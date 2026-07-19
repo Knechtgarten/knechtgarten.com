@@ -138,6 +138,7 @@ td{padding:6px 6px;border-bottom:1px solid var(--soft);vertical-align:top;}
     <div class="fld"><select id="offertentypSelect"></select></div>
   </div>
 
+  <div id="formelCards">
   <div class="card">
     <div class="cardlabel">Formel-Bibliothek – Eingabefelder</div>
     <div class="hint">Rohe Masse (z.B. Poollaenge). Werden in Tool A vom Mitarbeiter ausgefuellt.</div>
@@ -177,7 +178,7 @@ td{padding:6px 6px;border-bottom:1px solid var(--soft);vertical-align:top;}
     </div>
   </div>
 
-  <div class="card">
+  <div class="card" id="formelArbeitsschritteCard">
     <div class="cardlabel">Arbeitsschritte</div>
     <div id="arbeitsschritteList"></div>
     <div class="row" style="margin-top:10px;">
@@ -185,6 +186,29 @@ td{padding:6px 6px;border-bottom:1px solid var(--soft);vertical-align:top;}
     </div>
     <button class="btn" id="addAsBtn">+ Arbeitsschritt hinzufügen</button>
     <div class="status" id="asStatus"></div>
+  </div>
+  </div>
+
+  <div class="card hidden" id="tagessatzArbeitsschritteCard">
+    <div class="cardlabel">Arbeitsschritte (Tagessatz)</div>
+    <div class="hint">Kein Mengen-Formel noetig - stattdessen ein Tagessatz (Material/Maschine/Baumaschine/Lieferwagen pro Tag). In Tool A schaetzt der Mitarbeiter nur die Anzahl Tage.</div>
+    <table>
+      <thead><tr><th>Name</th><th>Gruppe</th><th>Material/Tag</th><th>Maschine/Tag</th><th>Baumaschine/Tag</th><th>Lieferwagen/Tag</th><th></th></tr></thead>
+      <tbody id="tagessatzBody"></tbody>
+    </table>
+    <div class="row">
+      <div class="fld"><label>Name</label><input id="newTsAsName" placeholder="z.B. Heckenschnitt"></div>
+      <div class="fld"><label>Gruppe</label><input id="newTsAsGruppe" placeholder="z.B. Pflegearbeiten"></div>
+    </div>
+    <div class="row">
+      <div class="fld"><label>Material/Tag (CHF)</label><input id="newTsAsMaterial" type="number" step="0.01" value="0"></div>
+      <div class="fld"><label>Maschine/Tag (CHF)</label><input id="newTsAsMaschine" type="number" step="0.01" value="0"></div>
+      <div class="fld"><label>Baumaschine/Tag (CHF)</label><input id="newTsAsBaumaschine" type="number" step="0.01" value="0"></div>
+      <div class="fld"><label>Lieferwagen/Tag (CHF)</label><input id="newTsAsLieferwagen" type="number" step="0.01" value="0"></div>
+    </div>
+    <div class="fld"><label>Beschreibung (erscheint in der Offerte)</label><input id="newTsAsBeschreibung" placeholder="z.B. Fachgerechter Heckenschnitt inkl. Abtransport."></div>
+    <button class="btn" id="addTsAsBtn">+ Arbeitsschritt hinzufügen</button>
+    <div class="status" id="tsAsStatus"></div>
   </div>
 </main>
 
@@ -195,6 +219,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_DoeD4uEnwemmnFu4AxE9uw_5lmQYc5P';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let currentOffertentypId = null;
+let currentBerechnungsmodell = 'formel';
+let OFFERTENTYPEN = [];
 let EINGABEFELDER = [];
 let TERMS = [];
 let ARTIKEL = [];
@@ -364,10 +390,19 @@ function createAusdruckBuilder(container, existingNode){
 // Laden
 // ---------------------------------------------------------------------------
 async function loadOffertentypen(){
-  const { data, error } = await sb.from('offertentyp').select('id,name').order('reihenfolge');
+  const { data, error } = await sb.from('offertentyp').select('id,name,berechnungsmodell').order('reihenfolge');
   if(error){ console.error(error); return; }
+  OFFERTENTYPEN = data;
   $('offertentypSelect').innerHTML = data.map(o => `<option value="${o.id}">${o.name}</option>`).join('');
   currentOffertentypId = data[0]?.id || null;
+  currentBerechnungsmodell = data[0]?.berechnungsmodell || 'formel';
+  aktualisiereModellAnsicht();
+}
+
+function aktualisiereModellAnsicht(){
+  const istTagessatz = currentBerechnungsmodell === 'tagessatz';
+  $('formelCards').classList.toggle('hidden', istTagessatz);
+  $('tagessatzArbeitsschritteCard').classList.toggle('hidden', !istTagessatz);
 }
 
 async function loadArtikel(){
@@ -507,7 +542,13 @@ function friendlyError(e){
 
 $('offertentypSelect').addEventListener('change', async e => {
   currentOffertentypId = e.target.value;
-  await Promise.all([loadFormelBibliothek(), loadArbeitsschritte()]);
+  currentBerechnungsmodell = OFFERTENTYPEN.find(o => o.id === currentOffertentypId)?.berechnungsmodell || 'formel';
+  aktualisiereModellAnsicht();
+  if(currentBerechnungsmodell === 'tagessatz'){
+    await loadTagessatzArbeitsschritte();
+  }else{
+    await Promise.all([loadFormelBibliothek(), loadArbeitsschritte()]);
+  }
 });
 
 $('addEfBtn').addEventListener('click', async () => {
@@ -734,11 +775,92 @@ async function deleteRessourcenzeile(id){
 }
 
 // ---------------------------------------------------------------------------
+// Tagessatz-Arbeitsschritte (Offertentyp "Allgemein")
+// ---------------------------------------------------------------------------
+let TAGESSATZ_ARBEITSSCHRITTE = [];
+
+async function loadTagessatzArbeitsschritte(){
+  const { data, error } = await sb.from('arbeitsschritt')
+    .select('id,name,gruppe,beschreibung,tagessatz_material,tagessatz_maschine,tagessatz_baumaschine,tagessatz_lieferwagen,reihenfolge')
+    .eq('offertentyp_id', currentOffertentypId).order('reihenfolge');
+  if(error){ console.error(error); return; }
+  TAGESSATZ_ARBEITSSCHRITTE = data;
+  renderTagessatzArbeitsschritte();
+}
+
+function renderTagessatzArbeitsschritte(){
+  $('tagessatzBody').innerHTML = TAGESSATZ_ARBEITSSCHRITTE.map(as => `
+    <tr data-tsas="${as.id}">
+      <td><input class="tsEdit tsName" value="${as.name}" style="min-width:140px;"></td>
+      <td><input class="tsEdit tsGruppe" value="${as.gruppe || ''}" style="min-width:120px;"></td>
+      <td><input class="tsEdit tsMaterial" type="number" step="0.01" value="${as.tagessatz_material ?? 0}" style="width:75px;"></td>
+      <td><input class="tsEdit tsMaschine" type="number" step="0.01" value="${as.tagessatz_maschine ?? 0}" style="width:75px;"></td>
+      <td><input class="tsEdit tsBaumaschine" type="number" step="0.01" value="${as.tagessatz_baumaschine ?? 0}" style="width:75px;"></td>
+      <td><input class="tsEdit tsLieferwagen" type="number" step="0.01" value="${as.tagessatz_lieferwagen ?? 0}" style="width:75px;"></td>
+      <td style="display:flex;gap:4px;">
+        <button class="icobtn tsSave" title="Speichern">💾</button>
+        <button class="icobtn" onclick="deleteTagessatzArbeitsschritt('${as.id}','${as.name.replace(/'/g,"\\'")}')">🗑</button>
+      </td>
+    </tr>`).join('');
+
+  document.querySelectorAll('#tagessatzBody tr').forEach(tr => {
+    tr.querySelector('.tsSave').addEventListener('click', async () => {
+      const id = tr.dataset.tsas;
+      const payload = {
+        name: tr.querySelector('.tsName').value.trim(),
+        gruppe: tr.querySelector('.tsGruppe').value.trim() || null,
+        tagessatz_material: parseFloat(tr.querySelector('.tsMaterial').value) || 0,
+        tagessatz_maschine: parseFloat(tr.querySelector('.tsMaschine').value) || 0,
+        tagessatz_baumaschine: parseFloat(tr.querySelector('.tsBaumaschine').value) || 0,
+        tagessatz_lieferwagen: parseFloat(tr.querySelector('.tsLieferwagen').value) || 0
+      };
+      const { error } = await sb.from('arbeitsschritt').update(payload).eq('id', id);
+      if(error){ showToast(friendlyError(error), true); return; }
+      showToast('Gespeichert.');
+      await loadTagessatzArbeitsschritte();
+    });
+  });
+}
+
+async function deleteTagessatzArbeitsschritt(id, name){
+  if(!(await confirmDialog(`Arbeitsschritt "${name}" wirklich dauerhaft loeschen? Das betrifft alle kuenftigen Offerten.`))) return;
+  const { error } = await sb.from('arbeitsschritt').delete().eq('id', id);
+  if(error){ showToast(friendlyError(error), true); return; }
+  await loadTagessatzArbeitsschritte();
+}
+
+$('addTsAsBtn').addEventListener('click', async () => {
+  const name = $('newTsAsName').value.trim();
+  if(!name){ $('tsAsStatus').textContent = 'Bitte Name ausfuellen.'; $('tsAsStatus').className='status err'; return; }
+  const payload = {
+    offertentyp_id: currentOffertentypId,
+    name,
+    gruppe: $('newTsAsGruppe').value.trim() || null,
+    beschreibung: $('newTsAsBeschreibung').value.trim() || null,
+    tagessatz_material: parseFloat($('newTsAsMaterial').value) || 0,
+    tagessatz_maschine: parseFloat($('newTsAsMaschine').value) || 0,
+    tagessatz_baumaschine: parseFloat($('newTsAsBaumaschine').value) || 0,
+    tagessatz_lieferwagen: parseFloat($('newTsAsLieferwagen').value) || 0,
+    reihenfolge: TAGESSATZ_ARBEITSSCHRITTE.length + 1
+  };
+  const { error } = await sb.from('arbeitsschritt').insert(payload);
+  if(error){ $('tsAsStatus').textContent = friendlyError(error); $('tsAsStatus').className='status err'; return; }
+  $('newTsAsName').value=''; $('newTsAsGruppe').value=''; $('newTsAsBeschreibung').value='';
+  $('newTsAsMaterial').value='0'; $('newTsAsMaschine').value='0'; $('newTsAsBaumaschine').value='0'; $('newTsAsLieferwagen').value='0';
+  $('tsAsStatus').textContent = 'Gespeichert.'; $('tsAsStatus').className='status ok';
+  await loadTagessatzArbeitsschritte();
+});
+
+// ---------------------------------------------------------------------------
 async function init(){
   await loadOffertentypen();
   await loadArtikel();
-  await loadFormelBibliothek();
-  await loadArbeitsschritte();
+  if(currentBerechnungsmodell === 'tagessatz'){
+    await loadTagessatzArbeitsschritte();
+  }else{
+    await loadFormelBibliothek();
+    await loadArbeitsschritte();
+  }
 }
 const $loginwrap = document.getElementById('loginwrap');
 const $keinZugriff = document.getElementById('keinZugriff');
