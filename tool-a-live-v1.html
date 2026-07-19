@@ -8,7 +8,7 @@
 :root{
   --bg:#F5F7F9; --card:#FFFFFF; --primary:#323E4E; --primary-l:#4C5C70;
   --ink:#232B35; --muted:#8B9097; --line:#E1E5E9; --soft:#EEF3F7;
-  --accent-blue:#D6E7F4; --accent-lime:#D1DB5F;
+  --accent-blue:#D6E7F4; --accent-lime:#D1DB5F; --danger:#B4655F;
 }
 *{box-sizing:border-box;margin:0;padding:0;}
 html,body{background:var(--bg);}
@@ -36,7 +36,12 @@ main{padding:18px 0 60px;}
 /* Teilbereich-Karte */
 .tbcard{background:var(--card);border:1px solid var(--line);border-radius:11px;margin-bottom:12px;overflow:hidden;}
 .tbhead{display:flex;align-items:center;gap:9px;padding:9px 12px;background:var(--primary);color:#fff;}
-.tbname{font-size:12px;font-weight:700;color:#fff;}
+.tbname{font-size:12px;font-weight:700;color:#fff;background:transparent;border:1px solid transparent;
+  border-radius:5px;padding:3px 5px;flex:1;min-width:80px;max-width:260px;}
+.tbname:hover{border-color:rgba(255,255,255,.3);}
+.tbname:focus{outline:none;background:rgba(255,255,255,.12);border-color:rgba(255,255,255,.5);}
+.tbdel{margin-left:auto;background:rgba(255,255,255,.1);color:#fff;border-color:rgba(255,255,255,.4);}
+.tbdel:hover{background:#fff;color:var(--danger);}
 .tbbody{padding:12px 14px 8px;}
 .dimsrow{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:4px;}
 .tbdim label{display:block;font-size:10px;color:var(--muted);margin-bottom:3px;white-space:nowrap;}
@@ -49,6 +54,15 @@ main{padding:18px 0 60px;}
 .opt{font-size:12px;font-weight:600;border:1px solid var(--line);background:#fff;color:var(--ink);
   border-radius:7px;padding:6px 12px;cursor:pointer;}
 .opt.on{background:var(--primary);color:#fff;border-color:var(--primary);}
+
+.icobtn{width:24px;height:24px;border-radius:50%;border:1px solid var(--line);background:#fff;color:var(--muted);
+  font-size:12px;cursor:pointer;padding:0;flex-shrink:0;}
+.icobtn:hover{border-color:var(--danger);color:var(--danger);background:#FBEFEC;}
+
+.addtb{width:100%;margin:2px 0 4px;display:flex;align-items:center;justify-content:center;gap:6px;
+  font-size:13px;font-weight:700;color:var(--primary);background:var(--soft);border:1px dashed var(--primary-l);
+  border-radius:8px;padding:10px 14px;cursor:pointer;}
+.addtb:hover{border-color:var(--primary);background:#e7edf2;}
 
 .costwrap{margin-top:14px;transition:background-color .1s;border-radius:8px;}
 .costwrap.flash{animation:flashfade .7s ease-out;}
@@ -72,7 +86,7 @@ tr.cdescrow td{padding:2px 0 10px;}
 .descblock:focus{outline:none;border-color:var(--primary);background:#fff;}
 
 .status{font-size:11px;color:var(--muted);margin-top:8px;}
-.status.err{color:#B4655F;}
+.status.err{color:var(--danger);}
 .status.ok{color:#3d7a3d;}
 </style>
 </head>
@@ -100,13 +114,8 @@ tr.cdescrow td{padding:2px 0 10px;}
   <div class="card">
     <div class="bauteiltitle">Poolbecken</div>
 
-    <div class="tbcard">
-      <div class="tbhead"><span class="tbname">Teilbereich 1</span></div>
-      <div class="tbbody">
-        <div class="dimsrow" id="geofields"><!-- per JS befuellt --></div>
-        <div id="auswahlfelder"><!-- per JS befuellt --></div>
-      </div>
-    </div>
+    <div id="teilbereiche"><!-- per JS befuellt --></div>
+    <button type="button" class="addtb" id="addTbBtn">＋ Teilbereich hinzufügen</button>
 
     <div class="costwrap" id="costwrap">
       <table class="cost">
@@ -129,10 +138,9 @@ const $status = document.getElementById('status');
 const $costbody = document.getElementById('costbody');
 const $total = document.getElementById('total');
 const $costwrap = document.getElementById('costwrap');
-const $geofields = document.getElementById('geofields');
-const $auswahlfelder = document.getElementById('auswahlfelder');
+const $teilbereiche = document.getElementById('teilbereiche');
+const $addTbBtn = document.getElementById('addTbBtn');
 const $offerteSelect = document.getElementById('offerteSelect');
-const $newOfferFields = document.getElementById('newOfferFields');
 const $kundeName = document.getElementById('kundeName');
 const $offerteTitel = document.getElementById('offerteTitel');
 const $saveBtn = document.getElementById('saveBtn');
@@ -145,36 +153,23 @@ const START_WERTE = { 'Poollaenge': 8, 'Poolbreite': 4, 'Beckentiefe': 1.5 };
 const fmtCHF = n => n.toLocaleString('de-CH', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' CHF';
 
 let offertentypId = null;
-let auswahlfelder = [];       // [{id,name,mehrfachauswahl,optionen:[{id,name}]}]
-let selectedOptions = new Set();
 let eingabefelder = [];       // [{id,name,einheit}]
+let auswahlfelder = [];       // [{id,name,mehrfachauswahl,optionen:[{id,name}]}]
 let ressourcenzeilen = [];    // [{optionId, arbeitsschritt, kategorie, bezeichnung, einheit, preis, menge_ausdruck}]
-let werteMap = {};
 
-function renderAuswahlfelder(){
-  $auswahlfelder.innerHTML = '';
-  auswahlfelder.forEach(af => {
-    const div = document.createElement('div');
-    div.className = 'afblock';
-    div.innerHTML = `<label class="flabel">${af.name}</label>
-      <div class="optrow">${af.optionen.map(o => `<button type="button" class="opt ${selectedOptions.has(o.id)?'on':''}" data-opt="${o.id}" data-af="${af.id}" data-multi="${af.mehrfachauswahl}">${o.name}</button>`).join('')}</div>`;
-    $auswahlfelder.appendChild(div);
-  });
-  $auswahlfelder.querySelectorAll('.opt').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const optId = btn.dataset.opt;
-      const afId = btn.dataset.af;
-      const multi = btn.dataset.multi === 'true';
-      if(!multi){
-        auswahlfelder.find(a => a.id === afId).optionen.forEach(o => selectedOptions.delete(o.id));
-        selectedOptions.add(optId);
-      }else{
-        if(selectedOptions.has(optId)) selectedOptions.delete(optId); else selectedOptions.add(optId);
-      }
-      renderAuswahlfelder();
-      recalc();
-    });
-  });
+// Ein Bauteil kann mehrere Teilbereiche haben - jeder ist eine Mini-Offerte
+// mit eigenen Massen und eigener Options-Auswahl.
+let teilflaechen = [];         // [{clientKey, dbId, name, werteMap, selectedOptions}]
+let deletedTeilflaechenIds = [];
+let tfCounter = 0;
+
+function neueTeilflaeche(){
+  tfCounter++;
+  const werteMap = {};
+  eingabefelder.forEach(ef => { werteMap[ef.id] = START_WERTE[ef.name] ?? 0; });
+  const selectedOptions = new Set();
+  auswahlfelder.forEach(af => { if(af.optionen[0]) selectedOptions.add(af.optionen[0].id); });
+  return { clientKey: 'tf' + tfCounter, dbId: null, name: 'Teilbereich ' + (teilflaechen.length + 1), werteMap, selectedOptions };
 }
 
 function flash(){
@@ -183,22 +178,71 @@ function flash(){
   $costwrap.classList.add('flash');
 }
 
-function renderGeofields(){
-  $geofields.innerHTML = '';
-  eingabefelder.forEach(ef => {
-    const div = document.createElement('div');
-    div.className = 'tbdim';
-    div.innerHTML = `<label>${ef.name} (${ef.einheit})</label>
-      <input type="number" step="0.01" value="${werteMap[ef.id]}" data-ef="${ef.id}">`;
-    $geofields.appendChild(div);
-  });
-  $geofields.querySelectorAll('input').forEach(inp => {
-    inp.addEventListener('input', () => {
-      werteMap[inp.dataset.ef] = parseFloat(inp.value) || 0;
+function renderTeilflaechen(){
+  $teilbereiche.innerHTML = '';
+  teilflaechen.forEach(tf => {
+    const card = document.createElement('div');
+    card.className = 'tbcard';
+    card.innerHTML = `
+      <div class="tbhead">
+        <input class="tbname" value="${tf.name}">
+        <button type="button" class="icobtn tbdel">🗑</button>
+      </div>
+      <div class="tbbody">
+        <div class="dimsrow"></div>
+        <div class="afwrap"></div>
+      </div>`;
+    $teilbereiche.appendChild(card);
+
+    card.querySelector('.tbname').addEventListener('input', e => { tf.name = e.target.value; });
+    card.querySelector('.tbdel').addEventListener('click', () => {
+      if(tf.dbId) deletedTeilflaechenIds.push(tf.dbId);
+      teilflaechen = teilflaechen.filter(x => x.clientKey !== tf.clientKey);
+      renderTeilflaechen();
       recalc();
+    });
+
+    const geoWrap = card.querySelector('.dimsrow');
+    eingabefelder.forEach(ef => {
+      const div = document.createElement('div');
+      div.className = 'tbdim';
+      div.innerHTML = `<label>${ef.name} (${ef.einheit})</label><input type="number" step="0.01" value="${tf.werteMap[ef.id] ?? 0}">`;
+      geoWrap.appendChild(div);
+      div.querySelector('input').addEventListener('input', e => {
+        tf.werteMap[ef.id] = parseFloat(e.target.value) || 0;
+        recalc();
+      });
+    });
+
+    const afWrap = card.querySelector('.afwrap');
+    auswahlfelder.forEach(af => {
+      const div = document.createElement('div');
+      div.className = 'afblock';
+      div.innerHTML = `<label class="flabel">${af.name}</label>
+        <div class="optrow">${af.optionen.map(o => `<button type="button" class="opt ${tf.selectedOptions.has(o.id)?'on':''}" data-opt="${o.id}">${o.name}</button>`).join('')}</div>`;
+      afWrap.appendChild(div);
+      div.querySelectorAll('.opt').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const optId = btn.dataset.opt;
+          if(!af.mehrfachauswahl){
+            af.optionen.forEach(o => tf.selectedOptions.delete(o.id));
+            tf.selectedOptions.add(optId);
+          }else{
+            if(tf.selectedOptions.has(optId)) tf.selectedOptions.delete(optId); else tf.selectedOptions.add(optId);
+          }
+          renderTeilflaechen();
+          recalc();
+        });
+      });
     });
   });
 }
+
+$addTbBtn.addEventListener('click', () => {
+  teilflaechen.push(neueTeilflaeche());
+  renderTeilflaechen();
+  recalc();
+});
 
 async function loadOfferteListe(){
   const { data, error } = await sb
@@ -213,7 +257,6 @@ async function loadOfferteListe(){
 
 let mode = 'new';               // 'new' oder 'edit'
 let currentOfferteId = null;
-let currentTeilflaecheId = null;
 
 function setMode(neu){
   mode = neu;
@@ -221,7 +264,6 @@ function setMode(neu){
     $kundeName.disabled = false;
     $saveBtn.textContent = 'Offerte speichern';
     currentOfferteId = null;
-    currentTeilflaecheId = null;
   }else{
     $kundeName.disabled = true;
     $saveBtn.textContent = 'Änderungen speichern';
@@ -233,23 +275,34 @@ async function ladeBestehendeOfferte(offerteId){
     .from('offerte').select('id, titel, kunde(name)').eq('id', offerteId).single();
   if(oErr){ console.error(oErr); $saveStatus.textContent = 'Fehler beim Laden: ' + oErr.message; $saveStatus.className='status err'; return; }
 
-  const { data: tf, error } = await sb
+  const { data: tfs, error } = await sb
     .from('teilflaeche')
-    .select('id, teilflaeche_eingabefeld_wert(eingabefeld_id, wert), teilflaeche_auswahl(option_id)')
-    .eq('offerte_id', offerteId).limit(1).single();
+    .select('id, name, teilflaeche_eingabefeld_wert(eingabefeld_id, wert), teilflaeche_auswahl(option_id)')
+    .eq('offerte_id', offerteId).order('reihenfolge');
   if(error){ console.error(error); $saveStatus.textContent = 'Fehler beim Laden: ' + error.message; $saveStatus.className='status err'; return; }
 
-  (tf.teilflaeche_eingabefeld_wert || []).forEach(w => { werteMap[w.eingabefeld_id] = w.wert; });
-  renderGeofields();
-  selectedOptions = new Set((tf.teilflaeche_auswahl || []).map(a => a.option_id));
-  renderAuswahlfelder();
+  teilflaechen = tfs.map(row => {
+    const werteMap = {};
+    eingabefelder.forEach(ef => { werteMap[ef.id] = 0; });
+    (row.teilflaeche_eingabefeld_wert || []).forEach(w => { werteMap[w.eingabefeld_id] = w.wert; });
+    tfCounter++;
+    return {
+      clientKey: 'tf' + tfCounter,
+      dbId: row.id,
+      name: row.name,
+      werteMap,
+      selectedOptions: new Set((row.teilflaeche_auswahl || []).map(a => a.option_id))
+    };
+  });
+  deletedTeilflaechenIds = [];
+  renderTeilflaechen();
+
   $kundeName.value = offerte.kunde?.name || '';
   $offerteTitel.value = offerte.titel;
   currentOfferteId = offerte.id;
-  currentTeilflaecheId = tf.id;
   setMode('edit');
   await recalc();
-  $saveStatus.textContent = 'Bestehende Offerte geladen - Masse/Auswahl aendern und "Änderungen speichern" klicken.';
+  $saveStatus.textContent = 'Bestehende Offerte geladen - Masse/Auswahl/Teilbereiche aendern und "Änderungen speichern" klicken.';
   $saveStatus.className = 'status';
 }
 
@@ -258,21 +311,16 @@ $offerteSelect.addEventListener('change', async () => {
     await ladeBestehendeOfferte($offerteSelect.value);
   }else{
     setMode('new');
-    eingabefelder.forEach(ef => { werteMap[ef.id] = START_WERTE[ef.name] ?? 0; });
-    renderGeofields();
-    waehleStandardOptionen();
-    renderAuswahlfelder();
+    tfCounter = 0;
+    teilflaechen = [ neueTeilflaeche() ];
+    deletedTeilflaechenIds = [];
+    renderTeilflaechen();
     $kundeName.value = '';
     $offerteTitel.value = 'Pool - Neubau';
     $saveStatus.textContent = '';
     await recalc();
   }
 });
-
-function waehleStandardOptionen(){
-  selectedOptions = new Set();
-  auswahlfelder.forEach(af => { if(af.optionen[0]) selectedOptions.add(af.optionen[0].id); });
-}
 
 async function speichereNeueOfferte(kundeNameVal, titelVal){
   const { data: kunde, error: kErr } = await sb.from('kunde').insert({ name: kundeNameVal }).select().single();
@@ -282,27 +330,27 @@ async function speichereNeueOfferte(kundeNameVal, titelVal){
     .insert({ kunde_id: kunde.id, offertentyp_id: offertentypId, titel: titelVal }).select().single();
   if(oErr) throw oErr;
 
-  const { data: teilflaeche, error: tErr } = await sb.from('teilflaeche')
-    .insert({ offerte_id: offerte.id, name: 'Teilbereich 1' }).select().single();
-  if(tErr) throw tErr;
+  for(const [i, tf] of teilflaechen.entries()){
+    const { data: row, error: tErr } = await sb.from('teilflaeche')
+      .insert({ offerte_id: offerte.id, name: tf.name, reihenfolge: i }).select().single();
+    if(tErr) throw tErr;
+    tf.dbId = row.id;
 
-  const werteRows = eingabefelder.map(ef => ({
-    teilflaeche_id: teilflaeche.id, eingabefeld_id: ef.id, wert: werteMap[ef.id]
-  }));
-  const { error: wErr } = await sb.from('teilflaeche_eingabefeld_wert').insert(werteRows);
-  if(wErr) throw wErr;
+    const werteRows = eingabefelder.map(ef => ({ teilflaeche_id: row.id, eingabefeld_id: ef.id, wert: tf.werteMap[ef.id] }));
+    const { error: wErr } = await sb.from('teilflaeche_eingabefeld_wert').insert(werteRows);
+    if(wErr) throw wErr;
 
-  if(selectedOptions.size){
-    const { error: aErr } = await sb.from('teilflaeche_auswahl')
-      .insert([...selectedOptions].map(oid => ({ teilflaeche_id: teilflaeche.id, option_id: oid })));
-    if(aErr) throw aErr;
+    if(tf.selectedOptions.size){
+      const { error: aErr } = await sb.from('teilflaeche_auswahl')
+        .insert([...tf.selectedOptions].map(oid => ({ teilflaeche_id: row.id, option_id: oid })));
+      if(aErr) throw aErr;
+    }
   }
 
   $saveStatus.textContent = `Gespeichert (Offerte-ID ${offerte.id.slice(0,8)}…).`;
   await loadOfferteListe();
   $offerteSelect.value = offerte.id;
   currentOfferteId = offerte.id;
-  currentTeilflaecheId = teilflaeche.id;
   setMode('edit');
 }
 
@@ -310,19 +358,35 @@ async function speichereAenderungen(titelVal){
   const { error: oErr } = await sb.from('offerte').update({ titel: titelVal }).eq('id', currentOfferteId);
   if(oErr) throw oErr;
 
-  const werteRows = eingabefelder.map(ef => ({
-    teilflaeche_id: currentTeilflaecheId, eingabefeld_id: ef.id, wert: werteMap[ef.id]
-  }));
-  const { error: wErr } = await sb.from('teilflaeche_eingabefeld_wert')
-    .upsert(werteRows, { onConflict: 'teilflaeche_id,eingabefeld_id' });
-  if(wErr) throw wErr;
+  if(deletedTeilflaechenIds.length){
+    const { error: delErr } = await sb.from('teilflaeche').delete().in('id', deletedTeilflaechenIds);
+    if(delErr) throw delErr;
+    deletedTeilflaechenIds = [];
+  }
 
-  const { error: delErr } = await sb.from('teilflaeche_auswahl').delete().eq('teilflaeche_id', currentTeilflaecheId);
-  if(delErr) throw delErr;
-  if(selectedOptions.size){
-    const { error: aErr } = await sb.from('teilflaeche_auswahl')
-      .insert([...selectedOptions].map(oid => ({ teilflaeche_id: currentTeilflaecheId, option_id: oid })));
-    if(aErr) throw aErr;
+  for(const [i, tf] of teilflaechen.entries()){
+    if(!tf.dbId){
+      const { data: row, error: tErr } = await sb.from('teilflaeche')
+        .insert({ offerte_id: currentOfferteId, name: tf.name, reihenfolge: i }).select().single();
+      if(tErr) throw tErr;
+      tf.dbId = row.id;
+    }else{
+      const { error: updErr } = await sb.from('teilflaeche').update({ name: tf.name, reihenfolge: i }).eq('id', tf.dbId);
+      if(updErr) throw updErr;
+    }
+
+    const werteRows = eingabefelder.map(ef => ({ teilflaeche_id: tf.dbId, eingabefeld_id: ef.id, wert: tf.werteMap[ef.id] }));
+    const { error: wErr } = await sb.from('teilflaeche_eingabefeld_wert')
+      .upsert(werteRows, { onConflict: 'teilflaeche_id,eingabefeld_id' });
+    if(wErr) throw wErr;
+
+    const { error: delAuswahlErr } = await sb.from('teilflaeche_auswahl').delete().eq('teilflaeche_id', tf.dbId);
+    if(delAuswahlErr) throw delAuswahlErr;
+    if(tf.selectedOptions.size){
+      const { error: aErr } = await sb.from('teilflaeche_auswahl')
+        .insert([...tf.selectedOptions].map(oid => ({ teilflaeche_id: tf.dbId, option_id: oid })));
+      if(aErr) throw aErr;
+    }
   }
 
   $saveStatus.textContent = 'Änderungen gespeichert.';
@@ -368,8 +432,6 @@ async function init(){
       .from('eingabefeld').select('id,name,einheit').eq('offertentyp_id', ot.id);
     if(efErr) throw efErr;
     eingabefelder = efs;
-    eingabefelder.forEach(ef => { werteMap[ef.id] = START_WERTE[ef.name] ?? 0; });
-    renderGeofields();
 
     const { data: arbeitsschritte, error: asErr } = await sb
       .from('arbeitsschritt')
@@ -408,8 +470,8 @@ async function init(){
       });
     });
 
-    waehleStandardOptionen();
-    renderAuswahlfelder();
+    teilflaechen = [ neueTeilflaeche() ];
+    renderTeilflaechen();
 
     await loadOfferteListe();
     $status.textContent = 'Verbunden mit Supabase.';
@@ -423,12 +485,16 @@ async function init(){
 
 async function recalc(){
   try{
-    const aktive = ressourcenzeilen.filter(rz => selectedOptions.has(rz.optionId));
-    const results = await Promise.all(aktive.map(async rz => {
-      const { data: menge, error } = await sb.rpc('eval_ausdruck', { node: rz.menge_ausdruck, werte: werteMap });
-      if(error) throw error;
-      return { ...rz, menge, betrag: menge * rz.preis };
-    }));
+    const alleZeilen = [];
+    for(const tf of teilflaechen){
+      const aktive = ressourcenzeilen.filter(rz => tf.selectedOptions.has(rz.optionId));
+      const berechnet = await Promise.all(aktive.map(async rz => {
+        const { data: menge, error } = await sb.rpc('eval_ausdruck', { node: rz.menge_ausdruck, werte: tf.werteMap });
+        if(error) throw error;
+        return { ...rz, menge, betrag: menge * rz.preis };
+      }));
+      alleZeilen.push(...berechnet);
+    }
 
     $costbody.innerHTML = '';
     let grandTotal = 0;
@@ -444,7 +510,7 @@ async function recalc(){
     }
 
     KAT_ORDER.forEach(kat => {
-      const zeilen = results.filter(r => r.kategorie === kat);
+      const zeilen = alleZeilen.filter(r => r.kategorie === kat);
       if(!zeilen.length) return;
       const trHead = document.createElement('tr');
       trHead.className = 'cgrouphead';
@@ -452,17 +518,28 @@ async function recalc(){
       $costbody.appendChild(trHead);
 
       if(kat === 'personal'){
-        // Personalaufwand bleibt einzeln aufgelistet, keine Aggregation.
-        zeilen.forEach(r => addRow(r.bezeichnung, r.menge, r.einheit, r.preis, r.betrag));
+        // Personalaufwand bleibt einzeln aufgelistet (pro Rolle/Artikel),
+        // aber ueber alle Teilbereiche hinweg zusammengefasst (nicht pro
+        // Teilbereich dupliziert), damit z.B. 2x "Baggerfuehrer" zu einer
+        // Zeile mit summierten Stunden werden.
+        const byName = {};
+        zeilen.forEach(r => {
+          if(!byName[r.bezeichnung]) byName[r.bezeichnung] = { menge:0, betrag:0, einheit:r.einheit, preis:r.preis };
+          byName[r.bezeichnung].menge += r.menge;
+          byName[r.bezeichnung].betrag += r.betrag;
+        });
+        Object.entries(byName).forEach(([name, v]) => addRow(name, v.menge, v.einheit, v.preis, v.betrag));
 
       }else if(kat === 'maschine'){
-        // Maschinenaufwand: ALLES ueber das ganze Bauteil zu einer Budget-Zeile.
+        // Maschinenaufwand: ALLES ueber das ganze Bauteil (alle Teilbereiche,
+        // alle Arbeitsschritte) zu einer Budget-Zeile.
         const summe = zeilen.reduce((s, r) => s + r.betrag, 0);
         addRow('Maschinenaufwand', 1, 'Budget', summe, summe);
 
       }else{
         // Logistik/Material: eine Zeile PRO Arbeitsschritt (Logistik als "Budget",
-        // Material als "1 Stueck" - das gesamte Materialpaket dieses Arbeitsschritts).
+        // Material als "1 Stueck" - das gesamte Materialpaket dieses Arbeitsschritts,
+        // ueber alle Teilbereiche summiert).
         const einheitLabel = kat === 'material' ? 'Stück' : 'Budget';
         const proArbeitsschritt = {};
         zeilen.forEach(r => {
