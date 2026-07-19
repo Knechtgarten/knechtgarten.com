@@ -104,7 +104,7 @@ tr.cdescrow td{padding:2px 0 10px;}
       <table class="cost">
         <thead><tr><th>Bezeichnung</th><th>Menge</th><th></th><th>Preis</th><th>Betrag</th></tr></thead>
         <tbody id="costbody"><tr><td colspan="5">Lade Daten …</td></tr></tbody>
-        <tfoot><tr class="ctotalrow"><td colspan="4">Total Aushub</td><td class="ctotalval" id="total">–</td></tr></tfoot>
+        <tfoot><tr class="ctotalrow"><td colspan="4">Total Poolbecken</td><td class="ctotalval" id="total">–</td></tr></tfoot>
       </table>
     </div>
     <div class="status" id="status"></div>
@@ -136,9 +136,9 @@ const START_WERTE = { 'Poollaenge': 8, 'Poolbreite': 4, 'Beckentiefe': 1.5 };
 const fmtCHF = n => n.toLocaleString('de-CH', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' CHF';
 
 let offertentypId = null;
-let optionId = null;         // die einzige Pilot-Option ("Bagger M") - wird mitgespeichert
+let optionIds = [];           // alle Pilot-Optionen (je Arbeitsschritt eine) - werden mitgespeichert
 let eingabefelder = [];       // [{id,name,einheit}]
-let ressourcenzeilen = [];
+let ressourcenzeilen = [];    // [{arbeitsschritt, kategorie, bezeichnung, einheit, preis, menge_ausdruck}]
 let werteMap = {};
 
 function flash(){
@@ -247,9 +247,9 @@ async function speichereNeueOfferte(kundeNameVal, titelVal){
   const { error: wErr } = await sb.from('teilflaeche_eingabefeld_wert').insert(werteRows);
   if(wErr) throw wErr;
 
-  if(optionId){
+  if(optionIds.length){
     const { error: aErr } = await sb.from('teilflaeche_auswahl')
-      .insert({ teilflaeche_id: teilflaeche.id, option_id: optionId });
+      .insert(optionIds.map(oid => ({ teilflaeche_id: teilflaeche.id, option_id: oid })));
     if(aErr) throw aErr;
   }
 
@@ -318,29 +318,33 @@ async function init(){
     eingabefelder.forEach(ef => { werteMap[ef.id] = START_WERTE[ef.name] ?? 0; });
     renderGeofields();
 
-    const { data: arbeitsschritt, error: asErr } = await sb
+    const { data: arbeitsschritte, error: asErr } = await sb
       .from('arbeitsschritt')
-      .select(`id, name,
+      .select(`id, name, reihenfolge,
         teilschritt ( id, name, beschreibung,
           auswahlfeld ( id, name,
             auswahloption ( id, name,
               ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck,
                 artikel ( bezeichnung, einheit, vp_knecht ) ) ) ) )`)
-      .eq('name','Aushub').eq('offertentyp_id', ot.id).single();
+      .eq('offertentyp_id', ot.id).order('reihenfolge');
     if(asErr) throw asErr;
 
     ressourcenzeilen = [];
-    (arbeitsschritt.teilschritt || []).forEach(ts => {
-      (ts.auswahlfeld || []).forEach(af => {
-        (af.auswahloption || []).forEach(opt => {
-          optionId = opt.id; // Pilot hat nur eine Option
-          (opt.ressourcenzeile || []).forEach(rz => {
-            ressourcenzeilen.push({
-              kategorie: rz.kategorie,
-              bezeichnung: rz.bezeichnung_override || rz.artikel?.bezeichnung || '(unbenannt)',
-              einheit: rz.artikel?.einheit || '',
-              preis: rz.preis_override ?? rz.artikel?.vp_knecht ?? 0,
-              menge_ausdruck: rz.menge_ausdruck
+    optionIds = [];
+    (arbeitsschritte || []).forEach(as => {
+      (as.teilschritt || []).forEach(ts => {
+        (ts.auswahlfeld || []).forEach(af => {
+          (af.auswahloption || []).forEach(opt => {
+            optionIds.push(opt.id); // Pilot hat pro Auswahlfeld nur eine Option
+            (opt.ressourcenzeile || []).forEach(rz => {
+              ressourcenzeilen.push({
+                arbeitsschritt: as.name,
+                kategorie: rz.kategorie,
+                bezeichnung: rz.bezeichnung_override || rz.artikel?.bezeichnung || '(unbenannt)',
+                einheit: rz.artikel?.einheit || '',
+                preis: rz.preis_override ?? rz.artikel?.vp_knecht ?? 0,
+                menge_ausdruck: rz.menge_ausdruck
+              });
             });
           });
         });
@@ -367,6 +371,17 @@ async function recalc(){
 
     $costbody.innerHTML = '';
     let grandTotal = 0;
+
+    function addRow(bezeichnung, menge, einheit, preis, betrag){
+      grandTotal += betrag;
+      const tr = document.createElement('tr');
+      tr.className = 'crow';
+      tr.innerHTML = `<td>${bezeichnung}</td><td style="text-align:right">${menge.toFixed(2)}</td>
+        <td style="color:var(--muted)">${einheit}</td><td style="text-align:right">${fmtCHF(preis)}</td>
+        <td class="cbetrag">${fmtCHF(betrag)}</td>`;
+      $costbody.appendChild(tr);
+    }
+
     KAT_ORDER.forEach(kat => {
       const zeilen = results.filter(r => r.kategorie === kat);
       if(!zeilen.length) return;
@@ -375,15 +390,27 @@ async function recalc(){
       trHead.innerHTML = `<td colspan="5">${KAT_LABEL[kat]}</td>`;
       $costbody.appendChild(trHead);
 
-      zeilen.forEach(r => {
-        grandTotal += r.betrag;
-        const tr = document.createElement('tr');
-        tr.className = 'crow';
-        tr.innerHTML = `<td>${r.bezeichnung}</td><td style="text-align:right">${r.menge.toFixed(2)}</td>
-          <td style="color:var(--muted)">${r.einheit}</td><td style="text-align:right">${fmtCHF(r.preis)}</td>
-          <td class="cbetrag">${fmtCHF(r.betrag)}</td>`;
-        $costbody.appendChild(tr);
-      });
+      if(kat === 'personal'){
+        // Personalaufwand bleibt einzeln aufgelistet, keine Aggregation.
+        zeilen.forEach(r => addRow(r.bezeichnung, r.menge, r.einheit, r.preis, r.betrag));
+
+      }else if(kat === 'maschine'){
+        // Maschinenaufwand: ALLES ueber das ganze Bauteil zu einer Budget-Zeile.
+        const summe = zeilen.reduce((s, r) => s + r.betrag, 0);
+        addRow('Maschinenaufwand', 1, 'Budget', summe, summe);
+
+      }else{
+        // Logistik/Material: eine Zeile PRO Arbeitsschritt (Logistik als "Budget",
+        // Material als "1 Stueck" - das gesamte Materialpaket dieses Arbeitsschritts).
+        const einheitLabel = kat === 'material' ? 'Stück' : 'Budget';
+        const proArbeitsschritt = {};
+        zeilen.forEach(r => {
+          proArbeitsschritt[r.arbeitsschritt] = (proArbeitsschritt[r.arbeitsschritt] || 0) + r.betrag;
+        });
+        Object.entries(proArbeitsschritt).forEach(([as, summe]) => {
+          addRow(as, 1, einheitLabel, summe, summe);
+        });
+      }
     });
 
     $total.textContent = fmtCHF(grandTotal);
