@@ -43,6 +43,13 @@ main{padding:18px 0 60px;}
 .tbdim input{width:80px;border:1px solid var(--line);border-radius:6px;padding:6px 7px;font:inherit;font-size:12.5px;color:var(--ink);}
 .tbdim input:focus{outline:none;border-color:var(--primary);}
 
+.afblock{margin-top:10px;padding-top:10px;border-top:1px solid var(--line);}
+.afblock label.flabel{display:block;font-size:11.5px;font-weight:700;color:var(--ink);margin-bottom:6px;}
+.optrow{display:flex;gap:6px;flex-wrap:wrap;}
+.opt{font-size:12px;font-weight:600;border:1px solid var(--line);background:#fff;color:var(--ink);
+  border-radius:7px;padding:6px 12px;cursor:pointer;}
+.opt.on{background:var(--primary);color:#fff;border-color:var(--primary);}
+
 .costwrap{margin-top:14px;transition:background-color .1s;border-radius:8px;}
 .costwrap.flash{animation:flashfade .7s ease-out;}
 @keyframes flashfade{from{background-color:var(--accent-blue);}to{background-color:transparent;}}
@@ -97,6 +104,7 @@ tr.cdescrow td{padding:2px 0 10px;}
       <div class="tbhead"><span class="tbname">Teilbereich 1</span></div>
       <div class="tbbody">
         <div class="dimsrow" id="geofields"><!-- per JS befuellt --></div>
+        <div id="auswahlfelder"><!-- per JS befuellt --></div>
       </div>
     </div>
 
@@ -122,6 +130,7 @@ const $costbody = document.getElementById('costbody');
 const $total = document.getElementById('total');
 const $costwrap = document.getElementById('costwrap');
 const $geofields = document.getElementById('geofields');
+const $auswahlfelder = document.getElementById('auswahlfelder');
 const $offerteSelect = document.getElementById('offerteSelect');
 const $newOfferFields = document.getElementById('newOfferFields');
 const $kundeName = document.getElementById('kundeName');
@@ -136,10 +145,37 @@ const START_WERTE = { 'Poollaenge': 8, 'Poolbreite': 4, 'Beckentiefe': 1.5 };
 const fmtCHF = n => n.toLocaleString('de-CH', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' CHF';
 
 let offertentypId = null;
-let optionIds = [];           // alle Pilot-Optionen (je Arbeitsschritt eine) - werden mitgespeichert
+let auswahlfelder = [];       // [{id,name,mehrfachauswahl,optionen:[{id,name}]}]
+let selectedOptions = new Set();
 let eingabefelder = [];       // [{id,name,einheit}]
-let ressourcenzeilen = [];    // [{arbeitsschritt, kategorie, bezeichnung, einheit, preis, menge_ausdruck}]
+let ressourcenzeilen = [];    // [{optionId, arbeitsschritt, kategorie, bezeichnung, einheit, preis, menge_ausdruck}]
 let werteMap = {};
+
+function renderAuswahlfelder(){
+  $auswahlfelder.innerHTML = '';
+  auswahlfelder.forEach(af => {
+    const div = document.createElement('div');
+    div.className = 'afblock';
+    div.innerHTML = `<label class="flabel">${af.name}</label>
+      <div class="optrow">${af.optionen.map(o => `<button type="button" class="opt ${selectedOptions.has(o.id)?'on':''}" data-opt="${o.id}" data-af="${af.id}" data-multi="${af.mehrfachauswahl}">${o.name}</button>`).join('')}</div>`;
+    $auswahlfelder.appendChild(div);
+  });
+  $auswahlfelder.querySelectorAll('.opt').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const optId = btn.dataset.opt;
+      const afId = btn.dataset.af;
+      const multi = btn.dataset.multi === 'true';
+      if(!multi){
+        auswahlfelder.find(a => a.id === afId).optionen.forEach(o => selectedOptions.delete(o.id));
+        selectedOptions.add(optId);
+      }else{
+        if(selectedOptions.has(optId)) selectedOptions.delete(optId); else selectedOptions.add(optId);
+      }
+      renderAuswahlfelder();
+      recalc();
+    });
+  });
+}
 
 function flash(){
   $costwrap.classList.remove('flash');
@@ -199,19 +235,21 @@ async function ladeBestehendeOfferte(offerteId){
 
   const { data: tf, error } = await sb
     .from('teilflaeche')
-    .select('id, teilflaeche_eingabefeld_wert(eingabefeld_id, wert)')
+    .select('id, teilflaeche_eingabefeld_wert(eingabefeld_id, wert), teilflaeche_auswahl(option_id)')
     .eq('offerte_id', offerteId).limit(1).single();
   if(error){ console.error(error); $saveStatus.textContent = 'Fehler beim Laden: ' + error.message; $saveStatus.className='status err'; return; }
 
   (tf.teilflaeche_eingabefeld_wert || []).forEach(w => { werteMap[w.eingabefeld_id] = w.wert; });
   renderGeofields();
+  selectedOptions = new Set((tf.teilflaeche_auswahl || []).map(a => a.option_id));
+  renderAuswahlfelder();
   $kundeName.value = offerte.kunde?.name || '';
   $offerteTitel.value = offerte.titel;
   currentOfferteId = offerte.id;
   currentTeilflaecheId = tf.id;
   setMode('edit');
   await recalc();
-  $saveStatus.textContent = 'Bestehende Offerte geladen - Masse aendern und "Änderungen speichern" klicken.';
+  $saveStatus.textContent = 'Bestehende Offerte geladen - Masse/Auswahl aendern und "Änderungen speichern" klicken.';
   $saveStatus.className = 'status';
 }
 
@@ -222,12 +260,19 @@ $offerteSelect.addEventListener('change', async () => {
     setMode('new');
     eingabefelder.forEach(ef => { werteMap[ef.id] = START_WERTE[ef.name] ?? 0; });
     renderGeofields();
+    waehleStandardOptionen();
+    renderAuswahlfelder();
     $kundeName.value = '';
     $offerteTitel.value = 'Pool - Neubau';
     $saveStatus.textContent = '';
     await recalc();
   }
 });
+
+function waehleStandardOptionen(){
+  selectedOptions = new Set();
+  auswahlfelder.forEach(af => { if(af.optionen[0]) selectedOptions.add(af.optionen[0].id); });
+}
 
 async function speichereNeueOfferte(kundeNameVal, titelVal){
   const { data: kunde, error: kErr } = await sb.from('kunde').insert({ name: kundeNameVal }).select().single();
@@ -247,9 +292,9 @@ async function speichereNeueOfferte(kundeNameVal, titelVal){
   const { error: wErr } = await sb.from('teilflaeche_eingabefeld_wert').insert(werteRows);
   if(wErr) throw wErr;
 
-  if(optionIds.length){
+  if(selectedOptions.size){
     const { error: aErr } = await sb.from('teilflaeche_auswahl')
-      .insert(optionIds.map(oid => ({ teilflaeche_id: teilflaeche.id, option_id: oid })));
+      .insert([...selectedOptions].map(oid => ({ teilflaeche_id: teilflaeche.id, option_id: oid })));
     if(aErr) throw aErr;
   }
 
@@ -271,6 +316,14 @@ async function speichereAenderungen(titelVal){
   const { error: wErr } = await sb.from('teilflaeche_eingabefeld_wert')
     .upsert(werteRows, { onConflict: 'teilflaeche_id,eingabefeld_id' });
   if(wErr) throw wErr;
+
+  const { error: delErr } = await sb.from('teilflaeche_auswahl').delete().eq('teilflaeche_id', currentTeilflaecheId);
+  if(delErr) throw delErr;
+  if(selectedOptions.size){
+    const { error: aErr } = await sb.from('teilflaeche_auswahl')
+      .insert([...selectedOptions].map(oid => ({ teilflaeche_id: currentTeilflaecheId, option_id: oid })));
+    if(aErr) throw aErr;
+  }
 
   $saveStatus.textContent = 'Änderungen gespeichert.';
   await loadOfferteListe();
@@ -322,7 +375,7 @@ async function init(){
       .from('arbeitsschritt')
       .select(`id, name, reihenfolge,
         teilschritt ( id, name, beschreibung,
-          auswahlfeld ( id, name,
+          auswahlfeld ( id, name, mehrfachauswahl,
             auswahloption ( id, name,
               ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck,
                 artikel ( bezeichnung, einheit, vp_knecht ) ) ) ) )`)
@@ -330,14 +383,18 @@ async function init(){
     if(asErr) throw asErr;
 
     ressourcenzeilen = [];
-    optionIds = [];
+    auswahlfelder = [];
     (arbeitsschritte || []).forEach(as => {
       (as.teilschritt || []).forEach(ts => {
         (ts.auswahlfeld || []).forEach(af => {
+          auswahlfelder.push({
+            id: af.id, name: af.name, mehrfachauswahl: af.mehrfachauswahl,
+            optionen: (af.auswahloption || []).map(o => ({ id: o.id, name: o.name }))
+          });
           (af.auswahloption || []).forEach(opt => {
-            optionIds.push(opt.id); // Pilot hat pro Auswahlfeld nur eine Option
             (opt.ressourcenzeile || []).forEach(rz => {
               ressourcenzeilen.push({
+                optionId: opt.id,
                 arbeitsschritt: as.name,
                 kategorie: rz.kategorie,
                 bezeichnung: rz.bezeichnung_override || rz.artikel?.bezeichnung || '(unbenannt)',
@@ -351,6 +408,9 @@ async function init(){
       });
     });
 
+    waehleStandardOptionen();
+    renderAuswahlfelder();
+
     await loadOfferteListe();
     $status.textContent = 'Verbunden mit Supabase.';
     await recalc();
@@ -363,7 +423,8 @@ async function init(){
 
 async function recalc(){
   try{
-    const results = await Promise.all(ressourcenzeilen.map(async rz => {
+    const aktive = ressourcenzeilen.filter(rz => selectedOptions.has(rz.optionId));
+    const results = await Promise.all(aktive.map(async rz => {
       const { data: menge, error } = await sb.rpc('eval_ausdruck', { node: rz.menge_ausdruck, werte: werteMap });
       if(error) throw error;
       return { ...rz, menge, betrag: menge * rz.preis };
