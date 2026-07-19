@@ -81,10 +81,24 @@ td{padding:6px 6px;border-bottom:1px solid var(--soft);vertical-align:top;}
 .toastwrap{position:fixed;bottom:16px;right:16px;z-index:70;display:flex;flex-direction:column;gap:6px;}
 .toast{background:var(--primary);color:#fff;font-size:12.5px;padding:9px 14px;border-radius:7px;box-shadow:0 6px 20px rgba(0,0,0,.2);}
 .toast.err{background:var(--danger);}
+
+.userbar{display:flex;align-items:center;gap:10px;margin-left:auto;}
+.userbar span{opacity:.85;}
+.userbar button{font-size:11.5px;color:#c7ccd1;background:none;border:1px solid rgba(255,255,255,.3);
+  border-radius:5px;padding:3px 9px;cursor:pointer;}
+.userbar button:hover{background:rgba(255,255,255,.1);color:#fff;}
+
+.loginwrap{min-height:80vh;display:flex;align-items:center;justify-content:center;}
+.logincard{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:28px 26px;width:100%;max-width:320px;}
+.logincard h2{font-size:16px;color:var(--primary);margin-bottom:14px;}
+.logincard .fld{margin-bottom:10px;}
+.hidden{display:none !important;}
 </style>
 </head>
 <body>
-<div class="proto"><div class="wrap"><b>LIVE</b> Tool B – schreibt direkt in die echte Supabase-Datenbank.</div></div>
+<div class="proto"><div class="wrap"><b>LIVE</b> Tool B – schreibt direkt in die echte Supabase-Datenbank.
+  <span class="userbar hidden" id="userbar"><span id="userbarText"></span><button id="logoutBtn">Abmelden</button></span>
+</div></div>
 
 <div class="ovl" id="ovl">
   <div class="ovlbox">
@@ -97,7 +111,25 @@ td{padding:6px 6px;border-bottom:1px solid var(--soft);vertical-align:top;}
 </div>
 <div class="toastwrap" id="toastwrap"></div>
 
-<main class="wrap">
+<div class="wrap hidden" id="loginwrap">
+  <div class="loginwrap">
+    <div class="logincard">
+      <h2>Anmelden</h2>
+      <div class="fld"><label>E-Mail</label><input id="loginEmail" type="email"></div>
+      <div class="fld"><label>Passwort</label><input id="loginPassword" type="password"></div>
+      <button class="btn" id="loginBtn">Anmelden</button>
+      <div class="status" id="loginStatus"></div>
+    </div>
+  </div>
+</div>
+
+<div class="wrap hidden" id="keinZugriff">
+  <div class="card"><div class="cardlabel">Kein Zugriff</div>
+    <p style="font-size:13px;">Tool B (Arbeitsschritt-Verwaltung) ist nur für Admins. Dein Konto hat die Rolle "Verkauf".</p>
+  </div>
+</div>
+
+<main class="wrap hidden" id="appMain">
   <h1>Arbeitsschritt-Verwaltung</h1>
   <div class="pagesub">Formel-Bibliothek + Arbeitsschritte pflegen, ohne dass jemand SQL schreiben muss.</div>
 
@@ -708,7 +740,62 @@ async function init(){
   await loadFormelBibliothek();
   await loadArbeitsschritte();
 }
-init();
+const $loginwrap = document.getElementById('loginwrap');
+const $keinZugriff = document.getElementById('keinZugriff');
+const $appMain = document.getElementById('appMain');
+const $userbar = document.getElementById('userbar');
+
+function zeigeLogin(msg){
+  $loginwrap.classList.remove('hidden');
+  $keinZugriff.classList.add('hidden');
+  $appMain.classList.add('hidden');
+  $userbar.classList.add('hidden');
+  if(msg){ document.getElementById('loginStatus').textContent = msg; document.getElementById('loginStatus').className = 'status err'; }
+}
+
+async function pruefeAnmeldung(){
+  const { data: { session } } = await sb.auth.getSession();
+  if(!session){ zeigeLogin(); return false; }
+
+  const { data: benutzer, error } = await sb.from('benutzer').select('rolle,email').eq('id', session.user.id).single();
+  if(error || !benutzer){
+    await sb.auth.signOut();
+    zeigeLogin('Dein Konto ist noch keiner Rolle zugewiesen - bitte einen Admin bitten, dich einzutragen.');
+    return false;
+  }
+
+  $loginwrap.classList.add('hidden');
+  $userbar.classList.remove('hidden');
+  document.getElementById('userbarText').textContent = `${benutzer.email} (${benutzer.rolle})`;
+
+  if(benutzer.rolle !== 'admin'){
+    $keinZugriff.classList.remove('hidden');
+    $appMain.classList.add('hidden');
+    return false;
+  }
+  $keinZugriff.classList.add('hidden');
+  $appMain.classList.remove('hidden');
+  return true;
+}
+
+document.getElementById('loginBtn').addEventListener('click', async () => {
+  const email = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  const statusEl = document.getElementById('loginStatus');
+  statusEl.textContent = 'Melde an …'; statusEl.className = 'status';
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if(error){ statusEl.textContent = 'Login fehlgeschlagen: ' + error.message; statusEl.className = 'status err'; return; }
+  if(await pruefeAnmeldung()) await init();
+});
+
+document.getElementById('logoutBtn').addEventListener('click', async () => {
+  await sb.auth.signOut();
+  location.reload();
+});
+
+(async () => {
+  if(await pruefeAnmeldung()) await init();
+})();
 </script>
 </body>
 </html>

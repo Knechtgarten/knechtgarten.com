@@ -88,12 +88,38 @@ tr.cdescrow td{padding:2px 0 10px;}
 .status{font-size:11px;color:var(--muted);margin-top:8px;}
 .status.err{color:var(--danger);}
 .status.ok{color:#3d7a3d;}
+
+.userbar{display:flex;align-items:center;gap:10px;margin-left:auto;}
+.userbar span{opacity:.85;}
+.userbar button{font-size:11.5px;color:#c7ccd1;background:none;border:1px solid rgba(255,255,255,.3);
+  border-radius:5px;padding:3px 9px;cursor:pointer;}
+.userbar button:hover{background:rgba(255,255,255,.1);color:#fff;}
+
+.loginwrap{min-height:80vh;display:flex;align-items:center;justify-content:center;}
+.logincard{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:28px 26px;width:100%;max-width:320px;}
+.logincard h2{font-size:16px;color:var(--primary);margin-bottom:14px;}
+.logincard .fld{margin-bottom:10px;}
+.hidden{display:none !important;}
 </style>
 </head>
 <body>
-<div class="proto"><div class="wrap"><b>LIVE</b> Tool A – rechnet gegen die echte Supabase-Pilot-Kette, kein Mockup.</div></div>
+<div class="proto"><div class="wrap"><b>LIVE</b> Tool A – rechnet gegen die echte Supabase-Pilot-Kette, kein Mockup.
+  <span class="userbar hidden" id="userbar"><span id="userbarText"></span><button id="logoutBtn">Abmelden</button></span>
+</div></div>
 
-<main class="wrap">
+<div class="wrap hidden" id="loginwrap">
+  <div class="loginwrap">
+    <div class="logincard">
+      <h2>Anmelden</h2>
+      <div class="fld"><label>E-Mail</label><input id="loginEmail" type="email"></div>
+      <div class="fld"><label>Passwort</label><input id="loginPassword" type="password"></div>
+      <button class="savebtn" id="loginBtn">Anmelden</button>
+      <div class="status" id="loginStatus"></div>
+    </div>
+  </div>
+</div>
+
+<main class="wrap hidden" id="appMain">
 
   <div class="card">
     <div class="cardlabel">Kunde &amp; Offerte</div>
@@ -562,7 +588,53 @@ async function recalc(){
   }
 }
 
-init();
+const $loginwrap = document.getElementById('loginwrap');
+const $appMain = document.getElementById('appMain');
+const $userbar = document.getElementById('userbar');
+
+function zeigeLogin(msg){
+  $loginwrap.classList.remove('hidden');
+  $appMain.classList.add('hidden');
+  $userbar.classList.add('hidden');
+  if(msg){ document.getElementById('loginStatus').textContent = msg; document.getElementById('loginStatus').className = 'status err'; }
+}
+
+async function pruefeAnmeldung(){
+  const { data: { session } } = await sb.auth.getSession();
+  if(!session){ zeigeLogin(); return false; }
+
+  const { data: benutzer, error } = await sb.from('benutzer').select('rolle,email').eq('id', session.user.id).single();
+  if(error || !benutzer){
+    await sb.auth.signOut();
+    zeigeLogin('Dein Konto ist noch keiner Rolle zugewiesen - bitte einen Admin bitten, dich einzutragen.');
+    return false;
+  }
+
+  $loginwrap.classList.add('hidden');
+  $appMain.classList.remove('hidden');
+  $userbar.classList.remove('hidden');
+  document.getElementById('userbarText').textContent = `${benutzer.email} (${benutzer.rolle})`;
+  return true;
+}
+
+document.getElementById('loginBtn').addEventListener('click', async () => {
+  const email = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  const statusEl = document.getElementById('loginStatus');
+  statusEl.textContent = 'Melde an …'; statusEl.className = 'status';
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if(error){ statusEl.textContent = 'Login fehlgeschlagen: ' + error.message; statusEl.className = 'status err'; return; }
+  if(await pruefeAnmeldung()) await init();
+});
+
+document.getElementById('logoutBtn').addEventListener('click', async () => {
+  await sb.auth.signOut();
+  location.reload();
+});
+
+(async () => {
+  if(await pruefeAnmeldung()) await init();
+})();
 </script>
 </body>
 </html>
