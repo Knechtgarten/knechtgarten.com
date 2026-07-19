@@ -24,14 +24,22 @@ main{padding:18px 0 60px;}
 .cardlabel{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-bottom:12px;}
 .bauteiltitle{font-size:21px;font-weight:800;color:var(--primary);margin-bottom:10px;}
 
-.offergrid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:10px;}
+.offergrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:10px;}
 .fld label{display:block;font-size:11px;color:var(--muted);margin-bottom:4px;}
-.fld select, .fld input{width:100%;border:1px solid var(--line);border-radius:7px;padding:8px 10px;font:inherit;font-size:13px;color:var(--ink);}
-.fld select:focus, .fld input:focus{outline:none;border-color:var(--primary);}
+.fld select, .fld input, .fld textarea{width:100%;border:1px solid var(--line);border-radius:7px;padding:8px 10px;font:inherit;font-size:13px;color:var(--ink);}
+.fld select:focus, .fld input:focus, .fld textarea:focus{outline:none;border-color:var(--primary);}
+.fld textarea{resize:vertical;min-height:44px;}
 .savebtn{font-size:13px;font-weight:700;color:#fff;background:var(--primary);border:none;border-radius:7px;
   padding:9px 16px;cursor:pointer;}
 .savebtn:hover{background:var(--primary-l);}
 .savebtn:disabled{background:var(--line);color:var(--muted);cursor:not-allowed;}
+
+.actionrow{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
+.statusicon{width:30px;height:30px;border-radius:50%;border:1px solid var(--line);background:#fff;color:var(--muted);
+  font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;}
+.statusicon:hover{border-color:var(--primary);color:var(--primary);}
+.statusicon.confirm.active{background:var(--accent-lime);border-color:var(--accent-lime);color:#5B6100;}
+.statusicon.reject.active{background:var(--danger);border-color:var(--danger);color:#fff;}
 
 /* Teilbereich-Karte */
 .tbcard{background:var(--card);border:1px solid var(--line);border-radius:11px;margin-bottom:12px;overflow:hidden;}
@@ -132,13 +140,19 @@ tr.cdescrow td{padding:2px 0 10px;}
     <div class="offergrid" id="newOfferFields">
       <div class="fld"><label>Kunde</label><input id="kundeName" placeholder="z.B. Familie Muster"></div>
       <div class="fld"><label>Offerte-Titel</label><input id="offerteTitel" value="Pool - Neubau"></div>
+      <div class="fld"><label>Datum</label><input id="offerteDatum" type="date"></div>
     </div>
-    <button class="savebtn" id="saveBtn">Offerte speichern</button>
+    <div class="actionrow">
+      <button type="button" class="statusicon confirm" id="statusBestaetigt" title="Bestätigt">✓</button>
+      <button type="button" class="statusicon reject" id="statusAbgelehnt" title="Abgelehnt">✕</button>
+      <button class="savebtn" id="saveBtn">Offerte speichern</button>
+    </div>
     <div class="status" id="saveStatus"></div>
   </div>
 
   <div class="card">
     <div class="bauteiltitle">Poolbecken</div>
+    <div class="fld" style="margin-bottom:14px;"><label>Notiz</label><textarea id="offerteNotiz" rows="2" placeholder="Interne Notiz zu dieser Offerte …"></textarea></div>
 
     <div id="teilbereiche"><!-- per JS befuellt --></div>
     <button type="button" class="addtb" id="addTbBtn">＋ Teilbereich hinzufügen</button>
@@ -169,8 +183,27 @@ const $addTbBtn = document.getElementById('addTbBtn');
 const $offerteSelect = document.getElementById('offerteSelect');
 const $kundeName = document.getElementById('kundeName');
 const $offerteTitel = document.getElementById('offerteTitel');
+const $offerteDatum = document.getElementById('offerteDatum');
+const $offerteNotiz = document.getElementById('offerteNotiz');
+const $statusBestaetigt = document.getElementById('statusBestaetigt');
+const $statusAbgelehnt = document.getElementById('statusAbgelehnt');
 const $saveBtn = document.getElementById('saveBtn');
 const $saveStatus = document.getElementById('saveStatus');
+
+let offerteStatus = 'offen'; // 'offen' | 'bestaetigt' | 'abgelehnt'
+
+function heuteAlsDatumsstring(){
+  return new Date().toISOString().slice(0,10);
+}
+
+function setStatus(neu){
+  offerteStatus = neu;
+  $statusBestaetigt.classList.toggle('active', offerteStatus === 'bestaetigt');
+  $statusAbgelehnt.classList.toggle('active', offerteStatus === 'abgelehnt');
+}
+
+$statusBestaetigt.addEventListener('click', () => setStatus(offerteStatus === 'bestaetigt' ? 'offen' : 'bestaetigt'));
+$statusAbgelehnt.addEventListener('click', () => setStatus(offerteStatus === 'abgelehnt' ? 'offen' : 'abgelehnt'));
 
 const KAT_LABEL = { personal:'Personalaufwand', maschine:'Maschinenaufwand', logistik:'Logistik, Transporte', material:'Materialaufwand' };
 const KAT_ORDER = ['personal','maschine','logistik','material'];
@@ -298,7 +331,7 @@ function setMode(neu){
 
 async function ladeBestehendeOfferte(offerteId){
   const { data: offerte, error: oErr } = await sb
-    .from('offerte').select('id, titel, kunde(name)').eq('id', offerteId).single();
+    .from('offerte').select('id, titel, datum, status, notiz, kunde(name)').eq('id', offerteId).single();
   if(oErr){ console.error(oErr); $saveStatus.textContent = 'Fehler beim Laden: ' + oErr.message; $saveStatus.className='status err'; return; }
 
   const { data: tfs, error } = await sb
@@ -325,6 +358,9 @@ async function ladeBestehendeOfferte(offerteId){
 
   $kundeName.value = offerte.kunde?.name || '';
   $offerteTitel.value = offerte.titel;
+  $offerteDatum.value = offerte.datum;
+  $offerteNotiz.value = offerte.notiz || '';
+  setStatus(offerte.status || 'offen');
   currentOfferteId = offerte.id;
   setMode('edit');
   await recalc();
@@ -343,6 +379,9 @@ $offerteSelect.addEventListener('change', async () => {
     renderTeilflaechen();
     $kundeName.value = '';
     $offerteTitel.value = 'Pool - Neubau';
+    $offerteDatum.value = heuteAlsDatumsstring();
+    $offerteNotiz.value = '';
+    setStatus('offen');
     $saveStatus.textContent = '';
     await recalc();
   }
@@ -353,7 +392,10 @@ async function speichereNeueOfferte(kundeNameVal, titelVal){
   if(kErr) throw kErr;
 
   const { data: offerte, error: oErr } = await sb.from('offerte')
-    .insert({ kunde_id: kunde.id, offertentyp_id: offertentypId, titel: titelVal }).select().single();
+    .insert({
+      kunde_id: kunde.id, offertentyp_id: offertentypId, titel: titelVal,
+      datum: $offerteDatum.value || heuteAlsDatumsstring(), status: offerteStatus, notiz: $offerteNotiz.value.trim() || null
+    }).select().single();
   if(oErr) throw oErr;
 
   for(const [i, tf] of teilflaechen.entries()){
@@ -381,7 +423,10 @@ async function speichereNeueOfferte(kundeNameVal, titelVal){
 }
 
 async function speichereAenderungen(titelVal){
-  const { error: oErr } = await sb.from('offerte').update({ titel: titelVal }).eq('id', currentOfferteId);
+  const { error: oErr } = await sb.from('offerte').update({
+    titel: titelVal, datum: $offerteDatum.value || heuteAlsDatumsstring(),
+    status: offerteStatus, notiz: $offerteNotiz.value.trim() || null
+  }).eq('id', currentOfferteId);
   if(oErr) throw oErr;
 
   if(deletedTeilflaechenIds.length){
@@ -498,6 +543,7 @@ async function init(){
 
     teilflaechen = [ neueTeilflaeche() ];
     renderTeilflaechen();
+    $offerteDatum.value = heuteAlsDatumsstring();
 
     await loadOfferteListe();
     $status.textContent = 'Verbunden mit Supabase.';
