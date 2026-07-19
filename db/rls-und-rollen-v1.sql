@@ -1,10 +1,10 @@
 -- ============================================================================
--- Offertentool 2027 - Row-Level-Security + Rollenmodell (Admin / Verkauf)
+-- Offertentool 2027 - Row-Level-Security + Rollenmodell (Admin / Mitarbeiter)
 -- ============================================================================
 -- Admin: darf alles (Tool A, B, C - lesen und schreiben).
--- Verkauf: darf Tool A voll nutzen (Kunde/Offerte/Teilflaeche); die
+-- Mitarbeiter: darf Tool A voll nutzen (Kunde/Offerte/Teilflaeche); die
 --          Formel-Bibliothek/Arbeitsschritte/Artikelstamm (Tool B/C) darf
---          Verkauf nur LESEN (fuers Rechnen noetig), nicht veraendern.
+--          Mitarbeiter nur LESEN (fuers Rechnen noetig), nicht veraendern.
 -- Alles ohne gueltige Anmeldung (Rolle "anon") hat ab jetzt KEINEN Zugriff
 -- mehr - vorher war die Datenbank ueber den oeffentlichen Key komplett offen.
 -- ============================================================================
@@ -18,7 +18,7 @@
 create table benutzer (
   id uuid primary key references auth.users(id) on delete cascade,
   email text not null,
-  rolle text not null check (rolle in ('admin','verkauf')),
+  rolle text not null check (rolle in ('admin','mitarbeiter')),
   erstellt_am timestamptz not null default now()
 );
 
@@ -46,7 +46,7 @@ create policy benutzer_admin_verwaltet on benutzer for all using (ist_admin()) w
 
 -- ----------------------------------------------------------------------------
 -- 2. KATALOG-/DEFINITIONS-TABELLEN (Tool B/C)
--- Lesen: jeder eingeloggte, zugewiesene Benutzer (Admin ODER Verkauf).
+-- Lesen: jeder eingeloggte, zugewiesene Benutzer (Admin ODER Mitarbeiter).
 -- Schreiben (insert/update/delete): nur Admin.
 -- ----------------------------------------------------------------------------
 do $$
@@ -67,7 +67,7 @@ end $$;
 -- ----------------------------------------------------------------------------
 -- 3. OFFERTEN-DATEN (Tool A)
 -- Voller Zugriff (lesen/schreiben) fuer jeden eingeloggten, zugewiesenen
--- Benutzer - Admin und Verkauf gleichermassen.
+-- Benutzer - Admin und Mitarbeiter gleichermassen.
 -- ----------------------------------------------------------------------------
 do $$
 declare
