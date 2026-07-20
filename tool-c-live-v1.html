@@ -39,6 +39,7 @@ h1{font-size:19px;color:var(--primary);margin-bottom:2px;}
 .fld label{display:block;font-size:11px;color:var(--muted);margin-bottom:3px;}
 .fld input, .fld select, .fld textarea{width:100%;border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:inherit;font-size:12.5px;color:var(--ink);}
 .fld input:focus, .fld select:focus, .fld textarea:focus{outline:none;border-color:var(--primary);}
+.fld input[readonly]{background:var(--soft);color:var(--muted);cursor:default;}
 .row{display:flex;gap:10px;flex-wrap:wrap;}
 .row > .fld{flex:1;min-width:130px;}
 
@@ -153,10 +154,15 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
     </div>
     <div class="row">
       <div class="fld"><label>Wechselkurs</label><input id="amWechselkurs" type="number" step="0.0001" value="1"></div>
+      <div class="fld"><label>Marge Lieferant %</label><input id="amMargeLieferant" type="text" readonly placeholder="—"></div>
+      <div class="fld"><label>Minimum-Marge % (vom Lieferant)</label><input id="amMinMarge" type="text" readonly placeholder="—"></div>
+    </div>
+    <div class="row">
       <div class="fld"><label>VP Knecht (CHF)</label><input id="amVpKnecht" type="number" step="0.01"></div>
-      <div class="fld"><label>Marge aktuell %</label><input id="amMarge" type="number" step="0.01"></div>
+      <div class="fld"><label>Marge Knecht %</label><input id="amMargeKnecht" type="number" step="0.01"></div>
       <div class="fld"><label>MwSt-Satz %</label><input id="amMwst" type="number" step="0.01"></div>
     </div>
+    <div class="hint" style="margin-top:-4px;">VP Knecht leer lassen für einen automatischen Vorschlag anhand der Minimum-Marge des Lieferanten.</div>
     <div class="row">
       <div class="fld"><label>Foto-URL</label><input id="amFoto"></div>
       <div class="fld"><label>Shop-Link</label><input id="amShop"></div>
@@ -290,7 +296,9 @@ let sortDir = 1;
 // jetzt unter Einstellungen -> Datenabgleich.
 // ---------------------------------------------------------------------------
 async function loadLieferanten(){
-  const { data, error } = await sb.from('lieferant').select('id,name,kuerzel,sync_typ').order('name');
+  const { data, error } = await sb.from('lieferant')
+    .select('id,name,kuerzel,sync_typ,lieferant_datenabgleich(zoll_fracht_prozent,sonderzuschlag_prozent,minimum_marge_prozent)')
+    .order('name');
   if(error){ console.error(error); return; }
   LIEFERANTEN = data;
 }
@@ -312,7 +320,7 @@ function renderArtikelgruppen(){
 async function loadArtikel(){
   const { data, error } = await sb.from('artikel')
     .select(`id, artikelnummer_lieferant, artikelnummer_knecht, bezeichnung, einheit, kategorie,
-      ep_lieferant, vp_lieferant, waehrung, wechselkurs, vp_knecht, marge_aktuell_pct, mwst_satz_pct,
+      ep_lieferant, vp_lieferant, waehrung, wechselkurs, vp_knecht, mwst_satz_pct,
       anmerkung, foto_url, shop_link, sync_offertentool, sync_webtool, sync_easybill,
       lieferant_id, artikelgruppe_id, lieferant(name,kuerzel), artikelgruppe(name)`);
   if(error){ console.error(error); return; }
@@ -390,10 +398,11 @@ function openArtikelModalAdd(){
   populateAmGruppeSelect(null);
   $('amNeueGruppeWrap').classList.add('hidden'); $('amNeueGruppeName').value = '';
   $('amEpLief').value = ''; $('amVpLief').value = ''; $('amWaehrung').value = 'CHF';
-  $('amWechselkurs').value = '1'; $('amVpKnecht').value = ''; $('amMarge').value = ''; $('amMwst').value = '';
+  $('amWechselkurs').value = '1'; $('amVpKnecht').value = ''; $('amMwst').value = '';
   $('amFoto').value = ''; $('amShop').value = ''; $('amAnmerkung').value = '';
   $('amOt').checked = false; $('amWt').checked = false; $('amEb').checked = false;
   $('amStatus').textContent = ''; $('amStatus').className = 'status';
+  amAktualisiereMargen();
   $('artikelModalOvl').classList.add('show');
 }
 
@@ -414,7 +423,6 @@ function openArtikelModalEdit(id){
   $('amWaehrung').value = a.waehrung || 'CHF';
   $('amWechselkurs').value = a.wechselkurs ?? 1;
   $('amVpKnecht').value = a.vp_knecht ?? '';
-  $('amMarge').value = a.marge_aktuell_pct ?? '';
   $('amMwst').value = a.mwst_satz_pct ?? '';
   $('amFoto').value = a.foto_url || '';
   $('amShop').value = a.shop_link || '';
@@ -423,8 +431,48 @@ function openArtikelModalEdit(id){
   $('amWt').checked = !!a.sync_webtool;
   $('amEb').checked = !!a.sync_easybill;
   $('amStatus').textContent = ''; $('amStatus').className = 'status';
+  amAktualisiereMargen();
   $('artikelModalOvl').classList.add('show');
 }
+
+// ---------------------------------------------------------------------------
+// Marge Lieferant/Knecht: reine Live-Berechnung, wird nirgends gespeichert.
+// Einstandspreis = EP Lieferant (CHF via Wechselkurs) + Zollkosten (Zoll/
+// Fracht-% vom Lieferant, Basis EP) + Sonderzuschlag (%, ebenfalls Basis EP).
+// ---------------------------------------------------------------------------
+function amEinstandspreisChf(){
+  const wechselkurs = parseFloat($('amWechselkurs').value) || 1;
+  const epChf = (parseFloat($('amEpLief').value) || 0) * wechselkurs;
+  const da = LIEFERANTEN.find(l => l.id === $('amLieferant').value)?.lieferant_datenabgleich;
+  const zoll = da?.zoll_fracht_prozent ? epChf * (da.zoll_fracht_prozent / 100) : 0;
+  const sonder = da?.sonderzuschlag_prozent ? epChf * (da.sonderzuschlag_prozent / 100) : 0;
+  return epChf + zoll + sonder;
+}
+function amAktualisiereMargen(){
+  const einstand = amEinstandspreisChf();
+  const wechselkurs = parseFloat($('amWechselkurs').value) || 1;
+  const vpLiefChf = (parseFloat($('amVpLief').value) || 0) * wechselkurs;
+  $('amMargeLieferant').value = vpLiefChf > 0 ? (((vpLiefChf - einstand) / vpLiefChf) * 100).toFixed(2) : '';
+
+  const minMarge = LIEFERANTEN.find(l => l.id === $('amLieferant').value)?.lieferant_datenabgleich?.minimum_marge_prozent;
+  $('amMinMarge').value = minMarge != null ? minMarge : '';
+
+  const vpKnechtRaw = $('amVpKnecht').value.trim();
+  let vpKnecht = vpKnechtRaw === '' ? null : parseFloat(vpKnechtRaw);
+  if(vpKnecht === null && minMarge != null && minMarge < 100){
+    vpKnecht = einstand / (1 - minMarge / 100);
+  }
+  $('amMargeKnecht').value = (vpKnecht && vpKnecht > 0) ? (((vpKnecht - einstand) / vpKnecht) * 100).toFixed(2) : '';
+}
+['amEpLief','amVpLief','amWechselkurs','amVpKnecht'].forEach(id => $(id).addEventListener('input', amAktualisiereMargen));
+$('amLieferant').addEventListener('change', amAktualisiereMargen);
+$('amMargeKnecht').addEventListener('input', () => {
+  const marge = parseFloat($('amMargeKnecht').value);
+  if(!isNaN(marge) && marge < 100){
+    $('amVpKnecht').value = (amEinstandspreisChf() / (1 - marge / 100)).toFixed(2);
+  }
+  amAktualisiereMargen();
+});
 
 $('amGruppe').addEventListener('change', () => {
   $('amNeueGruppeWrap').classList.toggle('hidden', $('amGruppe').value !== '__new__');
@@ -465,7 +513,6 @@ $('amSave').addEventListener('click', async () => {
     waehrung: $('amWaehrung').value.trim() || 'CHF',
     wechselkurs: parseFloat($('amWechselkurs').value) || 1,
     vp_knecht: parseFloat($('amVpKnecht').value) || null,
-    marge_aktuell_pct: parseFloat($('amMarge').value) || null,
     mwst_satz_pct: parseFloat($('amMwst').value) || null,
     foto_url: $('amFoto').value.trim() || null,
     shop_link: $('amShop').value.trim() || null,
