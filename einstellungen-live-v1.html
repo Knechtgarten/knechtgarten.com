@@ -360,6 +360,18 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
           <button class="btn" id="addZonengruppeBtn">+ Zonengruppe hinzufügen</button>
           <div class="status" id="zonengruppeStatus"></div>
         </div>
+
+        <div class="card">
+          <div class="cardlabel">Lieferwagenfahrzeit</div>
+          <div class="hint">Wird pro Offerte einmalig ab der PLZ des Kunden berechnet (Google Maps, Hin- und Rückfahrt). Zwei Ansätze möglich - welcher Artikel den Preis pro Stunde bzw. pro km liefert, wird hier festgelegt.</div>
+          <div class="fld"><label>Herkunftsadresse</label><input id="lwHerkunft" placeholder="z.B. Badhaus 42, 3615 Heimenschwand, Schweiz"></div>
+          <div class="row">
+            <div class="fld"><label>Stundenansatz-Artikel</label><button type="button" class="btn" id="lwStundenBtn" style="width:100%;text-align:left;background:#fff;color:var(--ink);border:1px solid var(--line);">Artikel wählen…</button></div>
+            <div class="fld"><label>km-Ansatz-Artikel</label><button type="button" class="btn" id="lwKmBtn" style="width:100%;text-align:left;background:#fff;color:var(--ink);border:1px solid var(--line);">Artikel wählen…</button></div>
+          </div>
+          <button class="btn" id="lwSpeichernBtn">Speichern</button>
+          <div class="status" id="lwStatus"></div>
+        </div>
       </div>
 
       <!-- ================= Teilflächenlogik ================= -->
@@ -446,7 +458,7 @@ function zeigeAbschnitt(name){
   });
   if(name === 'offertentyp') loadOffertentypen();
   if(name === 'datenabgleich'){ loadWechselkurse(); loadDatenabgleich(); loadArtikelgruppen(); }
-  if(name === 'preisfindung'){ loadStaffelgruppen(); loadZonengruppen(); }
+  if(name === 'preisfindung'){ loadStaffelgruppen(); loadZonengruppen(); loadLieferwagenKonfiguration(); }
   if(name === 'teilflaechenlogik') renderTeilflaechenlogik();
   if(name === 'benutzer') loadBenutzer();
 }
@@ -865,6 +877,40 @@ $('addZonengruppeBtn').addEventListener('click', async () => {
   $('newZonengruppeName').value = '';
   $('zonengruppeStatus').textContent = 'Gespeichert.'; $('zonengruppeStatus').className = 'status ok';
   await loadZonengruppen();
+});
+
+// ---------------------------------------------------------------------------
+// Preisfindung: Lieferwagenfahrzeit-Konfiguration (Herkunftsadresse + welcher
+// Artikel den Stunden-/km-Ansatz liefert). Die eigentliche Berechnung passiert
+// in Tool A (Kunde-PLZ -> Google Distance Matrix), hier nur die Stammdaten.
+// ---------------------------------------------------------------------------
+let lwStundenArtikelId = null;
+let lwKmArtikelId = null;
+
+async function loadLieferwagenKonfiguration(){
+  const { data, error } = await sb.from('lieferwagen_konfiguration').select('*').eq('id', true).single();
+  if(error){ console.error(error); return; }
+  $('lwHerkunft').value = data.herkunft_adresse || '';
+  lwStundenArtikelId = data.stundenansatz_artikel_id;
+  lwKmArtikelId = data.km_ansatz_artikel_id;
+  $('lwStundenBtn').textContent = lwStundenArtikelId ? artikelBezeichnung(lwStundenArtikelId) : 'Artikel wählen…';
+  $('lwKmBtn').textContent = lwKmArtikelId ? artikelBezeichnung(lwKmArtikelId) : 'Artikel wählen…';
+}
+$('lwStundenBtn').addEventListener('click', () => {
+  openArtikelPicker(a => { lwStundenArtikelId = a.id; $('lwStundenBtn').textContent = a.bezeichnung; });
+});
+$('lwKmBtn').addEventListener('click', () => {
+  openArtikelPicker(a => { lwKmArtikelId = a.id; $('lwKmBtn').textContent = a.bezeichnung; });
+});
+$('lwSpeichernBtn').addEventListener('click', async () => {
+  const herkunft = $('lwHerkunft').value.trim();
+  const { error } = await sb.from('lieferwagen_konfiguration').update({
+    herkunft_adresse: herkunft || null,
+    stundenansatz_artikel_id: lwStundenArtikelId,
+    km_ansatz_artikel_id: lwKmArtikelId
+  }).eq('id', true);
+  if(error){ $('lwStatus').textContent = friendlyError(error); $('lwStatus').className = 'status err'; return; }
+  $('lwStatus').textContent = 'Gespeichert.'; $('lwStatus').className = 'status ok';
 });
 
 // ---------------------------------------------------------------------------

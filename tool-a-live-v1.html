@@ -200,6 +200,10 @@ table.cost thead th{font-size:9.5px;text-transform:uppercase;letter-spacing:.04e
 tr.cgrouphead td{font-size:11px;font-weight:700;color:var(--primary);text-transform:uppercase;letter-spacing:.03em;
   padding:12px 0 5px;border-bottom:1px solid var(--line);}
 tr.crow td{padding:6px 8px 6px 0;border-bottom:1px solid var(--soft);vertical-align:middle;}
+tr.lwrow:hover td{background:var(--soft);}
+tr.lwrow.on td{background:var(--primary);color:#fff;}
+tr.lwrow.on td.cbetrag{color:#fff;}
+tr.lwrow.on td[style*="color:var(--muted)"]{color:#fff !important;}
 td.cbetrag{font-weight:700;text-align:right;white-space:nowrap;color:var(--ink);}
 tr.csubtotal td{padding:6px 0;font-size:11.5px;color:var(--ink);border-top:1px solid var(--line);}
 tr.csubtotal td:first-child{font-weight:600;}
@@ -407,6 +411,48 @@ let teilflaechen = [];         // [{clientKey, dbId, name, werteMap, selectedOpt
 let deletedTeilflaechenIds = [];
 let tfCounter = 0;
 
+// Lieferwagenfahrzeit (Preisfindung Phase 3): einmal pro Offerte anhand der
+// Kunde-PLZ ueber Google Distance Matrix berechnet, Nutzer waehlt Zeit/km.
+const GOOGLE_MAPS_API_KEY = 'AIzaSyA-4M4PV0EK8e_7ePV-B9G1VHErdc7pBNg';
+let lieferwagenKonfig = null; // {herkunft_adresse, stundenpreis, kmpreis}
+let lieferwagenModus = 'zeit'; // 'zeit' | 'distanz'
+let lieferwagenDistanzCache = {}; // {plz: {stdHinRueck, kmHinRueck} | null}
+
+async function ladeLieferwagenKonfiguration(){
+  const { data, error } = await sb.from('lieferwagen_konfiguration')
+    .select('herkunft_adresse, stundenansatz_artikel:stundenansatz_artikel_id(vp_knecht), km_ansatz_artikel:km_ansatz_artikel_id(vp_knecht)')
+    .eq('id', true).single();
+  if(error){ console.error(error); return; }
+  lieferwagenKonfig = {
+    herkunft_adresse: data.herkunft_adresse,
+    stundenpreis: data.stundenansatz_artikel?.vp_knecht ?? null,
+    kmpreis: data.km_ansatz_artikel?.vp_knecht ?? null
+  };
+}
+
+async function holeLieferwagenDistanz(plz){
+  if(lieferwagenDistanzCache.hasOwnProperty(plz)) return lieferwagenDistanzCache[plz];
+  try{
+    const origin = encodeURIComponent(lieferwagenKonfig.herkunft_adresse);
+    const dest = encodeURIComponent(plz + ', Schweiz');
+    const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${origin}&destinations=${dest}&key=${GOOGLE_MAPS_API_KEY}`;
+    const res = await fetch(url);
+    const json = await res.json();
+    const el = json.rows?.[0]?.elements?.[0];
+    if(el?.status !== 'OK') throw new Error(el?.status || 'Distanz nicht ermittelbar');
+    const ergebnis = {
+      stdHinRueck: (el.duration.value / 3600) * 2,
+      kmHinRueck: (el.distance.value / 1000) * 2
+    };
+    lieferwagenDistanzCache[plz] = ergebnis;
+    return ergebnis;
+  }catch(e){
+    console.error(e);
+    lieferwagenDistanzCache[plz] = null;
+    return null;
+  }
+}
+
 // Kunde: die ganze Seite dreht sich immer um GENAU EINEN Kunden zur Zeit -
 // die Offerten-Liste links zeigt nur dessen Offerten. currentKundeId ist
 // null, solange der eingetippte Name noch kein bestehender Kunde ist (wird
@@ -454,6 +500,7 @@ async function waehleKunde(){
 
 $('kundePlz').addEventListener('change', async () => {
   const plz = $('kundePlz').value.trim() || null;
+  recalc();
   if(!currentKundeId) return; // wird beim Anlegen des Kunden mitgespeichert
   const { error } = await sb.from('kunde').update({ plz }).eq('id', currentKundeId);
   if(error){ console.error(error); return; }
@@ -805,9 +852,10 @@ function setMode(neu){
 
 async function ladeBestehendeOfferte(offerteId){
   const { data: offerte, error: oErr } = await sb
-    .from('offerte').select('id, titel, datum, status, notiz, offertentyp_id').eq('id', offerteId).single();
+    .from('offerte').select('id, titel, datum, status, notiz, offertentyp_id, lieferwagen_modus').eq('id', offerteId).single();
   if(oErr){ console.error(oErr); $saveStatus.textContent = 'Fehler beim Laden: ' + oErr.message; $saveStatus.className='status err'; return; }
 
+  lieferwagenModus = offerte.lieferwagen_modus || 'zeit';
   zeigeBauteilCard();
   await ladeDatenFuerOffertentyp(offerte.offertentyp_id);
 
@@ -864,6 +912,7 @@ async function starteNeueOfferte(otId){
   }
   zeigeBauteilCard();
   setMode('new');
+  lieferwagenModus = 'zeit';
   await ladeDatenFuerOffertentyp(otId);
   if(currentBerechnungsmodell === 'tagessatz'){
     anzahlTage = {};
@@ -935,7 +984,7 @@ async function speichereNeueOfferte(titelVal){
     .insert({
       kunde_id: kundeId, offertentyp_id: offertentypId, titel: titelVal,
       datum: $offerteDatum.value || heuteAlsDatumsstring(), status: offerteStatus, notiz: $offerteNotiz.value.trim() || null,
-      betrag_total: letzterGrandTotal
+      betrag_total: letzterGrandTotal, lieferwagen_modus: lieferwagenModus
     }).select().single();
   if(oErr) throw oErr;
 
@@ -975,7 +1024,7 @@ async function speichereAenderungen(titelVal){
   const { error: oErr } = await sb.from('offerte').update({
     titel: titelVal, datum: $offerteDatum.value || heuteAlsDatumsstring(),
     status: offerteStatus, notiz: $offerteNotiz.value.trim() || null,
-    betrag_total: letzterGrandTotal
+    betrag_total: letzterGrandTotal, lieferwagen_modus: lieferwagenModus
   }).eq('id', currentOfferteId);
   if(oErr) throw oErr;
 
@@ -1062,6 +1111,7 @@ async function init(){
     renderOffpicker();
 
     await ladeAlleKunden();
+    await ladeLieferwagenKonfiguration();
     zeigeLeerenZustand();
 
     $status.textContent = 'Verbunden mit Supabase.';
@@ -1165,6 +1215,35 @@ async function recalc(){
         });
       }
     });
+
+    const plzFuerFahrzeit = $('kundePlz').value.trim();
+    if(lieferwagenKonfig?.herkunft_adresse && lieferwagenKonfig.stundenpreis != null && lieferwagenKonfig.kmpreis != null && plzFuerFahrzeit){
+      const distanz = await holeLieferwagenDistanz(plzFuerFahrzeit);
+      if(distanz){
+        const betragZeit = distanz.stdHinRueck * lieferwagenKonfig.stundenpreis;
+        const betragKm = distanz.kmHinRueck * lieferwagenKonfig.kmpreis;
+
+        const trHead = document.createElement('tr');
+        trHead.className = 'cgrouphead';
+        trHead.innerHTML = `<td colspan="5">Lieferwagenfahrzeit</td>`;
+        $costbody.appendChild(trHead);
+
+        const addLwRow = (modus, bezeichnung, menge, einheit, preis, betrag) => {
+          const tr = document.createElement('tr');
+          tr.className = 'crow lwrow' + (lieferwagenModus === modus ? ' on' : '');
+          tr.style.cursor = 'pointer';
+          tr.innerHTML = `<td>${bezeichnung}</td><td style="text-align:right">${menge.toFixed(2)}</td>
+            <td style="color:var(--muted)">${einheit}</td><td style="text-align:right">${fmtCHF(preis)}</td>
+            <td class="cbetrag">${fmtCHF(betrag)}</td>`;
+          tr.addEventListener('click', () => { lieferwagenModus = modus; recalc(); });
+          $costbody.appendChild(tr);
+        };
+        addLwRow('zeit', 'Fahrzeit (Hin- und Rückfahrt)', distanz.stdHinRueck, 'Std', lieferwagenKonfig.stundenpreis, betragZeit);
+        addLwRow('distanz', 'Fahrstrecke (Hin- und Rückfahrt)', distanz.kmHinRueck, 'km', lieferwagenKonfig.kmpreis, betragKm);
+
+        grandTotal += (lieferwagenModus === 'distanz') ? betragKm : betragZeit;
+      }
+    }
 
     $total.textContent = fmtCHF(grandTotal);
     letzterGrandTotal = grandTotal;
