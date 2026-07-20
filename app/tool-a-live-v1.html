@@ -35,6 +35,7 @@ main{padding:18px 0 60px;}
 
 .card{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:16px 18px;margin-bottom:14px;}
 .cardlabel{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-bottom:12px;}
+.row{display:flex;gap:10px;flex-wrap:wrap;}
 .fld label{display:block;font-size:11px;color:var(--muted);margin-bottom:4px;}
 .fld select, .fld input, .fld textarea{width:100%;border:1px solid var(--line);border-radius:7px;padding:8px 10px;font:inherit;font-size:13px;color:var(--ink);}
 .fld select:focus, .fld input:focus, .fld textarea:focus{outline:none;border-color:var(--primary);}
@@ -259,8 +260,13 @@ tr.cdescrow td{padding:2px 0 10px;}
 
   <div class="card">
     <div class="cardlabel">Kunde</div>
-    <div class="fld">
-      <input type="text" id="kundeSuche" list="kundenListe" placeholder="Kunde suchen oder neu erfassen …">
+    <div class="row">
+      <div class="fld" style="flex:3;">
+        <input type="text" id="kundeSuche" list="kundenListe" placeholder="Kunde suchen oder neu erfassen …">
+      </div>
+      <div class="fld" style="flex:1;min-width:90px;">
+        <input type="text" id="kundePlz" placeholder="PLZ" maxlength="4">
+      </div>
     </div>
     <datalist id="kundenListe"></datalist>
   </div>
@@ -410,7 +416,7 @@ let currentKundeId = null;
 let currentKundeName = '';
 
 async function ladeAlleKunden(){
-  const { data, error } = await sb.from('kunde').select('id,name').order('name');
+  const { data, error } = await sb.from('kunde').select('id,name,plz').order('name');
   if(error){ console.error(error); return; }
   alleKunden = data;
   $kundenListe.innerHTML = alleKunden.map(k => `<option value="${k.name}">`).join('');
@@ -426,6 +432,7 @@ async function waehleKunde(){
   if(!name){
     currentKundeId = null;
     currentKundeName = '';
+    $('kundePlz').value = '';
     offertenListe = [];
     currentOfferteId = null;
     renderOfferteListe();
@@ -435,6 +442,7 @@ async function waehleKunde(){
   const match = findeKundeByName(name);
   currentKundeId = match ? match.id : null;
   currentKundeName = name;
+  $('kundePlz').value = match?.plz || '';
   currentOfferteId = null;
   await loadOfferteListe();
   if(offertenListe.length){
@@ -443,6 +451,15 @@ async function waehleKunde(){
     zeigeLeerenZustand();
   }
 }
+
+$('kundePlz').addEventListener('change', async () => {
+  const plz = $('kundePlz').value.trim() || null;
+  if(!currentKundeId) return; // wird beim Anlegen des Kunden mitgespeichert
+  const { error } = await sb.from('kunde').update({ plz }).eq('id', currentKundeId);
+  if(error){ console.error(error); return; }
+  const k = alleKunden.find(x => x.id === currentKundeId);
+  if(k) k.plz = plz;
+});
 
 $kundeSuche.addEventListener('change', () => { waehleKunde(); });
 
@@ -903,7 +920,8 @@ document.getElementById('delconfirmOk').addEventListener('click', async () => {
 async function resolveKundeId(){
   const match = findeKundeByName(currentKundeName);
   if(match) return match.id;
-  const { data, error } = await sb.from('kunde').insert({ name: currentKundeName }).select().single();
+  const plz = $('kundePlz').value.trim() || null;
+  const { data, error } = await sb.from('kunde').insert({ name: currentKundeName, plz }).select().single();
   if(error) throw error;
   await ladeAlleKunden();
   currentKundeId = data.id;
