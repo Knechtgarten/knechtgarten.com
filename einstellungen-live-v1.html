@@ -388,15 +388,6 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
       <!-- ================= Sonderpositionen ================= -->
       <div id="abschnitt-sonderpositionen" class="hidden">
         <div id="staffelgruppenListe"></div>
-        <div class="card">
-          <div class="cardlabel">Neue Staffelgruppe</div>
-          <div class="hint">Mehrere Artikel zu einer Menge-Staffel gruppieren (z.B. Betonpumpe: 0–5m³ → Artikel A, 5–10m³ → Artikel B). In Tool B als Sonderposition statt einem festen Artikel wählbar.</div>
-          <div class="row" style="margin-top:10px;">
-            <div class="fld"><label>Name</label><input id="newStaffelgruppeName" placeholder="z.B. Betonpumpe"></div>
-          </div>
-          <button class="btn" id="addStaffelgruppeBtn">+ Staffelgruppe hinzufügen</button>
-          <div class="status" id="staffelgruppeStatus"></div>
-        </div>
 
         <div id="zonengruppenListe"></div>
         <div class="card">
@@ -717,10 +708,18 @@ function artikelBezeichnung(id){
 let STAFFELGRUPPEN = [];
 let STAFFELSTUFEN = [];
 
+// Es gibt aktuell genau eine Staffelgruppe (Betonpumpe) - kein generisches
+// Anlegen-Formular mehr, die Gruppe wird bei Bedarf automatisch erstellt.
+const STAFFELGRUPPE_FIX_NAME = 'Betonpumpe';
+
 async function loadStaffelgruppen(){
   const { data: gruppen, error } = await sb.from('staffelgruppe').select('id,name').order('name');
   if(error){ console.error(error); return; }
   STAFFELGRUPPEN = gruppen;
+  if(!STAFFELGRUPPEN.some(g => g.name === STAFFELGRUPPE_FIX_NAME)){
+    const { data: neu, error: insErr } = await sb.from('staffelgruppe').insert({ name: STAFFELGRUPPE_FIX_NAME }).select().single();
+    if(insErr){ console.error(insErr); } else { STAFFELGRUPPEN.push(neu); }
+  }
   const { data: stufen, error: stufenErr } = await sb.from('staffelstufe')
     .select('id,staffelgruppe_id,menge_von,menge_bis,artikel_id,reihenfolge').order('reihenfolge');
   if(stufenErr){ console.error(stufenErr); return; }
@@ -731,12 +730,9 @@ async function loadStaffelgruppen(){
 function renderStaffelgruppen(){
   $('staffelgruppenListe').innerHTML = STAFFELGRUPPEN.map(sg => `
     <div class="card">
-      <div class="cardlabel" style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-        ${sg.name}
-        <button class="icobtn" style="margin-left:auto;" onclick="openStaffelgruppeEdit('${sg.id}')" title="Bearbeiten">✎</button>
-        <button class="icobtn danger" onclick="deleteStaffelgruppe('${sg.id}','${sg.name.replace(/'/g,"\\'")}')" title="Löschen">🗑</button>
-      </div>
+      <div class="cardlabel">${sg.name}</div>
       <div class="hint">Sonderposition mit Staffelung für ${sg.name}:</div>
+      <button class="btn" onclick="openStaffelgruppeEdit('${sg.id}')">Bearbeiten</button>
     </div>`).join('');
 }
 
@@ -804,12 +800,6 @@ async function versucheAutoSaveStufe(){
 }
 $('sgEditClose').addEventListener('click', () => $('sgEditOvl').classList.remove('show'));
 
-async function deleteStaffelgruppe(id, name){
-  if(!(await confirmDialog(`Staffelgruppe "${name}" wirklich löschen? Alle Stufen werden mitgelöscht.`))) return;
-  const { error } = await sb.from('staffelgruppe').delete().eq('id', id);
-  if(error){ showToast(friendlyError(error), true); return; }
-  await loadStaffelgruppen();
-}
 async function deleteStaffelstufe(id){
   if(!(await confirmDialog('Stufe wirklich löschen?'))) return;
   const { error } = await sb.from('staffelstufe').delete().eq('id', id);
@@ -817,17 +807,6 @@ async function deleteStaffelstufe(id){
   await loadStaffelgruppen();
   renderSgEditModal();
 }
-$('addStaffelgruppeBtn').addEventListener('click', async () => {
-  const name = $('newStaffelgruppeName').value.trim();
-  if(!name) return;
-  const { data, error } = await sb.from('staffelgruppe').insert({ name }).select().single();
-  if(error){ $('staffelgruppeStatus').textContent = friendlyError(error); $('staffelgruppeStatus').className = 'status err'; return; }
-  $('newStaffelgruppeName').value = '';
-  $('staffelgruppeStatus').textContent = 'Gespeichert.'; $('staffelgruppeStatus').className = 'status ok';
-  await loadStaffelgruppen();
-  openStaffelgruppeEdit(data.id);
-});
-
 // ---------------------------------------------------------------------------
 // Preisfindung: PLZ-Zonen (z.B. Kies-Transport/Beton-Transport als eigene
 // Zonengruppen, je 1..N Zonen mit Artikel + PLZ-Liste).
