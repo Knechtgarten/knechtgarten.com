@@ -512,6 +512,9 @@ async function ladeFormelDaten(otId){
     .from('arbeitsschritt')
     .select(`id, name, reihenfolge, ausgeblendet,
       teilschritt ( id, name, beschreibung, ausgeblendet,
+        ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck,
+          zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4,
+          artikel ( bezeichnung, einheit, vp_knecht ) ),
         auswahlfeld ( id, name, mehrfachauswahl,
           auswahloption ( id, name,
             ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck,
@@ -522,28 +525,34 @@ async function ladeFormelDaten(otId){
 
   ressourcenzeilen = [];
   auswahlfelder = [];
+  function pushRz(rz, optionId, arbeitsschrittName){
+    ressourcenzeilen.push({
+      optionId,
+      arbeitsschritt: arbeitsschrittName,
+      kategorie: rz.kategorie,
+      bezeichnung: rz.bezeichnung_override || rz.artikel?.bezeichnung || '(unbenannt)',
+      einheit: rz.artikel?.einheit || '',
+      preis: rz.preis_override ?? rz.artikel?.vp_knecht ?? 0,
+      menge_ausdruck: rz.menge_ausdruck,
+      zugangsfaktoren: [rz.zugang_stufe1 ?? 1, rz.zugang_stufe2 ?? 1, rz.zugang_stufe3 ?? 1, rz.zugang_stufe4 ?? 1]
+    });
+  }
   (arbeitsschritte || []).forEach(as => {
     (as.teilschritt || []).filter(ts => !ts.ausgeblendet).forEach(ts => {
-      (ts.auswahlfeld || []).forEach(af => {
+      // Teilschritt ohne Auswahlfeld: seine Ressourcenzeilen gelten immer
+      // (kein optionId, keine Buttons fuer den Mitarbeiter).
+      (ts.ressourcenzeile || []).forEach(rz => pushRz(rz, null, as.name));
+
+      if(ts.auswahlfeld){
+        const af = ts.auswahlfeld;
         auswahlfelder.push({
           id: af.id, name: af.name, mehrfachauswahl: af.mehrfachauswahl,
           optionen: (af.auswahloption || []).map(o => ({ id: o.id, name: o.name }))
         });
         (af.auswahloption || []).forEach(opt => {
-          (opt.ressourcenzeile || []).forEach(rz => {
-            ressourcenzeilen.push({
-              optionId: opt.id,
-              arbeitsschritt: as.name,
-              kategorie: rz.kategorie,
-              bezeichnung: rz.bezeichnung_override || rz.artikel?.bezeichnung || '(unbenannt)',
-              einheit: rz.artikel?.einheit || '',
-              preis: rz.preis_override ?? rz.artikel?.vp_knecht ?? 0,
-              menge_ausdruck: rz.menge_ausdruck,
-              zugangsfaktoren: [rz.zugang_stufe1 ?? 1, rz.zugang_stufe2 ?? 1, rz.zugang_stufe3 ?? 1, rz.zugang_stufe4 ?? 1]
-            });
-          });
+          (opt.ressourcenzeile || []).forEach(rz => pushRz(rz, opt.id, as.name));
         });
-      });
+      }
     });
   });
 }
@@ -1070,7 +1079,7 @@ async function recalc(){
       for(const tf of teilflaechen){
         const tfMenge = tf.menge || 1;
         const zugFaktorTf = zi => (zi.zugangsfaktoren?.[(tf.zugaenglichkeitStufe || 2) - 1]) ?? 1;
-        const aktive = ressourcenzeilen.filter(rz => tf.selectedOptions.has(rz.optionId));
+        const aktive = ressourcenzeilen.filter(rz => rz.optionId == null || tf.selectedOptions.has(rz.optionId));
         const berechnet = await Promise.all(aktive.map(async rz => {
           const { data: mengeRoh, error } = await sb.rpc('eval_ausdruck', { node: rz.menge_ausdruck, werte: tf.werteMap });
           if(error) throw error;
