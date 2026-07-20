@@ -76,6 +76,10 @@ td{padding:6px 6px;border-bottom:1px solid var(--soft);vertical-align:top;}
 .draghandle{cursor:grab;color:var(--muted);font-size:13px;flex-shrink:0;line-height:1;}
 .draghandle:active{cursor:grabbing;}
 .tsblock.dragging,.asblock.dragging{opacity:.4;}
+.katitem{padding:8px 14px;font-size:12.5px;font-weight:600;cursor:pointer;border-left:3px solid transparent;color:var(--ink);}
+.katitem:hover{background:var(--soft);}
+.katitem.on{background:var(--soft);border-left-color:var(--primary);color:var(--primary);}
+
 .btnadd{display:block;border:1.5px dashed var(--line);border-radius:9px;padding:9px 14px;color:var(--primary);
   font-weight:700;font-size:12px;cursor:pointer;text-align:center;background:#fff;width:100%;margin-top:8px;}
 .btnadd:hover{border-color:var(--primary);background:var(--soft);}
@@ -214,12 +218,13 @@ td.artikelcell span:before{content:"· ";}
 
 <div class="overlay" id="addAfOverlay">
   <div class="modal">
-    <div class="modalhead"><div class="sub">Neues Auswahlfeld</div></div>
+    <div class="modalhead"><div class="sub" id="addAfModalTitle">Neues Auswahlfeld</div></div>
     <div class="fld"><label>Name</label><input id="addAfInput"></div>
     <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;margin-top:10px;">
       <input type="checkbox" id="addAfMultiInput"> Mehrfachauswahl erlauben
     </label>
     <div class="modalbtns">
+      <button class="btnlink hidden" id="addAfDeleteBtn" style="color:var(--danger);margin-right:auto;">Entfernen</button>
       <button class="btnlink" id="addAfCancel">Abbrechen</button>
       <button class="btn" id="addAfConfirm">Hinzufügen</button>
     </div>
@@ -285,12 +290,17 @@ td.artikelcell span:before{content:"· ";}
   <h1 id="seitentitel">Arbeitsschritt-Verwaltung</h1>
   <div class="pagesub" id="seitenuntertitel">Arbeitsschritte pflegen, ohne dass jemand SQL schreiben muss.</div>
 
-  <div class="card">
+  <div class="card" id="offertentypCard">
     <div class="cardlabel">Offertentyp</div>
     <div class="fld"><select id="offertentypSelect"></select></div>
   </div>
 
-  <div id="formelBibliothekView" class="hidden">
+  <div id="formelBibliothekView" class="hidden" style="display:flex;gap:16px;align-items:flex-start;">
+  <div class="card" style="width:190px;flex-shrink:0;padding:10px 0;">
+    <div class="cardlabel" style="padding:0 14px;">Kategorie</div>
+    <div id="formelKategorienListe"></div>
+  </div>
+  <div style="flex:1;min-width:0;">
   <div class="card">
     <div class="cardlabel">Formel-Bibliothek – Eingabefelder</div>
     <div class="hint">Rohe Masse (z.B. Poollaenge). Werden in Tool A vom Mitarbeiter ausgefuellt.</div>
@@ -328,6 +338,7 @@ td.artikelcell span:before{content:"· ";}
       <button class="btnlink" id="cancelTermBtn" style="margin-left:8px;">Abbrechen</button>
       <div class="status" id="termStatus"></div>
     </div>
+  </div>
   </div>
   </div>
 
@@ -576,6 +587,7 @@ function zeigeSeite(seite){
   const istFormel = seite === 'formelbibliothek';
   $('formelBibliothekView').classList.toggle('hidden', !istFormel);
   $('arbeitsschritteView').classList.toggle('hidden', istFormel);
+  $('offertentypCard').classList.toggle('hidden', istFormel);
   $('navArbeitsschritte').classList.toggle('on', !istFormel);
   $('navFormelBibliothek').classList.toggle('on', istFormel);
   $('seitentitel').textContent = istFormel ? 'Formel-Bibliothek' : 'Arbeitsschritt-Verwaltung';
@@ -583,6 +595,31 @@ function zeigeSeite(seite){
     ? 'Eingabefelder und Terms verwalten, die in den Arbeitsschritt-Formeln verwendet werden.'
     : 'Arbeitsschritte pflegen, ohne dass jemand SQL schreiben muss.';
   $('pathlineSeite').textContent = istFormel ? 'Formel-Bibliothek' : 'Arbeitsschritte';
+  if(istFormel){
+    renderFormelKategorien();
+    loadFormelBibliothek();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Formel-Bibliothek: Kategorien-Navigation (Allgemein + je ein Eintrag pro
+// Offertentyp mit Formel-Modell) - unabhaengig vom Offertentyp-Selektor oben,
+// der nur fuer die Arbeitsschritte-Ansicht gilt.
+// ---------------------------------------------------------------------------
+let formelBibliothekKategorie = 'allgemein';
+
+function renderFormelKategorien(){
+  const formelTypen = OFFERTENTYPEN.filter(o => o.berechnungsmodell === 'formel');
+  const items = [{ id: 'allgemein', name: 'Allgemein' }, ...formelTypen];
+  $('formelKategorienListe').innerHTML = items.map(k => `
+    <div class="katitem ${formelBibliothekKategorie===k.id?'on':''}" onclick="waehleFormelKategorie('${k.id}')">${k.name}</div>
+  `).join('');
+}
+
+async function waehleFormelKategorie(kat){
+  formelBibliothekKategorie = kat;
+  renderFormelKategorien();
+  await loadFormelBibliothek();
 }
 
 async function loadArtikel(){
@@ -594,13 +631,17 @@ async function loadArtikel(){
 }
 
 async function loadFormelBibliothek(){
-  const { data: efs, error: efErr } = await sb.from('eingabefeld').select('id,name,einheit,offertentyp_id')
-    .or(`offertentyp_id.is.null,offertentyp_id.eq.${currentOffertentypId}`);
+  const istAllgemein = formelBibliothekKategorie === 'allgemein';
+
+  let efQuery = sb.from('eingabefeld').select('id,name,einheit,offertentyp_id');
+  efQuery = istAllgemein ? efQuery.is('offertentyp_id', null) : efQuery.eq('offertentyp_id', formelBibliothekKategorie);
+  const { data: efs, error: efErr } = await efQuery;
   if(efErr){ console.error(efErr); return; }
   EINGABEFELDER = efs;
 
-  const { data: terms, error: tErr } = await sb.from('term').select('id,name,typ,wert,ausdruck,einheit,offertentyp_id')
-    .or(`offertentyp_id.is.null,offertentyp_id.eq.${currentOffertentypId}`);
+  let termQuery = sb.from('term').select('id,name,typ,wert,ausdruck,einheit,offertentyp_id');
+  termQuery = istAllgemein ? termQuery.is('offertentyp_id', null) : termQuery.eq('offertentyp_id', formelBibliothekKategorie);
+  const { data: terms, error: tErr } = await termQuery;
   if(tErr){ console.error(tErr); return; }
   TERMS = terms;
 
@@ -734,11 +775,11 @@ function renderTeilschritt(asId, ts, nummer){
     </div>`;
 }
 
-async function toggleAuswahlfeldAktiv(tsId, hatAf, afId){
+function toggleAuswahlfeldAktiv(tsId, hatAf, afId){
+  const ts = ARBEITSSCHRITTE.flatMap(a => a.teilschritt || []).find(t => t.id === tsId);
   if(hatAf){
-    await deleteAuswahlfeld(afId);
+    openAddAfModal(tsId, ts.auswahlfeld);
   }else{
-    const ts = ARBEITSSCHRITTE.flatMap(a => a.teilschritt || []).find(t => t.id === tsId);
     if(ts && ts.ressourcenzeile && ts.ressourcenzeile.length){
       showToast('Bitte zuerst die direkten Ressourcen-Zeilen entfernen, bevor ein Auswahlfeld aktiviert wird.', true);
       return;
@@ -823,7 +864,7 @@ $('offertentypSelect').addEventListener('change', async e => {
   if(currentBerechnungsmodell === 'tagessatz'){
     await loadTagessatzArbeitsschritte();
   }else{
-    await Promise.all([loadFormelBibliothek(), loadArbeitsschritte()]);
+    await loadArbeitsschritte();
   }
 });
 
@@ -831,7 +872,8 @@ $('addEfBtn').addEventListener('click', async () => {
   const name = $('newEfName').value.trim();
   const einheit = $('newEfEinheit').value.trim();
   if(!name || !einheit){ $('efStatus').textContent = 'Bitte Name und Einheit ausfuellen.'; $('efStatus').className='status err'; return; }
-  const { error } = await sb.from('eingabefeld').insert({ offertentyp_id: currentOffertentypId, name, einheit });
+  const offertentyp_id = formelBibliothekKategorie === 'allgemein' ? null : formelBibliothekKategorie;
+  const { error } = await sb.from('eingabefeld').insert({ offertentyp_id, name, einheit });
   if(error){ $('efStatus').textContent = friendlyError(error); $('efStatus').className='status err'; return; }
   $('newEfName').value=''; $('newEfEinheit').value='';
   $('efStatus').textContent = 'Gespeichert.'; $('efStatus').className='status ok';
@@ -877,7 +919,8 @@ $('saveTermBtn').addEventListener('click', async () => {
   const typ = $('newTermTyp').value;
   if(!name){ $('termStatus').textContent = 'Bitte Name ausfuellen.'; $('termStatus').className='status err'; return; }
 
-  const payload = { offertentyp_id: currentOffertentypId, name, einheit: einheit || null, typ };
+  const offertentyp_id = formelBibliothekKategorie === 'allgemein' ? null : formelBibliothekKategorie;
+  const payload = { offertentyp_id, name, einheit: einheit || null, typ };
   if(typ === 'konstante'){
     payload.wert = parseFloat($('newTermWert').value);
     if(isNaN(payload.wert)){ $('termStatus').textContent = 'Bitte einen gueltigen Wert eingeben.'; $('termStatus').className='status err'; return; }
@@ -983,10 +1026,16 @@ $('addTsConfirm').addEventListener('click', async () => {
 });
 $('addTsInput').addEventListener('keydown', e => { if(e.key === 'Enter') $('addTsConfirm').click(); });
 
-function openAddAfModal(tsId){
+let addAfEditingId = null;
+
+function openAddAfModal(tsId, existingAf){
   addAfContext = tsId;
-  $('addAfInput').value = '';
-  $('addAfMultiInput').checked = false;
+  addAfEditingId = existingAf ? existingAf.id : null;
+  $('addAfInput').value = existingAf ? existingAf.name : '';
+  $('addAfMultiInput').checked = existingAf ? existingAf.mehrfachauswahl : false;
+  $('addAfModalTitle').textContent = existingAf ? 'Auswahlfeld bearbeiten' : 'Neues Auswahlfeld';
+  $('addAfConfirm').textContent = existingAf ? 'Speichern' : 'Hinzufügen';
+  $('addAfDeleteBtn').classList.toggle('hidden', !existingAf);
   $('addAfOverlay').classList.add('show');
   $('addAfInput').focus();
 }
@@ -994,7 +1043,19 @@ $('addAfCancel').addEventListener('click', () => $('addAfOverlay').classList.rem
 $('addAfConfirm').addEventListener('click', async () => {
   const name = $('addAfInput').value.trim();
   if(!name) return;
-  if(await addAuswahlfeld(addAfContext, name, $('addAfMultiInput').checked)) $('addAfOverlay').classList.remove('show');
+  const mehrfachauswahl = $('addAfMultiInput').checked;
+  if(addAfEditingId){
+    const { error } = await sb.from('auswahlfeld').update({ name, mehrfachauswahl }).eq('id', addAfEditingId);
+    if(error){ showToast(friendlyError(error), true); return; }
+    $('addAfOverlay').classList.remove('show');
+    await loadArbeitsschritte();
+  }else{
+    if(await addAuswahlfeld(addAfContext, name, mehrfachauswahl)) $('addAfOverlay').classList.remove('show');
+  }
+});
+$('addAfDeleteBtn').addEventListener('click', async () => {
+  await deleteAuswahlfeld(addAfEditingId);
+  $('addAfOverlay').classList.remove('show');
 });
 $('addAfInput').addEventListener('keydown', e => { if(e.key === 'Enter') $('addAfConfirm').click(); });
 
@@ -1362,7 +1423,6 @@ async function init(){
   if(currentBerechnungsmodell === 'tagessatz'){
     await loadTagessatzArbeitsschritte();
   }else{
-    await loadFormelBibliothek();
     await loadArbeitsschritte();
   }
 }
