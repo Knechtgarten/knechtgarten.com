@@ -204,6 +204,10 @@ td.artikelcell span:before{content:"· ";}
   font-size:10.5px;border-left:1px solid var(--line);}
 .combofield.wide{flex:1;}
 .combofield.wide input{width:100%;}
+.optrow{display:flex;gap:6px;}
+.opt{font-size:12px;font-weight:600;border:1px solid var(--line);background:#fff;color:var(--ink);
+  border-radius:6px;padding:6px 12px;cursor:pointer;}
+.opt.on{background:var(--primary);color:#fff;border-color:var(--primary);}
 .pickersearch{width:100%;font:inherit;font-size:12.5px;padding:8px 10px;border:1px solid var(--line);
   border-radius:7px;margin-bottom:10px;}
 .pickersearch:focus{outline:none;border-color:var(--primary);}
@@ -313,10 +317,23 @@ td.artikelcell span:before{content:"· ";}
     <div class="notizbox" id="rzEditNotizBox"><textarea id="rzEditNotizInput" placeholder="Nur für dich/das Team sichtbar"></textarea></div>
 
     <div class="fld hidden" id="rzEditArtikelFld">
-      <label>Artikel</label>
+      <label>Herkunft</label>
+      <div class="optrow" style="margin-bottom:6px;">
+        <button type="button" class="opt on" id="rzEditQuelleArtikelBtn">Artikel</button>
+        <button type="button" class="opt" id="rzEditQuelleSonderBtn">Sonderposition</button>
+      </div>
       <div class="combofield wide">
         <input type="text" id="rzEditArtikelInput" readonly placeholder="Artikel waehlen...">
         <button type="button" id="rzEditArtikelBtn">▾</button>
+      </div>
+      <div class="fld hidden" id="rzEditKategorieFld" style="margin-top:8px;">
+        <label>Kategorie</label>
+        <select id="rzEditKategorieSelect">
+          <option value="personal">Personal</option>
+          <option value="maschine">Maschine</option>
+          <option value="logistik">Logistik</option>
+          <option value="material">Material</option>
+        </select>
       </div>
     </div>
 
@@ -387,6 +404,15 @@ td.artikelcell span:before{content:"· ";}
       </table>
     </div>
     <div class="modalbtns"><button class="btnlink" id="artikelPickerCancel">Abbrechen</button></div>
+  </div>
+</div>
+
+<div class="overlay" id="sonderpositionPickerOverlay">
+  <div class="modal">
+    <div class="modalhead"><div class="sub">Sonderposition waehlen</div></div>
+    <input type="text" class="pickersearch" id="sonderpositionPickerSearch" placeholder="Suchen...">
+    <div id="sonderpositionPickerList" style="max-height:360px;overflow:auto;"></div>
+    <div class="modalbtns"><button class="btnlink" id="sonderpositionPickerCancel">Abbrechen</button></div>
   </div>
 </div>
 
@@ -533,6 +559,9 @@ async function ladeAlleVariablen(){
 let ARTIKEL = [];
 let ARTIKELGRUPPEN = [];
 let LIEFERANTEN = [];
+let STAFFELGRUPPEN = [];
+let ZONENGRUPPEN = [];
+let SONDERPOSITION_TYPEN = [];
 let ARBEITSSCHRITTE = [];
 let activeOptionByAf = {}; // welche Option (Tab) pro Auswahlfeld gerade aktiv angezeigt wird
 function waehleOption(afId, optId){
@@ -773,6 +802,17 @@ async function loadArtikel(){
   ARTIKEL = data;
 }
 
+async function loadSonderpositionKataloge(){
+  const [sg, zg, sp] = await Promise.all([
+    sb.from('staffelgruppe').select('id,name'),
+    sb.from('zonengruppe').select('id,name'),
+    sb.from('sonderposition_typ').select('id,name')
+  ]);
+  if(sg.error) console.error(sg.error); else STAFFELGRUPPEN = sg.data;
+  if(zg.error) console.error(zg.error); else ZONENGRUPPEN = zg.data;
+  if(sp.error) console.error(sp.error); else SONDERPOSITION_TYPEN = sp.data;
+}
+
 async function loadArtikelgruppen(){
   const { data, error } = await sb.from('artikelgruppe').select('id,name').order('name');
   if(error){ console.error(error); return; }
@@ -831,12 +871,16 @@ async function loadArbeitsschritte(){
       teilschritt ( id, name, beschreibung, reihenfolge, ausgeblendet,
         ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, notiz,
           zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4, mindestmenge, verschnitt_prozent,
-          artikel_id, artikel(bezeichnung, einheit, artikelnummer_knecht) ),
+          artikel_id, artikel(bezeichnung, einheit, artikelnummer_knecht),
+          staffelgruppe_id, staffelgruppe(name), zonengruppe_id, zonengruppe(name),
+          sonderposition_typ_id, sonderposition_typ(name) ),
         auswahlfeld ( id, name, mehrfachauswahl, reihenfolge,
           auswahloption ( id, name, reihenfolge,
             ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, notiz,
               zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4, mindestmenge, verschnitt_prozent,
-              artikel_id, artikel(bezeichnung, einheit, artikelnummer_knecht) ) ) ) )`)
+              artikel_id, artikel(bezeichnung, einheit, artikelnummer_knecht),
+              staffelgruppe_id, staffelgruppe(name), zonengruppe_id, zonengruppe(name),
+              sonderposition_typ_id, sonderposition_typ(name) ) ) ) )`)
     .eq('offertentyp_id', currentOffertentypId).order('reihenfolge');
   if(error){ console.error(error); return; }
   ARBEITSSCHRITTE = data;
@@ -980,6 +1024,14 @@ function renderOption(afId, opt){
   return renderRessourcenTabelle('option', opt.id, opt.ressourcenzeile);
 }
 
+function rzArtikelZelleHtml(rz){
+  if(rz.bezeichnung_override) return `<b>${rz.bezeichnung_override}</b>`;
+  if(rz.staffelgruppe) return `<b>${rz.staffelgruppe.name}</b><span class="pill" style="background:var(--soft);color:var(--muted);margin-left:6px;">Staffel</span>`;
+  if(rz.zonengruppe) return `<b>${rz.zonengruppe.name}</b><span class="pill" style="background:var(--soft);color:var(--muted);margin-left:6px;">Zone</span>`;
+  if(rz.sonderposition_typ) return `<b>${rz.sonderposition_typ.name}</b><span class="pill" style="background:var(--soft);color:var(--muted);margin-left:6px;">Spezial</span>`;
+  return `<b>${rz.artikel?.bezeichnung || '(unbenannt)'}</b><span>${rz.artikel?.artikelnummer_knecht || ''}${rz.artikel?.einheit ? ' · ' + rz.artikel.einheit : ''}</span>`;
+}
+
 function renderRessourcenTabelle(kontextTyp, kontextId, zeilen){
   return `
     <div class="nest" style="margin-left:0;padding-left:0;border-left:none;">
@@ -989,9 +1041,7 @@ function renderRessourcenTabelle(kontextTyp, kontextId, zeilen){
           ${(zeilen||[]).map(rz => `
             <tr>
               <td><span class="pill ${rz.kategorie}">${rz.kategorie}</span></td>
-              <td class="artikelcell">
-                ${rz.bezeichnung_override ? `<b>${rz.bezeichnung_override}</b>` : `<b>${rz.artikel?.bezeichnung || '(unbenannt)'}</b><span>${rz.artikel?.artikelnummer_knecht || ''}${rz.artikel?.einheit ? ' · ' + rz.artikel.einheit : ''}</span>`}
-              </td>
+              <td class="artikelcell">${rzArtikelZelleHtml(rz)}</td>
               <td>${ausdruckPreview(rz.menge_ausdruck)}</td>
               <td class="c-tf"><input type="checkbox" checked disabled title="Teilflächen-Logik (noch ohne Funktion)"></td>
               <td>
@@ -1343,6 +1393,9 @@ let rzEditCurrentId = null;
 let rzEditKontext = null;       // { kontextTyp, kontextId } - nur im 'add'-Modus gebraucht
 let rzEditArtikelId = null;     // gewaehlter Artikel - nur im 'add'-Modus gebraucht
 let rzEditKategorie = null;     // vom gewaehlten Artikel uebernommen - nur im 'add'-Modus
+let rzEditQuelle = 'artikel';   // 'artikel' oder 'sonder' - nur im 'add'-Modus gebraucht
+let rzEditQuelleTyp = null;     // 'staffelgruppe'|'zonengruppe'|'sonderposition_typ' - wenn rzEditQuelle==='sonder'
+let rzEditQuelleId = null;
 let rzEditGlieder = null;       // [{op, mode:'lit'|'ref', refKind, refId, text}] oder null wenn zu komplex
 let rzEditPickerIndex = null;
 // Beim Oeffnen des Mengenfensters werden EINGABEFELDER/TERMS (dieselben
@@ -1446,7 +1499,7 @@ async function openRzEditModal(rzId){
   rzEditArtikelId = null;
   rzEditKategorie = null;
   $('rzEditArtikelFld').classList.add('hidden');
-  const bez = ctx.rz.bezeichnung_override || ctx.rz.artikel?.bezeichnung || '(unbenannt)';
+  const bez = ctx.rz.bezeichnung_override || ctx.rz.artikel?.bezeichnung || ctx.rz.staffelgruppe?.name || ctx.rz.zonengruppe?.name || ctx.rz.sonderposition_typ?.name || '(unbenannt)';
   $('rzEditContext').textContent = ctx.optName === '(gilt immer)'
     ? `${bez} · ${ctx.tsName} · ${ctx.asName}`
     : `${bez} · ${ctx.tsName} · ${ctx.asName} · ${ctx.optName}`;
@@ -1485,7 +1538,14 @@ function openRzAddModal(kontextTyp, kontextId){
   rzEditKontext = { kontextTyp, kontextId };
   rzEditArtikelId = null;
   rzEditKategorie = null;
+  rzEditQuelle = 'artikel';
+  rzEditQuelleTyp = null;
+  rzEditQuelleId = null;
+  $('rzEditQuelleArtikelBtn').classList.add('on');
+  $('rzEditQuelleSonderBtn').classList.remove('on');
+  $('rzEditKategorieFld').classList.add('hidden');
   $('rzEditArtikelFld').classList.remove('hidden');
+  $('rzEditArtikelInput').placeholder = 'Artikel waehlen...';
   $('rzEditArtikelInput').value = '';
   $('rzEditContext').textContent = info.optName === '(gilt immer)'
     ? `Neue Ressourcenzeile · ${info.tsName} · ${info.asName}`
@@ -1616,9 +1676,69 @@ function waehleArtikel(id){
   $('rzEditArtikelInput').value = `${a.bezeichnung}${a.artikelnummer_knecht ? ' · ' + a.artikelnummer_knecht : ''}`;
   $('artikelPickerOverlay').classList.remove('show');
 }
-$('rzEditArtikelBtn').addEventListener('click', openArtikelPicker);
+$('rzEditArtikelBtn').addEventListener('click', () => {
+  if(rzEditQuelle === 'artikel') openArtikelPicker(); else openSonderpositionPicker();
+});
 $('artikelPickerSearch').addEventListener('input', () => renderArtikelPickerList());
 $('artikelPickerCancel').addEventListener('click', () => $('artikelPickerOverlay').classList.remove('show'));
+
+// ---------------------------------------------------------------------------
+// Quelle-Umschalter (Artikel/Sonderposition) + Sonderposition-Picker: eine
+// Ressourcenzeile kann statt einem festen Artikel eine Staffelgruppe,
+// Zonengruppe oder einen Sonderposition-Typ referenzieren - Preisfindung
+// passiert dann zur Berechnungszeit in Tool A.
+// ---------------------------------------------------------------------------
+$('rzEditQuelleArtikelBtn').addEventListener('click', () => {
+  rzEditQuelle = 'artikel';
+  rzEditQuelleTyp = null; rzEditQuelleId = null;
+  $('rzEditQuelleArtikelBtn').classList.add('on');
+  $('rzEditQuelleSonderBtn').classList.remove('on');
+  $('rzEditKategorieFld').classList.add('hidden');
+  $('rzEditArtikelInput').placeholder = 'Artikel waehlen...';
+  $('rzEditArtikelInput').value = '';
+});
+$('rzEditQuelleSonderBtn').addEventListener('click', () => {
+  rzEditQuelle = 'sonder';
+  rzEditArtikelId = null;
+  $('rzEditQuelleSonderBtn').classList.add('on');
+  $('rzEditQuelleArtikelBtn').classList.remove('on');
+  $('rzEditKategorieFld').classList.remove('hidden');
+  $('rzEditArtikelInput').placeholder = 'Sonderposition waehlen...';
+  $('rzEditArtikelInput').value = '';
+});
+
+function renderSonderpositionPickerList(){
+  const q = $('sonderpositionPickerSearch').value.trim().toLowerCase();
+  const items = [
+    ...STAFFELGRUPPEN.map(s => ({ id: s.id, name: s.name, typ: 'staffelgruppe', badge: 'Staffel' })),
+    ...ZONENGRUPPEN.map(z => ({ id: z.id, name: z.name, typ: 'zonengruppe', badge: 'Zone' })),
+    ...SONDERPOSITION_TYPEN.map(s => ({ id: s.id, name: s.name, typ: 'sonderposition_typ', badge: 'Spezial' }))
+  ].filter(i => !q || i.name.toLowerCase().includes(q));
+  $('sonderpositionPickerList').innerHTML = items.map(i => `
+    <div class="apclickrow" style="padding:8px 4px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--soft);" onclick="waehleSonderposition('${i.typ}','${i.id}')">
+      <b>${i.name}</b><span class="pill" style="background:var(--soft);color:var(--muted);">${i.badge}</span>
+    </div>`).join('') || '<div class="hint">Keine Treffer - siehe Einstellungen -> Sonderpositionen.</div>';
+}
+function openSonderpositionPicker(){
+  $('sonderpositionPickerSearch').value = '';
+  renderSonderpositionPickerList();
+  $('sonderpositionPickerOverlay').classList.add('show');
+}
+function waehleSonderposition(typ, id){
+  const quelle = typ === 'staffelgruppe' ? STAFFELGRUPPEN : typ === 'zonengruppe' ? ZONENGRUPPEN : SONDERPOSITION_TYPEN;
+  const item = quelle.find(x => x.id === id);
+  if(!item) return;
+  rzEditQuelleTyp = typ;
+  rzEditQuelleId = id;
+  $('rzEditArtikelInput').value = item.name;
+  if(typ === 'zonengruppe' && rzEditGlieder?.length === 1 && rzEditGlieder[0].mode === 'lit' && rzEditGlieder[0].text === ''){
+    rzEditGlieder[0].text = '1';
+    renderRzEditTermline();
+  }
+  $('sonderpositionPickerOverlay').classList.remove('show');
+}
+$('sonderpositionPickerSearch').addEventListener('input', () => renderSonderpositionPickerList());
+$('sonderpositionPickerCancel').addEventListener('click', () => $('sonderpositionPickerOverlay').classList.remove('show'));
 
 function erzeugeCombofield(glied){
   const box = document.createElement('div');
@@ -1693,8 +1813,11 @@ $('varPickerCancel').addEventListener('click', () => $('varPickerOverlay').class
 $('rzEditCancel').addEventListener('click', () => { $('rzEditOverlay').classList.remove('show'); });
 
 $('rzEditSave').addEventListener('click', async () => {
-  if(rzEditMode === 'add' && !rzEditArtikelId){
+  if(rzEditMode === 'add' && rzEditQuelle === 'artikel' && !rzEditArtikelId){
     $('rzEditStatus').textContent = 'Bitte einen Artikel waehlen.'; $('rzEditStatus').className = 'status err'; return;
+  }
+  if(rzEditMode === 'add' && rzEditQuelle === 'sonder' && !rzEditQuelleId){
+    $('rzEditStatus').textContent = 'Bitte eine Sonderposition waehlen.'; $('rzEditStatus').className = 'status err'; return;
   }
   if(!rzEditGlieder){ $('rzEditOverlay').classList.remove('show'); return; }
   const node = buildMengenAusdruck(rzEditGlieder);
@@ -1708,14 +1831,17 @@ $('rzEditSave').addEventListener('click', async () => {
   const verschnitt_prozent = vsVal === '' ? null : parseFloat(vsVal);
 
   if(rzEditMode === 'add'){
+    const quellePayload = rzEditQuelle === 'artikel'
+      ? { kategorie: rzEditKategorie, artikel_id: rzEditArtikelId }
+      : { kategorie: $('rzEditKategorieSelect').value, [`${rzEditQuelleTyp}_id`]: rzEditQuelleId };
     const { error } = await sb.from('ressourcenzeile').insert({
       [`${rzEditKontext.kontextTyp}_id`]: rzEditKontext.kontextId,
-      kategorie: rzEditKategorie, artikel_id: rzEditArtikelId,
+      ...quellePayload,
       menge_ausdruck: node, notiz, mindestmenge, verschnitt_prozent, ...zugWerte
     });
     if(error){ $('rzEditStatus').textContent = friendlyError(error); $('rzEditStatus').className = 'status err'; return; }
     $('rzEditOverlay').classList.remove('show');
-    showToast('Artikel hinzugefuegt.');
+    showToast('Hinzugefuegt.');
   }else{
     const { error } = await sb.from('ressourcenzeile').update({ menge_ausdruck: node, notiz, mindestmenge, verschnitt_prozent, ...zugWerte }).eq('id', rzEditCurrentId);
     if(error){ $('rzEditStatus').textContent = friendlyError(error); $('rzEditStatus').className = 'status err'; return; }
@@ -1838,6 +1964,7 @@ async function init(){
   await loadArtikel();
   await loadArtikelgruppen();
   await loadLieferantenListe();
+  await loadSonderpositionKataloge();
   if(currentBerechnungsmodell === 'tagessatz'){
     await loadTagessatzArbeitsschritte();
   }else{

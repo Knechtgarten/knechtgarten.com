@@ -577,12 +577,18 @@ async function ladeFormelDaten(otId){
       teilschritt ( id, name, beschreibung, ausgeblendet,
         ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck,
           zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4, mindestmenge, verschnitt_prozent,
-          artikel ( bezeichnung, einheit, vp_knecht ) ),
+          artikel ( bezeichnung, einheit, vp_knecht ),
+          staffelgruppe ( name, staffelstufe ( menge_von, menge_bis, artikel ( vp_knecht ) ) ),
+          zonengruppe ( name, zone ( artikel ( vp_knecht ), zone_plz ( plz ) ) ),
+          sonderposition_typ ( name ) ),
         auswahlfeld ( id, name, mehrfachauswahl,
           auswahloption ( id, name,
             ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck,
               zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4, mindestmenge, verschnitt_prozent,
-              artikel ( bezeichnung, einheit, vp_knecht ) ) ) ) )`)
+              artikel ( bezeichnung, einheit, vp_knecht ),
+              staffelgruppe ( name, staffelstufe ( menge_von, menge_bis, artikel ( vp_knecht ) ) ),
+              zonengruppe ( name, zone ( artikel ( vp_knecht ), zone_plz ( plz ) ) ),
+              sonderposition_typ ( name ) ) ) ) )`)
     .eq('offertentyp_id', otId).eq('ausgeblendet', false).order('reihenfolge');
   if(asErr) throw asErr;
 
@@ -593,13 +599,16 @@ async function ladeFormelDaten(otId){
       optionId,
       arbeitsschritt: arbeitsschrittName,
       kategorie: rz.kategorie,
-      bezeichnung: rz.bezeichnung_override || rz.artikel?.bezeichnung || '(unbenannt)',
+      bezeichnung: rz.bezeichnung_override || rz.artikel?.bezeichnung || rz.staffelgruppe?.name || rz.zonengruppe?.name || rz.sonderposition_typ?.name || '(unbenannt)',
       einheit: rz.artikel?.einheit || '',
       preis: rz.preis_override ?? rz.artikel?.vp_knecht ?? 0,
       menge_ausdruck: rz.menge_ausdruck,
       zugangsfaktoren: [rz.zugang_stufe1 ?? 1, rz.zugang_stufe2 ?? 1, rz.zugang_stufe3 ?? 1, rz.zugang_stufe4 ?? 1],
       mindestmenge: rz.mindestmenge,
-      verschnittProzent: rz.verschnitt_prozent
+      verschnittProzent: rz.verschnitt_prozent,
+      staffelgruppe: rz.staffelgruppe,
+      zonengruppe: rz.zonengruppe,
+      sonderpositionTyp: rz.sonderposition_typ
     });
   }
   (arbeitsschritte || []).forEach(as => {
@@ -1150,11 +1159,30 @@ async function recalc(){
         const zugFaktorTf = zi => (zi.zugangsfaktoren?.[(tf.zugaenglichkeitStufe || 2) - 1]) ?? 1;
         const aktive = ressourcenzeilen.filter(rz => rz.optionId == null || tf.selectedOptions.has(rz.optionId));
         const berechnet = await Promise.all(aktive.map(async rz => {
+          // Sonderpositionen (Preisfindung Phase 2): statt einem festen Artikel
+          // wird zur Rechenzeit per Staffelstufe/PLZ-Zone der passende Preis
+          // gesucht - Menge in der Kostentabelle ist dabei immer 1 (Pauschale).
+          if(rz.zonengruppe){
+            const plz = $('kundePlz').value.trim();
+            const zone = (rz.zonengruppe.zone || []).find(z => (z.zone_plz || []).some(zp => zp.plz === plz));
+            const preis = zone?.artikel?.vp_knecht ?? 0;
+            const bezeichnung = zone ? rz.bezeichnung : rz.bezeichnung + ' (keine Zone für PLZ gefunden)';
+            return { ...rz, bezeichnung, einheit: 'Pauschale', menge: 1, preis, betrag: preis };
+          }
+          if(rz.sonderpositionTyp){
+            return { ...rz, bezeichnung: rz.bezeichnung + ' (Berechnung noch nicht hinterlegt)', einheit: 'Pauschale', menge: 1, preis: 0, betrag: 0 };
+          }
           const { data: mengeRoh, error } = await sb.rpc('eval_ausdruck', { node: rz.menge_ausdruck, werte: tf.werteMap });
           if(error) throw error;
           const verschnittFaktor = 1 + ((rz.verschnittProzent ?? 0) / 100);
           let menge = mengeRoh * verschnittFaktor * zugFaktorTf(rz) * tfMenge;
           if(rz.mindestmenge != null && menge < rz.mindestmenge) menge = rz.mindestmenge;
+          if(rz.staffelgruppe){
+            const stufe = (rz.staffelgruppe.staffelstufe || []).find(s => menge >= s.menge_von && (s.menge_bis == null || menge < s.menge_bis));
+            const preis = stufe?.artikel?.vp_knecht ?? 0;
+            const bezeichnung = stufe ? rz.bezeichnung : rz.bezeichnung + ' (keine Stufe gefunden)';
+            return { ...rz, bezeichnung, einheit: 'Pauschale', menge: 1, preis, betrag: preis };
+          }
           return { ...rz, menge, betrag: menge * rz.preis };
         }));
         alleZeilen.push(...berechnet);
