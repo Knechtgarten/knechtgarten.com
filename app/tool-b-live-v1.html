@@ -199,6 +199,42 @@ td.artikelcell span:before{content:"· ";}
 </div>
 <div class="toastwrap" id="toastwrap"></div>
 
+<div class="overlay" id="addTsOverlay">
+  <div class="modal">
+    <div class="modalhead"><div class="sub">Neuer Teilschritt</div></div>
+    <div class="fld"><label>Name</label><input id="addTsInput"></div>
+    <div class="modalbtns">
+      <button class="btnlink" id="addTsCancel">Abbrechen</button>
+      <button class="btn" id="addTsConfirm">Hinzufügen</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="addAfOverlay">
+  <div class="modal">
+    <div class="modalhead"><div class="sub">Neues Auswahlfeld</div></div>
+    <div class="fld"><label>Name</label><input id="addAfInput"></div>
+    <label style="font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;margin-top:10px;">
+      <input type="checkbox" id="addAfMultiInput"> Mehrfachauswahl erlauben
+    </label>
+    <div class="modalbtns">
+      <button class="btnlink" id="addAfCancel">Abbrechen</button>
+      <button class="btn" id="addAfConfirm">Hinzufügen</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="addOptOverlay">
+  <div class="modal">
+    <div class="modalhead"><div class="sub">Neue Option</div></div>
+    <div class="fld"><label>Name</label><input id="addOptInput"></div>
+    <div class="modalbtns">
+      <button class="btnlink" id="addOptCancel">Abbrechen</button>
+      <button class="btn" id="addOptConfirm">Hinzufügen</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="rzEditOverlay">
   <div class="modal wide">
     <div class="modalhead"><div class="sub" id="rzEditContext"></div></div>
@@ -610,11 +646,7 @@ function renderArbeitsschritte(){
         <div class="tswrap" data-tswrap="${as.id}">
           ${(as.teilschritt||[]).map((ts,i) => renderTeilschritt(as.id, ts, i+1)).join('')}
         </div>
-        <div class="row" id="newTsWrap-${as.id}" style="display:none;margin-top:6px;">
-          <div class="fld"><input placeholder="Name" id="newTsName-${as.id}"></div>
-          <button class="btn" onclick="addTeilschritt('${as.id}')">Hinzufügen</button>
-        </div>
-        <button type="button" class="btnadd" onclick="toggleAddForm('newTsWrap-${as.id}','newTsName-${as.id}')">+ Teilschritt hinzufügen</button>
+        <button type="button" class="btnadd" onclick="openAddTsModal('${as.id}')">+ Teilschritt hinzufügen</button>
       </div>
     </div>`).join('');
 
@@ -670,14 +702,7 @@ function renderTeilschritt(asId, ts, nummer){
       </div>
       <div class="tsbody ${ts.ausgeblendet?'is-hidden':''}">
         ${(ts.auswahlfeld||[]).map(af => renderAuswahlfeld(ts.id, af)).join('')}
-        <div class="row" id="newAfWrap-${ts.id}" style="display:none;margin-top:4px;align-items:center;">
-          <div class="fld"><input placeholder="Name" id="newAfName-${ts.id}"></div>
-          <label style="font-size:11.5px;color:var(--muted);display:flex;align-items:center;gap:5px;white-space:nowrap;">
-            <input type="checkbox" id="newAfMulti-${ts.id}"> Mehrfachauswahl erlauben
-          </label>
-          <button class="btn" onclick="addAuswahlfeld('${ts.id}')">Hinzufügen</button>
-        </div>
-        <button type="button" class="btnadd" onclick="toggleAddForm('newAfWrap-${ts.id}','newAfName-${ts.id}')">+ Auswahlfeld hinzufügen</button>
+        <button type="button" class="btnadd" onclick="openAddAfModal('${ts.id}')">+ Auswahlfeld hinzufügen</button>
       </div>
     </div>`;
 }
@@ -704,19 +729,8 @@ function renderAuswahlfeld(tsId, af){
         </div>
       </div>
       ${activeOpt ? renderOption(af.id, activeOpt) : '<div class="hint">Noch keine Option vorhanden.</div>'}
-      <div class="row" id="newOptWrap-${af.id}" style="display:none;margin-top:8px;">
-        <div class="fld"><input placeholder="Name" id="newOptName-${af.id}"></div>
-        <button class="btn" onclick="addOption('${af.id}')">Hinzufügen</button>
-      </div>
-      <button type="button" class="btnadd" onclick="toggleAddForm('newOptWrap-${af.id}','newOptName-${af.id}')">+ Option hinzufügen</button>
+      <button type="button" class="btnadd" onclick="openAddOptModal('${af.id}')">+ Option hinzufügen</button>
     </div>`;
-}
-
-function toggleAddForm(wrapId, focusId){
-  const wrap = document.getElementById(wrapId);
-  const showing = wrap.style.display !== 'none';
-  wrap.style.display = showing ? 'none' : 'flex';
-  if(!showing) document.getElementById(focusId).focus();
 }
 
 function toggleOptMenu(optId){
@@ -745,7 +759,7 @@ function renderOption(afId, opt){
             </tr>`).join('')}
         </tbody>
       </table>
-      <button class="btnlink" style="margin-top:6px;" onclick="toggleRzForm('${opt.id}')">+ Ressourcenzeile hinzufügen</button>
+      <button class="btnlink" style="margin-top:6px;" onclick="toggleRzForm('${opt.id}')">+ Artikel hinzufügen</button>
       <div id="rzform-${opt.id}" style="display:none;"></div>
     </div>`;
 }
@@ -868,13 +882,11 @@ async function deleteArbeitsschritt(id, name){
   await loadArbeitsschritte();
 }
 
-async function addTeilschritt(asId){
-  const input = $(`newTsName-${asId}`);
-  const name = input.value.trim();
-  if(!name) return;
+async function addTeilschritt(asId, name){
   const { error } = await sb.from('teilschritt').insert({ arbeitsschritt_id: asId, name, reihenfolge: 1 });
-  if(error){ showToast(friendlyError(error), true); return; }
+  if(error){ showToast(friendlyError(error), true); return false; }
   await loadArbeitsschritte();
+  return true;
 }
 async function deleteTeilschritt(id){
   if(!(await confirmDialog('Teilschritt wirklich loeschen?'))) return;
@@ -883,14 +895,11 @@ async function deleteTeilschritt(id){
   await loadArbeitsschritte();
 }
 
-async function addAuswahlfeld(tsId){
-  const input = $(`newAfName-${tsId}`);
-  const name = input.value.trim();
-  if(!name) return;
-  const mehrfachauswahl = $(`newAfMulti-${tsId}`).checked;
+async function addAuswahlfeld(tsId, name, mehrfachauswahl){
   const { error } = await sb.from('auswahlfeld').insert({ teilschritt_id: tsId, name, mehrfachauswahl, reihenfolge: 1 });
-  if(error){ showToast(friendlyError(error), true); return; }
+  if(error){ showToast(friendlyError(error), true); return false; }
   await loadArbeitsschritte();
+  return true;
 }
 async function deleteAuswahlfeld(id){
   if(!(await confirmDialog('Auswahlfeld wirklich loeschen?'))) return;
@@ -899,13 +908,11 @@ async function deleteAuswahlfeld(id){
   await loadArbeitsschritte();
 }
 
-async function addOption(afId){
-  const input = $(`newOptName-${afId}`);
-  const name = input.value.trim();
-  if(!name) return;
+async function addOption(afId, name){
   const { error } = await sb.from('auswahloption').insert({ auswahlfeld_id: afId, name, reihenfolge: 1 });
-  if(error){ showToast(friendlyError(error), true); return; }
+  if(error){ showToast(friendlyError(error), true); return false; }
   await loadArbeitsschritte();
+  return true;
 }
 async function deleteOption(id){
   if(!(await confirmDialog('Option wirklich loeschen?'))) return;
@@ -913,6 +920,54 @@ async function deleteOption(id){
   if(error){ showToast(friendlyError(error), true); return; }
   await loadArbeitsschritte();
 }
+
+// ---------------------------------------------------------------------------
+// Modale fuer "Neuer Teilschritt" / "Neues Auswahlfeld" / "Neue Option"
+// ---------------------------------------------------------------------------
+let addTsContext = null, addAfContext = null, addOptContext = null;
+
+function openAddTsModal(asId){
+  addTsContext = asId;
+  $('addTsInput').value = '';
+  $('addTsOverlay').classList.add('show');
+  $('addTsInput').focus();
+}
+$('addTsCancel').addEventListener('click', () => $('addTsOverlay').classList.remove('show'));
+$('addTsConfirm').addEventListener('click', async () => {
+  const name = $('addTsInput').value.trim();
+  if(!name) return;
+  if(await addTeilschritt(addTsContext, name)) $('addTsOverlay').classList.remove('show');
+});
+$('addTsInput').addEventListener('keydown', e => { if(e.key === 'Enter') $('addTsConfirm').click(); });
+
+function openAddAfModal(tsId){
+  addAfContext = tsId;
+  $('addAfInput').value = '';
+  $('addAfMultiInput').checked = false;
+  $('addAfOverlay').classList.add('show');
+  $('addAfInput').focus();
+}
+$('addAfCancel').addEventListener('click', () => $('addAfOverlay').classList.remove('show'));
+$('addAfConfirm').addEventListener('click', async () => {
+  const name = $('addAfInput').value.trim();
+  if(!name) return;
+  if(await addAuswahlfeld(addAfContext, name, $('addAfMultiInput').checked)) $('addAfOverlay').classList.remove('show');
+});
+$('addAfInput').addEventListener('keydown', e => { if(e.key === 'Enter') $('addAfConfirm').click(); });
+
+function openAddOptModal(afId){
+  addOptContext = afId;
+  $('addOptInput').value = '';
+  $('addOptOverlay').classList.add('show');
+  $('addOptInput').focus();
+}
+$('addOptCancel').addEventListener('click', () => $('addOptOverlay').classList.remove('show'));
+$('addOptConfirm').addEventListener('click', async () => {
+  const name = $('addOptInput').value.trim();
+  if(!name) return;
+  if(await addOption(addOptContext, name)) $('addOptOverlay').classList.remove('show');
+});
+$('addOptInput').addEventListener('keydown', e => { if(e.key === 'Enter') $('addOptConfirm').click(); });
 
 function artikelOptionsHtml(kategorie){
   const passend = ARTIKEL.filter(a => a.kategorie === kategorie);
