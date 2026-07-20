@@ -102,6 +102,11 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
 .subhead{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;font-weight:700;
   margin:12px 0 6px;}
 
+.zonecard{border:1px solid var(--line);border-radius:7px;padding:8px 10px;margin-bottom:8px;}
+.zonecard-head{display:flex;align-items:center;gap:10px;cursor:pointer;}
+.zonecard-head span:first-child{flex:1;font-size:12.5px;}
+.zonecard-body{margin-top:8px;}
+
 .ovl{position:fixed;inset:0;background:rgba(35,43,53,.45);display:none;align-items:center;justify-content:center;z-index:60;}
 .ovl.show{display:flex;}
 .ovlbox{background:#fff;border-radius:12px;max-width:400px;width:100%;padding:18px 20px;box-shadow:0 12px 40px rgba(0,0,0,.25);}
@@ -238,6 +243,7 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
       <a data-abschnitt="offertentyp" class="on">Offertentyp-Verwaltung</a>
       <a data-abschnitt="formelbibliothek">Formel-Bibliothek</a>
       <a data-abschnitt="datenabgleich">Datenabgleich</a>
+      <a data-abschnitt="preisfindung">Preisfindung</a>
       <a data-abschnitt="teilflaechenlogik">Teilflächenlogik</a>
       <a data-abschnitt="benutzer">Benutzerverwaltung</a>
     </div>
@@ -331,6 +337,31 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
         </div>
       </div>
 
+      <!-- ================= Preisfindung ================= -->
+      <div id="abschnitt-preisfindung" class="hidden">
+        <div class="card">
+          <div class="cardlabel">Staffelmengen</div>
+          <div class="hint">Mehrere Artikel zu einer Menge-Staffel gruppieren (z.B. Betonpumpe: 0–5m³ → Artikel A, 5–10m³ → Artikel B). Wird in Tool B als Alternative zu einem festen Artikel wählbar sein.</div>
+          <div id="staffelgruppenListe"></div>
+          <div class="row" style="margin-top:10px;">
+            <div class="fld"><label>Neue Staffelgruppe</label><input id="newStaffelgruppeName" placeholder="z.B. Betonpumpe"></div>
+          </div>
+          <button class="btn" id="addStaffelgruppeBtn">+ Staffelgruppe hinzufügen</button>
+          <div class="status" id="staffelgruppeStatus"></div>
+        </div>
+
+        <div class="card">
+          <div class="cardlabel">PLZ-Zonen</div>
+          <div class="hint">Getrennte Zonengruppen z.B. für Kies-Transport/Beton-Transport - jede Zone hat einen eigenen Artikel und eine Liste zugehöriger PLZ.</div>
+          <div id="zonengruppenListe"></div>
+          <div class="row" style="margin-top:10px;">
+            <div class="fld"><label>Neue Zonengruppe</label><input id="newZonengruppeName" placeholder="z.B. Kies-Transport"></div>
+          </div>
+          <button class="btn" id="addZonengruppeBtn">+ Zonengruppe hinzufügen</button>
+          <div class="status" id="zonengruppeStatus"></div>
+        </div>
+      </div>
+
       <!-- ================= Teilflächenlogik ================= -->
       <div id="abschnitt-teilflaechenlogik" class="hidden">
         <div class="card">
@@ -410,11 +441,12 @@ function naechsteReihenfolge(liste){
 // ---------------------------------------------------------------------------
 function zeigeAbschnitt(name){
   document.querySelectorAll('#settingsnav a').forEach(a => a.classList.toggle('on', a.dataset.abschnitt === name));
-  ['offertentyp','formelbibliothek','datenabgleich','teilflaechenlogik','benutzer'].forEach(n => {
+  ['offertentyp','formelbibliothek','datenabgleich','preisfindung','teilflaechenlogik','benutzer'].forEach(n => {
     $(`abschnitt-${n}`).classList.toggle('hidden', n !== name);
   });
   if(name === 'offertentyp') loadOffertentypen();
   if(name === 'datenabgleich'){ loadWechselkurse(); loadDatenabgleich(); loadArtikelgruppen(); }
+  if(name === 'preisfindung'){ loadStaffelgruppen(); loadZonengruppen(); }
   if(name === 'teilflaechenlogik') renderTeilflaechenlogik();
   if(name === 'benutzer') loadBenutzer();
 }
@@ -601,6 +633,239 @@ function waehleArtikelPicker(id){
 }
 $('artikelPickerSearch').addEventListener('input', () => renderArtikelPickerList());
 $('artikelPickerCancel').addEventListener('click', () => $('artikelPickerOvl').classList.remove('show'));
+
+function artikelBezeichnung(id){
+  const a = ARTIKEL.find(x => x.id === id);
+  return a ? `${a.bezeichnung}${a.artikelnummer_knecht ? ' · ' + a.artikelnummer_knecht : ''}` : '(unbekannt)';
+}
+
+// ---------------------------------------------------------------------------
+// Preisfindung: Staffelmengen (mehrere Artikel zu einer Menge-Staffel
+// gruppieren, z.B. Betonpumpe-Pauschalpreise nach m3-Bereich).
+// ---------------------------------------------------------------------------
+let STAFFELGRUPPEN = [];
+let STAFFELSTUFEN = [];
+
+async function loadStaffelgruppen(){
+  const { data: gruppen, error } = await sb.from('staffelgruppe').select('id,name').order('name');
+  if(error){ console.error(error); return; }
+  STAFFELGRUPPEN = gruppen;
+  const { data: stufen, error: stufenErr } = await sb.from('staffelstufe')
+    .select('id,staffelgruppe_id,menge_von,menge_bis,artikel_id,reihenfolge').order('reihenfolge');
+  if(stufenErr){ console.error(stufenErr); return; }
+  STAFFELSTUFEN = stufen;
+  renderStaffelgruppen();
+}
+
+function renderStaffelgruppen(){
+  $('staffelgruppenListe').innerHTML = STAFFELGRUPPEN.map(sg => {
+    const stufen = STAFFELSTUFEN.filter(s => s.staffelgruppe_id === sg.id).sort((a,b) => a.menge_von - b.menge_von);
+    return `
+    <div class="lieferantcard" data-staffelgruppe="${sg.id}">
+      <div class="head">
+        <b>${sg.name}</b>
+        <button class="icobtn danger" style="margin-left:auto;" onclick="deleteStaffelgruppe('${sg.id}','${sg.name.replace(/'/g,"\\'")}')" title="Staffelgruppe löschen">🗑</button>
+      </div>
+      <table>
+        <thead><tr><th>Von</th><th>Bis</th><th>Artikel</th><th></th></tr></thead>
+        <tbody>
+          ${stufen.map(s => `
+            <tr>
+              <td>${fmtNum(s.menge_von)}</td>
+              <td>${s.menge_bis != null ? fmtNum(s.menge_bis) : '∞'}</td>
+              <td>${artikelBezeichnung(s.artikel_id)}</td>
+              <td><button class="icobtn danger" onclick="deleteStaffelstufe('${s.id}')">🗑</button></td>
+            </tr>`).join('') || '<tr><td colspan="4" class="hint">Noch keine Stufen.</td></tr>'}
+        </tbody>
+      </table>
+      <div class="row" style="align-items:end;">
+        <div class="fld" style="max-width:90px;"><label>Von</label><input class="sfVon" type="number" step="0.01"></div>
+        <div class="fld" style="max-width:120px;"><label>Bis</label><input class="sfBis" type="number" step="0.01" placeholder="kein Limit"></div>
+        <div class="fld"><label>Artikel</label><button type="button" class="btn sfArtikelBtn" style="width:100%;text-align:left;background:#fff;color:var(--ink);border:1px solid var(--line);">Artikel wählen…</button></div>
+        <button class="btn sfAddBtn">+ Stufe</button>
+      </div>
+      <div class="status sfStatus"></div>
+    </div>`;
+  }).join('') || '<div class="hint">Noch keine Staffelgruppen.</div>';
+
+  document.querySelectorAll('.lieferantcard[data-staffelgruppe]').forEach(card => {
+    const sgId = card.dataset.staffelgruppe;
+    let gewaehlterArtikel = null;
+    card.querySelector('.sfArtikelBtn').addEventListener('click', () => {
+      openArtikelPicker(a => {
+        gewaehlterArtikel = a;
+        card.querySelector('.sfArtikelBtn').textContent = a.bezeichnung;
+      });
+    });
+    card.querySelector('.sfAddBtn').addEventListener('click', async () => {
+      const von = parseFloat(card.querySelector('.sfVon').value);
+      const bisRaw = card.querySelector('.sfBis').value.trim();
+      const statusEl = card.querySelector('.sfStatus');
+      if(isNaN(von) || !gewaehlterArtikel){
+        statusEl.textContent = 'Bitte Von-Menge und Artikel angeben.'; statusEl.className = 'status err'; return;
+      }
+      const { error } = await sb.from('staffelstufe').insert({
+        staffelgruppe_id: sgId, menge_von: von, menge_bis: bisRaw === '' ? null : parseFloat(bisRaw),
+        artikel_id: gewaehlterArtikel.id,
+        reihenfolge: naechsteReihenfolge(STAFFELSTUFEN.filter(s => s.staffelgruppe_id === sgId))
+      });
+      if(error){ statusEl.textContent = friendlyError(error); statusEl.className = 'status err'; return; }
+      showToast('Stufe hinzugefügt.');
+      await loadStaffelgruppen();
+    });
+  });
+}
+
+async function deleteStaffelgruppe(id, name){
+  if(!(await confirmDialog(`Staffelgruppe "${name}" wirklich löschen? Alle Stufen werden mitgelöscht.`))) return;
+  const { error } = await sb.from('staffelgruppe').delete().eq('id', id);
+  if(error){ showToast(friendlyError(error), true); return; }
+  await loadStaffelgruppen();
+}
+async function deleteStaffelstufe(id){
+  if(!(await confirmDialog('Stufe wirklich löschen?'))) return;
+  const { error } = await sb.from('staffelstufe').delete().eq('id', id);
+  if(error){ showToast(friendlyError(error), true); return; }
+  await loadStaffelgruppen();
+}
+$('addStaffelgruppeBtn').addEventListener('click', async () => {
+  const name = $('newStaffelgruppeName').value.trim();
+  if(!name) return;
+  const { error } = await sb.from('staffelgruppe').insert({ name });
+  if(error){ $('staffelgruppeStatus').textContent = friendlyError(error); $('staffelgruppeStatus').className = 'status err'; return; }
+  $('newStaffelgruppeName').value = '';
+  $('staffelgruppeStatus').textContent = 'Gespeichert.'; $('staffelgruppeStatus').className = 'status ok';
+  await loadStaffelgruppen();
+});
+
+// ---------------------------------------------------------------------------
+// Preisfindung: PLZ-Zonen (z.B. Kies-Transport/Beton-Transport als eigene
+// Zonengruppen, je 1..N Zonen mit Artikel + PLZ-Liste).
+// ---------------------------------------------------------------------------
+let ZONENGRUPPEN = [];
+let ZONEN = [];
+let ZONE_PLZ = [];
+let expandedZonen = new Set();
+
+async function loadZonengruppen(){
+  const { data: gruppen, error } = await sb.from('zonengruppe').select('id,name').order('name');
+  if(error){ console.error(error); return; }
+  ZONENGRUPPEN = gruppen;
+  const { data: zonen, error: zErr } = await sb.from('zone').select('id,zonengruppe_id,nummer,artikel_id,reihenfolge').order('reihenfolge');
+  if(zErr){ console.error(zErr); return; }
+  ZONEN = zonen;
+  const { data: plz, error: pErr } = await sb.from('zone_plz').select('id,zone_id,plz');
+  if(pErr){ console.error(pErr); return; }
+  ZONE_PLZ = plz;
+  renderZonengruppen();
+}
+
+function renderZonengruppen(){
+  $('zonengruppenListe').innerHTML = ZONENGRUPPEN.map(zg => {
+    const zonen = ZONEN.filter(z => z.zonengruppe_id === zg.id).sort((a,b) => a.nummer - b.nummer);
+    return `
+    <div class="lieferantcard" data-zonengruppe="${zg.id}">
+      <div class="head">
+        <b>${zg.name}</b>
+        <button class="icobtn danger" style="margin-left:auto;" onclick="deleteZonengruppe('${zg.id}','${zg.name.replace(/'/g,"\\'")}')" title="Zonengruppe löschen">🗑</button>
+      </div>
+      ${zonen.map(z => {
+        const plzListe = ZONE_PLZ.filter(p => p.zone_id === z.id).map(p => p.plz);
+        const offen = expandedZonen.has(z.id);
+        return `
+        <div class="zonecard" data-zone="${z.id}">
+          <div class="zonecard-head" onclick="toggleZone('${z.id}')">
+            <span><b>Zone ${z.nummer}</b> · ${artikelBezeichnung(z.artikel_id)}</span>
+            <span class="hint" style="margin:0;">${plzListe.length} PLZ</span>
+            <button class="icobtn danger" onclick="event.stopPropagation();deleteZone('${z.id}')" title="Zone löschen">🗑</button>
+          </div>
+          <div class="zonecard-body ${offen ? '' : 'hidden'}">
+            <div class="fld"><label>PLZ-Liste (Komma oder Zeilenumbruch getrennt)</label>
+              <textarea class="zonePlzText" rows="4">${plzListe.join(', ')}</textarea>
+            </div>
+            <button class="btn zonePlzSave">PLZ speichern</button>
+            <div class="status zonePlzStatus"></div>
+          </div>
+        </div>`;
+      }).join('') || '<div class="hint">Noch keine Zonen.</div>'}
+      <div class="row" style="align-items:end;margin-top:10px;">
+        <div class="fld" style="max-width:80px;"><label>Nummer</label><input class="zNummer" type="number" step="1"></div>
+        <div class="fld"><label>Artikel</label><button type="button" class="btn zArtikelBtn" style="width:100%;text-align:left;background:#fff;color:var(--ink);border:1px solid var(--line);">Artikel wählen…</button></div>
+        <button class="btn zAddBtn">+ Zone</button>
+      </div>
+      <div class="status zStatus"></div>
+    </div>`;
+  }).join('') || '<div class="hint">Noch keine Zonengruppen.</div>';
+
+  document.querySelectorAll('.lieferantcard[data-zonengruppe]').forEach(card => {
+    const zgId = card.dataset.zonengruppe;
+    let gewaehlterArtikel = null;
+    card.querySelector('.zArtikelBtn').addEventListener('click', () => {
+      openArtikelPicker(a => { gewaehlterArtikel = a; card.querySelector('.zArtikelBtn').textContent = a.bezeichnung; });
+    });
+    card.querySelector('.zAddBtn').addEventListener('click', async () => {
+      const nummer = parseInt(card.querySelector('.zNummer').value, 10);
+      const statusEl = card.querySelector('.zStatus');
+      if(isNaN(nummer) || !gewaehlterArtikel){
+        statusEl.textContent = 'Bitte Nummer und Artikel angeben.'; statusEl.className = 'status err'; return;
+      }
+      const { error } = await sb.from('zone').insert({
+        zonengruppe_id: zgId, nummer, artikel_id: gewaehlterArtikel.id,
+        reihenfolge: naechsteReihenfolge(ZONEN.filter(z => z.zonengruppe_id === zgId))
+      });
+      if(error){ statusEl.textContent = friendlyError(error); statusEl.className = 'status err'; return; }
+      showToast('Zone hinzugefügt.');
+      await loadZonengruppen();
+    });
+  });
+
+  document.querySelectorAll('.zonecard').forEach(zc => {
+    const zoneId = zc.dataset.zone;
+    const saveBtn = zc.querySelector('.zonePlzSave');
+    if(!saveBtn) return;
+    saveBtn.addEventListener('click', async () => {
+      const raw = zc.querySelector('.zonePlzText').value;
+      const statusEl = zc.querySelector('.zonePlzStatus');
+      const plzListe = [...new Set(raw.split(/[,\n]/).map(s => s.trim()).filter(Boolean))];
+      const { error: delErr } = await sb.from('zone_plz').delete().eq('zone_id', zoneId);
+      if(delErr){ statusEl.textContent = friendlyError(delErr); statusEl.className = 'status err'; return; }
+      if(plzListe.length){
+        const { error: insErr } = await sb.from('zone_plz').insert(plzListe.map(plz => ({ zone_id: zoneId, plz })));
+        if(insErr){ statusEl.textContent = friendlyError(insErr); statusEl.className = 'status err'; return; }
+      }
+      expandedZonen.add(zoneId);
+      showToast('PLZ-Liste gespeichert.');
+      await loadZonengruppen();
+    });
+  });
+}
+
+function toggleZone(id){
+  if(expandedZonen.has(id)) expandedZonen.delete(id); else expandedZonen.add(id);
+  renderZonengruppen();
+}
+
+async function deleteZonengruppe(id, name){
+  if(!(await confirmDialog(`Zonengruppe "${name}" wirklich löschen? Alle Zonen und PLZ werden mitgelöscht.`))) return;
+  const { error } = await sb.from('zonengruppe').delete().eq('id', id);
+  if(error){ showToast(friendlyError(error), true); return; }
+  await loadZonengruppen();
+}
+async function deleteZone(id){
+  if(!(await confirmDialog('Zone wirklich löschen?'))) return;
+  const { error } = await sb.from('zone').delete().eq('id', id);
+  if(error){ showToast(friendlyError(error), true); return; }
+  await loadZonengruppen();
+}
+$('addZonengruppeBtn').addEventListener('click', async () => {
+  const name = $('newZonengruppeName').value.trim();
+  if(!name) return;
+  const { error } = await sb.from('zonengruppe').insert({ name });
+  if(error){ $('zonengruppeStatus').textContent = friendlyError(error); $('zonengruppeStatus').className = 'status err'; return; }
+  $('newZonengruppeName').value = '';
+  $('zonengruppeStatus').textContent = 'Gespeichert.'; $('zonengruppeStatus').className = 'status ok';
+  await loadZonengruppen();
+});
 
 // ---------------------------------------------------------------------------
 // Datenabgleich: Wechselkurse
