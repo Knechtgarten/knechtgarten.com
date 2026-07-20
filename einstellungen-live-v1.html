@@ -60,6 +60,9 @@ th .arrow{display:inline-flex;flex-direction:column;margin-left:4px;vertical-ali
 th .arrow span{font-size:7px;color:var(--line);}
 th .arrow span.active{color:var(--primary);}
 td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
+.sgtable td input{width:100%;border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:inherit;font-size:12.5px;color:var(--ink);}
+.sgtable td input:focus{outline:none;border-color:var(--primary);}
+.sgtable td .btn{width:100%;text-align:left;background:#fff;color:var(--ink);border:1px solid var(--line);}
 .badge{font-size:10px;font-weight:700;text-transform:uppercase;background:var(--soft);color:var(--primary);
   border-radius:4px;padding:2px 6px;}
 .badge.aus{background:#FBEFEC;color:var(--danger);}
@@ -205,19 +208,13 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
 </div>
 
 <div class="ovl" id="sgEditOvl">
-  <div class="ovlbox">
+  <div class="ovlbox xwide">
     <div class="ovlmsg" id="sgEditTitle"></div>
-    <div class="hint" style="margin-bottom:12px;">Die berechnete Menge (z.B. m³) wird mit den Von/Bis-Bereichen unten verglichen - der erste passende Bereich bestimmt, welcher Artikel (und damit welcher Pauschalpreis) in der Offerte verrechnet wird.</div>
-    <table>
-      <thead><tr><th>Von</th><th>Bis</th><th>Artikel</th><th></th></tr></thead>
+    <div class="hint" style="margin-bottom:12px;">Die berechnete Menge (z.B. m³) wird mit den Von/Bis-Bereichen unten verglichen - der erste passende Bereich bestimmt, welcher Artikel (und damit welcher Pauschalpreis) in der Offerte verrechnet wird. Die letzte Zeile ist immer leer zum Erfassen - sobald Von und Artikel ausgefüllt sind, wird automatisch gespeichert und eine neue leere Zeile erscheint.</div>
+    <table class="sgtable">
+      <thead><tr><th style="width:90px;">Von</th><th style="width:110px;">Bis</th><th>Artikel</th><th style="width:40px;"></th></tr></thead>
       <tbody id="sgEditStufenBody"></tbody>
     </table>
-    <div class="row" style="align-items:end;margin-top:10px;">
-      <div class="fld" style="max-width:90px;"><label>Von</label><input id="sgEditVon" type="number" step="0.01"></div>
-      <div class="fld" style="max-width:120px;"><label>Bis</label><input id="sgEditBis" type="number" step="0.01" placeholder="kein Limit"></div>
-      <div class="fld"><label>Artikel</label><button type="button" class="btn" id="sgEditArtikelBtn" style="width:100%;text-align:left;background:#fff;color:var(--ink);border:1px solid var(--line);">Artikel wählen…</button></div>
-      <button class="btn" id="sgEditAddBtn">+ Stufe</button>
-    </div>
     <div class="status" id="sgEditStatus"></div>
     <div class="ovlbtns"><button class="btnlink" id="sgEditClose">Schliessen</button></div>
   </div>
@@ -746,11 +743,15 @@ function renderStaffelgruppen(){
 let sgEditId = null;
 let sgEditGewaehlterArtikel = null;
 
+function artikelDetailText(id){
+  const a = ARTIKEL.find(x => x.id === id);
+  if(!a) return '(unbekannt)';
+  return `${a.artikelnummer_knecht ? a.artikelnummer_knecht + ' · ' : ''}${a.bezeichnung} · ${a.einheit || '–'} · CHF ${fmtNum(a.vp_knecht)}`;
+}
+
 function openStaffelgruppeEdit(id){
   sgEditId = id;
   sgEditGewaehlterArtikel = null;
-  $('sgEditArtikelBtn').textContent = 'Artikel wählen…';
-  $('sgEditVon').value = ''; $('sgEditBis').value = '';
   $('sgEditStatus').textContent = ''; $('sgEditStatus').className = 'status';
   renderSgEditModal();
   $('sgEditOvl').classList.add('show');
@@ -764,31 +765,40 @@ function renderSgEditModal(){
     <tr>
       <td>${fmtNum(s.menge_von)}</td>
       <td>${s.menge_bis != null ? fmtNum(s.menge_bis) : '∞'}</td>
-      <td>${artikelBezeichnung(s.artikel_id)}</td>
-      <td><button class="icobtn danger" onclick="deleteStaffelstufe('${s.id}')">🗑</button></td>
-    </tr>`).join('') || '<tr><td colspan="4" class="hint">Noch keine Stufen.</td></tr>';
+      <td>${artikelDetailText(s.artikel_id)}</td>
+      <td><button class="icobtn danger" onclick="deleteStaffelstufe('${s.id}')" title="Stufe löschen">🗑</button></td>
+    </tr>`).join('') + `
+    <tr>
+      <td><input type="number" step="0.01" id="sgEditVon" placeholder="Von"></td>
+      <td><input type="number" step="0.01" id="sgEditBis" placeholder="kein Limit"></td>
+      <td><button type="button" class="btn" id="sgEditArtikelBtn">${sgEditGewaehlterArtikel ? artikelDetailText(sgEditGewaehlterArtikel.id) : 'Artikel wählen…'}</button></td>
+      <td><button class="icobtn" id="sgEditClearBtn" title="Zeile zurücksetzen">🗑</button></td>
+    </tr>`;
+  $('sgEditVon').addEventListener('change', versucheAutoSaveStufe);
+  $('sgEditBis').addEventListener('change', versucheAutoSaveStufe);
+  $('sgEditArtikelBtn').addEventListener('click', () => {
+    openArtikelPicker(a => { sgEditGewaehlterArtikel = a; renderSgEditModal(); versucheAutoSaveStufe(); });
+  });
+  $('sgEditClearBtn').addEventListener('click', () => {
+    sgEditGewaehlterArtikel = null;
+    renderSgEditModal();
+  });
 }
-$('sgEditArtikelBtn').addEventListener('click', () => {
-  openArtikelPicker(a => { sgEditGewaehlterArtikel = a; $('sgEditArtikelBtn').textContent = a.bezeichnung; });
-});
-$('sgEditAddBtn').addEventListener('click', async () => {
+async function versucheAutoSaveStufe(){
   const von = parseFloat($('sgEditVon').value);
+  if(isNaN(von) || !sgEditGewaehlterArtikel) return;
   const bisRaw = $('sgEditBis').value.trim();
-  if(isNaN(von) || !sgEditGewaehlterArtikel){
-    $('sgEditStatus').textContent = 'Bitte Von-Menge und Artikel angeben.'; $('sgEditStatus').className = 'status err'; return;
-  }
   const { error } = await sb.from('staffelstufe').insert({
     staffelgruppe_id: sgEditId, menge_von: von, menge_bis: bisRaw === '' ? null : parseFloat(bisRaw),
     artikel_id: sgEditGewaehlterArtikel.id,
     reihenfolge: naechsteReihenfolge(STAFFELSTUFEN.filter(s => s.staffelgruppe_id === sgEditId))
   });
   if(error){ $('sgEditStatus').textContent = friendlyError(error); $('sgEditStatus').className = 'status err'; return; }
-  $('sgEditVon').value = ''; $('sgEditBis').value = ''; sgEditGewaehlterArtikel = null;
-  $('sgEditArtikelBtn').textContent = 'Artikel wählen…';
-  $('sgEditStatus').textContent = 'Stufe hinzugefügt.'; $('sgEditStatus').className = 'status ok';
+  sgEditGewaehlterArtikel = null;
+  $('sgEditStatus').textContent = 'Stufe gespeichert.'; $('sgEditStatus').className = 'status ok';
   await loadStaffelgruppen();
   renderSgEditModal();
-});
+}
 $('sgEditClose').addEventListener('click', () => $('sgEditOvl').classList.remove('show'));
 
 async function deleteStaffelgruppe(id, name){
@@ -874,7 +884,7 @@ function renderZgEditModal(){
     return `
     <div class="zonecard" data-zone="${z.id}">
       <div class="zonecard-head" style="cursor:default;">
-        <span><b>Zone ${z.nummer}</b> · ${artikelBezeichnung(z.artikel_id)}</span>
+        <span><b>Zone ${z.nummer}</b> · ${artikelDetailText(z.artikel_id)}</span>
         <button class="icobtn danger" onclick="deleteZone('${z.id}')" title="Zone löschen">🗑</button>
       </div>
       <div class="fld" style="margin-top:8px;"><label>PLZ-Liste (Komma oder Zeilenumbruch getrennt)</label>
@@ -904,7 +914,7 @@ function renderZgEditModal(){
   });
 }
 $('zgEditArtikelBtn').addEventListener('click', () => {
-  openArtikelPicker(a => { zgEditGewaehlterArtikel = a; $('zgEditArtikelBtn').textContent = a.bezeichnung; });
+  openArtikelPicker(a => { zgEditGewaehlterArtikel = a; $('zgEditArtikelBtn').textContent = artikelDetailText(a.id); });
 });
 $('zgEditAddBtn').addEventListener('click', async () => {
   const nummer = parseInt($('zgEditNummer').value, 10);
