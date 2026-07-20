@@ -71,6 +71,9 @@ td{padding:6px 6px;border-bottom:1px solid var(--soft);vertical-align:top;}
 .asblock.collapsed .aschev{transform:rotate(-90deg);}
 .asblock.collapsed .asbody{display:none;}
 .asbody{padding:14px;}
+.draghandle{cursor:grab;color:var(--muted);font-size:13px;flex-shrink:0;line-height:1;}
+.draghandle:active{cursor:grabbing;}
+.tsblock.dragging,.asblock.dragging{opacity:.4;}
 
 /* Teilschritt-Karte - weisses Kopfband mit nummeriertem Kreis */
 .tsblock{border:1px solid var(--line);border-radius:9px;margin-bottom:12px;overflow:hidden;}
@@ -88,6 +91,19 @@ td{padding:6px 6px;border-bottom:1px solid var(--soft);vertical-align:top;}
 .ftag{font-size:9.5px;color:var(--muted);background:var(--soft);border-radius:4px;padding:1px 6px;}
 .opthead{font-size:11.5px;font-weight:600;color:var(--ink);background:var(--soft);border-radius:6px;padding:4px 8px;margin:5px 0 3px;
   display:flex;align-items:center;gap:8px;}
+
+.notizbtn{width:20px;height:20px;border-radius:50%;border:1px solid var(--line);background:#fff;
+  color:var(--primary-l);font-size:11px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:0;}
+.notizbtn:hover{background:var(--soft);color:var(--primary);border-color:var(--primary);}
+.notizbtn.has{background:var(--accent-lime);color:#5B6100;border-color:var(--accent-lime);}
+.notizbox{display:none;margin:0 0 12px;}
+.notizbox.show{display:block;}
+.notizbox textarea{width:100%;min-height:44px;font:inherit;font-size:12.5px;padding:8px 10px;
+  border:1px solid var(--line);border-radius:7px;resize:vertical;color:var(--ink);}
+.notizbox textarea:focus{outline:none;border-color:var(--primary);}
+.ashead.is-hidden .asnametitle,.tshead.is-hidden .nm{color:var(--muted);}
+.tshead.is-hidden .num{background:var(--bg);color:var(--muted);}
+.asbody.is-hidden,.tsbody.is-hidden{opacity:.45;}
 
 .opttabsrow{display:flex;align-items:center;gap:14px;margin-bottom:14px;border-bottom:1px solid var(--line);flex-wrap:wrap;}
 .opttabs{display:flex;gap:16px;flex-wrap:wrap;flex:1;}
@@ -113,6 +129,20 @@ td{padding:6px 6px;border-bottom:1px solid var(--soft);vertical-align:top;}
 .status.err{color:var(--danger);}
 .status.ok{color:#3d7a3d;}
 .hint{font-size:10.5px;color:var(--muted);margin-bottom:10px;}
+
+.overlay{position:fixed;inset:0;background:rgba(35,43,53,.45);display:none;align-items:flex-start;
+  justify-content:center;padding:40px 16px;z-index:55;overflow-y:auto;}
+.overlay.show{display:flex;}
+.modal{background:#fff;border-radius:12px;max-width:440px;width:100%;padding:22px 24px 20px;box-shadow:0 12px 40px rgba(0,0,0,.25);}
+.modal.wide{max-width:520px;}
+.modalhead{margin-bottom:16px;}
+.modalhead .sub{font-size:12.5px;font-weight:700;color:var(--ink);}
+.zugrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:18px;}
+.zugcell{border:1px solid var(--line);border-radius:8px;padding:6px 8px;text-align:center;}
+.zugcell .lvname{font-size:9.5px;color:var(--muted);margin-bottom:3px;}
+.zugcell input{width:100%;font:inherit;font-size:13px;text-align:center;padding:3px 4px;
+  border:1px solid var(--line);border-radius:6px;font-weight:700;color:var(--primary);}
+.modalbtns{display:flex;gap:8px;justify-content:flex-end;margin-top:20px;border-top:1px solid var(--line);padding-top:16px;}
 
 .ovl{position:fixed;inset:0;background:rgba(35,43,53,.45);display:none;align-items:center;justify-content:center;z-index:60;}
 .ovl.show{display:flex;}
@@ -152,6 +182,20 @@ td{padding:6px 6px;border-bottom:1px solid var(--soft);vertical-align:top;}
   </div>
 </div>
 <div class="toastwrap" id="toastwrap"></div>
+
+<div class="overlay" id="rzEditOverlay">
+  <div class="modal wide">
+    <div class="modalhead"><div class="sub" id="rzEditContext"></div></div>
+    <div id="rzEditBuilderWrap"></div>
+    <label style="font-size:11px;color:var(--muted);display:block;margin:14px 0 4px;">Zugänglichkeits-Faktor je Stufe (1.0 = kein Einfluss)</label>
+    <div class="zugrid" id="rzEditZugrid"></div>
+    <div class="modalbtns">
+      <button class="btnlink" id="rzEditCancel">Abbrechen</button>
+      <button class="btn" id="rzEditSave">Speichern</button>
+    </div>
+    <div class="status" id="rzEditStatus"></div>
+  </div>
+</div>
 
 <header class="app"><div class="wrap">
   <div class="brand"><h1>Offertentool 2027</h1><div class="sub">Knechtgarten · Admin</div></div>
@@ -516,11 +560,12 @@ function renderTerms(){
 
 async function loadArbeitsschritte(){
   const { data, error } = await sb.from('arbeitsschritt')
-    .select(`id, name, reihenfolge,
-      teilschritt ( id, name, beschreibung, reihenfolge,
+    .select(`id, name, reihenfolge, notiz, ausgeblendet,
+      teilschritt ( id, name, beschreibung, reihenfolge, ausgeblendet,
         auswahlfeld ( id, name, mehrfachauswahl, reihenfolge,
           auswahloption ( id, name, reihenfolge,
             ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck,
+              zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4,
               artikel_id, artikel(bezeichnung, einheit) ) ) ) )`)
     .eq('offertentyp_id', currentOffertentypId).order('reihenfolge');
   if(error){ console.error(error); return; }
@@ -533,30 +578,80 @@ const KAT_OPTIONS = ['personal','maschine','logistik','material'];
 function renderArbeitsschritte(){
   $('arbeitsschritteList').innerHTML = ARBEITSSCHRITTE.map(as => `
     <div class="asblock" data-as="${as.id}">
-      <div class="ashead" onclick="this.parentElement.classList.toggle('collapsed')">
+      <div class="ashead ${as.ausgeblendet?'is-hidden':''}" onclick="this.parentElement.classList.toggle('collapsed')">
+        <span class="draghandle" title="Verschieben" onclick="event.stopPropagation()">⠿</span>
         <span class="asnametitle">${as.name}</span>
+        <button class="notizbtn ${as.notiz?'has':''}" onclick="event.stopPropagation(); toggleNotizBox('${as.id}')" title="Interne Notiz">🗒</button>
+        <button class="icobtn" onclick="event.stopPropagation(); duplicateArbeitsschritt('${as.id}')" title="Arbeitsschritt duplizieren">⧉</button>
+        <button class="icobtn" onclick="event.stopPropagation(); toggleAusblenden('arbeitsschritt','${as.id}',${as.ausgeblendet})" title="${as.ausgeblendet?'Wieder einblenden':'Ausblenden'}">👁</button>
         <button class="icobtn" onclick="event.stopPropagation(); deleteArbeitsschritt('${as.id}','${as.name.replace(/'/g,"\\'")}')">🗑</button>
         <span class="aschev">▾</span>
       </div>
-      <div class="asbody">
-        ${(as.teilschritt||[]).map((ts,i) => renderTeilschritt(as.id, ts, i+1)).join('')}
+      <div class="asbody ${as.ausgeblendet?'is-hidden':''}">
+        <div class="notizbox" id="notizbox-${as.id}">
+          <textarea placeholder="Interne Notiz zu diesem Arbeitsschritt …" onblur="speichereNotiz('${as.id}', this.value)">${as.notiz || ''}</textarea>
+        </div>
+        <div class="tswrap" data-tswrap="${as.id}">
+          ${(as.teilschritt||[]).map((ts,i) => renderTeilschritt(as.id, ts, i+1)).join('')}
+        </div>
         <div class="row" style="margin-top:6px;">
           <div class="fld"><input placeholder="Neuer Teilschritt" id="newTsName-${as.id}"></div>
         </div>
         <button class="btnlink" onclick="addTeilschritt('${as.id}')">+ Teilschritt hinzufügen</button>
       </div>
     </div>`).join('');
+
+  setupDragReorder($('arbeitsschritteList'), '.asblock', ids => persistReihenfolge('arbeitsschritt', ids));
+  $('arbeitsschritteList').querySelectorAll('.tswrap').forEach(wrap => {
+    setupDragReorder(wrap, '.tsblock', ids => persistReihenfolge('teilschritt', ids));
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Drag&Drop-Umsortierung (Arbeitsschritte global, Teilschritte je innerhalb
+// ihres Arbeitsschritts)
+// ---------------------------------------------------------------------------
+function setupDragReorder(container, itemSelector, onReorder){
+  let dragEl = null;
+  container.querySelectorAll(itemSelector).forEach(el => {
+    el.setAttribute('draggable', 'true');
+    el.addEventListener('dragstart', () => { dragEl = el; el.classList.add('dragging'); });
+    el.addEventListener('dragend', () => { el.classList.remove('dragging'); dragEl = null; });
+    el.addEventListener('dragover', e => {
+      e.preventDefault();
+      if(!dragEl || dragEl === el) return;
+      const rect = el.getBoundingClientRect();
+      const after = (e.clientY - rect.top) / rect.height > 0.5;
+      el.parentNode.insertBefore(dragEl, after ? el.nextSibling : el);
+    });
+  });
+  container.addEventListener('drop', e => {
+    e.preventDefault();
+    if(!dragEl) return;
+    const ids = Array.from(container.querySelectorAll(itemSelector)).map(el => el.dataset.as || el.dataset.ts);
+    onReorder(ids);
+  });
+}
+
+async function persistReihenfolge(tabelle, ids){
+  for(let i = 0; i < ids.length; i++){
+    await sb.from(tabelle).update({ reihenfolge: i + 1 }).eq('id', ids[i]);
+  }
+  await loadArbeitsschritte();
 }
 
 function renderTeilschritt(asId, ts, nummer){
   return `
-    <div class="tsblock">
-      <div class="tshead" onclick="this.parentElement.classList.toggle('collapsed')">
+    <div class="tsblock" data-ts="${ts.id}">
+      <div class="tshead ${ts.ausgeblendet?'is-hidden':''}" onclick="this.parentElement.classList.toggle('collapsed')">
+        <span class="draghandle" title="Verschieben" onclick="event.stopPropagation()">⠿</span>
         <span class="num">${nummer}</span><span class="nm">${ts.name}</span>
+        <button class="icobtn" onclick="event.stopPropagation(); duplicateTeilschritt('${ts.id}')" title="Teilschritt duplizieren">⧉</button>
+        <button class="icobtn" onclick="event.stopPropagation(); toggleAusblenden('teilschritt','${ts.id}',${ts.ausgeblendet})" title="${ts.ausgeblendet?'Wieder einblenden':'Ausblenden'}">👁</button>
         <button class="icobtn" onclick="event.stopPropagation(); deleteTeilschritt('${ts.id}')">🗑</button>
         <span class="tschev">▾</span>
       </div>
-      <div class="tsbody">
+      <div class="tsbody ${ts.ausgeblendet?'is-hidden':''}">
         ${(ts.auswahlfeld||[]).map(af => renderAuswahlfeld(ts.id, af)).join('')}
         <div class="row" style="margin-top:4px;align-items:center;">
           <div class="fld"><input placeholder="Neues Auswahlfeld" id="newAfName-${ts.id}"></div>
@@ -600,14 +695,17 @@ function renderOption(afId, opt){
             <tr>
               <td><span class="pill ${rz.kategorie}">${rz.kategorie}</span></td>
               <td>${rz.bezeichnung_override || rz.artikel?.bezeichnung || '(unbenannt)'}</td>
-              <td>${ausdruckPreview(rz.menge_ausdruck)}</td>
+              <td>${ausdruckPreview(rz.menge_ausdruck)} <button class="icobtn" onclick="openRzEditModal('${rz.id}')" title="Formel anpassen">✎</button></td>
               <td><button class="icobtn" onclick="deleteRessourcenzeile('${rz.id}')">🗑</button></td>
             </tr>`).join('')}
         </tbody>
       </table>
       <div class="row" style="margin-top:6px;justify-content:space-between;align-items:center;">
         <button class="btnlink" onclick="toggleRzForm('${opt.id}')">+ Ressourcenzeile hinzufügen</button>
-        <button class="btnlink" style="color:var(--danger);" onclick="deleteOption('${opt.id}')">Option "${opt.name}" löschen</button>
+        <span style="display:flex;gap:14px;">
+          <button class="btnlink" onclick="duplicateOption('${opt.id}')">⧉ Option duplizieren</button>
+          <button class="btnlink" style="color:var(--danger);" onclick="deleteOption('${opt.id}')">Option "${opt.name}" löschen</button>
+        </span>
       </div>
       <div id="rzform-${opt.id}" style="display:none;"></div>
     </div>`;
@@ -865,6 +963,171 @@ async function deleteRessourcenzeile(id){
   const { error } = await sb.from('ressourcenzeile').delete().eq('id', id);
   if(error){ showToast(friendlyError(error), true); return; }
   await loadArbeitsschritte();
+}
+
+// ---------------------------------------------------------------------------
+// Notiz / Ausblenden / Duplizieren
+// ---------------------------------------------------------------------------
+function toggleNotizBox(asId){
+  $(`notizbox-${asId}`).classList.toggle('show');
+}
+
+async function speichereNotiz(asId, value){
+  const neu = value.trim() || null;
+  const { error } = await sb.from('arbeitsschritt').update({ notiz: neu }).eq('id', asId);
+  if(error){ showToast(friendlyError(error), true); return; }
+  const as = ARBEITSSCHRITTE.find(a => a.id === asId);
+  if(as) as.notiz = neu;
+  document.querySelector(`.asblock[data-as="${asId}"] .notizbtn`).classList.toggle('has', !!neu);
+}
+
+async function toggleAusblenden(tabelle, id, aktuell){
+  const { error } = await sb.from(tabelle).update({ ausgeblendet: !aktuell }).eq('id', id);
+  if(error){ showToast(friendlyError(error), true); return; }
+  await loadArbeitsschritte();
+}
+
+function naechsteReihenfolge(liste){
+  return Math.max(0, ...liste.map(x => x.reihenfolge || 0)) + 1;
+}
+
+async function duplicateTeilschrittInto(asId, ts, reihenfolge){
+  const { data: neuTs, error } = await sb.from('teilschritt')
+    .insert({ arbeitsschritt_id: asId, name: ts.name, beschreibung: ts.beschreibung, reihenfolge }).select().single();
+  if(error) throw error;
+  for(const af of (ts.auswahlfeld || [])){
+    const { data: neuAf, error: afErr } = await sb.from('auswahlfeld')
+      .insert({ teilschritt_id: neuTs.id, name: af.name, mehrfachauswahl: af.mehrfachauswahl, reihenfolge: af.reihenfolge }).select().single();
+    if(afErr) throw afErr;
+    for(const opt of (af.auswahloption || [])){
+      const { data: neuOpt, error: optErr } = await sb.from('auswahloption')
+        .insert({ auswahlfeld_id: neuAf.id, name: opt.name, reihenfolge: opt.reihenfolge }).select().single();
+      if(optErr) throw optErr;
+      for(const rz of (opt.ressourcenzeile || [])){
+        const { error: rzErr } = await sb.from('ressourcenzeile').insert({
+          option_id: neuOpt.id, kategorie: rz.kategorie, artikel_id: rz.artikel_id,
+          bezeichnung_override: rz.bezeichnung_override, preis_override: rz.preis_override, menge_ausdruck: rz.menge_ausdruck,
+          zugang_stufe1: rz.zugang_stufe1, zugang_stufe2: rz.zugang_stufe2, zugang_stufe3: rz.zugang_stufe3, zugang_stufe4: rz.zugang_stufe4
+        });
+        if(rzErr) throw rzErr;
+      }
+    }
+  }
+  return neuTs;
+}
+
+async function duplicateArbeitsschritt(asId){
+  const orig = ARBEITSSCHRITTE.find(a => a.id === asId);
+  if(!orig) return;
+  try{
+    const { data: neu, error } = await sb.from('arbeitsschritt').insert({
+      offertentyp_id: currentOffertentypId, name: orig.name + ' (Kopie)', notiz: orig.notiz,
+      reihenfolge: naechsteReihenfolge(ARBEITSSCHRITTE)
+    }).select().single();
+    if(error) throw error;
+    let i = 1;
+    for(const ts of (orig.teilschritt || [])){
+      await duplicateTeilschrittInto(neu.id, ts, i++);
+    }
+    showToast('Arbeitsschritt dupliziert.');
+    await loadArbeitsschritte();
+  }catch(e){ showToast(friendlyError(e), true); }
+}
+
+async function duplicateTeilschritt(tsId){
+  let asId = null, tsObj = null, geschwister = [];
+  for(const as of ARBEITSSCHRITTE){
+    const found = (as.teilschritt || []).find(t => t.id === tsId);
+    if(found){ asId = as.id; tsObj = found; geschwister = as.teilschritt; break; }
+  }
+  if(!tsObj) return;
+  try{
+    await duplicateTeilschrittInto(asId, { ...tsObj, name: tsObj.name + ' (Kopie)' }, naechsteReihenfolge(geschwister));
+    showToast('Teilschritt dupliziert.');
+    await loadArbeitsschritte();
+  }catch(e){ showToast(friendlyError(e), true); }
+}
+
+// ---------------------------------------------------------------------------
+// Modal: Menge-Formel + Zugaenglichkeits-Faktor einer bestehenden Ressourcenzeile bearbeiten
+// ---------------------------------------------------------------------------
+let rzEditBuilder = null;
+let rzEditCurrentId = null;
+
+function findRessourcenzeileKontext(rzId){
+  for(const as of ARBEITSSCHRITTE){
+    for(const ts of (as.teilschritt || [])){
+      for(const af of (ts.auswahlfeld || [])){
+        for(const opt of (af.auswahloption || [])){
+          const rz = (opt.ressourcenzeile || []).find(r => r.id === rzId);
+          if(rz) return { rz, optName: opt.name, tsName: ts.name, asName: as.name };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function openRzEditModal(rzId){
+  const ctx = findRessourcenzeileKontext(rzId);
+  if(!ctx) return;
+  rzEditCurrentId = rzId;
+  const bez = ctx.rz.bezeichnung_override || ctx.rz.artikel?.bezeichnung || '(unbenannt)';
+  $('rzEditContext').textContent = `${bez} · ${ctx.tsName} · ${ctx.asName} · ${ctx.optName}`;
+  $('rzEditBuilderWrap').innerHTML = '';
+  rzEditBuilder = createAusdruckBuilder($('rzEditBuilderWrap'), ctx.rz.menge_ausdruck);
+  $('rzEditZugrid').innerHTML = [1,2,3,4].map(n => `
+    <div class="zugcell">
+      <div class="lvname">Stufe ${n}</div>
+      <input type="number" step="0.01" class="zugval" data-n="${n}" value="${ctx.rz['zugang_stufe'+n] ?? 1}">
+    </div>`).join('');
+  $('rzEditStatus').textContent = '';
+  $('rzEditStatus').className = 'status';
+  $('rzEditOverlay').classList.add('show');
+}
+
+$('rzEditCancel').addEventListener('click', () => { $('rzEditOverlay').classList.remove('show'); });
+
+$('rzEditSave').addEventListener('click', async () => {
+  if(rzEditBuilder.tooComplex){ $('rzEditOverlay').classList.remove('show'); return; }
+  const node = rzEditBuilder.getNode();
+  if(!node){ $('rzEditStatus').textContent = 'Bitte eine gueltige Formel angeben.'; $('rzEditStatus').className='status err'; return; }
+  const zugWerte = {};
+  document.querySelectorAll('#rzEditZugrid .zugval').forEach(inp => { zugWerte['zugang_stufe'+inp.dataset.n] = parseFloat(inp.value) || 1; });
+  const { error } = await sb.from('ressourcenzeile').update({ menge_ausdruck: node, ...zugWerte }).eq('id', rzEditCurrentId);
+  if(error){ $('rzEditStatus').textContent = friendlyError(error); $('rzEditStatus').className = 'status err'; return; }
+  $('rzEditOverlay').classList.remove('show');
+  showToast('Formel gespeichert.');
+  await loadArbeitsschritte();
+});
+
+async function duplicateOption(optId){
+  let afId = null, optObj = null, geschwister = [];
+  for(const as of ARBEITSSCHRITTE){
+    for(const ts of (as.teilschritt || [])){
+      for(const af of (ts.auswahlfeld || [])){
+        const found = (af.auswahloption || []).find(o => o.id === optId);
+        if(found){ afId = af.id; optObj = found; geschwister = af.auswahloption; break; }
+      }
+    }
+  }
+  if(!optObj) return;
+  try{
+    const { data: neuOpt, error } = await sb.from('auswahloption')
+      .insert({ auswahlfeld_id: afId, name: optObj.name + ' (Kopie)', reihenfolge: naechsteReihenfolge(geschwister) }).select().single();
+    if(error) throw error;
+    for(const rz of (optObj.ressourcenzeile || [])){
+      const { error: rzErr } = await sb.from('ressourcenzeile').insert({
+        option_id: neuOpt.id, kategorie: rz.kategorie, artikel_id: rz.artikel_id,
+        bezeichnung_override: rz.bezeichnung_override, preis_override: rz.preis_override, menge_ausdruck: rz.menge_ausdruck,
+        zugang_stufe1: rz.zugang_stufe1, zugang_stufe2: rz.zugang_stufe2, zugang_stufe3: rz.zugang_stufe3, zugang_stufe4: rz.zugang_stufe4
+      });
+      if(rzErr) throw rzErr;
+    }
+    activeOptionByAf[afId] = neuOpt.id;
+    showToast('Option dupliziert.');
+    await loadArbeitsschritte();
+  }catch(e){ showToast(friendlyError(e), true); }
 }
 
 // ---------------------------------------------------------------------------
