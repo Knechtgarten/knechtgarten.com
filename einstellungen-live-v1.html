@@ -204,6 +204,38 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
   </div>
 </div>
 
+<div class="ovl" id="sgEditOvl">
+  <div class="ovlbox">
+    <div class="ovlmsg" id="sgEditTitle"></div>
+    <table>
+      <thead><tr><th>Von</th><th>Bis</th><th>Artikel</th><th></th></tr></thead>
+      <tbody id="sgEditStufenBody"></tbody>
+    </table>
+    <div class="row" style="align-items:end;margin-top:10px;">
+      <div class="fld" style="max-width:90px;"><label>Von</label><input id="sgEditVon" type="number" step="0.01"></div>
+      <div class="fld" style="max-width:120px;"><label>Bis</label><input id="sgEditBis" type="number" step="0.01" placeholder="kein Limit"></div>
+      <div class="fld"><label>Artikel</label><button type="button" class="btn" id="sgEditArtikelBtn" style="width:100%;text-align:left;background:#fff;color:var(--ink);border:1px solid var(--line);">Artikel wählen…</button></div>
+      <button class="btn" id="sgEditAddBtn">+ Stufe</button>
+    </div>
+    <div class="status" id="sgEditStatus"></div>
+    <div class="ovlbtns"><button class="btnlink" id="sgEditClose">Schliessen</button></div>
+  </div>
+</div>
+
+<div class="ovl" id="zgEditOvl">
+  <div class="ovlbox xwide">
+    <div class="ovlmsg" id="zgEditTitle"></div>
+    <div id="zgEditZonenList"></div>
+    <div class="row" style="align-items:end;margin-top:10px;">
+      <div class="fld" style="max-width:80px;"><label>Nummer</label><input id="zgEditNummer" type="number" step="1"></div>
+      <div class="fld"><label>Artikel</label><button type="button" class="btn" id="zgEditArtikelBtn" style="width:100%;text-align:left;background:#fff;color:var(--ink);border:1px solid var(--line);">Artikel wählen…</button></div>
+      <button class="btn" id="zgEditAddBtn">+ Zone</button>
+    </div>
+    <div class="status" id="zgEditStatus"></div>
+    <div class="ovlbtns"><button class="btnlink" id="zgEditClose">Schliessen</button></div>
+  </div>
+</div>
+
 <div class="toastwrap" id="toastwrap"></div>
 
 <header class="app"><div class="wrap">
@@ -686,62 +718,66 @@ async function loadStaffelgruppen(){
 
 function renderStaffelgruppen(){
   $('staffelgruppenListe').innerHTML = STAFFELGRUPPEN.map(sg => {
-    const stufen = STAFFELSTUFEN.filter(s => s.staffelgruppe_id === sg.id).sort((a,b) => a.menge_von - b.menge_von);
+    const count = STAFFELSTUFEN.filter(s => s.staffelgruppe_id === sg.id).length;
     return `
-    <div class="lieferantcard" data-staffelgruppe="${sg.id}">
+    <div class="lieferantcard">
       <div class="head">
-        <b>${sg.name}</b>
-        <button class="icobtn danger" style="margin-left:auto;" onclick="deleteStaffelgruppe('${sg.id}','${sg.name.replace(/'/g,"\\'")}')" title="Staffelgruppe löschen">🗑</button>
+        <b style="cursor:pointer;" onclick="openStaffelgruppeEdit('${sg.id}')">${sg.name}</b>
+        <span class="hint" style="margin:0;">${count} Stufe${count===1?'':'n'}</span>
+        <button class="icobtn" style="margin-left:auto;" onclick="openStaffelgruppeEdit('${sg.id}')" title="Stufen bearbeiten">✎</button>
+        <button class="icobtn danger" onclick="deleteStaffelgruppe('${sg.id}','${sg.name.replace(/'/g,"\\'")}')" title="Staffelgruppe löschen">🗑</button>
       </div>
-      <table>
-        <thead><tr><th>Von</th><th>Bis</th><th>Artikel</th><th></th></tr></thead>
-        <tbody>
-          ${stufen.map(s => `
-            <tr>
-              <td>${fmtNum(s.menge_von)}</td>
-              <td>${s.menge_bis != null ? fmtNum(s.menge_bis) : '∞'}</td>
-              <td>${artikelBezeichnung(s.artikel_id)}</td>
-              <td><button class="icobtn danger" onclick="deleteStaffelstufe('${s.id}')">🗑</button></td>
-            </tr>`).join('') || '<tr><td colspan="4" class="hint">Noch keine Stufen.</td></tr>'}
-        </tbody>
-      </table>
-      <div class="row" style="align-items:end;">
-        <div class="fld" style="max-width:90px;"><label>Von</label><input class="sfVon" type="number" step="0.01"></div>
-        <div class="fld" style="max-width:120px;"><label>Bis</label><input class="sfBis" type="number" step="0.01" placeholder="kein Limit"></div>
-        <div class="fld"><label>Artikel</label><button type="button" class="btn sfArtikelBtn" style="width:100%;text-align:left;background:#fff;color:var(--ink);border:1px solid var(--line);">Artikel wählen…</button></div>
-        <button class="btn sfAddBtn">+ Stufe</button>
-      </div>
-      <div class="status sfStatus"></div>
     </div>`;
   }).join('') || '<div class="hint">Noch keine Staffelgruppen.</div>';
-
-  document.querySelectorAll('.lieferantcard[data-staffelgruppe]').forEach(card => {
-    const sgId = card.dataset.staffelgruppe;
-    let gewaehlterArtikel = null;
-    card.querySelector('.sfArtikelBtn').addEventListener('click', () => {
-      openArtikelPicker(a => {
-        gewaehlterArtikel = a;
-        card.querySelector('.sfArtikelBtn').textContent = a.bezeichnung;
-      });
-    });
-    card.querySelector('.sfAddBtn').addEventListener('click', async () => {
-      const von = parseFloat(card.querySelector('.sfVon').value);
-      const bisRaw = card.querySelector('.sfBis').value.trim();
-      const statusEl = card.querySelector('.sfStatus');
-      if(isNaN(von) || !gewaehlterArtikel){
-        statusEl.textContent = 'Bitte Von-Menge und Artikel angeben.'; statusEl.className = 'status err'; return;
-      }
-      const { error } = await sb.from('staffelstufe').insert({
-        staffelgruppe_id: sgId, menge_von: von, menge_bis: bisRaw === '' ? null : parseFloat(bisRaw),
-        artikel_id: gewaehlterArtikel.id,
-        reihenfolge: naechsteReihenfolge(STAFFELSTUFEN.filter(s => s.staffelgruppe_id === sgId))
-      });
-      if(error){ statusEl.textContent = friendlyError(error); statusEl.className = 'status err'; return; }
-      showToast('Stufe hinzugefügt.');
-      await loadStaffelgruppen();
-    });
-  });
 }
+
+let sgEditId = null;
+let sgEditGewaehlterArtikel = null;
+
+function openStaffelgruppeEdit(id){
+  sgEditId = id;
+  sgEditGewaehlterArtikel = null;
+  $('sgEditArtikelBtn').textContent = 'Artikel wählen…';
+  $('sgEditVon').value = ''; $('sgEditBis').value = '';
+  $('sgEditStatus').textContent = ''; $('sgEditStatus').className = 'status';
+  renderSgEditModal();
+  $('sgEditOvl').classList.add('show');
+}
+function renderSgEditModal(){
+  const sg = STAFFELGRUPPEN.find(s => s.id === sgEditId);
+  if(!sg) return;
+  $('sgEditTitle').textContent = `Staffelgruppe "${sg.name}" - Stufen`;
+  const stufen = STAFFELSTUFEN.filter(s => s.staffelgruppe_id === sgEditId).sort((a,b) => a.menge_von - b.menge_von);
+  $('sgEditStufenBody').innerHTML = stufen.map(s => `
+    <tr>
+      <td>${fmtNum(s.menge_von)}</td>
+      <td>${s.menge_bis != null ? fmtNum(s.menge_bis) : '∞'}</td>
+      <td>${artikelBezeichnung(s.artikel_id)}</td>
+      <td><button class="icobtn danger" onclick="deleteStaffelstufe('${s.id}')">🗑</button></td>
+    </tr>`).join('') || '<tr><td colspan="4" class="hint">Noch keine Stufen.</td></tr>';
+}
+$('sgEditArtikelBtn').addEventListener('click', () => {
+  openArtikelPicker(a => { sgEditGewaehlterArtikel = a; $('sgEditArtikelBtn').textContent = a.bezeichnung; });
+});
+$('sgEditAddBtn').addEventListener('click', async () => {
+  const von = parseFloat($('sgEditVon').value);
+  const bisRaw = $('sgEditBis').value.trim();
+  if(isNaN(von) || !sgEditGewaehlterArtikel){
+    $('sgEditStatus').textContent = 'Bitte Von-Menge und Artikel angeben.'; $('sgEditStatus').className = 'status err'; return;
+  }
+  const { error } = await sb.from('staffelstufe').insert({
+    staffelgruppe_id: sgEditId, menge_von: von, menge_bis: bisRaw === '' ? null : parseFloat(bisRaw),
+    artikel_id: sgEditGewaehlterArtikel.id,
+    reihenfolge: naechsteReihenfolge(STAFFELSTUFEN.filter(s => s.staffelgruppe_id === sgEditId))
+  });
+  if(error){ $('sgEditStatus').textContent = friendlyError(error); $('sgEditStatus').className = 'status err'; return; }
+  $('sgEditVon').value = ''; $('sgEditBis').value = ''; sgEditGewaehlterArtikel = null;
+  $('sgEditArtikelBtn').textContent = 'Artikel wählen…';
+  $('sgEditStatus').textContent = 'Stufe hinzugefügt.'; $('sgEditStatus').className = 'status ok';
+  await loadStaffelgruppen();
+  renderSgEditModal();
+});
+$('sgEditClose').addEventListener('click', () => $('sgEditOvl').classList.remove('show'));
 
 async function deleteStaffelgruppe(id, name){
   if(!(await confirmDialog(`Staffelgruppe "${name}" wirklich löschen? Alle Stufen werden mitgelöscht.`))) return;
@@ -754,15 +790,17 @@ async function deleteStaffelstufe(id){
   const { error } = await sb.from('staffelstufe').delete().eq('id', id);
   if(error){ showToast(friendlyError(error), true); return; }
   await loadStaffelgruppen();
+  renderSgEditModal();
 }
 $('addStaffelgruppeBtn').addEventListener('click', async () => {
   const name = $('newStaffelgruppeName').value.trim();
   if(!name) return;
-  const { error } = await sb.from('staffelgruppe').insert({ name });
+  const { data, error } = await sb.from('staffelgruppe').insert({ name }).select().single();
   if(error){ $('staffelgruppeStatus').textContent = friendlyError(error); $('staffelgruppeStatus').className = 'status err'; return; }
   $('newStaffelgruppeName').value = '';
   $('staffelgruppeStatus').textContent = 'Gespeichert.'; $('staffelgruppeStatus').className = 'status ok';
   await loadStaffelgruppen();
+  openStaffelgruppeEdit(data.id);
 });
 
 // ---------------------------------------------------------------------------
@@ -772,7 +810,6 @@ $('addStaffelgruppeBtn').addEventListener('click', async () => {
 let ZONENGRUPPEN = [];
 let ZONEN = [];
 let ZONE_PLZ = [];
-let expandedZonen = new Set();
 
 async function loadZonengruppen(){
   const { data: gruppen, error } = await sb.from('zonengruppe').select('id,name').order('name');
@@ -789,68 +826,56 @@ async function loadZonengruppen(){
 
 function renderZonengruppen(){
   $('zonengruppenListe').innerHTML = ZONENGRUPPEN.map(zg => {
-    const zonen = ZONEN.filter(z => z.zonengruppe_id === zg.id).sort((a,b) => a.nummer - b.nummer);
+    const count = ZONEN.filter(z => z.zonengruppe_id === zg.id).length;
     return `
-    <div class="lieferantcard" data-zonengruppe="${zg.id}">
+    <div class="lieferantcard">
       <div class="head">
-        <b>${zg.name}</b>
-        <button class="icobtn danger" style="margin-left:auto;" onclick="deleteZonengruppe('${zg.id}','${zg.name.replace(/'/g,"\\'")}')" title="Zonengruppe löschen">🗑</button>
+        <b style="cursor:pointer;" onclick="openZonengruppeEdit('${zg.id}')">${zg.name}</b>
+        <span class="hint" style="margin:0;">${count} Zone${count===1?'':'n'}</span>
+        <button class="icobtn" style="margin-left:auto;" onclick="openZonengruppeEdit('${zg.id}')" title="Zonen bearbeiten">✎</button>
+        <button class="icobtn danger" onclick="deleteZonengruppe('${zg.id}','${zg.name.replace(/'/g,"\\'")}')" title="Zonengruppe löschen">🗑</button>
       </div>
-      ${zonen.map(z => {
-        const plzListe = ZONE_PLZ.filter(p => p.zone_id === z.id).map(p => p.plz);
-        const offen = expandedZonen.has(z.id);
-        return `
-        <div class="zonecard" data-zone="${z.id}">
-          <div class="zonecard-head" onclick="toggleZone('${z.id}')">
-            <span><b>Zone ${z.nummer}</b> · ${artikelBezeichnung(z.artikel_id)}</span>
-            <span class="hint" style="margin:0;">${plzListe.length} PLZ</span>
-            <button class="icobtn danger" onclick="event.stopPropagation();deleteZone('${z.id}')" title="Zone löschen">🗑</button>
-          </div>
-          <div class="zonecard-body ${offen ? '' : 'hidden'}">
-            <div class="fld"><label>PLZ-Liste (Komma oder Zeilenumbruch getrennt)</label>
-              <textarea class="zonePlzText" rows="4">${plzListe.join(', ')}</textarea>
-            </div>
-            <button class="btn zonePlzSave">PLZ speichern</button>
-            <div class="status zonePlzStatus"></div>
-          </div>
-        </div>`;
-      }).join('') || '<div class="hint">Noch keine Zonen.</div>'}
-      <div class="row" style="align-items:end;margin-top:10px;">
-        <div class="fld" style="max-width:80px;"><label>Nummer</label><input class="zNummer" type="number" step="1"></div>
-        <div class="fld"><label>Artikel</label><button type="button" class="btn zArtikelBtn" style="width:100%;text-align:left;background:#fff;color:var(--ink);border:1px solid var(--line);">Artikel wählen…</button></div>
-        <button class="btn zAddBtn">+ Zone</button>
-      </div>
-      <div class="status zStatus"></div>
     </div>`;
   }).join('') || '<div class="hint">Noch keine Zonengruppen.</div>';
+}
 
-  document.querySelectorAll('.lieferantcard[data-zonengruppe]').forEach(card => {
-    const zgId = card.dataset.zonengruppe;
-    let gewaehlterArtikel = null;
-    card.querySelector('.zArtikelBtn').addEventListener('click', () => {
-      openArtikelPicker(a => { gewaehlterArtikel = a; card.querySelector('.zArtikelBtn').textContent = a.bezeichnung; });
-    });
-    card.querySelector('.zAddBtn').addEventListener('click', async () => {
-      const nummer = parseInt(card.querySelector('.zNummer').value, 10);
-      const statusEl = card.querySelector('.zStatus');
-      if(isNaN(nummer) || !gewaehlterArtikel){
-        statusEl.textContent = 'Bitte Nummer und Artikel angeben.'; statusEl.className = 'status err'; return;
-      }
-      const { error } = await sb.from('zone').insert({
-        zonengruppe_id: zgId, nummer, artikel_id: gewaehlterArtikel.id,
-        reihenfolge: naechsteReihenfolge(ZONEN.filter(z => z.zonengruppe_id === zgId))
-      });
-      if(error){ statusEl.textContent = friendlyError(error); statusEl.className = 'status err'; return; }
-      showToast('Zone hinzugefügt.');
-      await loadZonengruppen();
-    });
-  });
+let zgEditId = null;
+let zgEditGewaehlterArtikel = null;
 
-  document.querySelectorAll('.zonecard').forEach(zc => {
-    const zoneId = zc.dataset.zone;
-    const saveBtn = zc.querySelector('.zonePlzSave');
-    if(!saveBtn) return;
-    saveBtn.addEventListener('click', async () => {
+function openZonengruppeEdit(id){
+  zgEditId = id;
+  zgEditGewaehlterArtikel = null;
+  $('zgEditArtikelBtn').textContent = 'Artikel wählen…';
+  $('zgEditNummer').value = '';
+  $('zgEditStatus').textContent = ''; $('zgEditStatus').className = 'status';
+  renderZgEditModal();
+  $('zgEditOvl').classList.add('show');
+}
+function renderZgEditModal(){
+  const zg = ZONENGRUPPEN.find(z => z.id === zgEditId);
+  if(!zg) return;
+  $('zgEditTitle').textContent = `Zonengruppe "${zg.name}" - Zonen`;
+  const zonen = ZONEN.filter(z => z.zonengruppe_id === zgEditId).sort((a,b) => a.nummer - b.nummer);
+  $('zgEditZonenList').innerHTML = zonen.map(z => {
+    const plzListe = ZONE_PLZ.filter(p => p.zone_id === z.id).map(p => p.plz);
+    return `
+    <div class="zonecard" data-zone="${z.id}">
+      <div class="zonecard-head" style="cursor:default;">
+        <span><b>Zone ${z.nummer}</b> · ${artikelBezeichnung(z.artikel_id)}</span>
+        <button class="icobtn danger" onclick="deleteZone('${z.id}')" title="Zone löschen">🗑</button>
+      </div>
+      <div class="fld" style="margin-top:8px;"><label>PLZ-Liste (Komma oder Zeilenumbruch getrennt)</label>
+        <textarea class="zonePlzText" rows="3" data-zone="${z.id}">${plzListe.join(', ')}</textarea>
+      </div>
+      <button class="btn zonePlzSave" data-zone="${z.id}">PLZ speichern</button>
+      <div class="status zonePlzStatus" data-zone="${z.id}"></div>
+    </div>`;
+  }).join('') || '<div class="hint">Noch keine Zonen.</div>';
+
+  $('zgEditZonenList').querySelectorAll('.zonePlzSave').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const zoneId = btn.dataset.zone;
+      const zc = btn.closest('.zonecard');
       const raw = zc.querySelector('.zonePlzText').value;
       const statusEl = zc.querySelector('.zonePlzStatus');
       const plzListe = [...new Set(raw.split(/[,\n]/).map(s => s.trim()).filter(Boolean))];
@@ -860,17 +885,31 @@ function renderZonengruppen(){
         const { error: insErr } = await sb.from('zone_plz').insert(plzListe.map(plz => ({ zone_id: zoneId, plz })));
         if(insErr){ statusEl.textContent = friendlyError(insErr); statusEl.className = 'status err'; return; }
       }
-      expandedZonen.add(zoneId);
-      showToast('PLZ-Liste gespeichert.');
+      statusEl.textContent = 'Gespeichert.'; statusEl.className = 'status ok';
       await loadZonengruppen();
     });
   });
 }
-
-function toggleZone(id){
-  if(expandedZonen.has(id)) expandedZonen.delete(id); else expandedZonen.add(id);
-  renderZonengruppen();
-}
+$('zgEditArtikelBtn').addEventListener('click', () => {
+  openArtikelPicker(a => { zgEditGewaehlterArtikel = a; $('zgEditArtikelBtn').textContent = a.bezeichnung; });
+});
+$('zgEditAddBtn').addEventListener('click', async () => {
+  const nummer = parseInt($('zgEditNummer').value, 10);
+  if(isNaN(nummer) || !zgEditGewaehlterArtikel){
+    $('zgEditStatus').textContent = 'Bitte Nummer und Artikel angeben.'; $('zgEditStatus').className = 'status err'; return;
+  }
+  const { error } = await sb.from('zone').insert({
+    zonengruppe_id: zgEditId, nummer, artikel_id: zgEditGewaehlterArtikel.id,
+    reihenfolge: naechsteReihenfolge(ZONEN.filter(z => z.zonengruppe_id === zgEditId))
+  });
+  if(error){ $('zgEditStatus').textContent = friendlyError(error); $('zgEditStatus').className = 'status err'; return; }
+  $('zgEditNummer').value = ''; zgEditGewaehlterArtikel = null;
+  $('zgEditArtikelBtn').textContent = 'Artikel wählen…';
+  $('zgEditStatus').textContent = 'Zone hinzugefügt.'; $('zgEditStatus').className = 'status ok';
+  await loadZonengruppen();
+  renderZgEditModal();
+});
+$('zgEditClose').addEventListener('click', () => $('zgEditOvl').classList.remove('show'));
 
 async function deleteZonengruppe(id, name){
   if(!(await confirmDialog(`Zonengruppe "${name}" wirklich löschen? Alle Zonen und PLZ werden mitgelöscht.`))) return;
@@ -883,15 +922,17 @@ async function deleteZone(id){
   const { error } = await sb.from('zone').delete().eq('id', id);
   if(error){ showToast(friendlyError(error), true); return; }
   await loadZonengruppen();
+  renderZgEditModal();
 }
 $('addZonengruppeBtn').addEventListener('click', async () => {
   const name = $('newZonengruppeName').value.trim();
   if(!name) return;
-  const { error } = await sb.from('zonengruppe').insert({ name });
+  const { data, error } = await sb.from('zonengruppe').insert({ name }).select().single();
   if(error){ $('zonengruppeStatus').textContent = friendlyError(error); $('zonengruppeStatus').className = 'status err'; return; }
   $('newZonengruppeName').value = '';
   $('zonengruppeStatus').textContent = 'Gespeichert.'; $('zonengruppeStatus').className = 'status ok';
   await loadZonengruppen();
+  openZonengruppeEdit(data.id);
 });
 
 // ---------------------------------------------------------------------------
