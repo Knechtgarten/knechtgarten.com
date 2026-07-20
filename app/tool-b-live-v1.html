@@ -167,6 +167,11 @@ td.artikelcell span:before{content:"· ";}
   border:1px solid var(--line);border-radius:6px;font-weight:700;color:var(--primary);}
 .modalbtns{display:flex;gap:8px;justify-content:flex-end;margin-top:20px;border-top:1px solid var(--line);padding-top:16px;}
 
+.modrow{display:flex;gap:12px;margin-top:18px;}
+.modrow > div{flex:1;}
+.modrow label{font-size:11px;font-weight:700;color:var(--primary);display:block;margin-bottom:5px;}
+.modrow input{width:100%;font:inherit;font-size:12.5px;padding:7px 9px;border:1px solid var(--line);border-radius:7px;}
+
 .termline-live{display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
 .termgroup{display:flex;gap:8px;align-items:center;flex-shrink:0;}
 .opsel{width:38px;font:inherit;font-size:13px;text-align:center;text-align-last:center;
@@ -286,6 +291,11 @@ td.artikelcell span:before{content:"· ";}
     <div class="notizbox" id="rzEditNotizBox"><textarea id="rzEditNotizInput" placeholder="Nur für dich/das Team sichtbar"></textarea></div>
 
     <div class="termline-live" id="rzEditTermline"></div>
+
+    <div class="modrow">
+      <div><label>Mindestmenge</label><input type="text" id="rzEditMindestmenge" placeholder="—"></div>
+      <div><label>Verschnitt/Auflockerung %</label><input type="text" id="rzEditVerschnitt" placeholder="—"></div>
+    </div>
 
     <label style="font-size:11px;color:var(--muted);display:block;margin:18px 0 4px;">Zugänglichkeits-Faktor je Stufe (1.0 = kein Einfluss)</label>
     <div class="zugrid" id="rzEditZugrid"></div>
@@ -732,12 +742,12 @@ async function loadArbeitsschritte(){
     .select(`id, name, reihenfolge, notiz, ausgeblendet,
       teilschritt ( id, name, beschreibung, reihenfolge, ausgeblendet,
         ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, notiz,
-          zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4,
+          zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4, mindestmenge, verschnitt_prozent,
           artikel_id, artikel(bezeichnung, einheit, artikelnummer_knecht) ),
         auswahlfeld ( id, name, mehrfachauswahl, reihenfolge,
           auswahloption ( id, name, reihenfolge,
             ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, notiz,
-              zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4,
+              zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4, mindestmenge, verschnitt_prozent,
               artikel_id, artikel(bezeichnung, einheit, artikelnummer_knecht) ) ) ) )`)
     .eq('offertentyp_id', currentOffertentypId).order('reihenfolge');
   if(error){ console.error(error); return; }
@@ -1158,6 +1168,10 @@ function toggleRzForm(kontextTyp, kontextId){
     </div>
     <label style="font-size:11px;color:var(--muted);display:block;margin:6px 0 3px;">Menge-Formel</label>
     <div class="rzAusdruck"></div>
+    <div class="row" style="margin-top:8px;">
+      <div class="fld"><label>Mindestmenge</label><input class="rzMindestmenge" type="number" step="0.01" placeholder="—"></div>
+      <div class="fld"><label>Verschnitt/Auflockerung %</label><input class="rzVerschnitt" type="number" step="0.01" placeholder="—"></div>
+    </div>
     <label style="font-size:11px;color:var(--muted);display:block;margin:10px 0 3px;">Zugänglichkeits-Faktor (Standort-Erschwernis, 1.0 = kein Einfluss)</label>
     <div class="row">
       <div class="fld"><label>1 Komplex</label><input class="rzZug1" type="number" step="0.01" value="1"></div>
@@ -1199,8 +1213,12 @@ function toggleRzForm(kontextTyp, kontextId){
     const node = builder.getNode();
     if(!node){ statusEl.textContent = 'Bitte eine Menge-Formel angeben.'; statusEl.className='status err'; return; }
 
+    const mmRaw = wrap.querySelector('.rzMindestmenge').value.trim();
+    const vsRaw = wrap.querySelector('.rzVerschnitt').value.trim();
     const { error } = await sb.from('ressourcenzeile').insert({
       [`${kontextTyp}_id`]: kontextId, kategorie, artikel_id: artikelId, menge_ausdruck: node,
+      mindestmenge: mmRaw === '' ? null : parseFloat(mmRaw),
+      verschnitt_prozent: vsRaw === '' ? null : parseFloat(vsRaw),
       zugang_stufe1: parseFloat(wrap.querySelector('.rzZug1').value) || 1,
       zugang_stufe2: parseFloat(wrap.querySelector('.rzZug2').value) || 1,
       zugang_stufe3: parseFloat(wrap.querySelector('.rzZug3').value) || 1,
@@ -1254,7 +1272,8 @@ async function duplicateTeilschrittInto(asId, ts, reihenfolge){
     const { error: rzErr } = await sb.from('ressourcenzeile').insert({
       teilschritt_id: neuTs.id, kategorie: rz.kategorie, artikel_id: rz.artikel_id,
       bezeichnung_override: rz.bezeichnung_override, preis_override: rz.preis_override, menge_ausdruck: rz.menge_ausdruck,
-      zugang_stufe1: rz.zugang_stufe1, zugang_stufe2: rz.zugang_stufe2, zugang_stufe3: rz.zugang_stufe3, zugang_stufe4: rz.zugang_stufe4
+      zugang_stufe1: rz.zugang_stufe1, zugang_stufe2: rz.zugang_stufe2, zugang_stufe3: rz.zugang_stufe3, zugang_stufe4: rz.zugang_stufe4,
+      mindestmenge: rz.mindestmenge, verschnitt_prozent: rz.verschnitt_prozent, notiz: rz.notiz
     });
     if(rzErr) throw rzErr;
   }
@@ -1271,7 +1290,8 @@ async function duplicateTeilschrittInto(asId, ts, reihenfolge){
         const { error: rzErr } = await sb.from('ressourcenzeile').insert({
           option_id: neuOpt.id, kategorie: rz.kategorie, artikel_id: rz.artikel_id,
           bezeichnung_override: rz.bezeichnung_override, preis_override: rz.preis_override, menge_ausdruck: rz.menge_ausdruck,
-          zugang_stufe1: rz.zugang_stufe1, zugang_stufe2: rz.zugang_stufe2, zugang_stufe3: rz.zugang_stufe3, zugang_stufe4: rz.zugang_stufe4
+          zugang_stufe1: rz.zugang_stufe1, zugang_stufe2: rz.zugang_stufe2, zugang_stufe3: rz.zugang_stufe3, zugang_stufe4: rz.zugang_stufe4,
+      mindestmenge: rz.mindestmenge, verschnitt_prozent: rz.verschnitt_prozent, notiz: rz.notiz
         });
         if(rzErr) throw rzErr;
       }
@@ -1412,6 +1432,8 @@ async function openRzEditModal(rzId){
   $('rzEditNotizInput').value = ctx.rz.notiz || '';
   $('rzEditNotizBox').classList.toggle('show', !!ctx.rz.notiz);
   $('rzEditNotizBtn').classList.toggle('has', !!ctx.rz.notiz);
+  $('rzEditMindestmenge').value = ctx.rz.mindestmenge ?? '';
+  $('rzEditVerschnitt').value = ctx.rz.verschnitt_prozent ?? '';
 
   const { data: efs } = await sb.from('eingabefeld').select('id,name,einheit')
     .or(`offertentyp_id.is.null,offertentyp_id.eq.${currentOffertentypId}`);
@@ -1519,7 +1541,11 @@ $('rzEditSave').addEventListener('click', async () => {
   const zugWerte = {};
   document.querySelectorAll('#rzEditZugrid .zugval').forEach(inp => { zugWerte['zugang_stufe'+inp.dataset.n] = parseFloat(inp.value) || 1; });
   const notiz = $('rzEditNotizInput').value.trim() || null;
-  const { error } = await sb.from('ressourcenzeile').update({ menge_ausdruck: node, notiz, ...zugWerte }).eq('id', rzEditCurrentId);
+  const mmVal = $('rzEditMindestmenge').value.trim();
+  const vsVal = $('rzEditVerschnitt').value.trim();
+  const mindestmenge = mmVal === '' ? null : parseFloat(mmVal);
+  const verschnitt_prozent = vsVal === '' ? null : parseFloat(vsVal);
+  const { error } = await sb.from('ressourcenzeile').update({ menge_ausdruck: node, notiz, mindestmenge, verschnitt_prozent, ...zugWerte }).eq('id', rzEditCurrentId);
   if(error){ $('rzEditStatus').textContent = friendlyError(error); $('rzEditStatus').className = 'status err'; return; }
   $('rzEditOverlay').classList.remove('show');
   showToast('Formel gespeichert.');
@@ -1545,7 +1571,8 @@ async function duplicateOption(optId){
       const { error: rzErr } = await sb.from('ressourcenzeile').insert({
         option_id: neuOpt.id, kategorie: rz.kategorie, artikel_id: rz.artikel_id,
         bezeichnung_override: rz.bezeichnung_override, preis_override: rz.preis_override, menge_ausdruck: rz.menge_ausdruck,
-        zugang_stufe1: rz.zugang_stufe1, zugang_stufe2: rz.zugang_stufe2, zugang_stufe3: rz.zugang_stufe3, zugang_stufe4: rz.zugang_stufe4
+        zugang_stufe1: rz.zugang_stufe1, zugang_stufe2: rz.zugang_stufe2, zugang_stufe3: rz.zugang_stufe3, zugang_stufe4: rz.zugang_stufe4,
+      mindestmenge: rz.mindestmenge, verschnitt_prozent: rz.verschnitt_prozent, notiz: rz.notiz
       });
       if(rzErr) throw rzErr;
     }
