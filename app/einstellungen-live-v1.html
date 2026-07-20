@@ -236,6 +236,19 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
   </div>
 </div>
 
+<div class="ovl" id="spEditOvl">
+  <div class="ovlbox">
+    <div class="ovlmsg">Sonderposition bearbeiten</div>
+    <div class="fld"><label>Name</label><input id="spEditName"></div>
+    <div class="fld"><label>Erklärung</label><textarea id="spEditErklaerung" rows="4" placeholder="Was steckt dahinter, wann greift es"></textarea></div>
+    <div class="status" id="spEditStatus"></div>
+    <div class="ovlbtns">
+      <button class="btnlink" id="spEditClose">Schliessen</button>
+      <button class="btn" id="spEditSave">Speichern</button>
+    </div>
+  </div>
+</div>
+
 <div class="toastwrap" id="toastwrap"></div>
 
 <header class="app"><div class="wrap">
@@ -396,14 +409,10 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
         <div class="card">
           <div class="cardlabel">Sonderpositionen mit Spezial-Rechenlogik</div>
           <div class="hint">Faelle mit echter Spezial-Rechenlogik (z.B. "Sonderfahrt zur Baustelle", "Baggertransport") - hier nur Name+Erklaerung katalogisiert, die eigentliche Berechnung wird pro Fall separat programmiert (kein Self-Service-Baukasten). Erscheinen in Tool B in der gleichen Auswahl wie Staffelgruppen/PLZ-Zonen.</div>
-          <table>
-            <thead><tr><th>Name</th><th>Erklärung</th><th></th></tr></thead>
-            <tbody id="sonderpositionTypBody"></tbody>
-          </table>
+          <div id="sonderpositionTypListe"></div>
           <div class="row" style="margin-top:10px;">
-            <div class="fld"><label>Name</label><input id="newSonderpositionTypName" placeholder="z.B. Baggertransport"></div>
+            <div class="fld"><label>Neue Sonderposition</label><input id="newSonderpositionTypName" placeholder="z.B. Baggertransport"></div>
           </div>
-          <div class="fld"><label>Erklärung</label><input id="newSonderpositionTypErklaerung" placeholder="Was steckt dahinter, wann greift es"></div>
           <button class="btn" id="addSonderpositionTypBtn">+ Sonderposition anfordern</button>
           <div class="status" id="sonderpositionTypStatus"></div>
         </div>
@@ -1157,27 +1166,58 @@ $('tflAbsenden').addEventListener('click', () => {
 // aber noch nicht implementiert (Platzhalter, bis ein konkreter Fall
 // programmiert wird).
 // ---------------------------------------------------------------------------
+let SONDERPOSITION_TYPEN = [];
+let spEditId = null;
+
 async function loadSonderpositionTypen(){
   const { data, error } = await sb.from('sonderposition_typ').select('id,name,erklaerung').order('name');
   if(error){ console.error(error); return; }
-  $('sonderpositionTypBody').innerHTML = data.map(s => `
-    <tr>
-      <td><b>${s.name}</b></td>
-      <td>${s.erklaerung || ''}</td>
-      <td><button class="icobtn" onclick="deleteSonderpositionTyp('${s.id}')">🗑</button></td>
-    </tr>`).join('') || '<tr><td colspan="3" class="hint">Noch keine erfasst.</td></tr>';
+  SONDERPOSITION_TYPEN = data;
+  renderSonderpositionTypen();
 }
-$('addSonderpositionTypBtn').addEventListener('click', async () => {
-  const name = $('newSonderpositionTypName').value.trim();
-  const erklaerung = $('newSonderpositionTypErklaerung').value.trim() || null;
-  if(!name){ $('sonderpositionTypStatus').textContent = 'Bitte einen Namen eintragen.'; $('sonderpositionTypStatus').className = 'status err'; return; }
-  const { error } = await sb.from('sonderposition_typ').insert({ name, erklaerung });
-  if(error){ $('sonderpositionTypStatus').textContent = friendlyError(error); $('sonderpositionTypStatus').className = 'status err'; return; }
-  $('newSonderpositionTypName').value = ''; $('newSonderpositionTypErklaerung').value = '';
-  $('sonderpositionTypStatus').textContent = 'Erfasst - die eigentliche Berechnung wird separat programmiert.'; $('sonderpositionTypStatus').className = 'status ok';
+function renderSonderpositionTypen(){
+  $('sonderpositionTypListe').innerHTML = SONDERPOSITION_TYPEN.map(s => `
+    <div class="lieferantcard">
+      <div class="head">
+        <b style="cursor:pointer;" onclick="openSonderpositionTypEdit('${s.id}')">${s.name}</b>
+        <button class="icobtn" style="margin-left:auto;" onclick="openSonderpositionTypEdit('${s.id}')" title="Bearbeiten">✎</button>
+        <button class="icobtn danger" onclick="deleteSonderpositionTyp('${s.id}','${s.name.replace(/'/g,"\\'")}')" title="Löschen">🗑</button>
+      </div>
+      ${s.erklaerung ? `<div class="hint">${s.erklaerung}</div>` : ''}
+    </div>`).join('') || '<div class="hint">Noch keine erfasst.</div>';
+}
+
+function openSonderpositionTypEdit(id){
+  const s = SONDERPOSITION_TYPEN.find(x => x.id === id);
+  if(!s) return;
+  spEditId = id;
+  $('spEditName').value = s.name;
+  $('spEditErklaerung').value = s.erklaerung || '';
+  $('spEditStatus').textContent = ''; $('spEditStatus').className = 'status';
+  $('spEditOvl').classList.add('show');
+}
+$('spEditSave').addEventListener('click', async () => {
+  const name = $('spEditName').value.trim();
+  if(!name){ $('spEditStatus').textContent = 'Bitte einen Namen eintragen.'; $('spEditStatus').className = 'status err'; return; }
+  const { error } = await sb.from('sonderposition_typ').update({ name, erklaerung: $('spEditErklaerung').value.trim() || null }).eq('id', spEditId);
+  if(error){ $('spEditStatus').textContent = friendlyError(error); $('spEditStatus').className = 'status err'; return; }
+  $('spEditStatus').textContent = 'Gespeichert.'; $('spEditStatus').className = 'status ok';
   await loadSonderpositionTypen();
 });
-async function deleteSonderpositionTyp(id){
+$('spEditClose').addEventListener('click', () => $('spEditOvl').classList.remove('show'));
+
+$('addSonderpositionTypBtn').addEventListener('click', async () => {
+  const name = $('newSonderpositionTypName').value.trim();
+  if(!name){ $('sonderpositionTypStatus').textContent = 'Bitte einen Namen eintragen.'; $('sonderpositionTypStatus').className = 'status err'; return; }
+  const { data, error } = await sb.from('sonderposition_typ').insert({ name }).select().single();
+  if(error){ $('sonderpositionTypStatus').textContent = friendlyError(error); $('sonderpositionTypStatus').className = 'status err'; return; }
+  $('newSonderpositionTypName').value = '';
+  $('sonderpositionTypStatus').textContent = 'Erfasst - die eigentliche Berechnung wird separat programmiert.'; $('sonderpositionTypStatus').className = 'status ok';
+  await loadSonderpositionTypen();
+  openSonderpositionTypEdit(data.id);
+});
+async function deleteSonderpositionTyp(id, name){
+  if(!(await confirmDialog(`Sonderposition "${name}" wirklich löschen?`))) return;
   const { error } = await sb.from('sonderposition_typ').delete().eq('id', id);
   if(error){ showToast(friendlyError(error), true); return; }
   await loadSonderpositionTypen();
