@@ -513,12 +513,12 @@ async function ladeFormelDaten(otId){
     .select(`id, name, reihenfolge, ausgeblendet,
       teilschritt ( id, name, beschreibung, ausgeblendet,
         ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck,
-          zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4,
+          zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4, mindestmenge, verschnitt_prozent,
           artikel ( bezeichnung, einheit, vp_knecht ) ),
         auswahlfeld ( id, name, mehrfachauswahl,
           auswahloption ( id, name,
             ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck,
-              zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4,
+              zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4, mindestmenge, verschnitt_prozent,
               artikel ( bezeichnung, einheit, vp_knecht ) ) ) ) )`)
     .eq('offertentyp_id', otId).eq('ausgeblendet', false).order('reihenfolge');
   if(asErr) throw asErr;
@@ -534,7 +534,9 @@ async function ladeFormelDaten(otId){
       einheit: rz.artikel?.einheit || '',
       preis: rz.preis_override ?? rz.artikel?.vp_knecht ?? 0,
       menge_ausdruck: rz.menge_ausdruck,
-      zugangsfaktoren: [rz.zugang_stufe1 ?? 1, rz.zugang_stufe2 ?? 1, rz.zugang_stufe3 ?? 1, rz.zugang_stufe4 ?? 1]
+      zugangsfaktoren: [rz.zugang_stufe1 ?? 1, rz.zugang_stufe2 ?? 1, rz.zugang_stufe3 ?? 1, rz.zugang_stufe4 ?? 1],
+      mindestmenge: rz.mindestmenge,
+      verschnittProzent: rz.verschnitt_prozent
     });
   }
   (arbeitsschritte || []).forEach(as => {
@@ -1083,7 +1085,9 @@ async function recalc(){
         const berechnet = await Promise.all(aktive.map(async rz => {
           const { data: mengeRoh, error } = await sb.rpc('eval_ausdruck', { node: rz.menge_ausdruck, werte: tf.werteMap });
           if(error) throw error;
-          const menge = mengeRoh * tfMenge * zugFaktorTf(rz);
+          const verschnittFaktor = 1 + ((rz.verschnittProzent ?? 0) / 100);
+          let menge = mengeRoh * verschnittFaktor * zugFaktorTf(rz) * tfMenge;
+          if(rz.mindestmenge != null && menge < rz.mindestmenge) menge = rz.mindestmenge;
           return { ...rz, menge, betrag: menge * rz.preis };
         }));
         alleZeilen.push(...berechnet);
