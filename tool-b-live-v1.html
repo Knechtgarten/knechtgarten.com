@@ -453,8 +453,22 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 let currentOffertentypId = null;
 let currentBerechnungsmodell = 'formel';
 let OFFERTENTYPEN = [];
-let EINGABEFELDER = [];
+let EINGABEFELDER = [];   // nur fuer die Formel-Bibliothek-Ansicht, kategorie-gefiltert (Allgemein ODER ein Offertentyp)
 let TERMS = [];
+// Immer gemischt (Allgemein + aktueller Offertentyp) - fuer refLabel()/ausdruckPreview()
+// ueberall dort, wo ein Name aufgeloest werden muss (Ressourcenzeilen-Tabelle,
+// Mengenfenster-Picker), unabhaengig davon, welche Kategorie die
+// Formel-Bibliothek-Seite gerade zeigt.
+let ALLE_EINGABEFELDER = [];
+let ALLE_TERMS = [];
+async function ladeAlleVariablen(){
+  const { data: efs } = await sb.from('eingabefeld').select('id,name,einheit')
+    .or(`offertentyp_id.is.null,offertentyp_id.eq.${currentOffertentypId}`);
+  ALLE_EINGABEFELDER = efs || [];
+  const { data: terms } = await sb.from('term').select('id,name,typ,wert,ausdruck,einheit')
+    .or(`offertentyp_id.is.null,offertentyp_id.eq.${currentOffertentypId}`);
+  ALLE_TERMS = terms || [];
+}
 let ARTIKEL = [];
 let LIEFERANT_INTERN_ID = null;
 let ARBEITSSCHRITTE = [];
@@ -489,7 +503,7 @@ function showToast(message, isErr){
 }
 
 function refLabel(kind, id){
-  const list = kind === 'eingabefeld' ? EINGABEFELDER : TERMS;
+  const list = kind === 'eingabefeld' ? ALLE_EINGABEFELDER : ALLE_TERMS;
   const item = list.find(x => x.id === id);
   return item ? item.name : '?';
 }
@@ -752,6 +766,7 @@ async function loadArbeitsschritte(){
     .eq('offertentyp_id', currentOffertentypId).order('reihenfolge');
   if(error){ console.error(error); return; }
   ARBEITSSCHRITTE = data;
+  await ladeAlleVariablen();
   renderArbeitsschritte();
 }
 
@@ -1410,8 +1425,8 @@ function buildMengenAusdruck(glieder){
 
 function labelFuerNode(node){
   if(node.lit !== undefined) return String(node.lit);
-  if(node.ref === 'eingabefeld') return EINGABEFELDER.find(e => e.id === node.id)?.name || '?';
-  if(node.ref === 'term') return TERMS.find(t => t.id === node.id)?.name || '?';
+  if(node.ref === 'eingabefeld') return ALLE_EINGABEFELDER.find(e => e.id === node.id)?.name || '?';
+  if(node.ref === 'term') return ALLE_TERMS.find(t => t.id === node.id)?.name || '?';
   return '?';
 }
 
@@ -1434,13 +1449,6 @@ async function openRzEditModal(rzId){
   $('rzEditNotizBtn').classList.toggle('has', !!ctx.rz.notiz);
   $('rzEditMindestmenge').value = ctx.rz.mindestmenge ?? '';
   $('rzEditVerschnitt').value = ctx.rz.verschnitt_prozent ?? '';
-
-  const { data: efs } = await sb.from('eingabefeld').select('id,name,einheit')
-    .or(`offertentyp_id.is.null,offertentyp_id.eq.${currentOffertentypId}`);
-  EINGABEFELDER = efs || [];
-  const { data: terms } = await sb.from('term').select('id,name,typ,wert,ausdruck,einheit')
-    .or(`offertentyp_id.is.null,offertentyp_id.eq.${currentOffertentypId}`);
-  TERMS = terms || [];
 
   const flat = flattenMengenAusdruck(ctx.rz.menge_ausdruck);
   if(flat === null){
@@ -1515,10 +1523,10 @@ function openVarPicker(index){
   rzEditPickerIndex = index;
   const ot = OFFERTENTYPEN.find(o => o.id === currentOffertentypId);
   $('varPickerScope').textContent = (ot ? ot.name : '') + ' + Allgemein';
-  $('varPickerEingabefelder').innerHTML = EINGABEFELDER.map(e =>
+  $('varPickerEingabefelder').innerHTML = ALLE_EINGABEFELDER.map(e =>
     `<div class="varitem" onclick="waehleVar('eingabefeld','${e.id}')"><b>${e.name}</b><span>${e.einheit}</span></div>`
   ).join('') || '<div class="hint">Keine vorhanden.</div>';
-  $('varPickerTerms').innerHTML = TERMS.map(t =>
+  $('varPickerTerms').innerHTML = ALLE_TERMS.map(t =>
     `<div class="varitem" onclick="waehleVar('term','${t.id}')"><b>${t.name}</b><span>${t.typ==='konstante'?fmtNum(t.wert):ausdruckPreview(t.ausdruck)}</span></div>`
   ).join('') || '<div class="hint">Keine vorhanden.</div>';
   $('varPickerOverlay').classList.add('show');
@@ -1526,7 +1534,7 @@ function openVarPicker(index){
 function waehleVar(kind, id){
   const g = rzEditGlieder[rzEditPickerIndex];
   g.mode = 'ref'; g.refKind = kind; g.refId = id;
-  g.text = kind === 'eingabefeld' ? EINGABEFELDER.find(e=>e.id===id)?.name : TERMS.find(t=>t.id===id)?.name;
+  g.text = kind === 'eingabefeld' ? ALLE_EINGABEFELDER.find(e=>e.id===id)?.name : ALLE_TERMS.find(t=>t.id===id)?.name;
   $('varPickerOverlay').classList.remove('show');
   renderRzEditTermline();
 }
