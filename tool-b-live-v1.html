@@ -59,6 +59,8 @@ td{padding:6px 6px;border-bottom:1px solid var(--soft);vertical-align:top;}
 .icobtn{width:22px;height:22px;border-radius:50%;border:1px solid var(--line);background:#fff;color:var(--muted);
   font-size:11px;cursor:pointer;padding:0;}
 .icobtn:hover{border-color:var(--danger);color:var(--danger);background:#FBEFEC;}
+.icobtn.active{background:var(--primary);color:#fff;border-color:var(--primary);}
+.icobtn.active:hover{background:var(--primary-l);color:#fff;border-color:var(--primary-l);}
 
 .nest{margin-left:16px;padding-left:14px;border-left:2px solid var(--line);margin-top:8px;}
 
@@ -631,6 +633,9 @@ async function loadArbeitsschritte(){
   const { data, error } = await sb.from('arbeitsschritt')
     .select(`id, name, reihenfolge, notiz, ausgeblendet,
       teilschritt ( id, name, beschreibung, reihenfolge, ausgeblendet,
+        ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck,
+          zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4,
+          artikel_id, artikel(bezeichnung, einheit, artikelnummer_knecht) ),
         auswahlfeld ( id, name, mehrfachauswahl, reihenfolge,
           auswahloption ( id, name, reihenfolge,
             ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck,
@@ -707,21 +712,39 @@ async function persistReihenfolge(tabelle, ids){
 }
 
 function renderTeilschritt(asId, ts, nummer){
+  const af = ts.auswahlfeld || null;
+  const hatAf = !!af;
+  const afTitel = hatAf
+    ? `Auswahlfeld "${af.name}" - anklicken zum Entfernen`
+    : 'Kein Auswahlfeld - anklicken um eines zu aktivieren (der Teilschritt bekommt dann waehlbare Optionen)';
   return `
     <div class="tsblock" data-ts="${ts.id}">
       <div class="tshead ${ts.ausgeblendet?'is-hidden':''}" onclick="this.parentElement.classList.toggle('collapsed')">
         <span class="draghandle" title="Verschieben" onclick="event.stopPropagation()">⠿</span>
         <span class="num">${nummer}</span><span class="nm">${ts.name}</span>
+        <button class="icobtn ${hatAf?'active':''}" onclick="event.stopPropagation(); toggleAuswahlfeldAktiv('${ts.id}', ${hatAf}, '${af?.id||''}')" title="${afTitel}">${hatAf?'☑':'☐'}</button>
         <button class="icobtn" onclick="event.stopPropagation(); duplicateTeilschritt('${ts.id}')" title="Teilschritt duplizieren">⧉</button>
         <button class="icobtn" onclick="event.stopPropagation(); toggleAusblenden('teilschritt','${ts.id}',${ts.ausgeblendet})" title="${ts.ausgeblendet?'Wieder einblenden':'Ausblenden'}">👁</button>
         <button class="icobtn" onclick="event.stopPropagation(); deleteTeilschritt('${ts.id}')">🗑</button>
         <span class="tschev">▾</span>
       </div>
       <div class="tsbody ${ts.ausgeblendet?'is-hidden':''}">
-        ${(ts.auswahlfeld||[]).map(af => renderAuswahlfeld(ts.id, af)).join('')}
-        <button type="button" class="btnadd" onclick="openAddAfModal('${ts.id}')">+ Auswahlfeld hinzufügen</button>
+        ${hatAf ? renderAuswahlfeld(ts.id, af) : renderRessourcenTabelle('teilschritt', ts.id, ts.ressourcenzeile || [])}
       </div>
     </div>`;
+}
+
+async function toggleAuswahlfeldAktiv(tsId, hatAf, afId){
+  if(hatAf){
+    await deleteAuswahlfeld(afId);
+  }else{
+    const ts = ARBEITSSCHRITTE.flatMap(a => a.teilschritt || []).find(t => t.id === tsId);
+    if(ts && ts.ressourcenzeile && ts.ressourcenzeile.length){
+      showToast('Bitte zuerst die direkten Ressourcen-Zeilen entfernen, bevor ein Auswahlfeld aktiviert wird.', true);
+      return;
+    }
+    openAddAfModal(tsId);
+  }
 }
 
 function renderAuswahlfeld(tsId, af){
@@ -730,8 +753,7 @@ function renderAuswahlfeld(tsId, af){
   const activeOpt = optionen.find(o => o.id === activeOptionByAf[af.id]) || optionen[0];
   return `
     <div class="fieldblock">
-      <div class="afhead">${af.name} <span class="ftag">${optionen.length} Optionen</span> ${af.mehrfachauswahl ? '<span class="badge">Mehrfachauswahl</span>' : ''}
-        <button class="icobtn" onclick="deleteAuswahlfeld('${af.id}')">🗑</button></div>
+      <div class="afhead">${af.name} <span class="ftag">${optionen.length} Optionen</span> ${af.mehrfachauswahl ? '<span class="badge">Mehrfachauswahl</span>' : ''}</div>
       <div class="opttabsrow">
         <div class="opttabs">
           <button type="button" class="opttab addnew" onclick="openAddOptModal('${af.id}')">+ Option</button>
@@ -759,12 +781,16 @@ function toggleOptMenu(optId){
 document.addEventListener('click', () => { document.querySelectorAll('.optmenu').forEach(m => m.classList.remove('show')); });
 
 function renderOption(afId, opt){
+  return renderRessourcenTabelle('option', opt.id, opt.ressourcenzeile);
+}
+
+function renderRessourcenTabelle(kontextTyp, kontextId, zeilen){
   return `
     <div class="nest" style="margin-left:0;padding-left:0;border-left:none;">
       <table class="res">
         <thead><tr><th>Typ</th><th>Artikel</th><th>Menge</th><th class="c-tf" title="Teilflächen-Logik (noch ohne Funktion)">TF</th><th></th></tr></thead>
         <tbody>
-          ${(opt.ressourcenzeile||[]).map(rz => `
+          ${(zeilen||[]).map(rz => `
             <tr>
               <td><span class="pill ${rz.kategorie}">${rz.kategorie}</span></td>
               <td class="artikelcell">
@@ -776,8 +802,8 @@ function renderOption(afId, opt){
             </tr>`).join('')}
         </tbody>
       </table>
-      <button class="btnlink" style="margin-top:6px;" onclick="toggleRzForm('${opt.id}')">+ Artikel hinzufügen</button>
-      <div id="rzform-${opt.id}" style="display:none;"></div>
+      <button class="btnlink" style="margin-top:6px;" onclick="toggleRzForm('${kontextTyp}','${kontextId}')">+ Artikel hinzufügen</button>
+      <div id="rzform-${kontextId}" style="display:none;"></div>
     </div>`;
 }
 
@@ -919,7 +945,7 @@ async function addAuswahlfeld(tsId, name, mehrfachauswahl){
   return true;
 }
 async function deleteAuswahlfeld(id){
-  if(!(await confirmDialog('Auswahlfeld wirklich loeschen?'))) return;
+  if(!(await confirmDialog('Auswahlfeld wirklich entfernen? Alle Optionen und deren Ressourcen-Zeilen gehen dabei verloren.'))) return;
   const { error } = await sb.from('auswahlfeld').delete().eq('id', id);
   if(error){ showToast(friendlyError(error), true); return; }
   await loadArbeitsschritte();
@@ -994,8 +1020,8 @@ function artikelOptionsHtml(kategorie){
 }
 
 let rzBuilders = {};
-function toggleRzForm(optId){
-  const wrap = $(`rzform-${optId}`);
+function toggleRzForm(kontextTyp, kontextId){
+  const wrap = $(`rzform-${kontextId}`);
   if(wrap.style.display !== 'none' && wrap.innerHTML){ wrap.style.display = 'none'; wrap.innerHTML=''; return; }
   wrap.style.display = '';
   wrap.innerHTML = `
@@ -1030,7 +1056,7 @@ function toggleRzForm(optId){
   katSel.addEventListener('change', () => { artSel.innerHTML = artikelOptionsHtml(katSel.value); newWrap.style.display='none'; });
   artSel.addEventListener('change', () => { newWrap.style.display = artSel.value === '__new__' ? '' : 'none'; });
 
-  rzBuilders[optId] = createAusdruckBuilder(wrap.querySelector('.rzAusdruck'), undefined);
+  rzBuilders[kontextId] = createAusdruckBuilder(wrap.querySelector('.rzAusdruck'), undefined);
 
   wrap.querySelector('.rzSave').addEventListener('click', async () => {
     const statusEl = wrap.querySelector('.rzStatus');
@@ -1051,12 +1077,12 @@ function toggleRzForm(optId){
       await loadArtikel();
     }
 
-    const builder = rzBuilders[optId];
+    const builder = rzBuilders[kontextId];
     const node = builder.getNode();
     if(!node){ statusEl.textContent = 'Bitte eine Menge-Formel angeben.'; statusEl.className='status err'; return; }
 
     const { error } = await sb.from('ressourcenzeile').insert({
-      option_id: optId, kategorie, artikel_id: artikelId, menge_ausdruck: node,
+      [`${kontextTyp}_id`]: kontextId, kategorie, artikel_id: artikelId, menge_ausdruck: node,
       zugang_stufe1: parseFloat(wrap.querySelector('.rzZug1').value) || 1,
       zugang_stufe2: parseFloat(wrap.querySelector('.rzZug2').value) || 1,
       zugang_stufe3: parseFloat(wrap.querySelector('.rzZug3').value) || 1,
@@ -1106,7 +1132,16 @@ async function duplicateTeilschrittInto(asId, ts, reihenfolge){
   const { data: neuTs, error } = await sb.from('teilschritt')
     .insert({ arbeitsschritt_id: asId, name: ts.name, beschreibung: ts.beschreibung, reihenfolge }).select().single();
   if(error) throw error;
-  for(const af of (ts.auswahlfeld || [])){
+  for(const rz of (ts.ressourcenzeile || [])){
+    const { error: rzErr } = await sb.from('ressourcenzeile').insert({
+      teilschritt_id: neuTs.id, kategorie: rz.kategorie, artikel_id: rz.artikel_id,
+      bezeichnung_override: rz.bezeichnung_override, preis_override: rz.preis_override, menge_ausdruck: rz.menge_ausdruck,
+      zugang_stufe1: rz.zugang_stufe1, zugang_stufe2: rz.zugang_stufe2, zugang_stufe3: rz.zugang_stufe3, zugang_stufe4: rz.zugang_stufe4
+    });
+    if(rzErr) throw rzErr;
+  }
+  if(ts.auswahlfeld){
+    const af = ts.auswahlfeld;
     const { data: neuAf, error: afErr } = await sb.from('auswahlfeld')
       .insert({ teilschritt_id: neuTs.id, name: af.name, mehrfachauswahl: af.mehrfachauswahl, reihenfolge: af.reihenfolge }).select().single();
     if(afErr) throw afErr;
@@ -1168,8 +1203,10 @@ let rzEditCurrentId = null;
 function findRessourcenzeileKontext(rzId){
   for(const as of ARBEITSSCHRITTE){
     for(const ts of (as.teilschritt || [])){
-      for(const af of (ts.auswahlfeld || [])){
-        for(const opt of (af.auswahloption || [])){
+      const direkt = (ts.ressourcenzeile || []).find(r => r.id === rzId);
+      if(direkt) return { rz: direkt, optName: '(gilt immer)', tsName: ts.name, asName: as.name };
+      if(ts.auswahlfeld){
+        for(const opt of (ts.auswahlfeld.auswahloption || [])){
           const rz = (opt.ressourcenzeile || []).find(r => r.id === rzId);
           if(rz) return { rz, optName: opt.name, tsName: ts.name, asName: as.name };
         }
@@ -1216,10 +1253,10 @@ async function duplicateOption(optId){
   let afId = null, optObj = null, geschwister = [];
   for(const as of ARBEITSSCHRITTE){
     for(const ts of (as.teilschritt || [])){
-      for(const af of (ts.auswahlfeld || [])){
-        const found = (af.auswahloption || []).find(o => o.id === optId);
-        if(found){ afId = af.id; optObj = found; geschwister = af.auswahloption; break; }
-      }
+      const af = ts.auswahlfeld;
+      if(!af) continue;
+      const found = (af.auswahloption || []).find(o => o.id === optId);
+      if(found){ afId = af.id; optObj = found; geschwister = af.auswahloption; break; }
     }
   }
   if(!optObj) return;
