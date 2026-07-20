@@ -111,6 +111,19 @@ td{padding:6px 6px;border-bottom:1px solid var(--soft);vertical-align:top;}
   padding:8px 0;border-bottom:2px solid transparent;margin-bottom:-1px;}
 .opttab.on{color:var(--primary);border-bottom-color:var(--primary);}
 .opttab.addnew{color:var(--primary);opacity:.7;}
+.opttabwrap{position:relative;display:inline-flex;align-items:center;}
+.opttab-caret{font-size:8px;color:var(--muted);cursor:pointer;padding:8px 4px 8px 2px;background:none;border:none;margin-bottom:-1px;}
+.optmenu{display:none;position:absolute;left:0;top:100%;margin-top:2px;background:#fff;border:1px solid var(--line);
+  border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.16);z-index:20;min-width:160px;overflow:hidden;}
+.optmenu.show{display:block;}
+.optmenu button{display:block;width:100%;text-align:left;font:inherit;font-size:12.5px;color:var(--ink);
+  background:none;border:none;padding:8px 12px;cursor:pointer;}
+.optmenu button:hover{background:var(--soft);}
+.optmenu button.danger{color:var(--danger);}
+th.c-tf,td.c-tf{width:34px;text-align:center;}
+td.artikelcell b{font-weight:600;color:var(--ink);}
+td.artikelcell span{color:var(--muted);font-size:11px;}
+td.artikelcell span:before{content:"· ";}
 
 .pill{display:inline-block;font-size:9.5px;font-weight:700;border-radius:5px;padding:2px 7px;white-space:nowrap;text-transform:none;}
 .pill.personal{background:#E7EEFA;color:#31507A;}
@@ -566,7 +579,7 @@ async function loadArbeitsschritte(){
           auswahloption ( id, name, reihenfolge,
             ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck,
               zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4,
-              artikel_id, artikel(bezeichnung, einheit) ) ) ) )`)
+              artikel_id, artikel(bezeichnung, einheit, artikelnummer_knecht) ) ) ) )`)
     .eq('offertentyp_id', currentOffertentypId).order('reihenfolge');
   if(error){ console.error(error); return; }
   ARBEITSSCHRITTE = data;
@@ -674,7 +687,15 @@ function renderAuswahlfeld(tsId, af){
         <button class="icobtn" onclick="deleteAuswahlfeld('${af.id}')">🗑</button></div>
       <div class="opttabsrow">
         <div class="opttabs">
-          ${optionen.map(o => `<button class="opttab ${o.id===activeOpt?.id?'on':''}" onclick="waehleOption('${af.id}','${o.id}')">${o.name}</button>`).join('')}
+          ${optionen.map(o => `
+            <div class="opttabwrap">
+              <button class="opttab ${o.id===activeOpt?.id?'on':''}" onclick="waehleOption('${af.id}','${o.id}')">${o.name}</button>
+              <button type="button" class="opttab-caret" onclick="event.stopPropagation(); toggleOptMenu('${o.id}')">▾</button>
+              <div class="optmenu" id="optmenu-${o.id}">
+                <button onclick="duplicateOption('${o.id}')">⧉ Duplizieren</button>
+                <button class="danger" onclick="deleteOption('${o.id}')">🗑 Löschen</button>
+              </div>
+            </div>`).join('')}
         </div>
       </div>
       ${activeOpt ? renderOption(af.id, activeOpt) : '<div class="hint">Noch keine Option vorhanden.</div>'}
@@ -685,28 +706,33 @@ function renderAuswahlfeld(tsId, af){
     </div>`;
 }
 
+function toggleOptMenu(optId){
+  const menu = document.getElementById('optmenu-' + optId);
+  const wasOpen = menu.classList.contains('show');
+  document.querySelectorAll('.optmenu').forEach(m => m.classList.remove('show'));
+  if(!wasOpen) menu.classList.add('show');
+}
+document.addEventListener('click', () => { document.querySelectorAll('.optmenu').forEach(m => m.classList.remove('show')); });
+
 function renderOption(afId, opt){
   return `
     <div class="nest" style="margin-left:0;padding-left:0;border-left:none;">
       <table class="res">
-        <thead><tr><th>Typ</th><th>Artikel</th><th>Menge-Formel</th><th></th></tr></thead>
+        <thead><tr><th>Typ</th><th>Artikel</th><th>Menge</th><th class="c-tf" title="Teilflächen-Logik (noch ohne Funktion)">TF</th><th></th></tr></thead>
         <tbody>
           ${(opt.ressourcenzeile||[]).map(rz => `
             <tr>
               <td><span class="pill ${rz.kategorie}">${rz.kategorie}</span></td>
-              <td>${rz.bezeichnung_override || rz.artikel?.bezeichnung || '(unbenannt)'}</td>
+              <td class="artikelcell">
+                ${rz.bezeichnung_override ? `<b>${rz.bezeichnung_override}</b>` : `<b>${rz.artikel?.bezeichnung || '(unbenannt)'}</b><span>${rz.artikel?.artikelnummer_knecht || ''}${rz.artikel?.einheit ? ' · ' + rz.artikel.einheit : ''}</span>`}
+              </td>
               <td>${ausdruckPreview(rz.menge_ausdruck)} <button class="icobtn" onclick="openRzEditModal('${rz.id}')" title="Formel anpassen">✎</button></td>
+              <td class="c-tf"><input type="checkbox" checked disabled title="Teilflächen-Logik (noch ohne Funktion)"></td>
               <td><button class="icobtn" onclick="deleteRessourcenzeile('${rz.id}')">🗑</button></td>
             </tr>`).join('')}
         </tbody>
       </table>
-      <div class="row" style="margin-top:6px;justify-content:space-between;align-items:center;">
-        <button class="btnlink" onclick="toggleRzForm('${opt.id}')">+ Ressourcenzeile hinzufügen</button>
-        <span style="display:flex;gap:14px;">
-          <button class="btnlink" onclick="duplicateOption('${opt.id}')">⧉ Option duplizieren</button>
-          <button class="btnlink" style="color:var(--danger);" onclick="deleteOption('${opt.id}')">Option "${opt.name}" löschen</button>
-        </span>
-      </div>
+      <button class="btnlink" style="margin-top:6px;" onclick="toggleRzForm('${opt.id}')">+ Ressourcenzeile hinzufügen</button>
       <div id="rzform-${opt.id}" style="display:none;"></div>
     </div>`;
 }
