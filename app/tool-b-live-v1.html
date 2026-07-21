@@ -406,8 +406,8 @@ td.artikelcell span:before{content:"· ";}
   <div class="modal">
     <div class="modalhead"><div class="sub" id="rzSonderContext"></div></div>
     <div class="fld">
-      <label>Sonderposition (exakter Name aus Einstellungen -> Sonderpositionen)</label>
-      <input type="text" id="rzSonderInput" placeholder="z.B. Betonpumpe">
+      <label>Sonderposition</label>
+      <select id="rzSonderSelect"><option value="">Wird geladen…</option></select>
       <div id="rzSonderMatchStatus" class="hint" style="margin-top:4px;"></div>
     </div>
     <div class="fld">
@@ -1767,40 +1767,45 @@ function anwendenSonderpositionAuswahl(typ, id, name){
     $('rzSonderMengeFld').classList.add('hidden');
   }
 }
-async function suchSonderpositionNachName(){
-  const name = $('rzSonderInput').value.trim();
+// Auswahlliste wird bei jedem Oeffnen des Fensters frisch geladen (nicht aus
+// einem beim Seitenaufbau vorgeladenen Zwischenspeicher) - so ist sie immer
+// aktuell und ein Ladefehler ist sofort als Meldung sichtbar.
+async function ladeSonderpositionAuswahl(){
+  $('rzSonderSelect').innerHTML = '<option value="">Wird geladen…</option>';
+  const [sg, zg, sp] = await Promise.all([
+    sb.from('staffelgruppe').select('id,name').order('name'),
+    sb.from('zonengruppe').select('id,name').order('name'),
+    sb.from('sonderposition_typ').select('id,name').order('name')
+  ]);
+  const fehler = sg.error || zg.error || sp.error;
+  if(fehler){
+    $('rzSonderSelect').innerHTML = `<option value="">Fehler beim Laden</option>`;
+    $('rzSonderMatchStatus').textContent = 'Fehler beim Laden: ' + friendlyError(fehler);
+    $('rzSonderMatchStatus').style.color = 'var(--danger)';
+    return;
+  }
+  const optionen = [
+    ...(sg.data || []).map(x => ({ typ: 'staffelgruppe', badge: 'Staffel', ...x })),
+    ...(zg.data || []).map(x => ({ typ: 'zonengruppe', badge: 'Zone', ...x })),
+    ...(sp.data || []).map(x => ({ typ: 'sonderposition_typ', badge: 'Spezial', ...x }))
+  ];
+  $('rzSonderSelect').innerHTML = '<option value="">Bitte wählen…</option>' +
+    optionen.map(o => `<option value="${o.typ}::${o.id}">${o.name} (${o.badge})</option>`).join('')
+    || '<option value="">Keine Sonderpositionen erfasst - siehe Einstellungen -> Sonderpositionen</option>';
+}
+$('rzSonderSelect').addEventListener('change', () => {
+  const val = $('rzSonderSelect').value;
   rzSonderQuelleTyp = null; rzSonderQuelleId = null; rzSonderKategorie = null;
   $('rzSonderMengeFld').classList.add('hidden');
   $('rzSonderKategorieSelect').classList.add('hidden');
   $('rzSonderKategorieAnzeige').classList.remove('hidden');
   $('rzSonderKategorieAnzeige').textContent = '– (wird von den Artikeln der Sonderposition übernommen)';
-  $('rzSonderMatchStatus').style.color = '';
-  if(!name){ $('rzSonderMatchStatus').textContent = ''; return; }
-  $('rzSonderMatchStatus').textContent = 'Suche …';
-  const [sg, zg, sp] = await Promise.all([
-    sb.from('staffelgruppe').select('id,name').ilike('name', name),
-    sb.from('zonengruppe').select('id,name').ilike('name', name),
-    sb.from('sonderposition_typ').select('id,name').ilike('name', name)
-  ]);
-  const fehler = sg.error || zg.error || sp.error;
-  if(fehler){
-    $('rzSonderMatchStatus').textContent = 'Fehler bei der Suche: ' + friendlyError(fehler);
-    $('rzSonderMatchStatus').style.color = 'var(--danger)';
-    return;
-  }
-  const treffer = sg.data[0] ? { typ: 'staffelgruppe', badge: 'Staffel', row: sg.data[0] }
-    : zg.data[0] ? { typ: 'zonengruppe', badge: 'Zone', row: zg.data[0] }
-    : sp.data[0] ? { typ: 'sonderposition_typ', badge: 'Spezial', row: sp.data[0] }
-    : null;
-  if(!treffer){
-    $('rzSonderMatchStatus').textContent = `Keine Sonderposition mit dem Namen "${name}" gefunden - siehe Einstellungen -> Sonderpositionen fuer die exakte Schreibweise.`;
-    $('rzSonderMatchStatus').style.color = 'var(--danger)';
-    return;
-  }
-  $('rzSonderMatchStatus').textContent = `✓ Gefunden (${treffer.badge})`;
-  anwendenSonderpositionAuswahl(treffer.typ, treffer.row.id, treffer.row.name);
-}
-$('rzSonderInput').addEventListener('change', suchSonderpositionNachName);
+  $('rzSonderMatchStatus').textContent = '';
+  if(!val) return;
+  const [typ, id] = val.split('::');
+  const name = $('rzSonderSelect').selectedOptions[0].textContent;
+  anwendenSonderpositionAuswahl(typ, id, name);
+});
 
 function openRzSonderAddModal(kontextTyp, kontextId){
   const info = findKontextInfo(kontextTyp, kontextId);
@@ -1809,7 +1814,6 @@ function openRzSonderAddModal(kontextTyp, kontextId){
   rzSonderQuelleTyp = null;
   rzSonderQuelleId = null;
   rzSonderKategorie = null;
-  $('rzSonderInput').value = '';
   $('rzSonderMatchStatus').textContent = '';
   $('rzSonderKategorieAnzeige').textContent = '– (wird von den Artikeln der Sonderposition übernommen)';
   $('rzSonderKategorieAnzeige').classList.remove('hidden');
@@ -1821,6 +1825,7 @@ function openRzSonderAddModal(kontextTyp, kontextId){
   $('rzSonderStatus').textContent = '';
   $('rzSonderStatus').className = 'status';
   $('rzSonderOverlay').classList.add('show');
+  ladeSonderpositionAuswahl();
 }
 $('rzSonderCancel').addEventListener('click', () => $('rzSonderOverlay').classList.remove('show'));
 $('rzSonderSave').addEventListener('click', async () => {
