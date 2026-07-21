@@ -118,7 +118,9 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
 .ovl{position:fixed;inset:0;background:rgba(35,43,53,.45);display:none;align-items:center;justify-content:center;z-index:60;}
 .ovl.show{display:flex;}
 #artikelPickerOvl{z-index:65;}
+#zonePlzOvl{z-index:65;}
 #ovl{z-index:66;}
+.zonePlzFeld{padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px;width:100%;box-sizing:border-box;}
 .ovlbox{background:#fff;border-radius:12px;max-width:400px;width:100%;padding:18px 20px;box-shadow:0 12px 40px rgba(0,0,0,.25);}
 .ovlbox.xwide{max-width:820px;max-height:88vh;overflow-y:auto;}
 .ovlmsg{font-size:13px;color:var(--ink);margin-bottom:12px;}
@@ -232,14 +234,23 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
     <div class="ovlmsg" id="zgEditTitle"></div>
     <div class="hint" style="margin-bottom:12px;">Die PLZ des Kunden wird mit den PLZ-Listen der Zonen unten verglichen - die passende Zone bestimmt, welcher Artikel (und damit welcher Pauschalpreis) in der Offerte verrechnet wird.</div>
     <div id="zgEditZonenList"></div>
-    <div class="hint" style="margin-top:10px;">Neue Zone erstellen (nur Zone-Nummer + Artikel) - danach erscheint darunter ein eigenes Feld für diese Zone, in das die PLZ eingetragen werden.</div>
+    <div class="hint" style="margin-top:10px;">Neue Zone erstellen (nur Artikel wählen) - danach kannst du für diese Zone die PLZ in einem eigenen Fenster erfassen.</div>
     <div class="row" style="align-items:end;margin-top:6px;">
-      <div class="fld" style="max-width:100px;"><label>Zone-Nr.</label><input id="zgEditNummer" type="number" step="1"></div>
       <div class="fld"><label>Artikel</label><button type="button" class="btn" id="zgEditArtikelBtn" style="width:100%;text-align:left;background:#fff;color:var(--ink);border:1px solid var(--line);">Artikel wählen…</button></div>
       <button class="btn" id="zgEditAddBtn">+ Zone erstellen</button>
     </div>
     <div class="status" id="zgEditStatus"></div>
     <div class="ovlbtns"><button class="btnlink" id="zgEditClose">Schliessen</button></div>
+  </div>
+</div>
+
+<div class="ovl" id="zonePlzOvl">
+  <div class="ovlbox xwide">
+    <div class="ovlmsg" id="zonePlzTitle">PLZ erfassen</div>
+    <div class="hint" style="margin-bottom:12px;">Pro Feld eine PLZ. Sobald du ins letzte Feld etwas einträgst, erscheint automatisch ein neues leeres Feld.</div>
+    <div id="zonePlzGrid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;max-height:50vh;overflow-y:auto;padding-right:4px;"></div>
+    <div class="status" id="zonePlzStatus" style="margin-top:10px;"></div>
+    <div class="ovlbtns"><button class="btnlink" id="zonePlzClose">Schliessen</button><button class="btn" id="zonePlzSaveBtn">Speichern</button></div>
   </div>
 </div>
 
@@ -875,7 +886,6 @@ function openZonengruppeEdit(id){
   zgEditId = id;
   zgEditGewaehlterArtikel = null;
   $('zgEditArtikelBtn').textContent = 'Artikel wählen…';
-  $('zgEditNummer').value = '';
   $('zgEditStatus').textContent = ''; $('zgEditStatus').className = 'status';
   renderZgEditModal();
   $('zgEditOvl').classList.add('show');
@@ -886,59 +896,82 @@ function renderZgEditModal(){
   $('zgEditTitle').textContent = `Sonderposition ${zg.name}`;
   const zonen = ZONEN.filter(z => z.zonengruppe_id === zgEditId).sort((a,b) => a.nummer - b.nummer);
   $('zgEditZonenList').innerHTML = zonen.map(z => {
-    const plzListe = ZONE_PLZ.filter(p => p.zone_id === z.id).map(p => p.plz);
+    const anzahlPlz = ZONE_PLZ.filter(p => p.zone_id === z.id).length;
     return `
     <div class="zonecard" data-zone="${z.id}">
       <div class="zonecard-head" style="cursor:default;">
         <span><b>Zone ${z.nummer}</b> · ${artikelDetailText(z.artikel_id)}</span>
         <button class="icobtn danger" onclick="deleteZone('${z.id}')" title="Zone löschen">🗑</button>
       </div>
-      <div class="fld" style="margin-top:8px;"><label>PLZ-Liste (Komma oder Zeilenumbruch getrennt)</label>
-        <textarea class="zonePlzText" rows="3" data-zone="${z.id}">${plzListe.join(', ')}</textarea>
-      </div>
-      <button class="btn zonePlzSave" data-zone="${z.id}">PLZ speichern</button>
-      <div class="status zonePlzStatus" data-zone="${z.id}"></div>
+      <div class="hint" style="margin-top:6px;">${anzahlPlz ? anzahlPlz + ' PLZ hinterlegt' : 'Noch keine PLZ hinterlegt'}</div>
+      <button class="btn" onclick="openZonePlzEdit('${z.id}')" style="margin-top:6px;">PLZ bearbeiten</button>
     </div>`;
   }).join('') || '<div class="hint">Noch keine Zonen.</div>';
-
-  $('zgEditZonenList').querySelectorAll('.zonePlzSave').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const zoneId = btn.dataset.zone;
-      const zc = btn.closest('.zonecard');
-      const raw = zc.querySelector('.zonePlzText').value;
-      const statusEl = zc.querySelector('.zonePlzStatus');
-      const plzListe = [...new Set(raw.split(/[,\n]/).map(s => s.trim()).filter(Boolean))];
-      const { error: delErr } = await sb.from('zone_plz').delete().eq('zone_id', zoneId);
-      if(delErr){ statusEl.textContent = friendlyError(delErr); statusEl.className = 'status err'; return; }
-      if(plzListe.length){
-        const { error: insErr } = await sb.from('zone_plz').insert(plzListe.map(plz => ({ zone_id: zoneId, plz })));
-        if(insErr){ statusEl.textContent = friendlyError(insErr); statusEl.className = 'status err'; return; }
-      }
-      statusEl.textContent = 'Gespeichert.'; statusEl.className = 'status ok';
-      await loadZonengruppen();
-    });
-  });
 }
 $('zgEditArtikelBtn').addEventListener('click', () => {
   openArtikelPicker(a => { zgEditGewaehlterArtikel = a; $('zgEditArtikelBtn').textContent = artikelDetailText(a.id); });
 });
 $('zgEditAddBtn').addEventListener('click', async () => {
-  const nummer = parseInt($('zgEditNummer').value, 10);
-  if(isNaN(nummer) || !zgEditGewaehlterArtikel){
-    $('zgEditStatus').textContent = 'Bitte Nummer und Artikel angeben.'; $('zgEditStatus').className = 'status err'; return;
+  if(!zgEditGewaehlterArtikel){
+    $('zgEditStatus').textContent = 'Bitte Artikel wählen.'; $('zgEditStatus').className = 'status err'; return;
   }
+  const bestehende = ZONEN.filter(z => z.zonengruppe_id === zgEditId);
   const { error } = await sb.from('zone').insert({
-    zonengruppe_id: zgEditId, nummer, artikel_id: zgEditGewaehlterArtikel.id,
-    reihenfolge: naechsteReihenfolge(ZONEN.filter(z => z.zonengruppe_id === zgEditId))
+    zonengruppe_id: zgEditId, nummer: bestehende.length + 1, artikel_id: zgEditGewaehlterArtikel.id,
+    reihenfolge: naechsteReihenfolge(bestehende)
   });
   if(error){ $('zgEditStatus').textContent = friendlyError(error); $('zgEditStatus').className = 'status err'; return; }
-  $('zgEditNummer').value = ''; zgEditGewaehlterArtikel = null;
+  zgEditGewaehlterArtikel = null;
   $('zgEditArtikelBtn').textContent = 'Artikel wählen…';
   $('zgEditStatus').textContent = 'Zone hinzugefügt.'; $('zgEditStatus').className = 'status ok';
   await loadZonengruppen();
   renderZgEditModal();
 });
 $('zgEditClose').addEventListener('click', () => $('zgEditOvl').classList.remove('show'));
+
+// ---------------------------------------------------------------------------
+// PLZ pro Zone: eigenes Fenster mit vielen kleinen Einzelfeldern statt einem
+// Textfeld mit Komma-Trennung - weniger fehleranfaellig (kein Vertippen bei
+// Kommas/Leerzeichen). Start mit einem leeren Feld, sobald das jeweils letzte
+// Feld befuellt wird, kommt automatisch ein neues leeres Feld dazu.
+// ---------------------------------------------------------------------------
+let zonePlzEditZoneId = null;
+function zonePlzAddFeld(value){
+  const grid = $('zonePlzGrid');
+  const inp = document.createElement('input');
+  inp.type = 'text'; inp.className = 'zonePlzFeld'; inp.value = value || '';
+  inp.addEventListener('input', () => {
+    if(inp === grid.lastElementChild && inp.value.trim() !== ''){
+      zonePlzAddFeld('');
+    }
+  });
+  grid.appendChild(inp);
+  return inp;
+}
+function openZonePlzEdit(zoneId){
+  zonePlzEditZoneId = zoneId;
+  const z = ZONEN.find(x => x.id === zoneId);
+  $('zonePlzTitle').textContent = z ? `PLZ für Zone ${z.nummer} erfassen` : 'PLZ erfassen';
+  $('zonePlzGrid').innerHTML = '';
+  const bestehende = ZONE_PLZ.filter(p => p.zone_id === zoneId).map(p => p.plz);
+  bestehende.forEach(plz => zonePlzAddFeld(plz));
+  zonePlzAddFeld('');
+  $('zonePlzStatus').textContent = ''; $('zonePlzStatus').className = 'status';
+  $('zonePlzOvl').classList.add('show');
+}
+$('zonePlzSaveBtn').addEventListener('click', async () => {
+  const plzListe = [...new Set([...document.querySelectorAll('#zonePlzGrid .zonePlzFeld')].map(i => i.value.trim()).filter(Boolean))];
+  const { error: delErr } = await sb.from('zone_plz').delete().eq('zone_id', zonePlzEditZoneId);
+  if(delErr){ $('zonePlzStatus').textContent = friendlyError(delErr); $('zonePlzStatus').className = 'status err'; return; }
+  if(plzListe.length){
+    const { error: insErr } = await sb.from('zone_plz').insert(plzListe.map(plz => ({ zone_id: zonePlzEditZoneId, plz })));
+    if(insErr){ $('zonePlzStatus').textContent = friendlyError(insErr); $('zonePlzStatus').className = 'status err'; return; }
+  }
+  await loadZonengruppen();
+  renderZgEditModal();
+  $('zonePlzOvl').classList.remove('show');
+});
+$('zonePlzClose').addEventListener('click', () => $('zonePlzOvl').classList.remove('show'));
 
 async function deleteZone(id){
   if(!(await confirmDialog('Zone wirklich löschen?'))) return;
