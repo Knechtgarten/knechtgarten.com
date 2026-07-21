@@ -264,6 +264,10 @@ td.artikelcell span:before{content:"· ";}
 .logincard h2{font-size:16px;color:var(--primary);margin-bottom:14px;}
 .logincard .fld{margin-bottom:10px;}
 .hidden{display:none !important;}
+/* Formel-Bibliothek ist fuer Mitarbeiter nur lesbar (deckt sich mit der RLS-
+   Regel fuer eingabefeld/term/term_abhaengigkeit) - Schreib-Kontrollen werden
+   per body-Klasse ausgeblendet statt die ganze Seite zu sperren. */
+body.mitarbeiter-rolle .admin-only{display:none !important;}
 </style>
 </head>
 <body>
@@ -324,6 +328,7 @@ td.artikelcell span:before{content:"· ";}
     <div class="modalhead" style="display:flex;align-items:flex-start;gap:8px;">
       <div class="sub" id="rzEditContext" style="flex:1;"></div>
       <button class="notizbtn" id="rzEditNotizBtn" onclick="document.getElementById('rzEditNotizBox').classList.toggle('show')" title="Interne Notiz">🗒</button>
+      <button class="notizbtn" id="rzEditCloseX" title="Schliessen">✕</button>
     </div>
     <div class="notizbox" id="rzEditNotizBox"><textarea id="rzEditNotizInput" placeholder="Nur für dich/das Team sichtbar"></textarea></div>
 
@@ -494,11 +499,11 @@ td.artikelcell span:before{content:"· ";}
       <thead><tr><th>Name</th><th>Einheit</th><th>Geltung</th><th></th></tr></thead>
       <tbody id="eingabefelderBody"></tbody>
     </table>
-    <div class="row">
+    <div class="row admin-only">
       <div class="fld"><label>Name</label><input id="newEfName" placeholder="z.B. Beckentiefe"></div>
       <div class="fld"><label>Einheit</label><input id="newEfEinheit" placeholder="z.B. m"></div>
     </div>
-    <button class="btn" id="addEfBtn">+ Eingabefeld hinzufügen</button>
+    <button class="btn admin-only" id="addEfBtn">+ Eingabefeld hinzufügen</button>
     <div class="status" id="efStatus"></div>
   </div>
 
@@ -509,7 +514,7 @@ td.artikelcell span:before{content:"· ";}
       <thead><tr><th>Name</th><th>Typ</th><th>Wert / Formel</th><th>Einheit</th><th></th></tr></thead>
       <tbody id="termsBody"></tbody>
     </table>
-    <button class="btnlink" id="showNewTermBtn">+ Neuer Term</button>
+    <button class="btnlink admin-only" id="showNewTermBtn">+ Neuer Term</button>
     <div id="newTermForm" style="display:none;margin-top:10px;">
       <div class="row">
         <div class="fld"><label>Name</label><input id="newTermName" placeholder="z.B. Fundamentdicke"></div>
@@ -786,7 +791,6 @@ function aktualisiereModellAnsicht(){
 
 let currentSeite = 'arbeitsschritte';
 function zeigeSeite(seite){
-  if(seite === 'formelbibliothek' && aktuelleRolle !== 'admin') return;
   currentSeite = seite;
   const istFormel = seite === 'formelbibliothek';
   $('formelBibliothekView').classList.toggle('hidden', !istFormel);
@@ -894,7 +898,7 @@ function renderEingabefelder(){
       <td>${ef.name}</td>
       <td>${ef.einheit}</td>
       <td>${ef.offertentyp_id ? 'dieser Offertentyp' : '<span class="badge">Allgemein</span>'}</td>
-      <td><button class="icobtn" onclick="deleteEingabefeld('${ef.id}')">🗑</button></td>
+      <td><button class="icobtn admin-only" onclick="deleteEingabefeld('${ef.id}')">🗑</button></td>
     </tr>`).join('');
 }
 
@@ -905,7 +909,7 @@ function renderTerms(){
       <td><span class="badge">${t.typ}</span></td>
       <td>${t.typ === 'konstante' ? fmtNum(t.wert) : ausdruckPreview(t.ausdruck)}</td>
       <td>${t.einheit || ''}</td>
-      <td><button class="icobtn" onclick="deleteTerm('${t.id}')">🗑</button></td>
+      <td><button class="icobtn admin-only" onclick="deleteTerm('${t.id}')">🗑</button></td>
     </tr>`).join('');
 }
 
@@ -1886,6 +1890,12 @@ function renderRzEditTermline(targetId){
       spacer.className = 'termspacer';
       wrap.appendChild(spacer);
       wrap.appendChild(erzeugeCombofield(g));
+      if(rzEditGlieder.length > 1){
+        const rm = document.createElement('button');
+        rm.type = 'button'; rm.className = 'rm'; rm.textContent = '🗑';
+        rm.addEventListener('click', () => { rzEditGlieder.splice(0, 1); renderRzEditTermline(); });
+        wrap.appendChild(rm);
+      }
     }else{
       const group = document.createElement('div');
       group.className = 'termgroup';
@@ -1931,6 +1941,7 @@ function waehleVar(kind, id){
 $('varPickerCancel').addEventListener('click', () => $('varPickerOverlay').classList.remove('show'));
 
 $('rzEditCancel').addEventListener('click', () => { $('rzEditOverlay').classList.remove('show'); });
+$('rzEditCloseX').addEventListener('click', () => { $('rzEditOverlay').classList.remove('show'); });
 
 $('rzEditSave').addEventListener('click', async () => {
   if(rzEditMode === 'add' && !rzEditArtikelId){
@@ -2120,8 +2131,11 @@ async function pruefeAnmeldung(){
   document.getElementById('userbarText').textContent = `${benutzer.email} (${benutzer.rolle})`;
 
   $appMain.classList.remove('hidden');
-  $('navFormelBibliothek').classList.toggle('hidden', aktuelleRolle !== 'admin');
-  $('gearLink').classList.toggle('hidden', aktuelleRolle !== 'admin');
+  // Formel-Bibliothek und Einstellungen sind fuer alle eingeloggten Benutzer
+  // sichtbar (lesen) - nur die eigentlichen Schreib-Aktionen (Hinzufuegen/
+  // Loeschen) bleiben ueber .admin-only + diese body-Klasse Mitarbeitern
+  // verwehrt, deckungsgleich mit der RLS-Regel in der Datenbank.
+  document.body.classList.toggle('mitarbeiter-rolle', aktuelleRolle !== 'admin');
   return true;
 }
 
