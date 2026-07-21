@@ -1,11 +1,14 @@
 -- ============================================================================
 -- Offertentool 2027 - Systemwert-Terms: dritter Term-Typ neben Konstante/Formel.
 --
--- Anwendungsfall: Fahrzeit/Fahrstrecke eines EINZELNEN Lieferwagen-Transports
--- (Hin+Rueck), z.B. fuer eine Kiestransport-Ressourcenzeile mit der Menge-Formel
--- "Fahrzeit Hin+Rueck * Anzahl Fahrten". Im Unterschied zur bestehenden
--- Lieferwagenfahrzeit-Konfiguration (die einmal pro ganzem Bauteil rechnet) soll
--- dieser Wert innerhalb einer normalen Menge-Formel wie ein Term auswaehlbar sein.
+-- Anwendungsfall: Fahrzeit/Fahrstrecke einer EINFACHEN Fahrt (nicht Hin+Rueck)
+-- eines einzelnen Lieferwagen-Transports, z.B. fuer eine Kiestransport-
+-- Ressourcenzeile mit der Menge-Formel "Fahrzeit einfache Fahrt * 2 * Anzahl
+-- Fahrten" (falls Hin+Rueck noetig ist, wird das *2 direkt in der Formel
+-- ergaenzt - der Systemwert selbst bleibt bewusst die einfache Fahrt). Im
+-- Unterschied zur bestehenden Lieferwagenfahrzeit-Konfiguration (die einmal
+-- pro ganzem Bauteil rechnet) soll dieser Wert innerhalb einer normalen
+-- Menge-Formel wie ein Term auswaehlbar sein.
 --
 -- Ein Systemwert-Term hat keinen gespeicherten Wert/keine Formel - der Wert wird
 -- in Tool A zur Rechenzeit live ermittelt (Google Distance Matrix ab Kunde-PLZ,
@@ -15,7 +18,7 @@
 -- ============================================================================
 
 alter table term add column systemwert_key text null
-  check (systemwert_key in ('fahrzeit_hin_rueck_std', 'distanz_hin_rueck_km'));
+  check (systemwert_key in ('fahrzeit_einfach_std', 'distanz_einfach_km'));
 
 -- Alte Check-Constraints dynamisch entfernen (Namen koennen variieren) und mit
 -- der neuen systemwert-Variante neu anlegen.
