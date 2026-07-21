@@ -221,6 +221,7 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
       <label>Name wird für Auswahlmenu Sonderpositionen verwendet.</label>
       <input type="text" id="sgEditNameInput">
     </div>
+    <div class="fld"><label>Erklärung (Kartentext)</label><textarea id="sgEditErklaerungInput" rows="2"></textarea></div>
     <div class="hint" style="margin-bottom:12px;">Die berechnete Menge (z.B. m³) wird mit den Von/Bis-Bereichen unten verglichen - der erste passende Bereich bestimmt, welcher Artikel (und damit welcher Pauschalpreis) in der Offerte verrechnet wird. Die letzte Zeile ist immer leer zum Erfassen - sobald Von und Artikel ausgefüllt sind, wird automatisch gespeichert und eine neue leere Zeile erscheint.</div>
     <table class="sgtable">
       <thead><tr><th style="width:150px;">Von</th><th style="width:150px;">Bis</th><th>Artikel</th><th style="width:40px;"></th></tr></thead>
@@ -238,6 +239,7 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
       <label>Name wird für Auswahlmenu Sonderpositionen verwendet.</label>
       <input type="text" id="zgEditNameInput">
     </div>
+    <div class="fld"><label>Erklärung (Kartentext)</label><textarea id="zgEditErklaerungInput" rows="2"></textarea></div>
     <div class="hint" style="margin-bottom:12px;">Die PLZ des Kunden wird mit den PLZ-Listen der Zonen unten verglichen - die passende Zone bestimmt, welcher Artikel (und damit welcher Pauschalpreis) in der Offerte verrechnet wird.</div>
     <div id="zgEditZonenList"></div>
     <div class="row" style="align-items:end;margin-top:10px;">
@@ -719,7 +721,7 @@ let STAFFELSTUFEN = [];
 const STAFFELGRUPPE_FIX_NAME = 'Betonpumpe';
 
 async function loadStaffelgruppen(){
-  const { data: gruppen, error } = await sb.from('staffelgruppe').select('id,name').order('name');
+  const { data: gruppen, error } = await sb.from('staffelgruppe').select('id,name,erklaerung').order('name');
   if(error){ console.error(error); return; }
   STAFFELGRUPPEN = gruppen;
   if(!STAFFELGRUPPEN.some(g => g.name === STAFFELGRUPPE_FIX_NAME)){
@@ -737,7 +739,7 @@ function renderStaffelgruppen(){
   $('staffelgruppenListe').innerHTML = STAFFELGRUPPEN.map(sg => `
     <div class="card">
       <div class="cardlabel">${sg.name}</div>
-      <div class="hint">Sonderposition mit Staffelung für ${sg.name}:</div>
+      <div class="hint">${sg.erklaerung || `Sonderposition mit Staffelung für ${sg.name}:`}</div>
       <button class="btn" onclick="openStaffelgruppeEdit('${sg.id}')">Bearbeiten</button>
     </div>`).join('');
 }
@@ -763,6 +765,7 @@ function renderSgEditModal(){
   if(!sg) return;
   $('sgEditTitle').textContent = `Sonderposition ${sg.name}`;
   $('sgEditNameInput').value = sg.name;
+  $('sgEditErklaerungInput').value = sg.erklaerung || '';
   const stufen = STAFFELSTUFEN.filter(s => s.staffelgruppe_id === sgEditId).sort((a,b) => a.menge_von - b.menge_von);
   $('sgEditStufenBody').innerHTML = stufen.map(s => {
     const einheit = ARTIKEL.find(a => a.id === s.artikel_id)?.einheit || '';
@@ -844,6 +847,13 @@ $('sgEditNameInput').addEventListener('change', async () => {
   await loadStaffelgruppen();
   renderSgEditModal();
 });
+$('sgEditErklaerungInput').addEventListener('change', async () => {
+  const { error } = await sb.from('staffelgruppe').update({ erklaerung: $('sgEditErklaerungInput').value.trim() || null }).eq('id', sgEditId);
+  if(error){ $('sgEditStatus').textContent = friendlyError(error); $('sgEditStatus').className = 'status err'; return; }
+  $('sgEditStatus').textContent = 'Erklärung aktualisiert.'; $('sgEditStatus').className = 'status ok';
+  await loadStaffelgruppen();
+  renderSgEditModal();
+});
 $('sgEditClose').addEventListener('click', () => $('sgEditOvl').classList.remove('show'));
 
 async function deleteStaffelstufe(id){
@@ -862,7 +872,7 @@ let ZONEN = [];
 let ZONE_PLZ = [];
 
 async function loadZonengruppen(){
-  const { data: gruppen, error } = await sb.from('zonengruppe').select('id,name').order('name');
+  const { data: gruppen, error } = await sb.from('zonengruppe').select('id,name,erklaerung').order('name');
   if(error){ console.error(error); return; }
   ZONENGRUPPEN = gruppen;
   const { data: zonen, error: zErr } = await sb.from('zone').select('id,zonengruppe_id,nummer,artikel_id,reihenfolge').order('reihenfolge');
@@ -882,7 +892,7 @@ function renderZonengruppen(){
         <button class="icobtn" style="margin-left:auto;" onclick="openZonengruppeEdit('${zg.id}')" title="Bearbeiten">✎</button>
         <button class="icobtn danger" onclick="deleteZonengruppe('${zg.id}','${zg.name.replace(/'/g,"\\'")}')" title="Löschen">🗑</button>
       </div>
-      <div class="hint">Sonderposition mit PLZ-Zonen für ${zg.name}:</div>
+      <div class="hint">${zg.erklaerung || `Sonderposition mit PLZ-Zonen für ${zg.name}:`}</div>
     </div>`).join('');
 }
 
@@ -903,6 +913,7 @@ function renderZgEditModal(){
   if(!zg) return;
   $('zgEditTitle').textContent = `Sonderposition ${zg.name}`;
   $('zgEditNameInput').value = zg.name;
+  $('zgEditErklaerungInput').value = zg.erklaerung || '';
   const zonen = ZONEN.filter(z => z.zonengruppe_id === zgEditId).sort((a,b) => a.nummer - b.nummer);
   $('zgEditZonenList').innerHTML = zonen.map(z => {
     const plzListe = ZONE_PLZ.filter(p => p.zone_id === z.id).map(p => p.plz);
@@ -963,6 +974,13 @@ $('zgEditNameInput').addEventListener('change', async () => {
   const { error } = await sb.from('zonengruppe').update({ name: neuerName }).eq('id', zgEditId);
   if(error){ $('zgEditStatus').textContent = friendlyError(error); $('zgEditStatus').className = 'status err'; return; }
   $('zgEditStatus').textContent = 'Name aktualisiert.'; $('zgEditStatus').className = 'status ok';
+  await loadZonengruppen();
+  renderZgEditModal();
+});
+$('zgEditErklaerungInput').addEventListener('change', async () => {
+  const { error } = await sb.from('zonengruppe').update({ erklaerung: $('zgEditErklaerungInput').value.trim() || null }).eq('id', zgEditId);
+  if(error){ $('zgEditStatus').textContent = friendlyError(error); $('zgEditStatus').className = 'status err'; return; }
+  $('zgEditStatus').textContent = 'Erklärung aktualisiert.'; $('zgEditStatus').className = 'status ok';
   await loadZonengruppen();
   renderZgEditModal();
 });
