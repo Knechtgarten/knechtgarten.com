@@ -111,11 +111,6 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
 .subhead{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;font-weight:700;
   margin:12px 0 6px;}
 
-.zonecard{border:1px solid var(--line);border-radius:7px;padding:8px 10px;margin-bottom:8px;}
-.zonecard-head{display:flex;align-items:center;gap:10px;cursor:pointer;}
-.zonecard-head span:first-child{flex:1;font-size:12.5px;}
-.zonecard-body{margin-top:8px;}
-
 .ovl{position:fixed;inset:0;background:rgba(35,43,53,.45);display:none;align-items:center;justify-content:center;z-index:60;}
 .ovl.show{display:flex;}
 #artikelPickerOvl{z-index:65;}
@@ -237,25 +232,20 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
   <div class="ovlbox xwide">
     <div class="ovlmsg" id="zgEditTitle"></div>
     <div class="fld" style="max-width:340px;"><label>Name wird für Auswahlmenu Sonderpositionen verwendet (einmalig vergeben, danach gesperrt).</label><input type="text" id="zgEditNameInput"></div>
-    <div class="hint" style="margin-bottom:12px;">Die PLZ des Kunden wird mit den PLZ-Listen der Zonen unten verglichen - die passende Zone bestimmt, welcher Artikel (und damit welcher Pauschalpreis) in der Offerte verrechnet wird.</div>
-    <div id="zgEditZonenList"></div>
-    <div class="hint" style="margin-top:10px;">Artikel wählen, um eine neue Zone zu erstellen - danach kannst du für diese Zone die PLZ in einem eigenen Fenster erfassen.</div>
-    <div class="row" style="align-items:end;margin-top:6px;">
-      <div class="fld"><label>Artikel</label><button type="button" class="btn" id="zgEditArtikelBtn" style="width:100%;text-align:left;background:#fff;color:var(--ink);border:1px solid var(--line);">Artikel wählen…</button></div>
-      <button class="icobtn" id="zgEditClearBtn" title="Zurücksetzen">🗑</button>
-    </div>
+    <div class="hint" style="margin-bottom:12px;">Die PLZ des Kunden wird mit den PLZ-Listen der Zonen unten verglichen - die passende Zone bestimmt, welcher Artikel (und damit welcher Pauschalpreis) in der Offerte verrechnet wird. Die letzte Zeile ist immer leer zum Erfassen - sobald ein Artikel gewählt ist, wird automatisch gespeichert und eine neue leere Zeile erscheint.</div>
+    <table class="sgtable">
+      <thead><tr><th style="width:70px;">PLZ</th><th>Artikel</th><th style="width:40px;"></th></tr></thead>
+      <tbody id="zgEditZonenBody"></tbody>
+    </table>
     <div class="status" id="zgEditStatus"></div>
     <div class="ovlbtns"><button class="btnlink" id="zgEditClose">Schliessen</button></div>
   </div>
 </div>
 
 <div class="ovl" id="zonePlzOvl">
-  <div class="ovlbox xwide">
-    <div class="ovlmsg" id="zonePlzTitle">PLZ erfassen</div>
-    <div class="hint" style="margin-bottom:12px;">Pro Feld eine PLZ. Sobald du ins letzte Feld etwas einträgst, erscheint automatisch ein neues leeres Feld.</div>
-    <div id="zonePlzGrid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;max-height:50vh;overflow-y:auto;padding-right:4px;"></div>
-    <div class="status" id="zonePlzStatus" style="margin-top:10px;"></div>
-    <div class="ovlbtns"><button class="btnlink" id="zonePlzClose">Schliessen</button><button class="btn" id="zonePlzSaveBtn">Speichern</button></div>
+  <div class="ovlbox">
+    <div id="zonePlzGrid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;max-height:60vh;overflow-y:auto;padding-right:4px;"></div>
+    <div class="ovlbtns"><button class="btn" id="zonePlzCloseBtn">Fertig</button></div>
   </div>
 </div>
 
@@ -905,7 +895,6 @@ let zgEditGewaehlterArtikel = null;
 function openZonengruppeEdit(id){
   zgEditId = id;
   zgEditGewaehlterArtikel = null;
-  $('zgEditArtikelBtn').textContent = 'Artikel wählen…';
   $('zgEditStatus').textContent = ''; $('zgEditStatus').className = 'status';
   renderZgEditModal();
   $('zgEditOvl').classList.add('show');
@@ -917,26 +906,28 @@ function renderZgEditModal(){
   $('zgEditNameInput').value = zg.name;
   $('zgEditNameInput').readOnly = !!zg.name;
   const zonen = ZONEN.filter(z => z.zonengruppe_id === zgEditId).sort((a,b) => a.nummer - b.nummer);
-  $('zgEditZonenList').innerHTML = zonen.map(z => {
-    const anzahlPlz = ZONE_PLZ.filter(p => p.zone_id === z.id).length;
-    return `
-    <div class="zonecard" data-zone="${z.id}">
-      <div class="zonecard-head" style="cursor:default;">
-        <span><b>Zone ${z.nummer}</b> · ${artikelDetailText(z.artikel_id)}</span>
-        <button class="icobtn" onclick="openZonePlzEdit('${z.id}')" title="PLZ bearbeiten">📍</button>
-        <button class="icobtn danger" onclick="deleteZone('${z.id}')" title="Zone löschen">🗑</button>
-      </div>
-      <div class="hint" style="margin-top:6px;">${anzahlPlz ? anzahlPlz + ' PLZ hinterlegt' : 'Noch keine PLZ hinterlegt'}</div>
-    </div>`;
-  }).join('') || '<div class="hint">Noch keine Zonen.</div>';
+  // Gleiches Muster wie bei der Betonpumpe: bestehende Zonen als Zeilen, danach
+  // eine leere Draft-Zeile zum Erfassen. PLZ-Button links, Loeschen rechts -
+  // in jeder Zeile an der immer gleichen Stelle.
+  $('zgEditZonenBody').innerHTML = zonen.map(z => `
+    <tr class="zoneRow" data-zone="${z.id}">
+      <td><button class="btn" style="padding:4px 10px;font-size:11px;" onclick="openZonePlzEdit('${z.id}')">PLZ</button></td>
+      <td>${artikelDetailText(z.artikel_id)}</td>
+      <td><button class="icobtn danger" onclick="deleteZone('${z.id}')" title="Zone löschen">🗑</button></td>
+    </tr>`).join('') + `
+    <tr id="zgEditDraftRow">
+      <td></td>
+      <td><button type="button" class="btn" id="zgEditArtikelBtn">${zgEditGewaehlterArtikel ? artikelDetailText(zgEditGewaehlterArtikel.id) : 'Artikel wählen…'}</button></td>
+      <td><button class="icobtn" id="zgEditClearBtn" title="Zeile zurücksetzen">🗑</button></td>
+    </tr>`;
+  $('zgEditArtikelBtn').addEventListener('click', () => {
+    openArtikelPicker(a => { zgEditGewaehlterArtikel = a; erstelleZoneAusArtikel(); });
+  });
+  $('zgEditClearBtn').addEventListener('click', () => {
+    zgEditGewaehlterArtikel = null;
+    renderZgEditModal();
+  });
 }
-$('zgEditArtikelBtn').addEventListener('click', () => {
-  openArtikelPicker(a => { zgEditGewaehlterArtikel = a; erstelleZoneAusArtikel(); });
-});
-$('zgEditClearBtn').addEventListener('click', () => {
-  zgEditGewaehlterArtikel = null;
-  $('zgEditArtikelBtn').textContent = 'Artikel wählen…';
-});
 async function erstelleZoneAusArtikel(){
   const bestehende = ZONEN.filter(z => z.zonengruppe_id === zgEditId);
   const { error } = await sb.from('zone').insert({
@@ -945,7 +936,6 @@ async function erstelleZoneAusArtikel(){
   });
   if(error){ $('zgEditStatus').textContent = friendlyError(error); $('zgEditStatus').className = 'status err'; return; }
   zgEditGewaehlterArtikel = null;
-  $('zgEditArtikelBtn').textContent = 'Artikel wählen…';
   $('zgEditStatus').textContent = 'Zone hinzugefügt.'; $('zgEditStatus').className = 'status ok';
   await loadZonengruppen();
   renderZgEditModal();
@@ -974,6 +964,7 @@ function zonePlzAddFeld(value){
   zelle.className = 'zonePlzZelle';
   const inp = document.createElement('input');
   inp.type = 'text'; inp.className = 'zonePlzFeld'; inp.value = value || '';
+  inp.inputMode = 'numeric'; inp.maxLength = 4; inp.placeholder = 'PLZ';
   const delBtn = document.createElement('button');
   delBtn.type = 'button'; delBtn.className = 'icobtn'; delBtn.title = 'PLZ entfernen'; delBtn.textContent = '🗑';
   delBtn.addEventListener('click', () => {
@@ -992,28 +983,25 @@ function zonePlzAddFeld(value){
 }
 function openZonePlzEdit(zoneId){
   zonePlzEditZoneId = zoneId;
-  const z = ZONEN.find(x => x.id === zoneId);
-  $('zonePlzTitle').textContent = z ? `PLZ für Zone ${z.nummer} erfassen` : 'PLZ erfassen';
   $('zonePlzGrid').innerHTML = '';
   const bestehende = ZONE_PLZ.filter(p => p.zone_id === zoneId).map(p => p.plz);
   bestehende.forEach(plz => zonePlzAddFeld(plz));
   zonePlzAddFeld('');
-  $('zonePlzStatus').textContent = ''; $('zonePlzStatus').className = 'status';
   $('zonePlzOvl').classList.add('show');
 }
-$('zonePlzSaveBtn').addEventListener('click', async () => {
+async function zonePlzSpeichernUndSchliessen(){
   const plzListe = [...new Set([...document.querySelectorAll('#zonePlzGrid .zonePlzFeld')].map(i => i.value.trim()).filter(Boolean))];
   const { error: delErr } = await sb.from('zone_plz').delete().eq('zone_id', zonePlzEditZoneId);
-  if(delErr){ $('zonePlzStatus').textContent = friendlyError(delErr); $('zonePlzStatus').className = 'status err'; return; }
+  if(delErr){ showToast(friendlyError(delErr), true); return; }
   if(plzListe.length){
     const { error: insErr } = await sb.from('zone_plz').insert(plzListe.map(plz => ({ zone_id: zonePlzEditZoneId, plz })));
-    if(insErr){ $('zonePlzStatus').textContent = friendlyError(insErr); $('zonePlzStatus').className = 'status err'; return; }
+    if(insErr){ showToast(friendlyError(insErr), true); return; }
   }
   await loadZonengruppen();
   renderZgEditModal();
   $('zonePlzOvl').classList.remove('show');
-});
-$('zonePlzClose').addEventListener('click', () => $('zonePlzOvl').classList.remove('show'));
+}
+$('zonePlzCloseBtn').addEventListener('click', zonePlzSpeichernUndSchliessen);
 
 async function deleteZone(id){
   if(!(await confirmDialog('Zone wirklich löschen?'))) return;
