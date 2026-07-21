@@ -510,7 +510,7 @@ body.mitarbeiter-rolle .admin-only{display:none !important;}
 
   <div class="card">
     <div class="cardlabel">Formel-Bibliothek – Terms (Konstanten &amp; Formeln)</div>
-    <div class="hint">Konstante = fixer Wert. Formel = Kombination aus Eingabefeldern/Terms mit einem Operator.</div>
+    <div class="hint">Konstante = fixer Wert. Formel = Kombination aus Eingabefeldern/Terms mit einem Operator. Systemwert = wird zur Rechenzeit automatisch ermittelt (z.B. Lieferwagen-Fahrzeit/-Fahrstrecke ab Kunde-PLZ).</div>
     <table>
       <thead><tr><th>Name</th><th>Typ</th><th>Wert / Formel</th><th>Einheit</th><th></th></tr></thead>
       <tbody id="termsBody"></tbody>
@@ -521,11 +521,17 @@ body.mitarbeiter-rolle .admin-only{display:none !important;}
         <div class="fld"><label>Name</label><input id="newTermName" placeholder="z.B. Fundamentdicke"></div>
         <div class="fld"><label>Einheit</label><input id="newTermEinheit" placeholder="z.B. m"></div>
         <div class="fld"><label>Typ</label>
-          <select id="newTermTyp"><option value="konstante">Konstante</option><option value="formel">Formel</option></select>
+          <select id="newTermTyp"><option value="konstante">Konstante</option><option value="formel">Formel</option><option value="systemwert">Systemwert</option></select>
         </div>
       </div>
       <div class="fld" id="newTermWertWrap"><label>Wert</label><input id="newTermWert" type="number" step="any"></div>
       <div id="newTermAusdruckWrap" style="display:none;"></div>
+      <div class="fld" id="newTermSystemwertWrap" style="display:none;"><label>Welcher Systemwert</label>
+        <select id="newTermSystemwertKey">
+          <option value="fahrzeit_hin_rueck_std">Fahrzeit Lieferwagen Hin+Rück (Std)</option>
+          <option value="distanz_hin_rueck_km">Fahrstrecke Lieferwagen Hin+Rück (km)</option>
+        </select>
+      </div>
       <button class="btn" id="saveTermBtn">Speichern</button>
       <button class="btnlink" id="cancelTermBtn" style="margin-left:8px;">Abbrechen</button>
       <div class="status" id="termStatus"></div>
@@ -589,7 +595,7 @@ let ALLE_TERMS = [];
 async function ladeAlleVariablen(){
   const { data: efs } = await sb.from('eingabefeld').select('id,name,einheit,offertentyp_id');
   ALLE_EINGABEFELDER = efs || [];
-  const { data: terms } = await sb.from('term').select('id,name,typ,wert,ausdruck,einheit,offertentyp_id');
+  const { data: terms } = await sb.from('term').select('id,name,typ,wert,ausdruck,einheit,offertentyp_id,systemwert_key');
   ALLE_TERMS = terms || [];
 }
 let ARTIKEL = [];
@@ -881,7 +887,7 @@ async function loadFormelBibliothek(){
   if(efErr){ console.error(efErr); return; }
   EINGABEFELDER = efs;
 
-  let termQuery = sb.from('term').select('id,name,typ,wert,ausdruck,einheit,offertentyp_id');
+  let termQuery = sb.from('term').select('id,name,typ,wert,ausdruck,einheit,offertentyp_id,systemwert_key');
   termQuery = istAllgemein ? termQuery.is('offertentyp_id', null) : termQuery.eq('offertentyp_id', formelBibliothekKategorie);
   const { data: terms, error: tErr } = await termQuery;
   if(tErr){ console.error(tErr); return; }
@@ -889,6 +895,17 @@ async function loadFormelBibliothek(){
 
   renderEingabefelder();
   renderTerms();
+}
+
+// Systemwert-Terms: Wert wird nicht gespeichert, sondern in Tool A zur
+// Rechenzeit live ermittelt (Google Distance Matrix ab Kunde-PLZ, gleiche
+// Quelle wie die bestehende Lieferwagenfahrzeit-Konfiguration).
+const SYSTEMWERT_KATALOG = {
+  fahrzeit_hin_rueck_std: 'Fahrzeit Lieferwagen Hin+Rück (Std)',
+  distanz_hin_rueck_km: 'Fahrstrecke Lieferwagen Hin+Rück (km)'
+};
+function systemwertLabel(key){
+  return SYSTEMWERT_KATALOG[key] || key;
 }
 
 function renderEingabefelder(){
@@ -906,7 +923,7 @@ function renderTerms(){
     <tr>
       <td>${t.name}</td>
       <td><span class="badge">${t.typ}</span></td>
-      <td>${t.typ === 'konstante' ? fmtNum(t.wert) : ausdruckPreview(t.ausdruck)}</td>
+      <td>${t.typ === 'konstante' ? fmtNum(t.wert) : t.typ === 'systemwert' ? systemwertLabel(t.systemwert_key) : ausdruckPreview(t.ausdruck)}</td>
       <td>${t.einheit || ''}</td>
       <td><button class="icobtn admin-only" onclick="deleteTerm('${t.id}')">🗑</button></td>
     </tr>`).join('');
@@ -1161,9 +1178,10 @@ $('showNewTermBtn').addEventListener('click', () => {
 });
 $('cancelTermBtn').addEventListener('click', () => { $('newTermForm').style.display = 'none'; });
 $('newTermTyp').addEventListener('change', e => {
-  const isFormel = e.target.value === 'formel';
-  $('newTermWertWrap').style.display = isFormel ? 'none' : '';
-  $('newTermAusdruckWrap').style.display = isFormel ? '' : 'none';
+  const typ = e.target.value;
+  $('newTermWertWrap').style.display = typ === 'konstante' ? '' : 'none';
+  $('newTermAusdruckWrap').style.display = typ === 'formel' ? '' : 'none';
+  $('newTermSystemwertWrap').style.display = typ === 'systemwert' ? '' : 'none';
 });
 
 let currentTermBuilder = null;
@@ -1184,6 +1202,8 @@ $('saveTermBtn').addEventListener('click', async () => {
   if(typ === 'konstante'){
     payload.wert = parseFloat($('newTermWert').value);
     if(isNaN(payload.wert)){ $('termStatus').textContent = 'Bitte einen gueltigen Wert eingeben.'; $('termStatus').className='status err'; return; }
+  }else if(typ === 'systemwert'){
+    payload.systemwert_key = $('newTermSystemwertKey').value;
   }else{
     if(!currentTermBuilder || currentTermBuilder.tooComplex){ $('termStatus').textContent = 'Formel-Editor nicht bereit.'; $('termStatus').className='status err'; return; }
     const node = currentTermBuilder.getNode();
@@ -1946,7 +1966,7 @@ function renderVarPickerListen(){
     `<div class="varitem" onclick="waehleVar('eingabefeld','${e.id}')"><b>${e.name}</b><span>${e.einheit}</span></div>`
   ).join('') || '<div class="hint">Keine vorhanden.</div>';
   $('varPickerTerms').innerHTML = ALLE_TERMS.filter(t => passt(t.offertentyp_id)).map(t =>
-    `<div class="varitem" onclick="waehleVar('term','${t.id}')"><b>${t.name}</b><span>${t.typ==='konstante'?fmtNum(t.wert):ausdruckPreview(t.ausdruck)}</span></div>`
+    `<div class="varitem" onclick="waehleVar('term','${t.id}')"><b>${t.name}</b><span>${t.typ==='konstante'?fmtNum(t.wert):t.typ==='systemwert'?systemwertLabel(t.systemwert_key):ausdruckPreview(t.ausdruck)}</span></div>`
   ).join('') || '<div class="hint">Keine vorhanden.</div>';
 }
 function openVarPicker(index){

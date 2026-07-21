@@ -419,6 +419,30 @@ let lieferwagenKonfig = null; // {herkunft_adresse, stundenpreis, kmpreis}
 let lieferwagenModus = 'zeit'; // 'zeit' | 'distanz'
 let lieferwagenDistanzCache = {}; // {plz: {stdHinRueck, kmHinRueck} | null}
 
+// Systemwert-Terms (Formel-Bibliothek): Terms vom Typ 'systemwert' haben keinen
+// gespeicherten Wert - der wird hier zur Rechenzeit live ermittelt (gleiche
+// Distanz-Quelle wie oben) und pro Term-Id in die "werte"-Map fuer
+// eval_ausdruck gemischt, genau wie Eingabefeld-Werte das schon tun.
+let SYSTEMWERT_TERMS = []; // [{id, systemwert_key}]
+async function ladeSystemwertTerms(){
+  const { data, error } = await sb.from('term').select('id,systemwert_key').eq('typ', 'systemwert');
+  if(error){ console.error(error); return; }
+  SYSTEMWERT_TERMS = data || [];
+}
+async function berechneSystemwerteMap(){
+  const map = {};
+  if(!SYSTEMWERT_TERMS.length) return map;
+  const plz = $('kundePlz').value.trim();
+  if(!plz || !lieferwagenKonfig?.herkunft_adresse) return map;
+  const distanz = await holeLieferwagenDistanz(plz);
+  if(!distanz) return map;
+  SYSTEMWERT_TERMS.forEach(t => {
+    if(t.systemwert_key === 'fahrzeit_hin_rueck_std') map[t.id] = distanz.stdHinRueck;
+    else if(t.systemwert_key === 'distanz_hin_rueck_km') map[t.id] = distanz.kmHinRueck;
+  });
+  return map;
+}
+
 async function ladeLieferwagenKonfiguration(){
   const { data, error } = await sb.from('lieferwagen_konfiguration')
     .select('herkunft_adresse, stundenansatz_artikel:stundenansatz_artikel_id(vp_knecht), km_ansatz_artikel:km_ansatz_artikel_id(vp_knecht)')
@@ -1122,6 +1146,7 @@ async function init(){
 
     await ladeAlleKunden();
     await ladeLieferwagenKonfiguration();
+    await ladeSystemwertTerms();
     zeigeLeerenZustand();
 
     $status.textContent = 'Verbunden mit Supabase.';
@@ -1155,6 +1180,10 @@ async function recalc(){
         }
       });
     }else{
+      // Systemwerte (z.B. Lieferwagen-Fahrzeit/-Distanz Hin+Rueck) haengen nur
+      // von der Kunde-PLZ ab, nicht von der Teilflaeche - daher einmal pro
+      // Neuberechnung ermitteln, nicht pro Teilflaeche/Zeile.
+      const systemwerteMap = await berechneSystemwerteMap();
       for(const tf of teilflaechen){
         const tfMenge = tf.menge || 1;
         const zugFaktorTf = zi => (zi.zugangsfaktoren?.[(tf.zugaenglichkeitStufe || 2) - 1]) ?? 1;
@@ -1173,8 +1202,14 @@ async function recalc(){
           if(rz.sonderpositionTyp){
             return { ...rz, bezeichnung: rz.bezeichnung + ' (Berechnung noch nicht hinterlegt)', einheit: 'Pauschale', menge: 1, preis: 0, betrag: 0 };
           }
-          const { data: mengeRoh, error } = await sb.rpc('eval_ausdruck', { node: rz.menge_ausdruck, werte: tf.werteMap });
-          if(error) throw error;
+          let mengeRoh;
+          try {
+            const { data, error } = await sb.rpc('eval_ausdruck', { node: rz.menge_ausdruck, werte: { ...tf.werteMap, ...systemwerteMap } });
+            if(error) throw error;
+            mengeRoh = data;
+          } catch(e) {
+            return { ...rz, bezeichnung: rz.bezeichnung + ` (Berechnung fehlgeschlagen: ${e.message || e})`, einheit: 'Pauschale', menge: 0, preis: 0, betrag: 0 };
+          }
           const verschnittFaktor = 1 + ((rz.verschnittProzent ?? 0) / 100);
           let menge = mengeRoh * verschnittFaktor * zugFaktorTf(rz) * tfMenge;
           if(rz.mindestmenge != null && menge < rz.mindestmenge) menge = rz.mindestmenge;
