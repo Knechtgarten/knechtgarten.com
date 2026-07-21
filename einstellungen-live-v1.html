@@ -398,15 +398,6 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
         <div id="staffelgruppenListe"></div>
 
         <div id="zonengruppenListe"></div>
-        <div class="card">
-          <div class="cardlabel">Neue Zonengruppe</div>
-          <div class="hint">Getrennte Zonengruppen z.B. für Kies-Transport/Beton-Transport - jede Zone hat einen eigenen Artikel und eine Liste zugehöriger PLZ. In Tool B als Sonderposition statt einem festen Artikel wählbar.</div>
-          <div class="row" style="margin-top:10px;">
-            <div class="fld"><label>Name</label><input id="newZonengruppeName" placeholder="z.B. Kies-Transport"></div>
-          </div>
-          <button class="btn" id="addZonengruppeBtn">+ Zonengruppe hinzufügen</button>
-          <div class="status" id="zonengruppeStatus"></div>
-        </div>
 
         <div id="sonderpositionTypListe"></div>
         <div class="card">
@@ -871,10 +862,21 @@ let ZONENGRUPPEN = [];
 let ZONEN = [];
 let ZONE_PLZ = [];
 
+// Es gibt aktuell diese fixen Zonengruppen - kein generisches Anlegen-Formular
+// mehr, jede wird bei Bedarf automatisch erstellt (gleiches Muster wie die
+// Staffelgruppe "Betonpumpe"). Neue Zonengruppe = neuer Eintrag hier.
+const ZONENGRUPPE_FIX_NAMEN = ['Kiestransport'];
+
 async function loadZonengruppen(){
   const { data: gruppen, error } = await sb.from('zonengruppe').select('id,name,erklaerung').order('name');
   if(error){ console.error(error); return; }
   ZONENGRUPPEN = gruppen;
+  for(const fixName of ZONENGRUPPE_FIX_NAMEN){
+    if(!ZONENGRUPPEN.some(g => g.name === fixName)){
+      const { data: neu, error: insErr } = await sb.from('zonengruppe').insert({ name: fixName }).select().single();
+      if(insErr){ console.error(insErr); } else { ZONENGRUPPEN.push(neu); }
+    }
+  }
   const { data: zonen, error: zErr } = await sb.from('zone').select('id,zonengruppe_id,nummer,artikel_id,reihenfolge').order('reihenfolge');
   if(zErr){ console.error(zErr); return; }
   ZONEN = zonen;
@@ -887,12 +889,9 @@ async function loadZonengruppen(){
 function renderZonengruppen(){
   $('zonengruppenListe').innerHTML = ZONENGRUPPEN.map(zg => `
     <div class="card">
-      <div class="cardlabel" style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
-        ${zg.name}
-        <button class="icobtn" style="margin-left:auto;" onclick="openZonengruppeEdit('${zg.id}')" title="Bearbeiten">✎</button>
-        <button class="icobtn danger" onclick="deleteZonengruppe('${zg.id}','${zg.name.replace(/'/g,"\\'")}')" title="Löschen">🗑</button>
-      </div>
+      <div class="cardlabel">${zg.name}</div>
       <div class="hint">${zg.erklaerung || `Sonderposition mit PLZ-Zonen für ${zg.name}:`}</div>
+      <button class="btn" onclick="openZonengruppeEdit('${zg.id}')">Bearbeiten</button>
     </div>`).join('');
 }
 
@@ -986,12 +985,6 @@ $('zgEditErklaerungInput').addEventListener('change', async () => {
 });
 $('zgEditClose').addEventListener('click', () => $('zgEditOvl').classList.remove('show'));
 
-async function deleteZonengruppe(id, name){
-  if(!(await confirmDialog(`Zonengruppe "${name}" wirklich löschen? Alle Zonen und PLZ werden mitgelöscht.`))) return;
-  const { error } = await sb.from('zonengruppe').delete().eq('id', id);
-  if(error){ showToast(friendlyError(error), true); return; }
-  await loadZonengruppen();
-}
 async function deleteZone(id){
   if(!(await confirmDialog('Zone wirklich löschen?'))) return;
   const { error } = await sb.from('zone').delete().eq('id', id);
@@ -999,17 +992,6 @@ async function deleteZone(id){
   await loadZonengruppen();
   renderZgEditModal();
 }
-$('addZonengruppeBtn').addEventListener('click', async () => {
-  const name = $('newZonengruppeName').value.trim();
-  if(!name) return;
-  const { data, error } = await sb.from('zonengruppe').insert({ name }).select().single();
-  if(error){ $('zonengruppeStatus').textContent = friendlyError(error); $('zonengruppeStatus').className = 'status err'; return; }
-  $('newZonengruppeName').value = '';
-  $('zonengruppeStatus').textContent = 'Gespeichert.'; $('zonengruppeStatus').className = 'status ok';
-  await loadZonengruppen();
-  openZonengruppeEdit(data.id);
-});
-
 // ---------------------------------------------------------------------------
 // Preisfindung: Lieferwagenfahrzeit-Konfiguration (Herkunftsadresse + welcher
 // Artikel den Stunden-/km-Ansatz liefert). Die eigentliche Berechnung passiert
