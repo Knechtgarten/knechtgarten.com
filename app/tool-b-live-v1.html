@@ -417,7 +417,8 @@ td.artikelcell span:before{content:"· ";}
     </div>
     <div class="fld">
       <label>Kategorie</label>
-      <select id="rzSonderKategorieSelect">
+      <div id="rzSonderKategorieAnzeige" class="hint" style="margin:0;">– (wird von den Artikeln der Sonderposition übernommen)</div>
+      <select id="rzSonderKategorieSelect" class="hidden">
         <option value="personal">Personal</option>
         <option value="maschine">Maschine</option>
         <option value="logistik">Logistik</option>
@@ -593,6 +594,8 @@ let LIEFERANTEN = [];
 let STAFFELGRUPPEN = [];
 let ZONENGRUPPEN = [];
 let SONDERPOSITION_TYPEN = [];
+let SONDERPOSITION_STAFFELSTUFEN = []; // [{staffelgruppe_id, artikel_id}] - nur fuer Kategorie-Ableitung
+let SONDERPOSITION_ZONEN = [];         // [{zonengruppe_id, artikel_id}] - nur fuer Kategorie-Ableitung
 let ARBEITSSCHRITTE = [];
 let activeOptionByAf = {}; // welche Option (Tab) pro Auswahlfeld gerade aktiv angezeigt wird
 function waehleOption(afId, optId){
@@ -833,15 +836,32 @@ async function loadArtikel(){
   ARTIKEL = data;
 }
 
+let sonderpositionLadeFehler = null;
 async function loadSonderpositionKataloge(){
-  const [sg, zg, sp] = await Promise.all([
+  sonderpositionLadeFehler = null;
+  const [sg, zg, sp, st, zo] = await Promise.all([
     sb.from('staffelgruppe').select('id,name'),
     sb.from('zonengruppe').select('id,name'),
-    sb.from('sonderposition_typ').select('id,name')
+    sb.from('sonderposition_typ').select('id,name'),
+    sb.from('staffelstufe').select('staffelgruppe_id,artikel_id'),
+    sb.from('zone').select('zonengruppe_id,artikel_id')
   ]);
-  if(sg.error) console.error(sg.error); else STAFFELGRUPPEN = sg.data;
-  if(zg.error) console.error(zg.error); else ZONENGRUPPEN = zg.data;
-  if(sp.error) console.error(sp.error); else SONDERPOSITION_TYPEN = sp.data;
+  if(sg.error){ console.error(sg.error); sonderpositionLadeFehler = sg.error.message; } else STAFFELGRUPPEN = sg.data;
+  if(zg.error){ console.error(zg.error); sonderpositionLadeFehler = zg.error.message; } else ZONENGRUPPEN = zg.data;
+  if(sp.error){ console.error(sp.error); sonderpositionLadeFehler = sp.error.message; } else SONDERPOSITION_TYPEN = sp.data;
+  if(st.error){ console.error(st.error); sonderpositionLadeFehler = st.error.message; } else SONDERPOSITION_STAFFELSTUFEN = st.data;
+  if(zo.error){ console.error(zo.error); sonderpositionLadeFehler = zo.error.message; } else SONDERPOSITION_ZONEN = zo.data;
+}
+
+// Kategorie einer Sonderposition wird von den bereits erfassten Artikeln
+// abgeleitet (nicht manuell gewaehlt) - eine Sonderposition soll nur Artikel
+// derselben Kategorie enthalten, siehe Einstellungen.
+function kategorieVonSonderposition(typ, id){
+  let artikelId = null;
+  if(typ === 'staffelgruppe') artikelId = SONDERPOSITION_STAFFELSTUFEN.find(s => s.staffelgruppe_id === id)?.artikel_id;
+  if(typ === 'zonengruppe') artikelId = SONDERPOSITION_ZONEN.find(z => z.zonengruppe_id === id)?.artikel_id;
+  if(!artikelId) return null;
+  return ARTIKEL.find(a => a.id === artikelId)?.kategorie || null;
 }
 
 async function loadArtikelgruppen(){
@@ -1728,6 +1748,10 @@ $('artikelPickerCancel').addEventListener('click', () => $('artikelPickerOverlay
 // oben. Preisfindung passiert dann zur Berechnungszeit in Tool A.
 // ---------------------------------------------------------------------------
 function renderSonderpositionPickerList(){
+  if(sonderpositionLadeFehler){
+    $('sonderpositionPickerList').innerHTML = `<div class="hint" style="color:var(--danger);">Fehler beim Laden: ${sonderpositionLadeFehler}</div>`;
+    return;
+  }
   const q = $('sonderpositionPickerSearch').value.trim().toLowerCase();
   const items = [
     ...STAFFELGRUPPEN.map(s => ({ id: s.id, name: s.name, typ: 'staffelgruppe', badge: 'Staffel' })),
@@ -1744,6 +1768,7 @@ function openSonderpositionPicker(){
   renderSonderpositionPickerList();
   $('sonderpositionPickerOverlay').classList.add('show');
 }
+let rzSonderKategorie = null;
 function waehleSonderposition(typ, id){
   const quelle = typ === 'staffelgruppe' ? STAFFELGRUPPEN : typ === 'zonengruppe' ? ZONENGRUPPEN : SONDERPOSITION_TYPEN;
   const item = quelle.find(x => x.id === id);
@@ -1751,6 +1776,21 @@ function waehleSonderposition(typ, id){
   rzSonderQuelleTyp = typ;
   rzSonderQuelleId = id;
   $('rzSonderInput').value = item.name;
+  if(typ === 'sonderposition_typ'){
+    // Kein Artikel hinterlegt (rein code-basierte Logik) - Kategorie muss
+    // hier ausnahmsweise manuell gewaehlt werden.
+    rzSonderKategorie = null;
+    $('rzSonderKategorieAnzeige').classList.add('hidden');
+    $('rzSonderKategorieSelect').classList.remove('hidden');
+    $('rzSonderKategorieSelect').value = 'logistik';
+  }else{
+    rzSonderKategorie = kategorieVonSonderposition(typ, id);
+    $('rzSonderKategorieSelect').classList.add('hidden');
+    $('rzSonderKategorieAnzeige').classList.remove('hidden');
+    $('rzSonderKategorieAnzeige').textContent = rzSonderKategorie
+      ? rzSonderKategorie.charAt(0).toUpperCase() + rzSonderKategorie.slice(1)
+      : '– (noch keine Artikel in dieser Sonderposition erfasst - erst in Einstellungen ergänzen)';
+  }
   if(typ === 'staffelgruppe'){
     rzEditGlieder = [{ op: null, mode: 'lit', refKind: null, refId: null, text: '' }];
     renderRzEditTermline('rzSonderTermline');
@@ -1769,8 +1809,11 @@ function openRzSonderAddModal(kontextTyp, kontextId){
   rzSonderKontext = { kontextTyp, kontextId };
   rzSonderQuelleTyp = null;
   rzSonderQuelleId = null;
+  rzSonderKategorie = null;
   $('rzSonderInput').value = '';
-  $('rzSonderKategorieSelect').value = 'logistik';
+  $('rzSonderKategorieAnzeige').textContent = '– (wird von den Artikeln der Sonderposition übernommen)';
+  $('rzSonderKategorieAnzeige').classList.remove('hidden');
+  $('rzSonderKategorieSelect').classList.add('hidden');
   $('rzSonderMengeFld').classList.add('hidden');
   $('rzSonderContext').textContent = info.optName === '(gilt immer)'
     ? `Neue Sonderposition · ${info.tsName} · ${info.asName}`
@@ -1785,6 +1828,10 @@ $('rzSonderSave').addEventListener('click', async () => {
   if(!rzSonderQuelleTyp || !rzSonderQuelleId){
     $('rzSonderStatus').textContent = 'Bitte eine Sonderposition waehlen.'; $('rzSonderStatus').className = 'status err'; return;
   }
+  const kategorie = rzSonderQuelleTyp === 'sonderposition_typ' ? $('rzSonderKategorieSelect').value : rzSonderKategorie;
+  if(!kategorie){
+    $('rzSonderStatus').textContent = 'Diese Sonderposition hat noch keine Artikel (Kategorie unbekannt) - bitte zuerst in Einstellungen ergänzen.'; $('rzSonderStatus').className = 'status err'; return;
+  }
   let node = { lit: 1 };
   if(rzSonderQuelleTyp === 'staffelgruppe'){
     node = buildMengenAusdruck(rzEditGlieder);
@@ -1792,7 +1839,7 @@ $('rzSonderSave').addEventListener('click', async () => {
   }
   const { error } = await sb.from('ressourcenzeile').insert({
     [`${rzSonderKontext.kontextTyp}_id`]: rzSonderKontext.kontextId,
-    kategorie: $('rzSonderKategorieSelect').value,
+    kategorie,
     [`${rzSonderQuelleTyp}_id`]: rzSonderQuelleId,
     menge_ausdruck: node
   });
