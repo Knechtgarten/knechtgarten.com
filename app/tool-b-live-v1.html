@@ -232,12 +232,10 @@ td.artikelcell span:before{content:"· ";}
   line-height:1;padding:0;}
 .addterm:hover{background:var(--primary-l);}
 
-.scopetag{display:inline-block;font-size:10px;font-weight:700;background:var(--accent-blue);
-  color:var(--primary);padding:3px 9px;border-radius:999px;margin-bottom:14px;}
-.vargroup{margin-bottom:14px;}
+.vargroup{margin-bottom:10px;}
 .vargroup .gt{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
-  color:var(--muted);margin-bottom:6px;}
-.varitem{display:grid;grid-template-columns:150px 1fr;gap:10px;align-items:center;padding:8px 10px;
+  color:var(--muted);margin-bottom:2px;}
+.varitem{display:grid;grid-template-columns:150px 1fr;gap:10px;align-items:center;padding:3px 10px;
   border-radius:7px;cursor:pointer;font-size:12.5px;}
 .varitem:hover{background:var(--soft);}
 .varitem b{color:var(--primary);}
@@ -361,9 +359,9 @@ body.mitarbeiter-rolle .admin-only{display:none !important;}
 </div>
 
 <div class="overlay" id="varPickerOverlay">
-  <div class="modal">
+  <div class="modal" style="max-width:720px;">
     <div class="modalhead"><div class="sub">Auswahl</div></div>
-    <span class="scopetag" id="varPickerScope"></span>
+    <div class="pillrow" id="varPickerScopeRow" style="margin-bottom:12px;flex-wrap:nowrap;"></div>
     <div class="vargroup">
       <div class="gt">Eingabefelder</div>
       <div id="varPickerEingabefelder"></div>
@@ -586,9 +584,9 @@ let TERMS = [];
 let ALLE_EINGABEFELDER = [];
 let ALLE_TERMS = [];
 async function ladeAlleVariablen(){
-  const { data: efs } = await sb.from('eingabefeld').select('id,name,einheit');
+  const { data: efs } = await sb.from('eingabefeld').select('id,name,einheit,offertentyp_id');
   ALLE_EINGABEFELDER = efs || [];
-  const { data: terms } = await sb.from('term').select('id,name,typ,wert,ausdruck,einheit');
+  const { data: terms } = await sb.from('term').select('id,name,typ,wert,ausdruck,einheit,offertentyp_id');
   ALLE_TERMS = terms || [];
 }
 let ARTIKEL = [];
@@ -1917,15 +1915,37 @@ function renderRzEditTermline(targetId){
   wrap.appendChild(addBtn);
 }
 
-function openVarPicker(index){
-  rzEditPickerIndex = index;
-  $('varPickerScope').textContent = 'Alle Offertentypen';
-  $('varPickerEingabefelder').innerHTML = ALLE_EINGABEFELDER.map(e =>
+// "Allgemein" (offertentyp_id null) startet ganz links, danach ein Tab pro
+// Offertentyp - der aktuell bearbeitete Offertentyp ist beim Oeffnen
+// vorausgewaehlt (blau), alle anderen grau. Alles bleibt ueber die Tabs
+// erreichbar, nur die Default-Ansicht ist nicht mehr eine ungefilterte
+// Groschliste von allen Offertentypen zusammen.
+let varPickerScopeId = 'allgemein';
+function renderVarPickerScopeTabs(){
+  const items = [{ id: 'allgemein', name: 'Allgemein' }, ...OFFERTENTYPEN];
+  $('varPickerScopeRow').innerHTML = items.map(k =>
+    `<button type="button" class="filterpill ${varPickerScopeId===k.id?'on':''}" onclick="waehleVarPickerScope('${k.id}')">${k.name}</button>`
+  ).join('');
+}
+function waehleVarPickerScope(id){
+  varPickerScopeId = id;
+  renderVarPickerScopeTabs();
+  renderVarPickerListen();
+}
+function renderVarPickerListen(){
+  const passt = otId => varPickerScopeId === 'allgemein' ? otId == null : otId === varPickerScopeId;
+  $('varPickerEingabefelder').innerHTML = ALLE_EINGABEFELDER.filter(e => passt(e.offertentyp_id)).map(e =>
     `<div class="varitem" onclick="waehleVar('eingabefeld','${e.id}')"><b>${e.name}</b><span>${e.einheit}</span></div>`
   ).join('') || '<div class="hint">Keine vorhanden.</div>';
-  $('varPickerTerms').innerHTML = ALLE_TERMS.map(t =>
+  $('varPickerTerms').innerHTML = ALLE_TERMS.filter(t => passt(t.offertentyp_id)).map(t =>
     `<div class="varitem" onclick="waehleVar('term','${t.id}')"><b>${t.name}</b><span>${t.typ==='konstante'?fmtNum(t.wert):ausdruckPreview(t.ausdruck)}</span></div>`
   ).join('') || '<div class="hint">Keine vorhanden.</div>';
+}
+function openVarPicker(index){
+  rzEditPickerIndex = index;
+  varPickerScopeId = currentOffertentypId || 'allgemein';
+  renderVarPickerScopeTabs();
+  renderVarPickerListen();
   $('varPickerOverlay').classList.add('show');
 }
 function waehleVar(kind, id){
