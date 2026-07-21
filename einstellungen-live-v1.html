@@ -117,6 +117,7 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
 .ovl{position:fixed;inset:0;background:rgba(35,43,53,.45);display:none;align-items:center;justify-content:center;z-index:60;}
 .ovl.show{display:flex;}
 #artikelPickerOvl{z-index:65;}
+#ovl{z-index:66;}
 .ovlbox{background:#fff;border-radius:12px;max-width:400px;width:100%;padding:18px 20px;box-shadow:0 12px 40px rgba(0,0,0,.25);}
 .ovlbox.xwide{max-width:820px;max-height:88vh;overflow-y:auto;}
 .ovlmsg{font-size:13px;color:var(--ink);margin-bottom:12px;}
@@ -756,9 +757,9 @@ function renderSgEditModal(){
   $('sgEditStufenBody').innerHTML = stufen.map(s => {
     const einheit = ARTIKEL.find(a => a.id === s.artikel_id)?.einheit || '';
     return `
-    <tr>
-      <td>${fmtNum(s.menge_von)} ${einheit}</td>
-      <td>${s.menge_bis != null ? fmtNum(s.menge_bis) + ' ' + einheit : '∞'}</td>
+    <tr class="sgStufeRow" data-stufe="${s.id}">
+      <td><div class="einheitfld"><input type="number" step="0.01" class="sgVonEdit" value="${s.menge_von}"><span class="einheitsuffix">${einheit}</span></div></td>
+      <td><div class="einheitfld"><input type="number" step="0.01" class="sgBisEdit" value="${s.menge_bis ?? ''}" placeholder="kein Limit"><span class="einheitsuffix">${einheit}</span></div></td>
       <td>${artikelDetailText(s.artikel_id)}</td>
       <td><button class="icobtn danger" onclick="deleteStaffelstufe('${s.id}')" title="Stufe löschen">🗑</button></td>
     </tr>`;
@@ -769,6 +770,13 @@ function renderSgEditModal(){
       <td><button type="button" class="btn" id="sgEditArtikelBtn">${sgEditGewaehlterArtikel ? artikelDetailText(sgEditGewaehlterArtikel.id) : 'Artikel wählen…'}</button></td>
       <td><button class="icobtn" id="sgEditClearBtn" title="Zeile zurücksetzen">🗑</button></td>
     </tr>`;
+  // Bestehende Stufen: Von/Bis jederzeit direkt aenderbar, Auto-Speichern beim
+  // Verlassen der Zeile (gleiches Muster wie bei der neuen Zeile unten).
+  $('sgEditStufenBody').querySelectorAll('.sgStufeRow').forEach(row => {
+    row.addEventListener('focusout', (e) => {
+      if(!e.currentTarget.contains(e.relatedTarget)) aktualisiereStufe(row.dataset.stufe);
+    });
+  });
   // Nur EIN Auslöser pro Zeile: sobald der Fokus die ganze Zeile verlaesst
   // (egal ob von Von, Bis oder dem Artikel-Button aus), wird versucht zu
   // speichern - nicht schon bei jedem einzelnen Feldwechsel, sonst speichert
@@ -784,6 +792,19 @@ function renderSgEditModal(){
     sgEditGewaehlterArtikel = null;
     renderSgEditModal();
   });
+}
+async function aktualisiereStufe(id){
+  const row = document.querySelector(`.sgStufeRow[data-stufe="${id}"]`);
+  const von = parseFloat(row.querySelector('.sgVonEdit').value);
+  if(isNaN(von)) return;
+  const bisRaw = row.querySelector('.sgBisEdit').value.trim();
+  const { error } = await sb.from('staffelstufe').update({
+    menge_von: von, menge_bis: bisRaw === '' ? null : parseFloat(bisRaw)
+  }).eq('id', id);
+  if(error){ $('sgEditStatus').textContent = friendlyError(error); $('sgEditStatus').className = 'status err'; return; }
+  $('sgEditStatus').textContent = 'Aktualisiert.'; $('sgEditStatus').className = 'status ok';
+  await loadStaffelgruppen();
+  renderSgEditModal();
 }
 let sgEditSpeichertGerade = false;
 async function versucheAutoSaveStufe(){
