@@ -402,24 +402,13 @@ td.artikelcell span:before{content:"· ";}
   </div>
 </div>
 
-<div class="overlay" id="sonderpositionPickerOverlay">
-  <div class="modal">
-    <div class="modalhead"><div class="sub">Sonderposition waehlen</div></div>
-    <input type="text" class="pickersearch" id="sonderpositionPickerSearch" placeholder="Suchen...">
-    <div id="sonderpositionPickerList" style="max-height:360px;overflow:auto;"></div>
-    <div class="modalbtns"><button class="btnlink" id="sonderpositionPickerCancel">Abbrechen</button></div>
-  </div>
-</div>
-
 <div class="overlay" id="rzSonderOverlay">
   <div class="modal">
     <div class="modalhead"><div class="sub" id="rzSonderContext"></div></div>
     <div class="fld">
-      <label>Sonderposition</label>
-      <div class="combofield wide">
-        <input type="text" id="rzSonderInput" readonly placeholder="Sonderposition waehlen...">
-        <button type="button" id="rzSonderPickBtn">▾</button>
-      </div>
+      <label>Sonderposition (exakter Name aus Einstellungen -> Sonderpositionen)</label>
+      <input type="text" id="rzSonderInput" placeholder="z.B. Betonpumpe">
+      <div id="rzSonderMatchStatus" class="hint" style="margin-top:4px;"></div>
     </div>
     <div class="fld">
       <label>Kategorie</label>
@@ -597,9 +586,6 @@ async function ladeAlleVariablen(){
 let ARTIKEL = [];
 let ARTIKELGRUPPEN = [];
 let LIEFERANTEN = [];
-let STAFFELGRUPPEN = [];
-let ZONENGRUPPEN = [];
-let SONDERPOSITION_TYPEN = [];
 let SONDERPOSITION_STAFFELSTUFEN = []; // [{staffelgruppe_id, artikel_id}] - nur fuer Kategorie-Ableitung
 let SONDERPOSITION_ZONEN = [];         // [{zonengruppe_id, artikel_id}] - nur fuer Kategorie-Ableitung
 let ARBEITSSCHRITTE = [];
@@ -842,21 +828,11 @@ async function loadArtikel(){
   ARTIKEL = data;
 }
 
-let sonderpositionLadeFehler = null;
+// Staffelgruppen/Zonengruppen/Sonderposition-Typen selbst werden nicht mehr
+// vorab geladen - die Sonderposition-Auswahl sucht live per Namen (siehe
+// suchSonderpositionNachName). Hier nur die Artikel-Zuordnung je Stufe/Zone,
+// fuer die automatische Kategorie-Ableitung.
 async function loadSonderpositionKataloge(){
-  sonderpositionLadeFehler = null;
-  const [sg, zg, sp] = await Promise.all([
-    sb.from('staffelgruppe').select('id,name'),
-    sb.from('zonengruppe').select('id,name'),
-    sb.from('sonderposition_typ').select('id,name')
-  ]);
-  if(sg.error){ console.error(sg.error); sonderpositionLadeFehler = sg.error.message; } else STAFFELGRUPPEN = sg.data;
-  if(zg.error){ console.error(zg.error); sonderpositionLadeFehler = zg.error.message; } else ZONENGRUPPEN = zg.data;
-  if(sp.error){ console.error(sp.error); sonderpositionLadeFehler = sp.error.message; } else SONDERPOSITION_TYPEN = sp.data;
-
-  // Nur fuer die Kategorie-Ableitung gebraucht - ein Fehler hier darf die
-  // Sonderpositionen-Liste selbst nicht blockieren (Name/Auswahl bleiben
-  // trotzdem nutzbar, nur die Kategorie-Anzeige waere dann leer).
   const [st, zo] = await Promise.all([
     sb.from('staffelstufe').select('staffelgruppe_id,artikel_id'),
     sb.from('zone').select('zonengruppe_id,artikel_id')
@@ -1759,35 +1735,15 @@ $('artikelPickerCancel').addEventListener('click', () => $('artikelPickerOverlay
 // schlankes Modal statt dem Artikel-Modal - siehe rzSonder*-Deklarationen
 // oben. Preisfindung passiert dann zur Berechnungszeit in Tool A.
 // ---------------------------------------------------------------------------
-function renderSonderpositionPickerList(){
-  if(sonderpositionLadeFehler){
-    $('sonderpositionPickerList').innerHTML = `<div class="hint" style="color:var(--danger);">Fehler beim Laden: ${sonderpositionLadeFehler}</div>`;
-    return;
-  }
-  const q = $('sonderpositionPickerSearch').value.trim().toLowerCase();
-  const items = [
-    ...STAFFELGRUPPEN.map(s => ({ id: s.id, name: s.name, typ: 'staffelgruppe', badge: 'Staffel' })),
-    ...ZONENGRUPPEN.map(z => ({ id: z.id, name: z.name, typ: 'zonengruppe', badge: 'Zone' })),
-    ...SONDERPOSITION_TYPEN.map(s => ({ id: s.id, name: s.name, typ: 'sonderposition_typ', badge: 'Spezial' }))
-  ].filter(i => !q || i.name.toLowerCase().includes(q));
-  $('sonderpositionPickerList').innerHTML = items.map(i => `
-    <div class="apclickrow" style="padding:8px 4px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--soft);" onclick="waehleSonderposition('${i.typ}','${i.id}')">
-      <b>${i.name}</b><span class="pill" style="background:var(--soft);color:var(--muted);">${i.badge}</span>
-    </div>`).join('') || '<div class="hint">Keine Treffer - siehe Einstellungen -> Sonderpositionen.</div>';
-}
-function openSonderpositionPicker(){
-  $('sonderpositionPickerSearch').value = '';
-  renderSonderpositionPickerList();
-  $('sonderpositionPickerOverlay').classList.add('show');
-}
 let rzSonderKategorie = null;
-function waehleSonderposition(typ, id){
-  const quelle = typ === 'staffelgruppe' ? STAFFELGRUPPEN : typ === 'zonengruppe' ? ZONENGRUPPEN : SONDERPOSITION_TYPEN;
-  const item = quelle.find(x => x.id === id);
-  if(!item) return;
+
+// Sonderposition wird per exaktem Namen eingetippt und live gegen die drei
+// Kataloge nachgeschlagen (statt aus einer vorab geladenen Liste ausgewaehlt) -
+// so ist sofort ersichtlich (Fehlermeldung), falls das Nachladen scheitert,
+// statt einer stumm leeren Auswahlliste.
+function anwendenSonderpositionAuswahl(typ, id, name){
   rzSonderQuelleTyp = typ;
   rzSonderQuelleId = id;
-  $('rzSonderInput').value = item.name;
   if(typ === 'sonderposition_typ'){
     // Kein Artikel hinterlegt (rein code-basierte Logik) - Kategorie muss
     // hier ausnahmsweise manuell gewaehlt werden.
@@ -1810,10 +1766,41 @@ function waehleSonderposition(typ, id){
   }else{
     $('rzSonderMengeFld').classList.add('hidden');
   }
-  $('sonderpositionPickerOverlay').classList.remove('show');
 }
-$('sonderpositionPickerSearch').addEventListener('input', () => renderSonderpositionPickerList());
-$('sonderpositionPickerCancel').addEventListener('click', () => $('sonderpositionPickerOverlay').classList.remove('show'));
+async function suchSonderpositionNachName(){
+  const name = $('rzSonderInput').value.trim();
+  rzSonderQuelleTyp = null; rzSonderQuelleId = null; rzSonderKategorie = null;
+  $('rzSonderMengeFld').classList.add('hidden');
+  $('rzSonderKategorieSelect').classList.add('hidden');
+  $('rzSonderKategorieAnzeige').classList.remove('hidden');
+  $('rzSonderKategorieAnzeige').textContent = '– (wird von den Artikeln der Sonderposition übernommen)';
+  $('rzSonderMatchStatus').style.color = '';
+  if(!name){ $('rzSonderMatchStatus').textContent = ''; return; }
+  $('rzSonderMatchStatus').textContent = 'Suche …';
+  const [sg, zg, sp] = await Promise.all([
+    sb.from('staffelgruppe').select('id,name').ilike('name', name),
+    sb.from('zonengruppe').select('id,name').ilike('name', name),
+    sb.from('sonderposition_typ').select('id,name').ilike('name', name)
+  ]);
+  const fehler = sg.error || zg.error || sp.error;
+  if(fehler){
+    $('rzSonderMatchStatus').textContent = 'Fehler bei der Suche: ' + friendlyError(fehler);
+    $('rzSonderMatchStatus').style.color = 'var(--danger)';
+    return;
+  }
+  const treffer = sg.data[0] ? { typ: 'staffelgruppe', badge: 'Staffel', row: sg.data[0] }
+    : zg.data[0] ? { typ: 'zonengruppe', badge: 'Zone', row: zg.data[0] }
+    : sp.data[0] ? { typ: 'sonderposition_typ', badge: 'Spezial', row: sp.data[0] }
+    : null;
+  if(!treffer){
+    $('rzSonderMatchStatus').textContent = `Keine Sonderposition mit dem Namen "${name}" gefunden - siehe Einstellungen -> Sonderpositionen fuer die exakte Schreibweise.`;
+    $('rzSonderMatchStatus').style.color = 'var(--danger)';
+    return;
+  }
+  $('rzSonderMatchStatus').textContent = `✓ Gefunden (${treffer.badge})`;
+  anwendenSonderpositionAuswahl(treffer.typ, treffer.row.id, treffer.row.name);
+}
+$('rzSonderInput').addEventListener('change', suchSonderpositionNachName);
 
 function openRzSonderAddModal(kontextTyp, kontextId){
   const info = findKontextInfo(kontextTyp, kontextId);
@@ -1823,6 +1810,7 @@ function openRzSonderAddModal(kontextTyp, kontextId){
   rzSonderQuelleId = null;
   rzSonderKategorie = null;
   $('rzSonderInput').value = '';
+  $('rzSonderMatchStatus').textContent = '';
   $('rzSonderKategorieAnzeige').textContent = '– (wird von den Artikeln der Sonderposition übernommen)';
   $('rzSonderKategorieAnzeige').classList.remove('hidden');
   $('rzSonderKategorieSelect').classList.add('hidden');
@@ -1834,7 +1822,6 @@ function openRzSonderAddModal(kontextTyp, kontextId){
   $('rzSonderStatus').className = 'status';
   $('rzSonderOverlay').classList.add('show');
 }
-$('rzSonderPickBtn').addEventListener('click', openSonderpositionPicker);
 $('rzSonderCancel').addEventListener('click', () => $('rzSonderOverlay').classList.remove('show'));
 $('rzSonderSave').addEventListener('click', async () => {
   if(!rzSonderQuelleTyp || !rzSonderQuelleId){
