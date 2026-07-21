@@ -48,6 +48,7 @@ h1{font-size:19px;color:var(--primary);margin-bottom:2px;}
 .fld input, .fld select, .fld textarea{width:100%;border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:inherit;font-size:12.5px;color:var(--ink);}
 .fld input:focus, .fld select:focus, .fld textarea:focus{outline:none;border-color:var(--primary);}
 .fld textarea{resize:vertical;min-height:52px;}
+.fld input[readonly]{background:var(--soft);color:var(--muted);}
 .row{display:flex;gap:10px;flex-wrap:wrap;}
 .row > .fld{flex:1;min-width:130px;}
 
@@ -219,7 +220,7 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
 <div class="ovl" id="sgEditOvl">
   <div class="ovlbox xwide">
     <div class="ovlmsg" id="sgEditTitle"></div>
-    <div class="fld" style="max-width:340px;"><label>Name wird für Auswahlmenu Sonderpositionen verwendet.</label><input type="text" id="sgEditNameInput"></div>
+    <div class="fld" style="max-width:340px;"><label>Name wird für Auswahlmenu Sonderpositionen verwendet (einmalig vergeben, danach gesperrt).</label><input type="text" id="sgEditNameInput"></div>
     <div class="hint" style="margin-bottom:12px;">Die berechnete Menge (z.B. m³) wird mit den Von/Bis-Bereichen unten verglichen - der erste passende Bereich bestimmt, welcher Artikel (und damit welcher Pauschalpreis) in der Offerte verrechnet wird. Die letzte Zeile ist immer leer zum Erfassen - sobald Von und Artikel ausgefüllt sind, wird automatisch gespeichert und eine neue leere Zeile erscheint.</div>
     <table class="sgtable">
       <thead><tr><th style="width:150px;">Von</th><th style="width:150px;">Bis</th><th>Artikel</th><th style="width:40px;"></th></tr></thead>
@@ -233,7 +234,7 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
 <div class="ovl" id="zgEditOvl">
   <div class="ovlbox xwide">
     <div class="ovlmsg" id="zgEditTitle"></div>
-    <div class="fld" style="max-width:340px;"><label>Name wird für Auswahlmenu Sonderpositionen verwendet.</label><input type="text" id="zgEditNameInput"></div>
+    <div class="fld" style="max-width:340px;"><label>Name wird für Auswahlmenu Sonderpositionen verwendet (einmalig vergeben, danach gesperrt).</label><input type="text" id="zgEditNameInput"></div>
     <div class="hint" style="margin-bottom:12px;">Die PLZ des Kunden wird mit den PLZ-Listen der Zonen unten verglichen - die passende Zone bestimmt, welcher Artikel (und damit welcher Pauschalpreis) in der Offerte verrechnet wird.</div>
     <div id="zgEditZonenList"></div>
     <div class="hint" style="margin-top:10px;">Artikel wählen, um eine neue Zone zu erstellen - danach kannst du für diese Zone die PLZ in einem eigenen Fenster erfassen.</div>
@@ -719,7 +720,10 @@ async function loadStaffelgruppen(){
   const { data: gruppen, error } = await sb.from('staffelgruppe').select('id,name').order('name');
   if(error){ console.error(error); return; }
   STAFFELGRUPPEN = gruppen;
-  if(!STAFFELGRUPPEN.some(g => g.name === STAFFELGRUPPE_FIX_NAME)){
+  // Ueber die Anzahl pruefen, nicht ueber den Namen - sonst wuerde ein
+  // umbenannter Eintrag (Name-Feld im Bearbeiten-Fenster) beim naechsten Laden
+  // faelschlicherweise als "fehlend" gelten und doppelt angelegt.
+  if(STAFFELGRUPPEN.length === 0){
     const { data: neu, error: insErr } = await sb.from('staffelgruppe').insert({ name: STAFFELGRUPPE_FIX_NAME }).select().single();
     if(insErr){ console.error(insErr); } else { STAFFELGRUPPEN.push(neu); }
   }
@@ -760,6 +764,7 @@ function renderSgEditModal(){
   if(!sg) return;
   $('sgEditTitle').textContent = `Sonderposition ${sg.name}`;
   $('sgEditNameInput').value = sg.name;
+  $('sgEditNameInput').readOnly = !!sg.name;
   const stufen = STAFFELSTUFEN.filter(s => s.staffelgruppe_id === sgEditId).sort((a,b) => a.menge_von - b.menge_von);
   $('sgEditStufenBody').innerHTML = stufen.map(s => {
     const einheit = ARTIKEL.find(a => a.id === s.artikel_id)?.einheit || '';
@@ -867,11 +872,12 @@ async function loadZonengruppen(){
   const { data: gruppen, error } = await sb.from('zonengruppe').select('id,name').order('name');
   if(error){ console.error(error); return; }
   ZONENGRUPPEN = gruppen;
-  for(const fixName of ZONENGRUPPE_FIX_NAMEN){
-    if(!ZONENGRUPPEN.some(g => g.name === fixName)){
-      const { data: neu, error: insErr } = await sb.from('zonengruppe').insert({ name: fixName }).select().single();
-      if(insErr){ console.error(insErr); } else { ZONENGRUPPEN.push(neu); }
-    }
+  // Ueber die Anzahl pruefen, nicht ueber den Namen - sonst wuerde ein
+  // umbenannter Eintrag (Name-Feld im Bearbeiten-Fenster) beim naechsten Laden
+  // faelschlicherweise als "fehlend" gelten und doppelt angelegt.
+  for(let i = ZONENGRUPPEN.length; i < ZONENGRUPPE_FIX_NAMEN.length; i++){
+    const { data: neu, error: insErr } = await sb.from('zonengruppe').insert({ name: ZONENGRUPPE_FIX_NAMEN[i] }).select().single();
+    if(insErr){ console.error(insErr); } else { ZONENGRUPPEN.push(neu); }
   }
   const { data: zonen, error: zErr } = await sb.from('zone').select('id,zonengruppe_id,nummer,artikel_id,reihenfolge').order('reihenfolge');
   if(zErr){ console.error(zErr); return; }
@@ -907,6 +913,7 @@ function renderZgEditModal(){
   if(!zg) return;
   $('zgEditTitle').textContent = `Sonderposition ${zg.name}`;
   $('zgEditNameInput').value = zg.name;
+  $('zgEditNameInput').readOnly = !!zg.name;
   const zonen = ZONEN.filter(z => z.zonengruppe_id === zgEditId).sort((a,b) => a.nummer - b.nummer);
   $('zgEditZonenList').innerHTML = zonen.map(z => {
     const anzahlPlz = ZONE_PLZ.filter(p => p.zone_id === z.id).length;
