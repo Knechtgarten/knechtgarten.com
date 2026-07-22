@@ -28,7 +28,7 @@ header.app nav a{color:#c9d2da;text-decoration:none;font-size:12.5px;font-weight
   padding:16px 13px;border-bottom:2px solid transparent;cursor:pointer;}
 header.app nav a.on{color:#fff;border-bottom-color:var(--accent-lime);}
 header.app nav a.gear{font-size:15px;padding:16px 14px;cursor:pointer;}
-main{padding:18px 0 60px;}
+main.wrap{padding-top:48px;padding-bottom:60px;}
 
 h1{font-size:19px;color:var(--primary);margin-bottom:2px;}
 .pagesub{font-size:11.5px;color:var(--muted);margin-bottom:16px;}
@@ -258,11 +258,11 @@ body.mitarbeiter-rolle .admin-only{display:none !important;}
 <header class="app"><div class="wrap">
   <div class="brand"><h1>Offertentool</h1><div class="sub">Knechtgarten</div></div>
   <nav>
-    <a href="tool-a-live-v1.html">Offerten</a>
+    <a href="tool-start-live-v1.html">Offerten</a>
     <a href="tool-a2-allgemein-live-v1.html">Allgemein</a>
     <a href="tool-c-live-v1.html">Artikelstamm</a>
     <a href="tool-b-live-v1.html">Arbeitsschritte</a>
-    <a href="tool-b-live-v1.html?seite=formelbibliothek">Formel-Bibliothek</a>
+    <a href="tool-d-kunden-live-v1.html">Kunden</a>
     <a class="gear on" title="Einstellungen">⚙</a>
   </nav>
 </div></header>
@@ -407,11 +407,23 @@ body.mitarbeiter-rolle .admin-only{display:none !important;}
           <div class="hint">Wird pro Offerte einmalig ab der PLZ des Kunden berechnet (Google Maps, Hin- und Rückfahrt). Zwei Ansätze möglich - welcher Artikel den Preis pro Stunde bzw. pro km liefert, wird hier festgelegt.</div>
           <div class="fld"><label>Herkunftsadresse</label><input id="lwHerkunft" placeholder="z.B. Badhaus 42, 3615 Heimenschwand, Schweiz"></div>
           <div class="row">
-            <div class="fld"><label>Stundenansatz-Artikel</label><button type="button" class="btn" id="lwStundenBtn" style="width:100%;text-align:left;background:#fff;color:var(--ink);border:1px solid var(--line);">Artikel wählen…</button></div>
-            <div class="fld"><label>km-Ansatz-Artikel</label><button type="button" class="btn" id="lwKmBtn" style="width:100%;text-align:left;background:#fff;color:var(--ink);border:1px solid var(--line);">Artikel wählen…</button></div>
+            <div class="fld"><label>Stundenansatz-Artikel für Offerten-Gesamtmenge</label><button type="button" class="btn" id="lwStundenBtn" style="width:100%;text-align:left;background:#fff;color:var(--ink);border:1px solid var(--line);">Artikel wählen…</button></div>
+            <div class="fld"><label>km-Ansatz-Artikel für Offerten-Gesamtmenge</label><button type="button" class="btn" id="lwKmBtn" style="width:100%;text-align:left;background:#fff;color:var(--ink);border:1px solid var(--line);">Artikel wählen…</button></div>
           </div>
           <button class="btn admin-only" id="lwSpeichernBtn">Speichern</button>
           <div class="status" id="lwStatus"></div>
+        </div>
+
+        <div class="card">
+          <div class="cardlabel">Tagessatz-Personal</div>
+          <div class="hint">Jeder gebuchte Tag auf einem Arbeitsschritt (Offertentyp "Allgemein") bedeutet automatisch 1 Vorarbeiter + 1 Gartenarbeiter, je Tagesleistung Std. Stundensaetze kommen aus den hier gewaehlten Artikeln.</div>
+          <div class="fld"><label>Tagesleistung (Std)</label><input id="tpTagesleistung" type="number" step="0.5"></div>
+          <div class="row">
+            <div class="fld"><label>Vorarbeiter-Artikel</label><button type="button" class="btn" id="tpVorarbeiterBtn" style="width:100%;text-align:left;background:#fff;color:var(--ink);border:1px solid var(--line);">Artikel wählen…</button></div>
+            <div class="fld"><label>Gartenarbeiter-Artikel</label><button type="button" class="btn" id="tpGartenarbeiterBtn" style="width:100%;text-align:left;background:#fff;color:var(--ink);border:1px solid var(--line);">Artikel wählen…</button></div>
+          </div>
+          <button class="btn admin-only" id="tpSpeichernBtn">Speichern</button>
+          <div class="status" id="tpStatus"></div>
         </div>
       </div>
 
@@ -487,7 +499,7 @@ function zeigeAbschnitt(name){
   if(name === 'offertentyp') loadOffertentypen();
   if(name === 'datenabgleich'){ loadWechselkurse(); loadDatenabgleich(); loadArtikelgruppen(); }
   if(name === 'sonderpositionen'){ loadStaffelgruppen(); loadZonengruppen(); }
-  if(name === 'rechenlogik'){ renderTeilflaechenlogik(); loadLieferwagenKonfiguration(); }
+  if(name === 'rechenlogik'){ renderTeilflaechenlogik(); loadLieferwagenKonfiguration(); loadPersonalKonfiguration(); }
   if(name === 'benutzer') loadBenutzer();
 }
 document.querySelectorAll('#settingsnav a').forEach(a => a.addEventListener('click', () => zeigeAbschnitt(a.dataset.abschnitt)));
@@ -1044,6 +1056,42 @@ $('lwSpeichernBtn').addEventListener('click', async () => {
   }).eq('id', true);
   if(error){ $('lwStatus').textContent = friendlyError(error); $('lwStatus').className = 'status err'; return; }
   $('lwStatus').textContent = 'Gespeichert.'; $('lwStatus').className = 'status ok';
+});
+
+// ---------------------------------------------------------------------------
+// Tagessatz-Personal-Konfiguration (Vorarbeiter/Gartenarbeiter-Artikel +
+// Tagesleistung) - gleiches Muster wie die Lieferwagenfahrzeit-Konfiguration.
+// ---------------------------------------------------------------------------
+let tpVorarbeiterArtikelId = null;
+let tpGartenarbeiterArtikelId = null;
+
+async function loadPersonalKonfiguration(){
+  const { data, error } = await sb.from('tagessatz_personal_konfiguration').select('*').eq('id', true).single();
+  if(error){ console.error(error); return; }
+  $('tpTagesleistung').value = data.tagesleistung_std ?? 9;
+  $('tpTagesleistung').readOnly = aktuelleRolle !== 'admin';
+  tpVorarbeiterArtikelId = data.vorarbeiter_artikel_id;
+  tpGartenarbeiterArtikelId = data.gartenarbeiter_artikel_id;
+  $('tpVorarbeiterBtn').textContent = tpVorarbeiterArtikelId ? artikelBezeichnung(tpVorarbeiterArtikelId) : 'Artikel wählen…';
+  $('tpGartenarbeiterBtn').textContent = tpGartenarbeiterArtikelId ? artikelBezeichnung(tpGartenarbeiterArtikelId) : 'Artikel wählen…';
+}
+$('tpVorarbeiterBtn').addEventListener('click', () => {
+  if(aktuelleRolle !== 'admin') return;
+  openArtikelPicker(a => { tpVorarbeiterArtikelId = a.id; $('tpVorarbeiterBtn').textContent = a.bezeichnung; });
+});
+$('tpGartenarbeiterBtn').addEventListener('click', () => {
+  if(aktuelleRolle !== 'admin') return;
+  openArtikelPicker(a => { tpGartenarbeiterArtikelId = a.id; $('tpGartenarbeiterBtn').textContent = a.bezeichnung; });
+});
+$('tpSpeichernBtn').addEventListener('click', async () => {
+  const tagesleistung = parseFloat($('tpTagesleistung').value);
+  const { error } = await sb.from('tagessatz_personal_konfiguration').update({
+    tagesleistung_std: isNaN(tagesleistung) ? 9 : tagesleistung,
+    vorarbeiter_artikel_id: tpVorarbeiterArtikelId,
+    gartenarbeiter_artikel_id: tpGartenarbeiterArtikelId
+  }).eq('id', true);
+  if(error){ $('tpStatus').textContent = friendlyError(error); $('tpStatus').className = 'status err'; return; }
+  $('tpStatus').textContent = 'Gespeichert.'; $('tpStatus').className = 'status ok';
 });
 
 // ---------------------------------------------------------------------------
