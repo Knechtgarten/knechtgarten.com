@@ -60,8 +60,8 @@ h1{font-size:19px;color:var(--primary);margin-bottom:2px;}
   display:flex;align-items:center;justify-content:center;gap:6px;}
 .actionrow .btn-start{background:var(--accent-lime-light);color:var(--primary);border:1px solid var(--accent-lime);font-weight:600;}
 .actionrow .btn-start:hover{background:var(--accent-lime);}
-.actionrow .btn-stop{background:var(--danger);color:#fff;}
-.actionrow .btn-stop:hover{filter:brightness(0.92);}
+.actionrow .btn-stop{background:#FBEFEC;color:var(--danger);border:1px solid var(--danger);font-weight:600;}
+.actionrow .btn-stop:hover{background:var(--danger);color:#fff;}
 .actionrow .btn-resume{background:var(--accent-blue);color:var(--primary);border:1px solid var(--accent-blue);font-weight:600;}
 .actionrow .btn-resume:hover{filter:brightness(0.96);}
 
@@ -262,10 +262,9 @@ table.data td.num{text-align:right;font-variant-numeric:tabular-nums;}
       <div id="crawlingFelder">
         <div class="card">
           <div class="cardlabel">Datenabgleich-Modus</div>
-          <div class="segrow eq">
-            <button class="segbtn" data-mode="ergaenzen" data-tip="Neue Artikel aus den Merklisten werden vorgeschlagen und erst nach Prüfung ins Artikelstamm übernommen. Bestehende Artikel werden gleichzeitig auf Preisabweichungen geprüft.">Ergänzen</button>
-            <button class="segbtn" data-mode="nurabgleich" data-tip="Nur Artikel, die bei Knechtgarten bereits vorhanden sind, werden anhand der Merklisten auf Preisabweichungen geprüft. Es werden keine neuen Artikel vorgeschlagen.">Nur Abgleich</button>
-            <button class="segbtn" data-mode="ganzershop" data-tip="Der gesamte Shop wird ohne Eingrenzung durch Merklisten mit dem Artikelstamm abgeglichen. Nur Preisvergleich, keine neuen Artikel.">Ganzer Shop</button>
+          <div class="segrow eq2">
+            <button class="segbtn" data-mode="ergaenzen" data-tip="Neue Artikel werden vorgeschlagen und erst nach Prüfung ins Artikelstamm übernommen. Bestehende Artikel werden gleichzeitig auf Preisabweichungen geprüft.">Ergänzen</button>
+            <button class="segbtn" data-mode="nurabgleich" data-tip="Nur Artikel, die bei Knechtgarten bereits vorhanden sind, werden auf Preisabweichungen geprüft. Es werden keine neuen Artikel vorgeschlagen.">Nur Abgleich</button>
           </div>
         </div>
 
@@ -274,8 +273,11 @@ table.data td.num{text-align:right;font-variant-numeric:tabular-nums;}
           <div class="fld"><label>Shop-URL</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="kaShopUrl"></div>
           <div class="fld"><label>Benutzername</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="kaBenutzername"></div>
           <div class="fld"><label>Passwort</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="kaPasswort" type="password"></div>
-          <div id="mklCard">
-            <div class="hint" style="margin:10px 0 4px;">Merklisten in diesem Shop:</div>
+          <div class="segrow eq2" style="margin-top:10px;">
+            <button class="segbtn" data-quelle="ganzershop" data-tip="Der gesamte Shop wird ohne Eingrenzung durch Merklisten mit dem Artikelstamm abgeglichen. Nur Preisvergleich, keine neuen Artikel.">Ganzer Shop</button>
+            <button class="segbtn" data-quelle="merkliste" data-tip="Nur Artikel aus den unten erfassten Merklisten werden beruecksichtigt.">Merkliste</button>
+          </div>
+          <div id="mklCard" style="margin-top:10px;">
             <table class="ka-liste"><tbody id="kaMerklistenBody"></tbody></table>
           </div>
         </div>
@@ -527,25 +529,43 @@ $('kaPasswort').addEventListener('change', async () => {
 });
 
 // ---- Datenabgleich-Modus (persistiert in crawling_modus) ---------------
+// Zwei unabhaengige Achsen: crawling_modus (Ergaenzen/Nur Abgleich - werden
+// neue Artikel vorgeschlagen?) und crawling_quelle (Merkliste/Ganzer Shop -
+// woher kommen die Artikel?). "Neue Artikel zum Ergaenzen" ist nur sichtbar,
+// wenn BEIDES zutrifft: Modus=Ergaenzen und Quelle=Merkliste.
 function renderModus(){
   const modus = LIEF.da.crawling_modus || 'ergaenzen';
+  const quelle = LIEF.da.crawling_quelle || 'merkliste';
   document.querySelectorAll('.segbtn[data-mode]').forEach(btn => btn.classList.toggle('on', btn.dataset.mode === modus));
-  wendeModusAn(modus);
+  document.querySelectorAll('.segbtn[data-quelle]').forEach(btn => btn.classList.toggle('on', btn.dataset.quelle === quelle));
+  wendeModusUndQuelleAn(modus, quelle);
   renderShopZugang();
 }
-function wendeModusAn(modus){
-  $('mklCard').style.display = (modus === 'ganzershop') ? 'none' : '';
-  $('ergaenzenSection').style.display = (modus === 'ergaenzen') ? '' : 'none';
+function wendeModusUndQuelleAn(modus, quelle){
+  $('mklCard').style.display = (quelle === 'ganzershop') ? 'none' : '';
+  $('ergaenzenSection').style.display = (modus === 'ergaenzen' && quelle === 'merkliste') ? '' : 'none';
 }
 document.querySelectorAll('.segbtn[data-mode]').forEach(btn => {
   btn.addEventListener('click', async () => {
     document.querySelectorAll('.segbtn[data-mode]').forEach(b => b.classList.remove('on'));
     btn.classList.add('on');
     const modus = btn.dataset.mode;
-    wendeModusAn(modus);
+    wendeModusUndQuelleAn(modus, LIEF.da.crawling_quelle || 'merkliste');
     const { error } = await sb.from('lieferant_datenabgleich').upsert({ lieferant_id: LIEFERANT_ID, crawling_modus: modus }, { onConflict: 'lieferant_id' });
     if(error){ showToast(friendlyError(error), true); return; }
     LIEF.da.crawling_modus = modus;
+    showToast('Gespeichert.');
+  });
+});
+document.querySelectorAll('.segbtn[data-quelle]').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    document.querySelectorAll('.segbtn[data-quelle]').forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
+    const quelle = btn.dataset.quelle;
+    wendeModusUndQuelleAn(LIEF.da.crawling_modus || 'ergaenzen', quelle);
+    const { error } = await sb.from('lieferant_datenabgleich').upsert({ lieferant_id: LIEFERANT_ID, crawling_quelle: quelle }, { onConflict: 'lieferant_id' });
+    if(error){ showToast(friendlyError(error), true); return; }
+    LIEF.da.crawling_quelle = quelle;
     showToast('Gespeichert.');
   });
 });
