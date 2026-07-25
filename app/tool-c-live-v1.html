@@ -182,7 +182,15 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
     </div>
     <div class="hint" style="margin-top:-4px;">VP Knecht leer lassen für einen automatischen Vorschlag anhand der Minimum-Marge des Lieferanten.</div>
     <div class="row">
-      <div class="fld"><label>Foto-URL</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="amFoto"></div>
+      <div class="fld">
+        <label>Foto</label>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <img id="amFotoPreview" alt="" style="width:34px;height:34px;object-fit:cover;border-radius:6px;border:1px solid var(--line);display:none;flex-shrink:0;">
+          <input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="amFoto" placeholder="Foto-URL (oder hochladen)" style="flex:1;">
+          <button type="button" class="icobtn" id="amFotoUploadBtn" title="Vom PC hochladen"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg></button>
+          <input type="file" id="amFotoUploadInput" accept="image/*" class="hidden">
+        </div>
+      </div>
       <div class="fld"><label>Shop-Link</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="amShop"></div>
     </div>
     <div class="fld"><label>Anmerkung</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="amAnmerkung"></div>
@@ -526,6 +534,30 @@ function renderArtikelTable(){
 // ---------------------------------------------------------------------------
 let amMode = 'add';
 let amEditId = null;
+let amEditOriginalEp = null;
+function amFotoVorschauAktualisieren(){
+  const url = $('amFoto').value.trim();
+  $('amFotoPreview').src = url;
+  $('amFotoPreview').style.display = url ? '' : 'none';
+}
+async function uploadArtikelFoto(file){
+  const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
+  const pfad = `${crypto.randomUUID()}.${ext}`;
+  const { error } = await sb.storage.from('artikel-fotos').upload(pfad, file);
+  if(error){ showToast(friendlyError(error), true); return null; }
+  return sb.storage.from('artikel-fotos').getPublicUrl(pfad).data.publicUrl;
+}
+$('amFoto').addEventListener('input', amFotoVorschauAktualisieren);
+$('amFotoUploadBtn').addEventListener('click', () => $('amFotoUploadInput').click());
+$('amFotoUploadInput').addEventListener('change', async () => {
+  const file = $('amFotoUploadInput').files[0];
+  if(!file) return;
+  const url = await uploadArtikelFoto(file);
+  $('amFotoUploadInput').value = '';
+  if(!url) return;
+  $('amFoto').value = url;
+  amFotoVorschauAktualisieren();
+});
 
 function populateAmLieferantSelect(selectedId){
   $('amLieferant').innerHTML = LIEFERANTEN.map(l => `<option value="${l.id}" ${l.id===selectedId?'selected':''}>${l.name} (${l.kuerzel})</option>`).join('');
@@ -537,16 +569,17 @@ function populateAmGruppeSelect(selectedId){
 }
 
 function openArtikelModalAdd(){
-  amMode = 'add'; amEditId = null;
+  amMode = 'add'; amEditId = null; amEditOriginalEp = null;
   $('artikelModalTitel').textContent = 'Neuer Artikel';
   $('amBezeichnung').value = ''; $('amKategorie').value = 'material'; $('amEinheit').value = '';
-  populateAmLieferantSelect(LIEFERANTEN[0]?.id);
+  populateAmLieferantSelect(filterLieferantId || LIEFERANTEN[0]?.id);
   $('amNrLieferant').value = '';
   populateAmGruppeSelect(null);
   $('amNeueGruppeWrap').classList.add('hidden'); $('amNeueGruppeName').value = '';
   $('amEpLief').value = ''; $('amVpLief').value = ''; $('amWaehrung').value = 'CHF';
   $('amWechselkurs').value = '1'; $('amVpKnecht').value = ''; $('amMwst').value = '';
   $('amFoto').value = ''; $('amShop').value = ''; $('amAnmerkung').value = '';
+  amFotoVorschauAktualisieren();
   $('amOt').checked = false; $('amWt').checked = false; $('amEb').checked = false;
   $('amStatus').textContent = ''; $('amStatus').className = 'status';
   amAktualisiereMargen();
@@ -556,7 +589,7 @@ function openArtikelModalAdd(){
 function openArtikelModalEdit(id){
   const a = ARTIKEL.find(x => x.id === id);
   if(!a) return;
-  amMode = 'edit'; amEditId = id;
+  amMode = 'edit'; amEditId = id; amEditOriginalEp = a.ep_lieferant ?? null;
   $('artikelModalTitel').textContent = a.bezeichnung;
   $('amBezeichnung').value = a.bezeichnung;
   $('amKategorie').value = a.kategorie;
@@ -572,6 +605,7 @@ function openArtikelModalEdit(id){
   $('amVpKnecht').value = a.vp_knecht ?? '';
   $('amMwst').value = a.mwst_satz_pct ?? '';
   $('amFoto').value = a.foto_url || '';
+  amFotoVorschauAktualisieren();
   $('amShop').value = a.shop_link || '';
   $('amAnmerkung').value = a.anmerkung || '';
   $('amOt').checked = !!a.sync_offertentool;
@@ -673,6 +707,14 @@ $('amSave').addEventListener('click', async () => {
     ? await sb.from('artikel').insert(payload)
     : await sb.from('artikel').update(payload).eq('id', amEditId);
   if(error){ $('amStatus').textContent = friendlyError(error); $('amStatus').className = 'status err'; return; }
+
+  if(amMode === 'edit' && payload.ep_lieferant != null && payload.ep_lieferant !== amEditOriginalEp){
+    await sb.from('artikel_preis_verlauf').insert({
+      artikel_id: amEditId, alter_preis: amEditOriginalEp, neuer_preis: payload.ep_lieferant,
+      quelle: 'artikelstamm', lieferant_id
+    });
+  }
+
   $('artikelModalOvl').classList.remove('show');
   showToast(amMode === 'add' ? 'Artikel angelegt.' : 'Artikel gespeichert.');
   await loadArtikel();
@@ -756,8 +798,11 @@ $('addArtBtn').addEventListener('click', openArtikelModalAdd);
 $('addArtBtnTop').addEventListener('click', openArtikelModalAdd);
 
 async function init(){
+  const initParams = new URLSearchParams(location.search);
+  if(initParams.get('lieferant')) filterLieferantId = initParams.get('lieferant');
   await Promise.all([loadLieferanten(), loadArtikelgruppen()]);
   await loadArtikel();
+  if(initParams.get('add') === '1') openArtikelModalAdd();
 }
 const $loginwrap = document.getElementById('loginwrap');
 const $pendingWrap = document.getElementById('pendingWrap');
