@@ -332,8 +332,8 @@ table.data td.num{text-align:right;font-variant-numeric:tabular-nums;}
       <div id="googleSheetFelder" class="hidden">
         <div class="card">
           <div class="cardlabel">Google-Sheet-Zugang</div>
-          <div class="fld"><label>Google-Sheet-Link</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="gsLink" placeholder="https://docs.google.com/spreadsheets/d/..."></div>
-          <button class="btn" id="gsZuordnenBtn" style="margin-top:8px;">Spalten zuordnen</button>
+          <div class="hint" id="gsLinkAnzeige" style="margin-top:0;">Noch kein Link hinterlegt.</div>
+          <button class="btn" id="gsOeffnenBtn" style="margin-top:8px;">Zugang &amp; Zuordnung öffnen</button>
         </div>
       </div>
     </div>
@@ -381,8 +381,12 @@ table.data td.num{text-align:right;font-variant-numeric:tabular-nums;}
 
 <div class="ovl" id="spaltenZuordnenOvl">
   <div class="ovlbox xxwide">
-    <div class="ovlmsg">Spalten zuordnen</div>
-    <div class="zuordnenzone">
+    <div class="ovlmsg">Google-Sheet-Zugang &amp; Spalten zuordnen</div>
+    <div class="row" style="align-items:flex-end;">
+      <div class="fld" style="flex:1;"><label>Google-Sheet-Link</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="gsLink" placeholder="https://docs.google.com/spreadsheets/d/..."></div>
+      <button class="btn" id="gsLadenBtn" style="margin-bottom:8px;">Sheet laden</button>
+    </div>
+    <div class="zuordnenzone" style="margin-top:16px;">
       <div class="zuordnencol">
         <div class="zuordnencolhead">Unsere Felder</div>
         <div class="zuordnenrows">
@@ -397,12 +401,12 @@ table.data td.num{text-align:right;font-variant-numeric:tabular-nums;}
       <div class="zuordnencol">
         <div class="zuordnencolhead">Spalten im Sheet - ziehen, bis Reihenfolge passt</div>
         <div class="zuordnenrows" id="gsMappedRows"></div>
-        <div class="zuordnendivider">Nicht zugeordnet</div>
+        <div class="zuordnendivider hidden" id="gsUnmappedDivider">Nicht zugeordnet</div>
         <div class="zuordnenrows" id="gsUnmappedRows"></div>
       </div>
     </div>
     <div class="ovlbtns">
-      <button class="btnlink" id="gsZuordnenCancel">Abbrechen</button>
+      <button class="btnlink" id="gsZuordnenCancel">Schliessen</button>
       <button class="btn" id="gsZuordnenSave">Zuordnung speichern</button>
     </div>
     <div class="status" id="gsZuordnenStatus"></div>
@@ -566,6 +570,7 @@ $('quelleGoogleSheet').addEventListener('click', () => {
   $('quelleGoogleSheet').classList.add('on'); $('quelleCrawling').classList.remove('on');
   $('crawlingFelder').classList.add('hidden'); $('googleSheetFelder').classList.remove('hidden');
   wendeModusUndQuelleAn(LIEF.da.crawling_modus || 'ergaenzen', LIEF.da.crawling_quelle || 'merkliste');
+  oeffneZuordnenModal();
 });
 
 // ---- Shop-Zugang (Vault-Passwort) --------------------------------------
@@ -732,10 +737,9 @@ const GS_FELDER = [
 ];
 
 function renderGoogleSheetFelder(){
-  const v = LIEF.da.sync_verbindung || {};
-  $('gsLink').value = v.google_sheet_link || '';
+  const link = (LIEF.da.sync_verbindung || {}).google_sheet_link;
+  $('gsLinkAnzeige').textContent = link || 'Noch kein Link hinterlegt.';
 }
-$('gsLink').addEventListener('change', () => speichereVerbindungsfeld('google_sheet_link', $('gsLink').value.trim()));
 
 async function ladeGoogleSheet(){
   const link = (LIEF.da.sync_verbindung || {}).google_sheet_link;
@@ -770,7 +774,21 @@ function setupZuordnenDrag(container){
   });
   container.addEventListener('dragover', e => e.preventDefault());
 }
-function renderZuordnenModal(sheetDaten){
+function renderZuordnungLeer(){
+  $('gsMappedRows').innerHTML = '<p class="hint" style="margin:0;padding:6px 4px;">Noch kein Sheet geladen - Link eintragen und "Sheet laden" klicken.</p>';
+  $('gsUnmappedRows').innerHTML = '';
+  $('gsUnmappedDivider').classList.add('hidden');
+}
+function renderZuordnungAusGespeichert(){
+  const gespeichert = LIEF.da.sheet_spalten_zuordnung;
+  if(!gespeichert || !Object.keys(gespeichert).length){ renderZuordnungLeer(); return; }
+  $('gsMappedRows').innerHTML = '';
+  GS_FELDER.forEach(f => { if(gespeichert[f.key]) $('gsMappedRows').appendChild(macheSheetZeile(gespeichert[f.key])); });
+  $('gsUnmappedRows').innerHTML = '';
+  $('gsUnmappedDivider').classList.add('hidden');
+  setupZuordnenDrag($('gsMappedRows'));
+}
+function renderZuordnung(sheetDaten){
   const gespeichert = LIEF.da.sheet_spalten_zuordnung || {};
   const zugeordneteNamen = GS_FELDER.map(f => gespeichert[f.key]).filter(Boolean);
   const uebrig = sheetDaten.headers.filter(h => !zugeordneteNamen.includes(h));
@@ -782,21 +800,33 @@ function renderZuordnenModal(sheetDaten){
     else if(uebrig.length) $('gsMappedRows').appendChild(macheSheetZeile(uebrig.shift()));
   });
   $('gsUnmappedRows').innerHTML = '';
+  $('gsUnmappedDivider').classList.toggle('hidden', uebrig.length === 0);
   uebrig.forEach(h => $('gsUnmappedRows').appendChild(macheSheetZeile(h)));
 
   setupZuordnenDrag($('gsMappedRows'));
   setupZuordnenDrag($('gsUnmappedRows'));
 }
-$('gsZuordnenBtn').addEventListener('click', async () => {
+function oeffneZuordnenModal(){
+  $('gsLink').value = (LIEF.da.sync_verbindung || {}).google_sheet_link || '';
+  $('gsZuordnenStatus').textContent = ''; $('gsZuordnenStatus').className = 'status';
+  renderZuordnungAusGespeichert();
+  $('spaltenZuordnenOvl').classList.add('show');
+}
+$('gsOeffnenBtn').addEventListener('click', oeffneZuordnenModal);
+$('gsLadenBtn').addEventListener('click', async () => {
+  const link = $('gsLink').value.trim();
+  if(!link){ showToast('Bitte zuerst einen Google-Sheet-Link eintragen.', true); return; }
+  await speichereVerbindungsfeld('google_sheet_link', link);
+  renderGoogleSheetFelder();
   const daten = await ladeGoogleSheet();
   if(!daten) return;
   $('gsZuordnenStatus').textContent = ''; $('gsZuordnenStatus').className = 'status';
-  renderZuordnenModal(daten);
-  $('spaltenZuordnenOvl').classList.add('show');
+  renderZuordnung(daten);
 });
 $('gsZuordnenCancel').addEventListener('click', () => $('spaltenZuordnenOvl').classList.remove('show'));
 $('gsZuordnenSave').addEventListener('click', async () => {
   const rows = Array.from($('gsMappedRows').querySelectorAll('.sheetrow'));
+  if(!rows.length){ showToast('Bitte zuerst ein Sheet laden.', true); return; }
   const zuordnung = {};
   GS_FELDER.forEach((f, i) => { if(rows[i]) zuordnung[f.key] = rows[i].dataset.name; });
   const { error } = await sb.from('lieferant_datenabgleich').upsert({ lieferant_id: LIEFERANT_ID, sheet_spalten_zuordnung: zuordnung }, { onConflict: 'lieferant_id' });
