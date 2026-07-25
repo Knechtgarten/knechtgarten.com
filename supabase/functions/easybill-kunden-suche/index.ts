@@ -45,29 +45,38 @@ Deno.serve(async (req) => {
     const auth = 'Basic ' + btoa(`${email}:${apiKey}`);
 
     // Easybill kennt kein generisches "name"-Feld - deshalb parallel nach
-    // Firmenname UND Nachname suchen und die Treffer zusammenfuehren.
-    // Ein "type"-Filterparameter existiert bei GET /customers NICHT (nur bei
+    // mehreren Feldern suchen (Firma, Nachname, bei rein numerischem
+    // Suchtext zusaetzlich PLZ/Kundennummer - beide empirisch getestet und
+    // funktionieren als GET-Filter) und die Treffer zusammenfuehren.
+    // "street" wurde ebenfalls getestet, ist aber KEIN funktionierender
+    // GET-Filter bei Easybill (liefert immer 0 Treffer, selbst bei
+    // existierender Strasse) - deshalb hier bewusst weggelassen. Ein "type"-
+    // Filterparameter existiert bei GET /customers ebenfalls NICHT (nur bei
     // POST) - Easybill liefert hier Kunden UND Lieferanten gemischt zurueck.
     // Unterscheidung erfolgt daher weiter unten ueber das Feld "number"
     // (echte Kundennummer) vs. "supplier_number" (Lieferant).
-    const [firmaRes, nameRes] = await Promise.all([
-      fetch(`${EASYBILL_BASE_URL}/customers?company_name=${encodeURIComponent(suchtext)}&limit=15`, { headers: { Authorization: auth } }),
-      fetch(`${EASYBILL_BASE_URL}/customers?last_name=${encodeURIComponent(suchtext)}&limit=15`, { headers: { Authorization: auth } }),
-    ]);
+    const istNumerisch = /^\d+$/.test(suchtext);
+    const felder = ['company_name', 'last_name'];
+    if (istNumerisch) felder.push('zip_code', 'number');
 
-    if (!firmaRes.ok || !nameRes.ok) {
-      const status = !firmaRes.ok ? firmaRes.status : nameRes.status;
-      return json({ error: `Easybill-Anfrage fehlgeschlagen (HTTP ${status}).` }, 502);
-    }
+    const antworten = await Promise.all(
+      felder.map((feld) =>
+        fetch(`${EASYBILL_BASE_URL}/customers?${feld}=${encodeURIComponent(suchtext)}&limit=15`, { headers: { Authorization: auth } })
+          .then(async (res) => (res.ok ? res.json() : null))
+          .catch(() => null)
+      )
+    );
 
-    const firmaJson = await firmaRes.json();
-    const nameJson = await nameRes.json();
-    // Easybill liefert {page, pages, limit, total, items: [...]}.
-    const firmaListe = Array.isArray(firmaJson) ? firmaJson : (firmaJson.items || firmaJson.data || []);
-    const nameListe = Array.isArray(nameJson) ? nameJson : (nameJson.items || nameJson.data || []);
+    // Easybill liefert {page, pages, limit, total, items: [...]}. Einzelne
+    // Felder, die Easybill evtl. nicht als Filter unterstuetzt (nicht jedes
+    // Feld ist dokumentiert), liefern dann einfach nichts - kein Grund, die
+    // ganze Suche abzubrechen.
+    const alleTreffer = antworten
+      .filter((r) => r !== null)
+      .flatMap((r: any) => (Array.isArray(r) ? r : (r.items || r.data || [])));
 
     const gesehen = new Set<number>();
-    const kunden = [...firmaListe, ...nameListe]
+    const kunden = alleTreffer
       .filter((k: any) => {
         if (gesehen.has(k.id)) return false;
         gesehen.add(k.id);
