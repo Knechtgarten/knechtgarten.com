@@ -157,11 +157,6 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
 #ovl{z-index:66;}
 .ovlbox{background:#fff;border-radius:12px;max-width:400px;width:100%;padding:18px 20px;box-shadow:0 12px 40px rgba(0,0,0,.25);}
 .ovlbox.xwide{max-width:820px;max-height:88vh;overflow-y:auto;}
-.ovlbox.xxwide{max-width:1100px;}
-.ka-liste{width:100%;border-collapse:collapse;margin-top:6px;}
-.ka-liste td{padding:4px 6px 4px 0;vertical-align:middle;}
-.ka-liste input{width:100%;}
-.ka-liste .ka-name{width:34%;}
 .ovlmsg{font-size:13px;color:var(--ink);margin-bottom:12px;}
 .ovlbtns{display:flex;justify-content:flex-end;gap:8px;margin-top:14px;}
 
@@ -262,7 +257,6 @@ body.mitarbeiter-rolle .admin-only{display:none !important;}
         <option value="crawling">Crawling</option>
         <option value="ftp_xml">FTP/XML</option>
         <option value="google_sheet">Google Sheet</option>
-        <option value="pdf">PDF</option>
       </select>
     </div>
     <div class="ovlbtns">
@@ -321,8 +315,6 @@ body.mitarbeiter-rolle .admin-only{display:none !important;}
 <div class="ovl" id="lieferantAbgleichOvl">
   <div class="ovlbox xwide">
     <div class="ovlmsg" id="abTitel">Abgleich starten</div>
-    <div class="pillrow" id="abMethodenRow"></div>
-    <div id="abMethodExtra"></div>
     <div class="row" id="abStartRow" style="align-items:center;margin-top:10px;">
       <button class="btn" id="abStartBtn">Jetzt starten</button>
       <span class="hint" id="abStartHint" style="margin:0;"></span>
@@ -1706,7 +1698,7 @@ async function loadArtikelgruppen(){
 // ---------------------------------------------------------------------------
 // Datenabgleich: Lieferanten-Stammdaten + Sync-Verbindung
 // ---------------------------------------------------------------------------
-const SYNC_LABELS = { manuell:'Manuell', api:'API', crawling:'Crawling', ftp_xml:'FTP/XML', google_sheet:'Google Sheet', pdf:'PDF' };
+const SYNC_LABELS = { manuell:'Manuell', api:'API', crawling:'Crawling', ftp_xml:'FTP/XML', google_sheet:'Google Sheet' };
 let LIEFERANTEN_DA = [];
 async function loadDatenabgleich(){
   const { data: lieferanten, error } = await sb.from('lieferant').select('id,name,kuerzel,sync_typ,logo_url').order('name');
@@ -1737,7 +1729,6 @@ function verbindungsfelderHtml(lieferantId, syncTyp, verbindung){
       <div class="fld"><label>Sheet-Link</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" class="da-v" data-k="sheet_link" value="${v.sheet_link || ''}"></div>
       <div class="fld"><label>Tabellenblatt</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" class="da-v" data-k="tabellenblatt" value="${v.tabellenblatt || ''}"></div>
     </div>`;
-  if(syncTyp === 'pdf') return '<div class="hint">Spalten-Zuordnung wird im Abgleich-Fenster festgelegt (kann von PDF zu PDF wechseln).</div>';
   return '<div class="hint">Manueller Abgleich - keine Verbindungsdaten nötig.</div>';
 }
 
@@ -1881,16 +1872,12 @@ $('ldSave').addEventListener('click', async () => {
 });
 
 // ---------------------------------------------------------------------------
-// Abgleich-Fenster: Methoden-Auswahl, echter Manuell-Pfad, Warteschlange bei
-// Mehrfachauswahl. API/Crawling/FTP/Google-Sheet und die PDF-Auswertung sind
-// bewusst noch ehrliche Platzhalter - die eigentliche Anbindung wird pro
-// Lieferant programmiert, sobald es konkret wird (siehe Plan).
+// Abgleich-Fenster: echter Manuell-Pfad, Warteschlange bei Mehrfachauswahl.
+// Crawling-Lieferanten landen schon vorher auf der eigenen, groesseren Seite
+// (siehe openAbgleichOvl). API/FTP/Google-Sheet sind bewusst noch ehrliche
+// Platzhalter - die eigentliche Anbindung wird pro Lieferant programmiert,
+// sobald es konkret wird (siehe Plan).
 // ---------------------------------------------------------------------------
-function methodenFuer(l){
-  const liste = [{ key: l.sync_typ, label: SYNC_LABELS[l.sync_typ] || l.sync_typ }];
-  if(l.sync_typ !== 'pdf') liste.push({ key: 'pdf', label: 'PDF' });
-  return liste;
-}
 function abweichungGrossFuer(l, alt, neu){
   const da = l.da || {};
   const prozent = ((neu - alt) / alt) * 100;
@@ -1928,153 +1915,18 @@ function openAbgleichOvl(ids){
     return;
   }
   abAktuelleLieferantId = l.id;
-  const methoden = methodenFuer(l);
-  abAktuelleMethode = methoden[0].key;
+  abAktuelleMethode = l.sync_typ;
   $('abTitel').textContent = `Abgleich starten – ${l.name}`;
-  $('abMethodenRow').innerHTML = methoden.map(m => `<button class="filterpill ${m.key===abAktuelleMethode?'on':''}" data-m="${m.key}">${m.label}</button>`).join('');
-  $('abMethodenRow').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
-    abAktuelleMethode = b.dataset.m;
-    $('abMethodenRow').querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
-    renderAbMethodExtra();
-  }));
   $('abResult').innerHTML = '';
   $('abRunning').classList.add('hidden');
   $('abStartRow').classList.remove('hidden');
-  renderAbMethodExtra();
   $('lieferantAbgleichOvl').classList.add('show');
-}
-function renderAbMethodExtra(){
-  $('lieferantAbgleichOvl').querySelector('.ovlbox').classList.toggle('xxwide', abAktuelleMethode === 'crawling');
-  $('abStartRow').classList.toggle('hidden', abAktuelleMethode === 'crawling');
-  if(abAktuelleMethode === 'pdf'){
-    $('abMethodExtra').innerHTML = `
-      <div class="fld"><label>PDF-Datei</label><input type="file" accept="application/pdf" id="abPdfFile"></div>
-      <div class="row">
-        <div class="fld"><label>Spalte Artikelnummer</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="abPdfSpalteNr" placeholder="z.B. Art.-Nr."></div>
-        <div class="fld"><label>Spalte Bezeichnung</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="abPdfSpalteBez" placeholder="z.B. Bezeichnung"></div>
-        <div class="fld"><label>Spalte Preis</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="abPdfSpaltePreis" placeholder="z.B. Preis CHF"></div>
-      </div>
-      <div class="hint">Zuordnung gilt nur für diesen Abgleich - PDF-Strukturen können sich pro Lieferant ändern.</div>`;
-  } else if(abAktuelleMethode === 'crawling'){
-    renderCrawlingExtra(LIEFERANTEN_DA.find(x => x.id === abAktuelleLieferantId));
-  } else {
-    $('abMethodExtra').innerHTML = '';
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Crawling/Shop-Abgleich: Shop-URL/Login (Passwort ueber Vault, siehe unten),
-// Artikelgruppen-/Merklisten-Listen. Alles wird direkt in sync_verbindung
-// (jsonb, ohne Passwort) gespeichert, Autosave beim Verlassen des Felds -
-// gleiches Muster wie renderKieswerkListe()/kwFeld() weiter oben.
-// ---------------------------------------------------------------------------
-function renderCrawlingExtra(l){
-  if(!l) return;
-  const v = l.da.sync_verbindung || {};
-  const hatPasswort = !!l.da.shop_passwort_secret_id;
-  $('abMethodExtra').innerHTML = `
-    <div class="row">
-      <div class="fld"><label>Shop-URL</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="kaShopUrl" value="${v.shop_url || ''}"></div>
-      <div class="fld"><label>Benutzername</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="kaBenutzername" value="${v.benutzername || ''}"></div>
-      <div class="fld"><label>Passwort</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="kaPasswort" type="password" placeholder="${hatPasswort ? '•••••••• (gespeichert) - zum Ändern neu eingeben' : 'Passwort eingeben'}"></div>
-    </div>
-    <div class="row" style="align-items:center;margin:2px 0 16px;">
-      <button class="btn" id="kaShopSuchenBtn">Artikel vom ganzen Shop suchen</button>
-    </div>
-    <div class="subhead">Artikelgruppen</div>
-    <table class="ka-liste"><tbody id="kaArtikelgruppenBody"></tbody></table>
-    <div class="subhead" style="margin-top:16px;">Merklisten</div>
-    <table class="ka-liste"><tbody id="kaMerklistenBody"></tbody></table>`;
-
-  renderKaListe(l, 'artikelgruppen', 'kaArtikelgruppenBody');
-  renderKaListe(l, 'merklisten', 'kaMerklistenBody');
-
-  $('kaShopUrl').addEventListener('change', () => speichereCrawlingFeld(l, 'shop_url', $('kaShopUrl').value.trim()));
-  $('kaBenutzername').addEventListener('change', () => speichereCrawlingFeld(l, 'benutzername', $('kaBenutzername').value.trim()));
-  $('kaPasswort').addEventListener('change', async () => {
-    const wert = $('kaPasswort').value;
-    if(!wert) return;
-    const { error } = await sb.rpc('speichere_shop_passwort', { p_lieferant_id: l.id, p_passwort: wert });
-    if(error){ showToast(friendlyError(error), true); return; }
-    l.da.shop_passwort_secret_id = l.da.shop_passwort_secret_id || true;
-    $('kaPasswort').value = '';
-    $('kaPasswort').placeholder = '•••••••• (gespeichert) - zum Ändern neu eingeben';
-    showToast('Passwort gespeichert.');
-  });
-  $('kaShopSuchenBtn').addEventListener('click', zeigeCrawlingNochNichtEingerichtet);
-}
-function zeigeCrawlingNochNichtEingerichtet(){
-  $('abResult').innerHTML = '<div class="hint" style="margin-top:10px;">Automatischer Abruf über Crawling ist für diesen Lieferanten noch nicht eingerichtet - kommt in einer der nächsten Etappen.</div>';
-}
-async function speichereSyncVerbindungCrawling(l){
-  const { error } = await sb.from('lieferant_datenabgleich').upsert({ lieferant_id: l.id, sync_verbindung: l.da.sync_verbindung }, { onConflict: 'lieferant_id' });
-  if(error){ showToast(friendlyError(error), true); return; }
-  showToast('Gespeichert.');
-}
-function speichereCrawlingFeld(l, feld, wert){
-  l.da.sync_verbindung = l.da.sync_verbindung || {};
-  l.da.sync_verbindung[feld] = wert;
-  return speichereSyncVerbindungCrawling(l);
-}
-function kaFeld(item, feld){
-  const val = item ? (item[feld] ?? '') : '';
-  return `<input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" class="kaFeld" data-feld="${feld}" value="${val}">`;
-}
-function renderKaListe(l, feld, zielId){
-  l.da.sync_verbindung = l.da.sync_verbindung || {};
-  const liste = l.da.sync_verbindung[feld] || [];
-  const rows = liste.map((item, i) => `
-    <tr data-i="${i}">
-      <td class="ka-name">${kaFeld(item,'name')}</td>
-      <td>${kaFeld(item,'url')}</td>
-      <td><button class="icobtn" title="Artikel dieser Gruppe/Liste suchen" data-such="1">${ICON.search}</button></td>
-      <td><button class="icobtn danger" title="Entfernen" data-del="1">${ICON.trash}</button></td>
-    </tr>`).join('');
-  const draftRow = `<tr class="kaDraftRow">
-      <td class="ka-name">${kaFeld(null,'name')}</td>
-      <td>${kaFeld(null,'url')}</td>
-      <td></td><td></td>
-    </tr>`;
-  $(zielId).innerHTML = rows + draftRow;
-
-  $(zielId).querySelectorAll('tr[data-i]').forEach(tr => {
-    const i = parseInt(tr.dataset.i);
-    tr.querySelectorAll('.kaFeld').forEach(inp => {
-      inp.addEventListener('change', () => {
-        l.da.sync_verbindung[feld][i][inp.dataset.feld] = inp.value.trim();
-        speichereSyncVerbindungCrawling(l);
-      });
-    });
-    tr.querySelector('[data-such]').addEventListener('click', zeigeCrawlingNochNichtEingerichtet);
-    tr.querySelector('[data-del]').addEventListener('click', async () => {
-      if(!(await confirmDialog('Eintrag wirklich entfernen?'))) return;
-      l.da.sync_verbindung[feld].splice(i, 1);
-      await speichereSyncVerbindungCrawling(l);
-      renderKaListe(l, feld, zielId);
-    });
-  });
-  const draft = $(zielId).querySelector('.kaDraftRow');
-  draft.querySelectorAll('.kaFeld').forEach(inp => {
-    inp.addEventListener('change', async () => {
-      const name = draft.querySelector('.kaFeld[data-feld="name"]').value.trim();
-      const url = draft.querySelector('.kaFeld[data-feld="url"]').value.trim();
-      if(!name) return;
-      l.da.sync_verbindung[feld] = l.da.sync_verbindung[feld] || [];
-      l.da.sync_verbindung[feld].push({ name, url });
-      await speichereSyncVerbindungCrawling(l);
-      renderKaListe(l, feld, zielId);
-    });
-  });
 }
 $('abStartBtn').addEventListener('click', async () => {
   const l = LIEFERANTEN_DA.find(x => x.id === abAktuelleLieferantId);
   if(!l) return;
   if(abAktuelleMethode === 'manuell'){
     await starteManuellenAbgleich(l);
-    return;
-  }
-  if(abAktuelleMethode === 'pdf'){
-    $('abResult').innerHTML = '<div class="hint" style="margin-top:10px;">PDF-Auswertung ist noch nicht angebunden - kommt, sobald dieser Lieferant konkret programmiert wird.</div>';
     return;
   }
   $('abResult').innerHTML = `<div class="hint" style="margin-top:10px;">Automatischer Abruf über ${SYNC_LABELS[abAktuelleMethode] || abAktuelleMethode} ist für diesen Lieferanten noch nicht eingerichtet - kommt in einer der nächsten Etappen.</div>`;
@@ -2155,8 +2007,6 @@ async function starteManuellenAbgleich(l){
 }
 function openAbgleichQueue(ids){
   $('abTitel').textContent = `Abgleich starten – ${ids.length} Lieferanten`;
-  $('abMethodenRow').innerHTML = '';
-  $('abMethodExtra').innerHTML = '';
   $('abStartRow').classList.add('hidden');
   $('abRunning').classList.add('hidden');
   $('abResult').innerHTML = ids.map(id => {
