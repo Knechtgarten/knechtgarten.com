@@ -1,10 +1,17 @@
 # Spiegelt den Inhalt von app/ bei jedem Push (der app/ betrifft) in den
 # eigenstaendigen Branch "hostinger-deploy", sodass app/-Dateien dort direkt
 # im Branch-Root liegen (nicht mehr in einem Unterordner). Hostingers native
-# Git-Integration (hPanel -> Website -> Advanced -> Git) wird auf genau diesen
-# Branch zeigen - so landen nur die echten Website-Dateien auf dem Server,
-# nicht db/, supabase/ oder .github/. Nutzt "git subtree split", das die
-# Historie fuer app/ eigenstaendig nachbildet.
+# Git-Integration (hPanel -> Website -> Advanced -> Git) zeigt auf genau
+# diesen Branch - so landen nur die echten Website-Dateien auf dem Server,
+# nicht db/, supabase/ oder .github/.
+#
+# Wichtig: Der Branch wird NICHT mehr per "git subtree split" + Force-Push
+# komplett neu aufgebaut (das hat Hostingers Shallow-Clone durcheinander-
+# gebracht - "fatal: shallow file has changed since we read it", jeder Sync
+# hat eine voellig neue, unverwandte Historie erzwungen). Stattdessen wird
+# der bestehende hostinger-deploy-Branch ausgecheckt und bekommt einfach
+# einen weiteren, normalen Commit obendrauf (echter Fast-Forward-Push, keine
+# erzwungene Historie).
 name: Deploy-Branch fuer Hostinger synchronisieren
 
 on:
@@ -21,18 +28,27 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Code auschecken (volle Historie)
+      - name: Code auschecken (main)
+        uses: actions/checkout@v4
+
+      - name: Bestehenden hostinger-deploy-Branch auschecken
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          ref: hostinger-deploy
+          path: deploy-branch
+          fetch-depth: 1
 
-      - name: Git-Identitaet setzen
+      - name: app/-Inhalt in den Deploy-Branch kopieren und committen
         run: |
+          find deploy-branch -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
+          cp -a app/. deploy-branch/
+          cd deploy-branch
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: app/-Unterordner als eigenstaendigen Branch abspalten und pushen
-        run: |
-          git subtree split --prefix=app -b hostinger-deploy-tmp
-          git push origin hostinger-deploy-tmp:hostinger-deploy --force
-          git branch -D hostinger-deploy-tmp
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Keine Aenderungen an app/ - nichts zu deployen."
+          else
+            git commit -m "Deploy: $(cd .. && git rev-parse --short HEAD) - $(cd .. && git log -1 --format=%s)"
+            git push origin HEAD:hostinger-deploy
+          fi
