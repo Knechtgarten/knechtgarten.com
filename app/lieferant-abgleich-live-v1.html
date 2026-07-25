@@ -138,6 +138,9 @@ table.data td.num{text-align:right;font-variant-numeric:tabular-nums;}
 .artname{font-weight:600;color:var(--ink);}
 .artmeta{font-size:11px;color:var(--muted);margin-top:1px;}
 .emptystate{padding:16px;margin:0;color:var(--muted);font-size:12.5px;}
+.preis-neu{width:100px;border:1px solid var(--line);border-radius:6px;padding:5px 7px;font:inherit;font-size:12.5px;text-align:right;}
+.devtag{font-size:10.5px;font-weight:700;border-radius:5px;padding:2px 6px;background:#EAF3E6;color:#3F6B36;}
+.devtag.warn{background:#FBEFE3;color:#8A5A22;}
 
 .toastwrap{position:fixed;bottom:16px;right:16px;z-index:70;display:flex;flex-direction:column;gap:6px;}
 .toast{background:var(--primary);color:#fff;font-size:12.5px;padding:9px 14px;border-radius:7px;box-shadow:0 6px 20px rgba(0,0,0,.2);}
@@ -302,12 +305,12 @@ table.data td.num{text-align:right;font-variant-numeric:tabular-nums;}
             <h3>Preisabgleich</h3>
             <span class="hint" id="preisHint"></span>
             <span class="spacer"></span>
-            <button class="segbtn uebernehmen-btn" id="preisUebernehmenBtn" disabled title="Verfügbar, sobald ein automatischer Abgleich abgeschlossen ist">Daten übernehmen</button>
+            <button class="segbtn uebernehmen-btn ready" id="preisUebernehmenBtn">Daten übernehmen</button>
           </div>
         </div>
         <div class="tablewrap">
           <table class="data">
-            <thead><tr><th><input type="checkbox"></th><th>Artikel</th><th class="num">Aktueller Preis</th><th class="num">Neuer Preis</th><th>Abweichung</th></tr></thead>
+            <thead><tr><th><input type="checkbox" id="preisCheckAll" checked></th><th>Artikel</th><th class="num">Aktueller Preis</th><th class="num">Neuer Preis</th><th>Abweichung</th></tr></thead>
             <tbody id="preisBody"></tbody>
           </table>
         </div>
@@ -648,20 +651,71 @@ $('btnStop').addEventListener('click', zeigeNochNichtEingerichtet);
 $('btnResume').addEventListener('click', zeigeNochNichtEingerichtet);
 $('logHead').addEventListener('click', () => $('logPanel').classList.toggle('open'));
 
-// ---- Rechte Spalte: Preisabweichungen + Neue Artikel -------------------
+// ---- Rechte Spalte: Preisabgleich + Artikel ergaenzen -------------------
+// Preisabgleich ist bereits echt: Neuer Preis wird direkt hier manuell
+// eingetragen (unabhaengig vom Sync-Typ - es gibt nur dieses eine Fenster),
+// "Daten übernehmen" schreibt die markierten, geänderten Zeilen wirklich in
+// artikel/artikel_preis_verlauf. Ein automatischer Abruf, der diese Felder
+// selbst vorbefuellt, existiert noch nicht (siehe Ablauf-Protokoll).
+function preisAbweichungGross(alt, neu){
+  if(!alt) return false;
+  const prozent = ((neu - alt) / alt) * 100;
+  const ueberProzent = Math.abs(prozent) >= (LIEF.da.warnschwelle_prozent ?? 15);
+  const ueberChf = LIEF.da.warnschwelle_betrag_chf != null && Math.abs(neu - alt) >= LIEF.da.warnschwelle_betrag_chf;
+  return ueberProzent || ueberChf;
+}
+function aktualisierePreisAbweichung(tr){
+  const alt = parseFloat(tr.dataset.alt);
+  const neu = parseFloat(tr.querySelector('.preis-neu').value);
+  const abwEl = tr.querySelector('.preis-abw');
+  if(isNaN(neu) || !alt){ abwEl.textContent = '–'; return; }
+  const prozent = ((neu - alt) / alt) * 100;
+  const warn = preisAbweichungGross(alt, neu);
+  abwEl.innerHTML = `<span class="devtag${warn ? ' warn' : ''}">${prozent >= 0 ? '+' : ''}${prozent.toFixed(1)}%</span>`;
+}
 function renderErgebnisSpalte(){
   $('statTotal').textContent = ARTIKEL.length;
-  $('preisHint').textContent = `${ARTIKEL.length} Artikel im Artikelstamm - noch keine Daten von einem automatischen Abgleich.`;
+  $('preisHint').textContent = `${ARTIKEL.length} Artikel im Artikelstamm.`;
   $('preisBody').innerHTML = ARTIKEL.map(a => `
-    <tr>
-      <td><input type="checkbox"></td>
+    <tr data-id="${a.id}" data-alt="${a.ep_lieferant ?? ''}">
+      <td><input type="checkbox" class="preis-check" checked></td>
       <td><div class="artname">${a.bezeichnung}</div><div class="artmeta">${a.einheit}</div></td>
       <td class="num">${a.ep_lieferant != null ? 'CHF ' + fmtNum(a.ep_lieferant) : '–'}</td>
-      <td class="num">–</td>
-      <td>–</td>
+      <td class="num"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="number" step="0.01" class="preis-neu" value="${a.ep_lieferant ?? ''}"></td>
+      <td class="preis-abw hint" style="margin:0;">–</td>
     </tr>`).join('') || '<tr><td colspan="5" class="hint" style="padding:14px;">Keine Artikel dieses Lieferanten im Artikelstamm.</td></tr>';
+  $('preisBody').querySelectorAll('tr[data-id]').forEach(tr => {
+    aktualisierePreisAbweichung(tr);
+    tr.querySelector('.preis-neu').addEventListener('input', () => aktualisierePreisAbweichung(tr));
+  });
   $('ergaenzenBody').innerHTML = '<tr><td colspan="3" class="hint" style="padding:14px;">Noch keine neuen Artikel gefunden. Automatischer Abruf ist für diesen Lieferanten noch nicht eingerichtet - kommt in einer der nächsten Etappen.</td></tr>';
 }
+$('preisCheckAll').addEventListener('change', () => {
+  $('preisBody').querySelectorAll('.preis-check').forEach(cb => cb.checked = $('preisCheckAll').checked);
+});
+$('preisUebernehmenBtn').addEventListener('click', async () => {
+  const zeilen = Array.from($('preisBody').querySelectorAll('tr[data-id]')).filter(tr => tr.querySelector('.preis-check').checked);
+  let anzahl = 0;
+  for(const tr of zeilen){
+    const artikelId = tr.dataset.id;
+    const alt = parseFloat(tr.dataset.alt) || null;
+    const neu = parseFloat(tr.querySelector('.preis-neu').value);
+    if(isNaN(neu) || alt === neu) continue;
+    const { error: updErr } = await sb.from('artikel').update({ ep_lieferant: neu }).eq('id', artikelId);
+    if(updErr){ showToast(friendlyError(updErr), true); continue; }
+    await sb.from('artikel_preis_verlauf').insert({
+      artikel_id: artikelId, alter_preis: alt, neuer_preis: neu,
+      quelle: 'abgleich', methode: 'manuell', lieferant_id: LIEFERANT_ID
+    });
+    anzahl++;
+  }
+  if(!anzahl){ showToast('Keine geänderten Preise zum Übernehmen markiert.', true); return; }
+  await sb.from('lieferant_datenabgleich').upsert({ lieferant_id: LIEFERANT_ID, letzter_abgleich_status: 'Erfolgreich', letzter_abgleich_zeitpunkt: new Date().toISOString() }, { onConflict: 'lieferant_id' });
+  showToast(`${anzahl} Preis(e) übernommen.`);
+  const { data: artikel } = await sb.from('artikel').select('id,bezeichnung,einheit,ep_lieferant').eq('lieferant_id', LIEFERANT_ID).order('bezeichnung');
+  ARTIKEL = artikel || [];
+  renderErgebnisSpalte();
+});
 
 
 (async () => {
