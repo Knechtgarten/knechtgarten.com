@@ -297,7 +297,7 @@ table.data td.num{text-align:right;font-variant-numeric:tabular-nums;}
         <div class="cardlabel">Datenabgleich-Modus</div>
         <div class="segrow eq2">
           <button class="segbtn" data-mode="ergaenzen" data-tip="Neue Artikel werden vorgeschlagen und erst nach Prüfung ins Artikelstamm übernommen. Bestehende Artikel werden gleichzeitig auf Preisabweichungen geprüft.">Daten ergänzen</button>
-          <button class="segbtn" data-mode="nurabgleich" data-tip="Nur Artikel, die bei Knechtgarten bereits vorhanden sind, werden auf Preisabweichungen geprüft. Es werden keine neuen Artikel vorgeschlagen.">Daten nur abgleichen</button>
+          <button class="segbtn" data-mode="nurabgleich" data-tip="Nur Artikel, die bei Knechtgarten bereits vorhanden sind, werden auf Preisabweichungen geprüft. Es werden keine neuen Artikel vorgeschlagen.">Eins-zu-eins-Abgleich</button>
         </div>
       </div>
 
@@ -546,16 +546,21 @@ function renderKopf(){
 
 // ---- Warnschwelle -----------------------------------------------------
 function renderWarnschwelle(){
-  $('wsProzent').value = LIEF.da.warnschwelle_prozent ?? 15;
+  $('wsProzent').value = LIEF.da.warnschwelle_prozent ?? '';
   $('wsChf').value = LIEF.da.warnschwelle_betrag_chf ?? '';
 }
+// Prozent und CHF sind ein Entweder-Oder-Paar: sobald im einen Feld eine
+// Zahl eingetippt wird, wird das andere sofort geleert (statt dass beide
+// Schwellenwerte gleichzeitig aktiv waeren).
+$('wsProzent').addEventListener('input', () => { if($('wsProzent').value.trim() !== '') $('wsChf').value = ''; });
+$('wsChf').addEventListener('input', () => { if($('wsChf').value.trim() !== '') $('wsProzent').value = ''; });
 async function speichereWarnschwelle(){
-  const prozent = parseFloat($('wsProzent').value) || 15;
+  const prozentRaw = $('wsProzent').value.trim();
   const chfRaw = $('wsChf').value.trim();
-  const payload = { lieferant_id: LIEFERANT_ID, warnschwelle_prozent: prozent, warnschwelle_betrag_chf: chfRaw === '' ? null : parseFloat(chfRaw) };
+  const payload = { lieferant_id: LIEFERANT_ID, warnschwelle_prozent: prozentRaw === '' ? null : parseFloat(prozentRaw), warnschwelle_betrag_chf: chfRaw === '' ? null : parseFloat(chfRaw) };
   const { error } = await sb.from('lieferant_datenabgleich').upsert(payload, { onConflict: 'lieferant_id' });
   if(error){ showToast(friendlyError(error), true); return; }
-  LIEF.da.warnschwelle_prozent = prozent;
+  LIEF.da.warnschwelle_prozent = payload.warnschwelle_prozent;
   LIEF.da.warnschwelle_betrag_chf = payload.warnschwelle_betrag_chf;
   showToast('Gespeichert.');
 }
@@ -992,7 +997,7 @@ $('logHead').addEventListener('click', () => $('logPanel').classList.toggle('ope
 function preisAbweichungGross(alt, neu){
   if(!alt) return false;
   const prozent = ((neu - alt) / alt) * 100;
-  const ueberProzent = Math.abs(prozent) >= (LIEF.da.warnschwelle_prozent ?? 15);
+  const ueberProzent = LIEF.da.warnschwelle_prozent != null && Math.abs(prozent) >= LIEF.da.warnschwelle_prozent;
   const ueberChf = LIEF.da.warnschwelle_betrag_chf != null && Math.abs(neu - alt) >= LIEF.da.warnschwelle_betrag_chf;
   return ueberProzent || ueberChf;
 }
