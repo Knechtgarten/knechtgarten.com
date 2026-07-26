@@ -97,6 +97,27 @@ async function spiegleFotoInStorage(sb: any, fotoUrl: string): Promise<string> {
   }
 }
 
+// Diagnose, WARUM ein Login fehlschlaegt - unterscheidet "der Shop hat uns
+// tatsaechlich abgelehnt" von "wir wurden vorher schon von einer Firewall/
+// einem unsichtbaren Bot-Check ausgebremst", was mit reinen HTTP-Anfragen
+// (ohne echten Browser) grundsaetzlich nicht loesbar waere.
+function erkenneVerdaechtigeAntwort(html: string): string | null {
+  const h = html.toLowerCase();
+  if (h.includes('recaptcha') || h.includes('g-recaptcha')) {
+    return 'Die Seite enthaelt ein reCAPTCHA - der Shop verlangt offenbar eine unsichtbare Bot-Pruefung, die ein reiner Server-Aufruf (ohne echten Browser) nicht loesen kann.';
+  }
+  if (h.includes('cloudflare') && (h.includes('attention required') || h.includes('checking your browser') || h.includes('cf-error') || h.includes('ray id'))) {
+    return 'Die Antwort kommt von einem Cloudflare-Sicherheitscheck, nicht vom Shop selbst - die Anfrage wurde schon davor blockiert.';
+  }
+  if (h.includes('access denied') || h.includes('forbidden') || h.includes('blockiert') || h.includes('gesperrt')) {
+    return 'Die Antwort deutet auf eine Zugriffssperre (Firewall/Hosting) hin, nicht auf falsche Zugangsdaten.';
+  }
+  if (h.includes('too many requests') || h.includes('rate limit') || h.includes('zu viele anfragen')) {
+    return 'Die Antwort deutet auf eine Rate-Limit-Sperre hin (zu viele Versuche in kurzer Zeit).';
+  }
+  return null;
+}
+
 function parseGambioMerkliste(html: string, origin: string) {
   const artikel: { artikelnummer_lieferant: string; bezeichnung: string; ep_lieferant: number | null; foto_url: string | null }[] = [];
   const teile = html.split('class="product-item"');
@@ -187,6 +208,8 @@ Deno.serve(async (req) => {
       body: new URLSearchParams({ email_address_login: benutzername, password_login: passwort }),
     });
     sammleCookies(cookieJar, loginRes);
+    const loginResHtml = await loginRes.clone().text().catch(() => '');
+    const loginResStatus = loginRes.status;
 
     // 3) Die eigentliche Merkliste mit der (hoffentlich eingeloggten) Session abrufen.
     const listeRes = await fetch(url, { headers: { ...browserHeaders, Cookie: cookieHeader(cookieJar) } });
@@ -195,7 +218,11 @@ Deno.serve(async (req) => {
     }
     const html = await listeRes.text();
     if (html.includes('name="email_address_login"')) {
-      return json({ error: 'Login beim Webshop fehlgeschlagen - bitte Benutzername/Passwort in den Verbindungsdaten pruefen.' }, 400);
+      const verdacht = erkenneVerdaechtigeAntwort(loginResHtml) || erkenneVerdaechtigeAntwort(html);
+      const zusatz = verdacht
+        ? ` (${verdacht})`
+        : ` (Login-Antwort-Status war ${loginResStatus} - Shop hat wieder die normale Login-Seite gezeigt, kein erkennbarer Bot-Check im HTML gefunden.)`;
+      return json({ error: `Login beim Webshop fehlgeschlagen - bitte Benutzername/Passwort in den Verbindungsdaten pruefen.${zusatz}` }, 400);
     }
 
     const artikel = parseGambioMerkliste(html, origin);
