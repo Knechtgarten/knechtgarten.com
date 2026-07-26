@@ -1,6 +1,12 @@
 // ============================================================================
-// Offertentool 2027 - Shop-Crawling: Merkliste eines Lieferanten-Webshops
-// lesen (erster echter Lieferant: Koi-Breeder, Gambio-Shop).
+// Offertentool 2027 - Shop-Crawling fuer Lieferanten mit Gambio-Webshop.
+//
+// Nicht pro Lieferant, sondern pro Shop-SOFTWARE: jeder Lieferant, dessen
+// Webshop auf Gambio laeuft (erster Fall: Koi-Breeder), kann diese Funktion
+// mitverwenden - Login-Formular und Produktkarten-Aufbau sind bei Gambio-
+// Shops identisch. Ein Lieferant mit anderer Shop-Software (WooCommerce,
+// Shopify, Eigenentwicklung, ...) braucht eine eigene Funktion nach gleichem
+// Namensmuster (z.B. shop-crawling-woocommerce-lesen).
 //
 // Loggt sich serverseitig beim Webshop des Lieferanten ein (Login-Daten aus
 // lieferant_datenabgleich.sync_verbindung, Passwort kommt entschluesselt aus
@@ -9,13 +15,11 @@
 // abgerufen und die enthaltenen Artikel (Bezeichnung/Artikelnummer/Preis)
 // herausgeparst. Schreibt NICHTS in den Webshop zurueck.
 //
-// Diese Login-/Parsing-Logik ist bewusst Gambio-spezifisch (Login-Feldnamen
-// email_address_login/password_login, POST auf login.php?action=process,
-// Produktkarten als div.product-item mit "Artikel Nr.:"/"CHF "-Textmustern
-// und dem Produktname im alt-Attribut des Bilds) - jeder weitere Lieferant
-// mit anderer Shop-Software braucht eine eigene Variante.
+// Gambio-spezifisch: Login-Feldnamen email_address_login/password_login,
+// POST auf login.php?action=process, Produktkarten als div.product-item mit
+// "Artikel Nr.:"/"CHF "-Textmustern und dem Produktname im alt-Attribut des Bilds.
 //
-// Aufruf vom Client: sb.functions.invoke('shop-crawling-lesen', { body: { lieferant_id, url } })
+// Aufruf vom Client: sb.functions.invoke('shop-crawling-gambio-lesen', { body: { lieferant_id, url } })
 // ============================================================================
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
