@@ -713,7 +713,7 @@ function renderKaListe(feld, zielId){
       LIEF.da.sync_verbindung[feld][i].abgleichen = e.target.checked;
       speichereSyncVerbindung();
     });
-    tr.querySelector('[data-such]').addEventListener('click', zeigeWebshopAbgleichStatus);
+    tr.querySelector('[data-such]').addEventListener('click', () => starteCrawlingMerklisten(LIEF.da.sync_verbindung[feld][i].url));
     tr.querySelector('[data-del]').addEventListener('click', async () => {
       if(!confirm('Eintrag wirklich entfernen?')) return;
       LIEF.da.sync_verbindung[feld].splice(i, 1);
@@ -1064,12 +1064,18 @@ async function starteGoogleSheetAbgleich(){
     anmerkung: idx.anmerkung >= 0 ? (row[idx.anmerkung] || '').trim() : ''
   })).filter(a => a.artikelnummer_lieferant);
 
-  // Gross-/Kleinschreibung wird beim Abgleich ignoriert - bei einer manuell
-  // gepflegten Tabelle waere ein Tippfehler in der Schreibweise sonst genug,
-  // damit ein Artikel faelschlich als "nicht gefunden" gilt.
+  await verarbeiteGefundeneArtikel(sheetArtikel, 'Sheet');
+}
+// Gemeinsame Auswertung fuer alle Quellen (Google Sheet + Crawling/Merkliste):
+// gegen den Artikelstamm dieses Lieferanten abgleichen (Gross-/Kleinschreibung
+// ignoriert - bei manuell gepflegten Listen waere ein Tippfehler sonst genug,
+// damit ein Artikel faelschlich als "nicht gefunden" gilt), neue Preise in die
+// Preisabgleich-Tabelle uebernehmen, neue Artikel + nicht gefundene Artikel
+// separat auflisten.
+async function verarbeiteGefundeneArtikel(gefundeneArtikel, quelleLabel){
   const bestandNachNr = new Map(ARTIKEL.filter(a => a.artikelnummer_lieferant).map(a => [normArtikelnr(a.artikelnummer_lieferant), a]));
   let treffer = 0;
-  sheetArtikel.forEach(sa => {
+  gefundeneArtikel.forEach(sa => {
     const bestand = bestandNachNr.get(normArtikelnr(sa.artikelnummer_lieferant));
     if(!bestand || sa.ep_lieferant == null) return;
     const tr = $('preisBody').querySelector(`tr[data-id="${bestand.id}"]`);
@@ -1082,23 +1088,60 @@ async function starteGoogleSheetAbgleich(){
 
   const modus = LIEF.da.crawling_modus || 'ergaenzen';
   if(modus === 'ergaenzen'){
-    const neue = sheetArtikel.filter(sa => !bestandNachNr.has(normArtikelnr(sa.artikelnummer_lieferant)));
+    const neue = gefundeneArtikel.filter(sa => !bestandNachNr.has(normArtikelnr(sa.artikelnummer_lieferant)));
     renderNeueArtikel(neue);
     logAnhaengen(`${neue.length} neue Artikel gefunden.`);
   }
 
-  const sheetNummern = new Set(sheetArtikel.map(sa => normArtikelnr(sa.artikelnummer_lieferant)));
-  const nichtGefunden = ARTIKEL.filter(a => a.artikelnummer_lieferant && !sheetNummern.has(normArtikelnr(a.artikelnummer_lieferant)));
+  const gefundeneNummern = new Set(gefundeneArtikel.map(sa => normArtikelnr(sa.artikelnummer_lieferant)));
+  const nichtGefunden = ARTIKEL.filter(a => a.artikelnummer_lieferant && !gefundeneNummern.has(normArtikelnr(a.artikelnummer_lieferant)));
   ABGLEICH_GELAUFEN = true;
   renderNichtAbgeglichen(nichtGefunden);
-  logAnhaengen(`${nichtGefunden.length} Artikel im Sheet nicht gefunden.`);
+  logAnhaengen(`${nichtGefunden.length} Artikel im ${quelleLabel} nicht gefunden.`);
 
   await sb.from('lieferant_datenabgleich').upsert({ lieferant_id: LIEFERANT_ID, letzter_abgleich_status: 'Erfolgreich', letzter_abgleich_zeitpunkt: new Date().toISOString() }, { onConflict: 'lieferant_id' });
   logAnhaengen('Fertig.');
   setzeStatus('fertig', 'Fertig');
-  showToast('Google-Sheet-Abgleich abgeschlossen.');
+  showToast(`${quelleLabel}-Abgleich abgeschlossen.`);
 }
-$('btnStart').addEventListener('click', () => istGoogleSheetQuelle() ? starteGoogleSheetAbgleich() : zeigeWebshopAbgleichStatus());
+
+// ---- Crawling: Merkliste(n) ueber echten Shop-Login lesen ----------------
+async function ladeMerklisteVomShop(url){
+  const { data, error } = await sb.functions.invoke('shop-crawling-lesen', { body: { lieferant_id: LIEFERANT_ID, url } });
+  if(error){
+    let msg = friendlyError(error);
+    try { const body = await error.context?.json(); if(body?.error) msg = body.error; } catch(_e) {}
+    showToast(msg, true);
+    return null;
+  }
+  if(data?.error){ showToast(data.error, true); return null; }
+  return data;
+}
+async function starteCrawlingMerklisten(nurEineUrl){
+  if(!LIEF.da.webshop_abgleich_eingerichtet){ zeigeWebshopAbgleichStatus(); return; }
+  const alle = (LIEF.da.sync_verbindung || {}).merklisten || [];
+  const zuLaden = nurEineUrl
+    ? alle.filter(m => m.url === nurEineUrl)
+    : alle.filter(m => m.abgleichen !== false && m.url);
+  if(!zuLaden.length){ showToast('Keine Merkliste zum Abgleichen hinterlegt.', true); return; }
+
+  setzeStatus('arbeit', 'In Arbeit');
+  $('logPanel').classList.add('open');
+  let alleArtikel = [];
+  for(const m of zuLaden){
+    logAnhaengen(`Merkliste "${m.name || m.url}" wird geladen …`);
+    const daten = await ladeMerklisteVomShop(m.url);
+    if(!daten){ setzeStatus('gestoppt', 'Gestoppt'); return; }
+    logAnhaengen(`${daten.artikel.length} Artikel in "${m.name || m.url}" gefunden.`);
+    alleArtikel = alleArtikel.concat(daten.artikel);
+  }
+  await verarbeiteGefundeneArtikel(alleArtikel, 'Shop');
+}
+$('btnStart').addEventListener('click', () => {
+  if(istGoogleSheetQuelle()) return starteGoogleSheetAbgleich();
+  if((LIEF.da.crawling_quelle || 'merkliste') === 'merkliste') return starteCrawlingMerklisten(null);
+  zeigeWebshopAbgleichStatus();
+});
 $('btnStop').addEventListener('click', zeigeNochNichtEingerichtet);
 $('btnResume').addEventListener('click', zeigeNochNichtEingerichtet);
 $('logHead').addEventListener('click', () => $('logPanel').classList.toggle('open'));
