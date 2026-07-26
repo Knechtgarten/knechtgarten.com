@@ -174,13 +174,9 @@ Deno.serve(async (req) => {
     const verbindung = da.sync_verbindung || {};
     const shopUrl = verbindung.shop_url;
     const benutzername = verbindung.benutzername;
-    if (!shopUrl || !benutzername) {
-      return json({ error: 'Shop-URL oder Benutzername fehlt in den Verbindungsdaten.' }, 400);
+    if (!shopUrl) {
+      return json({ error: 'Shop-URL fehlt in den Verbindungsdaten.' }, 400);
     }
-
-    const { data: passwort, error: pwErr } = await sb.rpc('lese_shop_passwort', { p_lieferant_id: lieferant_id });
-    if (pwErr) return json({ error: 'Shop-Passwort konnte nicht gelesen werden: ' + pwErr.message }, 400);
-    if (!passwort) return json({ error: 'Fuer diesen Lieferanten ist noch kein Shop-Passwort hinterlegt.' }, 400);
 
     let origin: string;
     try {
@@ -189,27 +185,51 @@ Deno.serve(async (req) => {
       return json({ error: 'Shop-URL ist ungueltig.' }, 400);
     }
 
+    // Manche Shops pruefen beim Login ein unsichtbares reCAPTCHA, das ein
+    // reiner Server-Aufruf nicht bestehen kann - dafuer gibt es die per Hand
+    // aus dem Browser kopierte Session (siehe lieferant-abgleich-live-v1.html,
+    // Feld "Session (aus Browser kopiert)"). Ist eine gespeichert, wird sie
+    // direkt verwendet und der eigene Login-Versuch komplett uebersprungen.
+    const { data: session, error: sessErr } = await sb.rpc('lese_shop_session', { p_lieferant_id: lieferant_id });
+    if (sessErr) return json({ error: 'Shop-Session konnte nicht gelesen werden: ' + sessErr.message }, 400);
+
     const cookieJar = new Map<string, string>();
+    let loginResHtml = '';
+    let loginResStatus = 0;
 
-    // 1) Login-Seite einmal laden, um eine anfaengliche Session-Cookie zu bekommen.
-    const loginSeite = await fetch(`${origin}/login.php`, { redirect: 'manual', headers: browserHeaders });
-    sammleCookies(cookieJar, loginSeite);
+    if (session) {
+      for (const paar of String(session).split(';')) {
+        const gleich = paar.indexOf('=');
+        if (gleich > 0) cookieJar.set(paar.slice(0, gleich).trim(), paar.slice(gleich + 1).trim());
+      }
+    } else {
+      if (!benutzername) {
+        return json({ error: 'Weder Benutzername/Passwort noch eine gespeicherte Session sind fuer diesen Lieferanten hinterlegt.' }, 400);
+      }
+      const { data: passwort, error: pwErr } = await sb.rpc('lese_shop_passwort', { p_lieferant_id: lieferant_id });
+      if (pwErr) return json({ error: 'Shop-Passwort konnte nicht gelesen werden: ' + pwErr.message }, 400);
+      if (!passwort) return json({ error: 'Fuer diesen Lieferanten ist noch kein Shop-Passwort hinterlegt.' }, 400);
 
-    // 2) Login-Formular absenden (Gambio: email_address_login/password_login).
-    const loginRes = await fetch(`${origin}/login.php?action=process`, {
-      method: 'POST',
-      redirect: 'manual',
-      headers: {
-        ...browserHeaders,
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Referer: `${origin}/login.php`,
-        Cookie: cookieHeader(cookieJar),
-      },
-      body: new URLSearchParams({ email_address_login: benutzername, password_login: passwort }),
-    });
-    sammleCookies(cookieJar, loginRes);
-    const loginResHtml = await loginRes.clone().text().catch(() => '');
-    const loginResStatus = loginRes.status;
+      // 1) Login-Seite einmal laden, um eine anfaengliche Session-Cookie zu bekommen.
+      const loginSeite = await fetch(`${origin}/login.php`, { redirect: 'manual', headers: browserHeaders });
+      sammleCookies(cookieJar, loginSeite);
+
+      // 2) Login-Formular absenden (Gambio: email_address_login/password_login).
+      const loginRes = await fetch(`${origin}/login.php?action=process`, {
+        method: 'POST',
+        redirect: 'manual',
+        headers: {
+          ...browserHeaders,
+          'Content-Type': 'application/x-www-form-urlencoded',
+          Referer: `${origin}/login.php`,
+          Cookie: cookieHeader(cookieJar),
+        },
+        body: new URLSearchParams({ email_address_login: benutzername, password_login: passwort }),
+      });
+      sammleCookies(cookieJar, loginRes);
+      loginResHtml = await loginRes.clone().text().catch(() => '');
+      loginResStatus = loginRes.status;
+    }
 
     // 3) Die eigentliche Merkliste mit der (hoffentlich eingeloggten) Session abrufen.
     const listeRes = await fetch(url, { headers: { ...browserHeaders, Cookie: cookieHeader(cookieJar) } });
@@ -218,6 +238,9 @@ Deno.serve(async (req) => {
     }
     const html = await listeRes.text();
     if (html.includes('name="email_address_login"')) {
+      if (session) {
+        return json({ error: 'Session abgelaufen - bitte im Browser neu einloggen, "Als cURL kopieren" wiederholen und im Feld "Session (aus Browser kopiert)" neu einfügen.' }, 400);
+      }
       const verdacht = erkenneVerdaechtigeAntwort(loginResHtml) || erkenneVerdaechtigeAntwort(html);
       const zusatz = verdacht
         ? ` (${verdacht})`
