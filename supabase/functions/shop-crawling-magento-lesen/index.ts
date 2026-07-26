@@ -56,6 +56,22 @@ function parseZahl(text: string): number | null {
   return isNaN(n) ? null : n;
 }
 
+// Das rohe Server-HTML dieses Shops schreibt Sonderzeichen in Attributwerten
+// (z.B. Leerzeichen im Produktnamen) als HTML-Entities statt als echtes
+// Zeichen - z.B. "Rain&#x20;Bird&#x20;..." statt "Rain Bird ...". Chromes
+// "Copy outerHTML" zeigt das schon aufgeloest (deshalb ist das beim ersten
+// Test nicht aufgefallen), das rohe HTML, das unser Server bekommt, aber nicht.
+function entHtmlDecode(text: string): string {
+  return text
+    .replace(/&#x([0-9a-fA-F]+);/g, (_m, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_m, dec) => String.fromCharCode(parseInt(dec, 10)))
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;|&apos;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+}
+
 // Bild einmalig vom Lieferanten-Shop herunterladen und in unseren eigenen
 // Storage-Bucket spiegeln (gleicher Bucket wie beim manuellen Foto-Upload in
 // Tool C und bei der Gambio-Funktion) - bleibt so erhalten, falls der
@@ -87,7 +103,7 @@ async function spiegleFotoInStorage(sb: any, fotoUrl: string): Promise<string> {
 function parseMagentoMerkliste(html: string, origin: string) {
   const artikel: { artikelnummer_lieferant: string; bezeichnung: string; ep_lieferant: number | null; foto_url: string | null }[] = [];
 
-  const itemRegex = /<li id="item_\d+" class="amwishlist-item"/g;
+  const itemRegex = /<li\s+id="item_\d+"\s+class="amwishlist-item"/g;
   const positionen: number[] = [];
   let m: RegExpExecArray | null;
   while ((m = itemRegex.exec(html)) !== null) positionen.push(m.index);
@@ -98,11 +114,11 @@ function parseMagentoMerkliste(html: string, origin: string) {
     // Die Artikelnummer steckt nicht sichtbar in der Zeile, sondern in einem
     // Tooltip-Block ("Optionsdetails" -> "Art.Nr." -> Wert). Ohne sie koennen
     // wir den Artikel nicht unserem Artikelstamm zuordnen - dann ueberspringen.
-    const nrMatch = block.match(/<dt class="label">Art\.Nr\.<\/dt>\s*<dd class="values">\s*([^<]+?)\s*<\/dd>/);
+    const nrMatch = block.match(/<dt\s+class="label">Art\.Nr\.<\/dt>\s*<dd\s+class="values">\s*([^<]+?)\s*<\/dd>/);
     if (!nrMatch) continue;
 
-    const nameMatch = block.match(/<a class="amwishlist-name"[^>]*title="([^"]+)"/);
-    const bildMatch = block.match(/<img class="product-image-photo"[^>]*src="([^"]+)"/);
+    const nameMatch = block.match(/<a\s+class="amwishlist-name"[^>]*title="([^"]+)"/);
+    const bildMatch = block.match(/<img\s+class="product-image-photo"[^>]*src="([^"]+)"/);
 
     // Bevorzugt den "finalPrice" (tatsaechlich zu zahlender Preis inkl.
     // evtl. Sonderangebot) - nur falls der fehlt (Artikel ohne Sonderpreis-
@@ -118,8 +134,8 @@ function parseMagentoMerkliste(html: string, origin: string) {
     }
 
     artikel.push({
-      artikelnummer_lieferant: nrMatch[1].trim(),
-      bezeichnung: nameMatch ? nameMatch[1].trim() : nrMatch[1].trim(),
+      artikelnummer_lieferant: entHtmlDecode(nrMatch[1]).trim(),
+      bezeichnung: entHtmlDecode(nameMatch ? nameMatch[1] : nrMatch[1]).trim(),
       ep_lieferant: preisMatch ? parseZahl(preisMatch[1]) : null,
       foto_url: fotoUrl,
     });
