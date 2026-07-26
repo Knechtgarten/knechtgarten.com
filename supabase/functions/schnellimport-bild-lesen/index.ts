@@ -76,25 +76,38 @@ Antworte AUSSCHLIESSLICH mit einem JSON-Array, keine Erklaerung, kein Markdown-C
 {"bezeichnung": string, "artikelnummer": string oder null, "ek_preis": number oder null, "vp_preis": number oder null}
 Zahlen als reine Zahl ohne Waehrungszeichen (z.B. 36.25, nicht "CHF 36.25"). Wenn kein Artikel erkennbar ist, gib ein leeres Array [] zurueck.`;
 
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{
-            parts: [
-              { text: prompt },
-              { inline_data: { mime_type: mimeType, data: base64Daten } },
-            ],
-          }],
-        }),
-      },
-    );
+    // Google benennt/entfernt Gemini-Modelle immer wieder ohne Vorwarnung
+    // (schon zweimal in dieser Etappe erlebt: gemini-2.0-flash und
+    // gemini-2.5-flash beide "no longer available"). Statt bei jeder
+    // Aenderung wieder manuell den Modellnamen anzupassen, probiert die
+    // Funktion mehrere bekannte Kandidaten nacheinander durch und nimmt den
+    // ersten, der funktioniert - "latest"-Alias zuerst, da der sich
+    // automatisch mitaktualisiert.
+    const MODELL_KANDIDATEN = ['gemini-flash-latest', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+    let geminiRes: Response | null = null;
+    let letzterFehler = '';
+    for (const modell of MODELL_KANDIDATEN) {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${modell}:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{
+              parts: [
+                { text: prompt },
+                { inline_data: { mime_type: mimeType, data: base64Daten } },
+              ],
+            }],
+          }),
+        },
+      );
+      if (res.ok) { geminiRes = res; break; }
+      letzterFehler = `Modell "${modell}": Status ${res.status}. ${(await res.text().catch(() => '')).slice(0, 200)}`;
+    }
 
-    if (!geminiRes.ok) {
-      const fehlerText = await geminiRes.text().catch(() => '');
-      return json({ error: `Gemini-Anfrage fehlgeschlagen (Status ${geminiRes.status}). ${fehlerText.slice(0, 300)}` }, 400);
+    if (!geminiRes) {
+      return json({ error: `Gemini-Anfrage fehlgeschlagen bei allen probierten Modellen. Letzter Fehler - ${letzterFehler}` }, 400);
     }
 
     const geminiJson = await geminiRes.json();
