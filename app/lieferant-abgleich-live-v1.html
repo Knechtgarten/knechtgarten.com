@@ -553,7 +553,7 @@ async function init(){
   renderKategorie();
   renderGoogleSheetFelder();
   renderKaListe('merklisten', 'kaMerklistenBody');
-  renderErgebnisSpalte();
+  renderPreisAbweichungen([]);
   renderNichtAbgeglichen([]);
 
   $('ladeHinweis').classList.add('hidden');
@@ -1003,7 +1003,6 @@ async function loescheNichtAbgeglichenenArtikel(a, tr){
   ARTIKEL = ARTIKEL.filter(x => x.id !== a.id);
   NICHT_ABGEGLICHEN_LISTE = NICHT_ABGEGLICHEN_LISTE.filter(x => x.id !== a.id);
   tr.remove();
-  renderErgebnisSpalte();
   if(!NICHT_ABGEGLICHEN_LISTE.length) renderNichtAbgeglichen([]);
   showToast('Artikel gelöscht.');
 }
@@ -1065,27 +1064,43 @@ async function starteGoogleSheetAbgleich(){
     anmerkung: idx.anmerkung >= 0 ? (row[idx.anmerkung] || '').trim() : ''
   })).filter(a => a.artikelnummer_lieferant);
 
-  await verarbeiteGefundeneArtikel(sheetArtikel, 'Sheet');
+  await verarbeiteGefundeneArtikel(sheetArtikel, 'Sheet', 'google_sheet');
 }
 // Gemeinsame Auswertung fuer alle Quellen (Google Sheet + Crawling/Merkliste):
 // gegen den Artikelstamm dieses Lieferanten abgleichen (Gross-/Kleinschreibung
 // ignoriert - bei manuell gepflegten Listen waere ein Tippfehler sonst genug,
-// damit ein Artikel faelschlich als "nicht gefunden" gilt), neue Preise in die
-// Preisabgleich-Tabelle uebernehmen, neue Artikel + nicht gefundene Artikel
-// separat auflisten.
-async function verarbeiteGefundeneArtikel(gefundeneArtikel, quelleLabel){
+// damit ein Artikel faelschlich als "nicht gefunden" gilt). Preise INNERHALB
+// des Toleranzwerts werden sofort automatisch uebernommen (kein manueller
+// Schritt noetig) - nur Ausreisser darueber (oder Artikel ganz ohne bisherigen
+// Vergleichspreis) landen zur Pruefung in "Kontrolle Preisabgleich". Neue
+// Artikel + nicht gefundene Artikel werden separat aufgelistet.
+async function verarbeiteGefundeneArtikel(gefundeneArtikel, quelleLabel, methode){
   const bestandNachNr = new Map(ARTIKEL.filter(a => a.artikelnummer_lieferant).map(a => [normArtikelnr(a.artikelnummer_lieferant), a]));
-  let treffer = 0;
-  gefundeneArtikel.forEach(sa => {
+  const zuPruefen = [];
+  let autoAbgeglichen = 0;
+  for(const sa of gefundeneArtikel){
     const bestand = bestandNachNr.get(normArtikelnr(sa.artikelnummer_lieferant));
-    if(!bestand || sa.ep_lieferant == null) return;
-    const tr = $('preisBody').querySelector(`tr[data-id="${bestand.id}"]`);
-    if(!tr) return;
-    tr.querySelector('.preis-neu').value = sa.ep_lieferant;
-    aktualisierePreisAbweichung(tr);
-    treffer++;
-  });
-  logAnhaengen(`${treffer} bestehende Artikel abgeglichen.`);
+    if(!bestand || sa.ep_lieferant == null) continue;
+    const alt = bestand.ep_lieferant;
+    if(alt != null && alt === sa.ep_lieferant) continue; // unveraendert - nichts zu tun
+    if(alt != null && !preisAbweichungGross(alt, sa.ep_lieferant)){
+      // Innerhalb des Toleranzwerts - direkt automatisch uebernehmen.
+      const { error: updErr } = await sb.from('artikel').update({ ep_lieferant: sa.ep_lieferant }).eq('id', bestand.id);
+      if(updErr){ showToast(friendlyError(updErr), true); continue; }
+      await sb.from('artikel_preis_verlauf').insert({
+        artikel_id: bestand.id, alter_preis: alt, neuer_preis: sa.ep_lieferant,
+        quelle: 'abgleich', methode, lieferant_id: LIEFERANT_ID
+      });
+      bestand.ep_lieferant = sa.ep_lieferant;
+      autoAbgeglichen++;
+    } else {
+      // Ueber dem Toleranzwert oder kein Vergleichspreis vorhanden - manuelle Pruefung noetig.
+      zuPruefen.push({ artikel: bestand, neuerPreis: sa.ep_lieferant });
+    }
+  }
+  logAnhaengen(`${autoAbgeglichen} Artikel automatisch abgeglichen (innerhalb Toleranzwert).`);
+  renderPreisAbweichungen(zuPruefen);
+  logAnhaengen(`${zuPruefen.length} Artikel über dem Toleranzwert - manuelle Prüfung nötig.`);
 
   const modus = LIEF.da.crawling_modus || 'ergaenzen';
   if(modus === 'ergaenzen'){
@@ -1136,7 +1151,7 @@ async function starteCrawlingMerklisten(nurEineUrl){
     logAnhaengen(`${daten.artikel.length} Artikel in "${m.name || m.url}" gefunden.`);
     alleArtikel = alleArtikel.concat(daten.artikel);
   }
-  await verarbeiteGefundeneArtikel(alleArtikel, 'Shop');
+  await verarbeiteGefundeneArtikel(alleArtikel, 'Shop', 'crawling');
 }
 $('btnStart').addEventListener('click', () => {
   if(istGoogleSheetQuelle()) return starteGoogleSheetAbgleich();
@@ -1169,20 +1184,27 @@ function aktualisierePreisAbweichung(tr){
   const warn = preisAbweichungGross(alt, neu);
   abwEl.innerHTML = `<span class="devtag${warn ? ' warn' : ''}">${prozent >= 0 ? '+' : ''}${prozent.toFixed(1)}%</span>`;
 }
-function renderErgebnisSpalte(){
-  $('preisBody').innerHTML = ARTIKEL.map(a => `
+// Zeigt nur Artikel, deren Preisabweichung den Toleranzwert ueberschreitet
+// (oder die noch keinen Vergleichspreis haben) - alles innerhalb der Toleranz
+// wurde bereits automatisch abgeglichen (siehe verarbeiteGefundeneArtikel) und
+// muss hier nicht mehr manuell geprueft werden.
+function renderPreisAbweichungen(zeilen){
+  if(!zeilen.length){
+    $('preisBody').innerHTML = '<tr><td colspan="5" class="hint" style="margin:0;padding:10px 4px;">Keine Preisabweichungen über dem Toleranzwert - wird nach dem nächsten Abgleich angezeigt.</td></tr>';
+    return;
+  }
+  $('preisBody').innerHTML = zeilen.map(({artikel: a, neuerPreis}) => `
     <tr data-id="${a.id}" data-alt="${a.ep_lieferant ?? ''}">
       <td><input type="checkbox" class="preis-check appcheck" checked></td>
       <td><div class="artname">${a.bezeichnung}</div><div class="artmeta">${a.einheit}</div></td>
       <td class="num">${a.ep_lieferant != null ? 'CHF ' + fmtNum(a.ep_lieferant) : '–'}</td>
-      <td class="num"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="number" step="0.01" class="preis-neu" value="${a.ep_lieferant ?? ''}"></td>
+      <td class="num"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="number" step="0.01" class="preis-neu" value="${neuerPreis ?? ''}"></td>
       <td class="preis-abw hint" style="margin:0;">–</td>
     </tr>`).join('');
   $('preisBody').querySelectorAll('tr[data-id]').forEach(tr => {
     aktualisierePreisAbweichung(tr);
     tr.querySelector('.preis-neu').addEventListener('input', () => aktualisierePreisAbweichung(tr));
   });
-  $('ergaenzenBody').innerHTML = '';
 }
 $('preisCheckAll').addEventListener('change', () => {
   $('preisBody').querySelectorAll('.preis-check').forEach(cb => cb.checked = $('preisCheckAll').checked);

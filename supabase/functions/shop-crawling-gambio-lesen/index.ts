@@ -32,6 +32,16 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Ohne diese Header sieht eine Anfrage fuer den Ziel-Shop nicht wie ein
+// normaler Browser aus (kein User-Agent etc.) - manche Shops/Hoster
+// blockieren oder verweigern den Login bzw. Bild-Abruf dann unabhaengig
+// davon, ob Benutzername/Passwort stimmen.
+const browserHeaders = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+  'Accept-Language': 'de-CH,de;q=0.9',
+};
+
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -72,7 +82,7 @@ function cookieHeader(jar: Map<string, string>): string {
 // behalten statt den ganzen Abgleich abzubrechen.
 async function spiegleFotoInStorage(sb: any, fotoUrl: string): Promise<string> {
   try {
-    const bildRes = await fetch(fotoUrl);
+    const bildRes = await fetch(fotoUrl, { headers: browserHeaders });
     if (!bildRes.ok) return fotoUrl;
     const bytes = new Uint8Array(await bildRes.arrayBuffer());
     const contentType = bildRes.headers.get('content-type') || 'image/jpeg';
@@ -161,7 +171,7 @@ Deno.serve(async (req) => {
     const cookieJar = new Map<string, string>();
 
     // 1) Login-Seite einmal laden, um eine anfaengliche Session-Cookie zu bekommen.
-    const loginSeite = await fetch(`${origin}/login.php`, { redirect: 'manual' });
+    const loginSeite = await fetch(`${origin}/login.php`, { redirect: 'manual', headers: browserHeaders });
     sammleCookies(cookieJar, loginSeite);
 
     // 2) Login-Formular absenden (Gambio: email_address_login/password_login).
@@ -169,7 +179,9 @@ Deno.serve(async (req) => {
       method: 'POST',
       redirect: 'manual',
       headers: {
+        ...browserHeaders,
         'Content-Type': 'application/x-www-form-urlencoded',
+        Referer: `${origin}/login.php`,
         Cookie: cookieHeader(cookieJar),
       },
       body: new URLSearchParams({ email_address_login: benutzername, password_login: passwort }),
@@ -177,7 +189,7 @@ Deno.serve(async (req) => {
     sammleCookies(cookieJar, loginRes);
 
     // 3) Die eigentliche Merkliste mit der (hoffentlich eingeloggten) Session abrufen.
-    const listeRes = await fetch(url, { headers: { Cookie: cookieHeader(cookieJar) } });
+    const listeRes = await fetch(url, { headers: { ...browserHeaders, Cookie: cookieHeader(cookieJar) } });
     if (!listeRes.ok) {
       return json({ error: `Merkliste konnte nicht geladen werden (Status ${listeRes.status}).` }, 400);
     }
