@@ -61,8 +61,8 @@ h1{font-size:19px;color:var(--primary);margin-bottom:2px;}
 table{width:100%;border-collapse:collapse;font-size:12.5px;}
 th{text-align:left;color:var(--muted);font-size:10.5px;text-transform:uppercase;letter-spacing:.02em;
   padding:6px 6px;border-bottom:1px solid var(--line);white-space:nowrap;}
-th[data-apsort]{cursor:pointer;user-select:none;}
-th[data-apsort]:hover{color:var(--primary);}
+th[data-apsort],th[data-liefsort]{cursor:pointer;user-select:none;}
+th[data-apsort]:hover,th[data-liefsort]:hover{color:var(--primary);}
 th .arrow{display:inline-flex;flex-direction:column;margin-left:4px;vertical-align:middle;line-height:.6;}
 th .arrow span{font-size:7px;color:var(--line);}
 th .arrow span.active{color:var(--primary);}
@@ -420,10 +420,10 @@ body.mitarbeiter-rolle .admin-only{display:none !important;}
 
   <div class="settingslayout">
     <div class="settingsnav" id="settingsnav">
-      <a data-abschnitt="offertentyp" class="on">Offerten-Vorlagen</a>
+      <a data-abschnitt="datenabgleich" id="navDatenabgleich" class="on">Lieferanten / Import</a>
+      <a data-abschnitt="offertentyp">Offerten-Vorlagen</a>
       <a data-abschnitt="formelbibliothek">Formel-Bibliothek</a>
       <div id="formelKategorienSidebar" class="hidden"></div>
-      <a data-abschnitt="datenabgleich" id="navDatenabgleich">Lieferanten / Import</a>
       <a data-abschnitt="rechenlogik">Rechenlogik/Sonderpositionen</a>
     </div>
 
@@ -503,10 +503,11 @@ body.mitarbeiter-rolle .admin-only{display:none !important;}
         </div>
 
         <div class="card admin-only">
-          <div class="cardlabel">Lieferanten</div>
+          <div class="cardheader" onclick="toggleCard(this)"><span class="cardchevron" style="transform:rotate(90deg);">&#9656;</span><div class="cardlabel">Lieferanten</div></div>
+          <div class="cardbody">
           <table style="table-layout:fixed;">
             <colgroup><col style="width:140px;"><col><col style="width:70px;"><col style="width:150px;"><col style="width:75px;"><col style="width:110px;"></colgroup>
-            <thead><tr><th></th><th>Lieferant</th><th>Kürzel</th><th>Letzter Abgleich</th><th>Marge</th><th>Aktionen</th></tr></thead>
+            <thead><tr><th></th><th data-liefsort="name">Lieferant</th><th data-liefsort="kuerzel">Kürzel</th><th data-liefsort="letzter_abgleich">Letzter Abgleich</th><th data-liefsort="marge">Marge</th><th>Aktionen</th></tr></thead>
             <tbody id="lieferantenBody"></tbody>
           </table>
           <div class="row" style="margin-top:10px;align-items:center;">
@@ -523,6 +524,7 @@ body.mitarbeiter-rolle .admin-only{display:none !important;}
               <thead><tr><th>Lieferant</th><th>Kürzel</th><th>Archiviert seit</th><th></th></tr></thead>
               <tbody id="lieferantenBodyArchiv"></tbody>
             </table>
+          </div>
           </div>
         </div>
 
@@ -1836,8 +1838,45 @@ function letzterAbgleichText(da){
   if(!da.letzter_abgleich_zeitpunkt) return '<span class="hint" style="margin:0;">Noch nie abgeglichen.</span>';
   return `${da.letzter_abgleich_status || ''}<br><span class="hint" style="margin:0;">${new Date(da.letzter_abgleich_zeitpunkt).toLocaleString('de-CH')}</span>`;
 }
+let liefSortCol = 'name';
+let liefSortDir = 1;
+function liefSortWert(l, col){
+  if(col === 'name') return l.name || '';
+  if(col === 'kuerzel') return l.kuerzel || '';
+  if(col === 'letzter_abgleich') return l.da.letzter_abgleich_zeitpunkt || null;
+  if(col === 'marge') return l.da.minimum_marge_prozent;
+  return '';
+}
+function liefRenderArrows(){
+  document.querySelectorAll('th[data-liefsort]').forEach(th => {
+    let arrow = th.querySelector('.arrow');
+    if(!arrow){
+      arrow = document.createElement('span');
+      arrow.className = 'arrow';
+      arrow.innerHTML = '<span class="au">' + ICON.sortUp + '</span><span class="ad">' + ICON.sortDown + '</span>';
+      th.appendChild(arrow);
+    }
+    const aktiv = th.dataset.liefsort === liefSortCol;
+    arrow.querySelector('.au').classList.toggle('active', aktiv && liefSortDir === 1);
+    arrow.querySelector('.ad').classList.toggle('active', aktiv && liefSortDir === -1);
+  });
+}
+document.querySelectorAll('th[data-liefsort]').forEach(th => {
+  th.addEventListener('click', () => {
+    const col = th.dataset.liefsort;
+    if(liefSortCol === col) liefSortDir *= -1; else { liefSortCol = col; liefSortDir = 1; }
+    renderDatenabgleich();
+  });
+});
 function renderDatenabgleich(){
-  const aktiv = LIEFERANTEN_DA.filter(l => !l.archiviert_am);
+  const aktiv = LIEFERANTEN_DA.filter(l => !l.archiviert_am).sort((x,y) => {
+    const av = liefSortWert(x, liefSortCol), bv = liefSortWert(y, liefSortCol);
+    if(av == null && bv == null) return 0;
+    if(av == null) return 1;
+    if(bv == null) return -1;
+    if(typeof av === 'number' || typeof bv === 'number') return (av-bv) * liefSortDir;
+    return String(av).localeCompare(String(bv)) * liefSortDir;
+  });
   $('lieferantenBody').innerHTML = aktiv.map(l => `
     <tr>
       <td style="cursor:pointer;" onclick="openLieferantInfoOvl('${l.id}')">${l.logo_url ? `<img src="${l.logo_url}" alt="" class="lf-logo">` : `<div class="lf-avatar">${initialen(l.name)}</div>`}</td>
@@ -1851,6 +1890,7 @@ function renderDatenabgleich(){
         <button class="icobtn" title="Archivieren" onclick="archiviereLieferant('${l.id}')">${ICON.archive}</button>
       </td>
     </tr>`).join('') || '<tr><td colspan="6" class="hint">Noch keine Lieferanten vorhanden.</td></tr>';
+  liefRenderArrows();
   renderLieferantenArchiv();
   renderSiLieferantSelect();
 }
@@ -2791,7 +2831,7 @@ function gewuenschterAbschnitt(){
   // Sonderpositionen bleibt funktionsfaehig (z.B. bestehender Link in Tool B).
   if(a === 'sonderpositionen') return 'rechenlogik';
   const gueltig = ['offertentyp','formelbibliothek','datenabgleich','rechenlogik'];
-  if(!gueltig.includes(a)) return 'offertentyp';
+  if(!gueltig.includes(a)) return 'datenabgleich';
   return a;
 }
 
