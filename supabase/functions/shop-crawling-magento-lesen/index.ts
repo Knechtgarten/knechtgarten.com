@@ -190,6 +190,24 @@ Deno.serve(async (req) => {
     for (const a of artikel) {
       if (a.foto_url) a.foto_url = await spiegleFotoInStorage(sb, a.foto_url);
     }
+
+    // Werden 0 Artikel gefunden, gleich einen Blick auf das tatsaechlich
+    // abgerufene HTML mitliefern, statt nochmal ueber Browser-Screenshots
+    // raten zu muessen, was der Server wirklich bekommen hat.
+    if (artikel.length === 0) {
+      const ankerPos = html.indexOf('id="item_');
+      return json({
+        artikel,
+        debug: {
+          htmlLaenge: html.length,
+          hatAmwishlistItem: html.includes('amwishlist-item'),
+          hatItemId: ankerPos !== -1,
+          hatArtNr: html.includes('Art.Nr.'),
+          ausschnittUmErstenItem: ankerPos !== -1 ? html.slice(Math.max(0, ankerPos - 60), ankerPos + 700) : null,
+        },
+      });
+    }
+
     return json({ artikel });
   } catch (e) {
     return json({ error: String(e) }, 500);
