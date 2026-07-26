@@ -90,6 +90,13 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
 .artsearch-row input{flex:1;border:1px solid var(--line);border-radius:6px;padding:8px 10px;font:inherit;font-size:12.5px;color:var(--ink);}
 .artsearch-row input:focus{outline:none;border-color:var(--primary);}
 
+.artpagination{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 2px;flex-wrap:wrap;font-size:12px;color:var(--muted);}
+.artpagination select{font-size:12px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;color:var(--ink);}
+.artpagination .seiten-nav{display:flex;align-items:center;gap:4px;}
+.artpagination .seiten-nav button{display:flex;align-items:center;justify-content:center;width:26px;height:26px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--ink);cursor:pointer;}
+.artpagination .seiten-nav button:disabled{opacity:.35;cursor:default;}
+.artpagination .seiten-nav button:not(:disabled):hover{border-color:var(--primary);}
+
 .checklabel{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--ink);}
 
 .status{font-size:11.5px;color:var(--muted);margin-top:6px;}
@@ -310,6 +317,8 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
       <tbody id="artikelBody"></tbody>
     </table>
 
+    <div class="artpagination" id="artikelPagination"></div>
+
     <div class="bulkbar" id="bulkbar">
       <div class="bulkbar-selection" id="bulkbarSelection">
         <span class="cnt" id="bulkCnt">Kein Artikel ausgewählt</span>
@@ -345,7 +354,9 @@ const ICON = {
   sortUp: '<svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>',
   sortDown: '<svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
   more: '<svg width="14" height="4" viewBox="0 0 24 6" fill="currentColor"><circle cx="3" cy="3" r="2"/><circle cx="12" cy="3" r="2"/><circle cx="21" cy="3" r="2"/></svg>',
-  foto: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10.5" r="1.5"/><path d="M21 16l-5-5-9 9"/></svg>'
+  foto: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10.5" r="1.5"/><path d="M21 16l-5-5-9 9"/></svg>',
+  chevronLeft: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>',
+  chevronRight: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>'
 };
 const fmtCHF = n => (n==null? '' : Number(n).toLocaleString('de-CH', {minimumFractionDigits:2, maximumFractionDigits:2}));
 
@@ -382,12 +393,15 @@ let filterKategorie = null;
 let filterGruppeId = null;
 let filterLieferantId = null;
 let searchQuery = '';
+let seitenGroesse = 40;
+let aktuelleSeite = 1;
 const KATEGORIEN = ['material','personal','maschine','logistik'];
 function renderKategorieFilter(){
   $('kategorieFilterRow').innerHTML = `<button class="filterpill ${!filterKategorie?'on':''}" data-k="">ALLE</button>` +
     KATEGORIEN.map(k => `<button class="filterpill ${filterKategorie===k?'on':''}" data-k="${k}">${k.toUpperCase()}</button>`).join('');
   $('kategorieFilterRow').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
     filterKategorie = b.dataset.k || null;
+    aktuelleSeite = 1;
     renderKategorieFilter();
     renderArtikelTable();
   }));
@@ -415,6 +429,7 @@ function renderGruppenFilter(){
     ARTIKELGRUPPEN.map(g => `<button class="filterpill ${filterGruppeId===g.id?'on':''}" data-g="${g.id}">${g.name}</button>`).join('');
   $('gruppenFilterRow').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
     filterGruppeId = b.dataset.g || null;
+    aktuelleSeite = 1;
     renderGruppenFilter();
     renderArtikelTable();
   }));
@@ -424,12 +439,14 @@ function renderLieferantFilter(){
     LIEFERANTEN.map(l => `<button class="filterpill ${filterLieferantId===l.id?'on':''}" data-l="${l.id}">${l.name}</button>`).join('');
   $('lieferantFilterRow').querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
     filterLieferantId = b.dataset.l || null;
+    aktuelleSeite = 1;
     renderLieferantFilter();
     renderArtikelTable();
   }));
 }
 $('artSearchInput').addEventListener('input', () => {
   searchQuery = $('artSearchInput').value.trim().toLowerCase();
+  aktuelleSeite = 1;
   renderArtikelTable();
 });
 function gefilterteArtikel(){
@@ -505,7 +522,11 @@ function renderArtikelTable(){
     arrow.querySelector('.ad').classList.toggle('active', aktiv && sortDir === -1);
   });
 
-  const sichtbar = gefilterteArtikel();
+  const gefiltert = gefilterteArtikel();
+  const maxSeite = Math.max(1, Math.ceil(gefiltert.length / seitenGroesse));
+  if(aktuelleSeite > maxSeite) aktuelleSeite = maxSeite;
+  const sichtbar = seitenGroesse === Infinity ? gefiltert : gefiltert.slice((aktuelleSeite-1)*seitenGroesse, aktuelleSeite*seitenGroesse);
+  renderArtikelPagination(gefiltert.length, maxSeite);
   $('artikelBody').innerHTML = sichtbar.map(a => `
     <tr>
       <td><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="checkbox" class="rowcheck" data-id="${a.id}" ${selected.has(a.id)?'checked':''}></td>
@@ -535,6 +556,38 @@ function renderArtikelTable(){
     });
   });
   renderBulkbar();
+}
+
+// Zeigt "Artikel X-Y von Z" fuer die aktuell gesetzten Filter/Suche (nicht die
+// gesamte Artikelliste) plus Seitengroesse-Auswahl und Vor/Zurueck - analog zu
+// einer Shop-Produktliste.
+function renderArtikelPagination(gesamtAnzahl, maxSeite){
+  if(gesamtAnzahl === 0){
+    $('artikelPagination').innerHTML = '<span>Keine Artikel gefunden.</span>';
+    return;
+  }
+  const von = (aktuelleSeite-1)*seitenGroesse + 1;
+  const bis = Math.min(aktuelleSeite*seitenGroesse, gesamtAnzahl);
+  $('artikelPagination').innerHTML = `
+    <span>Artikel ${seitenGroesse===Infinity?1:von}-${seitenGroesse===Infinity?gesamtAnzahl:bis} von ${gesamtAnzahl}</span>
+    <div class="seiten-nav">
+      <select id="seitenGroesseSelect">
+        ${[20,40,50,100].map(n => `<option value="${n}" ${seitenGroesse===n?'selected':''}>${n} pro Seite</option>`).join('')}
+        <option value="alle" ${seitenGroesse===Infinity?'selected':''}>Alle anzeigen</option>
+      </select>
+      <button id="seiteZurueckBtn" ${aktuelleSeite<=1?'disabled':''} title="Vorherige Seite">${ICON.chevronLeft}</button>
+      <span>Seite ${aktuelleSeite} / ${maxSeite}</span>
+      <button id="seiteVorBtn" ${aktuelleSeite>=maxSeite?'disabled':''} title="N&auml;chste Seite">${ICON.chevronRight}</button>
+    </div>
+  `;
+  $('seitenGroesseSelect').addEventListener('change', () => {
+    const wert = $('seitenGroesseSelect').value;
+    seitenGroesse = wert === 'alle' ? Infinity : parseInt(wert);
+    aktuelleSeite = 1;
+    renderArtikelTable();
+  });
+  $('seiteZurueckBtn')?.addEventListener('click', () => { aktuelleSeite--; renderArtikelTable(); });
+  $('seiteVorBtn')?.addEventListener('click', () => { aktuelleSeite++; renderArtikelTable(); });
 }
 
 // ---------------------------------------------------------------------------
