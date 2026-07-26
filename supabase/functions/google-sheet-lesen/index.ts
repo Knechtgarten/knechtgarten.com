@@ -82,7 +82,28 @@ Deno.serve(async (req) => {
       return json({ error: 'Das Sheet enthaelt keine Daten.' }, 400);
     }
     const [headers, ...datenzeilen] = rows;
-    return json({ headers, rows: datenzeilen });
+
+    // Echter Dateiname (wie in Google Drive) - aus der leichten "htmlview"-
+    // Vorschauseite ausgelesen, nur damit der Mitarbeitende im Zuordnungs-
+    // Fenster sieht, welche Datei geladen wurde. Rein informativ - schlaegt
+    // die Titel-Suche fehl, wird einfach kein Titel zurueckgegeben.
+    let titel: string | null = null;
+    try {
+      const previewRes = await fetch(`https://docs.google.com/spreadsheets/d/${sheetId}/htmlview`);
+      if (previewRes.ok) {
+        const previewHtml = await previewRes.text();
+        const titleMatch = previewHtml.match(/<title>(.*?)<\/title>/i);
+        if (titleMatch) {
+          titel = titleMatch[1]
+            .replace(/\s*-\s*Google (Tabellen|Sheets|Spreadsheets)\s*$/i, '')
+            .trim() || null;
+        }
+      }
+    } catch (_e) {
+      // Titel ist rein informativ - ein Fehlschlag hier darf den Abgleich nicht blockieren.
+    }
+
+    return json({ headers, rows: datenzeilen, titel });
   } catch (e) {
     return json({ error: String(e) }, 500);
   }
