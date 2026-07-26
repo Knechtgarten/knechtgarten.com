@@ -550,7 +550,7 @@ async function init(){
   const { data: da } = await sb.from('lieferant_datenabgleich').select('*').eq('lieferant_id', LIEFERANT_ID).maybeSingle();
   LIEF = { ...lieferant, da: da || {} };
 
-  const { data: artikel } = await sb.from('artikel').select('id,bezeichnung,einheit,ep_lieferant,artikelnummer_lieferant').eq('lieferant_id', LIEFERANT_ID).order('bezeichnung');
+  const { data: artikel } = await sb.from('artikel').select('id,bezeichnung,einheit,ep_lieferant,artikelnummer_lieferant,foto_url').eq('lieferant_id', LIEFERANT_ID).order('bezeichnung');
   ARTIKEL = artikel || [];
 
   renderKopf();
@@ -1122,32 +1122,30 @@ async function verarbeiteGefundeneArtikel(gefundeneArtikel, quelleLabel, methode
   for(const sa of gefundeneArtikel){
     const bestand = bestandNachNr.get(normArtikelnr(sa.artikelnummer_lieferant));
     if(!bestand) continue;
-    const alt = bestand.ep_lieferant;
-    // Fehlendes Foto nachtragen - unabhaengig davon, ob sich der Preis
-    // geaendert hat (z.B. bei Artikeln, die vor Einfuehrung der Foto-Funktion
-    // importiert wurden).
-    const fotoFehltNoch = !bestand.foto_url && !!sa.foto_url;
-    const preisUnveraendert = sa.ep_lieferant == null || (alt != null && alt === sa.ep_lieferant);
 
-    if(preisUnveraendert){
-      if(fotoFehltNoch){
-        const { error: updErr } = await sb.from('artikel').update({ foto_url: sa.foto_url }).eq('id', bestand.id);
-        if(!updErr){ bestand.foto_url = sa.foto_url; fotosNachgetragen++; }
-      }
-      continue;
+    // Fehlendes Foto immer nachtragen, sobald ein Artikel gefunden wird -
+    // komplett unabhaengig vom Preis-Status (Foto und Preisabgleich haben
+    // nichts miteinander zu tun; frueher wurde das faelschlich verknuepft,
+    // wodurch Artikel mit Preisabweichung nie ihr Foto bekamen).
+    const fotoFehltNoch = !bestand.foto_url && !!sa.foto_url;
+    if(fotoFehltNoch){
+      const { error: fotoErr } = await sb.from('artikel').update({ foto_url: sa.foto_url }).eq('id', bestand.id);
+      if(!fotoErr){ bestand.foto_url = sa.foto_url; fotosNachgetragen++; }
     }
+
+    const alt = bestand.ep_lieferant;
+    const preisUnveraendert = sa.ep_lieferant == null || (alt != null && alt === sa.ep_lieferant);
+    if(preisUnveraendert) continue;
+
     if(alt != null && !preisAbweichungGross(alt, sa.ep_lieferant)){
       // Innerhalb des Toleranzwerts - direkt automatisch uebernehmen.
-      const payload = { ep_lieferant: sa.ep_lieferant };
-      if(fotoFehltNoch) payload.foto_url = sa.foto_url;
-      const { error: updErr } = await sb.from('artikel').update(payload).eq('id', bestand.id);
+      const { error: updErr } = await sb.from('artikel').update({ ep_lieferant: sa.ep_lieferant }).eq('id', bestand.id);
       if(updErr){ showToast(friendlyError(updErr), true); continue; }
       await sb.from('artikel_preis_verlauf').insert({
         artikel_id: bestand.id, alter_preis: alt, neuer_preis: sa.ep_lieferant,
         quelle: 'abgleich', methode, lieferant_id: LIEFERANT_ID
       });
       bestand.ep_lieferant = sa.ep_lieferant;
-      if(fotoFehltNoch){ bestand.foto_url = sa.foto_url; fotosNachgetragen++; }
       autoAbgeglichen++;
     } else {
       // Ueber dem Toleranzwert oder kein Vergleichspreis vorhanden - manuelle Pruefung noetig.
@@ -1288,7 +1286,7 @@ $('preisUebernehmenBtn').addEventListener('click', async () => {
   // ARTIKEL im Hintergrund aktualisieren (fuer den naechsten Start-Klick),
   // die Sicht selbst aber leeren statt erneut die volle Artikelliste zu
   // zeigen - sie ist ja gerade erst uebernommen worden.
-  const { data: artikel } = await sb.from('artikel').select('id,bezeichnung,einheit,ep_lieferant,artikelnummer_lieferant').eq('lieferant_id', LIEFERANT_ID).order('bezeichnung');
+  const { data: artikel } = await sb.from('artikel').select('id,bezeichnung,einheit,ep_lieferant,artikelnummer_lieferant,foto_url').eq('lieferant_id', LIEFERANT_ID).order('bezeichnung');
   ARTIKEL = artikel || [];
   $('preisBody').innerHTML = '<tr><td colspan="5" class="hint">Übernommen - klicke "Start" für einen neuen Abgleich.</td></tr>';
 });
@@ -1326,7 +1324,7 @@ $('ergaenzenUebernehmenBtn').addEventListener('click', async () => {
   }
   if(!anzahl){ showToast('Keine neuen Artikel übernommen.', true); return; }
   showToast(`${anzahl} neue(r) Artikel übernommen.`);
-  const { data: artikel } = await sb.from('artikel').select('id,bezeichnung,einheit,ep_lieferant,artikelnummer_lieferant').eq('lieferant_id', LIEFERANT_ID).order('bezeichnung');
+  const { data: artikel } = await sb.from('artikel').select('id,bezeichnung,einheit,ep_lieferant,artikelnummer_lieferant,foto_url').eq('lieferant_id', LIEFERANT_ID).order('bezeichnung');
   ARTIKEL = artikel || [];
   $('ergaenzenBody').innerHTML = '<tr><td colspan="3" class="hint">Übernommen - klicke "Start" für einen neuen Abgleich.</td></tr>';
 });
