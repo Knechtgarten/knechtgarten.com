@@ -179,13 +179,21 @@ Deno.serve(async (req) => {
     // Die Merkliste zeigt pro Seite nur einen Ausschnitt (Standard-Magento-
     // Pagination) - "limit=40" ist die groesste vom Shop angebotene Seiten-
     // groesse (per Hand geprueft), "p=N" die Seitenzahl. Es wird so lange
-    // eine weitere Seite nachgeladen, bis eine Seite keine Artikel mehr
-    // liefert - so funktioniert es unabhaengig davon, ob eine Merkliste 8
-    // oder 800 Artikel hat, ohne die Gesamtzahl vorher zu kennen.
+    // eine weitere Seite nachgeladen, bis nichts Neues mehr dazukommt - so
+    // funktioniert es unabhaengig davon, ob eine Merkliste 8 oder 800
+    // Artikel hat, ohne die Gesamtzahl vorher zu kennen.
+    //
+    // Wichtig: eine Seite jenseits der letzten echten Seite liefert bei
+    // diesem Shop KEINE leere Liste, sondern zeigt einfach die letzte Seite
+    // erneut an - eine reine "Seite ist leer"-Abbruchbedingung wuerde also
+    // endlos (bis zum Sicherheitsnetz) dieselben Artikel als Duplikate
+    // mitzaehlen. Darum wird stattdessen ueber die Artikelnummer erkannt,
+    // ob eine Seite ueberhaupt noch etwas Neues bringt.
     const basisUrl = new URL(url);
     basisUrl.searchParams.set('limit', '40');
 
     const artikel: ReturnType<typeof parseMagentoMerkliste> = [];
+    const gesehen = new Set<string>();
     let ersteSeiteHtml = '';
     let seite = 1;
     const MAX_SEITEN = 30; // Sicherheitsnetz gegen eine Endlosschleife
@@ -204,8 +212,14 @@ Deno.serve(async (req) => {
       }
 
       const gefunden = parseMagentoMerkliste(html, origin);
-      if (gefunden.length === 0) break;
-      artikel.push(...gefunden);
+      const neue = gefunden.filter((a) => {
+        const key = a.artikelnummer_lieferant.toLowerCase();
+        if (gesehen.has(key)) return false;
+        gesehen.add(key);
+        return true;
+      });
+      if (neue.length === 0) break;
+      artikel.push(...neue);
       seite++;
     }
 
