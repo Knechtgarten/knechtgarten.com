@@ -77,7 +77,7 @@ Antworte AUSSCHLIESSLICH mit einem JSON-Array, keine Erklaerung, kein Markdown-C
 Zahlen als reine Zahl ohne Waehrungszeichen (z.B. 36.25, nicht "CHF 36.25"). Wenn kein Artikel erkennbar ist, gib ein leeres Array [] zurueck.`;
 
     const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
