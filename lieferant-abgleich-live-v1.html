@@ -170,6 +170,7 @@ table.data td.num{text-align:right;font-variant-numeric:tabular-nums;}
 .sheetrow + .sheetrow{margin-top:3px;}
 .sheetrow:hover{border-color:var(--primary);}
 .sheetrow.dragging{opacity:.35;}
+.sheetrow.dragziel{border-color:var(--primary);background:var(--accent-blue);}
 .sheetrow .drag{color:var(--muted);flex-shrink:0;display:flex;}
 .sheetrow .name{font-weight:600;font-size:12.5px;}
 .zuordnendivider{padding:8px 10px 4px;color:var(--muted);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;}
@@ -765,28 +766,47 @@ function setupZuordnenDrag(){
   [mapped, unmapped].forEach(zone => {
     zone.querySelectorAll('.sheetrow').forEach(el => {
       el.addEventListener('dragstart', () => { dragEl = el; dragAusMapped = (zone === mapped); el.classList.add('dragging'); });
-      el.addEventListener('dragend', () => { el.classList.remove('dragging'); dragEl = null; });
+      el.addEventListener('dragend', () => {
+        el.classList.remove('dragging');
+        document.querySelectorAll('.sheetrow.dragziel').forEach(r => r.classList.remove('dragziel'));
+        dragEl = null;
+      });
     });
   });
-  // Innerhalb "Zugeordnet" wird umsortiert (Reihenfolge = Zuordnung zu "Unsere Felder").
-  // Von "Nicht zugeordnet" nach "Zugeordnet" wird getauscht, damit die Anzahl der
-  // zugeordneten Zeilen immer exakt der Anzahl unserer Felder entspricht.
-  mapped.addEventListener('dragover', e => {
+  function markiereZiel(e){
+    document.querySelectorAll('.sheetrow.dragziel').forEach(r => r.classList.remove('dragziel'));
+    const over = e.target.closest('.sheetrow');
+    if(over && over !== dragEl) over.classList.add('dragziel');
+    return over;
+  }
+  // Waehrend des Ziehens wird nur optisch markiert (dragover feuert sehr
+  // haeufig - eine sofortige DOM-Verschiebung dort wuerde bei jedem Tick neu
+  // ausloesen und zu einer Kettenreaktion fuehren). Die eigentliche Aktion
+  // (Umsortieren bzw. Tausch) passiert erst einmalig beim Loslassen (drop).
+  [mapped, unmapped].forEach(zone => {
+    zone.addEventListener('dragover', e => { e.preventDefault(); if(dragEl) markiereZiel(e); });
+  });
+  mapped.addEventListener('drop', e => {
     e.preventDefault();
+    document.querySelectorAll('.sheetrow.dragziel').forEach(r => r.classList.remove('dragziel'));
     if(!dragEl) return;
     const over = e.target.closest('.sheetrow') || mapped.lastElementChild;
     if(!over || over === dragEl) return;
     if(dragAusMapped){
+      // Innerhalb "Zugeordnet": nur umsortieren (Reihenfolge = Zuordnung zu "Unsere Felder").
       const rect = over.getBoundingClientRect();
       const after = (e.clientY - rect.top) / rect.height > 0.5;
       over.parentNode.insertBefore(dragEl, after ? over.nextSibling : over);
     } else {
+      // Von "Nicht zugeordnet" hierher: tauschen, damit die Anzahl der
+      // zugeordneten Zeilen immer exakt der Anzahl unserer Felder entspricht.
       mapped.insertBefore(dragEl, over);
       unmapped.appendChild(over);
     }
   });
-  unmapped.addEventListener('dragover', e => {
+  unmapped.addEventListener('drop', e => {
     e.preventDefault();
+    document.querySelectorAll('.sheetrow.dragziel').forEach(r => r.classList.remove('dragziel'));
     if(!dragEl || dragAusMapped) return;
     const over = e.target.closest('.sheetrow');
     if(over && over !== dragEl){
