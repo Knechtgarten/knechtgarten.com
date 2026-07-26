@@ -79,18 +79,7 @@ Deno.serve(async (req) => {
         mobil: k.mobile || null,
       }));
 
-    // TEMPORAERE DIAGNOSE: unser Feldname "supplier_number" liefert bei
-    // bekannten Lieferanten wie "Koi-Breeder" nichts, obwohl die
-    // Lieferantennummer in Easybill sichtbar gesetzt ist - vermutlich
-    // stimmt der Feldname in der echten API-Antwort nicht. Diese Rohdaten
-    // zeigen alle vorhandenen Feldnamen, damit wir den richtigen finden.
-    // Danach wieder entfernen.
-    const diagnoseTreffer = alleKontakte.filter((k: any) =>
-      String(k.company_name || '').toLowerCase().includes('koi') ||
-      String(k.last_name || '').toLowerCase().includes('koi')
-    );
-
-    return json({ lieferanten, anzahl_kontakte_gesamt: alleKontakte.length, diagnose_koi: diagnoseTreffer });
+    return json({ lieferanten });
   } catch (e) {
     return json({ error: String(e) }, 500);
   }
