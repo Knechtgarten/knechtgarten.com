@@ -16,7 +16,9 @@
 
 const EASYBILL_BASE_URL = 'https://api.easybill.de/rest/v1';
 const SEITENGROESSE = 200;
-const MAX_SEITEN = 10; // Sicherheitsgrenze (max. 2000 Kontakte) gegen Endlos-Paginierung.
+const MAX_SEITEN = 100; // Sicherheitsgrenze (max. 20'000 Kontakte) gegen Endlos-Paginierung -
+// bewusst grosszuegig, da Easybill ueber die Jahre weit mehr als 2000 Kontakte
+// angesammelt hat (10 Seiten reichten nicht, um alle Lieferanten zu erreichen).
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
