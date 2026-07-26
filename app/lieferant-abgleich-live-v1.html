@@ -173,7 +173,6 @@ table.data td.num{text-align:right;font-variant-numeric:tabular-nums;}
 .sheetrow.dragziel{border-color:var(--primary);background:var(--accent-blue);}
 .sheetrow .drag{color:var(--muted);flex-shrink:0;display:flex;}
 .sheetrow .name{font-weight:600;font-size:12.5px;}
-.zuordnendivider{padding:8px 10px 4px;color:var(--muted);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;}
 
 .toastwrap{position:fixed;bottom:16px;right:16px;z-index:70;display:flex;flex-direction:column;gap:6px;}
 .toast{background:var(--primary);color:#fff;font-size:12.5px;padding:9px 14px;border-radius:7px;box-shadow:0 6px 20px rgba(0,0,0,.2);}
@@ -426,10 +425,8 @@ table.data td.num{text-align:right;font-variant-numeric:tabular-nums;}
         </div>
       </div>
       <div class="zuordnencol">
-        <div class="zuordnencolhead">Spalten im Sheet - ziehen, bis Reihenfolge passt</div>
+        <div class="zuordnencolhead">Spalten im Sheet - ziehen, bis Reihenfolge passt (oberste 6 Zeilen = zugeordnet)</div>
         <div class="zuordnenrows" id="gsMappedRows"></div>
-        <div class="zuordnendivider hidden" id="gsUnmappedDivider">Nicht zugeordnet</div>
-        <div class="zuordnenrows" id="gsUnmappedRows"></div>
       </div>
     </div>
     <div class="status" id="gsZuordnenStatus"></div>
@@ -794,21 +791,28 @@ function macheSheetZeile(headerName){
   const el = document.createElement('div');
   el.className = 'sheetrow';
   el.setAttribute('draggable', 'true');
-  el.dataset.name = headerName;
-  el.innerHTML = `<span class="drag">${ICON.drag}</span><span class="name">${headerName}</span>`;
+  el.dataset.name = headerName || '';
+  if(headerName){
+    el.innerHTML = `<span class="drag">${ICON.drag}</span><span class="name">${headerName}</span>`;
+  } else {
+    el.innerHTML = `<span class="drag">${ICON.drag}</span><span class="name hint" style="margin:0;">– noch keine Zuordnung –</span>`;
+  }
   return el;
 }
+// Eine einzige, frei sortierbare Liste statt zwei getrennter Zonen: die
+// obersten GS_FELDER.length Zeilen gelten (per Position) als zugeordnet,
+// alles darunter ist "uebrig". Das ersetzt die vorherige Zwei-Zonen-Logik
+// (Mapped/Unmapped-Tausch), die bei fehlenden Zeilen (kein 1:1-Slot pro
+// Feld) die Reihenfolge durcheinanderbrachte.
 function setupZuordnenDrag(){
-  const mapped = $('gsMappedRows'), unmapped = $('gsUnmappedRows');
-  let dragEl = null, dragAusMapped = false;
-  [mapped, unmapped].forEach(zone => {
-    zone.querySelectorAll('.sheetrow').forEach(el => {
-      el.addEventListener('dragstart', () => { dragEl = el; dragAusMapped = (zone === mapped); el.classList.add('dragging'); });
-      el.addEventListener('dragend', () => {
-        el.classList.remove('dragging');
-        document.querySelectorAll('.sheetrow.dragziel').forEach(r => r.classList.remove('dragziel'));
-        dragEl = null;
-      });
+  const zone = $('gsMappedRows');
+  let dragEl = null;
+  zone.querySelectorAll('.sheetrow').forEach(el => {
+    el.addEventListener('dragstart', () => { dragEl = el; el.classList.add('dragging'); });
+    el.addEventListener('dragend', () => {
+      el.classList.remove('dragging');
+      document.querySelectorAll('.sheetrow.dragziel').forEach(r => r.classList.remove('dragziel'));
+      dragEl = null;
     });
   });
   function markiereZiel(e){
@@ -820,55 +824,28 @@ function setupZuordnenDrag(){
   // Waehrend des Ziehens wird nur optisch markiert (dragover feuert sehr
   // haeufig - eine sofortige DOM-Verschiebung dort wuerde bei jedem Tick neu
   // ausloesen und zu einer Kettenreaktion fuehren). Die eigentliche Aktion
-  // (Umsortieren bzw. Tausch) passiert erst einmalig beim Loslassen (drop).
-  [mapped, unmapped].forEach(zone => {
-    zone.addEventListener('dragover', e => { e.preventDefault(); if(dragEl) markiereZiel(e); });
-  });
-  mapped.addEventListener('drop', e => {
+  // (Umsortieren) passiert erst einmalig beim Loslassen (drop).
+  zone.addEventListener('dragover', e => { e.preventDefault(); if(dragEl) markiereZiel(e); });
+  zone.addEventListener('drop', e => {
     e.preventDefault();
     document.querySelectorAll('.sheetrow.dragziel').forEach(r => r.classList.remove('dragziel'));
     if(!dragEl) return;
-    const over = e.target.closest('.sheetrow') || mapped.lastElementChild;
+    const over = e.target.closest('.sheetrow') || zone.lastElementChild;
     if(!over || over === dragEl) return;
-    if(dragAusMapped){
-      // Innerhalb "Zugeordnet": nur umsortieren (Reihenfolge = Zuordnung zu "Unsere Felder").
-      const rect = over.getBoundingClientRect();
-      const after = (e.clientY - rect.top) / rect.height > 0.5;
-      over.parentNode.insertBefore(dragEl, after ? over.nextSibling : over);
-    } else {
-      // Von "Nicht zugeordnet" hierher: tauschen, damit die Anzahl der
-      // zugeordneten Zeilen immer exakt der Anzahl unserer Felder entspricht.
-      mapped.insertBefore(dragEl, over);
-      unmapped.appendChild(over);
-    }
+    const rect = over.getBoundingClientRect();
+    const after = (e.clientY - rect.top) / rect.height > 0.5;
+    over.parentNode.insertBefore(dragEl, after ? over.nextSibling : over);
     speichereZuordnung();
-  });
-  unmapped.addEventListener('drop', e => {
-    e.preventDefault();
-    document.querySelectorAll('.sheetrow.dragziel').forEach(r => r.classList.remove('dragziel'));
-    if(!dragEl || dragAusMapped) return;
-    const over = e.target.closest('.sheetrow');
-    if(over && over !== dragEl){
-      const rect = over.getBoundingClientRect();
-      const after = (e.clientY - rect.top) / rect.height > 0.5;
-      over.parentNode.insertBefore(dragEl, after ? over.nextSibling : over);
-    } else if(!over){
-      unmapped.appendChild(dragEl);
-    }
   });
 }
 function renderZuordnungLeer(){
   $('gsMappedRows').innerHTML = '<p class="hint" style="margin:0;padding:6px 4px;">Noch kein Sheet geladen - Link eintragen und "Sheet laden" klicken.</p>';
-  $('gsUnmappedRows').innerHTML = '';
-  $('gsUnmappedDivider').classList.add('hidden');
 }
 function renderZuordnungAusGespeichert(){
   const gespeichert = LIEF.da.sheet_spalten_zuordnung;
   if(!gespeichert || !Object.keys(gespeichert).length){ renderZuordnungLeer(); return; }
   $('gsMappedRows').innerHTML = '';
-  GS_FELDER.forEach(f => { if(gespeichert[f.key]) $('gsMappedRows').appendChild(macheSheetZeile(gespeichert[f.key])); });
-  $('gsUnmappedRows').innerHTML = '';
-  $('gsUnmappedDivider').classList.add('hidden');
+  GS_FELDER.forEach(f => $('gsMappedRows').appendChild(macheSheetZeile(gespeichert[f.key] || '')));
   setupZuordnenDrag();
 }
 function renderZuordnung(sheetDaten){
@@ -880,11 +857,9 @@ function renderZuordnung(sheetDaten){
   GS_FELDER.forEach(f => {
     const name = gespeichert[f.key];
     if(name && sheetDaten.headers.includes(name)) $('gsMappedRows').appendChild(macheSheetZeile(name));
-    else if(uebrig.length) $('gsMappedRows').appendChild(macheSheetZeile(uebrig.shift()));
+    else $('gsMappedRows').appendChild(macheSheetZeile(uebrig.shift() || ''));
   });
-  $('gsUnmappedRows').innerHTML = '';
-  $('gsUnmappedDivider').classList.toggle('hidden', uebrig.length === 0);
-  uebrig.forEach(h => $('gsUnmappedRows').appendChild(macheSheetZeile(h)));
+  uebrig.forEach(h => $('gsMappedRows').appendChild(macheSheetZeile(h)));
 
   setupZuordnenDrag();
 }
@@ -912,7 +887,7 @@ async function speichereZuordnung(){
   const rows = Array.from($('gsMappedRows').querySelectorAll('.sheetrow'));
   if(!rows.length) return;
   const zuordnung = {};
-  GS_FELDER.forEach((f, i) => { if(rows[i]) zuordnung[f.key] = rows[i].dataset.name; });
+  GS_FELDER.forEach((f, i) => { if(rows[i] && rows[i].dataset.name) zuordnung[f.key] = rows[i].dataset.name; });
   const { error } = await sb.from('lieferant_datenabgleich').upsert({ lieferant_id: LIEFERANT_ID, sheet_spalten_zuordnung: zuordnung }, { onConflict: 'lieferant_id' });
   if(error){ $('gsZuordnenStatus').textContent = friendlyError(error); $('gsZuordnenStatus').className = 'status err'; return; }
   LIEF.da.sheet_spalten_zuordnung = zuordnung;
