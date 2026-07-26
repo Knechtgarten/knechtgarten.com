@@ -13,7 +13,10 @@
 // dem Supabase Vault ueber die RPC lese_shop_passwort - nie im Klartext in
 // der DB oder im Browser). Danach wird die angegebene Merklisten-Seite
 // abgerufen und die enthaltenen Artikel (Bezeichnung/Artikelnummer/Preis)
-// herausgeparst. Schreibt NICHTS in den Webshop zurueck.
+// herausgeparst. Produktbilder werden dabei einmalig heruntergeladen und in
+// den eigenen Storage-Bucket "artikel-fotos" gespiegelt (nicht nur verlinkt),
+// damit sie erhalten bleiben, falls der Lieferant sie im Shop spaeter aendert
+// oder loescht. Schreibt sonst NICHTS in den Webshop zurueck.
 //
 // Gambio-spezifisch: Login-Feldnamen email_address_login/password_login,
 // POST auf login.php?action=process, Produktkarten als div.product-item mit
@@ -59,6 +62,29 @@ function sammleCookies(jar: Map<string, string>, res: Response) {
 }
 function cookieHeader(jar: Map<string, string>): string {
   return Array.from(jar.entries()).map(([k, v]) => `${k}=${v}`).join('; ');
+}
+
+// Bild einmalig vom Lieferanten-Shop herunterladen und in unseren eigenen
+// Storage-Bucket spiegeln (gleicher Bucket wie beim manuellen Foto-Upload in
+// Tool C), statt nur extern zu verlinken - so bleibt das Bild auch dann
+// erhalten, wenn der Lieferant es spaeter im Shop loescht/verschiebt. Schlaegt
+// der Download/Upload fehl, wird ehrlich der externe Link als Rueckfallwert
+// behalten statt den ganzen Abgleich abzubrechen.
+async function spiegleFotoInStorage(sb: any, fotoUrl: string): Promise<string> {
+  try {
+    const bildRes = await fetch(fotoUrl);
+    if (!bildRes.ok) return fotoUrl;
+    const bytes = new Uint8Array(await bildRes.arrayBuffer());
+    const contentType = bildRes.headers.get('content-type') || 'image/jpeg';
+    const ext = (fotoUrl.split('?')[0].split('.').pop() || 'jpg').toLowerCase().slice(0, 5);
+    const pfad = `${crypto.randomUUID()}.${ext}`;
+    const { error: upErr } = await sb.storage.from('artikel-fotos').upload(pfad, bytes, { contentType });
+    if (upErr) return fotoUrl;
+    const { data } = sb.storage.from('artikel-fotos').getPublicUrl(pfad);
+    return data?.publicUrl || fotoUrl;
+  } catch (_e) {
+    return fotoUrl;
+  }
 }
 
 function parseGambioMerkliste(html: string, origin: string) {
@@ -161,6 +187,9 @@ Deno.serve(async (req) => {
     }
 
     const artikel = parseGambioMerkliste(html, origin);
+    for (const a of artikel) {
+      if (a.foto_url) a.foto_url = await spiegleFotoInStorage(sb, a.foto_url);
+    }
     return json({ artikel });
   } catch (e) {
     return json({ error: String(e) }, 500);
