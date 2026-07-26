@@ -1917,12 +1917,39 @@ function renderEasybillTreffer(liste){
     });
   });
 }
+// Tippfehlertolerante Suche: Levenshtein-Distanz pro Wort statt reinem
+// Teilstring-Vergleich, damit z.B. "Brieder" trotzdem "Breeder" findet.
+function levenshtein(a, b){
+  a = (a || '').toLowerCase(); b = (b || '').toLowerCase();
+  const m = a.length, n = b.length;
+  if(!m) return n;
+  if(!n) return m;
+  let prev = Array.from({ length: n + 1 }, (_, i) => i);
+  for(let i = 1; i <= m; i++){
+    const cur = [i];
+    for(let j = 1; j <= n; j++){
+      cur[j] = a[i-1] === b[j-1] ? prev[j-1] : 1 + Math.min(prev[j-1], prev[j], cur[j-1]);
+    }
+    prev = cur;
+  }
+  return prev[n];
+}
+function wortTrifftFeld(wort, feldtext){
+  if(!wort || !feldtext) return false;
+  const text = feldtext.toLowerCase();
+  if(text.includes(wort)) return true;
+  const toleranz = Math.max(1, Math.floor(wort.length * 0.34));
+  return text.split(/[\s-]+/).some(teil => levenshtein(wort, teil) <= toleranz);
+}
+function lieferantTrifftSuche(l, suchtext){
+  const felder = [l.name, l.firma, l.vorname, l.nachname, l.strasse, l.plz, l.ort, l.lieferantennummer].filter(Boolean);
+  const suchworte = suchtext.toLowerCase().split(/\s+/).filter(Boolean);
+  return suchworte.every(wort => felder.some(feld => wortTrifftFeld(wort, feld)));
+}
 function filtereEasybillTreffer(){
-  const text = $('leSearchInput').value.trim().toLowerCase();
+  const text = $('leSearchInput').value.trim();
   if(!text){ renderEasybillTreffer(LE_ALLE); return; }
-  const treffer = LE_ALLE.filter(l => [l.name, l.firma, l.vorname, l.nachname, l.strasse, l.plz, l.ort, l.lieferantennummer]
-    .some(feld => (feld || '').toLowerCase().includes(text)));
-  renderEasybillTreffer(treffer);
+  renderEasybillTreffer(LE_ALLE.filter(l => lieferantTrifftSuche(l, text)));
 }
 async function openEasybillLieferantImport(){
   $('leSearchInput').value = '';
@@ -1932,7 +1959,7 @@ async function openEasybillLieferantImport(){
   const { data, error } = await sb.functions.invoke('easybill-lieferanten-suche');
   if(error){ $('leStatus').textContent = 'Fehler beim Laden: ' + friendlyError(error); $('leStatus').className = 'status err'; return; }
   LE_ALLE = data?.lieferanten || [];
-  $('leStatus').textContent = ''; $('leStatus').className = 'status';
+  $('leStatus').textContent = `${LE_ALLE.length} Lieferant(en) von Easybill geladen.`; $('leStatus').className = 'status';
   renderEasybillTreffer(LE_ALLE);
   $('leSearchInput').focus();
 }
