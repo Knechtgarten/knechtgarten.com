@@ -1885,6 +1885,16 @@ document.getElementById('siKategoriePills').querySelectorAll('.filterpill').forE
     document.getElementById('siKategoriePills').querySelectorAll('.filterpill').forEach(b => b.classList.toggle('on', b === btn));
   });
 });
+// Wechselt der Lieferant, muss der "schon vorhanden"-Status aller bereits
+// angezeigten Zeilen neu geprueft werden - sonst bezieht sich die Anzeige
+// noch auf den Lieferanten, der beim Erkennen des Bildes ausgewaehlt war.
+$('siLieferantSelect').addEventListener('change', () => {
+  $('siListe').querySelectorAll('.si-row:not(.leer)').forEach(row => {
+    const nr = row.querySelectorAll('input')[1].value.trim();
+    siPruefeVorhanden(row, nr);
+    siAktualisiereKnechtVorschau(row);
+  });
+});
 
 function siIstLeerZeileVorhanden(){
   const liste = $('siListe');
@@ -1902,7 +1912,10 @@ function siBaueZeile({ bezeichnung = '', artikelnummer = '', ek = '', vp = '', l
     <div class="si-foto" title="Foto anklicken oder reinziehen">${ICON.foto}</div>
     <div class="si-fieldrow">
       <div class="si-fld grow"><input placeholder="Bezeichnung" value="${bezeichnung.replace(/"/g,'&quot;')}"></div>
-      <div class="si-fld small"><input placeholder="Art.Nr." value="${(artikelnummer||'').replace(/"/g,'&quot;')}"></div>
+      <div class="si-fld small">
+        <input placeholder="Art.Nr." value="${(artikelnummer||'').replace(/"/g,'&quot;')}">
+        <div class="si-knecht-vorschau hint" style="margin:2px 0 0;"></div>
+      </div>
       <div class="si-fld small"><input placeholder="EK-Preis" value="${ek ?? ''}"></div>
       <div class="si-fld small"><input placeholder="VP-Preis" value="${vp ?? ''}"></div>
     </div>
@@ -1911,6 +1924,11 @@ function siBaueZeile({ bezeichnung = '', artikelnummer = '', ek = '', vp = '', l
       <button class="btn" type="button">${leer ? '+ hinzufügen' : 'Übernehmen'}</button>
     </div>
   `;
+  row.querySelectorAll('input')[1].addEventListener('input', () => {
+    siAktualisiereKnechtVorschau(row);
+    if(!leer) siPruefeVorhanden(row, row.querySelectorAll('input')[1].value.trim());
+  });
+  siAktualisiereKnechtVorschau(row);
   const foto = row.querySelector('.si-foto');
   foto.addEventListener('click', () => siFotoAuswaehlen(row));
   foto.addEventListener('dragover', (e) => { e.preventDefault(); foto.classList.add('draghover'); });
@@ -1946,6 +1964,18 @@ async function uploadSchnellimportFoto(file){
   const { error } = await sb.storage.from('artikel-fotos').upload(pfad, file);
   if(error){ showToast(friendlyError(error), true); return null; }
   return sb.storage.from('artikel-fotos').getPublicUrl(pfad).data.publicUrl;
+}
+
+// Zeigt schon vor dem Uebernehmen, wie die spaeter generierte Knecht-
+// Artikelnummer (Kuerzel_Lieferantennummer) aussehen wird - reine
+// Transparenz/Kontrollhilfe, die eigentliche Duplikat-Pruefung laeuft
+// weiterhin ueber Lieferant+Lieferantennummer (siPruefeVorhanden).
+function siAktualisiereKnechtVorschau(row){
+  const vorschau = row.querySelector('.si-knecht-vorschau');
+  if(!vorschau) return;
+  const nr = row.querySelectorAll('input')[1].value.trim();
+  const lieferant = LIEFERANTEN_DA.find(l => l.id === $('siLieferantSelect').value);
+  vorschau.textContent = (nr && lieferant) ? `→ ${lieferant.kuerzel}_${nr}` : '';
 }
 
 async function siPruefeVorhanden(row, artikelnummer){
@@ -2048,13 +2078,33 @@ async function siVerarbeiteBild(file){
     $('siStatus').textContent = 'Keine Artikel im Bild erkannt.'; $('siStatus').className = 'status err';
     return;
   }
+  // Gemini erkennt manche Artikel gelegentlich doppelt (z.B. wenn eine
+  // Bildvorlage einen Artikel zweimal zeigt) - gegen bereits sichtbare
+  // Zeilen UND innerhalb der neuen Erkennung selbst abgleichen, damit keine
+  // Dubletten in der Liste landen. Artikel ohne Nummer koennen nicht
+  // dedupliziert werden und werden immer uebernommen.
+  const bekannteNummern = new Set(
+    Array.from($('siListe').querySelectorAll('.si-row:not(.leer)'))
+      .map(r => r.querySelectorAll('input')[1].value.trim().toLowerCase())
+      .filter(Boolean)
+  );
+  let uebersprungen = 0;
   siStelleLeerZeileSicher();
   const leerRow = $('siListe').querySelector('.si-row.leer');
   artikel.forEach(a => {
+    const nrKey = (a.artikelnummer || '').trim().toLowerCase();
+    if(nrKey){
+      if(bekannteNummern.has(nrKey)){ uebersprungen++; return; }
+      bekannteNummern.add(nrKey);
+    }
     const row = siBaueZeile({ bezeichnung: a.bezeichnung, artikelnummer: a.artikelnummer, ek: a.ek_preis, vp: a.vp_preis });
     $('siListe').insertBefore(row, leerRow);
   });
-  $('siStatus').textContent = `${artikel.length} Artikel erkannt.`; $('siStatus').className = 'status';
+  const anzahlNeu = artikel.length - uebersprungen;
+  $('siStatus').textContent = uebersprungen
+    ? `${anzahlNeu} Artikel erkannt (${uebersprungen} Dublette${uebersprungen>1?'n':''} übersprungen).`
+    : `${anzahlNeu} Artikel erkannt.`;
+  $('siStatus').className = 'status';
 }
 
 $('siDateiBtn').addEventListener('click', () => $('siDateiInput').click());
