@@ -61,19 +61,27 @@ function cookieHeader(jar: Map<string, string>): string {
   return Array.from(jar.entries()).map(([k, v]) => `${k}=${v}`).join('; ');
 }
 
-function parseGambioMerkliste(html: string) {
-  const artikel: { artikelnummer_lieferant: string; bezeichnung: string; ep_lieferant: number | null }[] = [];
+function parseGambioMerkliste(html: string, origin: string) {
+  const artikel: { artikelnummer_lieferant: string; bezeichnung: string; ep_lieferant: number | null; foto_url: string | null }[] = [];
   const teile = html.split('class="product-item"');
   for (let i = 1; i < teile.length; i++) {
     const block = teile[i];
-    const altMatch = block.match(/alt="([^"]+)"/);
+    const imgTagMatch = block.match(/<img[^>]*>/);
+    const imgTag = imgTagMatch ? imgTagMatch[0] : '';
+    const altMatch = imgTag.match(/alt="([^"]+)"/);
+    const srcMatch = imgTag.match(/src="([^"]+)"/);
     const nrMatch = block.match(/Artikel Nr\.:\s*([\d.]+)/);
     const preisMatch = block.match(/CHF\s*([\d'.,]+)/);
     if (!altMatch || !nrMatch) continue;
+    let fotoUrl: string | null = null;
+    if (srcMatch) {
+      try { fotoUrl = new URL(srcMatch[1], origin).href; } catch (_e) { fotoUrl = null; }
+    }
     artikel.push({
       artikelnummer_lieferant: nrMatch[1].trim(),
       bezeichnung: altMatch[1].trim(),
       ep_lieferant: preisMatch ? parseZahl(preisMatch[1]) : null,
+      foto_url: fotoUrl,
     });
   }
   return artikel;
@@ -152,7 +160,7 @@ Deno.serve(async (req) => {
       return json({ error: 'Login beim Webshop fehlgeschlagen - bitte Benutzername/Passwort in den Verbindungsdaten pruefen.' }, 400);
     }
 
-    const artikel = parseGambioMerkliste(html);
+    const artikel = parseGambioMerkliste(html, origin);
     return json({ artikel });
   } catch (e) {
     return json({ error: String(e) }, 500);
