@@ -324,7 +324,7 @@ table.data td.num{text-align:right;font-variant-numeric:tabular-nums;}
           </div>
           <div id="mklCard" style="margin-top:30px;">
             <table class="ka-liste">
-              <thead><tr><th class="ka-name">Merklisten-Namen</th><th>Merklisten Link</th><th></th><th></th></tr></thead>
+              <thead><tr><th title="Beim Abgleich berücksichtigen"></th><th class="ka-name">Merklisten-Namen</th><th>Merklisten Link</th><th></th><th></th></tr></thead>
               <tbody id="kaMerklistenBody"></tbody>
             </table>
           </div>
@@ -374,6 +374,21 @@ table.data td.num{text-align:right;font-variant-numeric:tabular-nums;}
           <table class="data">
             <thead><tr><th><input type="checkbox" class="appcheck" id="ergaenzenCheckAll"></th><th>Artikel</th><th class="num">Preis</th></tr></thead>
             <tbody id="ergaenzenBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="section" id="nichtAbgeglichenSection">
+        <div class="sectionhead">
+          <div class="sectionheadtop">
+            <h3>Nicht abgeglichen</h3>
+          </div>
+          <div class="hint" style="margin-top:4px;">Artikel dieses Lieferanten, die beim letzten Abgleich in keiner Sheet-Zeile vorkamen - z.B. weil der Lieferant die Artikelnummer geändert hat oder der Artikel nicht mehr existiert.</div>
+        </div>
+        <div class="tablewrap">
+          <table class="data">
+            <thead><tr><th>Artikel</th><th class="num">Preis</th><th></th></tr></thead>
+            <tbody id="nichtAbgeglichenBody"></tbody>
           </table>
         </div>
       </div>
@@ -535,6 +550,7 @@ async function init(){
   renderGoogleSheetFelder();
   renderKaListe('merklisten', 'kaMerklistenBody');
   renderErgebnisSpalte();
+  renderNichtAbgeglichen([]);
 
   $('ladeHinweis').classList.add('hidden');
   $('pageBody').classList.remove('hidden');
@@ -668,12 +684,14 @@ function renderKaListe(feld, zielId){
   const liste = LIEF.da.sync_verbindung[feld] || [];
   const rows = liste.map((item, i) => `
     <tr data-i="${i}">
+      <td><input type="checkbox" class="appcheck" data-abgleichen="1" title="Beim Abgleich berücksichtigen" ${item.abgleichen === false ? '' : 'checked'}></td>
       <td class="ka-name">${kaFeld(item,'name')}</td>
       <td>${kaFeld(item,'url')}</td>
       <td><button class="icobtn" title="Artikel dieser Liste suchen" data-such="1">${ICON.search}</button></td>
       <td><button class="icobtn danger" title="Entfernen" data-del="1">${ICON.trash}</button></td>
     </tr>`).join('');
   const draftRow = `<tr class="kaDraftRow">
+      <td></td>
       <td class="ka-name">${kaFeld(null,'name')}</td>
       <td>${kaFeld(null,'url')}</td>
       <td></td><td></td>
@@ -687,6 +705,10 @@ function renderKaListe(feld, zielId){
         LIEF.da.sync_verbindung[feld][i][inp.dataset.feld] = inp.value.trim();
         speichereSyncVerbindung();
       });
+    });
+    tr.querySelector('[data-abgleichen]').addEventListener('change', (e) => {
+      LIEF.da.sync_verbindung[feld][i].abgleichen = e.target.checked;
+      speichereSyncVerbindung();
     });
     tr.querySelector('[data-such]').addEventListener('click', zeigeNochNichtEingerichtet);
     tr.querySelector('[data-del]').addEventListener('click', async () => {
@@ -919,6 +941,46 @@ function parseSheetZahl(text){
 function findeHeaderIndex(headers, name){
   return headers.findIndex(h => h.trim() === name);
 }
+let NICHT_ABGEGLICHEN_LISTE = [];
+let ABGLEICH_GELAUFEN = false;
+function oeffneShopSuche(a){
+  const shopUrl = (LIEF.da.sync_verbindung || {}).shop_url;
+  if(!shopUrl){ showToast('Keine Shop-URL für diesen Lieferanten hinterlegt.', true); return; }
+  let host = shopUrl.trim();
+  try { host = new URL(/^https?:\/\//.test(shopUrl) ? shopUrl : 'https://' + shopUrl).hostname; } catch(e) {}
+  const query = `site:${host} ${a.bezeichnung || a.artikelnummer_lieferant || ''}`.trim();
+  window.open(`https://www.google.com/search?q=${encodeURIComponent(query)}`, '_blank');
+}
+async function loescheNichtAbgeglichenenArtikel(a, tr){
+  if(!confirm(`Artikel "${a.bezeichnung || a.artikelnummer_lieferant}" wirklich löschen?`)) return;
+  const { error } = await sb.from('artikel').delete().eq('id', a.id);
+  if(error){ showToast(friendlyError(error), true); return; }
+  ARTIKEL = ARTIKEL.filter(x => x.id !== a.id);
+  NICHT_ABGEGLICHEN_LISTE = NICHT_ABGEGLICHEN_LISTE.filter(x => x.id !== a.id);
+  tr.remove();
+  renderErgebnisSpalte();
+  if(!NICHT_ABGEGLICHEN_LISTE.length) renderNichtAbgeglichen([]);
+  showToast('Artikel gelöscht.');
+}
+function renderNichtAbgeglichen(liste){
+  NICHT_ABGEGLICHEN_LISTE = liste;
+  if(!liste.length){
+    const text = ABGLEICH_GELAUFEN ? 'Alle Artikel wurden beim letzten Abgleich im Sheet gefunden.' : 'Wird nach dem nächsten Abgleich angezeigt.';
+    $('nichtAbgeglichenBody').innerHTML = `<tr><td colspan="3" class="hint" style="margin:0;padding:10px 4px;">${text}</td></tr>`;
+    return;
+  }
+  $('nichtAbgeglichenBody').innerHTML = liste.map(a => `
+    <tr data-id="${a.id}">
+      <td><div class="artname">${a.bezeichnung || '(ohne Bezeichnung)'}</div><div class="artmeta">${a.einheit || ''} · ${a.artikelnummer_lieferant || ''}</div></td>
+      <td class="num">${a.ep_lieferant != null ? 'CHF ' + fmtNum(a.ep_lieferant) : '–'}</td>
+      <td><button class="icobtn" title="Im Shop suchen" data-such="1">${ICON.search}</button><button class="icobtn danger" title="Löschen" data-del="1">${ICON.trash}</button></td>
+    </tr>`).join('');
+  $('nichtAbgeglichenBody').querySelectorAll('tr[data-id]').forEach(tr => {
+    const a = liste.find(x => x.id === tr.dataset.id);
+    tr.querySelector('[data-such]').addEventListener('click', () => oeffneShopSuche(a));
+    tr.querySelector('[data-del]').addEventListener('click', () => loescheNichtAbgeglichenenArtikel(a, tr));
+  });
+}
 let NEUE_ARTIKEL_LISTE = [];
 function renderNeueArtikel(liste){
   NEUE_ARTIKEL_LISTE = liste;
@@ -977,6 +1039,12 @@ async function starteGoogleSheetAbgleich(){
     renderNeueArtikel(neue);
     logAnhaengen(`${neue.length} neue Artikel gefunden.`);
   }
+
+  const sheetNummern = new Set(sheetArtikel.map(sa => sa.artikelnummer_lieferant));
+  const nichtGefunden = ARTIKEL.filter(a => a.artikelnummer_lieferant && !sheetNummern.has(a.artikelnummer_lieferant));
+  ABGLEICH_GELAUFEN = true;
+  renderNichtAbgeglichen(nichtGefunden);
+  logAnhaengen(`${nichtGefunden.length} Artikel im Sheet nicht gefunden.`);
 
   await sb.from('lieferant_datenabgleich').upsert({ lieferant_id: LIEFERANT_ID, letzter_abgleich_status: 'Erfolgreich', letzter_abgleich_zeitpunkt: new Date().toISOString() }, { onConflict: 'lieferant_id' });
   logAnhaengen('Fertig.');
