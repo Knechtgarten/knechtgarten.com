@@ -311,6 +311,16 @@ body.mitarbeiter-rolle .admin-only{display:none !important;}
   </div>
 </div>
 
+<div class="ovl" id="lieferantInfoOvl">
+  <div class="ovlbox">
+    <div class="ovlmsg" style="display:flex;align-items:center;justify-content:space-between;gap:14px;">
+      <span id="liTitel">Lieferant</span>
+      <button class="btn" id="liCancel" type="button">Schliessen</button>
+    </div>
+    <div id="liInhalt" style="font-size:13px;font-weight:600;color:var(--ink);line-height:1.7;"></div>
+  </div>
+</div>
+
 <div class="ovl" id="lieferantEasybillOvl">
   <div class="ovlbox xwide">
     <div class="ovlmsg">Von Easybill importieren</div>
@@ -463,8 +473,8 @@ body.mitarbeiter-rolle .admin-only{display:none !important;}
         <div class="card admin-only">
           <div class="cardlabel">Lieferanten</div>
           <table style="table-layout:fixed;">
-            <colgroup><col style="width:140px;"><col><col style="width:100px;"><col style="width:190px;"><col style="width:120px;"><col style="width:130px;"></colgroup>
-            <thead><tr><th></th><th>Lieferant</th><th>Kürzel</th><th>Letzter Abgleich</th><th>Minimum-Marge</th><th>Aktionen</th></tr></thead>
+            <colgroup><col style="width:140px;"><col><col style="width:70px;"><col style="width:150px;"><col style="width:75px;"><col style="width:110px;"></colgroup>
+            <thead><tr><th></th><th>Lieferant</th><th>Kürzel</th><th>Letzter Abgleich</th><th>Marge</th><th>Aktionen</th></tr></thead>
             <tbody id="lieferantenBody"></tbody>
           </table>
           <div class="row" style="margin-top:10px;align-items:center;">
@@ -1715,6 +1725,31 @@ function initialen(name){
   const teile = name.trim().split(/\s+/);
   return ((teile[0]?.[0] || '') + (teile[1]?.[0] || teile[0]?.[1] || '')).toUpperCase();
 }
+function formatiereAdresseKontakt(l){
+  const adresseTeile = [l.strasse, [l.plz, l.ort].filter(Boolean).join(' '), l.land].filter(Boolean);
+  const kontakt = l.kontaktdaten || {};
+  const kontaktTeile = [];
+  if(l.lieferantennummer) kontaktTeile.push(`Lieferantennummer ${l.lieferantennummer}`);
+  if(kontakt.telefon1) kontaktTeile.push(`Tel. ${kontakt.telefon1}`);
+  if(kontakt.telefon2) kontaktTeile.push(`Tel. ${kontakt.telefon2}`);
+  if(kontakt.mobil) kontaktTeile.push(`Mobil ${kontakt.mobil}`);
+  if(kontakt.fax) kontaktTeile.push(`Fax ${kontakt.fax}`);
+  if(kontakt.emails && kontakt.emails.length) kontaktTeile.push(kontakt.emails.join(', '));
+  if(!adresseTeile.length && !kontaktTeile.length) return '';
+  return [
+    adresseTeile.length ? `<div>${adresseTeile.join(', ')}</div>` : '',
+    kontaktTeile.length ? `<div>${kontaktTeile.join(' · ')}</div>` : ''
+  ].join('');
+}
+function openLieferantInfoOvl(id){
+  const l = LIEFERANTEN_DA.find(x => x.id === id);
+  if(!l) return;
+  $('liTitel').textContent = l.name;
+  const html = formatiereAdresseKontakt(l);
+  $('liInhalt').innerHTML = html || '<div class="hint" style="margin:0;">Keine Adress-/Kontaktdaten vorhanden.</div>';
+  $('lieferantInfoOvl').classList.add('show');
+}
+$('liCancel').addEventListener('click', () => $('lieferantInfoOvl').classList.remove('show'));
 function letzterAbgleichText(da){
   if(!da.letzter_abgleich_zeitpunkt) return '<span class="hint" style="margin:0;">Noch nie abgeglichen.</span>';
   return `${da.letzter_abgleich_status || ''}<br><span class="hint" style="margin:0;">${new Date(da.letzter_abgleich_zeitpunkt).toLocaleString('de-CH')}</span>`;
@@ -1722,8 +1757,8 @@ function letzterAbgleichText(da){
 function renderDatenabgleich(){
   $('lieferantenBody').innerHTML = LIEFERANTEN_DA.map(l => `
     <tr>
-      <td>${l.logo_url ? `<img src="${l.logo_url}" alt="" class="lf-logo">` : `<div class="lf-avatar">${initialen(l.name)}</div>`}</td>
-      <td><b>${l.name}</b></td>
+      <td style="cursor:pointer;" onclick="openLieferantInfoOvl('${l.id}')">${l.logo_url ? `<img src="${l.logo_url}" alt="" class="lf-logo">` : `<div class="lf-avatar">${initialen(l.name)}</div>`}</td>
+      <td style="cursor:pointer;" onclick="openLieferantInfoOvl('${l.id}')"><div><b>${l.name}</b></div>${l.ort ? `<div class="hint" style="margin:0;">${l.ort}</div>` : ''}</td>
       <td class="hint" style="margin:0;">${l.kuerzel}</td>
       <td style="font-size:11.5px;">${letzterAbgleichText(l.da)}</td>
       <td class="hint" style="margin:0;">${l.da.minimum_marge_prozent != null ? l.da.minimum_marge_prozent + ' %' : '–'}</td>
@@ -1812,20 +1847,9 @@ async function openDetailOvl(lieferantId, kuerzelAutoGeneriert){
     $('ldKuerzelHint').className = 'hint';
     $('ldKuerzelHint').style.display = 'none';
   }
-  const adresseTeile = [l.strasse, [l.plz, l.ort].filter(Boolean).join(' '), l.land].filter(Boolean);
-  const kontakt = l.kontaktdaten || {};
-  const kontaktTeile = [];
-  if(l.lieferantennummer) kontaktTeile.push(`Lieferantennummer ${l.lieferantennummer}`);
-  if(kontakt.telefon1) kontaktTeile.push(`Tel. ${kontakt.telefon1}`);
-  if(kontakt.telefon2) kontaktTeile.push(`Tel. ${kontakt.telefon2}`);
-  if(kontakt.mobil) kontaktTeile.push(`Mobil ${kontakt.mobil}`);
-  if(kontakt.fax) kontaktTeile.push(`Fax ${kontakt.fax}`);
-  if(kontakt.emails && kontakt.emails.length) kontaktTeile.push(kontakt.emails.join(', '));
-  if(adresseTeile.length || kontaktTeile.length){
-    $('ldAdresseBlock').innerHTML = [
-      adresseTeile.length ? `<div>${adresseTeile.join(', ')}</div>` : '',
-      kontaktTeile.length ? `<div>${kontaktTeile.join(' · ')}</div>` : ''
-    ].join('');
+  const adresseKontaktHtml = formatiereAdresseKontakt(l);
+  if(adresseKontaktHtml){
+    $('ldAdresseBlock').innerHTML = adresseKontaktHtml;
     $('ldAdresseBlock').style.display = '';
   } else {
     $('ldAdresseBlock').style.display = 'none';
