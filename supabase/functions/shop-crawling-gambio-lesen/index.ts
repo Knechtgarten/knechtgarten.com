@@ -118,25 +118,52 @@ function erkenneVerdaechtigeAntwort(html: string): string | null {
   return null;
 }
 
+// Wichtig: NICHT mehr an "class=\"product-item\"" aufteilen - diese Klasse
+// kann auf der Seite mehrfach vorkommen (z.B. eine versteckte Zusatzansicht
+// fuers Handy), wodurch Artikelnummer und Preis aus verschiedenen "Haeppchen"
+// zusammenrutschen und ein falscher Preis einem anderen Artikel zugeordnet
+// wird. Stattdessen wird jedes "Artikel Nr.:"-Vorkommen (das ist pro Artikel
+// eindeutig) als Anker genommen und nur das unmittelbare Umfeld davor (Bild)
+// und danach (Preis) angeschaut - unabhaengig von der umgebenden Div-Struktur.
 function parseGambioMerkliste(html: string, origin: string) {
   const artikel: { artikelnummer_lieferant: string; bezeichnung: string; ep_lieferant: number | null; foto_url: string | null }[] = [];
-  const teile = html.split('class="product-item"');
-  for (let i = 1; i < teile.length; i++) {
-    const block = teile[i];
-    const imgTagMatch = block.match(/<img[^>]*>/);
-    const imgTag = imgTagMatch ? imgTagMatch[0] : '';
-    const altMatch = imgTag.match(/alt="([^"]+)"/);
-    const srcMatch = imgTag.match(/src="([^"]+)"/);
-    const nrMatch = block.match(/Artikel Nr\.:\s*([\d.]+)/);
-    const preisMatch = block.match(/CHF\s*([\d'.,]+)/);
-    if (!altMatch || !nrMatch) continue;
-    let fotoUrl: string | null = null;
-    if (srcMatch) {
-      try { fotoUrl = new URL(srcMatch[1], origin).href; } catch (_e) { fotoUrl = null; }
+
+  const bilder: { pos: number; alt: string; src: string }[] = [];
+  const imgRegex = /<img[^>]*>/g;
+  let imgMatch: RegExpExecArray | null;
+  while ((imgMatch = imgRegex.exec(html)) !== null) {
+    const tag = imgMatch[0];
+    const altM = tag.match(/alt="([^"]+)"/);
+    const srcM = tag.match(/src="([^"]+)"/);
+    if (altM && srcM) bilder.push({ pos: imgMatch.index, alt: altM[1], src: srcM[1] });
+  }
+
+  const nrRegex = /Artikel Nr\.:\s*([\d.]+)/g;
+  let nrMatch: RegExpExecArray | null;
+  while ((nrMatch = nrRegex.exec(html)) !== null) {
+    const pos = nrMatch.index;
+
+    // Naechstgelegenes Bild VOR dieser Artikelnummer - steht in der Karte
+    // immer oberhalb, egal wie weit die Bilder-Liste insgesamt reicht.
+    let bestBild: { alt: string; src: string } | null = null;
+    for (const b of bilder) {
+      if (b.pos < pos) bestBild = b;
+      else break;
     }
+
+    // Preis nur in einem kleinen Fenster NACH der Artikelnummer suchen -
+    // steht in der echten Karte nur wenige Zeichen weiter unten.
+    const fenster = html.slice(pos, pos + 400);
+    const preisMatch = fenster.match(/CHF\s*([\d'.,]+)/);
+
+    let fotoUrl: string | null = null;
+    if (bestBild) {
+      try { fotoUrl = new URL(bestBild.src, origin).href; } catch (_e) { fotoUrl = null; }
+    }
+
     artikel.push({
       artikelnummer_lieferant: nrMatch[1].trim(),
-      bezeichnung: altMatch[1].trim(),
+      bezeichnung: bestBild ? bestBild.alt.trim() : nrMatch[1].trim(),
       ep_lieferant: preisMatch ? parseZahl(preisMatch[1]) : null,
       foto_url: fotoUrl,
     });
