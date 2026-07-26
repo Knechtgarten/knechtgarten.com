@@ -176,17 +176,39 @@ Deno.serve(async (req) => {
       return json({ error: 'Fuer diesen Lieferanten ist noch keine Shop-Session hinterlegt. Bitte im Browser einloggen, eine Anfrage im Netzwerk-Tab per "Als cURL kopieren" kopieren und im Feld "Session (aus Browser kopiert)" einfügen.' }, 400);
     }
 
-    const listeRes = await fetch(url, { headers: { ...browserHeaders, Cookie: String(session) } });
-    if (!listeRes.ok) {
-      return json({ error: `Merkliste konnte nicht geladen werden (Status ${listeRes.status}).` }, 400);
-    }
-    const html = await listeRes.text();
+    // Die Merkliste zeigt pro Seite nur einen Ausschnitt (Standard-Magento-
+    // Pagination) - "limit=40" ist die groesste vom Shop angebotene Seiten-
+    // groesse (per Hand geprueft), "p=N" die Seitenzahl. Es wird so lange
+    // eine weitere Seite nachgeladen, bis eine Seite keine Artikel mehr
+    // liefert - so funktioniert es unabhaengig davon, ob eine Merkliste 8
+    // oder 800 Artikel hat, ohne die Gesamtzahl vorher zu kennen.
+    const basisUrl = new URL(url);
+    basisUrl.searchParams.set('limit', '40');
 
-    if (!html.includes('amwishlist-item') || html.includes('login[username]')) {
-      return json({ error: 'Session abgelaufen oder ungueltig - bitte im Browser neu einloggen, "Als cURL kopieren" wiederholen und im Feld "Session (aus Browser kopiert)" neu einfügen.' }, 400);
+    const artikel: ReturnType<typeof parseMagentoMerkliste> = [];
+    let ersteSeiteHtml = '';
+    let seite = 1;
+    const MAX_SEITEN = 30; // Sicherheitsnetz gegen eine Endlosschleife
+    while (seite <= MAX_SEITEN) {
+      basisUrl.searchParams.set('p', String(seite));
+      const listeRes = await fetch(basisUrl.href, { headers: { ...browserHeaders, Cookie: String(session) } });
+      if (!listeRes.ok) {
+        if (seite === 1) return json({ error: `Merkliste konnte nicht geladen werden (Status ${listeRes.status}).` }, 400);
+        break;
+      }
+      const html = await listeRes.text();
+      if (seite === 1) ersteSeiteHtml = html;
+
+      if (seite === 1 && (!html.includes('amwishlist-item') || html.includes('login[username]'))) {
+        return json({ error: 'Session abgelaufen oder ungueltig - bitte im Browser neu einloggen, "Als cURL kopieren" wiederholen und im Feld "Session (aus Browser kopiert)" neu einfügen.' }, 400);
+      }
+
+      const gefunden = parseMagentoMerkliste(html, origin);
+      if (gefunden.length === 0) break;
+      artikel.push(...gefunden);
+      seite++;
     }
 
-    const artikel = parseMagentoMerkliste(html, origin);
     for (const a of artikel) {
       if (a.foto_url) a.foto_url = await spiegleFotoInStorage(sb, a.foto_url);
     }
@@ -195,15 +217,15 @@ Deno.serve(async (req) => {
     // abgerufene HTML mitliefern, statt nochmal ueber Browser-Screenshots
     // raten zu muessen, was der Server wirklich bekommen hat.
     if (artikel.length === 0) {
-      const ankerPos = html.indexOf('id="item_');
+      const ankerPos = ersteSeiteHtml.indexOf('id="item_');
       return json({
         artikel,
         debug: {
-          htmlLaenge: html.length,
-          hatAmwishlistItem: html.includes('amwishlist-item'),
+          htmlLaenge: ersteSeiteHtml.length,
+          hatAmwishlistItem: ersteSeiteHtml.includes('amwishlist-item'),
           hatItemId: ankerPos !== -1,
-          hatArtNr: html.includes('Art.Nr.'),
-          ausschnittUmErstenItem: ankerPos !== -1 ? html.slice(Math.max(0, ankerPos - 60), ankerPos + 700) : null,
+          hatArtNr: ersteSeiteHtml.includes('Art.Nr.'),
+          ausschnittUmErstenItem: ankerPos !== -1 ? ersteSeiteHtml.slice(Math.max(0, ankerPos - 60), ankerPos + 700) : null,
         },
       });
     }
