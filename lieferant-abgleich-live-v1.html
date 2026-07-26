@@ -1118,20 +1118,36 @@ async function verarbeiteGefundeneArtikel(gefundeneArtikel, quelleLabel, methode
   const bestandNachNr = new Map(ARTIKEL.filter(a => a.artikelnummer_lieferant).map(a => [normArtikelnr(a.artikelnummer_lieferant), a]));
   const zuPruefen = [];
   let autoAbgeglichen = 0;
+  let fotosNachgetragen = 0;
   for(const sa of gefundeneArtikel){
     const bestand = bestandNachNr.get(normArtikelnr(sa.artikelnummer_lieferant));
-    if(!bestand || sa.ep_lieferant == null) continue;
+    if(!bestand) continue;
     const alt = bestand.ep_lieferant;
-    if(alt != null && alt === sa.ep_lieferant) continue; // unveraendert - nichts zu tun
+    // Fehlendes Foto nachtragen - unabhaengig davon, ob sich der Preis
+    // geaendert hat (z.B. bei Artikeln, die vor Einfuehrung der Foto-Funktion
+    // importiert wurden).
+    const fotoFehltNoch = !bestand.foto_url && !!sa.foto_url;
+    const preisUnveraendert = sa.ep_lieferant == null || (alt != null && alt === sa.ep_lieferant);
+
+    if(preisUnveraendert){
+      if(fotoFehltNoch){
+        const { error: updErr } = await sb.from('artikel').update({ foto_url: sa.foto_url }).eq('id', bestand.id);
+        if(!updErr){ bestand.foto_url = sa.foto_url; fotosNachgetragen++; }
+      }
+      continue;
+    }
     if(alt != null && !preisAbweichungGross(alt, sa.ep_lieferant)){
       // Innerhalb des Toleranzwerts - direkt automatisch uebernehmen.
-      const { error: updErr } = await sb.from('artikel').update({ ep_lieferant: sa.ep_lieferant }).eq('id', bestand.id);
+      const payload = { ep_lieferant: sa.ep_lieferant };
+      if(fotoFehltNoch) payload.foto_url = sa.foto_url;
+      const { error: updErr } = await sb.from('artikel').update(payload).eq('id', bestand.id);
       if(updErr){ showToast(friendlyError(updErr), true); continue; }
       await sb.from('artikel_preis_verlauf').insert({
         artikel_id: bestand.id, alter_preis: alt, neuer_preis: sa.ep_lieferant,
         quelle: 'abgleich', methode, lieferant_id: LIEFERANT_ID
       });
       bestand.ep_lieferant = sa.ep_lieferant;
+      if(fotoFehltNoch){ bestand.foto_url = sa.foto_url; fotosNachgetragen++; }
       autoAbgeglichen++;
     } else {
       // Ueber dem Toleranzwert oder kein Vergleichspreis vorhanden - manuelle Pruefung noetig.
@@ -1139,6 +1155,7 @@ async function verarbeiteGefundeneArtikel(gefundeneArtikel, quelleLabel, methode
     }
   }
   logAnhaengen(`${autoAbgeglichen} Artikel automatisch abgeglichen (innerhalb Toleranzwert).`);
+  if(fotosNachgetragen) logAnhaengen(`${fotosNachgetragen} fehlendes Foto nachgetragen.`);
   renderPreisAbweichungen(zuPruefen);
   logAnhaengen(`${zuPruefen.length} Artikel über dem Toleranzwert - manuelle Prüfung nötig.`);
 
