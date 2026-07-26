@@ -761,12 +761,15 @@ document.querySelectorAll('.segbtn[data-kategorie]').forEach(btn => {
 // ---------------------------------------------------------------------------
 const GS_FELDER = [
   { key: 'artikelnummer_lieferant', label: 'Artikelnummer Lieferant', tag: 'Abgleichs-Schlüssel', klasse: 'key' },
-  { key: 'bezeichnung', label: 'Bezeichnung' },
-  { key: 'einheit', label: 'Einheit' },
-  { key: 'ep_lieferant', label: 'EP Lieferant' },
-  { key: 'vp_lieferant', label: 'VP Lieferant', tag: 'optional' },
-  { key: 'anmerkung', label: 'Anmerkung', tag: 'optional' }
+  { key: 'bezeichnung', label: 'Bezeichnung', textArtig: true },
+  { key: 'einheit', label: 'Einheit', textArtig: true },
+  { key: 'ep_lieferant', label: 'EP Lieferant', numerisch: true },
+  { key: 'vp_lieferant', label: 'VP Lieferant', tag: 'optional', numerisch: true },
+  { key: 'anmerkung', label: 'Anmerkung', tag: 'optional', textArtig: true }
 ];
+// Sheet-Rohdaten der zuletzt geladenen Datei - fuer die Plausibilitaets-
+// pruefung der Spalten-Zuordnung (siehe pruefeSpaltenPlausibilitaet).
+let GS_LETZTE_DATEN = null;
 
 function renderGoogleSheetFelder(){
   const link = (LIEF.da.sync_verbindung || {}).google_sheet_link;
@@ -847,6 +850,7 @@ function renderZuordnungAusGespeichert(){
   $('gsMappedRows').innerHTML = '';
   GS_FELDER.forEach(f => $('gsMappedRows').appendChild(macheSheetZeile(gespeichert[f.key] || '')));
   setupZuordnenDrag();
+  pruefeSpaltenPlausibilitaet();
 }
 function renderZuordnung(sheetDaten){
   const gespeichert = LIEF.da.sheet_spalten_zuordnung || {};
@@ -862,6 +866,47 @@ function renderZuordnung(sheetDaten){
   uebrig.forEach(h => $('gsMappedRows').appendChild(macheSheetZeile(h)));
 
   setupZuordnenDrag();
+  pruefeSpaltenPlausibilitaet();
+}
+// Grober Sanity-Check der Zuordnung anhand einer Stichprobe der echten
+// Sheet-Werte - kein Beweis, dass die Zuordnung stimmt, aber faengt den
+// haeufigsten Fehler ab (Spalten vertauscht: Zahlenspalte auf Textfeld
+// gemappt oder umgekehrt, bzw. Spalte grossteils leer).
+function pruefeSpaltenPlausibilitaet(){
+  if(!GS_LETZTE_DATEN) return;
+  const rows = Array.from($('gsMappedRows').querySelectorAll('.sheetrow'));
+  GS_FELDER.forEach((f, i) => {
+    const tr = rows[i];
+    if(!tr) return;
+    const bestehend = tr.querySelector('.plausi-warn');
+    if(bestehend) bestehend.remove();
+    const name = tr.dataset.name;
+    if(!name) return; // noch nicht zugeordnet - nichts zu pruefen
+    const idx = findeHeaderIndex(GS_LETZTE_DATEN.headers, name);
+    if(idx < 0) return;
+    const alleWerte = GS_LETZTE_DATEN.rows.map(r => (r[idx] || '').trim());
+    const nichtLeer = alleWerte.filter(Boolean);
+    if(!nichtLeer.length) return;
+    const stichprobe = nichtLeer.slice(0, 50);
+    let hinweis = null;
+    const leerAnteil = 1 - (nichtLeer.length / alleWerte.length);
+    if(leerAnteil > 0.5){
+      hinweis = 'grossteils leer';
+    } else if(f.numerisch){
+      const ungueltig = stichprobe.filter(w => parseSheetZahl(w) === null).length;
+      if(ungueltig / stichprobe.length > 0.5) hinweis = 'wirkt nicht numerisch';
+    } else if(f.textArtig){
+      const numerisch = stichprobe.filter(w => parseSheetZahl(w) !== null).length;
+      if(numerisch / stichprobe.length > 0.8) hinweis = 'wirkt wie Zahlenspalte';
+    }
+    if(hinweis){
+      const warnEl = document.createElement('span');
+      warnEl.className = 'devtag warn plausi-warn';
+      warnEl.style.marginLeft = '8px';
+      warnEl.textContent = hinweis;
+      tr.querySelector('.name').after(warnEl);
+    }
+  });
 }
 function oeffneZuordnenModal(){
   $('gsLink').value = (LIEF.da.sync_verbindung || {}).google_sheet_link || '';
@@ -878,6 +923,7 @@ $('gsLadenBtn').addEventListener('click', async () => {
   renderGoogleSheetFelder();
   const daten = await ladeGoogleSheet();
   if(!daten) return;
+  GS_LETZTE_DATEN = daten;
   $('gsDateiname').textContent = daten.titel || '';
   $('gsZuordnenStatus').textContent = ''; $('gsZuordnenStatus').className = 'status';
   renderZuordnung(daten);
@@ -888,6 +934,7 @@ async function speichereZuordnung(){
   if(!rows.length) return;
   const zuordnung = {};
   GS_FELDER.forEach((f, i) => { if(rows[i] && rows[i].dataset.name) zuordnung[f.key] = rows[i].dataset.name; });
+  pruefeSpaltenPlausibilitaet();
   const { error } = await sb.from('lieferant_datenabgleich').upsert({ lieferant_id: LIEFERANT_ID, sheet_spalten_zuordnung: zuordnung }, { onConflict: 'lieferant_id' });
   if(error){ $('gsZuordnenStatus').textContent = friendlyError(error); $('gsZuordnenStatus').className = 'status err'; return; }
   LIEF.da.sheet_spalten_zuordnung = zuordnung;
