@@ -209,8 +209,15 @@ Deno.serve(async (req) => {
       seite++;
     }
 
-    for (const a of artikel) {
-      if (a.foto_url) a.foto_url = await spiegleFotoInStorage(sb, a.foto_url);
+    // Fotos in kleinen Gruppen GLEICHZEITIG spiegeln statt strikt nacheinander -
+    // bei Merklisten mit vielen Artikeln (z.B. 67) hat das nacheinander so
+    // lange gedauert, dass Supabase den ganzen Funktionsaufruf abgebrochen hat.
+    const FOTO_GRUPPENGROESSE = 8;
+    for (let i = 0; i < artikel.length; i += FOTO_GRUPPENGROESSE) {
+      const gruppe = artikel.slice(i, i + FOTO_GRUPPENGROESSE);
+      await Promise.all(gruppe.map(async (a) => {
+        if (a.foto_url) a.foto_url = await spiegleFotoInStorage(sb, a.foto_url);
+      }));
     }
 
     // Werden 0 Artikel gefunden, gleich einen Blick auf das tatsaechlich
