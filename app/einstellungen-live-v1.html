@@ -314,6 +314,21 @@ body.mitarbeiter-rolle .admin-only{display:none !important;}
   </div>
 </div>
 
+<div class="ovl" id="lieferantEasybillOvl">
+  <div class="ovlbox xwide">
+    <div class="ovlmsg">Von Easybill importieren</div>
+    <div class="fld"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="text" id="leSearchInput" placeholder="Easybill-Lieferant suchen (ab 3 Zeichen)…"></div>
+    <table>
+      <thead><tr><th>Lieferantennummer</th><th>Name</th><th>Strasse</th><th>PLZ</th><th>Ort</th><th></th></tr></thead>
+      <tbody id="leErgebnisse"></tbody>
+    </table>
+    <div class="ovlbtns">
+      <button class="btnlink" id="leCancel">Abbrechen</button>
+    </div>
+    <div class="status" id="leStatus"></div>
+  </div>
+</div>
+
 <div class="toastwrap" id="toastwrap"></div>
 
 <header class="app"><div class="wrap">
@@ -455,6 +470,7 @@ body.mitarbeiter-rolle .admin-only{display:none !important;}
             <tbody id="lieferantenBody"></tbody>
           </table>
           <div class="row" style="margin-top:10px;align-items:center;">
+            <button class="btn" id="liefEasybillBtn" style="margin-right:8px;">Von Easybill importieren</button>
             <button class="btnlink" id="openLiefNeuBtn">+ Lieferant hinzufügen</button>
           </div>
         </div>
@@ -1870,6 +1886,82 @@ $('addLiefBtn').addEventListener('click', async () => {
   await loadDatenabgleich();
   openDetailOvl(neu.id);
 });
+
+// ---------------------------------------------------------------------------
+// Von Easybill importieren: gleiches Muster wie beim Kunden-Import (Tool D) -
+// Easybill liefert Kunden UND Lieferanten ueber denselben /customers-
+// Endpunkt, die neue Function easybill-lieferanten-suche behaelt nur die
+// Datensaetze mit einer Lieferantennummer. Rein lesend, kein Zurueckschreiben
+// nach Easybill.
+// ---------------------------------------------------------------------------
+function generiereKuerzel(name){
+  let basis = (name || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) || 'LIEF';
+  let kuerzel = basis;
+  let n = 2;
+  const vergeben = new Set(LIEFERANTEN_DA.map(l => l.kuerzel));
+  while(vergeben.has(kuerzel)){ kuerzel = basis + n; n++; }
+  return kuerzel;
+}
+let leTimer = null;
+let leTreffer = [];
+function openEasybillLieferantImport(){
+  $('leSearchInput').value = '';
+  $('leErgebnisse').innerHTML = '';
+  $('leStatus').textContent = ''; $('leStatus').className = 'status';
+  $('lieferantEasybillOvl').classList.add('show');
+  $('leSearchInput').focus();
+}
+$('liefEasybillBtn').addEventListener('click', openEasybillLieferantImport);
+$('leCancel').addEventListener('click', () => $('lieferantEasybillOvl').classList.remove('show'));
+$('leSearchInput').addEventListener('input', () => {
+  const text = $('leSearchInput').value.trim();
+  clearTimeout(leTimer);
+  if(text.length < 3){ $('leErgebnisse').innerHTML = ''; return; }
+  leTimer = setTimeout(async () => {
+    const { data, error } = await sb.functions.invoke('easybill-lieferanten-suche', { body: { q: text } });
+    if(error){ $('leStatus').textContent = 'Fehler bei der Suche: ' + friendlyError(error); $('leStatus').className = 'status err'; return; }
+    leTreffer = data?.lieferanten || [];
+    $('leErgebnisse').innerHTML = leTreffer.map(l => `
+      <tr>
+        <td>${l.lieferantennummer || ''}</td>
+        <td>${l.name}</td>
+        <td>${l.strasse || ''}</td>
+        <td>${l.plz || ''}</td>
+        <td>${l.ort || ''}</td>
+        <td><button type="button" class="btn le-import" data-easybill-id="${l.easybill_id}" style="padding:4px 10px;font-size:11px;">Importieren</button></td>
+      </tr>`).join('') || '<tr><td colspan="6" style="padding:10px;color:var(--muted);">Keine Treffer.</td></tr>';
+    $('leErgebnisse').querySelectorAll('.le-import').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const eid = parseInt(btn.dataset.easybillId);
+        const el = leTreffer.find(t => t.easybill_id === eid);
+        if(!el) return;
+        if(!(await confirmDialog(`"${el.name}" als neuen Lieferanten importieren?`))) return;
+        const landMap = { CH: 'Schweiz', DE: 'Deutschland', AT: 'Österreich' };
+        const payload = {
+          name: el.name,
+          kuerzel: generiereKuerzel(el.firma || el.name),
+          easybill_id: el.easybill_id,
+          lieferantennummer: el.lieferantennummer,
+          firma: el.firma,
+          vorname: el.vorname,
+          nachname: el.nachname,
+          strasse: el.strasse,
+          plz: el.plz,
+          ort: el.ort,
+          land: landMap[el.land] || el.land || null,
+          kontaktdaten: { telefon1: el.telefon1, telefon2: el.telefon2, fax: el.fax, mobil: el.mobil, emails: el.emails || [] }
+        };
+        const { data: neu, error: insErr } = await sb.from('lieferant').insert(payload).select().single();
+        if(insErr){ $('leStatus').textContent = friendlyError(insErr); $('leStatus').className = 'status err'; return; }
+        $('lieferantEasybillOvl').classList.remove('show');
+        showToast('Lieferant importiert.');
+        await loadDatenabgleich();
+        openDetailOvl(neu.id);
+      });
+    });
+  }, 350);
+});
+
 // ---------------------------------------------------------------------------
 // Offerten-Positionen: Name/Erklaerung bleiben fest im Code (nur hier
 // dokumentiert), Einheit + Rundung Menge/Preis kommen dagegen aus der DB
