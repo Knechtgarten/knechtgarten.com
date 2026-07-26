@@ -758,21 +758,44 @@ function macheSheetZeile(headerName){
   el.innerHTML = `<span class="drag">${ICON.drag}</span><span class="name">${headerName}</span>`;
   return el;
 }
-function setupZuordnenDrag(container){
-  let dragEl = null;
-  container.querySelectorAll('.sheetrow').forEach(el => {
-    el.addEventListener('dragstart', () => { dragEl = el; el.classList.add('dragging'); });
-    el.addEventListener('dragend', () => { el.classList.remove('dragging'); dragEl = null; });
-    el.addEventListener('dragover', e => {
-      e.preventDefault();
-      const over = e.target.closest('.sheetrow');
-      if(!dragEl || !over || dragEl === over) return;
+function setupZuordnenDrag(){
+  const mapped = $('gsMappedRows'), unmapped = $('gsUnmappedRows');
+  let dragEl = null, dragAusMapped = false;
+  [mapped, unmapped].forEach(zone => {
+    zone.querySelectorAll('.sheetrow').forEach(el => {
+      el.addEventListener('dragstart', () => { dragEl = el; dragAusMapped = (zone === mapped); el.classList.add('dragging'); });
+      el.addEventListener('dragend', () => { el.classList.remove('dragging'); dragEl = null; });
+    });
+  });
+  // Innerhalb "Zugeordnet" wird umsortiert (Reihenfolge = Zuordnung zu "Unsere Felder").
+  // Von "Nicht zugeordnet" nach "Zugeordnet" wird getauscht, damit die Anzahl der
+  // zugeordneten Zeilen immer exakt der Anzahl unserer Felder entspricht.
+  mapped.addEventListener('dragover', e => {
+    e.preventDefault();
+    if(!dragEl) return;
+    const over = e.target.closest('.sheetrow') || mapped.lastElementChild;
+    if(!over || over === dragEl) return;
+    if(dragAusMapped){
       const rect = over.getBoundingClientRect();
       const after = (e.clientY - rect.top) / rect.height > 0.5;
       over.parentNode.insertBefore(dragEl, after ? over.nextSibling : over);
-    });
+    } else {
+      mapped.insertBefore(dragEl, over);
+      unmapped.appendChild(over);
+    }
   });
-  container.addEventListener('dragover', e => e.preventDefault());
+  unmapped.addEventListener('dragover', e => {
+    e.preventDefault();
+    if(!dragEl || dragAusMapped) return;
+    const over = e.target.closest('.sheetrow');
+    if(over && over !== dragEl){
+      const rect = over.getBoundingClientRect();
+      const after = (e.clientY - rect.top) / rect.height > 0.5;
+      over.parentNode.insertBefore(dragEl, after ? over.nextSibling : over);
+    } else if(!over){
+      unmapped.appendChild(dragEl);
+    }
+  });
 }
 function renderZuordnungLeer(){
   $('gsMappedRows').innerHTML = '<p class="hint" style="margin:0;padding:6px 4px;">Noch kein Sheet geladen - Link eintragen und "Sheet laden" klicken.</p>';
@@ -786,7 +809,7 @@ function renderZuordnungAusGespeichert(){
   GS_FELDER.forEach(f => { if(gespeichert[f.key]) $('gsMappedRows').appendChild(macheSheetZeile(gespeichert[f.key])); });
   $('gsUnmappedRows').innerHTML = '';
   $('gsUnmappedDivider').classList.add('hidden');
-  setupZuordnenDrag($('gsMappedRows'));
+  setupZuordnenDrag();
 }
 function renderZuordnung(sheetDaten){
   const gespeichert = LIEF.da.sheet_spalten_zuordnung || {};
@@ -803,8 +826,7 @@ function renderZuordnung(sheetDaten){
   $('gsUnmappedDivider').classList.toggle('hidden', uebrig.length === 0);
   uebrig.forEach(h => $('gsUnmappedRows').appendChild(macheSheetZeile(h)));
 
-  setupZuordnenDrag($('gsMappedRows'));
-  setupZuordnenDrag($('gsUnmappedRows'));
+  setupZuordnenDrag();
 }
 function oeffneZuordnenModal(){
   $('gsLink').value = (LIEF.da.sync_verbindung || {}).google_sheet_link || '';
