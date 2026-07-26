@@ -245,18 +245,6 @@ body.mitarbeiter-rolle .admin-only{display:none !important;}
   </div>
 </div>
 
-<div class="ovl" id="lieferantNeuOvl">
-  <div class="ovlbox">
-    <div class="ovlmsg">Neuer Lieferant</div>
-    <div class="fld"><label>Name</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="newLiefName" placeholder="z.B. Muster AG"></div>
-    <div class="fld"><label>Kürzel</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="newLiefKuerzel" placeholder="z.B. MUST"></div>
-    <div class="ovlbtns">
-      <button class="btnlink" id="liefNeuCancel">Abbrechen</button>
-      <button class="btn" id="addLiefBtn">Erstellen</button>
-    </div>
-    <div class="status" id="liefStatus"></div>
-  </div>
-</div>
 
 <div class="ovl" id="lieferantDetailOvl">
   <div class="ovlbox xwide">
@@ -470,7 +458,6 @@ body.mitarbeiter-rolle .admin-only{display:none !important;}
             <tbody id="lieferantenBody"></tbody>
           </table>
           <div class="row" style="margin-top:10px;align-items:center;">
-            <button class="btn" id="liefEasybillBtn" style="margin-right:8px;">Von Easybill importieren</button>
             <button class="btnlink" id="openLiefNeuBtn">+ Lieferant hinzufügen</button>
           </div>
         </div>
@@ -1870,29 +1857,16 @@ function openAbgleichOvl(id){
   location.href = `lieferant-abgleich-live-v1.html?lieferant=${id}`;
 }
 
-$('openLiefNeuBtn').addEventListener('click', () => {
-  $('newLiefName').value = ''; $('newLiefKuerzel').value = '';
-  $('liefStatus').textContent = ''; $('liefStatus').className = 'status';
-  $('lieferantNeuOvl').classList.add('show');
-});
-$('liefNeuCancel').addEventListener('click', () => $('lieferantNeuOvl').classList.remove('show'));
-$('addLiefBtn').addEventListener('click', async () => {
-  const name = $('newLiefName').value.trim();
-  const kuerzel = $('newLiefKuerzel').value.trim();
-  if(!name || !kuerzel){ $('liefStatus').textContent = 'Bitte Name und Kuerzel ausfuellen.'; $('liefStatus').className = 'status err'; return; }
-  const { data: neu, error } = await sb.from('lieferant').insert({ name, kuerzel }).select().single();
-  if(error){ $('liefStatus').textContent = friendlyError(error); $('liefStatus').className = 'status err'; return; }
-  $('lieferantNeuOvl').classList.remove('show');
-  await loadDatenabgleich();
-  openDetailOvl(neu.id);
-});
-
 // ---------------------------------------------------------------------------
-// Von Easybill importieren: gleiches Muster wie beim Kunden-Import (Tool D) -
-// Easybill liefert Kunden UND Lieferanten ueber denselben /customers-
-// Endpunkt, die neue Function easybill-lieferanten-suche behaelt nur die
-// Datensaetze mit einer Lieferantennummer. Rein lesend, kein Zurueckschreiben
-// nach Easybill.
+// Lieferant erfassen: zwingend ueber Easybill - ein neuer Lieferant muss
+// dort bereits als Kontakt erfasst sein. Easybill liefert Kunden UND
+// Lieferanten ueber denselben /customers-Endpunkt gemischt zurueck, die
+// Edge Function easybill-lieferanten-suche behaelt nur die Datensaetze mit
+// einer Lieferantennummer und liefert sie komplett (nicht gefiltert) -
+// gesucht/gefiltert wird hier im Browser ueber mehrere Felder gleichzeitig
+// (Name, Ort, PLZ, Lieferantennummer), damit auch ein Teilbegriff wie "Koi"
+// oder eine Lieferantennummer wie "70146" zuverlaessig etwas findet. Rein
+// lesend, kein Zurueckschreiben nach Easybill.
 // ---------------------------------------------------------------------------
 function generiereKuerzel(name){
   let basis = (name || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) || 'LIEF';
@@ -1902,65 +1876,69 @@ function generiereKuerzel(name){
   while(vergeben.has(kuerzel)){ kuerzel = basis + n; n++; }
   return kuerzel;
 }
-let leTimer = null;
-let leTreffer = [];
-function openEasybillLieferantImport(){
+let LE_ALLE = [];
+function renderEasybillTreffer(liste){
+  $('leErgebnisse').innerHTML = liste.map(l => `
+    <tr>
+      <td>${l.lieferantennummer || ''}</td>
+      <td>${l.name}</td>
+      <td>${l.strasse || ''}</td>
+      <td>${l.plz || ''}</td>
+      <td>${l.ort || ''}</td>
+      <td><button type="button" class="btn le-import" data-easybill-id="${l.easybill_id}" style="padding:4px 10px;font-size:11px;">Importieren</button></td>
+    </tr>`).join('') || '<tr><td colspan="6" style="padding:10px;color:var(--muted);">Keine Treffer.</td></tr>';
+  $('leErgebnisse').querySelectorAll('.le-import').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const eid = parseInt(btn.dataset.easybillId);
+      const el = LE_ALLE.find(t => t.easybill_id === eid);
+      if(!el) return;
+      if(!(await confirmDialog(`"${el.name}" als neuen Lieferanten importieren?`))) return;
+      const landMap = { CH: 'Schweiz', DE: 'Deutschland', AT: 'Österreich' };
+      const payload = {
+        name: el.name,
+        kuerzel: generiereKuerzel(el.firma || el.name),
+        easybill_id: el.easybill_id,
+        lieferantennummer: el.lieferantennummer,
+        firma: el.firma,
+        vorname: el.vorname,
+        nachname: el.nachname,
+        strasse: el.strasse,
+        plz: el.plz,
+        ort: el.ort,
+        land: landMap[el.land] || el.land || null,
+        kontaktdaten: { telefon1: el.telefon1, telefon2: el.telefon2, fax: el.fax, mobil: el.mobil, emails: el.emails || [] }
+      };
+      const { data: neu, error: insErr } = await sb.from('lieferant').insert(payload).select().single();
+      if(insErr){ $('leStatus').textContent = friendlyError(insErr); $('leStatus').className = 'status err'; return; }
+      $('lieferantEasybillOvl').classList.remove('show');
+      showToast('Lieferant importiert.');
+      await loadDatenabgleich();
+      openDetailOvl(neu.id);
+    });
+  });
+}
+function filtereEasybillTreffer(){
+  const text = $('leSearchInput').value.trim().toLowerCase();
+  if(!text){ renderEasybillTreffer(LE_ALLE); return; }
+  const treffer = LE_ALLE.filter(l => [l.name, l.firma, l.vorname, l.nachname, l.strasse, l.plz, l.ort, l.lieferantennummer]
+    .some(feld => (feld || '').toLowerCase().includes(text)));
+  renderEasybillTreffer(treffer);
+}
+async function openEasybillLieferantImport(){
   $('leSearchInput').value = '';
   $('leErgebnisse').innerHTML = '';
-  $('leStatus').textContent = ''; $('leStatus').className = 'status';
+  $('leStatus').textContent = 'Lädt Lieferanten von Easybill …'; $('leStatus').className = 'status';
   $('lieferantEasybillOvl').classList.add('show');
+  const { data, error } = await sb.functions.invoke('easybill-lieferanten-suche');
+  if(error){ $('leStatus').textContent = 'Fehler beim Laden: ' + friendlyError(error); $('leStatus').className = 'status err'; return; }
+  LE_ALLE = data?.lieferanten || [];
+  $('leStatus').textContent = ''; $('leStatus').className = 'status';
+  renderEasybillTreffer(LE_ALLE);
   $('leSearchInput').focus();
 }
-$('liefEasybillBtn').addEventListener('click', openEasybillLieferantImport);
+$('openLiefNeuBtn').addEventListener('click', openEasybillLieferantImport);
 $('leCancel').addEventListener('click', () => $('lieferantEasybillOvl').classList.remove('show'));
-$('leSearchInput').addEventListener('input', () => {
-  const text = $('leSearchInput').value.trim();
-  clearTimeout(leTimer);
-  if(text.length < 3){ $('leErgebnisse').innerHTML = ''; return; }
-  leTimer = setTimeout(async () => {
-    const { data, error } = await sb.functions.invoke('easybill-lieferanten-suche', { body: { q: text } });
-    if(error){ $('leStatus').textContent = 'Fehler bei der Suche: ' + friendlyError(error); $('leStatus').className = 'status err'; return; }
-    leTreffer = data?.lieferanten || [];
-    $('leErgebnisse').innerHTML = leTreffer.map(l => `
-      <tr>
-        <td>${l.lieferantennummer || ''}</td>
-        <td>${l.name}</td>
-        <td>${l.strasse || ''}</td>
-        <td>${l.plz || ''}</td>
-        <td>${l.ort || ''}</td>
-        <td><button type="button" class="btn le-import" data-easybill-id="${l.easybill_id}" style="padding:4px 10px;font-size:11px;">Importieren</button></td>
-      </tr>`).join('') || '<tr><td colspan="6" style="padding:10px;color:var(--muted);">Keine Treffer.</td></tr>';
-    $('leErgebnisse').querySelectorAll('.le-import').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const eid = parseInt(btn.dataset.easybillId);
-        const el = leTreffer.find(t => t.easybill_id === eid);
-        if(!el) return;
-        if(!(await confirmDialog(`"${el.name}" als neuen Lieferanten importieren?`))) return;
-        const landMap = { CH: 'Schweiz', DE: 'Deutschland', AT: 'Österreich' };
-        const payload = {
-          name: el.name,
-          kuerzel: generiereKuerzel(el.firma || el.name),
-          easybill_id: el.easybill_id,
-          lieferantennummer: el.lieferantennummer,
-          firma: el.firma,
-          vorname: el.vorname,
-          nachname: el.nachname,
-          strasse: el.strasse,
-          plz: el.plz,
-          ort: el.ort,
-          land: landMap[el.land] || el.land || null,
-          kontaktdaten: { telefon1: el.telefon1, telefon2: el.telefon2, fax: el.fax, mobil: el.mobil, emails: el.emails || [] }
-        };
-        const { data: neu, error: insErr } = await sb.from('lieferant').insert(payload).select().single();
-        if(insErr){ $('leStatus').textContent = friendlyError(insErr); $('leStatus').className = 'status err'; return; }
-        $('lieferantEasybillOvl').classList.remove('show');
-        showToast('Lieferant importiert.');
-        await loadDatenabgleich();
-        openDetailOvl(neu.id);
-      });
-    });
-  }, 350);
-});
+$('leSearchInput').addEventListener('input', filtereEasybillTreffer);
 
 // ---------------------------------------------------------------------------
 // Offerten-Positionen: Name/Erklaerung bleiben fest im Code (nur hier
