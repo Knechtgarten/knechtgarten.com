@@ -90,8 +90,9 @@ h1{font-size:19px;color:var(--primary);margin-bottom:2px;}
 /* Segment-Buttons (Quelle / Datenabgleich-Modus / Automatisch-Pruefen-Uebernehmen) */
 .segrow{display:flex;gap:8px;}
 .segrow.eq .segbtn{flex:1;}
-/* Quelle hat nur 2 Optionen - per Grid garantiert exakt gleich breit */
+/* Quelle-Optionen - per Grid garantiert exakt gleich breit */
 .segrow.eq2{display:grid;grid-template-columns:1fr 1fr;}
+.segrow.eq3{display:grid;grid-template-columns:1fr 1fr 1fr;}
 .segbtn{position:relative;font-size:12px;font-weight:600;text-align:center;padding:8px 6px;border-radius:6px;border:1px solid var(--line);
   background:var(--soft);color:var(--muted);cursor:pointer;line-height:1.3;font-family:inherit;}
 .segbtn.on{background:var(--primary);border-color:var(--primary);color:#fff;}
@@ -305,9 +306,10 @@ table.data td.num{text-align:right;font-variant-numeric:tabular-nums;}
 
       <div class="card">
         <div class="cardlabel">Quelle</div>
-        <div class="segrow eq2">
+        <div class="segrow eq3">
           <button class="segbtn on" id="quelleCrawling">Crawling</button>
           <button class="segbtn" id="quelleGoogleSheet">Google Sheet</button>
+          <button class="segbtn" id="quellePdf">PDF</button>
         </div>
       </div>
 
@@ -357,6 +359,15 @@ table.data td.num{text-align:right;font-variant-numeric:tabular-nums;}
           <div class="cardlabel">Google-Sheet-Zugang</div>
           <div class="hint" id="gsLinkAnzeige" style="margin-top:0;">Noch kein Link hinterlegt.</div>
           <button class="btn" id="gsOeffnenBtn" style="margin-top:8px;">Zugang &amp; Zuordnung öffnen</button>
+        </div>
+      </div>
+
+      <div id="pdfFelder" class="hidden">
+        <div class="card">
+          <div class="cardlabel">PDF-Preisliste einlesen</div>
+          <div class="hint" style="margin-top:0;">Aktuell zugeschnitten auf das Preisblatt-Format von Kieswerk Daepp AG ("Beton nach Herstellerrezept") - eine PDF-Datei mit anderem Aufbau wird nicht sauber erkannt.</div>
+          <input autocomplete="off" type="file" accept="application/pdf" id="pdfDatei" style="margin-top:10px;display:block;">
+          <button class="btn" id="pdfEinlesenBtn" style="margin-top:10px;">PDF einlesen</button>
         </div>
       </div>
     </div>
@@ -458,10 +469,12 @@ table.data td.num{text-align:right;font-variant-numeric:tabular-nums;}
 <div class="toastwrap" id="toastwrap"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
 <script>
 const SUPABASE_URL = 'https://oalapdxinqlnzwxhyuzy.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_DoeD4uEnwemmnFu4AxE9uw_5lmQYc5P';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
 const ROLLE_LABEL = { admin: 'Admin', buero_team: 'Büro-Team', mitarbeitende: 'Mitarbeitende', service_team: 'Service-Team' };
 
 const $ = id => document.getElementById(id);
@@ -608,18 +621,17 @@ async function speichereWarnschwelle(){
 $('wsProzent').addEventListener('change', speichereWarnschwelle);
 $('wsChf').addEventListener('change', speichereWarnschwelle);
 
-// ---- Quelle (Crawling/Google Sheet) - reine Ansichts-Umschaltung, nicht gespeichert ----
-$('quelleCrawling').addEventListener('click', () => {
-  $('quelleCrawling').classList.add('on'); $('quelleGoogleSheet').classList.remove('on');
-  $('crawlingFelder').classList.remove('hidden'); $('googleSheetFelder').classList.add('hidden');
+// ---- Quelle (Crawling/Google Sheet/PDF) - reine Ansichts-Umschaltung, nicht gespeichert ----
+function waehleQuelle(aktivesBtnId){
+  ['quelleCrawling', 'quelleGoogleSheet', 'quellePdf'].forEach(id => $(id).classList.toggle('on', id === aktivesBtnId));
+  $('crawlingFelder').classList.toggle('hidden', aktivesBtnId !== 'quelleCrawling');
+  $('googleSheetFelder').classList.toggle('hidden', aktivesBtnId !== 'quelleGoogleSheet');
+  $('pdfFelder').classList.toggle('hidden', aktivesBtnId !== 'quellePdf');
   wendeModusUndQuelleAn(LIEF.da.crawling_modus || 'ergaenzen', LIEF.da.crawling_quelle || 'merkliste');
-});
-$('quelleGoogleSheet').addEventListener('click', () => {
-  $('quelleGoogleSheet').classList.add('on'); $('quelleCrawling').classList.remove('on');
-  $('crawlingFelder').classList.add('hidden'); $('googleSheetFelder').classList.remove('hidden');
-  wendeModusUndQuelleAn(LIEF.da.crawling_modus || 'ergaenzen', LIEF.da.crawling_quelle || 'merkliste');
-  oeffneZuordnenModal();
-});
+}
+$('quelleCrawling').addEventListener('click', () => waehleQuelle('quelleCrawling'));
+$('quelleGoogleSheet').addEventListener('click', () => { waehleQuelle('quelleGoogleSheet'); oeffneZuordnenModal(); });
+$('quellePdf').addEventListener('click', () => waehleQuelle('quellePdf'));
 
 // ---- Shop-Zugang (Vault-Passwort) --------------------------------------
 function renderShopZugang(){
@@ -1221,6 +1233,156 @@ async function verarbeiteGefundeneArtikel(gefundeneArtikel, quelleLabel, methode
 }
 
 // ---- Crawling: Merkliste(n) ueber echten Shop-Login lesen ----------------
+// ---- PDF-Preisliste (aktuell: Kieswerk Daepp AG, "Beton nach Herstellerrezept") ----
+// Diese Firma hat keinen Webshop, dafuer eine feste PDF-Preisliste mit
+// Abschnitten (Magerbeton/Normalbeton, Recyclingbeton, Sickerbeton,
+// Schutzmoertel, Pump-Schmiermischung, Ueberzug). Pro Zeile gibt es
+// Bindemittel (kg/m3) + Korngroesse (mm) + zwei Preise nebeneinander
+// (Kieswerk Daepp AG Oppligen / Hu. Liechti AG Schuepbach) - wir wollen
+// NUR den Daepp-Oppligen-Preis, Hu. Liechti wird komplett ignoriert.
+//
+// Layout-Eigenheit im PDF: mal steht der Preis direkt in derselben Zeile
+// wie Bindemittel+Korngroesse (Magerbeton/Recyclingbeton), mal stehen erst
+// ALLE Zeilen eines Blocks hintereinander und danach folgt eine eigene,
+// flache Zahlenliste in derselben Reihenfolge (Sickerbeton/Schutzmoertel/
+// Pump-Schmiermischung/Ueberzug) - unterschieden anhand: ein Preis hat immer
+// einen Dezimalpunkt (z.B. "132.00"), ein Bindemittel-Wert nie (z.B. "100").
+const PDF_ABSCHNITT_MUSTER = [
+  { name: 'Magerbeton / Normalbeton', regex: /^MAGERBETON/i },
+  { name: 'Recyclingbeton', regex: /^RECYCLINGBETON/i },
+  { name: 'Sickerbeton', regex: /^SICKERBETON/i },
+  { name: 'Schutzmörtel', regex: /^SCHUTZM/i },
+  { name: 'Pump-Schmiermischung', regex: /^PUMP-?SCHMIERMISCHUNG/i },
+  { name: 'Überzug', regex: /^[ÜU]BERZUG/i },
+];
+function pdfAbschnittPrefix(name){
+  const nurBuchstaben = name.toUpperCase().replace(/[^A-ZÄÖÜ]/g, '');
+  const ohneUmlaut = nurBuchstaben.replace(/Ä/g, 'AE').replace(/Ö/g, 'OE').replace(/Ü/g, 'UE');
+  return ohneUmlaut.slice(0, 4);
+}
+function pdfNormKorngroesse(s){
+  return s.replace(/\s*mm\s*/gi, ' ').replace(/\s*\/\s*/g, '+').trim().replace(/\s+/g, '-');
+}
+async function extrahierePdfText(file){
+  const buffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+  const seite = await pdf.getPage(1);
+  const inhalt = await seite.getTextContent();
+  return inhalt.items.map(it => it.str).join('\n');
+}
+// Manche Preis-Zeilen im PDF enthalten mehrere Zahlen hintereinander in
+// einem einzigen Text-Fragment (z.B. "137.50 131.00 127.00 ..." als ein
+// Block statt eine Zahl pro Zeile) - solche reinen Zahlen-Zeilen werden hier
+// zusaetzlich an Leerzeichen aufgesplittet, damit jede Zahl einzeln als
+// eigener Preis-Token erkannt wird. Zeilen mit Text (z.B. "4-8 mm Splitt")
+// bleiben unangetastet.
+function pdfVorverarbeiten(text){
+  const rohZeilen = text.split('\n').map(z => z.trim()).filter(Boolean);
+  const zeilen = [];
+  for(const z of rohZeilen){
+    if(/^\d+[.,]\d+(\s+\d+[.,]\d+)+$/.test(z)){
+      zeilen.push(...z.split(/\s+/));
+    } else {
+      zeilen.push(z);
+    }
+  }
+  return zeilen;
+}
+function parseDaeppBetonPdf(text){
+  const zeilen = pdfVorverarbeiten(text);
+  const ergebnisse = [];
+  let aktuellerAbschnitt = null;
+  let wartendeZeilen = [];
+
+  const istBindemittel = t => /^\d+$/.test(t);
+  const istKorngroesse = t => /mm/i.test(t);
+  const istPreis = t => /^\d+[.,]\d+$/.test(t);
+  const istDaeppMarker = t => /^KIESWERK DAEPP AG/i.test(t);
+  const istLiechtiMarker = t => /^HU\.?\s*LIECHTI/i.test(t);
+
+  let i = 0;
+  while(i < zeilen.length){
+    const t = zeilen[i];
+
+    const abschnittTreffer = PDF_ABSCHNITT_MUSTER.find(a => a.regex.test(t));
+    if(abschnittTreffer){ aktuellerAbschnitt = abschnittTreffer; i++; continue; }
+
+    if(istDaeppMarker(t)){
+      i++;
+      const startPreise = i;
+      while(i < zeilen.length && istPreis(zeilen[i])) i++;
+      const preise = zeilen.slice(startPreise, i);
+      if(wartendeZeilen.length && preise.length === wartendeZeilen.length){
+        wartendeZeilen.forEach((row, idx) => ergebnisse.push({ ...row, preis: preise[idx] }));
+      }
+      wartendeZeilen = [];
+      continue;
+    }
+    if(istLiechtiMarker(t)){
+      i++;
+      while(i < zeilen.length && istPreis(zeilen[i])) i++;
+      continue;
+    }
+
+    if(istBindemittel(t) && aktuellerAbschnitt){
+      const naechste = zeilen[i + 1];
+      if(naechste && istKorngroesse(naechste)){
+        const bindemittel = t;
+        const korngroesse = naechste;
+        const evtlPreis = zeilen[i + 2];
+        if(evtlPreis && istPreis(evtlPreis)){
+          ergebnisse.push({ abschnitt: aktuellerAbschnitt.name, bindemittel, korngroesse, preis: evtlPreis });
+          i += 3;
+        } else {
+          wartendeZeilen.push({ abschnitt: aktuellerAbschnitt.name, bindemittel, korngroesse });
+          i += 2;
+        }
+        continue;
+      }
+    }
+    i++;
+  }
+
+  return ergebnisse.map(r => {
+    const prefix = pdfAbschnittPrefix(r.abschnitt);
+    const korngroesseNorm = pdfNormKorngroesse(r.korngroesse);
+    return {
+      artikelnummer_lieferant: `${prefix}-${r.bindemittel}-${korngroesseNorm}`,
+      bezeichnung: `${r.abschnitt}, ${r.bindemittel} kg/m3, ${r.korngroesse}`,
+      ep_lieferant: parseFloat(String(r.preis).replace(',', '.')),
+      foto_url: null,
+    };
+  });
+}
+$('pdfEinlesenBtn').addEventListener('click', async () => {
+  const file = $('pdfDatei').files[0];
+  if(!file){ showToast('Bitte zuerst eine PDF-Datei auswählen.', true); return; }
+
+  setzeStatus('arbeit', 'In Arbeit');
+  $('logPanel').classList.add('open');
+  versteckeDebugInfo();
+  logAnhaengen(`PDF "${file.name}" wird eingelesen …`);
+
+  let text;
+  try {
+    text = await extrahierePdfText(file);
+  } catch (e) {
+    setzeStatus('gestoppt', 'Gestoppt');
+    showToast('PDF konnte nicht gelesen werden: ' + (e.message || e), true);
+    return;
+  }
+
+  const artikel = parseDaeppBetonPdf(text);
+  logAnhaengen(`${artikel.length} Artikel im PDF gefunden.`);
+  if(!artikel.length){
+    zeigeDebugInfo({ textLaenge: text.length, textAusschnitt: text.slice(0, 1500) }, file.name);
+    setzeStatus('gestoppt', 'Gestoppt');
+    return;
+  }
+
+  await verarbeiteGefundeneArtikel(artikel, 'PDF', 'pdf');
+});
+
 async function ladeMerklisteVomShop(url){
   const shopSoftware = (LIEF.da.sync_verbindung || {}).shop_software || 'gambio';
   const { data, error } = await sb.functions.invoke(`shop-crawling-${shopSoftware}-lesen`, { body: { lieferant_id: LIEFERANT_ID, url } });
