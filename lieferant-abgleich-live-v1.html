@@ -364,10 +364,15 @@ table.data td.num{text-align:right;font-variant-numeric:tabular-nums;}
 
       <div id="pdfFelder" class="hidden">
         <div class="card">
-          <div class="cardlabel">PDF-Preisliste einlesen</div>
-          <div class="hint" style="margin-top:0;">Aktuell zugeschnitten auf das Preisblatt-Format von Kieswerk Daepp AG ("Beton nach Herstellerrezept") - eine PDF-Datei mit anderem Aufbau wird nicht sauber erkannt.</div>
-          <input autocomplete="off" type="file" accept="application/pdf" id="pdfDatei" style="margin-top:10px;display:block;">
-          <button class="btn" id="pdfEinlesenBtn" style="margin-top:10px;">PDF einlesen</button>
+          <div class="cardlabel">PDF-Format</div>
+          <div class="fld"><label>Welche PDF-Preisliste?</label>
+            <select id="pdfFormat">
+              <option value="">– noch nicht eingerichtet –</option>
+            </select>
+          </div>
+          <div class="hint" id="pdfFormatHinweis" style="margin-top:8px;">Für diesen Lieferanten ist noch kein PDF-Format eingerichtet.</div>
+          <input autocomplete="off" type="file" accept="application/pdf" id="pdfDatei" style="margin-top:14px;display:block;" disabled>
+          <button class="btn" id="pdfEinlesenBtn" style="margin-top:10px;" disabled>PDF einlesen</button>
         </div>
       </div>
     </div>
@@ -627,7 +632,9 @@ function waehleQuelle(aktivesBtnId){
   $('crawlingFelder').classList.toggle('hidden', aktivesBtnId !== 'quelleCrawling');
   $('googleSheetFelder').classList.toggle('hidden', aktivesBtnId !== 'quelleGoogleSheet');
   $('pdfFelder').classList.toggle('hidden', aktivesBtnId !== 'quellePdf');
-  wendeModusUndQuelleAn(LIEF.da.crawling_modus || 'ergaenzen', LIEF.da.crawling_quelle || 'merkliste');
+  const modus = effektiverModus();
+  document.querySelectorAll('.segbtn[data-mode]').forEach(btn => btn.classList.toggle('on', btn.dataset.mode === modus));
+  wendeModusUndQuelleAn(modus, LIEF.da.crawling_quelle || 'merkliste');
 }
 $('quelleCrawling').addEventListener('click', () => waehleQuelle('quelleCrawling'));
 $('quelleGoogleSheet').addEventListener('click', () => { waehleQuelle('quelleGoogleSheet'); oeffneZuordnenModal(); });
@@ -711,13 +718,24 @@ $('kaPasswort').addEventListener('change', async () => {
 // neue Artikel vorgeschlagen?) und crawling_quelle (Merkliste/Ganzer Shop -
 // woher kommen die Artikel?). "Neue Artikel zum Ergaenzen" ist nur sichtbar,
 // wenn BEIDES zutrifft: Modus=Ergaenzen und Quelle=Merkliste.
+// Bei PDF ist "Daten ergaenzen" riskanter als bei Crawling/Google Sheet: dort
+// wurde vorher schon manuell eine Merkliste kuratiert bzw. eine Spalten-
+// Zuordnung geprueft, bei einer PDF-Preisliste koennten sonst auf einen
+// Schlag sehr viele neue Artikel vorgeschlagen werden. Solange fuer diesen
+// Lieferanten noch nichts explizit gespeichert wurde, startet PDF darum
+// sicherheitshalber im 1:1-Abgleich (bleibt aber jederzeit umstellbar).
+function effektiverModus(){
+  if(LIEF.da.crawling_modus) return LIEF.da.crawling_modus;
+  return $('quellePdf').classList.contains('on') ? 'nurabgleich' : 'ergaenzen';
+}
 function renderModus(){
-  const modus = LIEF.da.crawling_modus || 'ergaenzen';
+  const modus = effektiverModus();
   const quelle = LIEF.da.crawling_quelle || 'merkliste';
   document.querySelectorAll('.segbtn[data-mode]').forEach(btn => btn.classList.toggle('on', btn.dataset.mode === modus));
   document.querySelectorAll('.segbtn[data-quelle]').forEach(btn => btn.classList.toggle('on', btn.dataset.quelle === quelle));
   wendeModusUndQuelleAn(modus, quelle);
   renderShopZugang();
+  renderPdfFormat();
 }
 function istGoogleSheetQuelle(){
   return $('quelleGoogleSheet').classList.contains('on');
@@ -745,7 +763,7 @@ document.querySelectorAll('.segbtn[data-quelle]').forEach(btn => {
     document.querySelectorAll('.segbtn[data-quelle]').forEach(b => b.classList.remove('on'));
     btn.classList.add('on');
     const quelle = btn.dataset.quelle;
-    wendeModusUndQuelleAn(LIEF.da.crawling_modus || 'ergaenzen', quelle);
+    wendeModusUndQuelleAn(effektiverModus(), quelle);
     const { error } = await sb.from('lieferant_datenabgleich').upsert({ lieferant_id: LIEFERANT_ID, crawling_quelle: quelle }, { onConflict: 'lieferant_id' });
     if(error){ showToast(friendlyError(error), true); return; }
     LIEF.da.crawling_quelle = quelle;
@@ -1213,7 +1231,7 @@ async function verarbeiteGefundeneArtikel(gefundeneArtikel, quelleLabel, methode
   renderPreisAbweichungen(zuPruefen);
   logAnhaengen(`${zuPruefen.length} Artikel über dem Toleranzwert - manuelle Prüfung nötig.`);
 
-  const modus = LIEF.da.crawling_modus || 'ergaenzen';
+  const modus = effektiverModus();
   if(modus === 'ergaenzen'){
     const neue = gefundeneArtikel.filter(sa => !bestandNachNr.has(normArtikelnr(sa.artikelnummer_lieferant)));
     renderNeueArtikel(neue);
@@ -1232,7 +1250,6 @@ async function verarbeiteGefundeneArtikel(gefundeneArtikel, quelleLabel, methode
   showToast(`${quelleLabel}-Abgleich abgeschlossen.`);
 }
 
-// ---- Crawling: Merkliste(n) ueber echten Shop-Login lesen ----------------
 // ---- PDF-Preisliste (aktuell: Kieswerk Daepp AG, "Beton nach Herstellerrezept") ----
 // Diese Firma hat keinen Webshop, dafuer eine feste PDF-Preisliste mit
 // Abschnitten (Magerbeton/Normalbeton, Recyclingbeton, Sickerbeton,
@@ -1354,7 +1371,38 @@ function parseDaeppBetonPdf(text){
     };
   });
 }
+// Registry aller unterstuetzten PDF-Formate - pro Eintrag ein eigener
+// Parser, genau wie shop_software bei Crawling pro Plattform eine eigene
+// Edge Function auswaehlt. Ein Lieferant kann mehrere Formate brauchen
+// (z.B. eine Preisliste fuer normale Ware, eine andere fuer Betonpumpen) -
+// darum ist die Auswahl pro Format, nicht pro Firma.
+const PDF_FORMATE = {
+  daepp_beton: {
+    label: 'Kieswerk Daepp AG – Beton nach Herstellerrezept',
+    hinweis: 'Lade die PDF-Preisliste "Beton nach Herstellerrezept" von Kieswerk Daepp AG hoch (unabhängig davon, wie viele Seiten sie hat).',
+    parse: parseDaeppBetonPdf,
+  },
+};
+function renderPdfFormat(){
+  const aktuell = (LIEF.da.sync_verbindung || {}).pdf_format || '';
+  $('pdfFormat').innerHTML = '<option value="">– noch nicht eingerichtet –</option>' +
+    Object.entries(PDF_FORMATE).map(([key, f]) => `<option value="${key}" ${aktuell === key ? 'selected' : ''}>${f.label}</option>`).join('');
+  const eingerichtet = !!PDF_FORMATE[aktuell];
+  $('pdfFormatHinweis').textContent = eingerichtet
+    ? PDF_FORMATE[aktuell].hinweis
+    : 'Für diesen Lieferanten ist noch kein PDF-Format eingerichtet - bitte melden, welches Preisblatt eingelesen werden soll.';
+  $('pdfDatei').disabled = !eingerichtet;
+  $('pdfEinlesenBtn').disabled = !eingerichtet;
+}
+$('pdfFormat').addEventListener('change', async () => {
+  const wert = $('pdfFormat').value;
+  await speichereVerbindungsfeld('pdf_format', wert);
+  renderPdfFormat();
+});
 $('pdfEinlesenBtn').addEventListener('click', async () => {
+  const formatKey = (LIEF.da.sync_verbindung || {}).pdf_format;
+  const format = PDF_FORMATE[formatKey];
+  if(!format){ showToast('Bitte zuerst ein PDF-Format auswählen.', true); return; }
   const file = $('pdfDatei').files[0];
   if(!file){ showToast('Bitte zuerst eine PDF-Datei auswählen.', true); return; }
 
@@ -1372,7 +1420,7 @@ $('pdfEinlesenBtn').addEventListener('click', async () => {
     return;
   }
 
-  const artikel = parseDaeppBetonPdf(text);
+  const artikel = format.parse(text);
   logAnhaengen(`${artikel.length} Artikel im PDF gefunden.`);
   if(!artikel.length){
     zeigeDebugInfo({ textLaenge: text.length, textAusschnitt: text.slice(0, 1500) }, file.name);
