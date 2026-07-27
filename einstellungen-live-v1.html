@@ -228,7 +228,6 @@ body.mitarbeiter-rolle .admin-only{display:none !important;}
 .si-actions .btn{padding:4px 10px;font-size:11px;}
 .si-actions .icobtn{width:22px;height:22px;}
 .si-vorhanden-hint{font-size:9.5px;color:var(--danger);text-align:right;max-width:130px;line-height:1.3;}
-.si-done-hint{font-size:10px;color:#5c6b12;text-align:right;font-weight:700;}
 .badge.si-neu{background:var(--accent-lime-light);color:#5c6b12;}
 .badge.si-vorhanden{background:#F4E7E6;color:var(--danger);}
 </style>
@@ -2091,10 +2090,10 @@ async function siUebernehmen(row){
     });
   }
 
-  const actions = row.querySelector('.si-actions');
-  actions.innerHTML = '<span class="badge si-neu">Neu</span><div class="si-done-hint">✓ Übernommen</div>';
-  row.querySelectorAll('input').forEach(el => el.disabled = true);
-  row.style.opacity = '.55';
+  // Uebernommene Zeile verschwindet ganz aus der Liste statt nur ausgegraut
+  // zu bleiben - nach dem Uebernehmen soll kein Rueckstand mehr sichtbar
+  // sein, die Liste ist danach wieder "leer" fuer den naechsten Import.
+  row.remove();
   $('siStatus').textContent = ''; $('siStatus').className = 'status';
   showToast('Artikel übernommen.');
 }
@@ -2230,11 +2229,13 @@ siRenderSpaltenkopf();
 
 // Wendet die aktuelle Spalten-Zuordnung (Praefix + Dropdown-Rolle, siehe
 // "Erweiterte Einstellungen") auf EINE Zeile an: liest zuerst alle Rohwerte
-// UNVERAENDERT ein (Snapshot), berechnet danach die vier Zielfelder +
-// Zusatzwert und schreibt sie erst am Schluss - so bleibt das Ergebnis
-// korrekt, auch wenn z.B. die Artikelnummer-Spalte selbst als Ziel
-// "Bezeichnung" bekommen hat. Wird direkt vor dem Speichern pro Zeile
-// aufgerufen (siehe "Angehakt uebernehmen"), kein eigener Button noetig.
+// ein (Snapshot), berechnet danach die vier Zielfelder + Zusatzwert und
+// schreibt sie erst am Schluss - so bleibt das Ergebnis innerhalb EINES
+// Aufrufs korrekt, auch wenn z.B. die Artikelnummer-Spalte selbst als Ziel
+// "Bezeichnung" bekommen hat. WICHTIG: darf pro Zeile nur EINMAL laufen -
+// die Bezeichnung-Spalte ist gleichzeitig Quelle UND Ziel der Verkettung,
+// ein zweiter Aufruf wuerde Praefix/Zusatzwerte nochmals anhaengen
+// (siehe Button-Disable-Guard bei "Angehakt uebernehmen").
 function siWendeZuordnungAn(row){
   const rollen = Array.from($('siSpaltenkopfFieldrow').querySelectorAll('.si-spalten-rolle'))
     .map(sel => ({ key: sel.dataset.key, ziel: sel.value }));
@@ -2303,6 +2304,10 @@ $('siAlleAuswaehlenCb').addEventListener('change', () => {
   $('siListe').querySelectorAll('.si-row .si-row-check').forEach(cb => { cb.checked = checked; });
 });
 $('siAusgewaehlteBtn').addEventListener('click', async () => {
+  const btn = $('siAusgewaehlteBtn');
+  if(btn.disabled) return; // Doppelklick waehrend des Uebernehmens wuerde
+  // sonst dieselbe Zeile zweimal zuordnen+verketten (Praefix/Zusatz-Werte
+  // landen dann doppelt in der Bezeichnung).
   const zeilen = Array.from($('siListe').querySelectorAll('.si-row'))
     .filter(row => row.querySelector('.si-row-check')?.checked && !row.classList.contains('vorhanden') && !row.querySelector('.si-in-bezeichnung').disabled);
   if(!zeilen.length){
@@ -2310,8 +2315,13 @@ $('siAusgewaehlteBtn').addEventListener('click', async () => {
     $('siStatus').className = 'status err';
     return;
   }
-  for(const row of zeilen){ siWendeZuordnungAn(row); await siUebernehmen(row); }
-  $('siAlleAuswaehlenCb').checked = false;
+  btn.disabled = true;
+  try{
+    for(const row of zeilen){ siWendeZuordnungAn(row); await siUebernehmen(row); }
+    $('siAlleAuswaehlenCb').checked = false;
+  } finally {
+    btn.disabled = false;
+  }
 });
 
 async function archiviereLieferant(id){
