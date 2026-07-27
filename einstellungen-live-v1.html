@@ -589,9 +589,10 @@ body.mitarbeiter-rolle .admin-only{display:none !important;}
               <button class="btn secondary" type="button" id="siEkVpTauschenBtn" title="Falls die KI Einkaufs- und Verkaufspreis vertauscht hat">EK ⇄ VP tauschen</button>
             </div>
           </div>
-          <div class="si-zuordnung hidden" id="siZusatzspaltenLeiste">
+          <div class="si-zuordnung" id="siZusatzspaltenLeiste">
             <div style="width:100%;">
-              <span class="si-zuordnung-label">Zusätzlich erkannte Spalten</span>
+              <span class="si-zuordnung-label">Weitere Spalten</span>
+              <div class="hint" style="margin:2px 0 8px;">Von der KI zusätzlich erkannte Werte (z.B. Masse, Volumen) plus zwei freie Spalten zum manuellen Eintragen. Pro Spalte auswählen, wohin sie gehört, dann unten anwenden - bei "Beschreibung" können auch mehrere Spalten gleichzeitig ausgewählt werden (werden aneinandergehängt).</div>
               <div id="siZusatzspaltenListe" style="display:flex;flex-wrap:wrap;gap:16px;margin:8px 0;"></div>
               <button class="btn secondary" type="button" id="siZusatzspaltenUebernehmenBtn">Auf alle Zeilen anwenden</button>
             </div>
@@ -2021,6 +2022,7 @@ function siBaueZeile({ bezeichnung = '', artikelnummer = '', ek = '', vp = '', l
   });
   siAktualisiereKnechtVorschau(row);
   if(!leer){
+    siSyncZusatzfelderFuerZeile(row);
     row.querySelector('.icobtn.danger').addEventListener('click', () => row.remove());
   }
   const foto = row.querySelector('.si-foto');
@@ -2198,6 +2200,15 @@ async function siVerarbeiteBild(file){
   let uebersprungen = 0;
   siStelleLeerZeileSicher();
   const leerRow = $('siListe').querySelector('.si-row.leer');
+  // Neue Zusatzspalten-Schluessel ZUERST sammeln, bevor irgendeine Zeile
+  // gebaut wird - sonst fehlt einer fruehen Zeile dieser Charge das Feld
+  // fuer einen Schluessel, der erst bei einem spaeteren Artikel derselben
+  // Erkennung auftaucht.
+  artikel.forEach(a => {
+    Object.keys(a.zusatzfelder || {}).forEach(k => {
+      if(!SI_ZUSATZSPALTEN.some(z => z.key === k)) SI_ZUSATZSPALTEN.push({ key: k, quelle: 'ki' });
+    });
+  });
   artikel.forEach(a => {
     const nrKey = (a.artikelnummer || '').trim().toLowerCase();
     if(nrKey){
@@ -2206,10 +2217,10 @@ async function siVerarbeiteBild(file){
     }
     const row = siBaueZeile({ bezeichnung: a.bezeichnung, artikelnummer: a.artikelnummer, ek: a.ek_preis, vp: a.vp_preis, zusatzfelder: a.zusatzfelder || {} });
     $('siListe').insertBefore(row, leerRow);
-    Object.keys(a.zusatzfelder || {}).forEach(k => {
-      if(!SI_ZUSATZSPALTEN.some(z => z.key === k)) SI_ZUSATZSPALTEN.push({ key: k });
-    });
   });
+  // Zeilen aus einer FRUEHEREN Erkennung bekommen ebenfalls Felder fuer erst
+  // jetzt neu hinzugekommene Spalten (leer, aber vorhanden).
+  $('siListe').querySelectorAll('.si-row:not(.leer)').forEach(siSyncZusatzfelderFuerZeile);
   siRenderZusatzspaltenLeiste();
   const anzahlNeu = artikel.length - uebersprungen;
   $('siStatus').textContent = uebersprungen
@@ -2222,30 +2233,52 @@ async function siVerarbeiteBild(file){
 // Massenbearbeitung fuer die gerade erkannte Schnellimport-Liste: statt jede
 // Zeile einzeln zu korrigieren, gilt eine Eingabe/Auswahl fuer ALLE Zeilen
 // auf einmal - z.B. wenn die KI bei jedem Artikel gleich vertauscht oder
-// unvollstaendig erkannt hat. "Zusatzspalten" sind Werte, die die KI zwar
-// erkannt, aber keinem unserer festen Felder zugeordnet hat (z.B. Masse,
-// Volumen) - der Nutzer entscheidet pro Spalte, ob sie in die Beschreibung
-// einfliesst oder als generischer Zusatzwert (Zahl+Einheit, siehe
-// artikel.zusatzwert/-einheit) uebernommen werden soll.
+// unvollstaendig erkannt hat. "Weitere Spalten" sind zusaetzlich zu den vier
+// festen Feldern (Bezeichnung/Art.Nr./EK/VP) sichtbar: von der KI erkannte,
+// aber keinem festen Feld zugeordnete Werte (z.B. Masse, Volumen) sowie
+// immer zwei freie "Zusatz"-Spalten zum manuellen Eintippen (z.B. wenn die
+// KI etwas gar nicht erkannt hat). Pro Spalte legt ein Dropdown fest, wohin
+// ihr Wert beim Anwenden fliesst - bei "Beschreibung" (und "Artikelnummer")
+// koennen mehrere Spalten gleichzeitig gewaehlt werden (werden verkettet);
+// EK-Preis/VP-Preis ueberschreiben das Zielfeld; Zusatzwert ist exklusiv
+// (artikel hat nur ein einziges Zusatzwert/-einheit-Feld, siehe
+// artikel.zusatzwert/-einheit).
 // ---------------------------------------------------------------------------
-let SI_ZUSATZSPALTEN = [];
+let SI_ZUSATZSPALTEN = [{ key: 'Zusatz 1', quelle: 'manuell' }, { key: 'Zusatz 2', quelle: 'manuell' }];
+
+function siZusatzfeldInputHtml(spalte, wert){
+  return `<div class="si-fld small si-zusatz-fld" data-key="${spalte.key}"><input class="si-zusatz-feld" data-key="${spalte.key}" placeholder="${spalte.key}" value="${(wert || '').replace(/"/g,'&quot;')}"></div>`;
+}
+// Ergaenzt bei einer bereits gebauten Zeile die Eingabefelder fuer alle
+// aktuell bekannten Zusatzspalten, die dort noch fehlen (z.B. weil die
+// Spalte erst durch eine spaetere Bild-Erkennung dazugekommen ist).
+function siSyncZusatzfelderFuerZeile(row){
+  const fieldrow = row.querySelector('.si-fieldrow');
+  if(!fieldrow) return;
+  SI_ZUSATZSPALTEN.forEach(spalte => {
+    if(fieldrow.querySelector(`.si-zusatz-fld[data-key="${CSS.escape(spalte.key)}"]`)) return;
+    const wert = (row._siZusatzfelder || {})[spalte.key] || '';
+    fieldrow.insertAdjacentHTML('beforeend', siZusatzfeldInputHtml(spalte, wert));
+  });
+}
 
 function siRenderZusatzspaltenLeiste(){
-  const wrap = $('siZusatzspaltenLeiste');
-  if(!SI_ZUSATZSPALTEN.length){ wrap.classList.add('hidden'); return; }
-  wrap.classList.remove('hidden');
   $('siZusatzspaltenListe').innerHTML = SI_ZUSATZSPALTEN.map(z => `
     <div class="si-zuordnung-item">
-      <span class="si-zuordnung-label">${z.key}</span>
+      <span class="si-zuordnung-label">${z.key}${z.quelle === 'manuell' ? ' (frei)' : ''}</span>
       <select class="siZusatzspaltenZiel" data-key="${z.key}">
         <option value="ignorieren">Ignorieren</option>
         <option value="beschreibung">Teil der Beschreibung</option>
+        <option value="artikelnummer">Teil der Artikelnummer</option>
+        <option value="ek_preis">EK-Preis</option>
+        <option value="vp_preis">VP-Preis</option>
         <option value="zusatzwert">Zusatzwert (Zahl + Einheit)</option>
       </select>
     </div>`).join('');
   // Nur EINE Spalte kann gleichzeitig als Zusatzwert gelten (artikel hat nur
   // ein einziges Zusatzwert/-einheit-Feld) - waehlt der Nutzer eine zweite,
   // wird die vorherige automatisch wieder auf "Ignorieren" zurueckgesetzt.
+  // Bezeichnung/Artikelnummer duerfen bewusst mehrfach gewaehlt werden.
   $('siZusatzspaltenListe').querySelectorAll('.siZusatzspaltenZiel').forEach(sel => {
     sel.addEventListener('change', () => {
       if(sel.value === 'zusatzwert'){
@@ -2256,6 +2289,7 @@ function siRenderZusatzspaltenLeiste(){
     });
   });
 }
+siRenderZusatzspaltenLeiste();
 
 $('siZusatzspaltenUebernehmenBtn').addEventListener('click', () => {
   const zuordnung = Array.from($('siZusatzspaltenListe').querySelectorAll('.siZusatzspaltenZiel'))
@@ -2263,13 +2297,21 @@ $('siZusatzspaltenUebernehmenBtn').addEventListener('click', () => {
     .filter(z => z.ziel !== 'ignorieren');
   if(!zuordnung.length) return;
   $('siListe').querySelectorAll('.si-row:not(.leer)').forEach(row => {
-    const felder = row._siZusatzfelder || {};
     zuordnung.forEach(z => {
-      const wert = (felder[z.key] || '').trim();
+      const feldInput = row.querySelector(`.si-zusatz-feld[data-key="${CSS.escape(z.key)}"]`);
+      const wert = (feldInput?.value || '').trim();
       if(!wert) return;
       if(z.ziel === 'beschreibung'){
         const inp = row.querySelector('.si-in-bezeichnung');
         inp.value = inp.value.trim() ? `${inp.value.trim()} ${wert}` : wert;
+      } else if(z.ziel === 'artikelnummer'){
+        const inp = row.querySelector('.si-in-nr');
+        inp.value = inp.value.trim() + wert;
+        inp.dispatchEvent(new Event('input'));
+      } else if(z.ziel === 'ek_preis'){
+        row.querySelector('.si-in-ek').value = wert;
+      } else if(z.ziel === 'vp_preis'){
+        row.querySelector('.si-in-vp').value = wert;
       } else if(z.ziel === 'zusatzwert'){
         const treffer = wert.match(/^([\d.,]+)\s*(.*)$/);
         row._siZusatzwert = treffer ? parseFloat(treffer[1].replace(',', '.')) : null;
@@ -2277,7 +2319,7 @@ $('siZusatzspaltenUebernehmenBtn').addEventListener('click', () => {
       }
     });
   });
-  showToast('Zusatzspalten auf alle Zeilen angewendet.');
+  showToast('Zuordnung auf alle Zeilen angewendet.');
 });
 
 $('siPraefixBeschreibungBtn').addEventListener('click', () => {
