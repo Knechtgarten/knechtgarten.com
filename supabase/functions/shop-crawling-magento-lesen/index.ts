@@ -25,6 +25,18 @@
 // Preis (data-price-type="finalPrice" data-price-amount="...") und
 // Artikelnummer (versteckt in einem Tooltip: <dt>Art.Nr.</dt><dd>...</dd>).
 //
+// Zweiter unterstuetzter Merklisten-Typ: natives Magento-Wishlist-Modul mit
+// Hyva-Theme (keine Drittanbieter-Erweiterung) - erster Fall: Aqua Solar.
+// Anderer HTML-Aufbau, aber gleiches Prinzip: pro Artikel ein eindeutiger
+// <div data-row="product-item" ... id="item_NNNN" ...>-Block. Foto zufaellig
+// mit derselben Klasse (<img class="product-image-photo" src="...">), Name
+// im Link <a class="font-semibold" title="...">, Artikelnummer direkt
+// sichtbar (<div class="mr-2 text-gray-900 mt-1">...</div>, kein Tooltip
+// noetig) und Preis ebenfalls ueber data-price-type="finalPrice" +
+// data-price-amount="...". Welcher der beiden Typen vorliegt, wird anhand
+// des HTML der ersten Seite automatisch erkannt (erkenneMerklistenTyp()) -
+// die Dropdown-Auswahl "Shop-Software" bleibt bei "Magento" fuer beide.
+//
 // Aufruf vom Client: sb.functions.invoke('shop-crawling-magento-lesen', { body: { lieferant_id, url } })
 // ============================================================================
 
@@ -143,6 +155,58 @@ function parseMagentoMerkliste(html: string, origin: string) {
   return artikel;
 }
 
+// Zweite Merklisten-Variante (natives Magento-Wishlist-Modul, Hyva-Theme,
+// z.B. Aqua Solar) - siehe Kommentar oben. Jeder Artikel-Block beginnt mit
+// <div data-row="product-item" ... id="item_NNNN" ...>, die Reihenfolge der
+// Attribute (class/id/x-show) ist dabei nicht garantiert - darum wird das
+// oeffnende Tag ueber [\s\S]*? bis zum ersten ">" gesucht statt ueber eine
+// feste Attribut-Reihenfolge.
+function parseHyvaNativeMerkliste(html: string, origin: string) {
+  const artikel: { artikelnummer_lieferant: string; bezeichnung: string; ep_lieferant: number | null; foto_url: string | null }[] = [];
+
+  const itemRegex = /<div\s+data-row="product-item"[\s\S]*?id="item_\d+"[\s\S]*?>/g;
+  const positionen: number[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = itemRegex.exec(html)) !== null) positionen.push(m.index);
+
+  for (let i = 0; i < positionen.length; i++) {
+    const block = html.slice(positionen[i], positionen[i + 1] ?? html.length);
+
+    // Artikelnummer steht hier direkt sichtbar im Markup (kein Tooltip wie
+    // bei Amasty) - ohne sie koennen wir den Artikel nicht zuordnen.
+    const nrMatch = block.match(/<div\s+class="mr-2\s+text-gray-900\s+mt-1">\s*([^<]+?)\s*<\/div>/);
+    if (!nrMatch) continue;
+
+    const nameMatch = block.match(/<a\s+class="font-semibold"[^>]*title="([^"]+)"/);
+    const bildMatch = block.match(/<img\s+class="product-image-photo"[^>]*src="([^"]+)"/);
+
+    // Wie bei Amasty: "finalPrice" ist der tatsaechlich zu zahlende
+    // (Kommissions-/Netto-)Preis, nicht der durchgestrichene Listenpreis.
+    const finalPreisMatch = block.match(/data-price-amount="([\d.]+)"[\s\S]{0,150}?data-price-type="finalPrice"/)
+      || block.match(/data-price-type="finalPrice"[\s\S]{0,150}?data-price-amount="([\d.]+)"/);
+
+    let fotoUrl: string | null = null;
+    if (bildMatch) {
+      try { fotoUrl = new URL(bildMatch[1], origin).href; } catch (_e) { fotoUrl = null; }
+    }
+
+    artikel.push({
+      artikelnummer_lieferant: entHtmlDecode(nrMatch[1]).trim(),
+      bezeichnung: entHtmlDecode(nameMatch ? nameMatch[1] : nrMatch[1]).trim(),
+      ep_lieferant: finalPreisMatch ? parseZahl(finalPreisMatch[1]) : null,
+      foto_url: fotoUrl,
+    });
+  }
+  return artikel;
+}
+
+type MerklistenTyp = 'amwishlist' | 'hyva_native';
+function erkenneMerklistenTyp(html: string): MerklistenTyp | null {
+  if (html.includes('amwishlist-item')) return 'amwishlist';
+  if (html.includes('data-row="product-item"') && html.includes('id="item_')) return 'hyva_native';
+  return null;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -195,6 +259,7 @@ Deno.serve(async (req) => {
     const artikel: ReturnType<typeof parseMagentoMerkliste> = [];
     const gesehen = new Set<string>();
     let ersteSeiteHtml = '';
+    let merklistenTyp: MerklistenTyp | null = null;
     let seite = 1;
     const MAX_SEITEN = 30; // Sicherheitsnetz gegen eine Endlosschleife
     while (seite <= MAX_SEITEN) {
@@ -207,11 +272,17 @@ Deno.serve(async (req) => {
       const html = await listeRes.text();
       if (seite === 1) ersteSeiteHtml = html;
 
-      if (seite === 1 && (!html.includes('amwishlist-item') || html.includes('login[username]'))) {
-        return json({ error: 'Session abgelaufen oder ungueltig - bitte im Browser neu einloggen, "Als cURL kopieren" wiederholen und im Feld "Session (aus Browser kopiert)" neu einfügen.' }, 400);
+      if (seite === 1) {
+        if (html.includes('login[username]')) {
+          return json({ error: 'Session abgelaufen oder ungueltig - bitte im Browser neu einloggen, "Als cURL kopieren" wiederholen und im Feld "Session (aus Browser kopiert)" neu einfügen.' }, 400);
+        }
+        merklistenTyp = erkenneMerklistenTyp(html);
+        if (!merklistenTyp) {
+          return json({ error: 'Session abgelaufen oder ungueltig - bitte im Browser neu einloggen, "Als cURL kopieren" wiederholen und im Feld "Session (aus Browser kopiert)" neu einfügen.' }, 400);
+        }
       }
 
-      const gefunden = parseMagentoMerkliste(html, origin);
+      const gefunden = merklistenTyp === 'amwishlist' ? parseMagentoMerkliste(html, origin) : parseHyvaNativeMerkliste(html, origin);
       const neue = gefunden.filter((a) => {
         const key = a.artikelnummer_lieferant.toLowerCase();
         if (gesehen.has(key)) return false;
@@ -242,8 +313,10 @@ Deno.serve(async (req) => {
       return json({
         artikel,
         debug: {
+          merklistenTyp,
           htmlLaenge: ersteSeiteHtml.length,
           hatAmwishlistItem: ersteSeiteHtml.includes('amwishlist-item'),
+          hatProductItemRow: ersteSeiteHtml.includes('data-row="product-item"'),
           hatItemId: ankerPos !== -1,
           hatArtNr: ersteSeiteHtml.includes('Art.Nr.'),
           ausschnittUmErstenItem: ankerPos !== -1 ? ersteSeiteHtml.slice(Math.max(0, ankerPos - 60), ankerPos + 700) : null,
