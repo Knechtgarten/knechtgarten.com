@@ -228,8 +228,11 @@ body.mitarbeiter-rolle .admin-only{display:none !important;}
 .si-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex-wrap:wrap;}
 .si-actions .btn{padding:4px 10px;font-size:11px;}
 .si-actions .icobtn{width:22px;height:22px;}
-.si-vorhanden-hint{font-size:9.5px;color:var(--danger);text-align:right;max-width:130px;line-height:1.3;}
 .badge.si-neu{background:var(--accent-lime-light);color:#5c6b12;}
+.si-preisvergleich{font-size:9.5px;color:var(--muted);margin:2px 0 0;line-height:1.4;}
+.devtag{font-size:9.5px;font-weight:700;border-radius:5px;padding:1px 5px;}
+.devtag.stufe1{background:var(--accent-blue);color:var(--primary);}
+.devtag.stufe2{background:#F4E7E6;color:var(--danger);}
 .badge.si-vorhanden{background:#F4E7E6;color:var(--danger);}
 </style>
 </head>
@@ -526,6 +529,19 @@ body.mitarbeiter-rolle .admin-only{display:none !important;}
         </div>
 
         <div class="card admin-only">
+          <div class="cardheader" onclick="toggleCard(this)"><span class="cardchevron">&#9656;</span><div class="cardlabel">Einstellungen</div></div>
+          <div class="hint">Global, gilt für alle Lieferanten (Lieferanten-Datenabgleich und Schnellimport).</div>
+          <div class="cardbody hidden">
+            <div class="row">
+              <div class="fld"><label>Warnstufe 1 - Preisabweichung ab (%)</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="wsStufe1" type="number" step="0.01"></div>
+              <div class="fld"><label>Warnstufe 2 - Preisabweichung ab (%)</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="wsStufe2" type="number" step="0.01"></div>
+            </div>
+            <div class="hint">Preisabweichungen werden ab Warnstufe 1 hellblau, ab Warnstufe 2 rot markiert.</div>
+            <div class="status" id="wsStatus"></div>
+          </div>
+        </div>
+
+        <div class="card admin-only">
           <div class="cardheader" onclick="toggleCard(this)"><span class="cardchevron" style="transform:rotate(90deg);">&#9656;</span><div class="cardlabel">Lieferanten</div></div>
           <div class="cardbody">
           <table style="table-layout:fixed;">
@@ -775,7 +791,7 @@ function zeigeAbschnitt(name){
   $('formelKategorienSidebar').classList.toggle('hidden', name !== 'formelbibliothek');
   if(name === 'offertentyp') loadOffertentypen();
   if(name === 'formelbibliothek') loadOffertentypen().then(renderFormelKategorienSidebar);
-  if(name === 'datenabgleich'){ loadWechselkurse(); loadDatenabgleich(); loadArtikelgruppen(); }
+  if(name === 'datenabgleich'){ loadWechselkurse(); loadWarnstufen(); loadDatenabgleich(); loadArtikelgruppen(); }
   if(name === 'rechenlogik'){
     Promise.all([ladeOffertenPositionEinstellungen(), ladeSammelpositionen('maschinenaufwand'), ladeSammelpositionen('logistikaufwand'), ladeSammelpositionen('maschinenaufwand_tagessatz'), ladeSammelpositionen('logistikaufwand_tagessatz')]).then(() => {
       renderTeilflaechenlogik(TEILFLAECHENLOGIK_KATALOG, 'tflBody');
@@ -1822,6 +1838,43 @@ async function deleteWechselkurs(id){
   await loadWechselkurse();
 }
 
+// ---------------------------------------------------------------------------
+// Datenabgleich: globale Warnstufen fuer Preisabweichungen (gilt fuer den
+// grossen Lieferanten-Datenabgleich UND fuer den Preisvergleich im
+// Schnellimport weiter unten - ersetzt die frueher pro Lieferant eingegebene
+// "Toleranzwert Preisabgleich"-Karte). Singleton-Zeile, gleiches Muster wie
+// lieferwagen_konfiguration (id = boolean-Primary-Key, immer true).
+// ---------------------------------------------------------------------------
+let WARNSTUFEN = { stufe1_prozent: 10, stufe2_prozent: 25 };
+async function loadWarnstufen(){
+  const { data, error } = await sb.from('preisabgleich_warnstufen').select('*').eq('id', true).maybeSingle();
+  if(error){ console.error(error); return; }
+  if(data) WARNSTUFEN = data;
+  $('wsStufe1').value = WARNSTUFEN.stufe1_prozent ?? '';
+  $('wsStufe2').value = WARNSTUFEN.stufe2_prozent ?? '';
+}
+async function speichereWarnstufen(){
+  const stufe1 = parseFloat($('wsStufe1').value);
+  const stufe2 = parseFloat($('wsStufe2').value);
+  if(isNaN(stufe1) || isNaN(stufe2)){ $('wsStatus').textContent = 'Bitte beide Warnstufen ausfüllen.'; $('wsStatus').className = 'status err'; return; }
+  const { error } = await sb.from('preisabgleich_warnstufen').update({ stufe1_prozent: stufe1, stufe2_prozent: stufe2 }).eq('id', true);
+  if(error){ $('wsStatus').textContent = friendlyError(error); $('wsStatus').className = 'status err'; return; }
+  WARNSTUFEN = { stufe1_prozent: stufe1, stufe2_prozent: stufe2 };
+  $('wsStatus').textContent = 'Gespeichert.'; $('wsStatus').className = 'status ok';
+}
+$('wsStufe1').addEventListener('change', speichereWarnstufen);
+$('wsStufe2').addEventListener('change', speichereWarnstufen);
+// 0 = unauffaellig (kein Vergleichspreis oder Abweichung unter Stufe 1),
+// 1 = Warnstufe 1 (dezent), 2 = Warnstufe 2 (deutlich) - siehe Schnellimport
+// weiter unten, das dieselbe Funktion fuer den Preisvergleich nutzt.
+function berechnePreisAbweichungStufe(alt, neu){
+  if(!alt || isNaN(neu)) return 0;
+  const prozentAbs = Math.abs(((neu - alt) / alt) * 100);
+  if(WARNSTUFEN.stufe2_prozent != null && prozentAbs >= WARNSTUFEN.stufe2_prozent) return 2;
+  if(WARNSTUFEN.stufe1_prozent != null && prozentAbs >= WARNSTUFEN.stufe1_prozent) return 1;
+  return 0;
+}
+
 // Nur noch Datenquelle fuer die Gruppe-Filterpillen im Artikel-Picker
 // (openArtikelPicker) - die eigentliche Verwaltung (Aufraeumen/Loeschen)
 // ist ins Artikelstamm (Tool C, Button "Artikelgruppen verwalten") gewandert.
@@ -1991,7 +2044,10 @@ function siBaueZeile({ bezeichnung = '', artikelnummer = '', ek = '', vp = '', z
         <input class="si-in-nr" placeholder="Art.Nr." value="${(artikelnummer||'').replace(/"/g,'&quot;')}">
         <div class="si-knecht-vorschau hint" style="margin:2px 0 0;"></div>
       </div>
-      <div class="si-fld small"><input class="si-in-ek" placeholder="EK-Preis" value="${ek ?? ''}"></div>
+      <div class="si-fld small">
+        <input class="si-in-ek" placeholder="EK-Preis" value="${ek ?? ''}">
+        <div class="si-preisvergleich"></div>
+      </div>
       <div class="si-fld small"><input class="si-in-vp" placeholder="VP-Preis" value="${vp ?? ''}"></div>
       <div class="si-fld small"><input class="si-in-zusatz1" placeholder="Zusatz 1" value="${(zusatz1 || '').replace(/"/g,'&quot;')}"></div>
       <div class="si-fld small"><input class="si-in-zusatz2" placeholder="Zusatz 2" value="${(zusatz2 || '').replace(/"/g,'&quot;')}"></div>
@@ -2006,6 +2062,7 @@ function siBaueZeile({ bezeichnung = '', artikelnummer = '', ek = '', vp = '', z
     siAktualisiereKnechtVorschau(row);
     siPruefeVorhanden(row, row.querySelector('.si-in-nr').value.trim());
   });
+  row.querySelector('.si-in-ek').addEventListener('input', () => siAktualisierePreisvergleich(row));
   siAktualisiereKnechtVorschau(row);
   row.querySelector('.icobtn.danger').addEventListener('click', () => row.remove());
   row.querySelector('.si-actions .btn').addEventListener('click', () => siUebernehmen(row));
@@ -2030,22 +2087,67 @@ async function siPruefeVorhanden(row, artikelnummer){
   const nr = (artikelnummer || '').trim();
   const lieferantId = $('siLieferantSelect').value;
   if(!nr || !lieferantId) return;
-  const { data } = await sb.from('artikel').select('id').eq('lieferant_id', lieferantId).ilike('artikelnummer_lieferant', nr).maybeSingle();
-  siZeigeVorhandenStatus(row, !!data);
+  const { data } = await sb.from('artikel').select('id,ep_lieferant').eq('lieferant_id', lieferantId).ilike('artikelnummer_lieferant', nr).maybeSingle();
+  siZeigeVorhandenStatus(row, data || null);
 }
-function siZeigeVorhandenStatus(row, istVorhanden){
-  row.classList.toggle('vorhanden', istVorhanden);
+// vorhandenArtikel = { id, ep_lieferant } des Treffers, oder null wenn die
+// Artikelnummer (noch) nicht existiert. Bei einem Treffer wird bewusst NUR
+// der Preis abgeglichen (siehe Absprache) - Bezeichnung/Zusatzfelder werden
+// nie angetastet, dafuer gibt es diese Zeile in Tool C selbst.
+function siZeigeVorhandenStatus(row, vorhandenArtikel){
+  row._siVorhandenArtikel = vorhandenArtikel;
+  row.classList.toggle('vorhanden', !!vorhandenArtikel);
   const actions = row.querySelector('.si-actions');
-  if(istVorhanden){
-    const lieferantName = $('siLieferantSelect').selectedOptions[0]?.textContent || '';
-    const nr = row.querySelector('.si-in-nr').value.trim();
-    actions.innerHTML = `<span class="badge si-vorhanden">Vorhanden</span><div class="si-vorhanden-hint">Artikelnummer ${nr} existiert bereits bei ${lieferantName} – wird nicht überschrieben.</div><button class="icobtn danger" type="button" title="Verwerfen">${ICON.trash}</button>`;
+  if(vorhandenArtikel){
+    actions.innerHTML = `<span class="badge si-vorhanden">Vorhanden</span><button class="btn" type="button">Preis übernehmen</button><button class="icobtn danger" type="button" title="Verwerfen">${ICON.trash}</button>`;
+    actions.querySelector('.btn').addEventListener('click', async () => { siWendeZuordnungAn(row); await siUebernehmePreisAbgleich(row); });
     actions.querySelector('.icobtn.danger').addEventListener('click', () => row.remove());
+    // Stufe 2 (deutliche Abweichung) startet bewusst nicht angehakt - alles
+    // andere bleibt bequem angehakt (siehe Absprache Warnstufen).
+    const neu = parseFloat(row.querySelector('.si-in-ek').value);
+    const stufe = berechnePreisAbweichungStufe(vorhandenArtikel.ep_lieferant, neu);
+    row.querySelector('.si-row-check').checked = stufe !== 2;
   } else if(!actions.querySelector('.btn')){
     actions.innerHTML = `<span class="badge si-neu">Neu</span><button class="btn" type="button">Übernehmen</button><button class="icobtn danger" type="button" title="Verwerfen">${ICON.trash}</button>`;
     actions.querySelector('.btn').addEventListener('click', () => siUebernehmen(row));
     actions.querySelector('.icobtn.danger').addEventListener('click', () => row.remove());
+    row.querySelector('.si-row-check').checked = true;
   }
+  siAktualisierePreisvergleich(row);
+}
+// Reine Anzeige (bisheriger Preis -> neu erkannter Preis + Abweichung in %,
+// farblich nach Warnstufe) - laeuft sowohl einmalig bei Erkennung eines
+// Treffers als auch live bei jeder Aenderung am EK-Feld, ruehrt aber NIE die
+// Checkbox an (die bleibt, was der Nutzer manuell gesetzt hat).
+function siAktualisierePreisvergleich(row){
+  const el = row.querySelector('.si-preisvergleich');
+  const vorhanden = row._siVorhandenArtikel;
+  if(!vorhanden){ el.textContent = ''; return; }
+  const neu = parseFloat(row.querySelector('.si-in-ek').value);
+  const alt = vorhanden.ep_lieferant;
+  if(isNaN(neu)){ el.textContent = 'Kein Preis erkannt'; return; }
+  if(alt == null){ el.textContent = `bisher kein Preis → ${fmtNum(neu)}`; return; }
+  const prozent = ((neu - alt) / alt) * 100;
+  const stufe = berechnePreisAbweichungStufe(alt, neu);
+  const stufeClass = stufe === 2 ? ' stufe2' : stufe === 1 ? ' stufe1' : '';
+  el.innerHTML = `${fmtNum(alt)} → ${fmtNum(neu)} <span class="devtag${stufeClass}">${prozent >= 0 ? '+' : ''}${prozent.toFixed(1)}%</span>`;
+}
+async function siUebernehmePreisAbgleich(row){
+  const vorhanden = row._siVorhandenArtikel;
+  if(!vorhanden) return;
+  const neu = parseFloat(row.querySelector('.si-in-ek').value);
+  if(isNaN(neu)){ $('siStatus').textContent = 'Kein gültiger Preis erkannt - Zeile wird übersprungen.'; $('siStatus').className = 'status err'; return; }
+  const alt = vorhanden.ep_lieferant;
+  if(alt != null && alt === neu){ row.remove(); return; }
+  const { error } = await sb.from('artikel').update({ ep_lieferant: neu }).eq('id', vorhanden.id);
+  if(error){ $('siStatus').textContent = friendlyError(error); $('siStatus').className = 'status err'; return; }
+  await sb.from('artikel_preis_verlauf').insert({
+    artikel_id: vorhanden.id, alter_preis: alt, neuer_preis: neu,
+    quelle: 'abgleich', methode: 'schnellimport', lieferant_id: $('siLieferantSelect').value,
+  });
+  row.remove();
+  $('siStatus').textContent = ''; $('siStatus').className = 'status';
+  showToast('Preis übernommen.');
 }
 
 async function siUebernehmen(row){
@@ -2062,8 +2164,8 @@ async function siUebernehmen(row){
   }
 
   if(artikelnummer){
-    const { data: vorhanden } = await sb.from('artikel').select('id').eq('lieferant_id', lieferantId).ilike('artikelnummer_lieferant', artikelnummer).maybeSingle();
-    if(vorhanden){ siZeigeVorhandenStatus(row, true); return; }
+    const { data: vorhanden } = await sb.from('artikel').select('id,ep_lieferant').eq('lieferant_id', lieferantId).ilike('artikelnummer_lieferant', artikelnummer).maybeSingle();
+    if(vorhanden){ siZeigeVorhandenStatus(row, vorhanden); return; }
   }
 
   const lieferant = LIEFERANTEN_DA.find(l => l.id === lieferantId);
@@ -2312,15 +2414,22 @@ $('siAusgewaehlteBtn').addEventListener('click', async () => {
   // sonst dieselbe Zeile zweimal zuordnen+verketten (Praefix/Zusatz-Werte
   // landen dann doppelt in der Bezeichnung).
   const zeilen = Array.from($('siListe').querySelectorAll('.si-row'))
-    .filter(row => row.querySelector('.si-row-check')?.checked && !row.classList.contains('vorhanden') && !row.querySelector('.si-in-bezeichnung').disabled);
+    .filter(row => row.querySelector('.si-row-check')?.checked && !row.querySelector('.si-in-bezeichnung').disabled);
   if(!zeilen.length){
-    $('siStatus').textContent = 'Keine Artikel angehakt (bereits übernommene oder "Vorhanden"-Zeilen zählen nicht mit).';
+    $('siStatus').textContent = 'Keine Artikel angehakt.';
     $('siStatus').className = 'status err';
     return;
   }
   btn.disabled = true;
   try{
-    for(const row of zeilen){ siWendeZuordnungAn(row); await siUebernehmen(row); }
+    for(const row of zeilen){
+      siWendeZuordnungAn(row);
+      // "Vorhanden"-Zeilen: nur der Preis wird abgeglichen, Rest bleibt
+      // unangetastet (siehe siUebernehmePreisAbgleich). Alle anderen Zeilen
+      // legen wie gewohnt einen neuen Artikel an.
+      if(row._siVorhandenArtikel) await siUebernehmePreisAbgleich(row);
+      else await siUebernehmen(row);
+    }
     $('siAlleAuswaehlenCb').checked = false;
   } finally {
     btn.disabled = false;

@@ -147,8 +147,9 @@ table.data td.num{text-align:right;font-variant-numeric:tabular-nums;}
 .artmeta{font-size:11px;color:var(--muted);margin-top:1px;}
 .emptystate{padding:16px;margin:0;color:var(--muted);font-size:12.5px;}
 .preis-neu{width:100px;border:1px solid var(--line);border-radius:6px;padding:5px 7px;font:inherit;font-size:12.5px;text-align:right;}
-.devtag{font-size:10.5px;font-weight:700;border-radius:5px;padding:2px 6px;background:#EAF3E6;color:#3F6B36;}
-.devtag.warn{background:#FBEFE3;color:#8A5A22;}
+.devtag{font-size:10.5px;font-weight:700;border-radius:5px;padding:2px 6px;}
+.devtag.stufe1{background:#D6E7F4;color:#323E4E;}
+.devtag.stufe2{background:#F4E7E6;color:var(--danger);}
 
 .segrow.eq4{display:grid;grid-template-columns:repeat(4,1fr);}
 
@@ -296,15 +297,6 @@ table.data td.num{text-align:right;font-variant-numeric:tabular-nums;}
       </div>
 
       <div class="card">
-        <div class="cardlabel">Toleranzwert Preisabgleich</div>
-        <div class="row">
-          <div class="fld"><label>Abweichung %</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="wsProzent" type="number" step="0.01"></div>
-          <div class="fld"><label>Abweichung CHF</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="wsChf" type="number" step="0.01" placeholder="—"></div>
-        </div>
-        <div class="hint">Artikel unterhalb von diesem Toleranzwert werden automatisch abgeglichen.</div>
-      </div>
-
-      <div class="card">
         <div class="cardlabel">Quelle</div>
         <div class="segrow eq3">
           <button class="segbtn on" id="quelleCrawling">Crawling</button>
@@ -402,10 +394,6 @@ table.data td.num{text-align:right;font-variant-numeric:tabular-nums;}
             <span class="spacer"></span>
             <button class="segbtn uebernehmen-btn" id="ergaenzenUebernehmenBtn" disabled title="Verfügbar, sobald ein automatischer Abgleich abgeschlossen ist">Daten übernehmen</button>
           </div>
-          <label class="chkrow">
-            <input type="checkbox" class="appcheck" id="ergaenzenPruefenCheck" checked>
-            Die Daten werden erst nach einer manuellen Prüfung in den Artikelstamm von knechtgarten.ch übernommen.
-          </label>
         </div>
         <div class="tablewrap">
           <table class="data">
@@ -569,6 +557,11 @@ $('pendingLogoutBtn').addEventListener('click', async () => { await sb.auth.sign
 let LIEFERANT_ID = null;
 let LIEF = null; // { id, name, kuerzel, sync_typ, logo_url, da: {...} }
 let ARTIKEL = [];
+// Global statt pro Lieferant (siehe Einstellungen-Seite, Karte "Einstellungen"
+// bei den Wechselkursen) - ersetzt die frueher pro Lieferant eingegebene
+// "Toleranzwert Preisabgleich"-Karte. Fallback-Werte, falls die Zeile aus
+// irgendeinem Grund noch nicht existiert.
+let WARNSTUFEN = { stufe1_prozent: 10, stufe2_prozent: 25 };
 
 async function init(){
   LIEFERANT_ID = new URLSearchParams(location.search).get('lieferant');
@@ -584,11 +577,13 @@ async function init(){
   const { data: da } = await sb.from('lieferant_datenabgleich').select('*').eq('lieferant_id', LIEFERANT_ID).maybeSingle();
   LIEF = { ...lieferant, da: da || {} };
 
+  const { data: warnstufen } = await sb.from('preisabgleich_warnstufen').select('*').eq('id', true).maybeSingle();
+  if(warnstufen) WARNSTUFEN = warnstufen;
+
   const { data: artikel } = await sb.from('artikel').select('id,bezeichnung,einheit,ep_lieferant,artikelnummer_lieferant,foto_url').eq('lieferant_id', LIEFERANT_ID).order('bezeichnung');
   ARTIKEL = artikel || [];
 
   renderKopf();
-  renderWarnschwelle();
   renderModus();
   renderKategorie();
   renderGoogleSheetFelder();
@@ -603,29 +598,6 @@ async function init(){
 function renderKopf(){
   $('supName').textContent = `${LIEF.name} · ${LIEF.kuerzel}`;
 }
-
-// ---- Warnschwelle -----------------------------------------------------
-function renderWarnschwelle(){
-  $('wsProzent').value = LIEF.da.warnschwelle_prozent ?? '';
-  $('wsChf').value = LIEF.da.warnschwelle_betrag_chf ?? '';
-}
-// Prozent und CHF sind ein Entweder-Oder-Paar: sobald im einen Feld eine
-// Zahl eingetippt wird, wird das andere sofort geleert (statt dass beide
-// Schwellenwerte gleichzeitig aktiv waeren).
-$('wsProzent').addEventListener('input', () => { if($('wsProzent').value.trim() !== '') $('wsChf').value = ''; });
-$('wsChf').addEventListener('input', () => { if($('wsChf').value.trim() !== '') $('wsProzent').value = ''; });
-async function speichereWarnschwelle(){
-  const prozentRaw = $('wsProzent').value.trim();
-  const chfRaw = $('wsChf').value.trim();
-  const payload = { lieferant_id: LIEFERANT_ID, warnschwelle_prozent: prozentRaw === '' ? null : parseFloat(prozentRaw), warnschwelle_betrag_chf: chfRaw === '' ? null : parseFloat(chfRaw) };
-  const { error } = await sb.from('lieferant_datenabgleich').upsert(payload, { onConflict: 'lieferant_id' });
-  if(error){ showToast(friendlyError(error), true); return; }
-  LIEF.da.warnschwelle_prozent = payload.warnschwelle_prozent;
-  LIEF.da.warnschwelle_betrag_chf = payload.warnschwelle_betrag_chf;
-  showToast('Gespeichert.');
-}
-$('wsProzent').addEventListener('change', speichereWarnschwelle);
-$('wsChf').addEventListener('change', speichereWarnschwelle);
 
 // ---- Quelle (Crawling/Google Sheet/PDF) - reine Ansichts-Umschaltung, nicht gespeichert ----
 function waehleQuelle(aktivesBtnId){
@@ -1225,15 +1197,15 @@ async function starteGoogleSheetAbgleich(){
 // Gemeinsame Auswertung fuer alle Quellen (Google Sheet + Crawling/Merkliste):
 // gegen den Artikelstamm dieses Lieferanten abgleichen (Gross-/Kleinschreibung
 // ignoriert - bei manuell gepflegten Listen waere ein Tippfehler sonst genug,
-// damit ein Artikel faelschlich als "nicht gefunden" gilt). Preise INNERHALB
-// des Toleranzwerts werden sofort automatisch uebernommen (kein manueller
-// Schritt noetig) - nur Ausreisser darueber (oder Artikel ganz ohne bisherigen
-// Vergleichspreis) landen zur Pruefung in "Kontrolle Preisabgleich". Neue
-// Artikel + nicht gefundene Artikel werden separat aufgelistet.
+// damit ein Artikel faelschlich als "nicht gefunden" gilt). JEDE gefundene
+// Preisaenderung landet zur manuellen Kontrolle in "Kontrolle Preisabgleich"
+// (kein automatisches Uebernehmen im Hintergrund mehr - siehe Absprache: alle
+// Preise werden bewusst von Hand geprueft, die Warnstufen sind dort nur noch
+// eine Farb-/Priorisierungshilfe). Neue Artikel + nicht gefundene Artikel
+// werden separat aufgelistet.
 async function verarbeiteGefundeneArtikel(gefundeneArtikel, quelleLabel, methode){
   const bestandNachNr = new Map(ARTIKEL.filter(a => a.artikelnummer_lieferant).map(a => [normArtikelnr(a.artikelnummer_lieferant), a]));
   const zuPruefen = [];
-  let autoAbgeglichen = 0;
   let fotosNachgetragen = 0;
   for(const sa of gefundeneArtikel){
     const bestand = bestandNachNr.get(normArtikelnr(sa.artikelnummer_lieferant));
@@ -1253,25 +1225,11 @@ async function verarbeiteGefundeneArtikel(gefundeneArtikel, quelleLabel, methode
     const preisUnveraendert = sa.ep_lieferant == null || (alt != null && alt === sa.ep_lieferant);
     if(preisUnveraendert) continue;
 
-    if(alt != null && !preisAbweichungGross(alt, sa.ep_lieferant)){
-      // Innerhalb des Toleranzwerts - direkt automatisch uebernehmen.
-      const { error: updErr } = await sb.from('artikel').update({ ep_lieferant: sa.ep_lieferant }).eq('id', bestand.id);
-      if(updErr){ showToast(friendlyError(updErr), true); continue; }
-      await sb.from('artikel_preis_verlauf').insert({
-        artikel_id: bestand.id, alter_preis: alt, neuer_preis: sa.ep_lieferant,
-        quelle: 'abgleich', methode, lieferant_id: LIEFERANT_ID
-      });
-      bestand.ep_lieferant = sa.ep_lieferant;
-      autoAbgeglichen++;
-    } else {
-      // Ueber dem Toleranzwert oder kein Vergleichspreis vorhanden - manuelle Pruefung noetig.
-      zuPruefen.push({ artikel: bestand, neuerPreis: sa.ep_lieferant });
-    }
+    zuPruefen.push({ artikel: bestand, neuerPreis: sa.ep_lieferant });
   }
-  logAnhaengen(`${autoAbgeglichen} Artikel automatisch abgeglichen (innerhalb Toleranzwert).`);
   if(fotosNachgetragen) logAnhaengen(`${fotosNachgetragen} fehlendes Foto nachgetragen.`);
   renderPreisAbweichungen(zuPruefen);
-  logAnhaengen(`${zuPruefen.length} Artikel über dem Toleranzwert - manuelle Prüfung nötig.`);
+  logAnhaengen(`${zuPruefen.length} Preisänderung${zuPruefen.length === 1 ? '' : 'en'} gefunden - manuelle Prüfung nötig.`);
 
   const modus = effektiverModus();
   if(modus === 'ergaenzen'){
@@ -1729,14 +1687,17 @@ $('logHead').addEventListener('click', () => $('logPanel').classList.toggle('ope
 // Preisabgleich ist bereits echt: Neuer Preis wird direkt hier manuell
 // eingetragen (unabhaengig vom Sync-Typ - es gibt nur dieses eine Fenster),
 // "Daten übernehmen" schreibt die markierten, geänderten Zeilen wirklich in
-// artikel/artikel_preis_verlauf. Ein automatischer Abruf, der diese Felder
-// selbst vorbefuellt, existiert noch nicht (siehe Ablauf-Protokoll).
-function preisAbweichungGross(alt, neu){
-  if(!alt) return false;
-  const prozent = ((neu - alt) / alt) * 100;
-  const ueberProzent = LIEF.da.warnschwelle_prozent != null && Math.abs(prozent) >= LIEF.da.warnschwelle_prozent;
-  const ueberChf = LIEF.da.warnschwelle_betrag_chf != null && Math.abs(neu - alt) >= LIEF.da.warnschwelle_betrag_chf;
-  return ueberProzent || ueberChf;
+// artikel/artikel_preis_verlauf. JEDE Preisaenderung landet hier zur
+// manuellen Kontrolle (kein automatisches Uebernehmen im Hintergrund mehr,
+// siehe verarbeiteGefundeneArtikel) - die zwei globalen Warnstufen (siehe
+// WARNSTUFEN) sind nur noch eine Farb-/Priorisierungshilfe, keine Schranke.
+// 0 = unauffaellig, 1 = Warnstufe 1 (dezent), 2 = Warnstufe 2 (deutlich).
+function berechnePreisAbweichungStufe(alt, neu){
+  if(!alt) return 0;
+  const prozentAbs = Math.abs(((neu - alt) / alt) * 100);
+  if(WARNSTUFEN.stufe2_prozent != null && prozentAbs >= WARNSTUFEN.stufe2_prozent) return 2;
+  if(WARNSTUFEN.stufe1_prozent != null && prozentAbs >= WARNSTUFEN.stufe1_prozent) return 1;
+  return 0;
 }
 function aktualisierePreisAbweichung(tr){
   const alt = parseFloat(tr.dataset.alt);
@@ -1744,26 +1705,32 @@ function aktualisierePreisAbweichung(tr){
   const abwEl = tr.querySelector('.preis-abw');
   if(isNaN(neu) || !alt){ abwEl.textContent = '–'; return; }
   const prozent = ((neu - alt) / alt) * 100;
-  const warn = preisAbweichungGross(alt, neu);
-  abwEl.innerHTML = `<span class="devtag${warn ? ' warn' : ''}">${prozent >= 0 ? '+' : ''}${prozent.toFixed(1)}%</span>`;
+  const stufe = berechnePreisAbweichungStufe(alt, neu);
+  const stufeClass = stufe === 2 ? ' stufe2' : stufe === 1 ? ' stufe1' : '';
+  abwEl.innerHTML = `<span class="devtag${stufeClass}">${prozent >= 0 ? '+' : ''}${prozent.toFixed(1)}%</span>`;
 }
-// Zeigt nur Artikel, deren Preisabweichung den Toleranzwert ueberschreitet
-// (oder die noch keinen Vergleichspreis haben) - alles innerhalb der Toleranz
-// wurde bereits automatisch abgeglichen (siehe verarbeiteGefundeneArtikel) und
-// muss hier nicht mehr manuell geprueft werden.
+// Zeigt JEDE gefundene Preisaenderung zur manuellen Kontrolle (kein
+// automatisches Uebernehmen mehr, siehe verarbeiteGefundeneArtikel).
+// Checkbox ist per Default angehakt - ausser bei Warnstufe 2, dort muss
+// bewusst aktiv angehakt werden (siehe Absprache: kleine, erwartete
+// Preisanpassungen bleiben bequem, grosse Ausreisser brauchen einen
+// bewussten Klick).
 function renderPreisAbweichungen(zeilen){
   if(!zeilen.length){
-    $('preisBody').innerHTML = '<tr><td colspan="5" class="hint" style="margin:0;padding:10px 4px;">Keine Preisabweichungen über dem Toleranzwert - wird nach dem nächsten Abgleich angezeigt.</td></tr>';
+    $('preisBody').innerHTML = '<tr><td colspan="5" class="hint" style="margin:0;padding:10px 4px;">Keine Preisänderungen gefunden - wird nach dem nächsten Abgleich angezeigt.</td></tr>';
     return;
   }
-  $('preisBody').innerHTML = zeilen.map(({artikel: a, neuerPreis}) => `
+  $('preisBody').innerHTML = zeilen.map(({artikel: a, neuerPreis}) => {
+    const stufe = berechnePreisAbweichungStufe(a.ep_lieferant, neuerPreis);
+    return `
     <tr data-id="${a.id}" data-alt="${a.ep_lieferant ?? ''}">
-      <td><input type="checkbox" class="preis-check appcheck" checked></td>
+      <td><input type="checkbox" class="preis-check appcheck" ${stufe === 2 ? '' : 'checked'}></td>
       <td><div class="artname">${a.bezeichnung}</div><div class="artmeta">${a.einheit}</div></td>
       <td class="num">${fmtCHF(a.ep_lieferant) || '–'}</td>
       <td class="num"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="number" step="0.01" class="preis-neu" value="${neuerPreis ?? ''}"></td>
       <td class="preis-abw hint" style="margin:0;">–</td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
   $('preisBody').querySelectorAll('tr[data-id]').forEach(tr => {
     aktualisierePreisAbweichung(tr);
     tr.querySelector('.preis-neu').addEventListener('input', () => aktualisierePreisAbweichung(tr));
