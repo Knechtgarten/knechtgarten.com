@@ -92,7 +92,15 @@ function parseDabagWarenkorb(html: string, origin: string) {
 
     const nameMatch = block.match(/class=['"]bsi-fakturatext['"]>([^<]+)<\/div>/);
     const bildMatch = block.match(/background-image:\s*url\('([^']+)'\)/);
-    const preisMatch = block.match(/data-title="Netto-Preis">\s*([^<]+)<\/td>/);
+
+    // Der Preis steckt in der Zelle oft nicht als reiner Text, sondern mit
+    // einem eingebetteten <span>CHF</span>-Waehrungskuerzel davor (z.B. bei
+    // IMMER AG). Darum die ganze Zellen-Innenhtml einfangen, Tags entfernen
+    // und erst danach die Zahl parsen - robust gegen beide Varianten.
+    const preisBlockMatch = block.match(/data-title="Netto-Preis"[^>]*>([\s\S]*?)<\/td>/);
+    const preisText = preisBlockMatch
+      ? preisBlockMatch[1].replace(/<[^>]*>/g, ' ').replace(/CHF/gi, '').trim()
+      : null;
 
     let fotoUrl: string | null = null;
     if (bildMatch) {
@@ -102,7 +110,7 @@ function parseDabagWarenkorb(html: string, origin: string) {
     artikel.push({
       artikelnummer_lieferant: nrMatch[1].trim(),
       bezeichnung: (nameMatch ? nameMatch[1] : nrMatch[1]).trim(),
-      ep_lieferant: preisMatch ? parseZahl(preisMatch[1]) : null,
+      ep_lieferant: preisText ? parseZahl(preisText) : null,
       foto_url: fotoUrl,
     });
   }
