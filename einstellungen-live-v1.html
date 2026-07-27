@@ -570,6 +570,33 @@ body.mitarbeiter-rolle .admin-only{display:none !important;}
             </div>
           </div>
 
+          <div class="si-zuordnung" style="align-items:flex-end;">
+            <div class="si-zuordnung-item" style="flex:1;min-width:220px;">
+              <span class="si-zuordnung-label">Vor die Beschreibung schreiben</span>
+              <div style="display:flex;gap:6px;flex:1;">
+                <input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="siPraefixBeschreibung" placeholder="z.B. Pflanzengefäss Jaco Austin" style="flex:1;border:1px solid var(--line);border-radius:6px;padding:5px 8px;font:inherit;font-size:12px;">
+                <button class="btn secondary" type="button" id="siPraefixBeschreibungBtn">Anwenden</button>
+              </div>
+            </div>
+            <div class="si-zuordnung-item" style="flex:1;min-width:220px;">
+              <span class="si-zuordnung-label">Vor die Artikelnummer schreiben</span>
+              <div style="display:flex;gap:6px;flex:1;">
+                <input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="siPraefixArtikelnummer" placeholder="z.B. AUS-" style="flex:1;border:1px solid var(--line);border-radius:6px;padding:5px 8px;font:inherit;font-size:12px;">
+                <button class="btn secondary" type="button" id="siPraefixArtikelnummerBtn">Anwenden</button>
+              </div>
+            </div>
+            <div class="si-zuordnung-item">
+              <button class="btn secondary" type="button" id="siEkVpTauschenBtn" title="Falls die KI Einkaufs- und Verkaufspreis vertauscht hat">EK ⇄ VP tauschen</button>
+            </div>
+          </div>
+          <div class="si-zuordnung hidden" id="siZusatzspaltenLeiste">
+            <div style="width:100%;">
+              <span class="si-zuordnung-label">Zusätzlich erkannte Spalten</span>
+              <div id="siZusatzspaltenListe" style="display:flex;flex-wrap:wrap;gap:16px;margin:8px 0;"></div>
+              <button class="btn secondary" type="button" id="siZusatzspaltenUebernehmenBtn">Auf alle Zeilen anwenden</button>
+            </div>
+          </div>
+
           <div class="hint" style="text-transform:uppercase;font-weight:700;letter-spacing:.03em;display:flex;align-items:center;justify-content:space-between;">
             <span style="display:flex;align-items:center;gap:6px;"><input autocomplete="off" type="checkbox" id="siAlleAuswaehlenCb"> Artikel</span>
             <button class="btn" id="siAusgewaehlteBtn" type="button" style="text-transform:none;letter-spacing:normal;padding:4px 10px;font-size:11px;">Ausgewählte übernehmen</button>
@@ -1966,8 +1993,9 @@ function siStelleLeerZeileSicher(){
   $('siListe').appendChild(siBaueZeile({ leer: true }));
 }
 
-function siBaueZeile({ bezeichnung = '', artikelnummer = '', ek = '', vp = '', leer = false }){
+function siBaueZeile({ bezeichnung = '', artikelnummer = '', ek = '', vp = '', leer = false, zusatzfelder = {} }){
   const row = document.createElement('div');
+  row._siZusatzfelder = zusatzfelder;
   row.className = 'si-row' + (leer ? ' leer' : '');
   row.innerHTML = `
     ${leer ? '<span></span>' : '<input autocomplete="off" type="checkbox" class="si-row-check">'}
@@ -2107,6 +2135,8 @@ async function siUebernehmen(row){
     ep_lieferant: ek, vp_lieferant: vp,
     waehrung: lieferant?.da?.waehrung || 'CHF',
     mwst_satz_pct: lieferant?.da?.mwst_satz ?? 8.1,
+    zusatzwert: row._siZusatzwert ?? null,
+    zusatzeinheit: row._siZusatzeinheit ?? null,
     foto_url, sync_easybill: true,
   };
   const { data: neuArtikel, error } = await sb.from('artikel').insert(payload).select().single();
@@ -2174,15 +2204,107 @@ async function siVerarbeiteBild(file){
       if(bekannteNummern.has(nrKey)){ uebersprungen++; return; }
       bekannteNummern.add(nrKey);
     }
-    const row = siBaueZeile({ bezeichnung: a.bezeichnung, artikelnummer: a.artikelnummer, ek: a.ek_preis, vp: a.vp_preis });
+    const row = siBaueZeile({ bezeichnung: a.bezeichnung, artikelnummer: a.artikelnummer, ek: a.ek_preis, vp: a.vp_preis, zusatzfelder: a.zusatzfelder || {} });
     $('siListe').insertBefore(row, leerRow);
+    Object.keys(a.zusatzfelder || {}).forEach(k => {
+      if(!SI_ZUSATZSPALTEN.some(z => z.key === k)) SI_ZUSATZSPALTEN.push({ key: k });
+    });
   });
+  siRenderZusatzspaltenLeiste();
   const anzahlNeu = artikel.length - uebersprungen;
   $('siStatus').textContent = uebersprungen
     ? `${anzahlNeu} Artikel erkannt (${uebersprungen} Dublette${uebersprungen>1?'n':''} übersprungen).`
     : `${anzahlNeu} Artikel erkannt.`;
   $('siStatus').className = 'status';
 }
+
+// ---------------------------------------------------------------------------
+// Massenbearbeitung fuer die gerade erkannte Schnellimport-Liste: statt jede
+// Zeile einzeln zu korrigieren, gilt eine Eingabe/Auswahl fuer ALLE Zeilen
+// auf einmal - z.B. wenn die KI bei jedem Artikel gleich vertauscht oder
+// unvollstaendig erkannt hat. "Zusatzspalten" sind Werte, die die KI zwar
+// erkannt, aber keinem unserer festen Felder zugeordnet hat (z.B. Masse,
+// Volumen) - der Nutzer entscheidet pro Spalte, ob sie in die Beschreibung
+// einfliesst oder als generischer Zusatzwert (Zahl+Einheit, siehe
+// artikel.zusatzwert/-einheit) uebernommen werden soll.
+// ---------------------------------------------------------------------------
+let SI_ZUSATZSPALTEN = [];
+
+function siRenderZusatzspaltenLeiste(){
+  const wrap = $('siZusatzspaltenLeiste');
+  if(!SI_ZUSATZSPALTEN.length){ wrap.classList.add('hidden'); return; }
+  wrap.classList.remove('hidden');
+  $('siZusatzspaltenListe').innerHTML = SI_ZUSATZSPALTEN.map(z => `
+    <div class="si-zuordnung-item">
+      <span class="si-zuordnung-label">${z.key}</span>
+      <select class="siZusatzspaltenZiel" data-key="${z.key}">
+        <option value="ignorieren">Ignorieren</option>
+        <option value="beschreibung">Teil der Beschreibung</option>
+        <option value="zusatzwert">Zusatzwert (Zahl + Einheit)</option>
+      </select>
+    </div>`).join('');
+  // Nur EINE Spalte kann gleichzeitig als Zusatzwert gelten (artikel hat nur
+  // ein einziges Zusatzwert/-einheit-Feld) - waehlt der Nutzer eine zweite,
+  // wird die vorherige automatisch wieder auf "Ignorieren" zurueckgesetzt.
+  $('siZusatzspaltenListe').querySelectorAll('.siZusatzspaltenZiel').forEach(sel => {
+    sel.addEventListener('change', () => {
+      if(sel.value === 'zusatzwert'){
+        $('siZusatzspaltenListe').querySelectorAll('.siZusatzspaltenZiel').forEach(other => {
+          if(other !== sel && other.value === 'zusatzwert') other.value = 'ignorieren';
+        });
+      }
+    });
+  });
+}
+
+$('siZusatzspaltenUebernehmenBtn').addEventListener('click', () => {
+  const zuordnung = Array.from($('siZusatzspaltenListe').querySelectorAll('.siZusatzspaltenZiel'))
+    .map(sel => ({ key: sel.dataset.key, ziel: sel.value }))
+    .filter(z => z.ziel !== 'ignorieren');
+  if(!zuordnung.length) return;
+  $('siListe').querySelectorAll('.si-row:not(.leer)').forEach(row => {
+    const felder = row._siZusatzfelder || {};
+    zuordnung.forEach(z => {
+      const wert = (felder[z.key] || '').trim();
+      if(!wert) return;
+      if(z.ziel === 'beschreibung'){
+        const inp = row.querySelector('.si-in-bezeichnung');
+        inp.value = inp.value.trim() ? `${inp.value.trim()} ${wert}` : wert;
+      } else if(z.ziel === 'zusatzwert'){
+        const treffer = wert.match(/^([\d.,]+)\s*(.*)$/);
+        row._siZusatzwert = treffer ? parseFloat(treffer[1].replace(',', '.')) : null;
+        row._siZusatzeinheit = (treffer && treffer[2]) ? treffer[2].trim() : null;
+      }
+    });
+  });
+  showToast('Zusatzspalten auf alle Zeilen angewendet.');
+});
+
+$('siPraefixBeschreibungBtn').addEventListener('click', () => {
+  const praefix = $('siPraefixBeschreibung').value.trim();
+  if(!praefix) return;
+  $('siListe').querySelectorAll('.si-row:not(.leer) .si-in-bezeichnung').forEach(inp => {
+    inp.value = inp.value.trim() ? `${praefix} ${inp.value.trim()}` : praefix;
+  });
+  showToast('Auf alle Zeilen angewendet.');
+});
+$('siPraefixArtikelnummerBtn').addEventListener('click', () => {
+  const praefix = $('siPraefixArtikelnummer').value.trim();
+  if(!praefix) return;
+  $('siListe').querySelectorAll('.si-row:not(.leer) .si-in-nr').forEach(inp => {
+    inp.value = praefix + inp.value.trim();
+    inp.dispatchEvent(new Event('input'));
+  });
+  showToast('Auf alle Zeilen angewendet.');
+});
+$('siEkVpTauschenBtn').addEventListener('click', () => {
+  $('siListe').querySelectorAll('.si-row:not(.leer)').forEach(row => {
+    const ek = row.querySelector('.si-in-ek');
+    const vp = row.querySelector('.si-in-vp');
+    const tausch = ek.value; ek.value = vp.value; vp.value = tausch;
+  });
+  showToast('EK/VP bei allen Zeilen getauscht.');
+});
 
 $('siDateiBtn').addEventListener('click', () => $('siDateiInput').click());
 $('siDateiInput').addEventListener('change', () => {
