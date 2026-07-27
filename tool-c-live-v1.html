@@ -207,6 +207,7 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
       <label class="checklabel"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="checkbox" id="amOt"> Offertentool</label>
       <label class="checklabel"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="checkbox" id="amWt"> Webtool</label>
       <label class="checklabel"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="checkbox" id="amEb"> Easybill</label>
+      <label class="checklabel"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="checkbox" id="amHaendisch"> Händischer Abgleich</label>
     </div>
     <div class="ovlbtns">
       <button class="btnlink" id="amCancel">Abbrechen</button>
@@ -313,6 +314,7 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
           <th data-sort="sync_offertentool" style="width:36px;text-align:center;" class="hidden">OT</th>
           <th data-sort="sync_webtool" style="width:36px;text-align:center;" class="hidden">WT</th>
           <th data-sort="sync_easybill" style="width:36px;text-align:center;">EB</th>
+          <th data-sort="haendischer_abgleich" style="width:36px;text-align:center;">MAN</th>
           <th></th>
         </tr>
       </thead>
@@ -330,6 +332,8 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
           <option value="">Sync-Flag setzen…</option>
           <option value="sync_easybill:1">Easybill: Ein</option>
           <option value="sync_easybill:0">Easybill: Aus</option>
+          <option value="haendischer_abgleich:1">Händischer Abgleich: Ein</option>
+          <option value="haendischer_abgleich:0">Händischer Abgleich: Aus</option>
         </select>
         <button class="btn" id="bulkDeleteBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></svg> Löschen</button>
       </div>
@@ -514,7 +518,7 @@ async function loadArtikel(){
   const { data, error } = await sb.from('artikel')
     .select(`id, artikelnummer_lieferant, artikelnummer_knecht, bezeichnung, einheit, kategorie,
       ep_lieferant, vp_lieferant, waehrung, wechselkurs, vp_knecht, mwst_satz_pct,
-      anmerkung, foto_url, shop_link, sync_offertentool, sync_webtool, sync_easybill,
+      anmerkung, foto_url, shop_link, sync_offertentool, sync_webtool, sync_easybill, haendischer_abgleich,
       lieferant_id, artikelgruppe_id, lieferant(name,kuerzel,archiviert_am), artikelgruppe(name)`);
   if(error){ console.error(error); return; }
   ARTIKEL = data.map(a => ({ ...a, lieferant_name: a.lieferant?.name || '',
@@ -564,6 +568,7 @@ function renderArtikelTable(){
       <td style="text-align:center;" class="hidden"><span class="syncbadge ${a.sync_offertentool?'on':''}" title="Offertentool">OT</span></td>
       <td style="text-align:center;" class="hidden"><span class="syncbadge ${a.sync_webtool?'on':''}" title="Webtool">WT</span></td>
       <td style="text-align:center;"><span class="syncbadge ${a.sync_easybill?'on':''}" title="Easybill">EB</span></td>
+      <td style="text-align:center;"><span class="syncbadge ${a.haendischer_abgleich?'on':''}" style="cursor:pointer;" title="Händischer Abgleich - hier klicken zum Ein-/Ausschalten" onclick="toggleHaendischerAbgleich('${a.id}')">MAN</span></td>
       <td style="display:flex;gap:4px;">
         ${a.foto_url
           ? `<button class="icobtn" title="Foto ansehen" onclick="oeffneFotoZoom('${a.foto_url}')">${ICON.foto}</button>`
@@ -675,7 +680,7 @@ function openArtikelModalAdd(){
   $('amWechselkurs').value = '1'; $('amVpKnecht').value = ''; $('amMwst').value = '';
   $('amFoto').value = ''; $('amShop').value = ''; $('amAnmerkung').value = '';
   amFotoVorschauAktualisieren();
-  $('amOt').checked = false; $('amWt').checked = false; $('amEb').checked = false;
+  $('amOt').checked = false; $('amWt').checked = false; $('amEb').checked = false; $('amHaendisch').checked = false;
   $('amStatus').textContent = ''; $('amStatus').className = 'status';
   amAktualisiereMargen();
   $('artikelModalOvl').classList.add('show');
@@ -706,6 +711,7 @@ function openArtikelModalEdit(id){
   $('amOt').checked = !!a.sync_offertentool;
   $('amWt').checked = !!a.sync_webtool;
   $('amEb').checked = !!a.sync_easybill;
+  $('amHaendisch').checked = !!a.haendischer_abgleich;
   $('amStatus').textContent = ''; $('amStatus').className = 'status';
   amAktualisiereMargen();
   $('artikelModalOvl').classList.add('show');
@@ -795,7 +801,8 @@ $('amSave').addEventListener('click', async () => {
     anmerkung: $('amAnmerkung').value.trim() || null,
     sync_offertentool: $('amOt').checked,
     sync_webtool: $('amWt').checked,
-    sync_easybill: $('amEb').checked
+    sync_easybill: $('amEb').checked,
+    haendischer_abgleich: $('amHaendisch').checked
   };
 
   const { error } = amMode === 'add'
@@ -887,6 +894,19 @@ async function deleteArtikel(id){
   const { error } = await sb.from('artikel').delete().eq('id', id);
   if(error){ showToast(friendlyError(error), true); return; }
   await loadArtikel();
+}
+
+// Direkt in der Tabelle per Klick umschaltbar (kein Modal noetig) - dieses
+// Haekchen wird typischerweise oefter angepasst als OT/WT/EB, darum bewusst
+// als schneller Ein-Klick-Toggle statt ueber "Bearbeiten".
+async function toggleHaendischerAbgleich(id){
+  const a = ARTIKEL.find(x => x.id === id);
+  if(!a) return;
+  const neu = !a.haendischer_abgleich;
+  const { error } = await sb.from('artikel').update({ haendischer_abgleich: neu }).eq('id', id);
+  if(error){ showToast(friendlyError(error), true); return; }
+  a.haendischer_abgleich = neu;
+  renderArtikelTable();
 }
 
 $('addArtBtn').addEventListener('click', openArtikelModalAdd);
