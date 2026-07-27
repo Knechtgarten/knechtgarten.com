@@ -98,7 +98,7 @@ h1{font-size:19px;color:var(--primary);margin-bottom:2px;}
 .segbtn.on{background:var(--primary);border-color:var(--primary);color:#fff;}
 .segbtn.gesperrt{opacity:.45;cursor:not-allowed;}
 .segbtn.gesperrt.on{background:var(--muted);border-color:var(--muted);}
-#kategorieCard.kategorie-irrelevant .segrow.eq4{opacity:.4;}
+#kategorieCard.kategorie-irrelevant #kategorieSegrow{opacity:.4;}
 .segbtn[data-tip]:hover::after{
   content:attr(data-tip);position:absolute;top:100%;left:50%;transform:translateX(-50%);margin-top:9px;
   width:210px;background:var(--primary);color:#fff;font-size:11px;font-weight:400;line-height:1.5;
@@ -291,12 +291,8 @@ table.data td.num{text-align:right;font-variant-numeric:tabular-nums;}
         <div class="cardlabel">Kategorie für neue Artikel</div>
         <div class="hint" style="margin-top:0;margin-bottom:12px;">Nur relevant bei "Daten ergänzen" - das Sheet liefert keine Kategorie mit.</div>
         <div class="hint" id="kategorieAutoHinweis" style="display:none;margin-top:0;margin-bottom:12px;color:var(--ink);font-weight:600;">Diese Quelle liefert die Kategorie pro Artikel schon selbst mit (siehe Spalte unten) - die Auswahl hier wird ignoriert.</div>
-        <div class="segrow eq4">
-          <button class="segbtn" data-kategorie="material">Material</button>
-          <button class="segbtn" data-kategorie="personal">Personal</button>
-          <button class="segbtn" data-kategorie="maschine">Maschine</button>
-          <button class="segbtn" data-kategorie="logistik">Logistik</button>
-        </div>
+        <div class="hint" id="kategorieFestHinweis" style="display:none;margin-top:0;margin-bottom:12px;color:var(--ink);font-weight:600;"></div>
+        <div class="segrow eq" id="kategorieSegrow"></div>
       </div>
 
       <div class="card">
@@ -847,21 +843,42 @@ function renderKaListe(feld, zielId){
 
 // ---- Kategorie-Default fuer neue Artikel (nur bei Modus=Ergaenzen sichtbar,
 // gilt gleichermassen fuer Crawling wie Google Sheet - siehe wendeModusUndQuelleAn) ----
-function renderKategorie(){
-  const kat = LIEF.da.kategorie_default || 'material';
-  document.querySelectorAll('.segbtn[data-kategorie]').forEach(btn => btn.classList.toggle('on', btn.dataset.kategorie === kat));
+// Welche Kategorien fuer diesen Lieferanten ueberhaupt in Frage kommen, wird
+// jetzt in den Einstellungen beim Lieferanten festgelegt (kategorie_material/
+// -personal/-maschine/-logistik), nicht mehr nur hier im Abgleich-Fenster:
+// - genau 1 angehakt -> fest vorgegeben, keine Auswahl noetig/moeglich.
+// - mehrere angehakt -> nur diese stehen hier zur Auswahl.
+// - keins angehakt (Standard bei aelteren Lieferanten) -> weiterhin alle 4.
+const KATEGORIE_LABEL = { material: 'Material', personal: 'Personal', maschine: 'Maschine', logistik: 'Logistik' };
+function lieferantErlaubteKategorien(){
+  const alle = ['material', 'personal', 'maschine', 'logistik'];
+  const erlaubt = alle.filter(k => LIEF.da[`kategorie_${k}`]);
+  return erlaubt.length ? erlaubt : alle;
 }
-document.querySelectorAll('.segbtn[data-kategorie]').forEach(btn => {
-  btn.addEventListener('click', async () => {
-    document.querySelectorAll('.segbtn[data-kategorie]').forEach(b => b.classList.remove('on'));
-    btn.classList.add('on');
-    const kat = btn.dataset.kategorie;
-    const { error } = await sb.from('lieferant_datenabgleich').upsert({ lieferant_id: LIEFERANT_ID, kategorie_default: kat }, { onConflict: 'lieferant_id' });
-    if(error){ showToast(friendlyError(error), true); return; }
-    LIEF.da.kategorie_default = kat;
-    showToast('Gespeichert.');
+function renderKategorie(){
+  const erlaubt = lieferantErlaubteKategorien();
+  if(erlaubt.length === 1){
+    LIEF.da.kategorie_default = erlaubt[0];
+    $('kategorieSegrow').innerHTML = '';
+    $('kategorieFestHinweis').textContent = `Kategorie für diesen Lieferanten fest auf "${KATEGORIE_LABEL[erlaubt[0]]}" eingestellt (änderbar in den Einstellungen beim Lieferanten).`;
+    $('kategorieFestHinweis').style.display = '';
+    return;
+  }
+  $('kategorieFestHinweis').style.display = 'none';
+  const kat = erlaubt.includes(LIEF.da.kategorie_default) ? LIEF.da.kategorie_default : erlaubt[0];
+  $('kategorieSegrow').innerHTML = erlaubt.map(k => `<button class="segbtn${k === kat ? ' on' : ''}" data-kategorie="${k}">${KATEGORIE_LABEL[k]}</button>`).join('');
+  $('kategorieSegrow').querySelectorAll('.segbtn[data-kategorie]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      $('kategorieSegrow').querySelectorAll('.segbtn').forEach(b => b.classList.remove('on'));
+      btn.classList.add('on');
+      const neu = btn.dataset.kategorie;
+      const { error } = await sb.from('lieferant_datenabgleich').upsert({ lieferant_id: LIEFERANT_ID, kategorie_default: neu }, { onConflict: 'lieferant_id' });
+      if(error){ showToast(friendlyError(error), true); return; }
+      LIEF.da.kategorie_default = neu;
+      showToast('Gespeichert.');
+    });
   });
-});
+}
 
 // ---------------------------------------------------------------------------
 // Google Sheet: Link speichern + Spalten-Zuordnung per Drag & Drop.
@@ -1156,7 +1173,6 @@ function renderNichtAbgeglichen(liste){
 let NEUE_ARTIKEL_LISTE = [];
 function renderNeueArtikel(liste){
   NEUE_ARTIKEL_LISTE = liste;
-  const KATEGORIE_LABEL = { material: 'Material', personal: 'Personal', maschine: 'Maschine', logistik: 'Logistik' };
   $('ergaenzenBody').innerHTML = liste.map((a, i) => `
     <tr data-i="${i}">
       <td><input type="checkbox" class="ergaenzen-check appcheck" checked></td>
