@@ -1450,6 +1450,45 @@ function parseDaeppBetonpumpePdf(text){
   return ergebnisse;
 }
 
+// ---- PDF-Preisliste (Kieswerk Daepp AG, "Betonzusatzmittel" - Teil von
+// "Betonzusaetze und Zuschlaege") ----
+// Nur die Zeilen 1-6 der Tabelle "Betonzusatzmittel" werden gebraucht (alles
+// andere auf dieser Seite - Bindemittel, Zusatzstoffe, Zuschlaege,
+// Nachtarbeitszuschlaege - explizit NICHT). Namen + Kurzbezeichnungen sind
+// eine feste, branchenuebliche Liste (aendert sich erfahrungsgemaess nicht),
+// darum hier hinterlegt statt aus dem oft mehrdeutig zusammenhaengenden
+// Fliesstext geparst - nur die zugehoerigen 6 Preise werden wirklich aus dem
+// PDF gelesen. Anker: die eindeutige Zeile "PREISE IN CHF PRO KG" direkt vor
+// den 6 Preisen der Betonzusatzmittel (die spaeteren Preisbloecke auf
+// derselben Seite - Zusatzstoffe, Zuschlaege - haben andere Ueberschriften
+// wie "PREISE IN CHF PRO KG/SACK", werden also nicht faelschlich erfasst).
+const DAEPP_BETONZUSATZMITTEL = [
+  { code: 'FM', name: 'Fliessmittel / Verflüssiger' },
+  { code: 'VZ', name: 'Verzögerer' },
+  { code: 'LP', name: 'Luftporenbildner' },
+  { code: 'FS', name: 'Frostschutz' },
+  { code: 'SRA', name: 'Schwindreduktionsmittel' },
+  { code: 'HBE', name: 'Erhärtungsbeschleuniger' },
+];
+function parseDaeppBetonzusatzmittelPdf(text){
+  const zeilen = text.split('\n').map(z => z.trim()).filter(Boolean);
+  const ankerIndex = zeilen.findIndex(z => /^PREISE IN CHF PRO KG$/i.test(z));
+  if(ankerIndex === -1) return [];
+  const preisZeile = zeilen[ankerIndex + 1];
+  if(!preisZeile) return [];
+  const preise = preisZeile.split(/\s+/);
+  if(preise.length !== DAEPP_BETONZUSATZMITTEL.length) return [];
+  if(!preise.every(p => /^\d+[.,]\d+$/.test(p))) return [];
+  return DAEPP_BETONZUSATZMITTEL.map((z, k) => ({
+    artikelnummer_lieferant: `Beton-${z.code}`,
+    bezeichnung: `Betonzusatzmittel ${z.name}`,
+    ep_lieferant: parseFloat(preise[k].replace(',', '.')),
+    einheit: 'kg',
+    foto_url: null,
+    kategorie: 'material',
+  }));
+}
+
 // Registry aller unterstuetzten PDF-Formate - pro Eintrag ein eigener
 // Parser, genau wie shop_software bei Crawling pro Plattform eine eigene
 // Edge Function auswaehlt. Ein Lieferant kann mehrere Formate brauchen
@@ -1467,6 +1506,9 @@ function findeDaeppBetonSeite(seiten){
 }
 function findeDaeppBetonpumpeSeite(seiten){
   return seiten.findIndex(t => /STAFFELPREISE/i.test(t));
+}
+function findeDaeppBetonzusatzmittelSeite(seiten){
+  return seiten.findIndex(t => /^PREISE IN CHF PRO KG$/im.test(t));
 }
 async function parseDaeppBetonFormat(file){
   const seiten = await extrahierePdfAlleSeiten(file);
@@ -1488,6 +1530,16 @@ async function parseDaeppBetonpumpeFormat(file){
   const artikel = parseDaeppBetonpumpePdf(text);
   return { artikel, debug: artikel.length ? null : { gefundenAufSeite: seitenIndex + 1, textLaenge: text.length, textAusschnitt: text.slice(0, 1500) } };
 }
+async function parseDaeppBetonzusatzmittelFormat(file){
+  const seiten = await extrahierePdfAlleSeiten(file);
+  const seitenIndex = findeDaeppBetonzusatzmittelSeite(seiten);
+  if(seitenIndex === -1){
+    return { artikel: [], debug: { anzahlSeitenImPdf: seiten.length, hinweis: 'Keine Seite mit "Preise in CHF pro kg" (Betonzusatzmittel) im PDF gefunden.' } };
+  }
+  const text = seiten[seitenIndex];
+  const artikel = parseDaeppBetonzusatzmittelPdf(text);
+  return { artikel, debug: artikel.length ? null : { gefundenAufSeite: seitenIndex + 1, textLaenge: text.length, textAusschnitt: text.slice(0, 1500) } };
+}
 // Gesamtpreisliste: EINE PDF-Datei enthaelt mehrere Bereiche (aktuell Beton
 // nach Herstellerrezept + Betonpumpe, spaeter evtl. weitere wie Betonzusaetze/
 // Zuschlaege) - alle Seiten werden nur EINMAL eingelesen, dann wird pro
@@ -1500,12 +1552,14 @@ async function parseDaeppGesamtFormat(file){
   const seiten = await extrahierePdfAlleSeiten(file);
   const betonSeite = findeDaeppBetonSeite(seiten);
   const pumpeSeite = findeDaeppBetonpumpeSeite(seiten);
+  const zusatzmittelSeite = findeDaeppBetonzusatzmittelSeite(seiten);
   const artikel = [
     ...(betonSeite !== -1 ? parseDaeppBetonPdf(seiten[betonSeite]) : []),
     ...(pumpeSeite !== -1 ? parseDaeppBetonpumpePdf(seiten[pumpeSeite]) : []),
+    ...(zusatzmittelSeite !== -1 ? parseDaeppBetonzusatzmittelPdf(seiten[zusatzmittelSeite]) : []),
   ];
   if(!artikel.length){
-    return { artikel, debug: { anzahlSeitenImPdf: seiten.length, betonSeiteGefunden: betonSeite !== -1, pumpeSeiteGefunden: pumpeSeite !== -1 } };
+    return { artikel, debug: { anzahlSeitenImPdf: seiten.length, betonSeiteGefunden: betonSeite !== -1, pumpeSeiteGefunden: pumpeSeite !== -1, zusatzmittelSeiteGefunden: zusatzmittelSeite !== -1 } };
   }
   return { artikel, debug: null };
 }
@@ -1520,9 +1574,14 @@ const PDF_FORMATE = {
     hinweis: 'Lade das PDF von Kieswerk Daepp AG hoch, das die Seite "Staffelpreise für Einsatz mit Fahrmischerpumpe" enthält - die passende Seite wird automatisch gesucht, unabhängig davon, an welcher Stelle im Dokument sie steht.',
     parse: parseDaeppBetonpumpeFormat,
   },
+  daepp_betonzusatzmittel: {
+    label: 'Kieswerk Daepp AG – Betonzusatzmittel (Teil von Betonzusätze und Zuschläge)',
+    hinweis: 'Lade das PDF von Kieswerk Daepp AG hoch, das die Tabelle "Betonzusatzmittel" (Fliessmittel, Verzögerer, Luftporenbildner, Frostschutz, Schwindreduktionsmittel, Erhärtungsbeschleuniger) enthält - die passende Seite wird automatisch gesucht.',
+    parse: parseDaeppBetonzusatzmittelFormat,
+  },
   daepp_gesamt: {
     label: 'Kieswerk Daepp AG – Gesamtpreisliste (alle Bereiche in einem PDF)',
-    hinweis: 'Lade die komplette Preisliste von Kieswerk Daepp AG hoch (die grosse PDF mit allen Bereichen) - Beton nach Herstellerrezept und Betonpumpe werden automatisch gefunden und je mit der passenden Kategorie (Material bzw. Logistik) übernommen.',
+    hinweis: 'Lade die komplette Preisliste von Kieswerk Daepp AG hoch (die grosse PDF mit allen Bereichen) - Beton nach Herstellerrezept, Betonpumpe und Betonzusatzmittel werden automatisch gefunden und je mit der passenden Kategorie (Material bzw. Logistik) übernommen.',
     parse: parseDaeppGesamtFormat,
   },
 };
