@@ -137,6 +137,10 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
 .logincard h2{font-size:16px;color:var(--primary);margin-bottom:14px;}
 .logincard .fld{margin-bottom:10px;}
 .hidden{display:none !important;}
+.am-foto-dropzone{display:flex;align-items:center;gap:8px;border:1.5px dashed var(--line);border-radius:8px;padding:6px 8px;transition:border-color .15s, background .15s;}
+.am-foto-dropzone.active{border-color:var(--primary-l);background:var(--soft);}
+.am-foto-dropzone img{width:34px;height:34px;object-fit:cover;border-radius:6px;border:1px solid var(--line);flex-shrink:0;cursor:zoom-in;}
+.am-foto-dropzone-text{flex:1;font-size:10.5px;color:var(--muted);line-height:1.3;}
 </style>
 </head>
 <body>
@@ -197,12 +201,14 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
     <div class="row">
       <div class="fld">
         <label>Foto</label>
-        <div style="display:flex;align-items:center;gap:8px;">
-          <img id="amFotoPreview" alt="" style="width:34px;height:34px;object-fit:cover;border-radius:6px;border:1px solid var(--line);display:none;flex-shrink:0;">
-          <input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="amFoto" placeholder="Foto-URL (oder hochladen)" style="flex:1;">
+        <div class="am-foto-dropzone" id="amFotoDropzone">
+          <img id="amFotoPreview" alt="" style="display:none;">
+          <span class="am-foto-dropzone-text" id="amFotoDropzoneText">Bild einfügen (Strg+V) oder hineinziehen</span>
           <button type="button" class="icobtn" id="amFotoUploadBtn" title="Vom PC hochladen"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg></button>
+          <button type="button" class="icobtn danger hidden" id="amFotoEntfernenBtn" title="Foto entfernen"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
           <input type="file" id="amFotoUploadInput" accept="image/*" class="hidden">
         </div>
+        <input type="hidden" id="amFoto">
       </div>
       <div class="fld"><label>Shop-Link</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="amShop"></div>
     </div>
@@ -642,7 +648,8 @@ function amFotoVorschauAktualisieren(){
   const url = $('amFoto').value.trim();
   $('amFotoPreview').src = url;
   $('amFotoPreview').style.display = url ? '' : 'none';
-  $('amFotoPreview').style.cursor = url ? 'zoom-in' : '';
+  $('amFotoDropzoneText').style.display = url ? 'none' : '';
+  $('amFotoEntfernenBtn').classList.toggle('hidden', !url);
 }
 function oeffneFotoZoom(url){
   if(!url) return;
@@ -658,16 +665,40 @@ async function uploadArtikelFoto(file){
   if(error){ showToast(friendlyError(error), true); return null; }
   return sb.storage.from('artikel-fotos').getPublicUrl(pfad).data.publicUrl;
 }
-$('amFoto').addEventListener('input', amFotoVorschauAktualisieren);
-$('amFotoUploadBtn').addEventListener('click', () => $('amFotoUploadInput').click());
-$('amFotoUploadInput').addEventListener('change', async () => {
-  const file = $('amFotoUploadInput').files[0];
-  if(!file) return;
+async function amFotoDatenUebernehmen(file){
+  if(!file || !file.type.startsWith('image/')) return;
   const url = await uploadArtikelFoto(file);
-  $('amFotoUploadInput').value = '';
   if(!url) return;
   $('amFoto').value = url;
   amFotoVorschauAktualisieren();
+}
+$('amFotoUploadBtn').addEventListener('click', () => $('amFotoUploadInput').click());
+$('amFotoUploadInput').addEventListener('change', async () => {
+  const file = $('amFotoUploadInput').files[0];
+  $('amFotoUploadInput').value = '';
+  await amFotoDatenUebernehmen(file);
+});
+$('amFotoEntfernenBtn').addEventListener('click', () => {
+  $('amFoto').value = '';
+  amFotoVorschauAktualisieren();
+});
+$('amFotoDropzone').addEventListener('dragover', (e) => { e.preventDefault(); $('amFotoDropzone').classList.add('active'); });
+$('amFotoDropzone').addEventListener('dragleave', () => $('amFotoDropzone').classList.remove('active'));
+$('amFotoDropzone').addEventListener('drop', async (e) => {
+  e.preventDefault(); $('amFotoDropzone').classList.remove('active');
+  await amFotoDatenUebernehmen(e.dataTransfer.files?.[0]);
+});
+// Nur aktiv, solange das Artikel-Modal offen ist, damit ein Bild-Paste
+// anderswo auf der Seite nicht ungefragt hier landet.
+document.addEventListener('paste', async (e) => {
+  if(!$('artikelModalOvl').classList.contains('show')) return;
+  const items = e.clipboardData?.items || [];
+  for(const item of items){
+    if(item.type.startsWith('image/')){
+      await amFotoDatenUebernehmen(item.getAsFile());
+      break;
+    }
+  }
 });
 
 function populateAmLieferantSelect(selectedId){
