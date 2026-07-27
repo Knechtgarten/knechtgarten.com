@@ -1514,6 +1514,62 @@ function parseDaeppBetonzusatzmittelPdf(text){
   return ergebnisse;
 }
 
+// ---- PDF-Preisliste (Atelier Vierkant, "PRICE LIST") ----
+// Das PDF besteht nur aus dieser mehrseitigen Preisliste (5 Seiten, je 3
+// Spalten-Bloecke nebeneinander: Seite/Modell/Preis in EUR) - die "PAGE"-
+// Spalte verweist auf einen separaten, hier nicht enthaltenen Fotokatalog
+// und wird nicht gebraucht. Da unklar ist, in welcher Reihenfolge pdf.js die
+// drei nebeneinanderliegenden Spalten-Bloecke tatsaechlich liefert, wird
+// NICHT auf eine Spalten-/Block-Position vertraut (anders als bei der
+// Betonpumpen-Tabelle) - stattdessen wird der ganze Text jeder Seite flach
+// durchsucht: sobald ein Text-Fragment exakt einem gesuchten Modellnamen
+// entspricht, gilt das UNMITTELBAR folgende Fragment als dessen Preis. Das
+// funktioniert nur, wenn Modell und Preis im von pdf.js gelieferten
+// Text-Strom direkt aufeinanderfolgen - falls das PDF beim echten Test 0
+// Artikel liefert, mit der Debug-Info-Box die echte Reihenfolge pruefen.
+// Preise im PDF gelten fuer graue Gefaesse; laut Fusszeile der Preisliste
+// kosten schwarze Gefaesse pauschal +10% (kein eigener Wert im PDF).
+const ATELIER_VIERKANT_HK_MODELLE = ['HK40', 'HK60', 'HK75', 'HK90'];
+const istAtelierVierkantUModell = t => /^U\d+$/.test(t);
+
+function parseAtelierVierkantPdf(text){
+  const zeilen = text.split('\n').map(z => z.trim()).filter(Boolean);
+  const istPreis = t => /^\d+([.,]\d+)?$/.test(t);
+  const ergebnisse = [];
+
+  for(let i = 0; i < zeilen.length; i++){
+    const modell = zeilen[i];
+    if(!ATELIER_VIERKANT_HK_MODELLE.includes(modell) && !istAtelierVierkantUModell(modell)) continue;
+    const preisToken = zeilen[i + 1];
+    if(!preisToken || !istPreis(preisToken)) continue;
+
+    const preisGrau = parseFloat(preisToken.replace(',', '.'));
+    ergebnisse.push({
+      artikelnummer_lieferant: `${modell}G`,
+      bezeichnung: `Gefäss Atelier Vierkant ${modell} Grau`,
+      ep_lieferant: preisGrau,
+      foto_url: null,
+      kategorie: 'material',
+    });
+    ergebnisse.push({
+      artikelnummer_lieferant: `${modell}Z`,
+      bezeichnung: `Gefäss Atelier Vierkant ${modell} Schwarz`,
+      ep_lieferant: Math.round(preisGrau * 1.1 * 100) / 100,
+      foto_url: null,
+      kategorie: 'material',
+    });
+  }
+  return ergebnisse;
+}
+async function parseAtelierVierkantFormat(file){
+  const seiten = await extrahierePdfAlleSeiten(file);
+  const artikel = seiten.flatMap(parseAtelierVierkantPdf);
+  if(!artikel.length){
+    return { artikel, debug: { anzahlSeitenImPdf: seiten.length } };
+  }
+  return { artikel, debug: null };
+}
+
 // Registry aller unterstuetzten PDF-Formate - pro Eintrag ein eigener
 // Parser, genau wie shop_software bei Crawling pro Plattform eine eigene
 // Edge Function auswaehlt. Ein Lieferant kann mehrere Formate brauchen
@@ -1563,6 +1619,11 @@ const PDF_FORMATE = {
     label: 'Daepp Beton',
     hinweis: 'Lade die komplette Preisliste von Kieswerk Daepp AG hoch (die grosse PDF mit allen Bereichen) - Beton nach Herstellerrezept, Betonpumpe und Betonzusatzmittel werden automatisch gefunden und je mit der passenden Kategorie (Material bzw. Logistik) übernommen.',
     parse: parseDaeppGesamtFormat,
+  },
+  atelier_vierkant: {
+    label: 'Atelier Vierkant',
+    hinweis: 'Lade die komplette Preisliste "Atelier Vierkant Preise" hoch - die Modelle HK40/HK60/HK75/HK90 sowie alle U-Modelle (U40 bis U160, ohne Buchstaben-Varianten wie UB/UC) werden automatisch gefunden, je als Grau- und Schwarz-Variante (Schwarz = Grau-Preis +10%). Preise stehen im PDF in Euro - bitte Währung des Lieferanten in den Einstellungen auf EUR prüfen.',
+    parse: parseAtelierVierkantFormat,
   },
 };
 function renderPdfFormat(){
