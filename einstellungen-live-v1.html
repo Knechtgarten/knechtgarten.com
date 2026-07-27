@@ -203,7 +203,11 @@ body.mitarbeiter-rolle .admin-only{display:none !important;}
 .si-zuordnung select{font-size:12px;font-weight:600;padding:5px 8px;border:1px solid var(--line);border-radius:6px;color:var(--ink);background:#fff;min-width:170px;}
 .si-erweitert-header{display:flex;align-items:center;gap:6px;cursor:pointer;-webkit-user-select:none;user-select:none;
   font-size:11.5px;font-weight:700;color:var(--muted);margin:4px 0 2px;}
-.si-spaltenkopf{display:grid;grid-template-columns:20px minmax(0,1fr) 150px;gap:10px;padding:0 10px;margin-bottom:8px;align-items:start;}
+/* .si-spaltenkopf sitzt im gepolsterten .si-zuordnung-Kasten (padding 14px),
+   .si-row aber nicht - margin -14px hebt dieses Polster wieder auf, padding
+   11px (= Rahmen+Polster von .si-row) sorgt dafuer, dass die Spalten hier
+   exakt ueber den Eingabefeldern jeder Zeile stehen. */
+.si-spaltenkopf{display:grid;grid-template-columns:20px minmax(0,1fr) 150px;gap:10px;margin:0 -14px 8px;padding:0 11px;align-items:start;}
 .si-spaltenkopf-fieldrow{display:flex;gap:8px;flex-wrap:nowrap;overflow-x:auto;min-width:0;align-items:start;padding-bottom:2px;}
 .si-spaltenkopf .si-fld{display:flex;flex-direction:column;gap:4px;flex-shrink:0;}
 .si-spaltenkopf .si-fld input{font-size:11px;padding:4px 6px;}
@@ -586,9 +590,10 @@ body.mitarbeiter-rolle .admin-only{display:none !important;}
               </div>
             </div>
 
-            <div class="hint" style="text-transform:uppercase;font-weight:700;letter-spacing:.03em;display:flex;align-items:center;justify-content:space-between;margin-top:10px;margin-bottom:0;">
-              <label class="chkrow" style="width:auto;gap:6px;"><input autocomplete="off" type="checkbox" class="appcheck" id="siAlleAuswaehlenCb" checked>Artikel</label>
-              <button class="btn" id="siAusgewaehlteBtn" type="button" style="text-transform:none;letter-spacing:normal;padding:4px 10px;font-size:11px;">Angehakt übernehmen</button>
+            <div class="si-spaltenkopf" style="margin:10px -14px 0;align-items:center;">
+              <label class="chkrow" style="width:auto;"><input autocomplete="off" type="checkbox" class="appcheck" id="siAlleAuswaehlenCb" checked></label>
+              <span class="hint" style="text-transform:uppercase;font-weight:700;letter-spacing:.03em;margin:0;">Artikel</span>
+              <button class="btn" id="siAusgewaehlteBtn" type="button" style="text-transform:none;letter-spacing:normal;padding:4px 10px;font-size:11px;justify-self:end;">Angehakt übernehmen</button>
             </div>
           </div>
           <div id="siListe"></div>
@@ -1972,9 +1977,8 @@ $('siLieferantSelect').addEventListener('change', () => {
   });
 });
 
-function siBaueZeile({ bezeichnung = '', artikelnummer = '', ek = '', vp = '', zusatzfelder = {} }){
+function siBaueZeile({ bezeichnung = '', artikelnummer = '', ek = '', vp = '', zusatz1 = '', zusatz2 = '' }){
   const row = document.createElement('div');
-  row._siZusatzfelder = zusatzfelder;
   row.className = 'si-row';
   row.innerHTML = `
     <input autocomplete="off" type="checkbox" class="si-row-check appcheck" checked>
@@ -1986,6 +1990,8 @@ function siBaueZeile({ bezeichnung = '', artikelnummer = '', ek = '', vp = '', z
       </div>
       <div class="si-fld small"><input class="si-in-ek" placeholder="EK-Preis" value="${ek ?? ''}"></div>
       <div class="si-fld small"><input class="si-in-vp" placeholder="VP-Preis" value="${vp ?? ''}"></div>
+      <div class="si-fld small"><input class="si-in-zusatz1" placeholder="Zusatz 1" value="${(zusatz1 || '').replace(/"/g,'&quot;')}"></div>
+      <div class="si-fld small"><input class="si-in-zusatz2" placeholder="Zusatz 2" value="${(zusatz2 || '').replace(/"/g,'&quot;')}"></div>
     </div>
     <div class="si-actions">
       <span class="badge si-neu">Neu</span>
@@ -1998,7 +2004,6 @@ function siBaueZeile({ bezeichnung = '', artikelnummer = '', ek = '', vp = '', z
     siPruefeVorhanden(row, row.querySelector('.si-in-nr').value.trim());
   });
   siAktualisiereKnechtVorschau(row);
-  siSyncZusatzfelderFuerZeile(row);
   row.querySelector('.icobtn.danger').addEventListener('click', () => row.remove());
   row.querySelector('.si-actions .btn').addEventListener('click', () => siUebernehmen(row));
 
@@ -2125,28 +2130,15 @@ async function siVerarbeiteBild(file){
       .filter(Boolean)
   );
   let uebersprungen = 0;
-  // Neue Zusatzspalten-Schluessel ZUERST sammeln, bevor irgendeine Zeile
-  // gebaut wird - sonst fehlt einer fruehen Zeile dieser Charge das Feld
-  // fuer einen Schluessel, der erst bei einem spaeteren Artikel derselben
-  // Erkennung auftaucht.
-  artikel.forEach(a => {
-    Object.keys(a.zusatzfelder || {}).forEach(k => {
-      if(!SI_ZUSATZSPALTEN.some(z => z.key === k)) SI_ZUSATZSPALTEN.push({ key: k, quelle: 'ki' });
-    });
-  });
   artikel.forEach(a => {
     const nrKey = (a.artikelnummer || '').trim().toLowerCase();
     if(nrKey){
       if(bekannteNummern.has(nrKey)){ uebersprungen++; return; }
       bekannteNummern.add(nrKey);
     }
-    const row = siBaueZeile({ bezeichnung: a.bezeichnung, artikelnummer: a.artikelnummer, ek: a.ek_preis, vp: a.vp_preis, zusatzfelder: a.zusatzfelder || {} });
+    const row = siBaueZeile({ bezeichnung: a.bezeichnung, artikelnummer: a.artikelnummer, ek: a.ek_preis, vp: a.vp_preis, zusatz1: a.zusatz_1, zusatz2: a.zusatz_2 });
     $('siListe').appendChild(row);
   });
-  // Zeilen aus einer FRUEHEREN Erkennung bekommen ebenfalls Felder fuer erst
-  // jetzt neu hinzugekommene Spalten (leer, aber vorhanden).
-  $('siListe').querySelectorAll('.si-row').forEach(siSyncZusatzfelderFuerZeile);
-  siRenderSpaltenkopf();
   const anzahlNeu = artikel.length - uebersprungen;
   $('siStatus').textContent = uebersprungen
     ? `${anzahlNeu} Artikel erkannt (${uebersprungen} Dublette${uebersprungen>1?'n':''} übersprungen).`
@@ -2180,62 +2172,48 @@ function siToggleErweitert(){
   chevron.style.transform = opening ? 'rotate(90deg)' : '';
 }
 
+// Immer GENAU 6 Spalten (nicht mehr dynamisch wachsend): vier feste
+// KI-Felder plus zwei generische "Zusatz"-Plaetze. Die KI-Erkennung
+// (schnellimport-bild-lesen) liefert dafuer ebenfalls immer nur "zusatz_1"/
+// "zusatz_2" statt beliebig benannter Zusatzfelder - so bleibt die
+// Spaltenzahl immer gleich (kein Umbruch/Scroll-Bedarf durch immer mehr
+// erkannte Eigenschaften, siehe fruehere Layout-Probleme).
 const SI_SPALTEN_FEST = [
-  { key: 'bezeichnung', inputSelector: '.si-in-bezeichnung', feldClass: 'grow' },
-  { key: 'artikelnummer', inputSelector: '.si-in-nr', feldClass: 'small' },
-  { key: 'ek_preis', inputSelector: '.si-in-ek', feldClass: 'small' },
-  { key: 'vp_preis', inputSelector: '.si-in-vp', feldClass: 'small' },
+  { key: 'bezeichnung', inputSelector: '.si-in-bezeichnung', feldClass: 'grow', titel: 'Bezeichnung' },
+  { key: 'artikelnummer', inputSelector: '.si-in-nr', feldClass: 'small', titel: 'Artikelnummer' },
+  { key: 'ek_preis', inputSelector: '.si-in-ek', feldClass: 'small', titel: 'EK-Preis' },
+  { key: 'vp_preis', inputSelector: '.si-in-vp', feldClass: 'small', titel: 'VP-Preis' },
+  { key: 'zusatz_1', inputSelector: '.si-in-zusatz1', feldClass: 'small', titel: 'Zusatz 1 (frei)' },
+  { key: 'zusatz_2', inputSelector: '.si-in-zusatz2', feldClass: 'small', titel: 'Zusatz 2 (frei)' },
 ];
 const SI_ROLLE_LABEL = { ignorieren: 'Nicht zuordnen', bezeichnung: 'Bezeichnung', artikelnummer: 'Artikelnummer', ek_preis: 'EK-Preis', vp_preis: 'VP-Preis', zusatzwert: 'Zusatzwert' };
-let SI_ZUSATZSPALTEN = [{ key: 'Zusatz 1', quelle: 'manuell' }, { key: 'Zusatz 2', quelle: 'manuell' }];
+// Default-Rolle: die vier festen KI-Felder starten mit ihrer eigenen
+// natuerlichen Rolle (was die KI dort eintraegt, ist ja meistens richtig),
+// die zwei generischen Zusatz-Plaetze starten neutral auf "Nicht zuordnen".
+const SI_SPALTE_DEFAULT_ROLLE = { bezeichnung: 'bezeichnung', artikelnummer: 'artikelnummer', ek_preis: 'ek_preis', vp_preis: 'vp_preis', zusatz_1: 'ignorieren', zusatz_2: 'ignorieren' };
 
-function siZusatzfeldInputHtml(spalte, wert){
-  return `<div class="si-fld small si-zusatz-fld" data-key="${spalte.key}"><input class="si-zusatz-feld" data-key="${spalte.key}" placeholder="${spalte.key}" value="${(wert || '').replace(/"/g,'&quot;')}"></div>`;
-}
-// Ergaenzt bei einer bereits gebauten Zeile die Eingabefelder fuer alle
-// aktuell bekannten Zusatzspalten, die dort noch fehlen (z.B. weil die
-// Spalte erst durch eine spaetere Bild-Erkennung dazugekommen ist).
-function siSyncZusatzfelderFuerZeile(row){
-  const fieldrow = row.querySelector('.si-fieldrow');
-  if(!fieldrow) return;
-  SI_ZUSATZSPALTEN.forEach(spalte => {
-    if(fieldrow.querySelector(`.si-zusatz-fld[data-key="${CSS.escape(spalte.key)}"]`)) return;
-    const wert = (row._siZusatzfelder || {})[spalte.key] || '';
-    fieldrow.insertAdjacentHTML('beforeend', siZusatzfeldInputHtml(spalte, wert));
-  });
-}
-
-function siSpaltenkopfZelleHtml(key, feldClass, titel){
-  return `<div class="si-fld ${feldClass}">
-    <input class="si-spalten-praefix" data-key="${key}" placeholder="Präfix…" title="Fester Text vor jeden Wert dieser Spalte, bei allen Zeilen">
-    <select class="si-spalten-rolle" data-key="${key}" title="${titel}">
+function siSpaltenkopfZelleHtml(spalte){
+  return `<div class="si-fld ${spalte.feldClass}">
+    <input class="si-spalten-praefix" data-key="${spalte.key}" placeholder="Präfix…" title="Fester Text vor jeden Wert dieser Spalte, bei allen Zeilen">
+    <select class="si-spalten-rolle" data-key="${spalte.key}" title="${spalte.titel}">
       ${Object.entries(SI_ROLLE_LABEL).map(([wert, label]) => `<option value="${wert}">${label}</option>`).join('')}
     </select>
   </div>`;
 }
-// Baut den Dropdown-Kopf direkt ueber der Artikel-Liste auf - EINMALIG pro
-// Spalte (feste Spalten fix, Zusatzspalten kommen dazu, sobald sie erkannt
-// wurden). Bereits vorhandene Dropdowns werden NIE neu erzeugt/zurueckgesetzt,
-// sonst wuerde eine schon getroffene Auswahl bei jedem neuen Bild wieder
-// verloren gehen.
+// Baut den Dropdown-Kopf direkt ueber der Artikel-Liste auf - EINMALIG beim
+// Laden der Seite (die Spaltenzahl steht jetzt fest, kein Nachbauen mehr
+// noetig, wenn ein Bild neue Eigenschaften liefert).
 function siRenderSpaltenkopf(){
   const fieldrow = $('siSpaltenkopfFieldrow');
+  fieldrow.innerHTML = SI_SPALTEN_FEST.map(siSpaltenkopfZelleHtml).join('');
   SI_SPALTEN_FEST.forEach(spalte => {
-    if(fieldrow.querySelector(`.si-spalten-rolle[data-key="${spalte.key}"]`)) return;
-    fieldrow.insertAdjacentHTML('beforeend', siSpaltenkopfZelleHtml(spalte.key, spalte.feldClass, SI_ROLLE_LABEL[spalte.key]));
-    fieldrow.querySelector(`.si-spalten-rolle[data-key="${spalte.key}"]`).value = spalte.key;
+    fieldrow.querySelector(`.si-spalten-rolle[data-key="${spalte.key}"]`).value = SI_SPALTE_DEFAULT_ROLLE[spalte.key];
   });
-  SI_ZUSATZSPALTEN.forEach(spalte => {
-    if(fieldrow.querySelector(`.si-spalten-rolle[data-key="${CSS.escape(spalte.key)}"]`)) return;
-    fieldrow.insertAdjacentHTML('beforeend', siSpaltenkopfZelleHtml(spalte.key, 'small', `${spalte.key}${spalte.quelle === 'manuell' ? ' (frei)' : ''}`));
-  });
+  // Nur EINE Spalte kann gleichzeitig als Zusatzwert gelten (artikel hat nur
+  // ein einziges Zusatzwert/-einheit-Feld) - waehlt der Nutzer eine zweite,
+  // wird die vorherige automatisch auf "Nicht zuordnen" zurueckgesetzt.
+  // Bezeichnung/Artikelnummer duerfen bewusst mehrfach gewaehlt werden.
   fieldrow.querySelectorAll('.si-spalten-rolle').forEach(sel => {
-    if(sel._siWired) return;
-    sel._siWired = true;
-    // Nur EINE Spalte kann gleichzeitig als Zusatzwert gelten (artikel hat
-    // nur ein einziges Zusatzwert/-einheit-Feld) - waehlt der Nutzer eine
-    // zweite, wird die vorherige automatisch auf "Nicht zuordnen" zurueckgesetzt.
-    // Bezeichnung/Artikelnummer duerfen bewusst mehrfach gewaehlt werden.
     sel.addEventListener('change', () => {
       if(sel.value === 'zusatzwert'){
         fieldrow.querySelectorAll('.si-spalten-rolle').forEach(other => {
@@ -2249,9 +2227,9 @@ siRenderSpaltenkopf();
 
 // Wendet die aktuelle Spalten-Zuordnung (Praefix + Dropdown-Rolle, siehe
 // "Erweiterte Einstellungen") auf EINE Zeile an: liest zuerst alle Rohwerte
-// (fest + zusatz) UNVERAENDERT ein (Snapshot), berechnet danach die vier
-// Zielfelder + Zusatzwert und schreibt sie erst am Schluss - so bleibt das
-// Ergebnis korrekt, auch wenn z.B. die Artikelnummer-Spalte selbst als Ziel
+// UNVERAENDERT ein (Snapshot), berechnet danach die vier Zielfelder +
+// Zusatzwert und schreibt sie erst am Schluss - so bleibt das Ergebnis
+// korrekt, auch wenn z.B. die Artikelnummer-Spalte selbst als Ziel
 // "Bezeichnung" bekommen hat. Wird direkt vor dem Speichern pro Zeile
 // aufgerufen (siehe "Angehakt uebernehmen"), kein eigener Button noetig.
 function siWendeZuordnungAn(row){
@@ -2262,7 +2240,6 @@ function siWendeZuordnungAn(row){
 
   const werte = {};
   SI_SPALTEN_FEST.forEach(spalte => { werte[spalte.key] = (row.querySelector(spalte.inputSelector)?.value || '').trim(); });
-  SI_ZUSATZSPALTEN.forEach(spalte => { werte[spalte.key] = (row.querySelector(`.si-zusatz-feld[data-key="${CSS.escape(spalte.key)}"]`)?.value || '').trim(); });
 
   const teilBeschreibung = [], teilArtikelnummer = [];
   let ekWert = '', vpWert = '', zusatzwertRoh = '';
