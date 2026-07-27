@@ -276,6 +276,13 @@ table.data td.num{text-align:right;font-variant-numeric:tabular-nums;}
         <div class="logbody" id="logBody"><div class="hint" style="margin:0;">Noch keine Ausführung.</div></div>
       </div>
 
+      <div class="card hidden" id="debugCard">
+        <div class="cardlabel">Debug-Info (0 Artikel gefunden)</div>
+        <div class="hint" style="margin-top:0;">Diese Angaben helfen bei der Fehlersuche - am besten direkt kopieren und im Chat einfügen.</div>
+        <pre id="debugText" style="font-family:'SFMono-Regular',Consolas,monospace;font-size:11px;line-height:1.6;background:var(--soft);border:1px solid var(--line);border-radius:6px;padding:10px;max-height:220px;overflow:auto;white-space:pre-wrap;word-break:break-word;margin:0 0 10px;"></pre>
+        <button class="btn" id="debugKopierenBtn" type="button">Debug-Info kopieren</button>
+      </div>
+
       <div class="card highlight hidden" id="kategorieCard">
         <div class="cardlabel">Kategorie für neue Artikel</div>
         <div class="hint" style="margin-top:0;margin-bottom:12px;">Nur relevant bei "Daten ergänzen" - das Sheet liefert keine Kategorie mit.</div>
@@ -1017,6 +1024,25 @@ function setzeStatus(klasse, text){
   el.className = 'statusbar ' + klasse;
   el.innerHTML = `<span class="dot"></span>${text}`;
 }
+function versteckeDebugInfo(){
+  $('debugCard').classList.add('hidden');
+  $('debugText').textContent = '';
+}
+// Wird angezeigt, wenn eine Shop-Crawling-Funktion 0 Artikel findet und dabei
+// ein "debug"-Objekt mitliefert (siehe supabase/functions/shop-crawling-*-lesen) -
+// erspart den Umweg ueber DevTools/Netzwerk-Tab, um die Fehlerursache zu finden.
+function zeigeDebugInfo(debug, kontext){
+  $('debugText').textContent = `Kontext: ${kontext}\n\n${JSON.stringify(debug, null, 2)}`;
+  $('debugCard').classList.remove('hidden');
+}
+$('debugKopierenBtn').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText($('debugText').textContent);
+    showToast('Debug-Info kopiert - jetzt im Chat einfügen.');
+  } catch (_e) {
+    showToast('Kopieren fehlgeschlagen - bitte Text im Kasten von Hand markieren und kopieren.', true);
+  }
+});
 function zeigeNochNichtEingerichtet(){
   logAnhaengen('Automatischer Abruf ist für diesen Lieferanten noch nicht eingerichtet - kommt in einer der nächsten Etappen.');
   $('logPanel').classList.add('open');
@@ -1103,6 +1129,7 @@ async function starteGoogleSheetAbgleich(){
 
   setzeStatus('arbeit', 'In Arbeit');
   $('logPanel').classList.add('open');
+  versteckeDebugInfo();
   logAnhaengen('Google Sheet wird geladen …');
 
   const daten = await ladeGoogleSheet();
@@ -1216,12 +1243,14 @@ async function starteCrawlingMerklisten(nurEineUrl){
 
   setzeStatus('arbeit', 'In Arbeit');
   $('logPanel').classList.add('open');
+  versteckeDebugInfo();
   let alleArtikel = [];
   for(const m of zuLaden){
     logAnhaengen(`Merkliste "${m.name || m.url}" wird geladen …`);
     const daten = await ladeMerklisteVomShop(m.url);
     if(!daten){ setzeStatus('gestoppt', 'Gestoppt'); return; }
     logAnhaengen(`${daten.artikel.length} Artikel in "${m.name || m.url}" gefunden.`);
+    if(daten.artikel.length === 0 && daten.debug) zeigeDebugInfo(daten.debug, m.name || m.url);
     alleArtikel = alleArtikel.concat(daten.artikel);
   }
   await verarbeiteGefundeneArtikel(alleArtikel, 'Shop', 'crawling');
