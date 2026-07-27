@@ -85,7 +85,9 @@ function parseDabagWarenkorb(html: string, origin: string) {
   for (let i = 0; i < positionen.length; i++) {
     const block = html.slice(positionen[i], positionen[i + 1] ?? html.length);
 
-    const nrMatch = block.match(/class="bsi-groessenr">\s*<a[^>]*>\s*<b>([^<]+)<\/b>/);
+    // Die Artikelnummer steht je nach Shop mit ODER ohne <b>-Umschlag im Link
+    // (z.B. bei B-Team Bern mit <b>, bei IMMER AG ohne) - beide Varianten abdecken.
+    const nrMatch = block.match(/class="bsi-groessenr">\s*<a[^>]*>\s*(?:<b>)?\s*([^<]+?)\s*(?:<\/b>)?\s*<\/a>/);
     if (!nrMatch) continue;
 
     const nameMatch = block.match(/class=['"]bsi-fakturatext['"]>([^<]+)<\/div>/);
