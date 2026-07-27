@@ -1300,6 +1300,22 @@ async function extrahierePdfText(file){
   const inhalt = await seite.getTextContent();
   return inhalt.items.map(it => it.str).join('\n');
 }
+// Liest den Text ALLER Seiten einzeln ein (fuer PDFs, bei denen die
+// gewuenschte Tabelle nicht auf Seite 1 steht und die Seitenzahl von
+// Ausgabe zu Ausgabe variieren kann, z.B. bei einer mehrseitigen
+// Gesamt-Preisliste). Der Aufrufer sucht sich anhand eines Ankertexts
+// selbst die passende Seite heraus, statt eine feste Seitenzahl anzunehmen.
+async function extrahierePdfAlleSeiten(file){
+  const buffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+  const seiten = [];
+  for(let i = 1; i <= pdf.numPages; i++){
+    const seite = await pdf.getPage(i);
+    const inhalt = await seite.getTextContent();
+    seiten.push(inhalt.items.map(it => it.str).join('\n'));
+  }
+  return seiten;
+}
 // Manche Preis-Zeilen im PDF enthalten mehrere Zahlen hintereinander in
 // einem einzigen Text-Fragment (z.B. "137.50 131.00 127.00 ..." als ein
 // Block statt eine Zahl pro Zeile) - solche reinen Zahlen-Zeilen werden hier
@@ -1384,16 +1400,77 @@ function parseDaeppBetonPdf(text){
     };
   });
 }
+// ---- PDF-Preisliste (Kieswerk Daepp AG, "Betonpumpe" - Staffelpreise Fahrmischerpumpe) ----
+// Ganz anderer Tabellenaufbau als die Beton-Herstellerrezept-Liste: pro
+// Block eine "Menge"-Zeile mit mehreren "N m3"-Werten hintereinander
+// (z.B. "ab 4 m3 5 m3 6 m3 ... 16 m3"), direkt gefolgt von einer
+// Preis-Zeile mit genau so vielen Preisen in derselben Reihenfolge
+// (z.B. "148.50 119.50 100.00 ..."). Es gibt einen dritten Block mit
+// Mengen-BEREICHEN (z.B. "31-40 m3", "ueber 300 m3") statt einzelner
+// Kubikzahlen - der wird bewusst nicht importiert (passt nicht zum
+// "Pum<N>"-Nummernschema und wurde vom Nutzer explizit ausgeschlossen).
+// Die Tabelle steht nicht auf Seite 1, darum wird sie anhand des Titels
+// "STAFFELPREISE" auf einer beliebigen Seite gesucht (siehe
+// parseDaeppBetonpumpeFormat) statt eine feste Seitenzahl anzunehmen.
+function parseDaeppBetonpumpePdf(text){
+  const zeilen = text.split('\n').map(z => z.trim()).filter(Boolean);
+  const ergebnisse = [];
+  const istMengenzeile = t => /^(ab\s+)?(\d+\s*m3\s*)+$/i.test(t);
+  const mengenAusZeile = t => { const out = []; const re = /(\d+)\s*m3/gi; let m; while((m = re.exec(t))) out.push(m[1]); return out; };
+  const istPreiszeile = t => /^\d+[.,]\d+(\s+\d+[.,]\d+)*$/.test(t);
+
+  for(let i = 0; i < zeilen.length; i++){
+    if(!istMengenzeile(zeilen[i])) continue;
+    const mengen = mengenAusZeile(zeilen[i]);
+    if(!mengen.length) continue;
+    const naechste = zeilen[i + 1];
+    if(!naechste || !istPreiszeile(naechste)) continue;
+    const preise = naechste.split(/\s+/);
+    if(preise.length !== mengen.length) continue;
+    mengen.forEach((m3, idx) => {
+      ergebnisse.push({
+        artikelnummer_lieferant: `Pum${m3}`,
+        bezeichnung: `Betonpumpen bis ${m3} Kubik`,
+        ep_lieferant: parseFloat(preise[idx].replace(',', '.')),
+        foto_url: null,
+      });
+    });
+  }
+  return ergebnisse;
+}
+
 // Registry aller unterstuetzten PDF-Formate - pro Eintrag ein eigener
 // Parser, genau wie shop_software bei Crawling pro Plattform eine eigene
 // Edge Function auswaehlt. Ein Lieferant kann mehrere Formate brauchen
 // (z.B. eine Preisliste fuer normale Ware, eine andere fuer Betonpumpen) -
-// darum ist die Auswahl pro Format, nicht pro Firma.
+// darum ist die Auswahl pro Format, nicht pro Firma. Jedes .parse(file)
+// gibt einheitlich { artikel, debug } zurueck - debug ist nur gesetzt, wenn
+// 0 Artikel gefunden wurden (siehe zeigeDebugInfo).
+async function parseDaeppBetonFormat(file){
+  const text = await extrahierePdfText(file);
+  const artikel = parseDaeppBetonPdf(text);
+  return { artikel, debug: artikel.length ? null : { textLaenge: text.length, textAusschnitt: text.slice(0, 1500) } };
+}
+async function parseDaeppBetonpumpeFormat(file){
+  const seiten = await extrahierePdfAlleSeiten(file);
+  const seitenIndex = seiten.findIndex(t => /STAFFELPREISE/i.test(t));
+  if(seitenIndex === -1){
+    return { artikel: [], debug: { anzahlSeitenImPdf: seiten.length, hinweis: 'Keine Seite mit "Staffelpreise" im PDF gefunden.' } };
+  }
+  const text = seiten[seitenIndex];
+  const artikel = parseDaeppBetonpumpePdf(text);
+  return { artikel, debug: artikel.length ? null : { gefundenAufSeite: seitenIndex + 1, textLaenge: text.length, textAusschnitt: text.slice(0, 1500) } };
+}
 const PDF_FORMATE = {
   daepp_beton: {
     label: 'Kieswerk Daepp AG – Beton nach Herstellerrezept',
     hinweis: 'Lade die PDF-Preisliste "Beton nach Herstellerrezept" von Kieswerk Daepp AG hoch (unabhängig davon, wie viele Seiten sie hat).',
-    parse: parseDaeppBetonPdf,
+    parse: parseDaeppBetonFormat,
+  },
+  daepp_betonpumpe: {
+    label: 'Kieswerk Daepp AG – Betonpumpe (Staffelpreise Fahrmischerpumpe)',
+    hinweis: 'Lade das PDF von Kieswerk Daepp AG hoch, das die Seite "Staffelpreise für Einsatz mit Fahrmischerpumpe" enthält - die passende Seite wird automatisch gesucht, unabhängig davon, an welcher Stelle im Dokument sie steht.',
+    parse: parseDaeppBetonpumpeFormat,
   },
 };
 function renderPdfFormat(){
@@ -1424,19 +1501,19 @@ $('pdfEinlesenBtn').addEventListener('click', async () => {
   versteckeDebugInfo();
   logAnhaengen(`PDF "${file.name}" wird eingelesen …`);
 
-  let text;
+  let ergebnis;
   try {
-    text = await extrahierePdfText(file);
+    ergebnis = await format.parse(file);
   } catch (e) {
     setzeStatus('gestoppt', 'Gestoppt');
     showToast('PDF konnte nicht gelesen werden: ' + (e.message || e), true);
     return;
   }
 
-  const artikel = format.parse(text);
+  const { artikel, debug } = ergebnis;
   logAnhaengen(`${artikel.length} Artikel im PDF gefunden.`);
   if(!artikel.length){
-    zeigeDebugInfo({ textLaenge: text.length, textAusschnitt: text.slice(0, 1500) }, file.name);
+    zeigeDebugInfo(debug || {}, file.name);
     setzeStatus('gestoppt', 'Gestoppt');
     return;
   }
