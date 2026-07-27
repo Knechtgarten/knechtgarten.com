@@ -98,6 +98,7 @@ h1{font-size:19px;color:var(--primary);margin-bottom:2px;}
 .segbtn.on{background:var(--primary);border-color:var(--primary);color:#fff;}
 .segbtn.gesperrt{opacity:.45;cursor:not-allowed;}
 .segbtn.gesperrt.on{background:var(--muted);border-color:var(--muted);}
+#kategorieCard.kategorie-irrelevant .segrow.eq4{opacity:.4;}
 .segbtn[data-tip]:hover::after{
   content:attr(data-tip);position:absolute;top:100%;left:50%;transform:translateX(-50%);margin-top:9px;
   width:210px;background:var(--primary);color:#fff;font-size:11px;font-weight:400;line-height:1.5;
@@ -289,6 +290,7 @@ table.data td.num{text-align:right;font-variant-numeric:tabular-nums;}
       <div class="card highlight hidden" id="kategorieCard">
         <div class="cardlabel">Kategorie für neue Artikel</div>
         <div class="hint" style="margin-top:0;margin-bottom:12px;">Nur relevant bei "Daten ergänzen" - das Sheet liefert keine Kategorie mit.</div>
+        <div class="hint" id="kategorieAutoHinweis" style="display:none;margin-top:0;margin-bottom:12px;color:var(--ink);font-weight:600;">Diese Quelle liefert die Kategorie pro Artikel schon selbst mit (siehe Spalte unten) - die Auswahl hier wird ignoriert.</div>
         <div class="segrow eq4">
           <button class="segbtn" data-kategorie="material">Material</button>
           <button class="segbtn" data-kategorie="personal">Personal</button>
@@ -1154,15 +1156,22 @@ function renderNichtAbgeglichen(liste){
 let NEUE_ARTIKEL_LISTE = [];
 function renderNeueArtikel(liste){
   NEUE_ARTIKEL_LISTE = liste;
+  const KATEGORIE_LABEL = { material: 'Material', personal: 'Personal', maschine: 'Maschine', logistik: 'Logistik' };
   $('ergaenzenBody').innerHTML = liste.map((a, i) => `
     <tr data-i="${i}">
       <td><input type="checkbox" class="ergaenzen-check appcheck" checked></td>
-      <td><div class="artname">${a.bezeichnung || '(ohne Bezeichnung)'}</div><div class="artmeta">${a.einheit || ''} · ${a.artikelnummer_lieferant}</div></td>
+      <td><div class="artname">${a.bezeichnung || '(ohne Bezeichnung)'}</div><div class="artmeta">${a.einheit || ''} · ${a.artikelnummer_lieferant}${a.kategorie ? ` · <span class="devtag" title="Kategorie wird von der Quelle vorgegeben">${KATEGORIE_LABEL[a.kategorie] || a.kategorie}</span>` : ''}</div></td>
       <td class="num">${fmtCHF(a.ep_lieferant) || '–'}</td>
     </tr>`).join('');
   $('ergaenzenUebernehmenBtn').disabled = liste.length === 0;
   $('ergaenzenUebernehmenBtn').classList.toggle('ready', liste.length > 0);
   $('ergaenzenUebernehmenBtn').title = liste.length ? '' : 'Verfügbar, sobald ein automatischer Abgleich abgeschlossen ist';
+  // Wenn (fast) alle neuen Artikel ihre Kategorie schon selbst mitbringen,
+  // ist die manuelle Auswahl oben fuer diesen Abgleich irrelevant - Hinweis
+  // entsprechend anpassen statt stillschweigend zu ignorieren.
+  const alleHabenKategorie = liste.length > 0 && liste.every(a => a.kategorie);
+  $('kategorieCard').classList.toggle('kategorie-irrelevant', alleHabenKategorie);
+  $('kategorieAutoHinweis').style.display = alleHabenKategorie ? '' : 'none';
 }
 async function starteGoogleSheetAbgleich(){
   const zuordnung = LIEF.da.sheet_spalten_zuordnung;
@@ -1397,6 +1406,7 @@ function parseDaeppBetonPdf(text){
       bezeichnung: `${r.abschnitt}, ${r.bindemittel} kg/m3, ${r.korngroesse}`,
       ep_lieferant: parseFloat(String(r.preis).replace(',', '.')),
       foto_url: null,
+      kategorie: 'material',
     };
   });
 }
@@ -1433,6 +1443,7 @@ function parseDaeppBetonpumpePdf(text){
         bezeichnung: `Betonpumpen bis ${m3} Kubik`,
         ep_lieferant: parseFloat(preise[idx].replace(',', '.')),
         foto_url: null,
+        kategorie: 'logistik',
       });
     });
   }
@@ -1446,20 +1457,57 @@ function parseDaeppBetonpumpePdf(text){
 // darum ist die Auswahl pro Format, nicht pro Firma. Jedes .parse(file)
 // gibt einheitlich { artikel, debug } zurueck - debug ist nur gesetzt, wenn
 // 0 Artikel gefunden wurden (siehe zeigeDebugInfo).
+// Sucht auf allen Seiten nach dem Abschnitt "MAGERBETON" (eindeutiger Anker
+// fuer "Beton nach Herstellerrezept") statt eine feste Seitenzahl
+// anzunehmen - funktioniert damit sowohl bei einer isolierten Einzelseite
+// als auch eingebettet in eine grosse Gesamt-Preisliste (dort z.B. Seite 7
+// statt Seite 1).
+function findeDaeppBetonSeite(seiten){
+  return seiten.findIndex(t => /^MAGERBETON/im.test(t));
+}
+function findeDaeppBetonpumpeSeite(seiten){
+  return seiten.findIndex(t => /STAFFELPREISE/i.test(t));
+}
 async function parseDaeppBetonFormat(file){
-  const text = await extrahierePdfText(file);
+  const seiten = await extrahierePdfAlleSeiten(file);
+  const seitenIndex = findeDaeppBetonSeite(seiten);
+  if(seitenIndex === -1){
+    return { artikel: [], debug: { anzahlSeitenImPdf: seiten.length, hinweis: 'Keine Seite mit "Magerbeton" (Beton nach Herstellerrezept) im PDF gefunden.' } };
+  }
+  const text = seiten[seitenIndex];
   const artikel = parseDaeppBetonPdf(text);
-  return { artikel, debug: artikel.length ? null : { textLaenge: text.length, textAusschnitt: text.slice(0, 1500) } };
+  return { artikel, debug: artikel.length ? null : { gefundenAufSeite: seitenIndex + 1, textLaenge: text.length, textAusschnitt: text.slice(0, 1500) } };
 }
 async function parseDaeppBetonpumpeFormat(file){
   const seiten = await extrahierePdfAlleSeiten(file);
-  const seitenIndex = seiten.findIndex(t => /STAFFELPREISE/i.test(t));
+  const seitenIndex = findeDaeppBetonpumpeSeite(seiten);
   if(seitenIndex === -1){
     return { artikel: [], debug: { anzahlSeitenImPdf: seiten.length, hinweis: 'Keine Seite mit "Staffelpreise" im PDF gefunden.' } };
   }
   const text = seiten[seitenIndex];
   const artikel = parseDaeppBetonpumpePdf(text);
   return { artikel, debug: artikel.length ? null : { gefundenAufSeite: seitenIndex + 1, textLaenge: text.length, textAusschnitt: text.slice(0, 1500) } };
+}
+// Gesamtpreisliste: EINE PDF-Datei enthaelt mehrere Bereiche (aktuell Beton
+// nach Herstellerrezept + Betonpumpe, spaeter evtl. weitere wie Betonzusaetze/
+// Zuschlaege) - alle Seiten werden nur EINMAL eingelesen, dann wird pro
+// bekanntem Bereich die zustaendige Seite gesucht und mit dessen eigenem
+// Parser ausgewertet. Jeder erkannte Artikel bringt schon seine eigene
+// Kategorie mit (siehe kategorie-Feld in parseDaeppBetonPdf/-BetonpumpePdf),
+// die manuellen Kategorie-Buttons im Abgleich-Fenster werden fuer diese
+// Artikel darum ignoriert (siehe renderNeueArtikel).
+async function parseDaeppGesamtFormat(file){
+  const seiten = await extrahierePdfAlleSeiten(file);
+  const betonSeite = findeDaeppBetonSeite(seiten);
+  const pumpeSeite = findeDaeppBetonpumpeSeite(seiten);
+  const artikel = [
+    ...(betonSeite !== -1 ? parseDaeppBetonPdf(seiten[betonSeite]) : []),
+    ...(pumpeSeite !== -1 ? parseDaeppBetonpumpePdf(seiten[pumpeSeite]) : []),
+  ];
+  if(!artikel.length){
+    return { artikel, debug: { anzahlSeitenImPdf: seiten.length, betonSeiteGefunden: betonSeite !== -1, pumpeSeiteGefunden: pumpeSeite !== -1 } };
+  }
+  return { artikel, debug: null };
 }
 const PDF_FORMATE = {
   daepp_beton: {
@@ -1471,6 +1519,11 @@ const PDF_FORMATE = {
     label: 'Kieswerk Daepp AG – Betonpumpe (Staffelpreise Fahrmischerpumpe)',
     hinweis: 'Lade das PDF von Kieswerk Daepp AG hoch, das die Seite "Staffelpreise für Einsatz mit Fahrmischerpumpe" enthält - die passende Seite wird automatisch gesucht, unabhängig davon, an welcher Stelle im Dokument sie steht.',
     parse: parseDaeppBetonpumpeFormat,
+  },
+  daepp_gesamt: {
+    label: 'Kieswerk Daepp AG – Gesamtpreisliste (alle Bereiche in einem PDF)',
+    hinweis: 'Lade die komplette Preisliste von Kieswerk Daepp AG hoch (die grosse PDF mit allen Bereichen) - Beton nach Herstellerrezept und Betonpumpe werden automatisch gefunden und je mit der passenden Kategorie (Material bzw. Logistik) übernommen.',
+    parse: parseDaeppGesamtFormat,
   },
 };
 function renderPdfFormat(){
@@ -1643,11 +1696,16 @@ $('ergaenzenCheckAll').addEventListener('change', () => {
 $('ergaenzenUebernehmenBtn').addEventListener('click', async () => {
   const rows = Array.from($('ergaenzenBody').querySelectorAll('tr[data-i]')).filter(tr => tr.querySelector('.ergaenzen-check').checked);
   if(!rows.length){ showToast('Keine Artikel zum Übernehmen markiert.', true); return; }
-  const kategorie = LIEF.da.kategorie_default || 'material';
+  const kategorieDefault = LIEF.da.kategorie_default || 'material';
   let anzahl = 0;
   for(const tr of rows){
     const a = NEUE_ARTIKEL_LISTE[parseInt(tr.dataset.i)];
     if(!a) continue;
+    // Bringt der gefundene Artikel schon eine eigene Kategorie mit (z.B. aus
+    // einer PDF-Gesamtpreisliste mit mehreren Bereichen), hat die Vorrang vor
+    // der manuellen Auswahl oben - siehe kategorie-Feld in parseDaeppBetonPdf/
+    // -BetonpumpePdf.
+    const kategorie = a.kategorie || kategorieDefault;
     const { data: neuArtikel, error: insErr } = await sb.from('artikel').insert({
       lieferant_id: LIEFERANT_ID,
       artikelnummer_lieferant: a.artikelnummer_lieferant,
