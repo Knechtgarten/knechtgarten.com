@@ -72,8 +72,9 @@ Deno.serve(async (req) => {
 
     const prompt = `Auf diesem Bild sind ein oder mehrere Verkaufs-/Preislisten-Artikel zu sehen (Screenshot einer Webseite, E-Mail oder Preisliste).
 Erkenne fuer JEDEN einzelnen Artikel: die Bezeichnung, die Artikelnummer, den Einkaufspreis (das ist meist der guenstigere/reduzierte Preis, z.B. bei "Kommission"/Netto-/Haendlerpreis) und den Verkaufspreis (der hoehere/durchgestrichene oder normale Listenpreis, falls vorhanden).
+Falls im Bild noch WEITERE, klar abgrenzbare Eigenschaften pro Artikel erkennbar sind, die nicht Bezeichnung/Artikelnummer/Preis sind (z.B. Masse, Volumen, Farbe, Gewicht, Material) - erfasse jede davon zusaetzlich unter "zusatzfelder" als Objekt, wobei der Schluessel der im Bild sichtbare Spaltenname ist (z.B. "Masse", "Volumen") und der Wert der erkannte Text/die Zahl aus dieser Spalte (z.B. "30 l", "D36 x H31").
 Antworte AUSSCHLIESSLICH mit einem JSON-Array, keine Erklaerung, kein Markdown-Codeblock. Jedes Element als Objekt mit genau diesen Feldern:
-{"bezeichnung": string, "artikelnummer": string oder null, "ek_preis": number oder null, "vp_preis": number oder null}
+{"bezeichnung": string, "artikelnummer": string oder null, "ek_preis": number oder null, "vp_preis": number oder null, "zusatzfelder": object oder null}
 Zahlen als reine Zahl ohne Waehrungszeichen (z.B. 36.25, nicht "CHF 36.25"). Wenn kein Artikel erkennbar ist, gib ein leeres Array [] zurueck.`;
 
     // Google benennt/entfernt Gemini-Modelle immer wieder ohne Vorwarnung
@@ -128,6 +129,9 @@ Zahlen als reine Zahl ohne Waehrungszeichen (z.B. 36.25, nicht "CHF 36.25"). Wen
       artikelnummer: a?.artikelnummer ? String(a.artikelnummer).trim() : null,
       ek_preis: parseZahl(a?.ek_preis),
       vp_preis: parseZahl(a?.vp_preis),
+      zusatzfelder: (a?.zusatzfelder && typeof a.zusatzfelder === 'object' && !Array.isArray(a.zusatzfelder))
+        ? Object.fromEntries(Object.entries(a.zusatzfelder).map(([k, v]) => [String(k).trim(), String(v ?? '').trim()]).filter(([k]) => k))
+        : {},
     })).filter((a) => a.bezeichnung);
 
     return json({ artikel });
