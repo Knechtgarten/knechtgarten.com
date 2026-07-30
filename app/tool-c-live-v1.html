@@ -567,7 +567,7 @@ renderKategorieFilter();
 // ---------------------------------------------------------------------------
 async function loadLieferanten(){
   const { data, error } = await sb.from('lieferant')
-    .select('id,name,kuerzel,sync_typ,lieferant_datenabgleich(zoll_fracht_prozent,sonderzuschlag_prozent,minimum_marge_prozent)')
+    .select('id,name,kuerzel,sync_typ,lieferant_datenabgleich(zoll_fracht_prozent,sonderzuschlag_prozent,minimum_marge_prozent,marge_lieferant_standard_prozent)')
     .order('name');
   if(error){ console.error(error); return; }
   LIEFERANTEN = data;
@@ -917,39 +917,86 @@ function openArtikelModalEdit(id){
 
 // ---------------------------------------------------------------------------
 // Marge Lieferant/Knecht: reine Live-Berechnung, wird nirgends gespeichert.
-// Einstandspreis = EP Lieferant (CHF via Wechselkurs) + Zollkosten (Zoll/
-// Fracht-% vom Lieferant, Basis EP) + Sonderzuschlag (%, ebenfalls Basis EP).
+// Einstandspreis = effektiver EK Lieferant (CHF via Wechselkurs) + Zollkosten
+// (Zoll/Fracht-% vom Lieferant) + Sonderzuschlag (%) - jeweils Basis EK.
+//
+// "Effektiver EK" ist normalerweise der echte EP-Lieferant-Wert. Fehlt der
+// (z.B. bei Crawling-Quellen, die nur einen oeffentlichen VK/UVP zeigen, kein
+// Netto-/Haendlerpreis), wird er aus VP Lieferant und der beim Lieferanten
+// hinterlegten "Marge Lieferant % (Standard)" zurueckgerechnet:
+// EK_angenommen = VP Lieferant x (1 - Standard-Marge/100). Ist auch das nicht
+// moeglich (keine Standard-Marge hinterlegt), bleibt der Einstand unbekannt
+// (null) statt fälschlich mit 0 weiterzurechnen.
 // ---------------------------------------------------------------------------
+function amEffektiverEkLieferant(){
+  const roh = $('amEpLief').value.trim();
+  if(roh !== '') return parseFloat(roh);
+  const vpLief = parseFloat($('amVpLief').value);
+  const standardMarge = LIEFERANTEN.find(l => l.id === $('amLieferant').value)?.lieferant_datenabgleich?.marge_lieferant_standard_prozent;
+  if(!isNaN(vpLief) && vpLief > 0 && standardMarge != null && standardMarge < 100){
+    return vpLief * (1 - standardMarge / 100);
+  }
+  return null;
+}
 function amEinstandspreisChf(){
+  const ek = amEffektiverEkLieferant();
+  if(ek == null) return null;
   const wechselkurs = parseFloat($('amWechselkurs').value) || 1;
-  const epChf = (parseFloat($('amEpLief').value) || 0) * wechselkurs;
+  const epChf = ek * wechselkurs;
   const da = LIEFERANTEN.find(l => l.id === $('amLieferant').value)?.lieferant_datenabgleich;
   const zoll = da?.zoll_fracht_prozent ? epChf * (da.zoll_fracht_prozent / 100) : 0;
   const sonder = da?.sonderzuschlag_prozent ? epChf * (da.sonderzuschlag_prozent / 100) : 0;
   return epChf + zoll + sonder;
 }
+// VP Knecht (Vorschlagswert fuer die Marge-Knecht-Anzeige, wird NICHT ins
+// Feld geschrieben) = hoeherer von zwei Kandidaten:
+// 1) VP Lieferant, ueber Wechselkurs/Zoll/Sonderzuschlag hochgerechnet -
+//    immer verfuegbar, sobald VP Lieferant bekannt ist.
+// 2) Einstand / (1 - Minimum-Marge) - wie bisher, ueber den (ggf.
+//    zurueckgerechneten) effektiven EK.
+// So bleibt immer ein Vorschlag da, auch ganz ohne Minimum-Marge, und die
+// Minimum-Marge wirkt weiterhin als Untergrenze, falls sie mehr verlangt.
+function amVpKnechtVorschlag(einstand, minMarge){
+  const wechselkurs = parseFloat($('amWechselkurs').value) || 1;
+  const vpLiefRoh = parseFloat($('amVpLief').value);
+  let kandidatVp = null;
+  if(!isNaN(vpLiefRoh) && vpLiefRoh > 0){
+    const basis = vpLiefRoh * wechselkurs;
+    const da = LIEFERANTEN.find(l => l.id === $('amLieferant').value)?.lieferant_datenabgleich;
+    const zoll = da?.zoll_fracht_prozent ? basis * (da.zoll_fracht_prozent / 100) : 0;
+    const sonder = da?.sonderzuschlag_prozent ? basis * (da.sonderzuschlag_prozent / 100) : 0;
+    kandidatVp = basis + zoll + sonder;
+  }
+  let kandidatMinMarge = null;
+  if(einstand != null && minMarge != null && minMarge < 100){
+    kandidatMinMarge = einstand / (1 - minMarge / 100);
+  }
+  if(kandidatVp != null && kandidatMinMarge != null) return Math.max(kandidatVp, kandidatMinMarge);
+  return kandidatVp ?? kandidatMinMarge ?? null;
+}
 function amAktualisiereMargen(){
   const einstand = amEinstandspreisChf();
   const wechselkurs = parseFloat($('amWechselkurs').value) || 1;
   const vpLiefChf = (parseFloat($('amVpLief').value) || 0) * wechselkurs;
-  $('amMargeLieferant').value = vpLiefChf > 0 ? (((vpLiefChf - einstand) / vpLiefChf) * 100).toFixed(2) : '';
+  $('amMargeLieferant').value = (einstand != null && vpLiefChf > 0) ? (((vpLiefChf - einstand) / vpLiefChf) * 100).toFixed(2) : '';
 
   const minMarge = LIEFERANTEN.find(l => l.id === $('amLieferant').value)?.lieferant_datenabgleich?.minimum_marge_prozent;
   $('amMinMarge').value = minMarge != null ? minMarge : '';
 
   const vpKnechtRaw = $('amVpKnecht').value.trim();
   let vpKnecht = vpKnechtRaw === '' ? null : parseFloat(vpKnechtRaw);
-  if(vpKnecht === null && minMarge != null && minMarge < 100){
-    vpKnecht = einstand / (1 - minMarge / 100);
+  if(vpKnecht === null){
+    vpKnecht = amVpKnechtVorschlag(einstand, minMarge);
   }
-  $('amMargeKnecht').value = (vpKnecht && vpKnecht > 0) ? (((vpKnecht - einstand) / vpKnecht) * 100).toFixed(2) : '';
+  $('amMargeKnecht').value = (vpKnecht != null && vpKnecht > 0 && einstand != null) ? (((vpKnecht - einstand) / vpKnecht) * 100).toFixed(2) : '';
 }
 ['amEpLief','amVpLief','amWechselkurs','amVpKnecht'].forEach(id => $(id).addEventListener('input', amAktualisiereMargen));
 $('amLieferant').addEventListener('change', amAktualisiereMargen);
 $('amMargeKnecht').addEventListener('input', () => {
   const marge = parseFloat($('amMargeKnecht').value);
-  if(!isNaN(marge) && marge < 100){
-    $('amVpKnecht').value = (amEinstandspreisChf() / (1 - marge / 100)).toFixed(2);
+  const einstand = amEinstandspreisChf();
+  if(!isNaN(marge) && marge < 100 && einstand != null){
+    $('amVpKnecht').value = (einstand / (1 - marge / 100)).toFixed(2);
   }
   amAktualisiereMargen();
 });
@@ -1099,22 +1146,57 @@ let anArtikelId = null;
 const AN_SUM_SPALTEN = 5;
 const $anNotiz = document.getElementById('anNotiz');
 
+// Effektiver EK wie im Artikel-Modal (amEffektiverEkLieferant): echter EK
+// Lieferant, sonst aus VP Lieferant + Standard-Marge des Lieferanten
+// zurueckgerechnet, sonst unbekannt (null) statt faelschlich 0.
+function anEffektiverEkLieferant(a){
+  if(a.ep_lieferant != null) return a.ep_lieferant;
+  const standardMarge = LIEFERANTEN.find(l => l.id === a.lieferant_id)?.lieferant_datenabgleich?.marge_lieferant_standard_prozent;
+  if(a.vp_lieferant != null && a.vp_lieferant > 0 && standardMarge != null && standardMarge < 100){
+    return a.vp_lieferant * (1 - standardMarge / 100);
+  }
+  return null;
+}
 function anEinstandspreisChf(a){
+  const ek = anEffektiverEkLieferant(a);
+  if(ek == null) return null;
   const wechselkurs = a.wechselkurs || 1;
-  const epChf = (a.ep_lieferant || 0) * wechselkurs;
+  const epChf = ek * wechselkurs;
   const da = LIEFERANTEN.find(l => l.id === a.lieferant_id)?.lieferant_datenabgleich;
   const zoll = da?.zoll_fracht_prozent ? epChf * (da.zoll_fracht_prozent / 100) : 0;
   const sonder = da?.sonderzuschlag_prozent ? epChf * (da.sonderzuschlag_prozent / 100) : 0;
   return epChf + zoll + sonder;
+}
+// VP Knecht: echter Wert falls vorhanden, sonst gleicher Vorschlag wie im
+// Artikel-Modal (amVpKnechtVorschlag) - hoeherer von VP-Lieferant-Kandidat
+// und Minimum-Marge-Kandidat.
+function anVpKnechtEffektiv(a, einstand){
+  if(a.vp_knecht != null) return a.vp_knecht;
+  const wechselkurs = a.wechselkurs || 1;
+  const da = LIEFERANTEN.find(l => l.id === a.lieferant_id)?.lieferant_datenabgleich;
+  let kandidatVp = null;
+  if(a.vp_lieferant != null && a.vp_lieferant > 0){
+    const basis = a.vp_lieferant * wechselkurs;
+    const zoll = da?.zoll_fracht_prozent ? basis * (da.zoll_fracht_prozent / 100) : 0;
+    const sonder = da?.sonderzuschlag_prozent ? basis * (da.sonderzuschlag_prozent / 100) : 0;
+    kandidatVp = basis + zoll + sonder;
+  }
+  let kandidatMinMarge = null;
+  const minMarge = da?.minimum_marge_prozent;
+  if(einstand != null && minMarge != null && minMarge < 100){
+    kandidatMinMarge = einstand / (1 - minMarge / 100);
+  }
+  if(kandidatVp != null && kandidatMinMarge != null) return Math.max(kandidatVp, kandidatMinMarge);
+  return kandidatVp ?? kandidatMinMarge ?? null;
 }
 
 function anRenderKennzahlen(a){
   const einstand = anEinstandspreisChf(a);
   const wechselkurs = a.wechselkurs || 1;
   const vpLiefChf = (a.vp_lieferant || 0) * wechselkurs;
-  const margeLief = vpLiefChf > 0 ? (((vpLiefChf - einstand) / vpLiefChf) * 100) : null;
-  const vpKnecht = a.vp_knecht;
-  const margeKnecht = (vpKnecht && vpKnecht > 0) ? (((vpKnecht - einstand) / vpKnecht) * 100) : null;
+  const margeLief = (einstand != null && vpLiefChf > 0) ? (((vpLiefChf - einstand) / vpLiefChf) * 100) : null;
+  const vpKnecht = anVpKnechtEffektiv(a, einstand);
+  const margeKnecht = (einstand != null && vpKnecht != null && vpKnecht > 0) ? (((vpKnecht - einstand) / vpKnecht) * 100) : null;
   $('anKzEkLief').textContent = a.ep_lieferant != null ? fmtCHF(a.ep_lieferant) + ' ' + (a.waehrung || 'CHF') : '—';
   $('anKzVpLief').textContent = a.vp_lieferant != null ? fmtCHF(a.vp_lieferant) + ' ' + (a.waehrung || 'CHF') : '—';
   $('anKzVpKnecht').textContent = vpKnecht != null ? fmtCHF(vpKnecht) + ' CHF' : '—';
