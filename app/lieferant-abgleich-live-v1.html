@@ -605,7 +605,7 @@ async function init(){
   const { data: warnstufen } = await sb.from('preisabgleich_warnstufen').select('*').eq('id', true).maybeSingle();
   if(warnstufen) WARNSTUFEN = warnstufen;
 
-  const { data: artikel } = await sb.from('artikel').select('id,bezeichnung,einheit,ep_lieferant,artikelnummer_lieferant,foto_url').eq('lieferant_id', LIEFERANT_ID).order('bezeichnung');
+  const { data: artikel } = await sb.from('artikel').select('id,bezeichnung,einheit,ep_lieferant,vp_lieferant,wechselkurs,preis_gesperrt,artikelnummer_lieferant,foto_url').eq('lieferant_id', LIEFERANT_ID).order('bezeichnung');
   ARTIKEL = artikel || [];
 
   renderKopf();
@@ -1788,6 +1788,24 @@ function renderPreisAbweichungen(zeilen){
 $('preisCheckAll').addEventListener('change', () => {
   $('preisBody').querySelectorAll('.preis-check').forEach(cb => cb.checked = $('preisCheckAll').checked);
 });
+// VP Knecht nach einem Bruttopreis-Import mit den aktuellen Lieferant-
+// Einstellungen neu berechnen - identische Formel wie im Artikel-Modal/
+// Notizen-Fenster von Tool C und beim Speichern der Lieferant-Details.
+// Nicht gesperrte Artikel (preis_gesperrt) werden dabei ueberschrieben,
+// gesperrte bleiben unangetastet.
+function abVpKnechtVorschlagRoh(a){
+  const wechselkurs = a.wechselkurs || 1;
+  if(LIEF.da.vp_lieferant_gleich_vp_knecht){
+    if(a.vp_lieferant == null || a.vp_lieferant <= 0) return null;
+    const basis = a.vp_lieferant * wechselkurs;
+    return LIEF.da.zuschlag_prozent ? basis * (1 + LIEF.da.zuschlag_prozent / 100) : basis;
+  }
+  if(a.ep_lieferant == null) return null;
+  const epChf = a.ep_lieferant * wechselkurs;
+  const marge = LIEF.da.minimum_marge_prozent;
+  if(marge == null || marge >= 100) return null;
+  return epChf / (1 - marge / 100);
+}
 $('preisUebernehmenBtn').addEventListener('click', async () => {
   const zeilen = Array.from($('preisBody').querySelectorAll('tr[data-id]')).filter(tr => tr.querySelector('.preis-check').checked);
   let anzahl = 0;
@@ -1802,6 +1820,11 @@ $('preisUebernehmenBtn').addEventListener('click', async () => {
       artikel_id: artikelId, alter_preis: alt, neuer_preis: neu,
       quelle: 'abgleich', methode: 'manuell', lieferant_id: LIEFERANT_ID
     });
+    const artikelObj = ARTIKEL.find(x => x.id === artikelId);
+    if(artikelObj && !artikelObj.preis_gesperrt){
+      const vorschlagRoh = abVpKnechtVorschlagRoh({ ...artikelObj, ep_lieferant: neu });
+      if(vorschlagRoh != null) await sb.from('artikel').update({ vp_knecht: Math.round(vorschlagRoh) }).eq('id', artikelId);
+    }
     anzahl++;
   }
   if(!anzahl){ showToast('Keine geänderten Preise zum Übernehmen markiert.', true); return; }
@@ -1810,7 +1833,7 @@ $('preisUebernehmenBtn').addEventListener('click', async () => {
   // ARTIKEL im Hintergrund aktualisieren (fuer den naechsten Start-Klick),
   // die Sicht selbst aber leeren statt erneut die volle Artikelliste zu
   // zeigen - sie ist ja gerade erst uebernommen worden.
-  const { data: artikel } = await sb.from('artikel').select('id,bezeichnung,einheit,ep_lieferant,artikelnummer_lieferant,foto_url').eq('lieferant_id', LIEFERANT_ID).order('bezeichnung');
+  const { data: artikel } = await sb.from('artikel').select('id,bezeichnung,einheit,ep_lieferant,vp_lieferant,wechselkurs,preis_gesperrt,artikelnummer_lieferant,foto_url').eq('lieferant_id', LIEFERANT_ID).order('bezeichnung');
   ARTIKEL = artikel || [];
   $('preisBody').innerHTML = '<tr><td colspan="5" class="hint">Übernommen - klicke "Start" für einen neuen Abgleich.</td></tr>';
 });
@@ -1830,6 +1853,7 @@ $('ergaenzenUebernehmenBtn').addEventListener('click', async () => {
     // der manuellen Auswahl oben - siehe kategorie-Feld in parseDaeppBetonPdf/
     // -BetonpumpePdf.
     const kategorie = a.kategorie || kategorieDefault;
+    const vpKnechtRoh = abVpKnechtVorschlagRoh({ ep_lieferant: a.ep_lieferant, vp_lieferant: a.vp_lieferant, wechselkurs: 1 });
     const { data: neuArtikel, error: insErr } = await sb.from('artikel').insert({
       lieferant_id: LIEFERANT_ID,
       artikelnummer_lieferant: a.artikelnummer_lieferant,
@@ -1838,6 +1862,7 @@ $('ergaenzenUebernehmenBtn').addEventListener('click', async () => {
       einheit: a.einheit || 'Stk.',
       ep_lieferant: a.ep_lieferant,
       vp_lieferant: a.vp_lieferant,
+      vp_knecht: vpKnechtRoh != null ? Math.round(vpKnechtRoh) : null,
       anmerkung: a.anmerkung || null,
       foto_url: a.foto_url || null,
       kategorie,
@@ -1853,7 +1878,7 @@ $('ergaenzenUebernehmenBtn').addEventListener('click', async () => {
   }
   if(!anzahl){ showToast('Keine neuen Artikel übernommen.', true); return; }
   showToast(`${anzahl} neue(r) Artikel übernommen.`);
-  const { data: artikel } = await sb.from('artikel').select('id,bezeichnung,einheit,ep_lieferant,artikelnummer_lieferant,foto_url').eq('lieferant_id', LIEFERANT_ID).order('bezeichnung');
+  const { data: artikel } = await sb.from('artikel').select('id,bezeichnung,einheit,ep_lieferant,vp_lieferant,wechselkurs,preis_gesperrt,artikelnummer_lieferant,foto_url').eq('lieferant_id', LIEFERANT_ID).order('bezeichnung');
   ARTIKEL = artikel || [];
   $('ergaenzenBody').innerHTML = '<tr><td colspan="3" class="hint">Übernommen - klicke "Start" für einen neuen Abgleich.</td></tr>';
 });
