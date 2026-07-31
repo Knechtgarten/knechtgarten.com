@@ -323,11 +323,16 @@ input[type=number]{-moz-appearance:textfield;}
       </div>
     </div>
     <div id="ldAdresseBlock" style="display:none;background:var(--soft);border-radius:6px;padding:10px 12px;margin:0 0 14px;line-height:1.6;font-size:13px;font-weight:600;color:var(--ink);"></div>
-    <div class="row">
-      <div class="fld"><label>Zoll/Fracht-Zuschlag %</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" class="ld-zoll" type="number" step="0.01" placeholder="—"></div>
-      <div class="fld"><label>Sonderzuschlag %</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" class="ld-sonder" type="number" step="0.01" placeholder="—"></div>
-      <div class="fld"><label style="cursor:help;" title="Ist die Lieferanten-Marge kleiner als dieser Wert oder fehlt der Verkaufspreis vom Lieferant, bestimmt dieser Prozentwert den Verkaufspreis von Knecht.">(Minimum-)Marge Knecht %</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" class="ld-minmarge" type="number" step="0.01" placeholder="—"></div>
+    <div class="subhead">Margen</div>
+    <div class="row" style="align-items:flex-end;">
+      <div class="fld" style="display:flex;align-items:center;gap:8px;padding-bottom:7px;">
+        <input type="checkbox" class="ld-vplief-gleich-vpknecht" style="width:auto;margin:0;">
+        <label style="margin:0;cursor:pointer;">VP Lieferant = VP Knecht</label>
+      </div>
+      <div class="fld"><label style="cursor:help;" title="Zoll, Fracht, Sonderzuschlag usw. in einem Wert zusammengefasst - wird nur verwendet, wenn VP Lieferant = VP Knecht aktiv ist.">Zuschläge % zu VP Lieferant</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" class="ld-zuschlag" type="number" step="0.01" placeholder="—"></div>
+      <div class="fld"><label style="cursor:help;" title="Bestimmt VP Knecht direkt aus EP Lieferant - wird nur verwendet, wenn VP Lieferant = VP Knecht NICHT aktiv ist.">Marge % (EP Lieferant → VP Knecht)</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" class="ld-marge" type="number" step="0.01" placeholder="—"></div>
     </div>
+    <div class="hint" style="margin-top:-6px;">Nie beides gleichzeitig: entweder VP Lieferant + Zuschläge, oder EP Lieferant + Marge %.</div>
     <div class="row">
       <div class="fld"><label>MwSt-Satz %</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" class="ld-mwst" type="number" step="0.01"></div>
       <div class="fld"><label>Preise sind</label>
@@ -2610,9 +2615,10 @@ async function openDetailOvl(lieferantId, kuerzelAutoGeneriert){
   }
   document.querySelector('.ld-logo').value = l.logo_url || '';
   ldLogoVorschauAktualisieren();
-  document.querySelector('.ld-zoll').value = l.da.zoll_fracht_prozent ?? '';
-  document.querySelector('.ld-sonder').value = l.da.sonderzuschlag_prozent ?? '';
-  document.querySelector('.ld-minmarge').value = l.da.minimum_marge_prozent ?? '';
+  document.querySelector('.ld-vplief-gleich-vpknecht').checked = !!l.da.vp_lieferant_gleich_vp_knecht;
+  document.querySelector('.ld-zuschlag').value = l.da.zuschlag_prozent ?? '';
+  document.querySelector('.ld-marge').value = l.da.minimum_marge_prozent ?? '';
+  ldMargenFelderAktualisieren();
   document.querySelector('.ld-mwst').value = l.da.mwst_satz ?? 8.1;
   document.querySelector('.ld-mwstinkl').value = l.da.mwst_inklusive ? 'true' : 'false';
   const waehrungOptionen = [...new Set(['CHF', 'EUR', ...WECHSELKURSE.map(w => w.waehrung), l.da.waehrung].filter(Boolean))];
@@ -2660,11 +2666,22 @@ $('ldLogoUploadInput').addEventListener('change', async () => {
   document.querySelector('.ld-logo').value = url;
   ldLogoVorschauAktualisieren();
 });
+// Margen-Bereich: die zwei Felder (Zuschlaege % / Marge %) sind exklusiv -
+// je nach Haekchen "VP Lieferant = VP Knecht" ist nur eines der beiden
+// relevant, das andere wird zur Klarheit deaktiviert (nicht nur informativ,
+// sondern wirklich gesperrt - "nie beides gleichzeitig").
+function ldMargenFelderAktualisieren(){
+  const vpGleich = document.querySelector('.ld-vplief-gleich-vpknecht').checked;
+  document.querySelector('.ld-zuschlag').disabled = !vpGleich;
+  document.querySelector('.ld-marge').disabled = vpGleich;
+}
+document.querySelector('.ld-vplief-gleich-vpknecht').addEventListener('change', ldMargenFelderAktualisieren);
+
 $('ldSave').addEventListener('click', async () => {
   if(!ldCurrentLieferantId) return;
-  const zoll = document.querySelector('.ld-zoll').value.trim();
-  const sonder = document.querySelector('.ld-sonder').value.trim();
-  const minmarge = document.querySelector('.ld-minmarge').value.trim();
+  const vpGleich = document.querySelector('.ld-vplief-gleich-vpknecht').checked;
+  const zuschlag = document.querySelector('.ld-zuschlag').value.trim();
+  const marge = document.querySelector('.ld-marge').value.trim();
   const name = document.querySelector('.ld-name').value.trim();
   const kuerzel = document.querySelector('.ld-kuerzel').value.trim();
   if(!name || !kuerzel){ $('ldStatus').textContent = 'Bitte Name und Kuerzel ausfuellen.'; $('ldStatus').className = 'status err'; return; }
@@ -2675,9 +2692,9 @@ $('ldSave').addEventListener('click', async () => {
   if(stammErr){ $('ldStatus').textContent = friendlyError(stammErr); $('ldStatus').className = 'status err'; return; }
   const payload = {
     lieferant_id: ldCurrentLieferantId,
-    zoll_fracht_prozent: zoll === '' ? null : parseFloat(zoll),
-    sonderzuschlag_prozent: sonder === '' ? null : parseFloat(sonder),
-    minimum_marge_prozent: minmarge === '' ? null : parseFloat(minmarge),
+    vp_lieferant_gleich_vp_knecht: vpGleich,
+    zuschlag_prozent: zuschlag === '' ? null : parseFloat(zuschlag),
+    minimum_marge_prozent: marge === '' ? null : parseFloat(marge),
     mwst_satz: parseFloat(document.querySelector('.ld-mwst').value) || null,
     mwst_inklusive: document.querySelector('.ld-mwstinkl').value === 'true',
     waehrung: document.querySelector('.ld-waehrung').value || 'CHF',
@@ -2691,46 +2708,38 @@ $('ldSave').addEventListener('click', async () => {
   };
   const { error } = await sb.from('lieferant_datenabgleich').upsert(payload, { onConflict: 'lieferant_id' });
   if(error){ $('ldStatus').textContent = friendlyError(error); $('ldStatus').className = 'status err'; return; }
-  const anzahlAufgefuellt = await ldVpKnechtAuffuellenFuerLieferant(ldCurrentLieferantId, payload.zoll_fracht_prozent, payload.sonderzuschlag_prozent, payload.minimum_marge_prozent);
+  const anzahlAufgefuellt = await ldVpKnechtAuffuellenFuerLieferant(ldCurrentLieferantId, vpGleich, payload.zuschlag_prozent, payload.minimum_marge_prozent);
   $('ldStatus').textContent = anzahlAufgefuellt > 0 ? `Gespeichert. VP Knecht bei ${anzahlAufgefuellt} Artikel(n) ergänzt.` : 'Gespeichert.';
   $('ldStatus').className = 'status ok';
   await loadDatenabgleich();
 });
 
 // Nach dem Speichern der Lieferant-Details: bei allen Artikeln dieses
-// Lieferanten OHNE VP Knecht wird der Vorschlag berechnet und gespeichert
-// (VP-Lieferant-Aufschlag bzw. Minimum-Marge, je hoeherer Wert, ganze
-// Franken) - identische Rechenlogik wie im Artikel-Modal/Notizen-Fenster
-// von Tool C. Artikel mit bereits gesetztem VP Knecht bleiben unangetastet,
-// auch wenn sich die Marge hier aendert.
-function ldVpKnechtVorschlagRoh(a, zollFrachtProzent, sonderzuschlagProzent, minMargeProzent){
+// Lieferanten OHNE VP Knecht wird der Vorschlag berechnet und gespeichert.
+// Exklusive Wahl statt "hoeherer Kandidat gewinnt":
+// - vpGleich=true:  VP Knecht = VP Lieferant x (1 + Zuschlag%)
+// - vpGleich=false: VP Knecht = EP Lieferant / (1 - Marge%)
+// Identische Logik wie im Artikel-Modal/Notizen-Fenster von Tool C. Artikel
+// mit bereits gesetztem VP Knecht bleiben unangetastet, auch wenn sich die
+// Einstellungen hier aendern.
+function ldVpKnechtVorschlagRoh(a, vpGleich, zuschlagProzent, margeProzent){
   const wechselkurs = a.wechselkurs || 1;
-  let einstand = null;
-  if(a.ep_lieferant != null){
-    const epChf = a.ep_lieferant * wechselkurs;
-    const zoll = zollFrachtProzent ? epChf * (zollFrachtProzent / 100) : 0;
-    const sonder = sonderzuschlagProzent ? epChf * (sonderzuschlagProzent / 100) : 0;
-    einstand = epChf + zoll + sonder;
-  }
-  let kandidatVp = null;
-  if(a.vp_lieferant != null && a.vp_lieferant > 0){
+  if(vpGleich){
+    if(a.vp_lieferant == null || a.vp_lieferant <= 0) return null;
     const basis = a.vp_lieferant * wechselkurs;
-    const zoll = zollFrachtProzent ? basis * (zollFrachtProzent / 100) : 0;
-    const sonder = sonderzuschlagProzent ? basis * (sonderzuschlagProzent / 100) : 0;
-    kandidatVp = basis + zoll + sonder;
+    return zuschlagProzent ? basis * (1 + zuschlagProzent / 100) : basis;
   }
-  let kandidatMinMarge = null;
-  if(einstand != null && minMargeProzent != null && minMargeProzent < 100){
-    kandidatMinMarge = einstand / (1 - minMargeProzent / 100);
-  }
-  return (kandidatVp != null && kandidatMinMarge != null) ? Math.max(kandidatVp, kandidatMinMarge) : (kandidatVp ?? kandidatMinMarge);
+  if(a.ep_lieferant == null) return null;
+  const epChf = a.ep_lieferant * wechselkurs;
+  if(margeProzent == null || margeProzent >= 100) return null;
+  return epChf / (1 - margeProzent / 100);
 }
-async function ldVpKnechtAuffuellenFuerLieferant(lieferantId, zollFrachtProzent, sonderzuschlagProzent, minMargeProzent){
+async function ldVpKnechtAuffuellenFuerLieferant(lieferantId, vpGleich, zuschlagProzent, margeProzent){
   const { data: artikel, error } = await sb.from('artikel').select('id, ep_lieferant, vp_lieferant, wechselkurs').eq('lieferant_id', lieferantId).is('vp_knecht', null);
   if(error || !artikel || artikel.length === 0) return 0;
   let aktualisiert = 0;
   for(const a of artikel){
-    const vorschlagRoh = ldVpKnechtVorschlagRoh(a, zollFrachtProzent, sonderzuschlagProzent, minMargeProzent);
+    const vorschlagRoh = ldVpKnechtVorschlagRoh(a, vpGleich, zuschlagProzent, margeProzent);
     if(vorschlagRoh == null) continue;
     const { error: updErr } = await sb.from('artikel').update({ vp_knecht: Math.round(vorschlagRoh) }).eq('id', a.id);
     if(!updErr) aktualisiert++;
