@@ -948,7 +948,7 @@ function amEinstandspreisChf(){
 //    zurueckgerechneten) effektiven EK.
 // So bleibt immer ein Vorschlag da, auch ganz ohne Minimum-Marge, und die
 // Minimum-Marge wirkt weiterhin als Untergrenze, falls sie mehr verlangt.
-function amVpKnechtVorschlag(einstand, minMarge){
+function amVpKnechtVorschlagRoh(einstand, minMarge){
   const wechselkurs = parseFloat($('amWechselkurs').value) || 1;
   const vpLiefRoh = parseFloat($('amVpLief').value);
   let kandidatVp = null;
@@ -963,8 +963,11 @@ function amVpKnechtVorschlag(einstand, minMarge){
   if(einstand != null && minMarge != null && minMarge < 100){
     kandidatMinMarge = einstand / (1 - minMarge / 100);
   }
-  const vorschlag = (kandidatVp != null && kandidatMinMarge != null) ? Math.max(kandidatVp, kandidatMinMarge) : (kandidatVp ?? kandidatMinMarge);
-  return vorschlag != null ? Math.round(vorschlag) : null;
+  return (kandidatVp != null && kandidatMinMarge != null) ? Math.max(kandidatVp, kandidatMinMarge) : (kandidatVp ?? kandidatMinMarge);
+}
+function amVpKnechtVorschlag(einstand, minMarge){
+  const roh = amVpKnechtVorschlagRoh(einstand, minMarge);
+  return roh != null ? Math.round(roh) : null;
 }
 function amAktualisiereMargen(){
   const einstand = amEinstandspreisChf();
@@ -975,16 +978,21 @@ function amAktualisiereMargen(){
   const minMarge = LIEFERANTEN.find(l => l.id === $('amLieferant').value)?.lieferant_datenabgleich?.minimum_marge_prozent;
   $('amMinMarge').value = minMarge != null ? minMarge : '';
 
-  const vorschlag = amVpKnechtVorschlag(einstand, minMarge);
+  const vorschlagRoh = amVpKnechtVorschlagRoh(einstand, minMarge);
+  const vorschlag = vorschlagRoh != null ? Math.round(vorschlagRoh) : null;
   $('amVpKnecht').placeholder = vorschlag != null ? vorschlag.toFixed(2) : '—';
   $('amVpVorschlagBtn').classList.toggle('hidden', vorschlag == null);
 
   const vpKnechtRaw = $('amVpKnecht').value.trim();
-  let vpKnecht = vpKnechtRaw === '' ? null : parseFloat(vpKnechtRaw);
-  if(vpKnecht === null){
-    vpKnecht = vorschlag;
-  }
-  $('amMargeKnecht').value = (vpKnecht != null && vpKnecht > 0 && einstand != null) ? (((vpKnecht - einstand) / vpKnecht) * 100).toFixed(2) : '';
+  const vpKnechtEingegeben = vpKnechtRaw === '' ? null : parseFloat(vpKnechtRaw);
+  // Solange der Preis dem gerundeten Vorschlag entspricht (oder das Feld leer
+  // ist), zeigt die Sondermarge den sauberen, ungerundeten Zielwert - die
+  // Rundung auf ganze Franken soll nicht wie eine eigene Margen-Abweichung
+  // wirken. Erst eine echte manuelle Preisanpassung darueber hinaus aendert
+  // die angezeigte Marge tatsaechlich.
+  const istUnveraenderterVorschlag = vpKnechtEingegeben === null || (vorschlag != null && Math.abs(vpKnechtEingegeben - vorschlag) < 0.005);
+  const vpFuerMarge = istUnveraenderterVorschlag ? vorschlagRoh : vpKnechtEingegeben;
+  $('amMargeKnecht').value = (vpFuerMarge != null && vpFuerMarge > 0 && einstand != null) ? (((vpFuerMarge - einstand) / vpFuerMarge) * 100).toFixed(2) : '';
 }
 // MwSt-Satz-Vorschlag: nur befuellen, wenn das Feld leer ist - ein bereits
 // eingetragener (auch bewusst geleerter) Wert wird nie ueberschrieben.
@@ -1173,8 +1181,7 @@ function anEinstandspreisChf(a){
 // VP Knecht: echter Wert falls vorhanden, sonst gleicher Vorschlag wie im
 // Artikel-Modal (amVpKnechtVorschlag) - hoeherer von VP-Lieferant-Kandidat
 // und Minimum-Marge-Kandidat.
-function anVpKnechtEffektiv(a, einstand){
-  if(a.vp_knecht != null) return a.vp_knecht;
+function anVpKnechtVorschlagRoh(a, einstand){
   const wechselkurs = a.wechselkurs || 1;
   const da = LIEFERANTEN.find(l => l.id === a.lieferant_id)?.lieferant_datenabgleich;
   let kandidatVp = null;
@@ -1189,8 +1196,12 @@ function anVpKnechtEffektiv(a, einstand){
   if(einstand != null && minMarge != null && minMarge < 100){
     kandidatMinMarge = einstand / (1 - minMarge / 100);
   }
-  const vorschlag = (kandidatVp != null && kandidatMinMarge != null) ? Math.max(kandidatVp, kandidatMinMarge) : (kandidatVp ?? kandidatMinMarge);
-  return vorschlag != null ? Math.round(vorschlag) : null;
+  return (kandidatVp != null && kandidatMinMarge != null) ? Math.max(kandidatVp, kandidatMinMarge) : (kandidatVp ?? kandidatMinMarge);
+}
+function anVpKnechtEffektiv(a, einstand){
+  if(a.vp_knecht != null) return a.vp_knecht;
+  const roh = anVpKnechtVorschlagRoh(a, einstand);
+  return roh != null ? Math.round(roh) : null;
 }
 
 function anRenderKennzahlen(a){
@@ -1199,7 +1210,11 @@ function anRenderKennzahlen(a){
   const vpLiefChf = (a.vp_lieferant || 0) * wechselkurs;
   const margeLief = (einstand != null && vpLiefChf > 0) ? (((vpLiefChf - einstand) / vpLiefChf) * 100) : null;
   const vpKnecht = anVpKnechtEffektiv(a, einstand);
-  const margeKnecht = (einstand != null && vpKnecht != null && vpKnecht > 0) ? (((vpKnecht - einstand) / vpKnecht) * 100) : null;
+  // Bei einem echt gespeicherten VP Knecht zaehlt der reale Wert; ist es nur
+  // ein (gerundeter) Vorschlag, wird die Marge aus dem ungerundeten Zielwert
+  // berechnet, damit die Franken-Rundung die angezeigte Marge nicht verzerrt.
+  const vpFuerMarge = a.vp_knecht != null ? a.vp_knecht : anVpKnechtVorschlagRoh(a, einstand);
+  const margeKnecht = (einstand != null && vpFuerMarge != null && vpFuerMarge > 0) ? (((vpFuerMarge - einstand) / vpFuerMarge) * 100) : null;
   $('anKzEkLief').textContent = a.ep_lieferant != null ? fmtCHF(a.ep_lieferant) + ' ' + (a.waehrung || 'CHF') : '—';
   $('anKzVpLief').textContent = a.vp_lieferant != null ? fmtCHF(a.vp_lieferant) + ' ' + (a.waehrung || 'CHF') : '—';
   $('anKzVpKnecht').textContent = vpKnecht != null ? fmtCHF(vpKnecht) + ' CHF' : '—';
