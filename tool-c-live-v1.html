@@ -239,8 +239,11 @@ input[type=number]{-moz-appearance:textfield;}
     <div class="row" style="align-items:flex-start;">
       <div style="flex:1;display:flex;flex-direction:column;gap:8px;min-width:130px;">
         <div style="display:flex;gap:8px;">
-          <div class="fld" style="margin:0;flex:1;"><label>Währung</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="amWaehrung" value="CHF"></div>
-          <div class="fld" style="margin:0;flex:1;"><label style="cursor:help;" title="Kommt live aus Einstellungen -> Lieferanten/Import -> Wechselkurse - nicht pro Artikel aenderbar.">Wechselkurs</label><input id="amWechselkurs" type="text" readonly placeholder="—"></div>
+          <div style="flex:1;background:var(--soft);border-radius:8px;padding:8px 10px;display:flex;gap:8px;">
+            <div class="fld" style="margin:0;flex:1;"><label style="cursor:help;" title="Kommt vom gewaehlten Lieferant (Einstellungen -> Lieferanten/Import) - nicht pro Artikel aenderbar.">Währung</label><input id="amWaehrung" type="text" readonly value="CHF"></div>
+            <div class="fld" style="margin:0;flex:1;"><label style="cursor:help;" title="Kommt live aus Einstellungen -> Lieferanten/Import -> Wechselkurse - nicht pro Artikel aenderbar.">Wechselkurs</label><input id="amWechselkurs" type="text" readonly placeholder="—"></div>
+          </div>
+          <div class="fld" style="margin:0;flex:1;"><label>MwSt-Satz %</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="amMwst" type="number" step="0.01"></div>
         </div>
         <div style="display:flex;gap:8px;">
           <div class="fld" style="margin:0;flex:1;"><label>EP Lieferant</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="amEpLief" type="number" step="0.01"></div>
@@ -255,7 +258,6 @@ input[type=number]{-moz-appearance:textfield;}
         </div>
       </div>
       <div style="flex:1;display:flex;flex-direction:column;gap:8px;min-width:130px;">
-        <div class="fld" style="margin:0;"><label>MwSt-Satz %</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="amMwst" type="number" step="0.01"></div>
         <div style="background:var(--soft);border-radius:8px;padding:10px 12px;display:flex;flex-direction:column;gap:8px;">
           <div class="fld" style="margin:0;"><label>Marge Lieferant %</label><input id="amMargeLieferant" type="text" readonly placeholder="—"></div>
           <div class="fld" style="margin:0;"><label style="cursor:help;" title="Zuschläge (Zoll, Fracht, Sonderzuschlag usw.) - wird nur angewendet, wenn beim Lieferanten 'VP Lieferant = VP Knecht' aktiv ist.">Sonderzuschlag für diesen Lieferant %</label><input id="amZuschlagLieferant" type="text" readonly placeholder="—"></div>
@@ -602,7 +604,7 @@ renderKategorieFilter();
 // ---------------------------------------------------------------------------
 async function loadLieferanten(){
   const { data, error } = await sb.from('lieferant')
-    .select('id,name,kuerzel,sync_typ,lieferant_datenabgleich(vp_lieferant_gleich_vp_knecht,zuschlag_prozent,minimum_marge_prozent,mwst_satz)')
+    .select('id,name,kuerzel,sync_typ,lieferant_datenabgleich(vp_lieferant_gleich_vp_knecht,zuschlag_prozent,minimum_marge_prozent,mwst_satz,waehrung)')
     .order('name');
   if(error){ console.error(error); return; }
   LIEFERANTEN = data;
@@ -912,7 +914,8 @@ function openArtikelModalAdd(){
   $('amNrLieferant').value = '';
   populateAmGruppeSelect(null);
   $('amNeueGruppeWrap').classList.add('hidden'); $('amNeueGruppeName').value = '';
-  $('amEpLief').value = ''; $('amVpLief').value = ''; $('amWaehrung').value = 'CHF';
+  $('amEpLief').value = ''; $('amVpLief').value = '';
+  amWaehrungAusLieferantSetzen();
   $('amVpKnecht').value = ''; $('amMwst').value = '';
   $('amMargeKnecht').value = '';
   $('amFoto').value = ''; $('amAnmerkung').value = '';
@@ -941,7 +944,7 @@ function openArtikelModalEdit(id){
   $('amNeueGruppeWrap').classList.add('hidden'); $('amNeueGruppeName').value = '';
   $('amEpLief').value = a.ep_lieferant ?? '';
   $('amVpLief').value = a.vp_lieferant ?? '';
-  $('amWaehrung').value = a.waehrung || 'CHF';
+  amWaehrungAusLieferantSetzen();
   $('amVpKnecht').value = a.vp_knecht ?? '';
   $('amMargeKnecht').value = '';
   $('amMwst').value = a.mwst_satz_pct ?? '';
@@ -1055,8 +1058,15 @@ function amMwstVorschlagFuellen(){
   const mwst = LIEFERANTEN.find(l => l.id === $('amLieferant').value)?.lieferant_datenabgleich?.mwst_satz;
   if(mwst != null) $('amMwst').value = mwst;
 }
-['amEpLief','amVpLief','amWaehrung','amVpKnecht'].forEach(id => $(id).addEventListener('input', amAktualisiereMargen));
-$('amLieferant').addEventListener('change', () => { amAktualisiereMargen(); amMwstVorschlagFuellen(); });
+// Waehrung ist nicht pro Artikel eingebbar, sondern kommt immer vom aktuell
+// gewaehlten Lieferant (Einstellungen -> Lieferanten/Import) - analog zum
+// Wechselkurs, der ebenfalls nicht pro Artikel aenderbar ist.
+function amWaehrungAusLieferantSetzen(){
+  const da = LIEFERANTEN.find(l => l.id === $('amLieferant').value)?.lieferant_datenabgleich;
+  $('amWaehrung').value = (da?.waehrung || 'CHF').toUpperCase();
+}
+['amEpLief','amVpLief','amVpKnecht'].forEach(id => $(id).addEventListener('input', amAktualisiereMargen));
+$('amLieferant').addEventListener('change', () => { amWaehrungAusLieferantSetzen(); amAktualisiereMargen(); amMwstVorschlagFuellen(); });
 $('amMargeKnecht').addEventListener('input', () => {
   const marge = parseFloat($('amMargeKnecht').value);
   const einstand = amEinstandspreisChf();
