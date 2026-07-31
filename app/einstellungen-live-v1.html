@@ -628,18 +628,12 @@ input[type=number]{-moz-appearance:textfield;}
 
         <div class="card admin-only">
           <div class="cardheader" onclick="toggleCard(this)"><span class="cardchevron">&#9656;</span><div class="cardlabel">Wechselkurse</div></div>
-          <div class="hint">Global, unabhängig von einzelnen Lieferanten-Abgleichen.</div>
+          <div class="hint">Global, unabhängig von einzelnen Lieferanten-Abgleichen - genau ein Kurs pro Währung, gilt sofort live für alle Artikel dieser Währung (kein Verlauf/Datum).</div>
           <div class="cardbody hidden">
             <table>
-              <thead><tr><th>Währung</th><th>Kurs zu CHF</th><th>Stand vom</th><th></th></tr></thead>
+              <thead><tr><th>Währung</th><th>Kurs zu CHF</th><th></th></tr></thead>
               <tbody id="wkBody"></tbody>
             </table>
-            <div class="row" style="margin-top:10px;">
-              <div class="fld"><label>Währung</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="newWkWaehrung" placeholder="z.B. EUR" style="text-transform:uppercase;"></div>
-              <div class="fld"><label>Kurs zu CHF</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="newWkKurs" type="number" step="0.0001"></div>
-              <div class="fld"><label>Stand vom</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="newWkStand" type="date"></div>
-            </div>
-            <button class="btn" id="addWkBtn">+ Wechselkurs hinzufügen</button>
             <div class="status" id="wkStatus"></div>
           </div>
         </div>
@@ -1836,34 +1830,71 @@ $('lwSpeichernBtn').addEventListener('click', async () => {
 // Datenabgleich: Wechselkurse
 // ---------------------------------------------------------------------------
 let WECHSELKURSE = [];
+// Genau eine Zahl pro Waehrung (waehrung ist in der DB unique) - kein
+// Verlauf/Datum mehr. Aenderung wirkt sofort live: die Preis-Berechnungen
+// (Tool C, Lieferant-Details, Crawling-Abgleich) lesen den Kurs bei jeder
+// Berechnung frisch aus dieser Tabelle statt aus einem pro Artikel
+// eingefrorenen Wert (siehe aktuellerWechselkurs() in den anderen Dateien).
 async function loadWechselkurse(){
-  const { data, error } = await sb.from('wechselkurs').select('id,waehrung,kurs_zu_chf,stand_vom').order('waehrung');
+  const { data, error } = await sb.from('wechselkurs').select('id,waehrung,kurs_zu_chf').order('waehrung');
   if(error){ console.error(error); return; }
   WECHSELKURSE = data;
-  $('wkBody').innerHTML = WECHSELKURSE.map(w => `
-    <tr>
-      <td><b>${w.waehrung}</b></td>
-      <td>${fmtNum(w.kurs_zu_chf)}</td>
-      <td>${w.stand_vom}</td>
-      <td><button class="icobtn danger" onclick="deleteWechselkurs('${w.id}')">${ICON.trash}</button></td>
-    </tr>`).join('') || '<tr><td colspan="4" class="hint">Noch keine Wechselkurse hinterlegt.</td></tr>';
+  renderWechselkurse();
 }
-$('addWkBtn').addEventListener('click', async () => {
-  const waehrung = $('newWkWaehrung').value.trim().toUpperCase();
-  const kurs_zu_chf = parseFloat($('newWkKurs').value);
-  const stand_vom = $('newWkStand').value || new Date().toISOString().slice(0,10);
-  if(!waehrung || isNaN(kurs_zu_chf)){ $('wkStatus').textContent = 'Bitte Waehrung und Kurs ausfuellen.'; $('wkStatus').className = 'status err'; return; }
-  const { error } = await sb.from('wechselkurs').upsert({ waehrung, kurs_zu_chf, stand_vom }, { onConflict: 'waehrung' });
-  if(error){ $('wkStatus').textContent = friendlyError(error); $('wkStatus').className = 'status err'; return; }
-  $('newWkWaehrung').value = ''; $('newWkKurs').value = '';
-  $('wkStatus').textContent = 'Gespeichert.'; $('wkStatus').className = 'status ok';
-  await loadWechselkurse();
-});
-async function deleteWechselkurs(id){
-  if(!(await confirmDialog('Wechselkurs wirklich loeschen?'))) return;
-  const { error } = await sb.from('wechselkurs').delete().eq('id', id);
-  if(error){ showToast(friendlyError(error), true); return; }
-  await loadWechselkurse();
+function wkFeld(w, feld, typ){
+  const val = w ? (w[feld] ?? '') : '';
+  return `<input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="${typ}" class="wkFeld" data-feld="${feld}" value="${val}" ${typ === 'number' ? 'step="0.0001"' : 'placeholder="z.B. EUR" style="text-transform:uppercase;"'}>`;
+}
+function renderWechselkurse(){
+  const rows = WECHSELKURSE.map(w => `<tr data-id="${w.id}">
+    <td><b>${w.waehrung}</b></td>
+    <td>${wkFeld(w,'kurs_zu_chf','number')}</td>
+    <td><button class="icobtn danger wkDeleteBtn" data-id="${w.id}" title="Waehrung entfernen">${ICON.trash}</button></td>
+  </tr>`).join('');
+  const draftRow = `<tr class="wkDraftRow">
+    <td>${wkFeld(null,'waehrung','text')}</td>
+    <td>${wkFeld(null,'kurs_zu_chf','number')}</td>
+    <td></td>
+  </tr>`;
+  $('wkBody').innerHTML = rows + draftRow;
+  attachWechselkursHandlers();
+}
+function attachWechselkursHandlers(){
+  const body = $('wkBody');
+  body.querySelectorAll('tr[data-id]').forEach(tr => {
+    const id = tr.dataset.id;
+    tr.querySelectorAll('.wkFeld').forEach(inp => {
+      inp.addEventListener('change', async () => {
+        const kurs = parseFloat(inp.value);
+        if(isNaN(kurs)){ showToast('Bitte eine gültige Zahl eingeben.', true); return; }
+        const { error } = await sb.from('wechselkurs').update({ kurs_zu_chf: kurs }).eq('id', id);
+        if(error){ showToast(friendlyError(error), true); return; }
+        showToast('Gespeichert - gilt sofort live für alle Artikel dieser Währung.');
+        await loadWechselkurse();
+      });
+    });
+  });
+  body.querySelectorAll('.wkDeleteBtn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if(!(await confirmDialog('Währung wirklich entfernen? Artikel in dieser Währung haben danach keinen Wechselkurs mehr hinterlegt (Kurs gilt dann als 1).'))) return;
+      const { error } = await sb.from('wechselkurs').delete().eq('id', btn.dataset.id);
+      if(error){ showToast(friendlyError(error), true); return; }
+      await loadWechselkurse();
+    });
+  });
+  const draftRow = body.querySelector('.wkDraftRow');
+  if(draftRow){
+    draftRow.querySelectorAll('.wkFeld').forEach(inp => {
+      inp.addEventListener('change', async () => {
+        const waehrung = draftRow.querySelector('.wkFeld[data-feld="waehrung"]').value.trim().toUpperCase();
+        const kurs = parseFloat(draftRow.querySelector('.wkFeld[data-feld="kurs_zu_chf"]').value);
+        if(!waehrung || isNaN(kurs)) return;
+        const { error } = await sb.from('wechselkurs').upsert({ waehrung, kurs_zu_chf: kurs }, { onConflict: 'waehrung' });
+        if(error){ showToast(friendlyError(error), true); return; }
+        await loadWechselkurse();
+      });
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -2754,8 +2785,16 @@ $('ldSave').addEventListener('click', async () => {
 // - vpGleich=true:  VP Knecht = VP Lieferant x (1 + Zuschlag%)
 // - vpGleich=false: VP Knecht = EP Lieferant / (1 - Marge%)
 // Identische Logik wie im Artikel-Modal/Notizen-Fenster von Tool C.
+// Wechselkurs kommt IMMER live aus der zentralen Wechselkurse-Karte (siehe
+// oben), nie aus dem eingefrorenen artikel.wechselkurs - so wirkt eine
+// Kursaenderung sofort bei allen Artikeln dieser Waehrung, ohne dass man
+// jeden Artikel einzeln anfassen muesste.
+function aktuellerWechselkurs(waehrung){
+  if(!waehrung || waehrung === 'CHF') return 1;
+  return WECHSELKURSE.find(w => w.waehrung === waehrung)?.kurs_zu_chf ?? 1;
+}
 function ldVpKnechtVorschlagRoh(a, vpGleich, zuschlagProzent, margeProzent){
-  const wechselkurs = a.wechselkurs || 1;
+  const wechselkurs = aktuellerWechselkurs(a.waehrung);
   if(vpGleich){
     if(a.vp_lieferant == null || a.vp_lieferant <= 0) return null;
     const basis = a.vp_lieferant * wechselkurs;
@@ -2767,7 +2806,7 @@ function ldVpKnechtVorschlagRoh(a, vpGleich, zuschlagProzent, margeProzent){
   return epChf / (1 - margeProzent / 100);
 }
 async function ldVpKnechtNeuBerechnenFuerLieferant(lieferantId, vpGleich, zuschlagProzent, margeProzent){
-  const { data: artikel, error } = await sb.from('artikel').select('id, ep_lieferant, vp_lieferant, wechselkurs').eq('lieferant_id', lieferantId).eq('preis_gesperrt', false);
+  const { data: artikel, error } = await sb.from('artikel').select('id, ep_lieferant, vp_lieferant, waehrung').eq('lieferant_id', lieferantId).eq('preis_gesperrt', false);
   if(error || !artikel || artikel.length === 0) return 0;
   let aktualisiert = 0;
   for(const a of artikel){
