@@ -483,6 +483,7 @@ input[type=number]{-moz-appearance:textfield;}
           <option value="haendischer_abgleich:1">Händischer Abgleich: Ein</option>
           <option value="haendischer_abgleich:0">Händischer Abgleich: Aus</option>
         </select>
+        <button class="btn" id="bulkVpKnechtBtn" title="Berechnet fuer jeden ausgewaehlten Artikel ohne VP Knecht den Vorschlag (VP Lieferant bzw. Minimum-Marge, ganze Franken) und speichert ihn - Artikel mit bereits gesetztem VP Knecht bleiben unveraendert.">VP Knecht auffüllen</button>
         <button class="btn" id="bulkDeleteBtn"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></svg> Löschen</button>
       </div>
       <button class="btn" id="addArtBtn" style="margin-left:auto;">+ Artikel hinzufügen</button>
@@ -1093,6 +1094,7 @@ function renderBulkbar(){
   $('bulkGruppeSelect').disabled = n === 0;
   $('bulkLieferantSelect').disabled = n === 0;
   $('bulkSyncSelect').disabled = n === 0;
+  $('bulkVpKnechtBtn').disabled = n === 0;
   $('bulkDeleteBtn').disabled = n === 0;
   const sichtbar = gefilterteArtikel();
   $('selectAll').checked = n > 0 && n === sichtbar.length;
@@ -1109,6 +1111,27 @@ document.querySelectorAll('th[data-sort]').forEach(th => {
     if(sortCol === col) sortDir *= -1; else { sortCol = col; sortDir = 1; }
     renderArtikelTable();
   });
+});
+
+$('bulkVpKnechtBtn').addEventListener('click', async () => {
+  const kandidaten = ARTIKEL.filter(a => selected.has(a.id) && a.vp_knecht == null);
+  if(kandidaten.length === 0){ showToast('Bei allen ausgewählten Artikeln ist VP Knecht bereits gesetzt.'); return; }
+  let aktualisiert = 0, ohneVorschlag = 0;
+  for(const a of kandidaten){
+    const einstand = anEinstandspreisChf(a);
+    const vorschlagRoh = anVpKnechtVorschlagRoh(a, einstand);
+    if(vorschlagRoh == null){ ohneVorschlag++; continue; }
+    const { error } = await sb.from('artikel').update({ vp_knecht: Math.round(vorschlagRoh) }).eq('id', a.id);
+    if(error){ showToast(friendlyError(error), true); return; }
+    aktualisiert++;
+  }
+  const uebersprungen = selected.size - kandidaten.length;
+  let text = `${aktualisiert} Artikel mit VP Knecht befüllt.`;
+  if(uebersprungen) text += ` ${uebersprungen} hatten bereits einen Wert.`;
+  if(ohneVorschlag) text += ` ${ohneVorschlag} ohne möglichen Vorschlag (kein EK/Minimum-Marge).`;
+  showToast(text);
+  selected.clear();
+  await loadArtikel();
 });
 
 $('bulkDeleteBtn').addEventListener('click', async () => {
