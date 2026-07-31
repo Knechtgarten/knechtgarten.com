@@ -240,7 +240,7 @@ input[type=number]{-moz-appearance:textfield;}
       <div style="flex:1;display:flex;flex-direction:column;gap:8px;min-width:130px;">
         <div style="display:flex;gap:8px;">
           <div class="fld" style="margin:0;flex:1;"><label>Währung</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="amWaehrung" value="CHF"></div>
-          <div class="fld" style="margin:0;flex:1;"><label>Wechselkurs</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="amWechselkurs" type="number" step="0.0001" value="1"></div>
+          <div class="fld" style="margin:0;flex:1;"><label style="cursor:help;" title="Kommt live aus Einstellungen -> Lieferanten/Import -> Wechselkurse - nicht pro Artikel aenderbar.">Wechselkurs</label><input id="amWechselkurs" type="text" readonly placeholder="—"></div>
         </div>
         <div style="display:flex;gap:8px;">
           <div class="fld" style="margin:0;flex:1;"><label>EP Lieferant</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="amEpLief" type="number" step="0.01"></div>
@@ -558,6 +558,19 @@ function friendlyError(e){
 }
 
 let LIEFERANTEN = [];
+let WECHSELKURSE = [];
+async function loadWechselkurse(){
+  const { data, error } = await sb.from('wechselkurs').select('waehrung,kurs_zu_chf');
+  if(error){ console.error(error); return; }
+  WECHSELKURSE = data;
+}
+// Wechselkurs kommt IMMER live aus der zentralen Wechselkurse-Karte in den
+// Einstellungen, nie aus einem pro Artikel eingefrorenen Wert - eine
+// Kursaenderung dort wirkt sofort bei allen Artikeln dieser Waehrung.
+function aktuellerWechselkurs(waehrung){
+  if(!waehrung || waehrung === 'CHF') return 1;
+  return WECHSELKURSE.find(w => w.waehrung === waehrung)?.kurs_zu_chf ?? 1;
+}
 let ARTIKELGRUPPEN = [];
 let ARTIKEL = [];
 let selected = new Set();
@@ -900,7 +913,7 @@ function openArtikelModalAdd(){
   populateAmGruppeSelect(null);
   $('amNeueGruppeWrap').classList.add('hidden'); $('amNeueGruppeName').value = '';
   $('amEpLief').value = ''; $('amVpLief').value = ''; $('amWaehrung').value = 'CHF';
-  $('amWechselkurs').value = '1'; $('amVpKnecht').value = ''; $('amMwst').value = '';
+  $('amVpKnecht').value = ''; $('amMwst').value = '';
   $('amMargeKnecht').value = '';
   $('amFoto').value = ''; $('amAnmerkung').value = '';
   $('amZusatzwert').value = ''; $('amZusatzeinheit').value = '';
@@ -929,7 +942,6 @@ function openArtikelModalEdit(id){
   $('amEpLief').value = a.ep_lieferant ?? '';
   $('amVpLief').value = a.vp_lieferant ?? '';
   $('amWaehrung').value = a.waehrung || 'CHF';
-  $('amWechselkurs').value = a.wechselkurs ?? 1;
   $('amVpKnecht').value = a.vp_knecht ?? '';
   $('amMargeKnecht').value = '';
   $('amMwst').value = a.mwst_satz_pct ?? '';
@@ -981,7 +993,7 @@ function amEffektiverEkLieferant(){
 function amEinstandspreisChf(){
   const ek = amEffektiverEkLieferant();
   if(ek == null) return null;
-  const wechselkurs = parseFloat($('amWechselkurs').value) || 1;
+  const wechselkurs = aktuellerWechselkurs($('amWaehrung').value.trim().toUpperCase());
   return ek * wechselkurs;
 }
 // VP Knecht (Vorschlagswert, wird NICHT automatisch ins Feld geschrieben) -
@@ -990,7 +1002,7 @@ function amEinstandspreisChf(){
 // - vp_lieferant_gleich_vp_knecht = false: Einstand / (1 - Marge%)
 function amVpKnechtVorschlagRoh(einstand, minMarge){
   const da = LIEFERANTEN.find(l => l.id === $('amLieferant').value)?.lieferant_datenabgleich;
-  const wechselkurs = parseFloat($('amWechselkurs').value) || 1;
+  const wechselkurs = aktuellerWechselkurs($('amWaehrung').value.trim().toUpperCase());
   if(da?.vp_lieferant_gleich_vp_knecht){
     const vpLiefRoh = parseFloat($('amVpLief').value);
     if(isNaN(vpLiefRoh) || vpLiefRoh <= 0) return null;
@@ -1005,8 +1017,10 @@ function amVpKnechtVorschlag(einstand, minMarge){
   return roh != null ? Math.round(roh) : null;
 }
 function amAktualisiereMargen(){
+  const waehrung = $('amWaehrung').value.trim().toUpperCase();
+  const wechselkurs = aktuellerWechselkurs(waehrung);
+  $('amWechselkurs').value = waehrung === 'CHF' ? '1' : wechselkurs.toString();
   const einstand = amEinstandspreisChf();
-  const wechselkurs = parseFloat($('amWechselkurs').value) || 1;
   const vpLiefChf = (parseFloat($('amVpLief').value) || 0) * wechselkurs;
   $('amMargeLieferant').value = (einstand != null && vpLiefChf > 0) ? (((vpLiefChf - einstand) / vpLiefChf) * 100).toFixed(2) : '';
 
@@ -1041,7 +1055,7 @@ function amMwstVorschlagFuellen(){
   const mwst = LIEFERANTEN.find(l => l.id === $('amLieferant').value)?.lieferant_datenabgleich?.mwst_satz;
   if(mwst != null) $('amMwst').value = mwst;
 }
-['amEpLief','amVpLief','amWechselkurs','amVpKnecht'].forEach(id => $(id).addEventListener('input', amAktualisiereMargen));
+['amEpLief','amVpLief','amWaehrung','amVpKnecht'].forEach(id => $(id).addEventListener('input', amAktualisiereMargen));
 $('amLieferant').addEventListener('change', () => { amAktualisiereMargen(); amMwstVorschlagFuellen(); });
 $('amMargeKnecht').addEventListener('input', () => {
   const marge = parseFloat($('amMargeKnecht').value);
@@ -1103,7 +1117,7 @@ $('amSave').addEventListener('click', async () => {
     ep_lieferant: parseFloat($('amEpLief').value) || null,
     vp_lieferant: parseFloat($('amVpLief').value) || null,
     waehrung: $('amWaehrung').value.trim() || 'CHF',
-    wechselkurs: parseFloat($('amWechselkurs').value) || 1,
+    wechselkurs: aktuellerWechselkurs($('amWaehrung').value.trim().toUpperCase() || 'CHF'),
     vp_knecht, preis_gesperrt,
     mwst_satz_pct: parseFloat($('amMwst').value) || null,
     foto_url: $('amFoto').value.trim() || null,
@@ -1218,14 +1232,14 @@ function anEffektiverEkLieferant(a){
 function anEinstandspreisChf(a){
   const ek = anEffektiverEkLieferant(a);
   if(ek == null) return null;
-  const wechselkurs = a.wechselkurs || 1;
+  const wechselkurs = aktuellerWechselkurs(a.waehrung);
   return ek * wechselkurs;
 }
 // VP Knecht: echter Wert falls vorhanden, sonst gleicher Vorschlag wie im
 // Artikel-Modal (amVpKnechtVorschlag) - pro Lieferant exklusiv einer von
 // zwei Wegen, nie eine Mischung/Maximum.
 function anVpKnechtVorschlagRoh(a, einstand){
-  const wechselkurs = a.wechselkurs || 1;
+  const wechselkurs = aktuellerWechselkurs(a.waehrung);
   const da = LIEFERANTEN.find(l => l.id === a.lieferant_id)?.lieferant_datenabgleich;
   if(da?.vp_lieferant_gleich_vp_knecht){
     if(a.vp_lieferant == null || a.vp_lieferant <= 0) return null;
@@ -1435,7 +1449,7 @@ $('addArtBtnTop').addEventListener('click', openArtikelModalAdd);
 async function init(){
   const initParams = new URLSearchParams(location.search);
   if(initParams.get('lieferant')) filterLieferantId = initParams.get('lieferant');
-  await Promise.all([loadLieferanten(), loadArtikelgruppen()]);
+  await Promise.all([loadLieferanten(), loadArtikelgruppen(), loadWechselkurse()]);
   await loadArtikel();
   if(initParams.get('add') === '1') openArtikelModalAdd();
 }

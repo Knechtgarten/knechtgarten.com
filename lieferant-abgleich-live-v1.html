@@ -575,6 +575,11 @@ let ARTIKEL = [];
 // "Toleranzwert Preisabgleich"-Karte. Fallback-Werte, falls die Zeile aus
 // irgendeinem Grund noch nicht existiert.
 let WARNSTUFEN = { stufe1_prozent: 10, stufe2_prozent: 25 };
+let WECHSELKURSE = [];
+function aktuellerWechselkurs(waehrung){
+  if(!waehrung || waehrung === 'CHF') return 1;
+  return WECHSELKURSE.find(w => w.waehrung === waehrung)?.kurs_zu_chf ?? 1;
+}
 
 function confirmDialog(message){
   return new Promise(resolve => {
@@ -605,7 +610,10 @@ async function init(){
   const { data: warnstufen } = await sb.from('preisabgleich_warnstufen').select('*').eq('id', true).maybeSingle();
   if(warnstufen) WARNSTUFEN = warnstufen;
 
-  const { data: artikel } = await sb.from('artikel').select('id,bezeichnung,einheit,ep_lieferant,vp_lieferant,wechselkurs,preis_gesperrt,artikelnummer_lieferant,foto_url').eq('lieferant_id', LIEFERANT_ID).order('bezeichnung');
+  const { data: wk } = await sb.from('wechselkurs').select('waehrung,kurs_zu_chf');
+  WECHSELKURSE = wk || [];
+
+  const { data: artikel } = await sb.from('artikel').select('id,bezeichnung,einheit,ep_lieferant,vp_lieferant,waehrung,preis_gesperrt,artikelnummer_lieferant,foto_url').eq('lieferant_id', LIEFERANT_ID).order('bezeichnung');
   ARTIKEL = artikel || [];
 
   renderKopf();
@@ -1794,7 +1802,7 @@ $('preisCheckAll').addEventListener('change', () => {
 // Nicht gesperrte Artikel (preis_gesperrt) werden dabei ueberschrieben,
 // gesperrte bleiben unangetastet.
 function abVpKnechtVorschlagRoh(a){
-  const wechselkurs = a.wechselkurs || 1;
+  const wechselkurs = aktuellerWechselkurs(a.waehrung);
   if(LIEF.da.vp_lieferant_gleich_vp_knecht){
     if(a.vp_lieferant == null || a.vp_lieferant <= 0) return null;
     const basis = a.vp_lieferant * wechselkurs;
@@ -1833,7 +1841,7 @@ $('preisUebernehmenBtn').addEventListener('click', async () => {
   // ARTIKEL im Hintergrund aktualisieren (fuer den naechsten Start-Klick),
   // die Sicht selbst aber leeren statt erneut die volle Artikelliste zu
   // zeigen - sie ist ja gerade erst uebernommen worden.
-  const { data: artikel } = await sb.from('artikel').select('id,bezeichnung,einheit,ep_lieferant,vp_lieferant,wechselkurs,preis_gesperrt,artikelnummer_lieferant,foto_url').eq('lieferant_id', LIEFERANT_ID).order('bezeichnung');
+  const { data: artikel } = await sb.from('artikel').select('id,bezeichnung,einheit,ep_lieferant,vp_lieferant,waehrung,preis_gesperrt,artikelnummer_lieferant,foto_url').eq('lieferant_id', LIEFERANT_ID).order('bezeichnung');
   ARTIKEL = artikel || [];
   $('preisBody').innerHTML = '<tr><td colspan="5" class="hint">Übernommen - klicke "Start" für einen neuen Abgleich.</td></tr>';
 });
@@ -1853,7 +1861,7 @@ $('ergaenzenUebernehmenBtn').addEventListener('click', async () => {
     // der manuellen Auswahl oben - siehe kategorie-Feld in parseDaeppBetonPdf/
     // -BetonpumpePdf.
     const kategorie = a.kategorie || kategorieDefault;
-    const vpKnechtRoh = abVpKnechtVorschlagRoh({ ep_lieferant: a.ep_lieferant, vp_lieferant: a.vp_lieferant, wechselkurs: 1 });
+    const vpKnechtRoh = abVpKnechtVorschlagRoh({ ep_lieferant: a.ep_lieferant, vp_lieferant: a.vp_lieferant, waehrung: LIEF.da.waehrung });
     const { data: neuArtikel, error: insErr } = await sb.from('artikel').insert({
       lieferant_id: LIEFERANT_ID,
       artikelnummer_lieferant: a.artikelnummer_lieferant,
@@ -1878,7 +1886,7 @@ $('ergaenzenUebernehmenBtn').addEventListener('click', async () => {
   }
   if(!anzahl){ showToast('Keine neuen Artikel übernommen.', true); return; }
   showToast(`${anzahl} neue(r) Artikel übernommen.`);
-  const { data: artikel } = await sb.from('artikel').select('id,bezeichnung,einheit,ep_lieferant,vp_lieferant,wechselkurs,preis_gesperrt,artikelnummer_lieferant,foto_url').eq('lieferant_id', LIEFERANT_ID).order('bezeichnung');
+  const { data: artikel } = await sb.from('artikel').select('id,bezeichnung,einheit,ep_lieferant,vp_lieferant,waehrung,preis_gesperrt,artikelnummer_lieferant,foto_url').eq('lieferant_id', LIEFERANT_ID).order('bezeichnung');
   ARTIKEL = artikel || [];
   $('ergaenzenBody').innerHTML = '<tr><td colspan="3" class="hint">Übernommen - klicke "Start" für einen neuen Abgleich.</td></tr>';
 });
