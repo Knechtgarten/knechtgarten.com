@@ -325,9 +325,14 @@ input[type=number]{-moz-appearance:textfield;}
     <div id="ldAdresseBlock" style="display:none;background:var(--soft);border-radius:6px;padding:10px 12px;margin:0 0 14px;line-height:1.6;font-size:13px;font-weight:600;color:var(--ink);"></div>
     <div class="subhead">Margen</div>
     <div class="row" style="align-items:flex-end;">
-      <div class="fld" style="display:flex;align-items:center;gap:8px;padding-bottom:7px;">
-        <input type="checkbox" class="ld-vplief-gleich-vpknecht" style="width:auto;margin:0;">
-        <label style="margin:0;cursor:pointer;">VP Lieferant = VP Knecht</label>
+      <div class="fld" style="padding-bottom:7px;">
+        <label>Basis für VP Knecht</label>
+        <button type="button" id="ldVplietLockBtn" data-locked="false"
+          style="display:inline-flex;align-items:center;gap:7px;padding:7px 12px;border:1px solid var(--line);border-radius:7px;background:#fff;font-size:12.5px;font-weight:600;cursor:pointer;"
+          title="Gesperrt: VP Lieferant (Bruttopreis) ist Basis fuer VP Knecht - vor der generellen Prozent-Marge geschuetzt. Entsperrt: EP Lieferant + generelle Marge % wird verwendet.">
+          <span id="ldVplietLockIcon" style="display:flex;"></span>
+          <span id="ldVplietLockText"></span>
+        </button>
       </div>
       <div class="fld"><label style="cursor:help;" title="Zoll, Fracht, Sonderzuschlag usw. in einem Wert zusammengefasst - wird nur verwendet, wenn VP Lieferant = VP Knecht aktiv ist.">Zuschläge % zu VP Lieferant</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" class="ld-zuschlag" type="number" step="0.01" placeholder="—"></div>
       <div class="fld"><label style="cursor:help;" title="Bestimmt VP Knecht direkt aus EP Lieferant - wird nur verwendet, wenn VP Lieferant = VP Knecht NICHT aktiv ist.">Marge % (EP Lieferant → VP Knecht)</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" class="ld-marge" type="number" step="0.01" placeholder="—"></div>
@@ -759,7 +764,9 @@ const ICON = {
   zap: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z"/></svg>',
   upload: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M12 4l-4 4M12 4l4 4"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>',
   check: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>',
-  search: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>'
+  search: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>',
+  lock: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>',
+  unlock: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-1.8"/></svg>'
 };
 const fmtNum = n => n == null ? '' : Number(n).toLocaleString('de-CH', {maximumFractionDigits:4});
 
@@ -2615,10 +2622,10 @@ async function openDetailOvl(lieferantId, kuerzelAutoGeneriert){
   }
   document.querySelector('.ld-logo').value = l.logo_url || '';
   ldLogoVorschauAktualisieren();
-  document.querySelector('.ld-vplief-gleich-vpknecht').checked = !!l.da.vp_lieferant_gleich_vp_knecht;
+  $('ldVplietLockBtn').dataset.locked = l.da.vp_lieferant_gleich_vp_knecht ? 'true' : 'false';
   document.querySelector('.ld-zuschlag').value = l.da.zuschlag_prozent ?? '';
   document.querySelector('.ld-marge').value = l.da.minimum_marge_prozent ?? '';
-  ldMargenFelderAktualisieren();
+  ldVplietLockRendern();
   document.querySelector('.ld-mwst').value = l.da.mwst_satz ?? 8.1;
   document.querySelector('.ld-mwstinkl').value = l.da.mwst_inklusive ? 'true' : 'false';
   const waehrungOptionen = [...new Set(['CHF', 'EUR', ...WECHSELKURSE.map(w => w.waehrung), l.da.waehrung].filter(Boolean))];
@@ -2667,19 +2674,36 @@ $('ldLogoUploadInput').addEventListener('change', async () => {
   ldLogoVorschauAktualisieren();
 });
 // Margen-Bereich: die zwei Felder (Zuschlaege % / Marge %) sind exklusiv -
-// je nach Haekchen "VP Lieferant = VP Knecht" ist nur eines der beiden
-// relevant, das andere wird zur Klarheit deaktiviert (nicht nur informativ,
-// sondern wirklich gesperrt - "nie beides gleichzeitig").
-function ldMargenFelderAktualisieren(){
-  const vpGleich = document.querySelector('.ld-vplief-gleich-vpknecht').checked;
-  document.querySelector('.ld-zuschlag').disabled = !vpGleich;
-  document.querySelector('.ld-marge').disabled = vpGleich;
+// je nach Schloss "Basis fuer VP Knecht" ist nur eines der beiden relevant,
+// das andere wird zur Klarheit deaktiviert (nicht nur informativ, sondern
+// wirklich gesperrt - "nie beides gleichzeitig"). Gesperrt (data-locked=true)
+// = VP Lieferant (Bruttopreis) ist Basis, geschuetzt vor der generellen
+// Prozent-Marge. Entsperrt = EP Lieferant + generelle Marge % - das kann
+// bestehende, auf echten Bruttopreisen basierende VP-Knecht-Werte bei einer
+// Neuberechnung durch eine generische Prozentzahl ersetzen, darum die
+// Warnung beim Entsperren.
+function ldVplietLockRendern(){
+  const locked = $('ldVplietLockBtn').dataset.locked === 'true';
+  $('ldVplietLockIcon').innerHTML = locked ? ICON.lock : ICON.unlock;
+  $('ldVplietLockText').textContent = locked ? 'VP Lieferant + Zuschläge (Bruttopreis geschützt)' : 'EP Lieferant + generelle Marge %';
+  $('ldVplietLockBtn').style.borderColor = locked ? 'var(--primary)' : 'var(--line)';
+  $('ldVplietLockBtn').style.color = locked ? 'var(--primary)' : 'var(--ink)';
+  document.querySelector('.ld-zuschlag').disabled = !locked;
+  document.querySelector('.ld-marge').disabled = locked;
 }
-document.querySelector('.ld-vplief-gleich-vpknecht').addEventListener('change', ldMargenFelderAktualisieren);
+$('ldVplietLockBtn').addEventListener('click', async () => {
+  const aktuellGesperrt = $('ldVplietLockBtn').dataset.locked === 'true';
+  if(aktuellGesperrt){
+    const ok = await confirmDialog('Achtung: Damit wird VP Knecht für diesen Lieferanten künftig aus einer generellen Prozent-Marge berechnet statt aus dem echten VP Lieferant (Bruttopreis). Bestehende, auf dem Bruttopreis basierende VP-Knecht-Werte können dadurch bei einer künftigen Neuberechnung durch die generelle Marge ersetzt werden. Wirklich entsperren?');
+    if(!ok) return;
+  }
+  $('ldVplietLockBtn').dataset.locked = aktuellGesperrt ? 'false' : 'true';
+  ldVplietLockRendern();
+});
 
 $('ldSave').addEventListener('click', async () => {
   if(!ldCurrentLieferantId) return;
-  const vpGleich = document.querySelector('.ld-vplief-gleich-vpknecht').checked;
+  const vpGleich = $('ldVplietLockBtn').dataset.locked === 'true';
   const zuschlag = document.querySelector('.ld-zuschlag').value.trim();
   const marge = document.querySelector('.ld-marge').value.trim();
   const name = document.querySelector('.ld-name').value.trim();
@@ -2735,7 +2759,7 @@ function ldVpKnechtVorschlagRoh(a, vpGleich, zuschlagProzent, margeProzent){
   return epChf / (1 - margeProzent / 100);
 }
 async function ldVpKnechtAuffuellenFuerLieferant(lieferantId, vpGleich, zuschlagProzent, margeProzent){
-  const { data: artikel, error } = await sb.from('artikel').select('id, ep_lieferant, vp_lieferant, wechselkurs').eq('lieferant_id', lieferantId).is('vp_knecht', null);
+  const { data: artikel, error } = await sb.from('artikel').select('id, ep_lieferant, vp_lieferant, wechselkurs').eq('lieferant_id', lieferantId).eq('preis_gesperrt', false).is('vp_knecht', null);
   if(error || !artikel || artikel.length === 0) return 0;
   let aktualisiert = 0;
   for(const a of artikel){
