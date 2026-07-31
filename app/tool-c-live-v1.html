@@ -800,12 +800,11 @@ let amMode = 'add';
 let amEditId = null;
 let amEditOriginalEp = null;
 // Preis-Sperre: explizites Schloss statt impliziter Erkennung. amGesperrt
-// spiegelt den aktuellen Button-Zustand im Modal; amSondermargeBenutzt wird
-// nur true, wenn im aktuellen Bearbeiten wirklich in "Sondermarge Artikel %"
-// getippt wurde (das Feld zeigt sonst auch passiv immer die implizite Marge
-// des aktuellen Preises an - das allein darf nicht automatisch sperren).
+// spiegelt den aktuellen Button-Zustand im Modal. Ob die Sondermarge benutzt
+// wurde, wird beim Speichern direkt am Feldwert geprueft (nicht ueber eine
+// eigene Sitzungs-Variable) - amMargeKnecht zeigt die implizite Marge nur
+// noch als Platzhalter an, ein echter Wert kommt ausschliesslich vom Tippen.
 let amGesperrt = false;
-let amSondermargeBenutzt = false;
 function amFotoVorschauAktualisieren(){
   const url = $('amFoto').value.trim();
   $('amFotoPreview').src = url;
@@ -902,13 +901,14 @@ function openArtikelModalAdd(){
   $('amNeueGruppeWrap').classList.add('hidden'); $('amNeueGruppeName').value = '';
   $('amEpLief').value = ''; $('amVpLief').value = ''; $('amWaehrung').value = 'CHF';
   $('amWechselkurs').value = '1'; $('amVpKnecht').value = ''; $('amMwst').value = '';
+  $('amMargeKnecht').value = '';
   $('amFoto').value = ''; $('amAnmerkung').value = '';
   $('amZusatzwert').value = ''; $('amZusatzeinheit').value = '';
   amFotoVorschauAktualisieren();
   $('amOt').checked = false; $('amWt').checked = false; $('amEb').checked = false; $('amHaendisch').checked = false;
   $('amStatus').textContent = ''; $('amStatus').className = 'status';
   $('amNotizBtn').classList.add('hidden');
-  amGesperrt = false; amSondermargeBenutzt = false; amAktualisiereGesperrtButton();
+  amGesperrt = false; amAktualisiereGesperrtButton();
   amMwstVorschlagFuellen();
   amAktualisiereMargen();
   $('artikelModalOvl').classList.add('show');
@@ -931,6 +931,7 @@ function openArtikelModalEdit(id){
   $('amWaehrung').value = a.waehrung || 'CHF';
   $('amWechselkurs').value = a.wechselkurs ?? 1;
   $('amVpKnecht').value = a.vp_knecht ?? '';
+  $('amMargeKnecht').value = '';
   $('amMwst').value = a.mwst_satz_pct ?? '';
   amMwstVorschlagFuellen();
   $('amFoto').value = a.foto_url || '';
@@ -945,7 +946,7 @@ function openArtikelModalEdit(id){
   $('amStatus').textContent = ''; $('amStatus').className = 'status';
   $('amNotizBtn').classList.remove('hidden');
   $('amNotizBtn').onclick = () => openArtikelNotizOvl(id);
-  amGesperrt = !!a.preis_gesperrt; amSondermargeBenutzt = false; amAktualisiereGesperrtButton();
+  amGesperrt = !!a.preis_gesperrt; amAktualisiereGesperrtButton();
   amAktualisiereMargen();
   $('artikelModalOvl').classList.add('show');
 }
@@ -1027,7 +1028,11 @@ function amAktualisiereMargen(){
   // die angezeigte Marge tatsaechlich.
   const istUnveraenderterVorschlag = vpKnechtEingegeben === null || (vorschlag != null && Math.abs(vpKnechtEingegeben - vorschlag) < 0.005);
   const vpFuerMarge = istUnveraenderterVorschlag ? vorschlagRoh : vpKnechtEingegeben;
-  $('amMargeKnecht').value = (vpFuerMarge != null && vpFuerMarge > 0 && einstand != null) ? (((vpFuerMarge - einstand) / vpFuerMarge) * 100).toFixed(2) : '';
+  // Nur als Platzhalter anzeigen (wie bei VP Knecht) - NIE als echten Wert
+  // reinschreiben. Sonst laesst sich ein leeres Sondermarge-Feld nie leeren:
+  // jede Eingabe (auch ein Loeschen) loest amAktualisiereMargen() erneut aus,
+  // das den aktuellen Wert sofort wieder zurueckschreiben wuerde.
+  $('amMargeKnecht').placeholder = (vpFuerMarge != null && vpFuerMarge > 0 && einstand != null) ? (((vpFuerMarge - einstand) / vpFuerMarge) * 100).toFixed(2) : '—';
 }
 // MwSt-Satz-Vorschlag: nur befuellen, wenn das Feld leer ist - ein bereits
 // eingetragener (auch bewusst geleerter) Wert wird nie ueberschrieben.
@@ -1039,7 +1044,6 @@ function amMwstVorschlagFuellen(){
 ['amEpLief','amVpLief','amWechselkurs','amVpKnecht'].forEach(id => $(id).addEventListener('input', amAktualisiereMargen));
 $('amLieferant').addEventListener('change', () => { amAktualisiereMargen(); amMwstVorschlagFuellen(); });
 $('amMargeKnecht').addEventListener('input', () => {
-  amSondermargeBenutzt = true;
   const marge = parseFloat($('amMargeKnecht').value);
   const einstand = amEinstandspreisChf();
   if(!isNaN(marge) && marge < 100 && einstand != null){
@@ -1085,10 +1089,13 @@ $('amSave').addEventListener('click', async () => {
   const vpKnechtEingabe = parseFloat($('amVpKnecht').value);
   const vp_knecht = !isNaN(vpKnechtEingabe) ? vpKnechtEingabe
     : amVpKnechtVorschlag(amEinstandspreisChf(), LIEFERANTEN.find(l => l.id === lieferant_id)?.lieferant_datenabgleich?.minimum_marge_prozent);
-  // Sondermarge Artikel % benutzt -> automatisch mitsperren (bewusste
+  // Sondermarge Artikel % ausgefuellt -> automatisch mitsperren (bewusste
   // Preis-Ausnahme soll auch vor kuenftigen automatischen Neuberechnungen
-  // geschuetzt sein). Manuelles Schloss bleibt zusaetzlich moeglich.
-  const preis_gesperrt = amGesperrt || amSondermargeBenutzt;
+  // geschuetzt sein). Manuelles Schloss bleibt zusaetzlich moeglich. Das Feld
+  // zeigt die implizite Marge nur noch als Platzhalter an (siehe
+  // amAktualisiereMargen) - ein echter .value kommt ausschliesslich vom
+  // bewussten Eintippen, daher reicht die reine Leer-Pruefung hier.
+  const preis_gesperrt = amGesperrt || $('amMargeKnecht').value.trim() !== '';
 
   const payload = {
     bezeichnung, kategorie: $('amKategorie').value, einheit, lieferant_id,
