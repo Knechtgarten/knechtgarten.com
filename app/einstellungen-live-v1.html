@@ -2216,7 +2216,7 @@ async function siUebernehmen(row){
   // ueber den bestehenden Foto-Upload im Artikelstamm (Tool C) ergaenzt.
   const payload = {
     bezeichnung, artikelnummer_lieferant: artikelnummer, artikelnummer_knecht,
-    lieferant_id: lieferantId, kategorie: siKategorie, einheit: 'Stk.',
+    lieferant_id: lieferantId, kategorie: siKategorie, einheit: row._siEinheit || 'Stk.',
     ep_lieferant: ek, vp_lieferant: vp,
     waehrung: lieferant?.da?.waehrung || 'CHF',
     mwst_satz_pct: lieferant?.da?.mwst_satz ?? 8.1,
@@ -2333,7 +2333,11 @@ const SI_SPALTEN_FEST = [
   { key: 'zusatz_1', inputSelector: '.si-in-zusatz1', feldClass: 'small', titel: 'Zusatz 1 (frei)' },
   { key: 'zusatz_2', inputSelector: '.si-in-zusatz2', feldClass: 'small', titel: 'Zusatz 2 (frei)' },
 ];
-const SI_ROLLE_LABEL = { ignorieren: 'Nicht zuordnen', bezeichnung: 'Bezeichnung', artikelnummer: 'Artikelnummer', ek_preis: 'EK-Preis', vp_preis: 'VP-Preis', zusatzwert: 'Zusatzwert' };
+const SI_ROLLE_LABEL = { ignorieren: 'Nicht zuordnen', bezeichnung: 'Bezeichnung', artikelnummer: 'Artikelnummer', ek_preis: 'EK-Preis', vp_preis: 'VP-Preis', einheit: 'Einheit', zusatzwert: 'Zusatzwert' };
+// Rollen, die (wie zusatzwert) nur bei EINER Spalte gleichzeitig gewaehlt
+// sein duerfen, da artikel jeweils nur ein einziges Zielfeld dafuer hat
+// (artikel.einheit bzw. artikel.zusatzwert/-einheit).
+const SI_ROLLEN_EXKLUSIV = ['einheit', 'zusatzwert'];
 // Default-Rolle: die vier festen KI-Felder starten mit ihrer eigenen
 // natuerlichen Rolle (was die KI dort eintraegt, ist ja meistens richtig),
 // die zwei generischen Zusatz-Plaetze starten neutral auf "Nicht zuordnen".
@@ -2363,9 +2367,9 @@ function siRenderSpaltenkopf(){
   // Bezeichnung/Artikelnummer duerfen bewusst mehrfach gewaehlt werden.
   fieldrow.querySelectorAll('.si-spalten-rolle').forEach(sel => {
     sel.addEventListener('change', () => {
-      if(sel.value === 'zusatzwert'){
+      if(SI_ROLLEN_EXKLUSIV.includes(sel.value)){
         fieldrow.querySelectorAll('.si-spalten-rolle').forEach(other => {
-          if(other !== sel && other.value === 'zusatzwert') other.value = 'ignorieren';
+          if(other !== sel && other.value === sel.value) other.value = 'ignorieren';
         });
       }
     });
@@ -2392,7 +2396,7 @@ function siWendeZuordnungAn(row){
   SI_SPALTEN_FEST.forEach(spalte => { werte[spalte.key] = (row.querySelector(spalte.inputSelector)?.value || '').trim(); });
 
   const teilBeschreibung = [], teilArtikelnummer = [];
-  let ekWert = '', vpWert = '', zusatzwertRoh = '';
+  let ekWert = '', vpWert = '', zusatzwertRoh = '', einheitRoh = '';
   rollen.forEach(r => {
     if(!werte[r.key]) return;
     const praefix = praefixe[r.key] || '';
@@ -2402,6 +2406,7 @@ function siWendeZuordnungAn(row){
     else if(r.ziel === 'ek_preis') ekWert = wert;
     else if(r.ziel === 'vp_preis') vpWert = wert;
     else if(r.ziel === 'zusatzwert') zusatzwertRoh = wert;
+    else if(r.ziel === 'einheit') einheitRoh = wert;
   });
 
   row.querySelector('.si-in-bezeichnung').value = teilBeschreibung.join(' ');
@@ -2417,6 +2422,7 @@ function siWendeZuordnungAn(row){
   } else {
     row._siZusatzwert = null; row._siZusatzeinheit = null;
   }
+  row._siEinheit = einheitRoh ? siNormalisiereEinheit(einheitRoh) : null;
 }
 // Die KI schreibt dieselbe Einheit mal ausgeschrieben, mal abgekuerzt (z.B.
 // "Liter" vs. "l") - auf eine feste Kurzform vereinheitlichen, damit das im
