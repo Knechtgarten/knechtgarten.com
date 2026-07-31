@@ -1841,9 +1841,19 @@ async function loadWechselkurse(){
   WECHSELKURSE = data;
   renderWechselkurse();
 }
+// Feste Liste statt Freitext fuer die Waehrung der neuen Zeile - verhindert
+// Tippfehler wie "EURO" statt "EUR" (der Code muss exakt zum artikel.waehrung-
+// Wert passen, sonst greift der Kurs nirgends und faellt still auf 1 zurueck).
+const WK_WAEHRUNGEN = ['EUR', 'USD', 'GBP'];
 function wkFeld(w, feld, typ){
   const val = w ? (w[feld] ?? '') : '';
-  return `<input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="${typ}" class="wkFeld" data-feld="${feld}" value="${val}" ${typ === 'number' ? 'step="0.0001"' : 'placeholder="z.B. EUR" style="text-transform:uppercase;"'}>`;
+  if(feld === 'waehrung' && !w){
+    const belegt = new Set(WECHSELKURSE.map(x => x.waehrung));
+    const optionen = WK_WAEHRUNGEN.filter(c => !belegt.has(c));
+    if(!optionen.length) return '<span class="hint">Alle Währungen bereits erfasst</span>';
+    return `<select class="wkFeld" data-feld="waehrung">${optionen.map(c => `<option value="${c}">${c}</option>`).join('')}</select>`;
+  }
+  return `<input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="${typ}" class="wkFeld" data-feld="${feld}" value="${val}" ${typ === 'number' ? 'step="0.0001"' : ''}>`;
 }
 function renderWechselkurse(){
   const rows = WECHSELKURSE.map(w => `<tr data-id="${w.id}">
@@ -1886,9 +1896,11 @@ function attachWechselkursHandlers(){
   if(draftRow){
     draftRow.querySelectorAll('.wkFeld').forEach(inp => {
       inp.addEventListener('change', async () => {
-        const waehrung = draftRow.querySelector('.wkFeld[data-feld="waehrung"]').value.trim().toUpperCase();
+        const waehrungFeld = draftRow.querySelector('.wkFeld[data-feld="waehrung"]');
         const kurs = parseFloat(draftRow.querySelector('.wkFeld[data-feld="kurs_zu_chf"]').value);
-        if(!waehrung || isNaN(kurs)) return;
+        if(!waehrungFeld || isNaN(kurs)) return;
+        const waehrung = waehrungFeld.value.trim().toUpperCase();
+        if(!waehrung) return;
         const { error } = await sb.from('wechselkurs').upsert({ waehrung, kurs_zu_chf: kurs }, { onConflict: 'waehrung' });
         if(error){ showToast(friendlyError(error), true); return; }
         await loadWechselkurse();
