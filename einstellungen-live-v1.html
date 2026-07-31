@@ -2732,20 +2732,23 @@ $('ldSave').addEventListener('click', async () => {
   };
   const { error } = await sb.from('lieferant_datenabgleich').upsert(payload, { onConflict: 'lieferant_id' });
   if(error){ $('ldStatus').textContent = friendlyError(error); $('ldStatus').className = 'status err'; return; }
-  const anzahlAufgefuellt = await ldVpKnechtAuffuellenFuerLieferant(ldCurrentLieferantId, vpGleich, payload.zuschlag_prozent, payload.minimum_marge_prozent);
-  $('ldStatus').textContent = anzahlAufgefuellt > 0 ? `Gespeichert. VP Knecht bei ${anzahlAufgefuellt} Artikel(n) ergänzt.` : 'Gespeichert.';
+  const anzahlNeuBerechnet = await ldVpKnechtNeuBerechnenFuerLieferant(ldCurrentLieferantId, vpGleich, payload.zuschlag_prozent, payload.minimum_marge_prozent);
+  $('ldStatus').textContent = anzahlNeuBerechnet > 0 ? `Gespeichert. VP Knecht bei ${anzahlNeuBerechnet} Artikel(n) neu berechnet.` : 'Gespeichert.';
   $('ldStatus').className = 'status ok';
   await loadDatenabgleich();
 });
 
-// Nach dem Speichern der Lieferant-Details: bei allen Artikeln dieses
-// Lieferanten OHNE VP Knecht wird der Vorschlag berechnet und gespeichert.
-// Exklusive Wahl statt "hoeherer Kandidat gewinnt":
+// Nach dem Speichern der Lieferant-Details: bei ALLEN nicht gesperrten
+// Artikeln dieses Lieferanten wird VP Knecht mit den (evtl. neuen)
+// Einstellungen neu berechnet und ueberschrieben - das Schloss pro Artikel
+// (preis_gesperrt) ist der einzige Schutz vor dieser Neuberechnung, nicht
+// mehr "hat das Feld schon einen Wert". Wer einen Preis bewusst abweichend
+// halten will, sperrt ihn (oder benutzt die Sondermarge Artikel %, die
+// automatisch mitsperrt). Exklusive Formel-Wahl statt "hoeherer Kandidat
+// gewinnt":
 // - vpGleich=true:  VP Knecht = VP Lieferant x (1 + Zuschlag%)
 // - vpGleich=false: VP Knecht = EP Lieferant / (1 - Marge%)
-// Identische Logik wie im Artikel-Modal/Notizen-Fenster von Tool C. Artikel
-// mit bereits gesetztem VP Knecht bleiben unangetastet, auch wenn sich die
-// Einstellungen hier aendern.
+// Identische Logik wie im Artikel-Modal/Notizen-Fenster von Tool C.
 function ldVpKnechtVorschlagRoh(a, vpGleich, zuschlagProzent, margeProzent){
   const wechselkurs = a.wechselkurs || 1;
   if(vpGleich){
@@ -2758,8 +2761,8 @@ function ldVpKnechtVorschlagRoh(a, vpGleich, zuschlagProzent, margeProzent){
   if(margeProzent == null || margeProzent >= 100) return null;
   return epChf / (1 - margeProzent / 100);
 }
-async function ldVpKnechtAuffuellenFuerLieferant(lieferantId, vpGleich, zuschlagProzent, margeProzent){
-  const { data: artikel, error } = await sb.from('artikel').select('id, ep_lieferant, vp_lieferant, wechselkurs').eq('lieferant_id', lieferantId).eq('preis_gesperrt', false).is('vp_knecht', null);
+async function ldVpKnechtNeuBerechnenFuerLieferant(lieferantId, vpGleich, zuschlagProzent, margeProzent){
+  const { data: artikel, error } = await sb.from('artikel').select('id, ep_lieferant, vp_lieferant, wechselkurs').eq('lieferant_id', lieferantId).eq('preis_gesperrt', false);
   if(error || !artikel || artikel.length === 0) return 0;
   let aktualisiert = 0;
   for(const a of artikel){
