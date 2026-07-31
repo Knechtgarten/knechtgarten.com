@@ -2691,9 +2691,52 @@ $('ldSave').addEventListener('click', async () => {
   };
   const { error } = await sb.from('lieferant_datenabgleich').upsert(payload, { onConflict: 'lieferant_id' });
   if(error){ $('ldStatus').textContent = friendlyError(error); $('ldStatus').className = 'status err'; return; }
-  $('ldStatus').textContent = 'Gespeichert.'; $('ldStatus').className = 'status ok';
+  const anzahlAufgefuellt = await ldVpKnechtAuffuellenFuerLieferant(ldCurrentLieferantId, payload.zoll_fracht_prozent, payload.sonderzuschlag_prozent, payload.minimum_marge_prozent);
+  $('ldStatus').textContent = anzahlAufgefuellt > 0 ? `Gespeichert. VP Knecht bei ${anzahlAufgefuellt} Artikel(n) ergänzt.` : 'Gespeichert.';
+  $('ldStatus').className = 'status ok';
   await loadDatenabgleich();
 });
+
+// Nach dem Speichern der Lieferant-Details: bei allen Artikeln dieses
+// Lieferanten OHNE VP Knecht wird der Vorschlag berechnet und gespeichert
+// (VP-Lieferant-Aufschlag bzw. Minimum-Marge, je hoeherer Wert, ganze
+// Franken) - identische Rechenlogik wie im Artikel-Modal/Notizen-Fenster
+// von Tool C. Artikel mit bereits gesetztem VP Knecht bleiben unangetastet,
+// auch wenn sich die Marge hier aendert.
+function ldVpKnechtVorschlagRoh(a, zollFrachtProzent, sonderzuschlagProzent, minMargeProzent){
+  const wechselkurs = a.wechselkurs || 1;
+  let einstand = null;
+  if(a.ep_lieferant != null){
+    const epChf = a.ep_lieferant * wechselkurs;
+    const zoll = zollFrachtProzent ? epChf * (zollFrachtProzent / 100) : 0;
+    const sonder = sonderzuschlagProzent ? epChf * (sonderzuschlagProzent / 100) : 0;
+    einstand = epChf + zoll + sonder;
+  }
+  let kandidatVp = null;
+  if(a.vp_lieferant != null && a.vp_lieferant > 0){
+    const basis = a.vp_lieferant * wechselkurs;
+    const zoll = zollFrachtProzent ? basis * (zollFrachtProzent / 100) : 0;
+    const sonder = sonderzuschlagProzent ? basis * (sonderzuschlagProzent / 100) : 0;
+    kandidatVp = basis + zoll + sonder;
+  }
+  let kandidatMinMarge = null;
+  if(einstand != null && minMargeProzent != null && minMargeProzent < 100){
+    kandidatMinMarge = einstand / (1 - minMargeProzent / 100);
+  }
+  return (kandidatVp != null && kandidatMinMarge != null) ? Math.max(kandidatVp, kandidatMinMarge) : (kandidatVp ?? kandidatMinMarge);
+}
+async function ldVpKnechtAuffuellenFuerLieferant(lieferantId, zollFrachtProzent, sonderzuschlagProzent, minMargeProzent){
+  const { data: artikel, error } = await sb.from('artikel').select('id, ep_lieferant, vp_lieferant, wechselkurs').eq('lieferant_id', lieferantId).is('vp_knecht', null);
+  if(error || !artikel || artikel.length === 0) return 0;
+  let aktualisiert = 0;
+  for(const a of artikel){
+    const vorschlagRoh = ldVpKnechtVorschlagRoh(a, zollFrachtProzent, sonderzuschlagProzent, minMargeProzent);
+    if(vorschlagRoh == null) continue;
+    const { error: updErr } = await sb.from('artikel').update({ vp_knecht: Math.round(vorschlagRoh) }).eq('id', a.id);
+    if(!updErr) aktualisiert++;
+  }
+  return aktualisiert;
+}
 
 // ---------------------------------------------------------------------------
 // Abgleich starten: es gibt nur noch das eine, umfangreiche Fenster
