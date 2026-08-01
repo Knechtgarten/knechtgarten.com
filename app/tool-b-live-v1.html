@@ -118,7 +118,7 @@ td{padding:6px 6px;border-bottom:1px solid var(--soft);vertical-align:top;}
 .asbody{padding:14px;}
 .draghandle{cursor:grab;color:var(--muted);font-size:13px;flex-shrink:0;line-height:1;display:inline-flex;align-items:center;}
 .draghandle:active{cursor:grabbing;}
-.tsblock.dragging,.asblock.dragging{opacity:.4;}
+.tsblock.dragging,.asblock.dragging,#eingabefelderBody tr.dragging{opacity:.4;}
 .katitem{padding:8px 14px;font-size:12.5px;font-weight:600;cursor:pointer;border-left:3px solid transparent;color:var(--ink);}
 .katitem:hover{background:var(--soft);}
 .katitem.on{background:var(--soft);border-left-color:var(--primary);color:var(--primary);}
@@ -386,6 +386,18 @@ input[type=number]{-moz-appearance:textfield;}
   </div>
 </div>
 
+<div class="overlay" id="efEditOverlay">
+  <div class="modal">
+    <div class="modalhead"><div class="sub">Eingabefeld bearbeiten</div></div>
+    <div class="fld"><label>Name</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="efEditName"></div>
+    <div class="fld"><label>Einheit</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="efEditEinheit"></div>
+    <div class="modalbtns">
+      <button class="btnlink" id="efEditCancel">Abbrechen</button>
+      <button class="btn" id="efEditSave">Speichern</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="rzEditOverlay">
   <div class="modal wide">
     <div class="modalhead" style="display:flex;align-items:flex-start;gap:8px;">
@@ -619,7 +631,7 @@ input[type=number]{-moz-appearance:textfield;}
     <div class="hint">Rohe Masse (z.B. Poollaenge). Werden in Tool A vom Mitarbeiter ausgefuellt.</div>
     <div class="cardbody hidden">
       <table>
-        <thead><tr><th>Name</th><th>Einheit</th><th></th></tr></thead>
+        <thead><tr><th style="width:24px;"></th><th>Name</th><th>Einheit</th><th></th></tr></thead>
         <tbody id="eingabefelderBody"></tbody>
       </table>
       <div class="row admin-only">
@@ -1036,7 +1048,7 @@ async function loadLieferantenListe(){
 async function loadFormelBibliothek(){
   const istAllgemein = formelBibliothekKategorie === 'allgemein';
 
-  let efQuery = sb.from('eingabefeld').select('id,name,einheit,offertentyp_id');
+  let efQuery = sb.from('eingabefeld').select('id,name,einheit,offertentyp_id,reihenfolge').order('reihenfolge');
   efQuery = istAllgemein ? efQuery.is('offertentyp_id', null) : efQuery.eq('offertentyp_id', formelBibliothekKategorie);
   const { data: efs, error: efErr } = await efQuery;
   if(efErr){ console.error(efErr); return; }
@@ -1089,12 +1101,38 @@ function renderSystemwerte(){
 
 function renderEingabefelder(){
   $('eingabefelderBody').innerHTML = EINGABEFELDER.map(ef => `
-    <tr>
+    <tr data-ef="${ef.id}">
+      <td><span class="draghandle admin-only" title="Verschieben">${ICON.drag}</span></td>
       <td>${ef.name}</td>
       <td>${ef.einheit}</td>
-      <td><button class="icobtn admin-only" onclick="deleteEingabefeld('${ef.id}')">${ICON.trash}</button></td>
+      <td style="display:flex;gap:4px;">
+        <button class="icobtn admin-only" onclick="openEditEingabefeldModal('${ef.id}')" title="Bearbeiten">${ICON.edit}</button>
+        <button class="icobtn admin-only danger" onclick="deleteEingabefeld('${ef.id}')" title="Löschen">${ICON.trash}</button>
+      </td>
     </tr>`).join('');
+  setupDragReorder($('eingabefelderBody'), 'tr', ids => persistReihenfolge('eingabefeld', ids), 'ef');
 }
+let efEditId = null;
+function openEditEingabefeldModal(id){
+  const ef = EINGABEFELDER.find(e => e.id === id);
+  if(!ef) return;
+  efEditId = id;
+  $('efEditName').value = ef.name;
+  $('efEditEinheit').value = ef.einheit;
+  $('efEditOverlay').classList.add('show');
+  $('efEditName').focus();
+}
+$('efEditCancel').addEventListener('click', () => $('efEditOverlay').classList.remove('show'));
+$('efEditSave').addEventListener('click', async () => {
+  const name = $('efEditName').value.trim();
+  const einheit = $('efEditEinheit').value.trim();
+  if(!name || !einheit) return;
+  const { error } = await sb.from('eingabefeld').update({ name, einheit }).eq('id', efEditId);
+  if(error){ showToast(friendlyError(error), true); return; }
+  $('efEditOverlay').classList.remove('show');
+  await loadFormelBibliothek();
+});
+$('efEditName').addEventListener('keydown', e => { if(e.key === 'Enter') $('efEditSave').click(); });
 
 function renderTerms(){
   // Systemwert-Terms erscheinen nicht hier, sondern in der eigenen
@@ -1166,7 +1204,7 @@ function renderArbeitsschritte(){
 // Drag&Drop-Umsortierung (Arbeitsschritte global, Teilschritte je innerhalb
 // ihres Arbeitsschritts)
 // ---------------------------------------------------------------------------
-function setupDragReorder(container, itemSelector, onReorder){
+function setupDragReorder(container, itemSelector, onReorder, datasetKey){
   let dragEl = null;
   container.querySelectorAll(itemSelector).forEach(el => {
     el.setAttribute('draggable', 'true');
@@ -1183,16 +1221,21 @@ function setupDragReorder(container, itemSelector, onReorder){
   container.addEventListener('drop', e => {
     e.preventDefault();
     if(!dragEl) return;
-    const ids = Array.from(container.querySelectorAll(itemSelector)).map(el => el.dataset.as || el.dataset.ts);
+    const ids = Array.from(container.querySelectorAll(itemSelector)).map(el => datasetKey ? el.dataset[datasetKey] : (el.dataset.as || el.dataset.ts));
     onReorder(ids);
   });
 }
 
+// tabelle='arbeitsschritt'/'teilschritt' laden nach dem Speichern ueber
+// loadArbeitsschritte() neu (eigene Ladefunktion je Tabelle), alle anderen
+// (z.B. 'eingabefeld') ueber loadFormelBibliothek() - beide sind hier global
+// erreichbar, da alles in derselben Datei ohne Module lebt.
 async function persistReihenfolge(tabelle, ids){
   for(let i = 0; i < ids.length; i++){
     await sb.from(tabelle).update({ reihenfolge: i + 1 }).eq('id', ids[i]);
   }
-  await loadArbeitsschritte();
+  if(tabelle === 'eingabefeld') await loadFormelBibliothek();
+  else await loadArbeitsschritte();
 }
 
 function renderTeilschritt(asId, ts, nummer){
@@ -1323,7 +1366,8 @@ $('addEfBtn').addEventListener('click', async () => {
   const einheit = $('newEfEinheit').value.trim();
   if(!name || !einheit){ $('efStatus').textContent = 'Bitte Name und Einheit ausfuellen.'; $('efStatus').className='status err'; return; }
   const offertentyp_id = formelBibliothekKategorie === 'allgemein' ? null : formelBibliothekKategorie;
-  const { error } = await sb.from('eingabefeld').insert({ offertentyp_id, name, einheit });
+  const reihenfolge = EINGABEFELDER.length ? Math.max(...EINGABEFELDER.map(e => e.reihenfolge || 0)) + 1 : 1;
+  const { error } = await sb.from('eingabefeld').insert({ offertentyp_id, name, einheit, reihenfolge });
   if(error){ $('efStatus').textContent = friendlyError(error); $('efStatus').className='status err'; return; }
   $('newEfName').value=''; $('newEfEinheit').value='';
   $('efStatus').textContent = 'Gespeichert.'; $('efStatus').className='status ok';
