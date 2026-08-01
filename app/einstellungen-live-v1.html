@@ -1628,8 +1628,26 @@ function kategorieSelectHtml(aktuelleKategorie, cssClass){
   return `<select class="${cssClass}">${kategorieOptionsHtml(aktuelleKategorie)}</select>`;
 }
 
+let STAFFEL_REF_EINGABEFELDER = [];
+let STAFFEL_REF_TERMS = [];
+async function ladeStaffelReferenzWerte(){
+  const [ef, t] = await Promise.all([
+    sb.from('eingabefeld').select('id,name').eq('staffel_referenz', true).order('name'),
+    sb.from('term').select('id,name').eq('staffel_referenz', true).order('name')
+  ]);
+  STAFFEL_REF_EINGABEFELDER = ef.data || [];
+  STAFFEL_REF_TERMS = t.data || [];
+}
+function staffelReferenzOptionsHtml(sg){
+  const aktuell = sg.referenz_eingabefeld_id ? `eingabefeld:${sg.referenz_eingabefeld_id}` : sg.referenz_term_id ? `term:${sg.referenz_term_id}` : '';
+  const efOpts = STAFFEL_REF_EINGABEFELDER.map(e => `<option value="eingabefeld:${e.id}" ${aktuell===`eingabefeld:${e.id}`?'selected':''}>${e.name}</option>`).join('');
+  const termOpts = STAFFEL_REF_TERMS.map(t => `<option value="term:${t.id}" ${aktuell===`term:${t.id}`?'selected':''}>${t.name}</option>`).join('');
+  return `<option value="">– Menge-Formel der Ressourcenzeile –</option>${efOpts}${termOpts}`;
+}
+
 async function loadStaffelgruppen(){
-  const { data: gruppen, error } = await sb.from('staffelgruppe').select('id,name,kategorie,titel').order('name');
+  await ladeStaffelReferenzWerte();
+  const { data: gruppen, error } = await sb.from('staffelgruppe').select('id,name,kategorie,titel,referenz_eingabefeld_id,referenz_term_id').order('name');
   if(error){ console.error(error); return; }
   STAFFELGRUPPEN = gruppen;
   // Ueber die Anzahl pruefen, nicht ueber den Namen - sonst wuerde ein
@@ -1691,7 +1709,9 @@ function renderSgBody(sg){
     <div class="row">
       <div class="fld" style="max-width:360px;white-space:nowrap;"><label style="white-space:nowrap;">Titel (frei änderbar, wird in der Offerte angezeigt)</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="text" class="sgTitelInput" value="${sg.titel || ''}" placeholder="${sg.name}"></div>
       <div class="fld" style="max-width:160px;"><label>Kategorie</label>${kategorieSelectHtml(sg.kategorie, 'sgKategorieSelect')}</div>
+      <div class="fld" style="max-width:260px;"><label>Referenzwert für Staffelung</label><select class="sgReferenzSelect">${staffelReferenzOptionsHtml(sg)}</select></div>
     </div>
+    <div class="hint" style="margin-bottom:12px;">Ohne Referenzwert bestimmt die Menge-Formel der jeweiligen Ressourcenzeile die Staffelstufe (bisheriges Verhalten). Mit Referenzwert wird stattdessen immer dieser eine Wert verwendet, egal wo die Staffelung eingesetzt wird.</div>
     <div class="hint" style="margin-bottom:12px;">Die berechnete Menge (z.B. m³) wird mit den Von/Bis-Bereichen unten verglichen - der erste passende Bereich bestimmt, welcher Artikel (und damit welcher Pauschalpreis) in der Offerte verrechnet wird. Die letzte Zeile ist immer leer zum Erfassen - sobald Von und Artikel ausgefüllt sind, wird automatisch gespeichert und eine neue leere Zeile erscheint.</div>
     <table class="sgtable">
       <thead><tr><th style="width:150px;">Von</th><th style="width:150px;">Bis</th><th style="width:320px;">Artikel</th><th style="width:40px;"></th></tr></thead>
@@ -1733,6 +1753,17 @@ function attachSgBodyHandlers(){
       const statusEl = body.querySelector('.sgStatus');
       if(error){ statusEl.textContent = friendlyError(error); statusEl.className = 'status sgStatus err'; return; }
       statusEl.textContent = 'Kategorie gespeichert.'; statusEl.className = 'status sgStatus ok';
+      await loadStaffelgruppen();
+    });
+    body.querySelector('.sgReferenzSelect').addEventListener('change', async e => {
+      const val = e.target.value;
+      const payload = { referenz_eingabefeld_id: null, referenz_term_id: null };
+      if(val.startsWith('eingabefeld:')) payload.referenz_eingabefeld_id = val.slice('eingabefeld:'.length);
+      else if(val.startsWith('term:')) payload.referenz_term_id = val.slice('term:'.length);
+      const { error } = await sb.from('staffelgruppe').update(payload).eq('id', sgId);
+      const statusEl = body.querySelector('.sgStatus');
+      if(error){ statusEl.textContent = friendlyError(error); statusEl.className = 'status sgStatus err'; return; }
+      statusEl.textContent = 'Referenzwert gespeichert.'; statusEl.className = 'status sgStatus ok';
       await loadStaffelgruppen();
     });
     body.querySelectorAll('.sgStufeRow').forEach(row => {
