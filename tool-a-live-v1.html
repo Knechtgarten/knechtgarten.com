@@ -1043,7 +1043,6 @@ let tfCounter = 0;
 
 // Lieferwagenfahrzeit (Preisfindung Phase 3): einmal pro Offerte anhand der
 // Kunde-PLZ ueber Google Distance Matrix berechnet, Nutzer waehlt Zeit/km.
-const GOOGLE_MAPS_API_KEY = 'AIzaSyA-4M4PV0EK8e_7ePV-B9G1VHErdc7pBNg';
 let lieferwagenKonfig = null; // {herkunft_adresse, stundenpreis, kmpreis}
 let lieferwagenModus = 'zeit'; // 'zeit' | 'distanz'
 let lieferwagenDistanzCache = {}; // {plz: {stdHinRueck, kmHinRueck} | null}
@@ -1176,12 +1175,15 @@ async function ladeLieferwagenKonfiguration(){
 async function holeLieferwagenDistanz(plz){
   if(lieferwagenDistanzCache.hasOwnProperty(plz)) return lieferwagenDistanzCache[plz];
   try{
-    const origin = encodeURIComponent(lieferwagenKonfig.herkunft_adresse);
-    const dest = encodeURIComponent(plz + ', Schweiz');
-    const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${origin}&destinations=${dest}&key=${GOOGLE_MAPS_API_KEY}`;
-    const res = await fetch(url);
-    const json = await res.json();
-    const el = json.rows?.[0]?.elements?.[0];
+    // Direkter Browser-Aufruf an Google wird per CORS blockiert (Google
+    // liefert keine Access-Control-Allow-Origin-Header) - deshalb ueber eine
+    // Edge Function, die serverseitig aufruft (siehe distance-matrix).
+    const { data, error } = await sb.functions.invoke('distance-matrix', {
+      body: { origin: lieferwagenKonfig.herkunft_adresse, destination: plz + ', Schweiz' }
+    });
+    if(error) throw error;
+    if(data?.error) throw new Error(data.error);
+    const el = data.rows?.[0]?.elements?.[0];
     if(el?.status !== 'OK') throw new Error(el?.status || 'Distanz nicht ermittelbar');
     const ergebnis = {
       stdHinRueck: (el.duration.value / 3600) * 2,
@@ -1224,12 +1226,12 @@ async function holeKieswerkDistanzKm(adresse, plz){
   const key = adresse + '::' + plz;
   if(kiesBetonDistanzCache.hasOwnProperty(key)) return kiesBetonDistanzCache[key];
   try{
-    const origin = encodeURIComponent(adresse);
-    const dest = encodeURIComponent(plz + ', Schweiz');
-    const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${origin}&destinations=${dest}&key=${GOOGLE_MAPS_API_KEY}`;
-    const res = await fetch(url);
-    const json = await res.json();
-    const el = json.rows?.[0]?.elements?.[0];
+    const { data, error } = await sb.functions.invoke('distance-matrix', {
+      body: { origin: adresse, destination: plz + ', Schweiz' }
+    });
+    if(error) throw error;
+    if(data?.error) throw new Error(data.error);
+    const el = data.rows?.[0]?.elements?.[0];
     if(el?.status !== 'OK') throw new Error(el?.status || 'Distanz nicht ermittelbar');
     const km = el.distance.value / 1000;
     kiesBetonDistanzCache[key] = km;
