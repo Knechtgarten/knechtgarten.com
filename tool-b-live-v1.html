@@ -724,9 +724,19 @@ input[type=number]{-moz-appearance:textfield;}
   </div>
 
   <div class="card" id="systemwerteCard">
-    <div class="cardheader" onclick="toggleCard(this)"><span class="cardchevron">&#9656;</span><div class="cardlabel">Systemwerte</div></div>
+    <div class="cardheader" onclick="toggleCard(this)"><span class="cardchevron">&#9656;</span><div class="cardlabel">Fahrstrecke (Distanzberechnung)</div></div>
     <div class="hint">Werte, die zur Rechenzeit automatisch ermittelt werden (im Code hinterlegt, nicht loeschbar) - in Menge-Formeln wie ein normaler Wert auswaehlbar.</div>
     <div class="cardbody hidden">
+      <div class="row" style="align-items:flex-end;margin-bottom:14px;">
+        <div class="fld" style="flex:1;">
+          <label>Standort der Firma (Ausgangspunkt)</label>
+          <input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="text" id="firmenstandortInput" placeholder="z.B. Badhaus 42, 3615 Heimenschwand, Schweiz">
+        </div>
+        <div class="fld" style="max-width:130px;">
+          <button class="btnlink" id="firmenstandortCheckBtn" title="Adresse pruefen (Google)">Prüfen</button>
+        </div>
+      </div>
+      <div class="hint" style="margin-bottom:14px;">Gilt gleichzeitig für "Fahrzeit/Fahrstrecke zur Baustelle" unten UND für die Lieferwagenfahrzeit über die ganze Offerte (Einstellungen → Berechnungsregeln).</div>
       <table>
         <thead><tr><th>Name</th><th>Typ</th><th></th></tr></thead>
         <tbody id="systemwerteBody"></tbody>
@@ -1054,6 +1064,7 @@ async function loadFormelBibliothek(){
   TERMS = terms;
   if(istAllgemein) await stelleSystemwerteSicher(terms);
   if(istAllgemein) await ladeDistanzAdresslisten();
+  if(istAllgemein) await ladeFirmenstandort();
 
   renderEingabefelder();
   renderTerms();
@@ -1095,6 +1106,45 @@ function renderSystemwerte(){
       <td class="hint">im Code erstellt</td>
     </tr>`).join('');
 }
+
+// Standort der Firma - Ausgangspunkt fuer "Fahrzeit/Fahrstrecke zur
+// Baustelle" (Systemwerte oben) UND fuer die Lieferwagenfahrzeit-
+// Kostenzeile (Einstellungen > Berechnungsregeln). Beide lesen denselben
+// lieferwagen_konfiguration.herkunft_adresse-Wert - hier zentral an einer
+// Stelle mit Pruefen-Button verwaltet statt doppelt gepflegt.
+function firmenstandortZeigePruefstatus(data){
+  const btn = $('firmenstandortCheckBtn');
+  if(data.herkunft_geprueft_ok === true){ btn.innerHTML = `${ICON.check} Gefunden`; btn.style.color = '#2E7D32'; }
+  else if(data.herkunft_geprueft_ok === false){ btn.innerHTML = `${ICON.close} ${data.herkunft_geprueft_fehler || 'Nicht gefunden'}`; btn.style.color = 'var(--danger)'; }
+  else { btn.textContent = 'Prüfen'; btn.style.color = ''; }
+}
+async function ladeFirmenstandort(){
+  const { data, error } = await sb.from('lieferwagen_konfiguration').select('herkunft_adresse, herkunft_geprueft_ok, herkunft_geprueft_fehler').eq('id', true).single();
+  if(error){ console.error(error); return; }
+  $('firmenstandortInput').value = data.herkunft_adresse || '';
+  firmenstandortZeigePruefstatus(data);
+}
+$('firmenstandortInput').addEventListener('change', async () => {
+  const herkunft = $('firmenstandortInput').value.trim();
+  // Adresse geaendert - alter Pruefstatus gilt nicht mehr, zuruecksetzen.
+  const { error } = await sb.from('lieferwagen_konfiguration').update({ herkunft_adresse: herkunft || null, herkunft_geprueft_ok: null, herkunft_geprueft_fehler: null }).eq('id', true);
+  if(error){ showToast(friendlyError(error), true); return; }
+  showToast('Gespeichert.');
+  firmenstandortZeigePruefstatus({});
+});
+$('firmenstandortCheckBtn').addEventListener('click', async () => {
+  const btn = $('firmenstandortCheckBtn');
+  const adresse = $('firmenstandortInput').value.trim();
+  if(!adresse){ btn.textContent = 'Bitte Adresse eintragen'; btn.style.color = 'var(--danger)'; return; }
+  btn.disabled = true;
+  btn.textContent = 'Prüfe …';
+  btn.style.color = '';
+  const ergebnis = await pruefeAdresseGeocoding(adresse);
+  btn.disabled = false;
+  btn.innerHTML = ergebnis.ok ? `${ICON.check} Gefunden` : `${ICON.close} ${ergebnis.status}`;
+  btn.style.color = ergebnis.ok ? '#2E7D32' : 'var(--danger)';
+  await sb.from('lieferwagen_konfiguration').update({ herkunft_geprueft_ok: ergebnis.ok, herkunft_geprueft_fehler: ergebnis.ok ? null : ergebnis.status }).eq('id', true);
+});
 
 // ---------------------------------------------------------------------------
 // Adresslisten fuer die Distanz-Systemwerte "Fahrt Baustelle zu naechstem
@@ -1155,12 +1205,22 @@ async function pruefeAdresseGeocoding(adresse){
   }
 }
 
+// Zeigt das zuletzt gespeicherte Pruefergebnis direkt an (statt immer bei
+// "Prüfen" zu starten) - bleibt so nach einem Neuladen auf einen Blick
+// sichtbar, welche Adressen schon verifiziert sind (siehe geprueft_ok/
+// geprueft_fehler, zurueckgesetzt beim Aendern der Adresse).
+function distanzAdrPruefzelleHtml(r){
+  if(r.geprueft_ok === true) return `<button class="btnlink distanzAdrCheckBtn" data-id="${r.id}" style="color:#2E7D32;" title="Erneut prüfen">${ICON.check} Gefunden</button>`;
+  if(r.geprueft_ok === false) return `<button class="btnlink distanzAdrCheckBtn" data-id="${r.id}" style="color:var(--danger);" title="Erneut prüfen">${ICON.close} ${r.geprueft_fehler || 'Nicht gefunden'}</button>`;
+  return `<button class="btnlink distanzAdrCheckBtn" data-id="${r.id}" title="Adresse pruefen (Google)">Prüfen</button>`;
+}
+
 function renderDistanzAdressliste(tabelle, zielId){
   const liste = DISTANZ_ADRESSLISTEN[tabelle];
   const rows = liste.map(r => `<tr data-id="${r.id}">
     <td>${distanzAdrFeld(r,'name')}</td>
     <td>${distanzAdrFeld(r,'adresse')}</td>
-    <td><button class="btnlink distanzAdrCheckBtn" data-id="${r.id}" title="Adresse pruefen (Google)">Prüfen</button></td>
+    <td>${distanzAdrPruefzelleHtml(r)}</td>
     <td><button class="icobtn admin-only danger distanzAdrDeleteBtn" data-id="${r.id}" ${liste.length <= 1 ? 'disabled title="Mindestens eine Adresse muss bestehen bleiben"' : 'title="Eintrag löschen"'}>${ICON.trash}</button></td>
   </tr>`).join('');
   const draftRow = `<tr class="distanzAdrDraftRow admin-only">
@@ -1179,15 +1239,23 @@ function attachDistanzAdresslisteHandlers(tabelle, zielId){
     const id = tr.dataset.id;
     tr.querySelectorAll('.distanzAdrFeld').forEach(inp => {
       inp.addEventListener('change', async () => {
-        const { error } = await sb.from(tabelle).update({ [inp.dataset.feld]: inp.value.trim() }).eq('id', id);
+        const werte = { [inp.dataset.feld]: inp.value.trim() };
+        // Adresse geaendert - alter Pruefstatus gilt nicht mehr, zuruecksetzen.
+        if(inp.dataset.feld === 'adresse'){ werte.geprueft_ok = null; werte.geprueft_fehler = null; }
+        const { error } = await sb.from(tabelle).update(werte).eq('id', id);
         if(error){ showToast(friendlyError(error), true); return; }
         showToast('Gespeichert.');
+        if(inp.dataset.feld === 'adresse'){
+          await ladeDistanzAdresslisten();
+          renderDistanzAdressliste(tabelle, zielId);
+        }
       });
     });
   });
   body.querySelectorAll('.distanzAdrCheckBtn').forEach(btn => {
     btn.addEventListener('click', async () => {
       const tr = btn.closest('tr');
+      const id = tr.dataset.id;
       const adresse = tr.querySelector('.distanzAdrFeld[data-feld="adresse"]').value.trim();
       if(!adresse){ btn.textContent = 'Bitte Adresse eintragen'; btn.style.color = 'var(--danger)'; return; }
       btn.disabled = true;
@@ -1197,6 +1265,9 @@ function attachDistanzAdresslisteHandlers(tabelle, zielId){
       btn.disabled = false;
       btn.innerHTML = ergebnis.ok ? `${ICON.check} Gefunden` : `${ICON.close} ${ergebnis.status}`;
       btn.style.color = ergebnis.ok ? '#2E7D32' : 'var(--danger)';
+      await sb.from(tabelle).update({ geprueft_ok: ergebnis.ok, geprueft_fehler: ergebnis.ok ? null : ergebnis.status }).eq('id', id);
+      const row = DISTANZ_ADRESSLISTEN[tabelle].find(x => x.id === id);
+      if(row){ row.geprueft_ok = ergebnis.ok; row.geprueft_fehler = ergebnis.ok ? null : ergebnis.status; }
     });
   });
   body.querySelectorAll('.distanzAdrDeleteBtn').forEach(btn => {
