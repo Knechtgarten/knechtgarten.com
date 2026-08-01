@@ -747,7 +747,7 @@ input[type=number]{-moz-appearance:textfield;}
             <div class="row" style="margin-bottom:12px;">
               <div class="fld" style="max-width:220px;"><label>Titel (frei änderbar, wird in der Offerte angezeigt)</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="text" id="kiesTransportTitelInput" placeholder="Kies-Transport"></div>
               <div class="fld" style="max-width:160px;"><label>Kategorie</label><select id="kiesTransportKategorieSelect"></select></div>
-              <div class="fld" style="max-width:120px;"><label>Einheit</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="text" id="kiesTransportEinheitInput" placeholder="Pauschale"></div>
+              <div class="fld" style="max-width:120px;"><label>Einheit</label><select id="kiesTransportEinheitInput"></select></div>
               <div class="fld" style="max-width:120px;"><label>MwSt-Satz %</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="number" step="0.1" id="kiesTransportMwstInput" placeholder="8.1"></div>
             </div>
             <div class="hint" style="margin-bottom:12px;">Die letzte Zeile ist immer leer zum Erfassen - sobald ein Name eingegeben ist, wird automatisch gespeichert und eine neue leere Zeile erscheint.</div>
@@ -767,7 +767,7 @@ input[type=number]{-moz-appearance:textfield;}
             <div class="row" style="margin-bottom:12px;">
               <div class="fld" style="max-width:220px;"><label>Titel (frei änderbar, wird in der Offerte angezeigt)</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="text" id="betonTransportTitelInput" placeholder="Beton-Transport"></div>
               <div class="fld" style="max-width:160px;"><label>Kategorie</label><select id="betonTransportKategorieSelect"></select></div>
-              <div class="fld" style="max-width:120px;"><label>Einheit</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="text" id="betonTransportEinheitInput" placeholder="Pauschale"></div>
+              <div class="fld" style="max-width:120px;"><label>Einheit</label><select id="betonTransportEinheitInput"></select></div>
               <div class="fld" style="max-width:120px;"><label>MwSt-Satz %</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="number" step="0.1" id="betonTransportMwstInput" placeholder="8.1"></div>
             </div>
             <div class="hint" style="margin-bottom:12px;">Die letzte Zeile ist immer leer zum Erfassen - sobald ein Name eingegeben ist, wird automatisch gespeichert und eine neue leere Zeile erscheint.</div>
@@ -878,7 +878,7 @@ function zeigeAbschnitt(name){
   }
   if(name === 'sonderpositionen'){
     loadStaffelgruppen(); loadKieswerkListe('kieswerk_kies','kiesTransportBody'); loadKieswerkListe('kieswerk_beton','betonTransportBody');
-    ladeSonderpositionTypKategorien();
+    ladeEinheiten().then(ladeSonderpositionTypKategorien);
   }
   if(name === 'benutzer'){ loadBenutzer(); loadModulSichtbarkeit(); }
 }
@@ -888,6 +888,24 @@ document.querySelectorAll('#settingsnav a').forEach(a => a.addEventListener('cli
 // Offertentyp-Verwaltung
 // ---------------------------------------------------------------------------
 let OFFERTENTYPEN = [];
+let EINHEITEN = [];
+async function ladeEinheiten(){
+  const { data, error } = await sb.from('einheit').select('code,name').order('reihenfolge');
+  if(error){ console.error(error); return; }
+  EINHEITEN = data;
+}
+// selected kann eine bisher frei getippte, nicht (mehr) in der Liste
+// vorhandene Einheit sein - die bleibt dann als eigene Option erhalten,
+// statt beim Oeffnen des Formulars stillschweigend auf die erste Einheit
+// der Liste zu springen.
+function einheitOptionsHtml(selected, mitLeerOption){
+  const bekannt = EINHEITEN.some(e => e.code === selected);
+  const leer = mitLeerOption ? '<option value="">– waehlen –</option>' : '';
+  const unbekannt = (selected && !bekannt) ? `<option value="${selected}" selected>${selected} (unbekannt)</option>` : '';
+  return leer + unbekannt + EINHEITEN.map(e =>
+    `<option value="${e.code}" ${e.code===selected?'selected':''}>${e.code}${e.name ? ' – ' + e.name : ''}</option>`
+  ).join('');
+}
 async function loadOffertentypen(){
   const { data, error } = await sb.from('offertentyp').select('id,name,berechnungsmodell,reihenfolge,ausgeblendet,papierkorb_am').order('reihenfolge');
   if(error){ console.error(error); return; }
@@ -1844,7 +1862,7 @@ async function ladeSonderpositionTypKategorien(){
       statusEl.textContent = 'Titel gespeichert.'; statusEl.className = 'status ok';
       if(titelLabel) titelLabel.textContent = neuerTitel || eintrag.name;
     };
-    einheitInput.value = eintrag.einheit || '';
+    einheitInput.innerHTML = einheitOptionsHtml(eintrag.einheit || 'Pauschale');
     einheitInput.onchange = async () => {
       const neueEinheit = einheitInput.value.trim() || 'Pauschale';
       const { error: updErr } = await sb.from('sonderposition_typ').update({ einheit: neueEinheit }).eq('id', eintrag.id);
