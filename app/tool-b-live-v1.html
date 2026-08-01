@@ -778,7 +778,6 @@ input[type=number]{-moz-appearance:textfield;}
 const SUPABASE_URL = 'https://oalapdxinqlnzwxhyuzy.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_DoeD4uEnwemmnFu4AxE9uw_5lmQYc5P';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-const GOOGLE_MAPS_API_KEY = 'AIzaSyA-4M4PV0EK8e_7ePV-B9G1VHErdc7pBNg';
 const ROLLE_LABEL = { admin: 'Admin', buero_team: 'Büro-Team', mitarbeitende: 'Mitarbeitende', service_team: 'Service-Team' };
 
 let currentOffertentypId = null;
@@ -1128,18 +1127,22 @@ function distanzAdrFeld(row, feld){
 // holeKieswerkDistanzKm() in Tool A, die bereits nachweislich funktioniert).
 // Adresse gegen sich selbst testen: schlaegt Google fehl, die Adresse zu
 // finden, kommt fuer origin/destination ein Status ungleich 'OK' zurueck.
-// Nur eine visuelle Rueckmeldung beim Erfassen, wird nirgends gespeichert -
-// bei Bedarf einfach erneut pruefbar (Button bleibt klickbar).
+// Laeuft ueber die distance-matrix-Edge-Function (Server-zu-Server) - ein
+// direkter Browser-Aufruf an Google wird per CORS blockiert (keine
+// Access-Control-Allow-Origin-Header in Googles Antwort). Nur eine visuelle
+// Rueckmeldung beim Erfassen, wird nirgends gespeichert - bei Bedarf einfach
+// erneut pruefbar (Button bleibt klickbar).
 async function pruefeAdresseGeocoding(adresse){
   try{
-    const encoded = encodeURIComponent(adresse);
-    const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${encoded}&destinations=${encoded}&key=${GOOGLE_MAPS_API_KEY}`;
-    const res = await fetch(url);
-    const json = await res.json();
+    const { data: json, error: fnError } = await sb.functions.invoke('distance-matrix', {
+      body: { origin: adresse, destination: adresse }
+    });
+    if(fnError) throw fnError;
     // json.status ist der Gesamtstatus der Anfrage (z.B. REQUEST_DENIED bei
     // einer API-Key-Einschraenkung) - unabhaengig vom Status pro Zeile/Ort
     // (rows[].elements[].status, z.B. NOT_FOUND). Beides pruefen, damit der
     // eigentliche Grund sichtbar wird statt nur "nicht gefunden".
+    if(json.error) return { ok: false, status: json.error };
     if(json.status && json.status !== 'OK'){
       return { ok: false, status: json.status + (json.error_message ? ': ' + json.error_message : '') };
     }
