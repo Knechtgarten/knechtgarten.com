@@ -401,8 +401,9 @@ input[type=number]{-moz-appearance:textfield;}
           <option value="ja_nein">Ja/Nein</option>
         </select>
       </div>
-      <div class="fld" id="efEditEinheitWrap"><label>Einheit</label><select id="efEditEinheit"></select></div>
+      <div class="fld"><label>Einheit</label><select id="efEditEinheit"></select></div>
     </div>
+    <div class="fld hidden" id="efEditWertWrap"><label>Fixer Wert (wird uebernommen, wenn der Mitarbeiter das Haekchen setzt)</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="number" step="any" id="efEditWert"></div>
     <div class="modalbtns">
       <button class="btnlink" id="efEditCancel">Abbrechen</button>
       <button class="btn" id="efEditSave">Speichern</button>
@@ -674,8 +675,9 @@ input[type=number]{-moz-appearance:textfield;}
             <option value="ja_nein">Ja/Nein</option>
           </select>
         </div>
-        <div class="fld" id="newEfEinheitWrap"><label>Einheit</label><select id="newEfEinheit"></select></div>
+        <div class="fld"><label>Einheit</label><select id="newEfEinheit"></select></div>
       </div>
+      <div class="fld hidden admin-only" id="newEfWertWrap"><label>Fixer Wert (wird uebernommen, wenn der Mitarbeiter das Haekchen setzt)</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="number" step="any" id="newEfWert"></div>
       <button class="btn admin-only" id="addEfBtn">+ Eingabefeld hinzufügen</button>
       <div class="status" id="efStatus"></div>
     </div>
@@ -981,7 +983,7 @@ async function loadLieferantenListe(){
 async function loadFormelBibliothek(){
   const istAllgemein = formelBibliothekKategorie === 'allgemein';
 
-  let efQuery = sb.from('eingabefeld').select('id,name,einheit,offertentyp_id,reihenfolge,typ').order('reihenfolge');
+  let efQuery = sb.from('eingabefeld').select('id,name,einheit,offertentyp_id,reihenfolge,typ,fixer_wert').order('reihenfolge');
   efQuery = istAllgemein ? efQuery.is('offertentyp_id', null) : efQuery.eq('offertentyp_id', formelBibliothekKategorie);
   const { data: efs, error: efErr } = await efQuery;
   if(efErr){ console.error(efErr); return; }
@@ -1038,7 +1040,7 @@ function renderEingabefelder(){
       <td><span class="draghandle admin-only" title="Verschieben">${ICON.drag}</span></td>
       <td>${ef.name}</td>
       <td>${ef.typ === 'ja_nein' ? 'Ja/Nein' : 'Zahl'}</td>
-      <td>${ef.typ === 'ja_nein' ? '–' : ef.einheit}</td>
+      <td>${ef.typ === 'ja_nein' && ef.fixer_wert != null ? fmtNum(ef.fixer_wert) + ' ' + (ef.einheit || '') : ef.einheit}</td>
       <td style="display:flex;gap:4px;">
         <button class="icobtn admin-only" onclick="openEditEingabefeldModal('${ef.id}')" title="Bearbeiten">${ICON.edit}</button>
         <button class="icobtn admin-only danger" onclick="deleteEingabefeld('${ef.id}')" title="Löschen">${ICON.trash}</button>
@@ -1053,21 +1055,23 @@ function openEditEingabefeldModal(id){
   efEditId = id;
   $('efEditName').value = ef.name;
   $('efEditTyp').value = ef.typ || 'zahl';
-  $('efEditEinheitWrap').classList.toggle('hidden', ef.typ === 'ja_nein');
+  $('efEditWertWrap').classList.toggle('hidden', ef.typ !== 'ja_nein');
+  $('efEditWert').value = ef.fixer_wert ?? '';
   $('efEditEinheit').innerHTML = einheitOptionsHtml(ef.einheit, true);
   $('efEditOverlay').classList.add('show');
   $('efEditName').focus();
 }
 $('efEditTyp').addEventListener('change', () => {
-  $('efEditEinheitWrap').classList.toggle('hidden', $('efEditTyp').value === 'ja_nein');
+  $('efEditWertWrap').classList.toggle('hidden', $('efEditTyp').value !== 'ja_nein');
 });
 $('efEditCancel').addEventListener('click', () => $('efEditOverlay').classList.remove('show'));
 $('efEditSave').addEventListener('click', async () => {
   const name = $('efEditName').value.trim();
   const typ = $('efEditTyp').value;
-  const einheit = typ === 'ja_nein' ? null : $('efEditEinheit').value.trim();
-  if(!name || (typ !== 'ja_nein' && !einheit)) return;
-  const { error } = await sb.from('eingabefeld').update({ name, einheit, typ }).eq('id', efEditId);
+  const einheit = $('efEditEinheit').value.trim();
+  const fixer_wert = typ === 'ja_nein' ? parseFloat($('efEditWert').value) : null;
+  if(!name || !einheit || (typ === 'ja_nein' && isNaN(fixer_wert))) return;
+  const { error } = await sb.from('eingabefeld').update({ name, einheit, typ, fixer_wert }).eq('id', efEditId);
   if(error){ showToast(friendlyError(error), true); return; }
   $('efEditOverlay').classList.remove('show');
   await loadFormelBibliothek();
@@ -1306,18 +1310,19 @@ async function toggleTeilflaechenKombination(rzId, checked){
 }
 
 $('newEfTyp').addEventListener('change', () => {
-  $('newEfEinheitWrap').classList.toggle('hidden', $('newEfTyp').value === 'ja_nein');
+  $('newEfWertWrap').classList.toggle('hidden', $('newEfTyp').value !== 'ja_nein');
 });
 $('addEfBtn').addEventListener('click', async () => {
   const name = $('newEfName').value.trim();
   const typ = $('newEfTyp').value;
-  const einheit = typ === 'ja_nein' ? null : $('newEfEinheit').value.trim();
-  if(!name || (typ !== 'ja_nein' && !einheit)){ $('efStatus').textContent = 'Bitte Name und Einheit ausfuellen.'; $('efStatus').className='status err'; return; }
+  const einheit = $('newEfEinheit').value.trim();
+  const fixer_wert = typ === 'ja_nein' ? parseFloat($('newEfWert').value) : null;
+  if(!name || !einheit || (typ === 'ja_nein' && isNaN(fixer_wert))){ $('efStatus').textContent = 'Bitte Name, Einheit' + (typ === 'ja_nein' ? ' und Fixen Wert' : '') + ' ausfuellen.'; $('efStatus').className='status err'; return; }
   const offertentyp_id = formelBibliothekKategorie === 'allgemein' ? null : formelBibliothekKategorie;
   const reihenfolge = EINGABEFELDER.length ? Math.max(...EINGABEFELDER.map(e => e.reihenfolge || 0)) + 1 : 1;
-  const { error } = await sb.from('eingabefeld').insert({ offertentyp_id, name, einheit, typ, reihenfolge });
+  const { error } = await sb.from('eingabefeld').insert({ offertentyp_id, name, einheit, typ, fixer_wert, reihenfolge });
   if(error){ $('efStatus').textContent = friendlyError(error); $('efStatus').className='status err'; return; }
-  $('newEfName').value=''; $('newEfEinheit').value=''; $('newEfTyp').value = 'zahl'; $('newEfEinheitWrap').classList.remove('hidden');
+  $('newEfName').value=''; $('newEfEinheit').value=''; $('newEfWert').value=''; $('newEfTyp').value = 'zahl'; $('newEfWertWrap').classList.add('hidden');
   $('efStatus').textContent = 'Gespeichert.'; $('efStatus').className='status ok';
   await loadFormelBibliothek();
 });
