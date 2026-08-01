@@ -256,7 +256,7 @@ input[type=number]{-moz-appearance:textfield;}
       <div class="fld"><label>Lieferant</label><select id="amLieferant"></select></div>
       <div class="fld"><label>Artikelnr. Lieferant</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="amNrLieferant" placeholder="optional"></div>
       <div class="fld"><label>Artikelgruppe</label><select id="amGruppe"></select></div>
-      <div class="fld"><label>Einheit</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="amEinheit" placeholder="z.B. Stk"></div>
+      <div class="fld"><label>Einheit</label><select id="amEinheit"></select></div>
     </div>
     <div class="hint" style="margin-top:-4px;">Neue Lieferanten unter <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg> Einstellungen → Datenabgleich anlegen.</div>
     <div class="fld hidden" id="amNeueGruppeWrap">
@@ -318,7 +318,7 @@ input[type=number]{-moz-appearance:textfield;}
     <div class="row">
       <div class="fld" style="flex:2;"><label>Anmerkung</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="amAnmerkung"></div>
       <div class="fld"><label>Zusatzwert</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="amZusatzwert" type="number" step="0.01" placeholder="z.B. 30"></div>
-      <div class="fld"><label>Zusatzeinheit</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="amZusatzeinheit" placeholder="z.B. l, m², Stk."></div>
+      <div class="fld"><label>Zusatzeinheit</label><select id="amZusatzeinheit"></select></div>
     </div>
     <div class="hint" style="margin-top:-4px;">Frei nutzbare Zusatzangabe (z.B. Volumen, Fläche) für spätere Berechnungen in Offerten - noch nicht überall ausgewertet.</div>
     <div class="fld" style="display:flex;gap:14px;align-items:center;">
@@ -624,6 +624,24 @@ function aktuellerWechselkurs(waehrung){
   return WECHSELKURSE.find(w => w.waehrung === waehrung)?.kurs_zu_chf ?? 1;
 }
 let ARTIKELGRUPPEN = [];
+let EINHEITEN = [];
+async function ladeEinheiten(){
+  const { data, error } = await sb.from('einheit').select('code,name').order('reihenfolge');
+  if(error){ console.error(error); return; }
+  EINHEITEN = data;
+}
+// selected kann eine bisher frei getippte, nicht (mehr) in der Liste
+// vorhandene Einheit sein - die bleibt dann als eigene Option erhalten,
+// statt beim Oeffnen des Formulars stillschweigend auf die erste Einheit
+// der Liste zu springen.
+function einheitOptionsHtml(selected, mitLeerOption){
+  const bekannt = EINHEITEN.some(e => e.code === selected);
+  const leer = mitLeerOption ? '<option value="">– waehlen –</option>' : '';
+  const unbekannt = (selected && !bekannt) ? `<option value="${selected}" selected>${selected} (unbekannt)</option>` : '';
+  return leer + unbekannt + EINHEITEN.map(e =>
+    `<option value="${e.code}" ${e.code===selected?'selected':''}>${e.code}${e.name ? ' – ' + e.name : ''}</option>`
+  ).join('');
+}
 let ARTIKEL = [];
 let selected = new Set();
 let sortCol = 'bezeichnung';
@@ -960,7 +978,7 @@ function populateAmGruppeSelect(selectedId){
 function openArtikelModalAdd(){
   amMode = 'add'; amEditId = null; amEditOriginalEp = null;
   $('artikelModalTitel').textContent = 'Neuer Artikel';
-  $('amBezeichnung').value = ''; $('amKategorie').value = 'material'; $('amEinheit').value = '';
+  $('amBezeichnung').value = ''; $('amKategorie').value = 'material'; $('amEinheit').innerHTML = einheitOptionsHtml('', true);
   populateAmLieferantSelect(filterLieferantId || LIEFERANTEN[0]?.id);
   $('amNrLieferant').value = '';
   populateAmGruppeSelect(null);
@@ -970,7 +988,7 @@ function openArtikelModalAdd(){
   $('amVpKnecht').value = ''; $('amMwst').value = '';
   $('amMargeKnecht').value = '';
   $('amFoto').value = ''; $('amAnmerkung').value = '';
-  $('amZusatzwert').value = ''; $('amZusatzeinheit').value = '';
+  $('amZusatzwert').value = ''; $('amZusatzeinheit').innerHTML = einheitOptionsHtml('', true);
   amFotoVorschauAktualisieren();
   $('amOt').checked = false; $('amWt').checked = false; $('amEb').checked = false; $('amHaendisch').checked = false;
   $('amStatus').textContent = ''; $('amStatus').className = 'status';
@@ -988,7 +1006,7 @@ function openArtikelModalEdit(id){
   $('artikelModalTitel').textContent = a.bezeichnung;
   $('amBezeichnung').value = a.bezeichnung;
   $('amKategorie').value = a.kategorie;
-  $('amEinheit').value = a.einheit;
+  $('amEinheit').innerHTML = einheitOptionsHtml(a.einheit, true);
   populateAmLieferantSelect(a.lieferant_id);
   $('amNrLieferant').value = a.artikelnummer_lieferant || '';
   populateAmGruppeSelect(a.artikelgruppe_id);
@@ -1004,7 +1022,7 @@ function openArtikelModalEdit(id){
   amFotoVorschauAktualisieren();
   $('amAnmerkung').value = a.anmerkung || '';
   $('amZusatzwert').value = a.zusatzwert ?? '';
-  $('amZusatzeinheit').value = a.zusatzeinheit || '';
+  $('amZusatzeinheit').innerHTML = einheitOptionsHtml(a.zusatzeinheit || '', true);
   $('amOt').checked = !!a.sync_offertentool;
   $('amWt').checked = !!a.sync_webtool;
   $('amEb').checked = !!a.sync_easybill;
@@ -1561,7 +1579,7 @@ $('addArtBtnTop').addEventListener('click', openArtikelModalAdd);
 async function init(){
   const initParams = new URLSearchParams(location.search);
   if(initParams.get('lieferant')) filterLieferantId = initParams.get('lieferant');
-  await Promise.all([loadLieferanten(), loadArtikelgruppen(), loadWechselkurse()]);
+  await Promise.all([loadLieferanten(), loadArtikelgruppen(), loadWechselkurse(), ladeEinheiten()]);
   await loadArtikel();
   if(initParams.get('add') === '1') openArtikelModalAdd();
 }

@@ -394,7 +394,7 @@ input[type=number]{-moz-appearance:textfield;}
   <div class="modal">
     <div class="modalhead"><div class="sub">Eingabefeld bearbeiten</div></div>
     <div class="fld"><label>Name</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="efEditName"></div>
-    <div class="fld"><label>Einheit</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="efEditEinheit"></div>
+    <div class="fld"><label>Einheit</label><select id="efEditEinheit"></select></div>
     <div class="modalbtns">
       <button class="btnlink" id="efEditCancel">Abbrechen</button>
       <button class="btn" id="efEditSave">Speichern</button>
@@ -410,7 +410,7 @@ input[type=number]{-moz-appearance:textfield;}
     </div>
     <div class="row">
       <div class="fld"><label>Name</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="termEditName" placeholder="z.B. Fundamentdicke"></div>
-      <div class="fld"><label>Einheit</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="termEditEinheit" placeholder="z.B. m"></div>
+      <div class="fld"><label>Einheit</label><select id="termEditEinheit"></select></div>
     </div>
     <label style="font-size:11px;color:var(--muted);display:block;margin:14px 0 6px;">Formel<span class="hint" style="margin-left:6px;">Ein einzelnes Glied ohne Verknuepfung ergibt automatisch eine feste Zahl.</span></label>
     <div id="termEditTermline"></div>
@@ -660,7 +660,7 @@ input[type=number]{-moz-appearance:textfield;}
       </table>
       <div class="row admin-only">
         <div class="fld"><label>Name</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="newEfName" placeholder="z.B. Beckentiefe"></div>
-        <div class="fld"><label>Einheit</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="newEfEinheit" placeholder="z.B. m"></div>
+        <div class="fld"><label>Einheit</label><select id="newEfEinheit"></select></div>
       </div>
       <button class="btn admin-only" id="addEfBtn">+ Eingabefeld hinzufügen</button>
       <div class="status" id="efStatus"></div>
@@ -718,6 +718,7 @@ let currentOffertentypId = null;
 let currentBerechnungsmodell = 'formel';
 let currentTeilbereicheMoeglich = false;
 let OFFERTENTYPEN = [];
+let EINHEITEN = [];   // zentrale Einheiten-Liste (Einstellungen -> Rechenlogik), fuer alle Einheit-Auswahlfelder
 let EINGABEFELDER = [];   // nur fuer die Formel-Bibliothek-Ansicht, kategorie-gefiltert (Allgemein ODER ein Offertentyp)
 let TERMS = [];
 // Immer ALLE Eingabefelder/Terms aus allen Offertentypen (nicht nur Allgemein +
@@ -819,6 +820,23 @@ function ausdruckPreview(node){
 // ---------------------------------------------------------------------------
 // Laden
 // ---------------------------------------------------------------------------
+async function ladeEinheiten(){
+  const { data, error } = await sb.from('einheit').select('code,name').order('reihenfolge');
+  if(error){ console.error(error); return; }
+  EINHEITEN = data;
+}
+// selected kann eine bisher frei getippte, nicht (mehr) in der Liste
+// vorhandene Einheit sein - die bleibt dann als eigene Option erhalten,
+// statt beim Oeffnen des Formulars stillschweigend auf die erste Einheit
+// der Liste zu springen.
+function einheitOptionsHtml(selected, mitLeerOption){
+  const bekannt = EINHEITEN.some(e => e.code === selected);
+  const leer = mitLeerOption ? '<option value="">– waehlen –</option>' : '';
+  const unbekannt = (selected && !bekannt) ? `<option value="${selected}" selected>${selected} (unbekannt)</option>` : '';
+  return leer + unbekannt + EINHEITEN.map(e =>
+    `<option value="${e.code}" ${e.code===selected?'selected':''}>${e.code}${e.name ? ' – ' + e.name : ''}</option>`
+  ).join('');
+}
 async function loadOffertentypen(){
   const { data, error } = await sb.from('offertentyp').select('id,name,berechnungsmodell,teilbereiche_moeglich').order('reihenfolge');
   if(error){ console.error(error); return; }
@@ -1016,7 +1034,7 @@ function openEditEingabefeldModal(id){
   if(!ef) return;
   efEditId = id;
   $('efEditName').value = ef.name;
-  $('efEditEinheit').value = ef.einheit;
+  $('efEditEinheit').innerHTML = einheitOptionsHtml(ef.einheit, true);
   $('efEditOverlay').classList.add('show');
   $('efEditName').focus();
 }
@@ -1302,7 +1320,7 @@ function openNewTermModal(){
   termEditId = null;
   $('termEditTitle').textContent = 'Neuer Term';
   $('termEditName').value = '';
-  $('termEditEinheit').value = '';
+  $('termEditEinheit').innerHTML = einheitOptionsHtml('', true);
   termEditGlieder = [{ op: null, mode: 'lit', refKind: null, refId: null, text: '' }];
   renderTermEditTermline();
   $('termEditStatus').textContent = ''; $('termEditStatus').className = 'status';
@@ -1316,7 +1334,7 @@ function openEditTermModal(id){
   termEditId = id;
   $('termEditTitle').textContent = 'Term bearbeiten';
   $('termEditName').value = t.name;
-  $('termEditEinheit').value = t.einheit || '';
+  $('termEditEinheit').innerHTML = einheitOptionsHtml(t.einheit || '', true);
   const node = t.typ === 'konstante' ? { lit: t.wert } : t.ausdruck;
   const flat = flattenMengenAusdruck(node);
   termEditGlieder = (flat && flat.length) ? flat.map((f, i) => gliedAusNode(i === 0 ? null : f.op, f.node)) : null;
@@ -2386,6 +2404,8 @@ async function duplicateOption(optId){
 // ---------------------------------------------------------------------------
 async function init(){
   await loadOffertentypen();
+  await ladeEinheiten();
+  $('newEfEinheit').innerHTML = einheitOptionsHtml('', true);
 
   // Aufruf via ?ot=<id> (z.B. aus Einstellungen/Offerten-Vorlagen "Ändern")
   // - waehlt diesen Offertentyp direkt vor, statt den ersten per reihenfolge.
