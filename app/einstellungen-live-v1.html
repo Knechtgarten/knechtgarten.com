@@ -731,6 +731,19 @@ input[type=number]{-moz-appearance:textfield;}
             <div class="status" id="lwStatus"></div>
           </div>
         </div>
+
+        <div class="card">
+          <div class="cardheader" onclick="toggleCard(this)"><span class="cardchevron">&#9656;</span><div class="cardlabel">Einheiten</div></div>
+          <div class="hint">Zentrale Liste aller Einheiten (Stk., m, m³ usw.) - wird bei Artikeln, Eingabefeldern, Terms usw. als Auswahl angeboten. Hier ergänzen/ändern, kein Code-Update nötig.</div>
+          <div class="cardbody hidden">
+            <table style="table-layout:fixed;">
+              <colgroup><col style="width:140px;"><col><col style="width:90px;"><col style="width:40px;"></colgroup>
+              <thead><tr><th>Code</th><th>Ausgeschrieben</th><th>Reihenfolge</th><th></th></tr></thead>
+              <tbody id="einheitenBody"></tbody>
+            </table>
+            <div class="status" id="einheitenStatus"></div>
+          </div>
+        </div>
       </div>
 
       <!-- ================= Sonderpositionen ================= -->
@@ -875,6 +888,7 @@ function zeigeAbschnitt(name){
       renderTeilflaechenlogik(TEILFLAECHENLOGIK_KATALOG_TAGESSATZ, 'tflBodyTagessatz');
     });
     loadLieferwagenKonfiguration();
+    ladeEinheiten().then(renderEinheitenListe);
   }
   if(name === 'sonderpositionen'){
     loadStaffelgruppen(); loadKieswerkListe('kieswerk_kies','kiesTransportBody'); loadKieswerkListe('kieswerk_beton','betonTransportBody');
@@ -890,9 +904,71 @@ document.querySelectorAll('#settingsnav a').forEach(a => a.addEventListener('cli
 let OFFERTENTYPEN = [];
 let EINHEITEN = [];
 async function ladeEinheiten(){
-  const { data, error } = await sb.from('einheit').select('code,name').order('reihenfolge');
+  const { data, error } = await sb.from('einheit').select('id,code,name,reihenfolge').order('reihenfolge');
   if(error){ console.error(error); return; }
   EINHEITEN = data;
+}
+function einheitFeld(e, feld, typ){
+  const val = e ? (e[feld] ?? '') : '';
+  return `<input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="${typ}" class="einheitFeld" data-feld="${feld}" value="${val}" ${typ === 'number' ? 'step="1"' : ''}>`;
+}
+function renderEinheitenListe(){
+  const rows = EINHEITEN.map(e => `<tr data-id="${e.id}">
+    <td>${einheitFeld(e,'code','text')}</td>
+    <td>${einheitFeld(e,'name','text')}</td>
+    <td>${einheitFeld(e,'reihenfolge','number')}</td>
+    <td><button class="icobtn danger admin-only einheitDeleteBtn" data-id="${e.id}" title="Einheit löschen">${ICON.trash}</button></td>
+  </tr>`).join('');
+  const draftRow = `<tr class="einheitDraftRow admin-only">
+    <td>${einheitFeld(null,'code','text')}</td>
+    <td>${einheitFeld(null,'name','text')}</td>
+    <td>${einheitFeld(null,'reihenfolge','number')}</td>
+    <td></td>
+  </tr>`;
+  $('einheitenBody').innerHTML = rows + draftRow;
+  attachEinheitenListeHandlers();
+}
+function einheitFeldWert(inp){
+  return inp.type === 'number' ? (parseInt(inp.value) || 0) : inp.value.trim();
+}
+function attachEinheitenListeHandlers(){
+  const body = $('einheitenBody');
+  body.querySelectorAll('tr[data-id]').forEach(tr => {
+    const id = tr.dataset.id;
+    tr.querySelectorAll('.einheitFeld').forEach(inp => {
+      inp.addEventListener('change', async () => {
+        const { error } = await sb.from('einheit').update({ [inp.dataset.feld]: einheitFeldWert(inp) }).eq('id', id);
+        if(error){ $('einheitenStatus').textContent = friendlyError(error); $('einheitenStatus').className = 'status err'; return; }
+        $('einheitenStatus').textContent = 'Gespeichert.'; $('einheitenStatus').className = 'status ok';
+        await ladeEinheiten();
+        if(inp.dataset.feld === 'reihenfolge') renderEinheitenListe();
+      });
+    });
+  });
+  body.querySelectorAll('.einheitDeleteBtn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if(!(await confirmDialog('Diese Einheit wirklich löschen? Artikel/Eingabefelder, die sie bereits verwenden, behalten den Text - er erscheint dann als "unbekannt".'))) return;
+      const { error } = await sb.from('einheit').delete().eq('id', btn.dataset.id);
+      if(error){ $('einheitenStatus').textContent = friendlyError(error); $('einheitenStatus').className = 'status err'; return; }
+      await ladeEinheiten();
+      renderEinheitenListe();
+    });
+  });
+  const draft = body.querySelector('.einheitDraftRow');
+  draft.querySelectorAll('.einheitFeld').forEach(inp => {
+    inp.addEventListener('change', async () => {
+      const code = draft.querySelector('[data-feld="code"]').value.trim();
+      if(!code) return;
+      const name = draft.querySelector('[data-feld="name"]').value.trim() || null;
+      const reihenfolgeRoh = draft.querySelector('[data-feld="reihenfolge"]').value;
+      const reihenfolge = parseInt(reihenfolgeRoh) || (EINHEITEN.length ? Math.max(...EINHEITEN.map(e => e.reihenfolge || 0)) + 1 : 1);
+      const { error } = await sb.from('einheit').insert({ code, name, reihenfolge });
+      if(error){ $('einheitenStatus').textContent = friendlyError(error); $('einheitenStatus').className = 'status err'; return; }
+      $('einheitenStatus').textContent = 'Gespeichert.'; $('einheitenStatus').className = 'status ok';
+      await ladeEinheiten();
+      renderEinheitenListe();
+    });
+  });
 }
 // selected kann eine bisher frei getippte, nicht (mehr) in der Liste
 // vorhandene Einheit sein - die bleibt dann als eigene Option erhalten,
