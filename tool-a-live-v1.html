@@ -1070,17 +1070,41 @@ async function berechneSystemwerteMap(){
   const map = {};
   if(!SYSTEMWERT_TERMS.length) return map;
   const plz = $('kundePlz').value.trim();
-  if(!plz || !lieferwagenKonfig?.herkunft_adresse) return map;
-  const distanz = await holeLieferwagenDistanz(plz);
-  if(!distanz) return map;
-  // holeLieferwagenDistanz() liefert bereits die Hin+Rueck-Strecke (fuer die
-  // bestehende Lieferwagenfahrzeit-Kostenzeile) - der Systemwert-Term selbst
-  // soll aber bewusst nur die einfache Fahrt sein, daher hier halbiert.
-  SYSTEMWERT_TERMS.forEach(t => {
-    if(t.systemwert_key === 'fahrzeit_einfach_std') map[t.id] = distanz.stdHinRueck / 2;
-    else if(t.systemwert_key === 'distanz_einfach_km') map[t.id] = distanz.kmHinRueck / 2;
-  });
+  if(!plz) return map;
+
+  if(lieferwagenKonfig?.herkunft_adresse){
+    const distanz = await holeLieferwagenDistanz(plz);
+    if(distanz){
+      // holeLieferwagenDistanz() liefert bereits die Hin+Rueck-Strecke (fuer
+      // die bestehende Lieferwagenfahrzeit-Kostenzeile) - der Systemwert-Term
+      // selbst soll aber bewusst nur die einfache Fahrt sein, daher hier halbiert.
+      SYSTEMWERT_TERMS.forEach(t => {
+        if(t.systemwert_key === 'fahrzeit_einfach_std') map[t.id] = distanz.stdHinRueck / 2;
+        else if(t.systemwert_key === 'distanz_einfach_km') map[t.id] = distanz.kmHinRueck / 2;
+      });
+    }
+  }
+
+  // Naechstgelegenes Kieswerk/Deponie zur Kunden-PLZ - eigene, frei
+  // erweiterbare Adresslisten (siehe Tool B "Formeln Allgemein"), unabhaengig
+  // von den Kieswerken der Kies-/Beton-Transport-Sonderposition. Ein Weg,
+  // nicht Hin+Rueck (holeKieswerkDistanzKm() liefert bereits nur den Hinweg).
+  if(KIESWERK_DISTANZ_LISTE.length && SYSTEMWERT_TERMS.some(t => t.systemwert_key === 'distanz_naechstes_kieswerk_km')){
+    const km = await holeNaechsteDistanzKm(KIESWERK_DISTANZ_LISTE, plz);
+    if(km != null) SYSTEMWERT_TERMS.forEach(t => { if(t.systemwert_key === 'distanz_naechstes_kieswerk_km') map[t.id] = km; });
+  }
+  if(DEPONIE_DISTANZ_LISTE.length && SYSTEMWERT_TERMS.some(t => t.systemwert_key === 'distanz_naechste_deponie_km')){
+    const km = await holeNaechsteDistanzKm(DEPONIE_DISTANZ_LISTE, plz);
+    if(km != null) SYSTEMWERT_TERMS.forEach(t => { if(t.systemwert_key === 'distanz_naechste_deponie_km') map[t.id] = km; });
+  }
+
   return map;
+}
+
+async function holeNaechsteDistanzKm(adressListe, plz){
+  const ergebnisse = await Promise.all(adressListe.map(a => holeKieswerkDistanzKm(a.adresse, plz)));
+  const gueltige = ergebnisse.filter(km => km != null);
+  return gueltige.length ? Math.min(...gueltige) : null;
 }
 
 // Einheit/Rundung fuer Personal-/Materialaufwand in der Kostentabelle kommen
@@ -1179,6 +1203,21 @@ async function ladeKieswerke(){
   ]);
   if(k.error){ console.error(k.error); } else { KIESWERK_KIES = k.data; }
   if(b.error){ console.error(b.error); } else { KIESWERK_BETON = b.data; }
+}
+
+// Adresslisten fuer die Systemwerte "Fahrt Baustelle zu naechstem Kieswerk"/
+// "...zu naechster Deponie" (siehe berechneSystemwerteMap oben) - eigene,
+// frei erweiterbare Listen (Verwaltung in Tool B "Formeln Allgemein"),
+// unabhaengig von KIESWERK_KIES/KIESWERK_BETON oben.
+let KIESWERK_DISTANZ_LISTE = [];
+let DEPONIE_DISTANZ_LISTE = [];
+async function ladeDistanzAdresslisten(){
+  const [k, d] = await Promise.all([
+    sb.from('kieswerk_distanz').select('id,name,adresse').order('reihenfolge'),
+    sb.from('deponie_distanz').select('id,name,adresse').order('reihenfolge')
+  ]);
+  if(k.error){ console.error(k.error); } else { KIESWERK_DISTANZ_LISTE = k.data; }
+  if(d.error){ console.error(d.error); } else { DEPONIE_DISTANZ_LISTE = d.data; }
 }
 
 async function holeKieswerkDistanzKm(adresse, plz){
@@ -2353,6 +2392,7 @@ async function init(){
     await ladeMaschinenSammelpositionen();
     await ladeLogistikSammelpositionen();
     await ladeKieswerke();
+    await ladeDistanzAdresslisten();
 
     const params = new URLSearchParams(location.search);
     const deeplinkOfferteId = params.get('offerte');
