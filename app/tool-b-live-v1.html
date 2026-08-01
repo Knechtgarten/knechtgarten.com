@@ -731,6 +731,28 @@ input[type=number]{-moz-appearance:textfield;}
       </table>
     </div>
   </div>
+
+  <div class="card" id="kieswerkDistanzCard">
+    <div class="cardheader" onclick="toggleCard(this)"><span class="cardchevron">&#9656;</span><div class="cardlabel">Kieswerke (Distanzberechnung)</div></div>
+    <div class="hint">Adressen für den Systemwert "Fahrt Baustelle zu nächstem Kieswerk" - das System nimmt automatisch das nächstgelegene zur Kunden-PLZ. Frei erweiter-/löschbar, unabhängig von den Kieswerken bei Kies-/Beton-Transport.</div>
+    <div class="cardbody hidden">
+      <table>
+        <thead><tr><th>Name</th><th>Adresse</th><th></th></tr></thead>
+        <tbody id="kieswerkDistanzBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card" id="deponieDistanzCard">
+    <div class="cardheader" onclick="toggleCard(this)"><span class="cardchevron">&#9656;</span><div class="cardlabel">Deponien (Distanzberechnung)</div></div>
+    <div class="hint">Adressen für den Systemwert "Fahrt Baustelle zu nächster Deponie" - das System nimmt automatisch die nächstgelegene zur Kunden-PLZ.</div>
+    <div class="cardbody hidden">
+      <table>
+        <thead><tr><th>Name</th><th>Adresse</th><th></th></tr></thead>
+        <tbody id="deponieDistanzBody"></tbody>
+      </table>
+    </div>
+  </div>
   </div>
   </div>
 
@@ -1028,10 +1050,12 @@ async function loadFormelBibliothek(){
   if(tErr){ console.error(tErr); return; }
   TERMS = terms;
   if(istAllgemein) await stelleSystemwerteSicher(terms);
+  if(istAllgemein) await ladeDistanzAdresslisten();
 
   renderEingabefelder();
   renderTerms();
   renderSystemwerte();
+  renderDistanzAdresslisten();
 }
 
 // Systemwert-Terms: Wert wird nicht gespeichert, sondern in Tool A zur
@@ -1043,7 +1067,9 @@ async function loadFormelBibliothek(){
 // berechneSystemwerteMap().
 const SYSTEMWERT_TERM_FIX_LISTE = [
   { name: 'Fahrzeit zur Baustelle', systemwert_key: 'fahrzeit_einfach_std', einheit: 'Std' },
-  { name: 'Fahrstrecke zur Baustelle', systemwert_key: 'distanz_einfach_km', einheit: 'km' }
+  { name: 'Fahrstrecke zur Baustelle', systemwert_key: 'distanz_einfach_km', einheit: 'km' },
+  { name: 'Fahrt Baustelle zu nächstem Kieswerk', systemwert_key: 'distanz_naechstes_kieswerk_km', einheit: 'km' },
+  { name: 'Fahrt Baustelle zu nächster Deponie', systemwert_key: 'distanz_naechste_deponie_km', einheit: 'km' }
 ];
 let SYSTEMWERTE = [];
 async function stelleSystemwerteSicher(vorhandeneTerms){
@@ -1065,6 +1091,96 @@ function renderSystemwerte(){
       <td><span class="badge">Systemwert</span></td>
       <td class="hint">im Code erstellt</td>
     </tr>`).join('');
+}
+
+// ---------------------------------------------------------------------------
+// Adresslisten fuer die Distanz-Systemwerte "Fahrt Baustelle zu naechstem
+// Kieswerk"/"...zu naechster Deponie" (siehe berechneSystemwerteMap() in
+// Tool A) - einfache Name+Adresse-Liste, frei erweiter-/loeschbar, bewusst
+// getrennt von den Kieswerken der Kies-/Beton-Transport-Sonderposition
+// (dort zusaetzlich Pauschale/km-Preis/Marge, hier nur die Adresse noetig).
+// Beide Karten teilen sich denselben Render-/Speicher-Code, parametrisiert
+// ueber Tabellenname - gleiches Muster wie die Kieswerke in
+// einstellungen-live-v1.html.
+// ---------------------------------------------------------------------------
+let DISTANZ_ADRESSLISTEN = { kieswerk_distanz: [], deponie_distanz: [] };
+
+async function ladeDistanzAdresslisten(){
+  const [k, d] = await Promise.all([
+    sb.from('kieswerk_distanz').select('*').order('reihenfolge'),
+    sb.from('deponie_distanz').select('*').order('reihenfolge')
+  ]);
+  if(k.error){ console.error(k.error); } else { DISTANZ_ADRESSLISTEN.kieswerk_distanz = k.data; }
+  if(d.error){ console.error(d.error); } else { DISTANZ_ADRESSLISTEN.deponie_distanz = d.data; }
+}
+
+function distanzAdrFeld(row, feld){
+  const val = row ? (row[feld] ?? '') : '';
+  return `<input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="text" class="distanzAdrFeld" data-feld="${feld}" value="${val}">`;
+}
+
+function renderDistanzAdressliste(tabelle, zielId){
+  const liste = DISTANZ_ADRESSLISTEN[tabelle];
+  const rows = liste.map(r => `<tr data-id="${r.id}">
+    <td>${distanzAdrFeld(r,'name')}</td>
+    <td>${distanzAdrFeld(r,'adresse')}</td>
+    <td><button class="icobtn admin-only danger distanzAdrDeleteBtn" data-id="${r.id}" title="Eintrag löschen">${ICON.trash}</button></td>
+  </tr>`).join('');
+  const draftRow = `<tr class="distanzAdrDraftRow admin-only">
+    <td>${distanzAdrFeld(null,'name')}</td>
+    <td>${distanzAdrFeld(null,'adresse')}</td>
+    <td></td>
+  </tr>`;
+  $(zielId).innerHTML = rows + draftRow;
+  attachDistanzAdresslisteHandlers(tabelle, zielId);
+}
+
+function attachDistanzAdresslisteHandlers(tabelle, zielId){
+  const body = $(zielId);
+  body.querySelectorAll('tr[data-id]').forEach(tr => {
+    const id = tr.dataset.id;
+    tr.querySelectorAll('.distanzAdrFeld').forEach(inp => {
+      inp.addEventListener('change', async () => {
+        const { error } = await sb.from(tabelle).update({ [inp.dataset.feld]: inp.value.trim() }).eq('id', id);
+        if(error){ showToast(friendlyError(error), true); return; }
+        showToast('Gespeichert.');
+      });
+    });
+  });
+  body.querySelectorAll('.distanzAdrDeleteBtn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if(!(await confirmDialog('Eintrag wirklich löschen?'))) return;
+      const { error } = await sb.from(tabelle).delete().eq('id', btn.dataset.id);
+      if(error){ showToast(friendlyError(error), true); return; }
+      await ladeDistanzAdresslisten();
+      renderDistanzAdressliste(tabelle, zielId);
+    });
+  });
+  const draftRow = body.querySelector('.distanzAdrDraftRow');
+  if(draftRow){
+    draftRow.querySelectorAll('.distanzAdrFeld').forEach(inp => {
+      inp.addEventListener('change', async () => {
+        const name = draftRow.querySelector('.distanzAdrFeld[data-feld="name"]').value.trim();
+        if(!name) return;
+        const adresse = draftRow.querySelector('.distanzAdrFeld[data-feld="adresse"]').value.trim();
+        const liste = DISTANZ_ADRESSLISTEN[tabelle];
+        const reihenfolge = liste.length ? Math.max(...liste.map(x => x.reihenfolge || 0)) + 1 : 1;
+        const { error } = await sb.from(tabelle).insert({ name, adresse, reihenfolge });
+        if(error){ showToast(friendlyError(error), true); return; }
+        await ladeDistanzAdresslisten();
+        renderDistanzAdressliste(tabelle, zielId);
+      });
+    });
+  }
+}
+
+function renderDistanzAdresslisten(){
+  const zeigen = formelBibliothekKategorie === 'allgemein';
+  $('kieswerkDistanzCard').classList.toggle('hidden', !zeigen);
+  $('deponieDistanzCard').classList.toggle('hidden', !zeigen);
+  if(!zeigen) return;
+  renderDistanzAdressliste('kieswerk_distanz', 'kieswerkDistanzBody');
+  renderDistanzAdressliste('deponie_distanz', 'deponieDistanzBody');
 }
 
 function renderEingabefelder(){
