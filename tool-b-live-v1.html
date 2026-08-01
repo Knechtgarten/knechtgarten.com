@@ -1168,14 +1168,14 @@ async function loadArbeitsschritte(){
   const { data, error } = await sb.from('arbeitsschritt')
     .select(`id, name, reihenfolge, notiz, ausgeblendet,
       teilschritt ( id, name, beschreibung, reihenfolge, ausgeblendet,
-        ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, tagesleistung_menge, notiz,
+        ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, tagesleistung_menge, notiz, reihenfolge,
           zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4, mindestmenge, verschnitt_prozent, teilflaechen_kombination,
           artikel_id, artikel(bezeichnung, einheit, artikelnummer_knecht),
           staffelgruppe_id, staffelgruppe(name, titel), zonengruppe_id, zonengruppe(name, titel),
           sonderposition_typ_id, sonderposition_typ(name, titel) ),
         auswahlfeld ( id, name, mehrfachauswahl, reihenfolge,
           auswahloption ( id, name, reihenfolge,
-            ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, tagesleistung_menge, notiz,
+            ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, tagesleistung_menge, notiz, reihenfolge,
               zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4, mindestmenge, verschnitt_prozent, teilflaechen_kombination,
               artikel_id, artikel(bezeichnung, einheit, artikelnummer_knecht),
               staffelgruppe_id, staffelgruppe(name, titel), zonengruppe_id, zonengruppe(name, titel),
@@ -1183,6 +1183,18 @@ async function loadArbeitsschritte(){
     .eq('offertentyp_id', currentOffertentypId).order('reihenfolge');
   if(error){ console.error(error); return; }
   ARBEITSSCHRITTE = data;
+  // Ressourcenzeile-Reihenfolge kommt aus zwei verschiedenen Verschachtelungs-
+  // pfaden (direkt am Teilschritt, oder pro Auswahloption) - PostgREST kann
+  // verschachtelte Embeds nicht zuverlaessig ueber beide Pfade hinweg sortieren,
+  // darum hier client-seitig nachsortieren statt per .order() im Query.
+  ARBEITSSCHRITTE.forEach(as => {
+    (as.teilschritt || []).forEach(ts => {
+      (ts.ressourcenzeile || []).sort((a, b) => (a.reihenfolge || 0) - (b.reihenfolge || 0));
+      (ts.auswahlfeld?.auswahloption || []).forEach(opt => {
+        (opt.ressourcenzeile || []).sort((a, b) => (a.reihenfolge || 0) - (b.reihenfolge || 0));
+      });
+    });
+  });
   await ladeAlleVariablen();
   renderArbeitsschritte();
 }
@@ -1214,6 +1226,9 @@ function renderArbeitsschritte(){
   setupDragReorder($('arbeitsschritteList'), '.asblock', ids => persistReihenfolge('arbeitsschritt', ids));
   $('arbeitsschritteList').querySelectorAll('.tswrap').forEach(wrap => {
     setupDragReorder(wrap, '.tsblock', ids => persistReihenfolge('teilschritt', ids));
+  });
+  $('arbeitsschritteList').querySelectorAll('table.res tbody').forEach(tbody => {
+    setupDragReorder(tbody, 'tr', ids => persistReihenfolge('ressourcenzeile', ids), 'rz');
   });
 }
 
@@ -1341,10 +1356,11 @@ function renderRessourcenTabelle(kontextTyp, kontextId, zeilen){
   return `
     <div class="nest" style="margin-left:0;padding-left:0;border-left:none;">
       <table class="res">
-        <thead><tr><th>Typ</th><th>Artikel</th>${istTagessatz ? '' : '<th>Menge</th>'}${zeigeTf ? '<th class="c-tf" title="Teilflächen-Kombination: Mengen mehrerer Teilflächen werden vor der Preisberechnung zusammengezählt (z.B. Mulden-Kapazität, Staffelstufen, Pauschalen) - aktuell nur bei Logistik moeglich. Die eigentliche Berechnung folgt separat.">TF</th>' : ''}<th></th></tr></thead>
+        <thead><tr><th style="width:20px;"></th><th>Typ</th><th>Artikel</th>${istTagessatz ? '' : '<th>Menge</th>'}${zeigeTf ? '<th class="c-tf" title="Teilflächen-Kombination: Mengen mehrerer Teilflächen werden vor der Preisberechnung zusammengezählt (z.B. Mulden-Kapazität, Staffelstufen, Pauschalen) - aktuell nur bei Logistik moeglich. Die eigentliche Berechnung folgt separat.">TF</th>' : ''}<th></th></tr></thead>
         <tbody>
           ${(zeilen||[]).map(rz => `
-            <tr>
+            <tr data-rz="${rz.id}">
+              <td><span class="draghandle" title="Verschieben">${ICON.drag}</span></td>
               <td><span class="pill ${rz.kategorie}">${rz.kategorie}</span></td>
               <td class="artikelcell">${rzArtikelZelleHtml(rz)}</td>
               ${istTagessatz ? '' : `<td>${rzMengeZelleHtml(rz)}</td>`}${zeigeTf ? `<td class="c-tf">${istTeilflaechenKombinationFaehigeKategorie(rz.kategorie)
