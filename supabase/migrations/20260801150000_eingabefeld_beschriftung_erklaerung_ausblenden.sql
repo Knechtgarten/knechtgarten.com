@@ -17,6 +17,6 @@
 -- Offerte erneut beschaeftigen sollen.
 -- ============================================================================
 
-alter table eingabefeld add column beschriftung text null;
-alter table eingabefeld add column erklaerung text null;
-alter table eingabefeld add column ausgeblendet boolean not null default false;
+alter table eingabefeld add column if not exists beschriftung text null;
+alter table eingabefeld add column if not exists erklaerung text null;
+alter table eingabefeld add column if not exists ausgeblendet boolean not null default false;
