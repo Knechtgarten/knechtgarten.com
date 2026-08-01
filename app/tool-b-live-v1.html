@@ -1327,7 +1327,35 @@ $('addEfBtn').addEventListener('click', async () => {
   await loadFormelBibliothek();
 });
 
+// Prueft, ob eine id (Eingabefeld oder Term) noch irgendwo referenziert wird
+// - in anderen Terms (term.ausdruck) oder in Ressourcenzeilen (menge_ausdruck).
+// UUIDs sind praktisch kollisionsfrei, darum reicht ein einfacher Text-Treffer
+// auf das serialisierte JSON statt eines rekursiven Baum-Scans.
+async function pruefeVerwendung(id){
+  const nadel = `"id":"${id}"`;
+  const treffer = [];
+  const { data: terms } = await sb.from('term').select('id,name,ausdruck');
+  (terms || []).forEach(t => {
+    if(t.id !== id && t.ausdruck && JSON.stringify(t.ausdruck).includes(nadel)) treffer.push(`Term "${t.name}"`);
+  });
+  const { data: zeilen } = await sb.from('ressourcenzeile')
+    .select('menge_ausdruck,bezeichnung_override,artikel(bezeichnung),staffelgruppe(name,titel),zonengruppe(name,titel),sonderposition_typ(name,titel)');
+  (zeilen || []).forEach(rz => {
+    if(rz.menge_ausdruck && JSON.stringify(rz.menge_ausdruck).includes(nadel)){
+      const bez = rz.bezeichnung_override || rz.artikel?.bezeichnung || rz.staffelgruppe?.titel || rz.staffelgruppe?.name
+        || rz.zonengruppe?.titel || rz.zonengruppe?.name || rz.sonderposition_typ?.titel || rz.sonderposition_typ?.name || '(unbenannte Ressourcenzeile)';
+      treffer.push(`Ressourcenzeile "${bez}"`);
+    }
+  });
+  return treffer;
+}
+
 async function deleteEingabefeld(id){
+  const verwendungen = await pruefeVerwendung(id);
+  if(verwendungen.length){
+    showToast(`Kann nicht geloescht werden - wird noch verwendet in: ${verwendungen.join(', ')}. Bitte zuerst dort entfernen.`, true);
+    return;
+  }
   if(!(await confirmDialog('Dieses Eingabefeld wirklich dauerhaft loeschen?'))) return;
   const { error } = await sb.from('eingabefeld').delete().eq('id', id);
   if(error){ showToast(friendlyError(error), true); return; }
@@ -1335,6 +1363,11 @@ async function deleteEingabefeld(id){
 }
 
 async function deleteTerm(id){
+  const verwendungen = await pruefeVerwendung(id);
+  if(verwendungen.length){
+    showToast(`Kann nicht geloescht werden - wird noch verwendet in: ${verwendungen.join(', ')}. Bitte zuerst dort entfernen.`, true);
+    return;
+  }
   if(!(await confirmDialog('Diesen Term wirklich dauerhaft loeschen?'))) return;
   const { error } = await sb.from('term').delete().eq('id', id);
   if(error){ showToast(friendlyError(error), true); return; }
@@ -1760,17 +1793,23 @@ function flattenMengenAusdruck(node){
 }
 
 function nodeFromGlied(g){
-  return g.mode === 'lit' ? { lit: parseFloat(g.text) } : { ref: g.refKind, id: g.refId };
+  if(g.mode === 'lit'){
+    const node = { lit: parseFloat(g.text) };
+    if(g.einheit) node._einheit = g.einheit;
+    return node;
+  }
+  return { ref: g.refKind, id: g.refId };
 }
 
 // Automatische Einheiten-Umrechnung beim Verknuepfen von Gliedern: eval_ausdruck
 // rechnet rein numerisch, kennt also weder "cm" noch "m" - mischt eine Formel
 // z.B. Meter- und Zentimeter-Werte, waere das Ergebnis ohne diese Umrechnung
-// schlicht falsch (8 + 20 statt 8 + 0.2). Nur Glieder mit BEKANNTER, GLEICHER
-// Einheiten-Familie werden umgerechnet - freie Zahlen (kein Ref) und
-// unbekannte/inkompatible Einheiten (Stk., Pauschale, m² usw.) bleiben
-// unangetastet. Zielwert je Familie ist die zuerst im Glied-Zug vorkommende
-// Einheit dieser Familie - alle weiteren werden darauf umgerechnet.
+// schlicht falsch (8 + 20 statt 8 + 0.2). Auch eine freie Zahl kann eine
+// Einheit bekommen (_einheit am lit-Knoten, siehe nodeFromGlied/gliedAusNode)
+// - dann zaehlt sie fuer die Umrechnung genau wie ein Eingabefeld/Term mit
+// dieser Einheit. Unbekannte/inkompatible Einheiten (Stk., Pauschale, m² usw.)
+// bleiben unangetastet. Zielwert je Familie ist die zuerst im Glied-Zug
+// vorkommende Einheit dieser Familie - alle weiteren werden darauf umgerechnet.
 const EINHEIT_FAMILIE = {
   mm: 'laenge', cm: 'laenge', m: 'laenge', km: 'laenge',
   g: 'masse', kg: 'masse', t: 'masse',
@@ -1816,7 +1855,7 @@ function labelFuerNode(node){
 }
 
 function gliedAusNode(op, node){
-  if(node.lit !== undefined) return { op, mode: 'lit', refKind: null, refId: null, text: String(node.lit) };
+  if(node.lit !== undefined) return { op, mode: 'lit', refKind: null, refId: null, text: String(node.lit), einheit: node._einheit || null };
   return { op, mode: 'ref', refKind: node.ref, refId: node.id, text: labelFuerNode(node) };
 }
 
@@ -2287,7 +2326,7 @@ function renderRzEditTermline(targetId){
 // gestapelte Zeilen (Eingabewert + Einheit nebeneinander, Operator dazwischen)
 // statt einer einzigen Zeile - siehe Formeln-Karte in der Formel-Bibliothek.
 function gliedEinheitLabel(g){
-  if(g.mode !== 'ref') return '';
+  if(g.mode === 'lit') return g.einheit || '';
   const list = g.refKind === 'eingabefeld' ? ALLE_EINGABEFELDER : ALLE_TERMS;
   return list.find(x => x.id === g.refId)?.einheit || '';
 }
@@ -2315,10 +2354,18 @@ function renderTermEditTermline(){
     const row = document.createElement('div');
     row.className = 'gliedrow';
     row.appendChild(erzeugeCombofield(g, termEditGlieder, renderTermEditTermline));
-    const unit = document.createElement('div');
-    unit.className = 'gliedunit';
-    unit.textContent = gliedEinheitLabel(g) || '—';
-    row.appendChild(unit);
+    if(g.mode === 'lit'){
+      const unitSel = document.createElement('select');
+      unitSel.className = 'gliedunit gliedunitsel';
+      unitSel.innerHTML = einheitOptionsHtml(g.einheit || '', true);
+      unitSel.addEventListener('change', e => { g.einheit = e.target.value || null; });
+      row.appendChild(unitSel);
+    }else{
+      const unit = document.createElement('div');
+      unit.className = 'gliedunit';
+      unit.textContent = gliedEinheitLabel(g) || '—';
+      row.appendChild(unit);
+    }
     if(termEditGlieder.length > 1){
       const rm = document.createElement('button');
       rm.type = 'button'; rm.className = 'rm'; rm.innerHTML = ICON.trash;
