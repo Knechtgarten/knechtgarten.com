@@ -1136,11 +1136,19 @@ async function pruefeAdresseGeocoding(adresse){
     const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${encoded}&destinations=${encoded}&key=${GOOGLE_MAPS_API_KEY}`;
     const res = await fetch(url);
     const json = await res.json();
+    // json.status ist der Gesamtstatus der Anfrage (z.B. REQUEST_DENIED bei
+    // einer API-Key-Einschraenkung) - unabhaengig vom Status pro Zeile/Ort
+    // (rows[].elements[].status, z.B. NOT_FOUND). Beides pruefen, damit der
+    // eigentliche Grund sichtbar wird statt nur "nicht gefunden".
+    if(json.status && json.status !== 'OK'){
+      return { ok: false, status: json.status + (json.error_message ? ': ' + json.error_message : '') };
+    }
     const el = json.rows?.[0]?.elements?.[0];
-    return el?.status === 'OK';
+    if(el?.status === 'OK') return { ok: true };
+    return { ok: false, status: el?.status || 'unbekannter Fehler' };
   }catch(e){
     console.error(e);
-    return false;
+    return { ok: false, status: 'Netzwerkfehler' };
   }
 }
 
@@ -1182,10 +1190,10 @@ function attachDistanzAdresslisteHandlers(tabelle, zielId){
       btn.disabled = true;
       btn.textContent = 'Prüfe …';
       btn.style.color = '';
-      const gefunden = await pruefeAdresseGeocoding(adresse);
+      const ergebnis = await pruefeAdresseGeocoding(adresse);
       btn.disabled = false;
-      btn.innerHTML = gefunden ? `${ICON.check} Gefunden` : `${ICON.close} Nicht gefunden`;
-      btn.style.color = gefunden ? '#2E7D32' : 'var(--danger)';
+      btn.innerHTML = ergebnis.ok ? `${ICON.check} Gefunden` : `${ICON.close} ${ergebnis.status}`;
+      btn.style.color = ergebnis.ok ? '#2E7D32' : 'var(--danger)';
     });
   });
   body.querySelectorAll('.distanzAdrDeleteBtn').forEach(btn => {
