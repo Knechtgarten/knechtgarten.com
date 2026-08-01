@@ -2465,6 +2465,13 @@ async function siUebernehmen(row){
     zusatzeinheit: row._siZusatzeinheit ?? null,
     sync_easybill: true,
   };
+  // VP Knecht direkt zugeordnet (z.B. interne Personal-Ansaetze ohne
+  // Lieferanten-Marge) - sperren, damit ein spaeterer automatischer
+  // Preisabgleich diesen Wert nicht wieder ueberschreibt.
+  if(row._siVpKnecht != null){
+    payload.vp_knecht = row._siVpKnecht;
+    payload.preis_gesperrt = true;
+  }
   const { data: neuArtikel, error } = await sb.from('artikel').insert(payload).select().single();
   if(error){ $('siStatus').textContent = friendlyError(error); $('siStatus').className = 'status err'; return; }
 
@@ -2574,11 +2581,11 @@ const SI_SPALTEN_FEST = [
   { key: 'zusatz_1', inputSelector: '.si-in-zusatz1', feldClass: 'small', titel: 'Zusatz 1 (frei)' },
   { key: 'zusatz_2', inputSelector: '.si-in-zusatz2', feldClass: 'small', titel: 'Zusatz 2 (frei)' },
 ];
-const SI_ROLLE_LABEL = { ignorieren: 'Nicht zuordnen', bezeichnung: 'Bezeichnung', artikelnummer: 'Artikelnummer', ek_preis: 'EK-Preis', vp_preis: 'VP-Preis', einheit: 'Einheit', zusatzwert: 'Zusatzwert' };
+const SI_ROLLE_LABEL = { ignorieren: 'Nicht zuordnen', bezeichnung: 'Bezeichnung', artikelnummer: 'Artikelnummer', ek_preis: 'EK-Preis', vp_preis: 'VP Lieferant', vp_knecht: 'VP Knecht', einheit: 'Einheit', zusatzwert: 'Zusatzwert' };
 // Rollen, die (wie zusatzwert) nur bei EINER Spalte gleichzeitig gewaehlt
 // sein duerfen, da artikel jeweils nur ein einziges Zielfeld dafuer hat
 // (artikel.einheit bzw. artikel.zusatzwert/-einheit).
-const SI_ROLLEN_EXKLUSIV = ['einheit', 'zusatzwert'];
+const SI_ROLLEN_EXKLUSIV = ['einheit', 'zusatzwert', 'vp_knecht'];
 // Default-Rolle: die vier festen KI-Felder starten mit ihrer eigenen
 // natuerlichen Rolle (was die KI dort eintraegt, ist ja meistens richtig),
 // die zwei generischen Zusatz-Plaetze starten neutral auf "Nicht zuordnen".
@@ -2637,7 +2644,7 @@ function siWendeZuordnungAn(row){
   SI_SPALTEN_FEST.forEach(spalte => { werte[spalte.key] = (row.querySelector(spalte.inputSelector)?.value || '').trim(); });
 
   const teilBeschreibung = [], teilArtikelnummer = [];
-  let ekWert = '', vpWert = '', zusatzwertRoh = '', einheitRoh = '';
+  let ekWert = '', vpWert = '', vpKnechtWert = '', zusatzwertRoh = '', einheitRoh = '';
   rollen.forEach(r => {
     if(!werte[r.key]) return;
     const praefix = praefixe[r.key] || '';
@@ -2646,6 +2653,7 @@ function siWendeZuordnungAn(row){
     else if(r.ziel === 'artikelnummer') teilArtikelnummer.push(wert);
     else if(r.ziel === 'ek_preis') ekWert = wert;
     else if(r.ziel === 'vp_preis') vpWert = wert;
+    else if(r.ziel === 'vp_knecht') vpKnechtWert = wert;
     else if(r.ziel === 'zusatzwert') zusatzwertRoh = wert;
     else if(r.ziel === 'einheit') einheitRoh = wert;
   });
@@ -2664,6 +2672,11 @@ function siWendeZuordnungAn(row){
     row._siZusatzwert = null; row._siZusatzeinheit = null;
   }
   row._siEinheit = einheitRoh ? siNormalisiereEinheit(einheitRoh) : null;
+  // VP Knecht wird bei Direktzuordnung (z.B. Personal-Stundenansaetze ohne
+  // eigenen Lieferanten-Aufschlag) explizit gesetzt statt aus VP Lieferant +
+  // Marge berechnet - siPreisgesperrt in siUebernehmen() sorgt dafuer, dass
+  // ein spaeterer automatischer Preisabgleich diesen Wert nicht ueberschreibt.
+  row._siVpKnecht = vpKnechtWert ? (parseFloat(vpKnechtWert.replace(',', '.')) || null) : null;
 }
 // Die KI schreibt dieselbe Einheit mal ausgeschrieben, mal abgekuerzt (z.B.
 // "Liter" vs. "l") - auf eine feste Kurzform vereinheitlichen, damit das im
