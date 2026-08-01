@@ -811,6 +811,9 @@ function ausdruckPreview(node){
   if(!node) return '(leer)';
   if(node.lit !== undefined) return String(node.lit);
   if(node.ref) return refLabel(node.ref, node.id);
+  // Automatisch eingefuegte Einheiten-Umrechnung (siehe buildMengenAusdruck) -
+  // in der Vorschau nicht als Multiplikation zeigen, sondern wie das Original.
+  if(node.op === '*' && node._umrechnung && Array.isArray(node.args)) return ausdruckPreview(node.args[0]);
   if(node.op && Array.isArray(node.args)){
     return node.args.map(a => ausdruckPreview(a)).join(` ${OP_SYMBOL[node.op] || node.op} `);
   }
@@ -1699,6 +1702,10 @@ function findRessourcenzeileKontext(rzId){
 function flattenMengenAusdruck(node){
   if(node === null || node === undefined) return [];
   if(node.lit !== undefined || node.ref) return [{ op: null, node }];
+  // Automatisch eingefuegte Einheiten-Umrechnung (siehe buildMengenAusdruck) -
+  // fuer den Editor wie ein einzelnes Glied behandeln (den urspruenglichen
+  // Ref/Wert vor der Umrechnung), nicht wie eine vom Nutzer gebaute Formel.
+  if(node.op === '*' && node._umrechnung && Array.isArray(node.args)) return flattenMengenAusdruck(node.args[0]);
   if(node.op && Array.isArray(node.args) && node.args.length){
     if(node.args.length > 2){
       const [first, ...rest] = node.args;
@@ -1726,12 +1733,47 @@ function nodeFromGlied(g){
   return g.mode === 'lit' ? { lit: parseFloat(g.text) } : { ref: g.refKind, id: g.refId };
 }
 
+// Automatische Einheiten-Umrechnung beim Verknuepfen von Gliedern: eval_ausdruck
+// rechnet rein numerisch, kennt also weder "cm" noch "m" - mischt eine Formel
+// z.B. Meter- und Zentimeter-Werte, waere das Ergebnis ohne diese Umrechnung
+// schlicht falsch (8 + 20 statt 8 + 0.2). Nur Glieder mit BEKANNTER, GLEICHER
+// Einheiten-Familie werden umgerechnet - freie Zahlen (kein Ref) und
+// unbekannte/inkompatible Einheiten (Stk., Pauschale, m² usw.) bleiben
+// unangetastet. Zielwert je Familie ist die zuerst im Glied-Zug vorkommende
+// Einheit dieser Familie - alle weiteren werden darauf umgerechnet.
+const EINHEIT_FAMILIE = {
+  mm: 'laenge', cm: 'laenge', m: 'laenge', km: 'laenge',
+  g: 'masse', kg: 'masse', t: 'masse',
+  l: 'volumen', 'm³': 'volumen'
+};
+const EINHEIT_FAKTOR = {
+  mm: 0.001, cm: 0.01, m: 1, km: 1000,
+  g: 0.001, kg: 1, t: 1000,
+  l: 0.001, 'm³': 1
+};
+function nodeFromGliedMitUmrechnung(g, zielProFamilie){
+  const basis = nodeFromGlied(g);
+  const einheit = gliedEinheitLabel(g);
+  const familie = einheit && EINHEIT_FAMILIE[einheit];
+  if(!familie) return basis;
+  if(!zielProFamilie[familie]){ zielProFamilie[familie] = einheit; return basis; }
+  const ziel = zielProFamilie[familie];
+  if(ziel === einheit) return basis;
+  const faktor = EINHEIT_FAKTOR[einheit] / EINHEIT_FAKTOR[ziel];
+  // _umrechnung markiert diesen Knoten als selbst erzeugt (nicht vom Nutzer
+  // gebaut) - flattenMengenAusdruck/ausdruckPreview behandeln ihn darum wie
+  // ein einzelnes Glied, nicht wie eine echte Multiplikation. eval_ausdruck
+  // ignoriert das zusaetzliche Feld einfach (kennt nur lit/ref/op/args).
+  return { op: '*', args: [basis, { lit: faktor }], _umrechnung: true };
+}
+
 function buildMengenAusdruck(glieder){
   const valid = glieder.filter(g => g.mode === 'lit' ? g.text !== '' && !isNaN(parseFloat(g.text)) : !!g.refId);
   if(!valid.length) return null;
-  let acc = nodeFromGlied(valid[0]);
+  const zielProFamilie = {};
+  let acc = nodeFromGliedMitUmrechnung(valid[0], zielProFamilie);
   for(let i = 1; i < valid.length; i++){
-    acc = { op: valid[i].op, args: [acc, nodeFromGlied(valid[i])] };
+    acc = { op: valid[i].op, args: [acc, nodeFromGliedMitUmrechnung(valid[i], zielProFamilie)] };
   }
   return acc;
 }
