@@ -125,7 +125,7 @@ td{padding:6px 6px;border-bottom:1px solid var(--soft);vertical-align:top;}
 .asbody{padding:14px;}
 .draghandle{cursor:grab;color:var(--muted);font-size:13px;flex-shrink:0;line-height:1;display:inline-flex;align-items:center;}
 .draghandle:active{cursor:grabbing;}
-.tsblock.dragging,.asblock.dragging,#eingabefelderBody tr.dragging{opacity:.4;}
+.tsblock.dragging,.asblock.dragging,#eingabefelderBody tr.dragging,.opttabwrap.dragging{opacity:.4;}
 .katitem{padding:8px 14px;font-size:12.5px;font-weight:600;cursor:pointer;border-left:3px solid transparent;color:var(--ink);}
 .katitem:hover{background:var(--soft);}
 .katitem.on{background:var(--soft);border-left-color:var(--primary);color:var(--primary);}
@@ -184,9 +184,10 @@ td{padding:6px 6px;border-bottom:1px solid var(--soft);vertical-align:top;}
 .opttabwrap{position:relative;display:inline-flex;align-items:center;background:#fff;
   border:1px solid var(--line);border-bottom:none;border-radius:7px 7px 0 0;color:var(--muted);z-index:2;}
 .opttabwrap.on{background:#fcfdfe;color:var(--primary);z-index:3;box-shadow:0 -1px 3px rgba(0,0,0,.03);margin-bottom:-1px;}
-.opttab{font-size:12.5px;font-weight:600;color:inherit;background:none;border:none;cursor:pointer;padding:8px 6px 8px 12px;}
-.opttab.addnew{color:var(--primary);opacity:.7;border:1px dashed var(--line);border-radius:7px 7px 0 0;padding:8px 12px;}
-.opttab-caret{font-size:8px;color:inherit;cursor:pointer;padding:8px 10px 8px 2px;background:none;border:none;display:inline-flex;align-items:center;justify-content:center;}
+.opttab{font-size:11px;font-weight:600;color:inherit;background:none;border:none;cursor:pointer;padding:6px 4px 6px 9px;white-space:nowrap;}
+.opttab.addnew{color:var(--primary);opacity:.7;border:1px dashed var(--line);border-radius:7px 7px 0 0;padding:6px 9px;}
+.opttab-caret{font-size:8px;color:inherit;cursor:pointer;padding:6px 7px 6px 2px;background:none;border:none;display:inline-flex;align-items:center;justify-content:center;}
+.opttabwrap[draggable="true"]{cursor:grab;}
 .optmenu{display:none;position:absolute;left:0;top:100%;margin-top:2px;background:#fff;border:1px solid var(--line);
   border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.16);z-index:20;min-width:160px;overflow:hidden;}
 .optmenu.show{display:block;}
@@ -1445,6 +1446,7 @@ async function loadArbeitsschritte(){
   ARBEITSSCHRITTE.forEach(as => {
     (as.teilschritt || []).forEach(ts => {
       (ts.ressourcenzeile || []).sort((a, b) => (a.reihenfolge || 0) - (b.reihenfolge || 0));
+      if(ts.auswahlfeld) ts.auswahlfeld.auswahloption = (ts.auswahlfeld.auswahloption || []).sort((a, b) => (a.reihenfolge || 0) - (b.reihenfolge || 0));
       (ts.auswahlfeld?.auswahloption || []).forEach(opt => {
         (opt.ressourcenzeile || []).sort((a, b) => (a.reihenfolge || 0) - (b.reihenfolge || 0));
       });
@@ -1482,6 +1484,9 @@ function renderArbeitsschritte(){
   $('arbeitsschritteList').querySelectorAll('.tswrap').forEach(wrap => {
     setupDragReorder(wrap, '.tsblock', ids => persistReihenfolge('teilschritt', ids));
   });
+  $('arbeitsschritteList').querySelectorAll('.opttabs').forEach(wrap => {
+    setupDragReorder(wrap, '.opttabwrap', ids => persistReihenfolge('auswahloption', ids), 'opt', 'horizontal');
+  });
   $('arbeitsschritteList').querySelectorAll('table.res tbody').forEach(tbody => {
     setupDragReorder(tbody, 'tr', ids => persistReihenfolge('ressourcenzeile', ids), 'rz');
   });
@@ -1491,7 +1496,10 @@ function renderArbeitsschritte(){
 // Drag&Drop-Umsortierung (Arbeitsschritte global, Teilschritte je innerhalb
 // ihres Arbeitsschritts)
 // ---------------------------------------------------------------------------
-function setupDragReorder(container, itemSelector, onReorder, datasetKey){
+function setupDragReorder(container, itemSelector, onReorder, datasetKey, achse){
+  // achse='horizontal' fuer Zeilen, die nebeneinander statt untereinander
+  // angeordnet sind (z.B. Options-Tabs) - Vorher/Nachher richtet sich dann
+  // nach der X- statt der Y-Position innerhalb des Elements.
   let dragEl = null;
   container.querySelectorAll(itemSelector).forEach(el => {
     el.setAttribute('draggable', 'true');
@@ -1501,7 +1509,9 @@ function setupDragReorder(container, itemSelector, onReorder, datasetKey){
       e.preventDefault();
       if(!dragEl || dragEl === el) return;
       const rect = el.getBoundingClientRect();
-      const after = (e.clientY - rect.top) / rect.height > 0.5;
+      const after = achse === 'horizontal'
+        ? (e.clientX - rect.left) / rect.width > 0.5
+        : (e.clientY - rect.top) / rect.height > 0.5;
       el.parentNode.insertBefore(dragEl, after ? el.nextSibling : el);
     });
   });
@@ -1553,9 +1563,9 @@ function renderAuswahlfeld(tsId, af){
       ${af.mehrfachauswahl ? '<div class="afhead"><span class="badge">Mehrfachauswahl</span></div>' : ''}
       <div class="opttabsrow">
         <div class="opttabs">
-          <button type="button" class="opttab addnew" onclick="openAddOptModal('${af.id}')">+Auswahl/Option</button>
+          <button type="button" class="opttab addnew" onclick="openAddOptModal('${af.id}')">+ Option</button>
           ${optionen.map(o => `
-            <div class="opttabwrap ${o.id===activeOpt?.id?'on':''}">
+            <div class="opttabwrap ${o.id===activeOpt?.id?'on':''}" data-opt="${o.id}">
               <button class="opttab" onclick="waehleOption('${af.id}','${o.id}')">${o.name}</button>
               <button type="button" class="opttab-caret" onclick="event.stopPropagation(); toggleOptMenu('${o.id}')">${ICON.chevronDown}</button>
               <div class="optmenu" id="optmenu-${o.id}">
