@@ -1499,7 +1499,7 @@ async function ladeFormelDaten(otId){
         ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, artikel_id,
           zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4, mindestmenge, verschnitt_prozent,
           artikel ( bezeichnung, einheit, vp_knecht ),
-          staffelgruppe ( name, titel, referenz_eingabefeld_id, referenz_term_id, staffelstufe ( menge_von, menge_bis, artikel ( vp_knecht ) ) ),
+          staffelgruppe ( name, titel, staffelstufe ( menge_von, menge_bis, artikel ( vp_knecht ) ) ),
           zonengruppe ( name, titel, zone ( artikel ( vp_knecht ), zone_plz ( plz ) ) ),
           sonderposition_typ ( name, titel, einheit, mwst_satz_pct ) ),
         auswahlfeld ( id, name, mehrfachauswahl,
@@ -1507,7 +1507,7 @@ async function ladeFormelDaten(otId){
             ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, artikel_id,
               zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4, mindestmenge, verschnitt_prozent,
               artikel ( bezeichnung, einheit, vp_knecht ),
-              staffelgruppe ( name, titel, referenz_eingabefeld_id, referenz_term_id, staffelstufe ( menge_von, menge_bis, artikel ( vp_knecht ) ) ),
+              staffelgruppe ( name, titel, staffelstufe ( menge_von, menge_bis, artikel ( vp_knecht ) ) ),
               zonengruppe ( name, titel, zone ( artikel ( vp_knecht ), zone_plz ( plz ) ) ),
               sonderposition_typ ( name, titel, einheit, mwst_satz_pct ) ) ) ) )`)
     .eq('offertentyp_id', otId).eq('ausgeblendet', false).order('reihenfolge');
@@ -2924,25 +2924,12 @@ async function recalc(){
           let menge = mengeRoh * verschnittFaktor * zugFaktorTf(rz) * tfMenge;
           if(rz.mindestmenge != null && menge < rz.mindestmenge) menge = rz.mindestmenge;
           if(rz.staffelgruppe){
-            // Referenzwert an der Staffelgruppe (z.B. "Beckenvolumen") hat
-            // Vorrang vor der Ressourcenzeilen-eigenen Menge-Formel - so muss
-            // nicht jede Verwendung der Staffelgruppe ihre Formel neu bauen.
-            // Ohne Referenzwert bleibt es beim bisherigen Verhalten (menge
-            // oben, inkl. Verschnitt/Zugangsfaktor/Mindestmenge).
-            let mengeFuerStaffel = menge;
-            if(rz.staffelgruppe.referenz_eingabefeld_id || rz.staffelgruppe.referenz_term_id){
-              const refNode = rz.staffelgruppe.referenz_eingabefeld_id
-                ? { ref: 'eingabefeld', id: rz.staffelgruppe.referenz_eingabefeld_id }
-                : { ref: 'term', id: rz.staffelgruppe.referenz_term_id };
-              try {
-                const { data: refWert, error: refErr } = await sb.rpc('eval_ausdruck', { node: refNode, werte: { ...tf.werteMap, ...systemwerteMap } });
-                if(refErr) throw refErr;
-                mengeFuerStaffel = refWert;
-              } catch(e) {
-                return { ...rz, bezeichnung: rz.bezeichnung + ` (Referenzwert-Berechnung fehlgeschlagen: ${e.message || e})`, einheit: 'Pauschale', menge: 0, preis: 0, betrag: 0 };
-              }
-            }
-            const stufe = (rz.staffelgruppe.staffelstufe || []).find(s => mengeFuerStaffel >= s.menge_von && (s.menge_bis == null || mengeFuerStaffel < s.menge_bis));
+            // Die Menge-Formel der jeweiligen Ressourcenzeile (inkl.
+            // Verschnitt/Zugangsfaktor/Mindestmenge, siehe menge oben)
+            // bestimmt immer die passende Staffelstufe - so kann dieselbe
+            // Staffelgruppe je nach Einsatzort einen anderen Wert nutzen
+            // (z.B. mal Poolboden-, mal Poolwand-Volumen).
+            const stufe = (rz.staffelgruppe.staffelstufe || []).find(s => menge >= s.menge_von && (s.menge_bis == null || menge < s.menge_bis));
             const preis = stufe?.artikel?.vp_knecht ?? 0;
             const bezeichnung = stufe ? rz.bezeichnung : rz.bezeichnung + ' (keine Stufe gefunden)';
             return { ...rz, bezeichnung, einheit: 'Pauschale', menge: 1, preis, betrag: preis };
