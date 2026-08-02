@@ -392,10 +392,6 @@ input[type=number]{-moz-appearance:textfield;}
   <div class="modal">
     <div class="modalhead"><div class="sub" id="addOptModalTitle">Neue Option</div></div>
     <div class="fld"><label>Name</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="addOptInput"></div>
-    <div class="fld hidden" id="addOptBeschreibungWrap">
-      <label style="font-size:11px;color:var(--muted);">Text (erscheint am Schluss der Offerte, wenn diese Option gewählt ist)</label>
-      <textarea id="addOptBeschreibungInput" style="width:100%;min-height:50px;font:inherit;font-size:12.5px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;" placeholder="z.B. Hinweis zur Zugänglichkeit oder Besonderheiten dieser Option …"></textarea>
-    </div>
     <div class="fld hidden" id="addOptHinweistextWrap">
       <label style="font-size:11px;color:var(--muted);">Hinweistext (spaeter als Tooltip beim Überfahren des Options-Buttons in der Offerte)</label>
       <textarea id="addOptHinweistextInput" style="width:100%;min-height:36px;font:inherit;font-size:12.5px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;" placeholder="z.B. kurzer Hinweis, was diese Option beinhaltet …"></textarea>
@@ -1623,7 +1619,19 @@ function toggleOptMenu(optId){
 document.addEventListener('click', () => { document.querySelectorAll('.optmenu').forEach(m => m.classList.remove('show')); });
 
 function renderOption(afId, opt){
-  return renderRessourcenTabelle('option', opt.id, opt.ressourcenzeile);
+  return renderRessourcenTabelle('option', opt.id, opt.ressourcenzeile) + `
+    <div class="fld" style="margin-top:14px;">
+      <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;">Text (erscheint am Schluss der Offerte, wenn diese Option gewählt ist)</label>
+      <textarea style="width:100%;min-height:50px;font:inherit;font-size:12.5px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;" placeholder="z.B. Hinweis zur Zugänglichkeit oder Besonderheiten dieser Option …" onblur="speichereOptionBeschreibung('${opt.id}', this.value)">${opt.beschreibung || ''}</textarea>
+    </div>`;
+}
+async function speichereOptionBeschreibung(optId, value){
+  const neu = value.trim() || null;
+  const { error } = await sb.from('auswahloption').update({ beschreibung: neu }).eq('id', optId);
+  if(error){ showToast(friendlyError(error), true); return; }
+  const opt = ARBEITSSCHRITTE.flatMap(a => a.teilschritt || []).map(t => t.auswahlfeld).filter(Boolean)
+    .flatMap(af => af.auswahloption || []).find(o => o.id === optId);
+  if(opt) opt.beschreibung = neu;
 }
 
 // ---------------------------------------------------------------------------
@@ -1989,13 +1997,12 @@ function openAddOptModal(afId, existingOpt){
   $('addOptInput').value = existingOpt ? existingOpt.name : '';
   $('addOptModalTitle').textContent = existingOpt ? 'Option bearbeiten' : 'Neue Option';
   $('addOptConfirm').textContent = existingOpt ? 'Speichern' : 'Hinzufügen';
-  // Text/Hinweistext/Hinweisbild nur beim Bearbeiten einer bestehenden Option
-  // zeigen - beim Neuanlegen zaehlt erstmal nur der Name, die Zusatzfelder
-  // braucht man ohnehin meist erst spaeter.
-  $('addOptBeschreibungWrap').classList.toggle('hidden', !existingOpt);
+  // Hinweistext/Hinweisbild (Erscheinungsbild/allgemeine Hinweise) nur beim
+  // Bearbeiten einer bestehenden Option zeigen - beim Neuanlegen zaehlt erstmal
+  // nur der Name. Der Beschreibungstext (Berechnungs-/Offerteninhalt) lebt
+  // bewusst separat inline auf der Seite, siehe renderOption().
   $('addOptHinweistextWrap').classList.toggle('hidden', !existingOpt);
   $('addOptHinweisbildWrap').classList.toggle('hidden', !existingOpt);
-  $('addOptBeschreibungInput').value = existingOpt?.beschreibung || '';
   $('addOptHinweistextInput').value = existingOpt?.hinweistext || '';
   addOptHinweisbildUrl = existingOpt?.hinweisbild_url || null;
   addOptHinweisbildVorschauAktualisieren();
@@ -2014,7 +2021,6 @@ $('addOptConfirm').addEventListener('click', async () => {
   if(addOptEditingId){
     const payload = {
       name,
-      beschreibung: $('addOptBeschreibungInput').value.trim() || null,
       hinweistext: $('addOptHinweistextInput').value.trim() || null,
       hinweisbild_url: addOptHinweisbildUrl
     };
