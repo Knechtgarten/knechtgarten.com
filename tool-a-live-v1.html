@@ -329,6 +329,18 @@ tr.csubtotal td:first-child{font-weight:600;}
 tr.csubtotal .csubval{font-weight:700;text-align:right;white-space:nowrap;}
 tr.ctotalrow td{padding:12px 0 4px;font-size:15px;font-weight:800;color:var(--primary);border-top:2px solid var(--line);}
 tr.ctotalrow .ctotalval{text-align:right;white-space:nowrap;}
+
+/* Rechnungsweg-Tooltip: ersetzt das native title-Attribut, weil dieses bei
+   langen Artikelnamen keine Kuerzung/Spalten kann - eigenes kleines Popup
+   stattdessen, folgt der Zeile beim Hover. */
+.rzw-pop{position:fixed;z-index:500;background:#fff;border:1px solid var(--line);border-radius:8px;
+  box-shadow:0 8px 24px rgba(0,0,0,.18);padding:8px 10px;font-size:12px;line-height:1.7;
+  max-width:420px;display:none;}
+.rzw-pop.show{display:block;}
+.rzw-row{display:flex;align-items:baseline;gap:12px;}
+.rzw-row .rzw-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px;color:var(--ink);}
+.rzw-row .rzw-wert{flex:0 0 auto;margin-left:auto;white-space:nowrap;color:var(--muted);}
+.rzw-simple{white-space:nowrap;color:var(--ink);}
 tr.cdescrow td{padding:2px 0 10px;}
 .descwrap{margin-top:6px;}
 .descblock{width:100%;min-height:44px;font:inherit;font-size:11.5px;color:var(--ink);line-height:1.5;
@@ -589,6 +601,8 @@ input[type=number]{-moz-appearance:textfield;}
     </div>
   </div>
 </main>
+
+<div class="rzw-pop" id="rzwPop"></div>
 
 <div class="ovl" id="neueOfferteTypOvl">
   <div class="ovlbox">
@@ -2610,6 +2624,25 @@ function snapshotZeile(label, zeile){
   (snapshotGruppen[label] = snapshotGruppen[label] || []).push(zeile);
 }
 
+// Rechnungsweg-Popup (siehe renderKostenblock/addRow): rechnungsweg ist
+// entweder null (einfache Zeile, nur der einzeilige Text) oder ein Array
+// {label, wert} - jeder Eintrag eine eigene, per CSS gekuerzte/rechtsbuendige
+// Zeile statt eines langen, unformatierten Fliesstexts.
+function zeigeRechnungsweg(tr, rechnungsweg, simpleText){
+  const pop = $('rzwPop');
+  pop.innerHTML = (rechnungsweg && rechnungsweg.length)
+    ? rechnungsweg.map(z => `<div class="rzw-row"><span class="rzw-label" title="${String(z.label).replace(/"/g,'&quot;')}">${z.label}</span><span class="rzw-wert">${z.wert}</span></div>`).join('')
+    : `<div class="rzw-simple">${simpleText}</div>`;
+  const rect = tr.getBoundingClientRect();
+  pop.classList.add('show');
+  const popRect = pop.getBoundingClientRect();
+  pop.style.left = Math.max(4, Math.min(rect.left, window.innerWidth - popRect.width - 4)) + 'px';
+  pop.style.top = (rect.bottom + 4) + 'px';
+}
+function versteckeRechnungsweg(){
+  $('rzwPop').classList.remove('show');
+}
+
 async function recalc(){
   if(!offertentypId) return;
   snapshotGruppen = {};
@@ -2656,12 +2689,15 @@ async function recalc(){
         const tr = document.createElement('tr');
         tr.className = 'crow' + (geloescht ? ' zgeloescht' : '');
         // Rechnungsweg-Tooltip: bei einer einfachen Zeile (kein Breakdown
-        // uebergeben oder nur ein einzelner Beitrag) reicht die Zeile selbst
-        // als Erklaerung - sonst zeigt der Tooltip die einzelnen Beitraege
+        // uebergeben) reicht "Menge x Preis = Betrag" - sonst zeigt das
+        // eigene Popup die einzelnen Beitraege in zwei sauberen Spalten
         // (z.B. Stunden pro Teilschritt bei Personal, Betrag pro Artikel bei
-        // einem Materialpaket), siehe Aufrufstellen weiter unten.
-        const rechnungswegZeilen = (rechnungsweg && rechnungsweg.length) ? rechnungsweg : [`${effMenge} ${einheit} × ${fmtCHF(effPreis)} = ${fmtCHF(effBetrag)}`];
-        tr.title = rechnungswegZeilen.join('\n');
+        // einem Materialpaket), siehe Aufrufstellen weiter unten. Ein
+        // natives title-Attribut kann weder lange Artikelnamen kuerzen noch
+        // Spalten ausrichten, darum ein eigenes Popup statt title.
+        const rechnungswegSimple = `${effMenge} ${einheit} × ${fmtCHF(effPreis)} = ${fmtCHF(effBetrag)}`;
+        tr.addEventListener('mouseenter', () => zeigeRechnungsweg(tr, rechnungsweg, rechnungswegSimple));
+        tr.addEventListener('mouseleave', versteckeRechnungsweg);
         tr.innerHTML = `<td>${bezeichnung}</td>
           <td style="text-align:right"><span class="berechnet-val">${mengeAbweicht ? rundungMengeFn(menge) : ''}</span><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" class="korrektur-feld" data-feld="menge" placeholder="Korr." value="${mengeFeldWert}" ${geloescht ? 'disabled' : ''}></td>
           <td style="color:var(--muted)">${einheit}</td>
@@ -2714,7 +2750,7 @@ async function recalc(){
             });
             Object.entries(byName).forEach(([name, v]) => {
               const einheitLabel = personalCfg ? personalCfg.einheit : v.einheit;
-              const rechnungsweg = Object.entries(v.proTeilschritt).map(([ts, std]) => `${ts}: ${personalRundungMenge(std)} ${einheitLabel}`);
+              const rechnungsweg = Object.entries(v.proTeilschritt).map(([ts, std]) => ({ label: ts, wert: `${personalRundungMenge(std)} ${einheitLabel}` }));
               addRow(name, v.menge, v.einheit, v.preis, v.betrag, `personal:${name}`, personalRundungMenge, personalRundungPreis, rechnungsweg);
             });
 
@@ -2826,7 +2862,7 @@ async function recalc(){
             // abgestimmt, deshalb dort unveraendert nur der Arbeitsschritt-Titel.
             Object.entries(proArbeitsschritt).forEach(([as, v]) => {
               const bezeichnung = currentBerechnungsmodell === 'formel' ? `Materialpaket ${as}` : as;
-              const rechnungsweg = Object.entries(v.proArtikel).map(([artikel, betrag]) => `${artikel}: ${fmtCHF(rundeCHF(betrag))}`);
+              const rechnungsweg = Object.entries(v.proArtikel).map(([artikel, betrag]) => ({ label: artikel, wert: fmtCHF(rundeCHF(betrag)) }));
               addRow(bezeichnung, 1, einheitLabel, v.summe, v.summe, `material:${as}`, materialRundungMenge, materialRundungPreis, rechnungsweg);
             });
           }
