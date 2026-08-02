@@ -397,6 +397,10 @@ input[type=number]{-moz-appearance:textfield;}
   <div class="modal">
     <div class="modalhead"><div class="sub" id="addOptModalTitle">Neue Option</div></div>
     <div class="fld"><label>Name</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="addOptInput"></div>
+    <div class="fld" style="flex-direction:row;align-items:center;gap:8px;">
+      <input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="checkbox" id="addOptStandardInput">
+      <label for="addOptStandardInput" style="font-size:12.5px;">Standardmässig ausgewählt (wenn bei keiner Option dieses Auswahlfelds ein Häkchen gesetzt ist, startet eine neue Offerte ohne Auswahl)</label>
+    </div>
     <div class="fld hidden" id="addOptHinweistextWrap">
       <label style="font-size:11px;color:var(--muted);">Hinweistext (spaeter als Tooltip beim Überfahren des Options-Buttons in der Offerte)</label>
       <textarea id="addOptHinweistextInput" style="width:100%;min-height:36px;font:inherit;font-size:12.5px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;" placeholder="z.B. kurzer Hinweis, was diese Option beinhaltet …"></textarea>
@@ -1471,7 +1475,7 @@ async function loadArbeitsschritte(){
           staffelgruppe_id, staffelgruppe(name, titel), zonengruppe_id, zonengruppe(name, titel),
           sonderposition_typ_id, sonderposition_typ(name, titel) ),
         auswahlfeld ( id, name, mehrfachauswahl, reihenfolge,
-          auswahloption ( id, name, beschreibung, hinweistext, hinweisbild_url, reihenfolge,
+          auswahloption ( id, name, beschreibung, hinweistext, hinweisbild_url, ist_standard, reihenfolge,
             ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, tagesleistung_menge, notiz, reihenfolge,
               zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4, mindestmenge, verschnitt_prozent, teilflaechen_kombination,
               artikel_id, artikel(bezeichnung, einheit, artikelnummer_knecht),
@@ -1983,9 +1987,21 @@ async function deleteTeilschritt(id){
   await loadArbeitsschritte();
 }
 
-async function addOption(afId, name){
-  const { error } = await sb.from('auswahloption').insert({ auswahlfeld_id: afId, name, reihenfolge: 1 });
+// Innerhalb eines NICHT-Mehrfachauswahl-Auswahlfelds darf immer nur eine
+// Option den Standard-Haken tragen (sonst waere unklar, welche davon bei
+// einer neuen Offerte vorausgewaehlt werden soll) - bei Mehrfachauswahl
+// duerfen dagegen mehrere Optionen gleichzeitig Standard sein.
+async function erzwingeEinzigenStandard(afId, keepOptId){
+  const af = ARBEITSSCHRITTE.flatMap(a => a.teilschritt || []).map(t => t.auswahlfeld).find(a => a?.id === afId);
+  if(af?.mehrfachauswahl) return;
+  const { error } = await sb.from('auswahloption').update({ ist_standard: false }).eq('auswahlfeld_id', afId).neq('id', keepOptId);
+  if(error) console.error(error);
+}
+
+async function addOption(afId, name, istStandard){
+  const { data, error } = await sb.from('auswahloption').insert({ auswahlfeld_id: afId, name, reihenfolge: 1, ist_standard: !!istStandard }).select().single();
   if(error){ showToast(friendlyError(error), true); return false; }
+  if(istStandard) await erzwingeEinzigenStandard(afId, data.id);
   await loadArbeitsschritte();
   return true;
 }
@@ -2030,6 +2046,7 @@ function openAddOptModal(afId, existingOpt){
   $('addOptHinweistextWrap').classList.toggle('hidden', !existingOpt);
   $('addOptHinweisbildWrap').classList.toggle('hidden', !existingOpt);
   $('addOptHinweistextInput').value = existingOpt?.hinweistext || '';
+  $('addOptStandardInput').checked = !!existingOpt?.ist_standard;
   addOptHinweisbildUrl = existingOpt?.hinweisbild_url || null;
   addOptHinweisbildVorschauAktualisieren();
   $('addOptOverlay').classList.add('show');
@@ -2044,18 +2061,21 @@ $('addOptCancel').addEventListener('click', () => $('addOptOverlay').classList.r
 $('addOptConfirm').addEventListener('click', async () => {
   const name = $('addOptInput').value.trim();
   if(!name) return;
+  const istStandard = $('addOptStandardInput').checked;
   if(addOptEditingId){
     const payload = {
       name,
+      ist_standard: istStandard,
       hinweistext: $('addOptHinweistextInput').value.trim() || null,
       hinweisbild_url: addOptHinweisbildUrl
     };
     const { error } = await sb.from('auswahloption').update(payload).eq('id', addOptEditingId);
     if(error){ showToast(friendlyError(error), true); return; }
+    if(istStandard) await erzwingeEinzigenStandard(addOptContext, addOptEditingId);
     $('addOptOverlay').classList.remove('show');
     await loadArbeitsschritte();
   }else{
-    if(await addOption(addOptContext, name)) $('addOptOverlay').classList.remove('show');
+    if(await addOption(addOptContext, name, istStandard)) $('addOptOverlay').classList.remove('show');
   }
 });
 $('addOptInput').addEventListener('keydown', e => { if(e.key === 'Enter') $('addOptConfirm').click(); });
