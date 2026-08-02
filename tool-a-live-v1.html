@@ -335,11 +335,14 @@ tr.ctotalrow .ctotalval{text-align:right;white-space:nowrap;}
    stattdessen, folgt der Zeile beim Hover. */
 .rzw-pop{position:fixed;z-index:500;background:#fff;border:1px solid var(--line);border-radius:8px;
   box-shadow:0 8px 24px rgba(0,0,0,.18);padding:8px 10px;font-size:12px;line-height:1.7;
-  max-width:420px;display:none;}
+  max-width:460px;display:none;}
 .rzw-pop.show{display:block;}
-.rzw-row{display:flex;align-items:baseline;gap:12px;}
-.rzw-row .rzw-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:260px;color:var(--ink);}
-.rzw-row .rzw-wert{flex:0 0 auto;margin-left:auto;white-space:nowrap;color:var(--muted);}
+.rzw-row{display:flex;align-items:baseline;gap:10px;}
+.rzw-row .rzw-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:210px;margin-right:auto;color:var(--ink);}
+.rzw-row .rzw-menge,.rzw-row .rzw-preis,.rzw-row .rzw-betrag{flex:none;white-space:nowrap;text-align:right;color:var(--muted);}
+.rzw-row .rzw-menge{width:64px;}
+.rzw-row .rzw-preis{width:72px;}
+.rzw-row .rzw-betrag{width:84px;color:var(--ink);font-weight:600;}
 .rzw-simple{white-space:nowrap;color:var(--ink);}
 tr.cdescrow td{padding:2px 0 10px;}
 .descwrap{margin-top:6px;}
@@ -2626,18 +2629,33 @@ function snapshotZeile(label, zeile){
 
 // Rechnungsweg-Popup (siehe renderKostenblock/addRow): rechnungsweg ist
 // entweder null (einfache Zeile, nur der einzeilige Text) oder ein Array
-// {label, wert} - jeder Eintrag eine eigene, per CSS gekuerzte/rechtsbuendige
-// Zeile statt eines langen, unformatierten Fliesstexts.
+// {label, menge, preis, betrag} - jeder Eintrag eine eigene, per CSS
+// gekuerzte/spaltenweise ausgerichtete Zeile (gleiche Spalten wie die
+// Haupttabelle: Bezeichnung/Menge/Preis/Betrag), damit man Mengen-/Preis-
+// Fehler einzelner Artikel direkt erkennen kann.
 function zeigeRechnungsweg(tr, rechnungsweg, simpleText){
   const pop = $('rzwPop');
   pop.innerHTML = (rechnungsweg && rechnungsweg.length)
-    ? rechnungsweg.map(z => `<div class="rzw-row"><span class="rzw-label" title="${String(z.label).replace(/"/g,'&quot;')}">${z.label}</span><span class="rzw-wert">${z.wert}</span></div>`).join('')
+    ? rechnungsweg.map(z => `<div class="rzw-row">
+        <span class="rzw-label" title="${String(z.label).replace(/"/g,'&quot;')}">${z.label}</span>
+        ${z.menge != null ? `<span class="rzw-menge">${z.menge}</span>` : ''}
+        ${z.preis != null ? `<span class="rzw-preis">${z.preis}</span>` : ''}
+        ${z.betrag != null ? `<span class="rzw-betrag">${z.betrag}</span>` : ''}
+      </div>`).join('')
     : `<div class="rzw-simple">${simpleText}</div>`;
   const rect = tr.getBoundingClientRect();
   pop.classList.add('show');
   const popRect = pop.getBoundingClientRect();
   pop.style.left = Math.max(4, Math.min(rect.left, window.innerWidth - popRect.width - 4)) + 'px';
-  pop.style.top = (rect.bottom + 4) + 'px';
+  // Nach unten oeffnen, ausser es hat dort keinen Platz mehr (Zeile nahe am
+  // unteren Fensterrand) - dann klappt das Popup stattdessen nach oben auf,
+  // damit es nie ueber den sichtbaren Bereich hinausragt.
+  const platzUnten = window.innerHeight - rect.bottom - 4;
+  if(popRect.height <= platzUnten || rect.top - popRect.height - 4 < 0){
+    pop.style.top = (rect.bottom + 4) + 'px';
+  }else{
+    pop.style.top = (rect.top - popRect.height - 4) + 'px';
+  }
 }
 function versteckeRechnungsweg(){
   $('rzwPop').classList.remove('show');
@@ -2750,7 +2768,7 @@ async function recalc(){
             });
             Object.entries(byName).forEach(([name, v]) => {
               const einheitLabel = personalCfg ? personalCfg.einheit : v.einheit;
-              const rechnungsweg = Object.entries(v.proTeilschritt).map(([ts, std]) => ({ label: ts, wert: `${personalRundungMenge(std)} ${einheitLabel}` }));
+              const rechnungsweg = Object.entries(v.proTeilschritt).map(([ts, std]) => ({ label: ts, menge: `${personalRundungMenge(std)} ${einheitLabel}` }));
               addRow(name, v.menge, v.einheit, v.preis, v.betrag, `personal:${name}`, personalRundungMenge, personalRundungPreis, rechnungsweg);
             });
 
@@ -2855,14 +2873,22 @@ async function recalc(){
             katZeilen.forEach(r => {
               if(!proArbeitsschritt[r.arbeitsschritt]) proArbeitsschritt[r.arbeitsschritt] = { summe: 0, proArtikel: {} };
               proArbeitsschritt[r.arbeitsschritt].summe += r.betrag;
-              proArbeitsschritt[r.arbeitsschritt].proArtikel[r.bezeichnung] = (proArbeitsschritt[r.arbeitsschritt].proArtikel[r.bezeichnung] || 0) + r.betrag;
+              const pa = proArbeitsschritt[r.arbeitsschritt].proArtikel;
+              if(!pa[r.bezeichnung]) pa[r.bezeichnung] = { menge: 0, einheit: r.einheit, preis: r.preis, betrag: 0 };
+              pa[r.bezeichnung].menge += r.menge;
+              pa[r.bezeichnung].betrag += r.betrag;
             });
             // "Materialpaket "-Praefix gilt bewusst NUR fuer Offerte-Typ "Formel" -
             // fuer "Tagessatz" (Allgemein) ist das Verhalten noch nicht
             // abgestimmt, deshalb dort unveraendert nur der Arbeitsschritt-Titel.
             Object.entries(proArbeitsschritt).forEach(([as, v]) => {
               const bezeichnung = currentBerechnungsmodell === 'formel' ? `Materialpaket ${as}` : as;
-              const rechnungsweg = Object.entries(v.proArtikel).map(([artikel, betrag]) => ({ label: artikel, wert: fmtCHF(rundeCHF(betrag)) }));
+              const rechnungsweg = Object.entries(v.proArtikel).map(([artikel, a]) => ({
+                label: artikel,
+                menge: `${rundeMenge(a.menge)} ${a.einheit}`,
+                preis: fmtCHF(rundeCHF(a.preis)),
+                betrag: fmtCHF(rundeCHF(a.betrag))
+              }));
               addRow(bezeichnung, 1, einheitLabel, v.summe, v.summe, `material:${as}`, materialRundungMenge, materialRundungPreis, rechnungsweg);
             });
           }
