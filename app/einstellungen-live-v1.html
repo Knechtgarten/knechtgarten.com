@@ -70,10 +70,6 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
 .sgtable{table-layout:fixed;}
 .sgtable td input{width:100%;border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:inherit;font-size:12.5px;color:var(--ink);}
 .sgtable td input:focus{outline:none;border-color:var(--primary);}
-.einheitfld{display:flex;align-items:stretch;}
-.einheitfld input{border-top-right-radius:0;border-bottom-right-radius:0;border-right:none;min-width:52px;flex:1;width:auto;}
-.einheitsuffix{flex-shrink:0;display:flex;align-items:center;padding:0 8px;font-size:11px;color:var(--muted);
-  background:var(--soft);border:1px solid var(--line);border-top-right-radius:6px;border-bottom-right-radius:6px;white-space:nowrap;}
 .sgtable td .btn{width:100%;text-align:left;background:#fff;color:var(--ink);border:1px solid var(--line);}
 .badge{font-size:10px;font-weight:700;text-transform:uppercase;background:var(--soft);color:var(--primary);
   border-radius:4px;padding:2px 6px;}
@@ -1629,37 +1625,8 @@ function kategorieSelectHtml(aktuelleKategorie, cssClass){
   return `<select class="${cssClass}">${kategorieOptionsHtml(aktuelleKategorie)}</select>`;
 }
 
-let STAFFEL_REF_EINGABEFELDER = [];
-let STAFFEL_REF_TERMS = [];
-async function ladeStaffelReferenzWerte(){
-  const [ef, t] = await Promise.all([
-    sb.from('eingabefeld').select('id,name,einheit').eq('staffel_referenz', true).order('name'),
-    sb.from('term').select('id,name,einheit').eq('staffel_referenz', true).order('name')
-  ]);
-  STAFFEL_REF_EINGABEFELDER = ef.data || [];
-  STAFFEL_REF_TERMS = t.data || [];
-}
-function staffelReferenzOptionsHtml(sg){
-  const aktuell = sg.referenz_eingabefeld_id ? `eingabefeld:${sg.referenz_eingabefeld_id}` : sg.referenz_term_id ? `term:${sg.referenz_term_id}` : '';
-  const efOpts = STAFFEL_REF_EINGABEFELDER.map(e => `<option value="eingabefeld:${e.id}" ${aktuell===`eingabefeld:${e.id}`?'selected':''}>${e.name}</option>`).join('');
-  const termOpts = STAFFEL_REF_TERMS.map(t => `<option value="term:${t.id}" ${aktuell===`term:${t.id}`?'selected':''}>${t.name}</option>`).join('');
-  return `<option value="">– kein Referenzwert –</option>${efOpts}${termOpts}`;
-}
-// Von/Bis vergleichen sich mit dem Referenzwert (z.B. m³), nicht mit dem
-// spaeter daraus resultierenden Artikel (der oft pauschal "Stk." verrechnet
-// wird) - darum hier bewusst die Einheit des Referenzwerts anzeigen. Ohne
-// gewaehlten Referenzwert bestimmt zur Laufzeit die Menge-Formel der jeweils
-// einsetzenden Ressourcenzeile den Vergleichswert - deren Einheit ist hier
-// nicht bekannt (kann je nach Einsatzort unterschiedlich sein), darum "–".
-function staffelReferenzEinheit(sg){
-  if(sg.referenz_eingabefeld_id) return STAFFEL_REF_EINGABEFELDER.find(e => e.id === sg.referenz_eingabefeld_id)?.einheit || '';
-  if(sg.referenz_term_id) return STAFFEL_REF_TERMS.find(t => t.id === sg.referenz_term_id)?.einheit || '';
-  return '–';
-}
-
 async function loadStaffelgruppen(){
-  await ladeStaffelReferenzWerte();
-  const { data: gruppen, error } = await sb.from('staffelgruppe').select('id,name,kategorie,titel,referenz_eingabefeld_id,referenz_term_id').order('name');
+  const { data: gruppen, error } = await sb.from('staffelgruppe').select('id,name,kategorie,titel').order('name');
   if(error){ console.error(error); return; }
   STAFFELGRUPPEN = gruppen;
   // Ueber die Anzahl pruefen, nicht ueber den Namen - sonst wuerde ein
@@ -1721,25 +1688,22 @@ function renderSgBody(sg){
     <div class="row">
       <div class="fld" style="max-width:360px;white-space:nowrap;"><label style="white-space:nowrap;">Titel (frei änderbar, wird in der Offerte angezeigt)</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="text" class="sgTitelInput" value="${sg.titel || ''}" placeholder="${sg.name}"></div>
       <div class="fld" style="max-width:160px;"><label>Kategorie</label>${kategorieSelectHtml(sg.kategorie, 'sgKategorieSelect')}</div>
-      <div class="fld" style="max-width:260px;"><label>Referenzwert für Staffelung</label><select class="sgReferenzSelect">${staffelReferenzOptionsHtml(sg)}</select></div>
     </div>
-    <div class="hint" style="margin-bottom:12px;">Ohne Referenzwert bestimmt die Menge-Formel der jeweiligen Ressourcenzeile die Staffelstufe (bisheriges Verhalten). Mit Referenzwert wird stattdessen immer dieser eine Wert verwendet, egal wo die Staffelung eingesetzt wird.</div>
     <div class="hint" style="margin-bottom:12px;">Die berechnete Menge (z.B. m³) wird mit den Von/Bis-Bereichen unten verglichen - der erste passende Bereich bestimmt, welcher Artikel (und damit welcher Pauschalpreis) in der Offerte verrechnet wird. Die letzte Zeile ist immer leer zum Erfassen - sobald Von und Artikel ausgefüllt sind, wird automatisch gespeichert und eine neue leere Zeile erscheint.</div>
     <table class="sgtable">
       <thead><tr><th style="width:150px;">Von</th><th style="width:150px;">Bis</th><th style="width:320px;">Artikel</th><th style="width:40px;"></th></tr></thead>
       <tbody>
         ${stufen.map(s => {
-          const einheit = staffelReferenzEinheit(sg);
           return `<tr class="sgStufeRow" data-stufe="${s.id}">
-            <td><div class="einheitfld"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="number" step="0.01" class="sgVonEdit" value="${s.menge_von}" ${nurLesen}><span class="einheitsuffix">${einheit}</span></div></td>
-            <td><div class="einheitfld"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="number" step="0.01" class="sgBisEdit" value="${s.menge_bis ?? ''}" placeholder="kein Limit" ${nurLesen}><span class="einheitsuffix">${einheit}</span></div></td>
+            <td><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="number" step="0.01" class="sgVonEdit" value="${s.menge_von}" ${nurLesen}></td>
+            <td><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="number" step="0.01" class="sgBisEdit" value="${s.menge_bis ?? ''}" placeholder="kein Limit" ${nurLesen}></td>
             <td>${artikelDetailText(s.artikel_id)}</td>
             <td><button class="icobtn danger admin-only sgDeleteBtn" data-stufe="${s.id}" title="Stufe löschen">${ICON.trash}</button></td>
           </tr>`;
         }).join('')}
         <tr class="sgDraftRow admin-only" data-sgid="${sg.id}">
-          <td><div class="einheitfld"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="number" step="0.01" class="sgEditVon" placeholder="Von"><span class="einheitsuffix">${staffelReferenzEinheit(sg)}</span></div></td>
-          <td><div class="einheitfld"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="number" step="0.01" class="sgEditBis" placeholder="kein Limit"><span class="einheitsuffix">${staffelReferenzEinheit(sg)}</span></div></td>
+          <td><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="number" step="0.01" class="sgEditVon" placeholder="Von"></td>
+          <td><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="number" step="0.01" class="sgEditBis" placeholder="kein Limit"></td>
           <td><button type="button" class="btn sgArtikelBtn">${draftArtikel ? artikelDetailText(draftArtikel.id) : 'Artikel wählen…'}</button></td>
           <td><button class="icobtn sgClearBtn" title="Zeile zurücksetzen">${ICON.trash}</button></td>
         </tr>
@@ -1765,17 +1729,6 @@ function attachSgBodyHandlers(){
       const statusEl = body.querySelector('.sgStatus');
       if(error){ statusEl.textContent = friendlyError(error); statusEl.className = 'status sgStatus err'; return; }
       statusEl.textContent = 'Kategorie gespeichert.'; statusEl.className = 'status sgStatus ok';
-      await loadStaffelgruppen();
-    });
-    body.querySelector('.sgReferenzSelect').addEventListener('change', async e => {
-      const val = e.target.value;
-      const payload = { referenz_eingabefeld_id: null, referenz_term_id: null };
-      if(val.startsWith('eingabefeld:')) payload.referenz_eingabefeld_id = val.slice('eingabefeld:'.length);
-      else if(val.startsWith('term:')) payload.referenz_term_id = val.slice('term:'.length);
-      const { error } = await sb.from('staffelgruppe').update(payload).eq('id', sgId);
-      const statusEl = body.querySelector('.sgStatus');
-      if(error){ statusEl.textContent = friendlyError(error); statusEl.className = 'status sgStatus err'; return; }
-      statusEl.textContent = 'Referenzwert gespeichert.'; statusEl.className = 'status sgStatus ok';
       await loadStaffelgruppen();
     });
     body.querySelectorAll('.sgStufeRow').forEach(row => {
