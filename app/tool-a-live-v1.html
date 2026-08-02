@@ -542,6 +542,10 @@ input[type=number]{-moz-appearance:textfield;}
             <div class="descwrap">
               <textarea class="descblock" id="beschreibungBlock" placeholder="Beschreibung …"></textarea>
             </div>
+            <div class="descwrap">
+              <label style="font-size:10.5px;color:var(--muted);display:block;margin-bottom:3px;">Hinweise zu gewählten Optionen</label>
+              <textarea class="descblock" id="optionenTextBlock" placeholder="Wird automatisch aus den Options-Texten zusammengestellt …"></textarea>
+            </div>
             <div class="ctotalrow-flex">
               <span id="totalLabel">Total</span>
               <span class="ctotalval" id="total">–</span>
@@ -632,6 +636,7 @@ const $costbody = document.getElementById('costbody');
 const $total = document.getElementById('total');
 const $costwrap = document.getElementById('costwrap');
 const $beschreibungBlock = document.getElementById('beschreibungBlock');
+const $optionenTextBlock = document.getElementById('optionenTextBlock');
 const $teilbereiche = document.getElementById('teilbereiche');
 const $offlist = document.getElementById('offlist');
 const $neueOfferteBtn = document.getElementById('neueOfferteBtn');
@@ -1498,7 +1503,7 @@ async function ladeFormelDaten(otId){
           zonengruppe ( name, titel, zone ( artikel ( vp_knecht ), zone_plz ( plz ) ) ),
           sonderposition_typ ( name, titel, einheit, mwst_satz_pct ) ),
         auswahlfeld ( id, name, mehrfachauswahl,
-          auswahloption ( id, name,
+          auswahloption ( id, name, beschreibung,
             ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, artikel_id,
               zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4, mindestmenge, verschnitt_prozent,
               artikel ( bezeichnung, einheit, vp_knecht ),
@@ -1539,7 +1544,7 @@ async function ladeFormelDaten(otId){
         const af = ts.auswahlfeld;
         auswahlfelder.push({
           id: af.id, name: af.name, mehrfachauswahl: af.mehrfachauswahl,
-          optionen: (af.auswahloption || []).map(o => ({ id: o.id, name: o.name }))
+          optionen: (af.auswahloption || []).map(o => ({ id: o.id, name: o.name, beschreibung: o.beschreibung }))
         });
         (af.auswahloption || []).forEach(opt => {
           (opt.ressourcenzeile || []).forEach(rz => pushRz(rz, opt.id, as.name));
@@ -1560,7 +1565,7 @@ async function ladeTagessatzDaten(otId){
         ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, tagesleistung_menge,
           artikel ( bezeichnung, einheit, vp_knecht ) ),
         auswahlfeld ( id, name, mehrfachauswahl,
-          auswahloption ( id, name,
+          auswahloption ( id, name, beschreibung,
             ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, tagesleistung_menge,
               artikel ( bezeichnung, einheit, vp_knecht ) ) ) ) )`)
     .eq('offertentyp_id', otId).eq('ausgeblendet', false).order('reihenfolge');
@@ -1589,7 +1594,7 @@ async function ladeTagessatzDaten(otId){
         const af = ts.auswahlfeld;
         tagessatzAuswahlfelder.push({
           id: af.id, teilschrittId: ts.id, arbeitsschrittId: as.id, name: af.name, mehrfachauswahl: af.mehrfachauswahl,
-          optionen: (af.auswahloption || []).map(o => ({ id: o.id, name: o.name }))
+          optionen: (af.auswahloption || []).map(o => ({ id: o.id, name: o.name, beschreibung: o.beschreibung }))
         });
         (af.auswahloption || []).forEach(opt => {
           (opt.ressourcenzeile || []).forEach(rz => pushRz(rz, opt.id, ts.id, as.id, as.name));
@@ -1909,7 +1914,7 @@ function setMode(neu){
 
 async function ladeBestehendeOfferte(offerteId){
   const { data: offerte, error: oErr } = await sb
-    .from('offerte').select('id, titel, datum, status, notiz, offertentyp_id, lieferwagen_modus, beschreibung_block, beschreibung_manuell, kosten_snapshot, offertnummer').eq('id', offerteId).single();
+    .from('offerte').select('id, titel, datum, status, notiz, offertentyp_id, lieferwagen_modus, beschreibung_block, beschreibung_manuell, optionen_text_liste, optionen_text_manuell, kosten_snapshot, offertnummer').eq('id', offerteId).single();
   if(oErr){ console.error(oErr); $saveStatus.textContent = 'Fehler beim Laden: ' + oErr.message; $saveStatus.className='status err'; return; }
 
   lieferwagenModus = offerte.lieferwagen_modus || 'zeit';
@@ -1973,6 +1978,8 @@ async function ladeBestehendeOfferte(offerteId){
 
   beschreibungManuellBearbeitet = offerte.beschreibung_manuell || false;
   $beschreibungBlock.value = offerte.beschreibung_block || '';
+  optionenTextManuellBearbeitet = offerte.optionen_text_manuell || false;
+  $optionenTextBlock.value = offerte.optionen_text_liste || '';
 
   $offerteTitel.value = offerte.titel;
   $offerteDatum.value = offerte.datum;
@@ -2024,6 +2031,8 @@ async function starteNeueOfferte(otId){
   renderGeometrieResultate();
   beschreibungManuellBearbeitet = false;
   $beschreibungBlock.value = '';
+  optionenTextManuellBearbeitet = false;
+  $optionenTextBlock.value = '';
   currentOffertnummer = null;
   renderOffertnummerBadge();
   const ot = OFFERTENTYPEN.find(o => o.id === otId);
@@ -2167,6 +2176,7 @@ async function speichereNeueOfferte(titelVal){
       datum: $offerteDatum.value || heuteAlsDatumsstring(), status: offerteStatus, notiz: notizWert(),
       betrag_total: letzterGrandTotal, lieferwagen_modus: lieferwagenModus,
       beschreibung_block: $beschreibungBlock.value.trim() || null, beschreibung_manuell: beschreibungManuellBearbeitet,
+      optionen_text_liste: $optionenTextBlock.value.trim() || null, optionen_text_manuell: optionenTextManuellBearbeitet,
       kosten_snapshot: letzterKostenSnapshot, offertnummer
     }).select().single();
   if(oErr) throw oErr;
@@ -2229,6 +2239,7 @@ async function speichereAenderungen(titelVal){
     status: offerteStatus, notiz: notizWert(),
     betrag_total: letzterGrandTotal, lieferwagen_modus: lieferwagenModus,
     beschreibung_block: $beschreibungBlock.value.trim() || null, beschreibung_manuell: beschreibungManuellBearbeitet,
+    optionen_text_liste: $optionenTextBlock.value.trim() || null, optionen_text_manuell: optionenTextManuellBearbeitet,
     kosten_snapshot: letzterKostenSnapshot
   }).eq('id', currentOfferteId);
   if(oErr) throw oErr;
@@ -2440,6 +2451,46 @@ function berechneBeschreibungsBlock(){
 }
 
 $beschreibungBlock.addEventListener('input', () => { beschreibungManuellBearbeitet = true; });
+
+// ---------------------------------------------------------------------------
+// Hinweise zu gewaehlten Optionen: eigene Liste (nicht Teil des fortlaufenden
+// Beschreibungsblocks) - eine Zeile pro tatsaechlich gewaehlter Option, die an
+// der Option selbst (Tool B) einen Text hinterlegt hat. Gleiches
+// Manuell-Ueberschreiben-Verhalten wie beim Beschreibungsblock.
+// ---------------------------------------------------------------------------
+let optionenTextManuellBearbeitet = false;
+
+function berechneOptionenTextListe(){
+  const zeilen = [];
+  if(currentBerechnungsmodell === 'tagessatz'){
+    const optionInfo = {};
+    tagessatzAuswahlfelder.forEach(af => af.optionen.forEach(o => { optionInfo[o.id] = o; }));
+    tagessatzTeilschritte.forEach(ts => {
+      if(!ts.optionIds) return;
+      if((teilschrittTage[ts.id] || 0) <= 0) return;
+      const ausgewaehlt = tagessatzAuswahl[ts.id] || new Set();
+      ts.optionIds.forEach(oid => {
+        if(!ausgewaehlt.has(oid)) return;
+        const opt = optionInfo[oid];
+        if(opt?.beschreibung && opt.beschreibung.trim()) zeilen.push(`- ${opt.name}: ${opt.beschreibung.trim()}`);
+      });
+    });
+  }else{
+    const optionInfo = {};
+    auswahlfelder.forEach(af => af.optionen.forEach(o => { optionInfo[o.id] = o; }));
+    teilschritte.forEach(ts => {
+      if(!ts.optionIds) return;
+      ts.optionIds.forEach(oid => {
+        if(!teilflaechen.some(tf => tf.selectedOptions.has(oid))) return;
+        const opt = optionInfo[oid];
+        if(opt?.beschreibung && opt.beschreibung.trim()) zeilen.push(`- ${opt.name}: ${opt.beschreibung.trim()}`);
+      });
+    });
+  }
+  return zeilen.join('\n');
+}
+
+$optionenTextBlock.addEventListener('input', () => { optionenTextManuellBearbeitet = true; });
 
 // ---------------------------------------------------------------------------
 // Eigene Zeile pro Abschnitt: in jeder Kategorie (Personal/Maschine/Logistik/
@@ -2962,6 +3013,7 @@ async function recalc(){
     }
 
     if(!beschreibungManuellBearbeitet) $beschreibungBlock.value = berechneBeschreibungsBlock();
+    if(!optionenTextManuellBearbeitet) $optionenTextBlock.value = berechneOptionenTextListe();
 
     grandTotal = rundeCHF(grandTotal);
     $total.textContent = fmtCHF(grandTotal);

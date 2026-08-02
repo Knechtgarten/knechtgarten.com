@@ -377,6 +377,10 @@ input[type=number]{-moz-appearance:textfield;}
   <div class="modal">
     <div class="modalhead"><div class="sub" id="addOptModalTitle">Neue Option</div></div>
     <div class="fld"><label>Name</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="addOptInput"></div>
+    <div class="fld">
+      <label>Text (erscheint am Schluss der Offerte, wenn diese Option gewählt ist)</label>
+      <textarea id="addOptBeschreibungInput" style="width:100%;min-height:60px;font:inherit;font-size:12.5px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;"></textarea>
+    </div>
     <div class="modalbtns">
       <button class="btnlink" id="addOptCancel">Abbrechen</button>
       <button class="btn" id="addOptConfirm">Hinzufügen</button>
@@ -1419,7 +1423,7 @@ async function loadArbeitsschritte(){
           staffelgruppe_id, staffelgruppe(name, titel), zonengruppe_id, zonengruppe(name, titel),
           sonderposition_typ_id, sonderposition_typ(name, titel) ),
         auswahlfeld ( id, name, mehrfachauswahl, reihenfolge,
-          auswahloption ( id, name, reihenfolge,
+          auswahloption ( id, name, beschreibung, reihenfolge,
             ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, tagesleistung_menge, notiz, reihenfolge,
               zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4, mindestmenge, verschnitt_prozent, teilflaechen_kombination,
               artikel_id, artikel(bezeichnung, einheit, artikelnummer_knecht),
@@ -1839,8 +1843,8 @@ async function deleteTeilschritt(id){
   await loadArbeitsschritte();
 }
 
-async function addOption(afId, name){
-  const { error } = await sb.from('auswahloption').insert({ auswahlfeld_id: afId, name, reihenfolge: 1 });
+async function addOption(afId, name, beschreibung){
+  const { error } = await sb.from('auswahloption').insert({ auswahlfeld_id: afId, name, beschreibung: beschreibung || null, reihenfolge: 1 });
   if(error){ showToast(friendlyError(error), true); return false; }
   await loadArbeitsschritte();
   return true;
@@ -1877,6 +1881,7 @@ function openAddOptModal(afId, existingOpt){
   addOptContext = afId;
   addOptEditingId = existingOpt ? existingOpt.id : null;
   $('addOptInput').value = existingOpt ? existingOpt.name : '';
+  $('addOptBeschreibungInput').value = existingOpt ? (existingOpt.beschreibung || '') : '';
   $('addOptModalTitle').textContent = existingOpt ? 'Option bearbeiten' : 'Neue Option';
   $('addOptConfirm').textContent = existingOpt ? 'Speichern' : 'Hinzufügen';
   $('addOptOverlay').classList.add('show');
@@ -1891,13 +1896,14 @@ $('addOptCancel').addEventListener('click', () => $('addOptOverlay').classList.r
 $('addOptConfirm').addEventListener('click', async () => {
   const name = $('addOptInput').value.trim();
   if(!name) return;
+  const beschreibung = $('addOptBeschreibungInput').value.trim() || null;
   if(addOptEditingId){
-    const { error } = await sb.from('auswahloption').update({ name }).eq('id', addOptEditingId);
+    const { error } = await sb.from('auswahloption').update({ name, beschreibung }).eq('id', addOptEditingId);
     if(error){ showToast(friendlyError(error), true); return; }
     $('addOptOverlay').classList.remove('show');
     await loadArbeitsschritte();
   }else{
-    if(await addOption(addOptContext, name)) $('addOptOverlay').classList.remove('show');
+    if(await addOption(addOptContext, name, beschreibung)) $('addOptOverlay').classList.remove('show');
   }
 });
 $('addOptInput').addEventListener('keydown', e => { if(e.key === 'Enter') $('addOptConfirm').click(); });
@@ -1985,7 +1991,7 @@ async function duplicateTeilschrittInto(asId, ts, reihenfolge){
     if(afErr) throw afErr;
     for(const opt of (af.auswahloption || [])){
       const { data: neuOpt, error: optErr } = await sb.from('auswahloption')
-        .insert({ auswahlfeld_id: neuAf.id, name: opt.name, reihenfolge: opt.reihenfolge }).select().single();
+        .insert({ auswahlfeld_id: neuAf.id, name: opt.name, beschreibung: opt.beschreibung, reihenfolge: opt.reihenfolge }).select().single();
       if(optErr) throw optErr;
       for(const rz of (opt.ressourcenzeile || [])){
         const { error: rzErr } = await sb.from('ressourcenzeile').insert({
@@ -2835,7 +2841,7 @@ async function duplicateOption(optId){
   if(!optObj) return;
   try{
     const { data: neuOpt, error } = await sb.from('auswahloption')
-      .insert({ auswahlfeld_id: afId, name: optObj.name + ' (Kopie)', reihenfolge: naechsteReihenfolge(geschwister) }).select().single();
+      .insert({ auswahlfeld_id: afId, name: optObj.name + ' (Kopie)', beschreibung: optObj.beschreibung, reihenfolge: naechsteReihenfolge(geschwister) }).select().single();
     if(error) throw error;
     for(const rz of (optObj.ressourcenzeile || [])){
       const { error: rzErr } = await sb.from('ressourcenzeile').insert({
