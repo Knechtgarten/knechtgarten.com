@@ -1746,6 +1746,7 @@ function renderRessourcenTabelle(kontextTyp, kontextId, zeilen){
                 ${rz.zonengruppe || rz.sonderposition_typ ? '' : (istTagessatz
                   ? `<button class="icobtn" onclick="openArtikelPickerUpdate('${rz.id}')" title="Artikel ändern">${ICON.edit}</button>`
                   : `<button class="icobtn" onclick="openRzEditModal('${rz.id}')" title="Formel anpassen">${ICON.edit}</button>`)}
+                <button class="icobtn" onclick="duplicateRessourcenzeile('${rz.id}')" title="Zeile duplizieren (inkl. Formel/Faktoren) - danach z.B. nur den Artikel wechseln">${ICON.copy}</button>
                 <button class="icobtn" onclick="deleteRessourcenzeile('${rz.id}')">${ICON.trash}</button>
               </td>
             </tr>`).join('')}
@@ -2051,6 +2052,42 @@ async function deleteRessourcenzeile(id){
   if(!(await confirmDialog('Ressourcenzeile wirklich loeschen?'))) return;
   const { error } = await sb.from('ressourcenzeile').delete().eq('id', id);
   if(error){ showToast(friendlyError(error), true); return; }
+  await loadArbeitsschritte();
+}
+
+// Zeile 1:1 duplizieren (inkl. Menge-Formel/Zugaenglichkeitsfaktoren/
+// Mindestmenge usw.) - typischer Anwendungsfall: eine Personal-Zeile mit
+// fertiger Berechnung kopieren und an der Kopie nur noch den Artikel wechseln
+// (z.B. "Polier" -> "Gartenarbeiter"), statt die Formel von Grund auf neu zu
+// bauen.
+async function duplicateRessourcenzeile(id){
+  let rz = null, teilschritt_id = null, option_id = null, geschwister = [];
+  outer:
+  for(const as of ARBEITSSCHRITTE){
+    for(const ts of (as.teilschritt || [])){
+      const direkt = (ts.ressourcenzeile || []).find(r => r.id === id);
+      if(direkt){ rz = direkt; teilschritt_id = ts.id; geschwister = ts.ressourcenzeile; break outer; }
+      if(ts.auswahlfeld){
+        for(const opt of (ts.auswahlfeld.auswahloption || [])){
+          const gefunden = (opt.ressourcenzeile || []).find(r => r.id === id);
+          if(gefunden){ rz = gefunden; option_id = opt.id; geschwister = opt.ressourcenzeile; break outer; }
+        }
+      }
+    }
+  }
+  if(!rz) return;
+  const payload = {
+    teilschritt_id, option_id, kategorie: rz.kategorie, artikel_id: rz.artikel_id,
+    bezeichnung_override: rz.bezeichnung_override, preis_override: rz.preis_override, menge_ausdruck: rz.menge_ausdruck,
+    tagesleistung_menge: rz.tagesleistung_menge, notiz: rz.notiz,
+    zugang_stufe1: rz.zugang_stufe1, zugang_stufe2: rz.zugang_stufe2, zugang_stufe3: rz.zugang_stufe3, zugang_stufe4: rz.zugang_stufe4,
+    mindestmenge: rz.mindestmenge, verschnitt_prozent: rz.verschnitt_prozent, teilflaechen_kombination: rz.teilflaechen_kombination,
+    staffelgruppe_id: rz.staffelgruppe_id, zonengruppe_id: rz.zonengruppe_id, sonderposition_typ_id: rz.sonderposition_typ_id,
+    reihenfolge: naechsteReihenfolge(geschwister)
+  };
+  const { error } = await sb.from('ressourcenzeile').insert(payload);
+  if(error){ showToast(friendlyError(error), true); return; }
+  showToast('Zeile dupliziert.');
   await loadArbeitsschritte();
 }
 
