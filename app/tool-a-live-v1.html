@@ -193,7 +193,6 @@ main.wrap{padding-top:48px;padding-bottom:60px;}
 .opt{font-size:11px;font-weight:600;border:1px solid var(--line);background:#fff;color:var(--ink);
   border-radius:6px;padding:4px 9px;cursor:pointer;}
 .opt.on{background:var(--primary);color:#fff;border-color:var(--primary);}
-.kwGroup{display:inline-flex;gap:5px;flex-wrap:wrap;margin-left:8px;padding-left:8px;border-left:1px solid var(--line);}
 
 .icobtn{width:24px;height:24px;border-radius:50%;border:1px solid var(--line);background:#fff;color:var(--muted);
   font-size:12px;cursor:pointer;padding:0;flex-shrink:0;display:flex;align-items:center;justify-content:center;}
@@ -1039,10 +1038,12 @@ let tagessatzAuswahl = {};          // {teilschritt_id: Set<option_id>}
 let tagessatzOffenIds = new Set();  // Arbeitsschritt-IDs, die gerade aufgeklappt sind
 
 // Ein Bauteil kann mehrere Teilbereiche haben - jeder ist eine Mini-Offerte
-// mit eigenen Massen, eigener Zugaenglichkeit UND eigener Options-/Kieswerk-
-// Wahl (z.B. kann Teilflaeche A eine Kies-Fundation bekommen und Teilflaeche
-// B nicht) - siehe tf.selectedOptions/tf.kieswerkWahl.
-let teilflaechen = [];         // [{clientKey, dbId, name, werteMap, selectedOptions, kieswerkWahl, menge, zugaenglichkeitStufe, eingeklappt}]
+// mit eigenen Massen, eigener Zugaenglichkeit UND eigener Options-Wahl (z.B.
+// kann Teilflaeche A eine Kies-Fundation bekommen und Teilflaeche B nicht) -
+// siehe tf.selectedOptions. Welches Kieswerk fuer Kies-/Beton-Transport
+// gilt, wird NICHT pro Teilflaeche gewaehlt, sondern automatisch anhand der
+// Kunde-PLZ ermittelt (naechstgelegenes Kieswerk, siehe ermittleNaechstesKieswerk()).
+let teilflaechen = [];         // [{clientKey, dbId, name, werteMap, selectedOptions, menge, zugaenglichkeitStufe, eingeklappt}]
 let deletedTeilflaechenIds = [];
 let tfCounter = 0;
 
@@ -1109,6 +1110,19 @@ async function holeNaechsteDistanzKm(adressListe, plz){
   const ergebnisse = await Promise.all(adressListe.map(a => holeKieswerkDistanzKm(a.adresse, plz)));
   const gueltige = ergebnisse.filter(km => km != null);
   return gueltige.length ? Math.min(...gueltige) : null;
+}
+
+// Kies-/Beton-Transport: es gibt bewusst KEINE manuelle Kieswerk-Wahl mehr -
+// das System nimmt immer automatisch das geografisch naechstgelegene
+// Kieswerk zur Kunde-PLZ aus der jeweiligen Liste (kies/beton). Das Material
+// selbst (welcher Kies-Typ verbaut wird) ist davon unabhaengig - das laeuft
+// als normaler Artikel in einer eigenen Ressourcenzeile.
+async function ermittleNaechstesKieswerk(liste, plz){
+  if(!liste?.length || !plz) return null;
+  const ergebnisse = await Promise.all(liste.map(async kw => ({ kw, km: await holeKieswerkDistanzKm(kw.adresse, plz) })));
+  const gueltige = ergebnisse.filter(e => e.km != null);
+  if(!gueltige.length) return null;
+  return gueltige.reduce((a, b) => b.km < a.km ? b : a);
 }
 
 // Einheit/Rundung fuer Personal-/Materialaufwand in der Kostentabelle kommen
@@ -1633,7 +1647,7 @@ function neueTeilflaeche(){
   // umgestellt (siehe speichereNeueOfferte/speichereAenderungen), damit
   // Korrektur-Schluessel (zeilenKorrekturen) innerhalb derselben Sitzung
   // sofort stabil auf dieselbe Teilflaeche zeigen, auch nach dem Speichern.
-  return { clientKey: 'neu' + tfCounter, dbId: null, name: 'Teilbereich ' + (teilflaechen.length + 1), werteMap, selectedOptions, kieswerkWahl: {}, menge: 1, zugaenglichkeitStufe: 2, eingeklappt: false };
+  return { clientKey: 'neu' + tfCounter, dbId: null, name: 'Teilbereich ' + (teilflaechen.length + 1), werteMap, selectedOptions, menge: 1, zugaenglichkeitStufe: 2, eingeklappt: false };
 }
 
 function aktualisiereDimSummary(tf, card){
@@ -1807,30 +1821,13 @@ function renderTeilflaechen(){
     auswahlfelder.forEach(af => {
       const div = document.createElement('div');
       div.className = 'afblock';
-      // Kies-/Beton-Transport: bei der aktuell gewaehlten Option, die eine
-      // solche Sonderposition enthaelt, kommen die Kieswerk-Buttons direkt in
-      // dieselbe Zeile wie die Options-Buttons (kein eigenes Label/eigene
-      // Zeile) - optisch leicht abgesetzt durch einen duennen Trennstrich.
-      const optButtons = af.optionen.map(o => {
-        let html = `<button type="button" class="opt ${tf.selectedOptions.has(o.id)?'on':''}" data-opt="${o.id}">${o.name}</button>`;
-        if(tf.selectedOptions.has(o.id)){
-          const kiesRz = ressourcenzeilen.find(rz => rz.optionId === o.id && rz.sonderpositionTyp?.name === 'Kies-Transport');
-          const betonRz = ressourcenzeilen.find(rz => rz.optionId === o.id && rz.sonderpositionTyp?.name === 'Beton-Transport');
-          if(kiesRz || betonRz){
-            const material = kiesRz ? 'kies' : 'beton';
-            const liste = material === 'kies' ? KIESWERK_KIES : KIESWERK_BETON;
-            const aktuelleWahl = tf.kieswerkWahl?.[o.id]?.[material];
-            html += `<span class="kwGroup">${liste.length
-              ? liste.map(kw => `<button type="button" class="opt kwOptBtn ${aktuelleWahl === kw.id ? 'on' : ''}" data-opt-id="${o.id}" data-material="${material}" data-kw="${kw.id}">${kw.name}</button>`).join('')
-              : '<span class="hint">Keine Kieswerke erfasst</span>'}</span>`;
-          }
-        }
-        return html;
-      }).join('');
+      const optButtons = af.optionen.map(o =>
+        `<button type="button" class="opt ${tf.selectedOptions.has(o.id)?'on':''}" data-opt="${o.id}">${o.name}</button>`
+      ).join('');
       div.innerHTML = `<label class="flabel">${af.name}</label>
         <div class="optrow">${optButtons}</div>`;
       afWrap.appendChild(div);
-      div.querySelectorAll('.opt:not(.kwOptBtn)').forEach(btn => {
+      div.querySelectorAll('.opt').forEach(btn => {
         btn.addEventListener('click', () => {
           const optId = btn.dataset.opt;
           if(!af.mehrfachauswahl){
@@ -1839,17 +1836,6 @@ function renderTeilflaechen(){
           }else{
             if(tf.selectedOptions.has(optId)) tf.selectedOptions.delete(optId); else tf.selectedOptions.add(optId);
           }
-          renderTeilflaechen();
-          recalc();
-        });
-      });
-      div.querySelectorAll('.kwOptBtn').forEach(btn => {
-        btn.addEventListener('click', () => {
-          const optId = btn.dataset.optId;
-          const material = btn.dataset.material;
-          if(!tf.kieswerkWahl) tf.kieswerkWahl = {};
-          if(!tf.kieswerkWahl[optId]) tf.kieswerkWahl[optId] = {};
-          tf.kieswerkWahl[optId][material] = btn.dataset.kw;
           renderTeilflaechen();
           recalc();
         });
@@ -1942,7 +1928,7 @@ async function ladeBestehendeOfferte(offerteId){
   }else{
     const { data: tfs, error } = await sb
       .from('teilflaeche')
-      .select('id, name, menge, zugaenglichkeit_stufe, teilflaeche_eingabefeld_wert(eingabefeld_id, wert), teilflaeche_auswahl(option_id, kieswerk_kies_id, kieswerk_beton_id)')
+      .select('id, name, menge, zugaenglichkeit_stufe, teilflaeche_eingabefeld_wert(eingabefeld_id, wert), teilflaeche_auswahl(option_id)')
       .eq('offerte_id', offerteId).order('reihenfolge');
     if(error){ console.error(error); $saveStatus.textContent = 'Fehler beim Laden: ' + error.message; $saveStatus.className='status err'; return; }
 
@@ -1960,9 +1946,6 @@ async function ladeBestehendeOfferte(offerteId){
         name: row.name,
         werteMap,
         selectedOptions: new Set((row.teilflaeche_auswahl || []).map(a => a.option_id)),
-        kieswerkWahl: Object.fromEntries((row.teilflaeche_auswahl || [])
-          .filter(a => a.kieswerk_kies_id || a.kieswerk_beton_id)
-          .map(a => [a.option_id, { kies: a.kieswerk_kies_id, beton: a.kieswerk_beton_id }])),
         menge: row.menge ?? 1,
         zugaenglichkeitStufe: row.zugaenglichkeit_stufe ?? 2,
         eingeklappt: false
@@ -2213,11 +2196,7 @@ async function speichereNeueOfferte(titelVal){
 
       if(tf.selectedOptions.size){
         const { error: aErr } = await sb.from('teilflaeche_auswahl')
-          .insert([...tf.selectedOptions].map(oid => ({
-            teilflaeche_id: row.id, option_id: oid,
-            kieswerk_kies_id: tf.kieswerkWahl?.[oid]?.kies || null,
-            kieswerk_beton_id: tf.kieswerkWahl?.[oid]?.beton || null
-          })));
+          .insert([...tf.selectedOptions].map(oid => ({ teilflaeche_id: row.id, option_id: oid })));
         if(aErr) throw aErr;
       }
     }
@@ -2290,11 +2269,7 @@ async function speichereAenderungen(titelVal){
       if(delAuswahlErr) throw delAuswahlErr;
       if(tf.selectedOptions.size){
         const { error: aErr } = await sb.from('teilflaeche_auswahl')
-          .insert([...tf.selectedOptions].map(oid => ({
-            teilflaeche_id: tf.dbId, option_id: oid,
-            kieswerk_kies_id: tf.kieswerkWahl?.[oid]?.kies || null,
-            kieswerk_beton_id: tf.kieswerkWahl?.[oid]?.beton || null
-          })));
+          .insert([...tf.selectedOptions].map(oid => ({ teilflaeche_id: tf.dbId, option_id: oid })));
         if(aErr) throw aErr;
       }
     }
@@ -2857,6 +2832,12 @@ async function recalc(){
       // von der Kunde-PLZ ab, nicht von der Teilflaeche - daher einmal pro
       // Neuberechnung ermitteln, nicht pro Teilflaeche/Zeile.
       const systemwerteMap = await berechneSystemwerteMap();
+      // Naechstgelegenes Kieswerk/Betonwerk zur Kunde-PLZ - haengt nur von der
+      // PLZ ab (nicht von der Teilflaeche/Option), daher einmal pro
+      // Neuberechnung ermitteln statt pro Teilflaeche/Zeile.
+      const kundePlzTrim = $('kundePlz').value.trim();
+      const naechstesKiesWerk = await ermittleNaechstesKieswerk(KIESWERK_KIES, kundePlzTrim);
+      const naechstesBetonWerk = await ermittleNaechstesKieswerk(KIESWERK_BETON, kundePlzTrim);
       // $costbody dient bei "Formel" nur noch fuer offertenweite, nicht an
       // eine einzelne Teilflaeche gebundene Dinge (Gemeinsame Positionen,
       // Lieferwagenfahrzeit) - jede Teilflaeche bekommt ihren eigenen
@@ -2879,13 +2860,14 @@ async function recalc(){
           }
           if(rz.sonderpositionTyp?.name === 'Kies-Transport' || rz.sonderpositionTyp?.name === 'Beton-Transport'){
             const einheit = rz.sonderpositionTyp.einheit || 'm3';
-            const material = rz.sonderpositionTyp.name === 'Kies-Transport' ? 'kies' : 'beton';
-            const liste = material === 'kies' ? KIESWERK_KIES : KIESWERK_BETON;
-            const kieswerkId = tf.kieswerkWahl?.[rz.optionId]?.[material];
-            const kieswerk = liste.find(k => k.id === kieswerkId);
-            if(!kieswerk){
-              return { ...rz, bezeichnung: rz.bezeichnung + ' (Kieswerk auswählen)', einheit, menge: 0, preis: 0, betrag: 0 };
+            // Kieswerk wird NICHT mehr gewaehlt, sondern ist immer das
+            // geografisch naechstgelegene zur Kunde-PLZ (siehe naechstesKiesWerk/
+            // naechstesBetonWerk oben, einmal pro Neuberechnung ermittelt).
+            const naechstes = rz.sonderpositionTyp.name === 'Kies-Transport' ? naechstesKiesWerk : naechstesBetonWerk;
+            if(!naechstes){
+              return { ...rz, bezeichnung: rz.bezeichnung + ' (kein Kieswerk erfasst oder Distanz nicht ermittelbar)', einheit, menge: 0, preis: 0, betrag: 0 };
             }
+            const { kw: kieswerk, km } = naechstes;
             // Menge-Formel ergibt das Transportvolumen (m3) - gleiche Auswertung
             // wie bei generischen Ressourcenzeilen (eval_ausdruck-RPC), aber mit
             // eigener, hartcodierter Preisfindung statt Artikel-Preis: der
@@ -2901,12 +2883,10 @@ async function recalc(){
             }
             let menge = mengeRoh * tfMenge;
             if(kieswerk.mindestmenge != null && menge < kieswerk.mindestmenge) menge = kieswerk.mindestmenge;
-            const plz = $('kundePlz').value.trim();
-            const km = plz ? await holeKieswerkDistanzKm(kieswerk.adresse, plz) : null;
-            let betrag = kieswerk.pauschale + (km != null ? km * kieswerk.km_preis * menge : 0);
+            let betrag = kieswerk.pauschale + km * kieswerk.km_preis * menge;
             betrag = betrag * (1 + (kieswerk.marge_pct || 0) / 100);
             const preis = menge > 0 ? betrag / menge : 0;
-            const bezeichnung = rz.bezeichnung + ` (${kieswerk.name}${km == null ? ', Distanz nicht ermittelbar' : ''})`;
+            const bezeichnung = rz.bezeichnung + ` (${kieswerk.name})`;
             return { ...rz, bezeichnung, einheit, menge, preis, betrag };
           }
           if(rz.sonderpositionTyp){
