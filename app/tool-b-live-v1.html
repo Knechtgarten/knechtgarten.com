@@ -261,6 +261,15 @@ input[type=checkbox].appcheck.appcheck-sm:checked::after{left:4px;top:0px;width:
   font-size:10.5px;border-left:1px solid var(--line);}
 .combofield.wide{flex:1;}
 .combofield.wide input{width:100%;}
+.artikelSuggest{display:none;position:absolute;top:100%;left:0;right:0;margin-top:4px;background:#fff;
+  border:1px solid var(--line);border-radius:7px;box-shadow:0 4px 14px rgba(0,0,0,.1);z-index:20;
+  max-height:220px;overflow-y:auto;}
+.artikelSuggest.show{display:block;}
+.artikelSuggest-item{padding:7px 10px;cursor:pointer;font-size:12.5px;display:flex;justify-content:space-between;gap:8px;}
+.artikelSuggest-item:hover,.artikelSuggest-item.active{background:var(--soft);}
+.artikelSuggest-item b{color:var(--ink);font-weight:600;}
+.artikelSuggest-item span{color:var(--muted);white-space:nowrap;}
+.artikelSuggest-empty{padding:8px 10px;font-size:12px;color:var(--muted);}
 .optrow{display:flex;gap:6px;}
 .opt{font-size:12px;font-weight:600;border:1px solid var(--line);background:#fff;color:var(--ink);
   border-radius:6px;padding:6px 12px;cursor:pointer;}
@@ -453,9 +462,10 @@ input[type=number]{-moz-appearance:textfield;}
     <div class="fld hidden" id="rzEditArtikelFld">
       <label>Artikel</label>
       <div style="display:flex;align-items:center;gap:8px;">
-        <div class="combofield wide">
-          <input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="text" id="rzEditArtikelInput" readonly placeholder="Artikel waehlen...">
+        <div class="combofield wide" style="position:relative;">
+          <input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="text" id="rzEditArtikelInput" placeholder="Artikel waehlen oder Bezeichnung eintippen...">
           <button type="button" id="rzEditArtikelBtn"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></button>
+          <div class="artikelSuggest" id="rzEditArtikelSuggest"></div>
         </div>
         <span class="hint" id="rzEditArtikelEinheit" style="white-space:nowrap;"></span>
       </div>
@@ -2304,6 +2314,7 @@ async function openRzEditModal(rzId){
     </div>`).join('');
   $('rzEditStatus').textContent = '';
   $('rzEditStatus').className = 'status';
+  $('rzEditArtikelSuggest').classList.remove('show');
   $('rzEditOverlay').classList.add('show');
 }
 
@@ -2348,6 +2359,7 @@ function openRzAddModal(kontextTyp, kontextId){
     </div>`).join('');
   $('rzEditStatus').textContent = '';
   $('rzEditStatus').className = 'status';
+  $('rzEditArtikelSuggest').classList.remove('show');
   $('rzEditOverlay').classList.add('show');
 }
 
@@ -2498,9 +2510,53 @@ async function waehleArtikel(id){
   setzeRzArtikelEinheit(a.einheit);
   $('rzEditZugridWrap').classList.toggle('hidden', currentBerechnungsmodell === 'tagessatz' || !istZugFaehigeKategorie(rzEditKategorie));
   $('artikelPickerOverlay').classList.remove('show');
+  $('rzEditArtikelSuggest').classList.remove('show');
 }
-$('rzEditArtikelBtn').addEventListener('click', () => { apDirektKontext = null; apUpdateRzId = null; openArtikelPicker(); });
+$('rzEditArtikelBtn').addEventListener('click', () => {
+  apDirektKontext = null; apUpdateRzId = null;
+  $('rzEditArtikelSuggest').classList.remove('show');
+  openArtikelPicker();
+});
 $('artikelPickerSearch').addEventListener('input', () => renderArtikelPickerList());
+
+// ---------------------------------------------------------------------------
+// Direkt-Eintippen im Artikel-Feld des Ressourcenzeile-Editors: kennt man die
+// Bezeichnung bereits, muss nicht zwingend der grosse Picker geoeffnet werden
+// - ein Tipp-Vorschlag (bis zu 8 Treffer) erscheint direkt unter dem Feld,
+// Auswahl laeuft ueber dieselbe waehleArtikel()-Logik wie der Picker.
+function rzArtikelSuggestRender(treffer){
+  const box = $('rzEditArtikelSuggest');
+  if(!treffer.length){
+    box.innerHTML = '<div class="artikelSuggest-empty">Keine Treffer.</div>';
+    box.classList.add('show');
+    return;
+  }
+  box.innerHTML = treffer.map(a => `
+    <div class="artikelSuggest-item" data-id="${a.id}">
+      <b>${a.bezeichnung}</b><span>${a.artikelnummer_knecht ? a.artikelnummer_knecht + ' · ' : ''}${a.einheit}</span>
+    </div>`).join('');
+  box.querySelectorAll('.artikelSuggest-item').forEach(el => {
+    el.addEventListener('mousedown', e => { e.preventDefault(); waehleArtikel(el.dataset.id); });
+  });
+  box.classList.add('show');
+}
+$('rzEditArtikelInput').addEventListener('input', () => {
+  rzEditArtikelId = null;
+  const q = $('rzEditArtikelInput').value.trim().toLowerCase();
+  if(!q){ $('rzEditArtikelSuggest').classList.remove('show'); return; }
+  rzArtikelSuggestRender(ARTIKEL.filter(a => `${a.bezeichnung} ${a.artikelnummer_knecht||''}`.toLowerCase().includes(q)).slice(0, 8));
+});
+$('rzEditArtikelInput').addEventListener('keydown', e => {
+  if(e.key === 'Enter'){
+    const first = $('rzEditArtikelSuggest').querySelector('.artikelSuggest-item');
+    if(first){ e.preventDefault(); waehleArtikel(first.dataset.id); }
+  }else if(e.key === 'Escape'){
+    $('rzEditArtikelSuggest').classList.remove('show');
+  }
+});
+$('rzEditArtikelInput').addEventListener('blur', () => {
+  setTimeout(() => $('rzEditArtikelSuggest').classList.remove('show'), 150);
+});
 $('artikelPickerCancel').addEventListener('click', () => { apDirektKontext = null; apUpdateRzId = null; $('artikelPickerOverlay').classList.remove('show'); });
 
 // ---------------------------------------------------------------------------
