@@ -1530,10 +1530,11 @@ async function ladeFormelDaten(otId){
   ressourcenzeilen = [];
   auswahlfelder = [];
   teilschritte = [];
-  function pushRz(rz, optionId, arbeitsschrittName){
+  function pushRz(rz, optionId, arbeitsschrittName, teilschrittName){
     ressourcenzeilen.push({
       optionId,
       arbeitsschritt: arbeitsschrittName,
+      teilschritt: teilschrittName,
       kategorie: rz.kategorie,
       artikelId: rz.artikel_id,
       bezeichnung: rz.bezeichnung_override || rz.artikel?.bezeichnung || rz.staffelgruppe?.titel || rz.staffelgruppe?.name || rz.zonengruppe?.titel || rz.zonengruppe?.name || rz.sonderposition_typ?.titel || rz.sonderposition_typ?.name || '(unbenannt)',
@@ -1552,7 +1553,7 @@ async function ladeFormelDaten(otId){
     (as.teilschritt || []).filter(ts => !ts.ausgeblendet).forEach(ts => {
       // Teilschritt ohne Auswahlfeld: seine Ressourcenzeilen gelten immer
       // (kein optionId, keine Buttons fuer den Mitarbeiter).
-      (ts.ressourcenzeile || []).forEach(rz => pushRz(rz, null, as.name));
+      (ts.ressourcenzeile || []).forEach(rz => pushRz(rz, null, as.name, ts.name));
 
       if(ts.auswahlfeld){
         const af = ts.auswahlfeld;
@@ -1561,7 +1562,7 @@ async function ladeFormelDaten(otId){
           optionen: (af.auswahloption || []).map(o => ({ id: o.id, name: o.name, beschreibung: o.beschreibung }))
         });
         (af.auswahloption || []).forEach(opt => {
-          (opt.ressourcenzeile || []).forEach(rz => pushRz(rz, opt.id, as.name));
+          (opt.ressourcenzeile || []).forEach(rz => pushRz(rz, opt.id, as.name, ts.name));
         });
         teilschritte.push({ id: ts.id, beschreibung: ts.beschreibung, optionIds: (af.auswahloption || []).map(o => o.id) });
       }else{
@@ -2630,7 +2631,7 @@ async function recalc(){
       container.innerHTML = '';
       let blockTotal = 0;
 
-      function addRow(bezeichnung, menge, einheit, preis, betrag, schluesselBasis, rundungMengeFn = rundeMenge, rundungPreisFn = rundeCHF){
+      function addRow(bezeichnung, menge, einheit, preis, betrag, schluesselBasis, rundungMengeFn = rundeMenge, rundungPreisFn = rundeCHF, rechnungsweg = null){
         const schluessel = schluesselBasis + korrekturSuffix;
         const k = zeilenKorrekturen[schluessel] || {};
         const effMenge = rundungMengeFn(k.menge_korrektur != null ? k.menge_korrektur : menge);
@@ -2654,6 +2655,13 @@ async function recalc(){
         const preisFeldWert = k.preis_korrektur != null ? k.preis_korrektur : (istFormel ? rundungPreisFn(preis) : '');
         const tr = document.createElement('tr');
         tr.className = 'crow' + (geloescht ? ' zgeloescht' : '');
+        // Rechnungsweg-Tooltip: bei einer einfachen Zeile (kein Breakdown
+        // uebergeben oder nur ein einzelner Beitrag) reicht die Zeile selbst
+        // als Erklaerung - sonst zeigt der Tooltip die einzelnen Beitraege
+        // (z.B. Stunden pro Teilschritt bei Personal, Betrag pro Artikel bei
+        // einem Materialpaket), siehe Aufrufstellen weiter unten.
+        const rechnungswegZeilen = (rechnungsweg && rechnungsweg.length) ? rechnungsweg : [`${effMenge} ${einheit} × ${fmtCHF(effPreis)} = ${fmtCHF(effBetrag)}`];
+        tr.title = rechnungswegZeilen.join('\n');
         tr.innerHTML = `<td>${bezeichnung}</td>
           <td style="text-align:right"><span class="berechnet-val">${mengeAbweicht ? rundungMengeFn(menge) : ''}</span><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" class="korrektur-feld" data-feld="menge" placeholder="Korr." value="${mengeFeldWert}" ${geloescht ? 'disabled' : ''}></td>
           <td style="color:var(--muted)">${einheit}</td>
@@ -2698,11 +2706,17 @@ async function recalc(){
             const personalRundungPreis = personalCfg ? (RUNDUNGSREGEL_FN[personalCfg.rundung_preis] || rundeCHF) : rundeCHF;
             const byName = {};
             katZeilen.forEach(r => {
-              if(!byName[r.bezeichnung]) byName[r.bezeichnung] = { menge:0, betrag:0, einheit: personalCfg ? personalCfg.einheit : r.einheit, preis:r.preis };
+              if(!byName[r.bezeichnung]) byName[r.bezeichnung] = { menge:0, betrag:0, einheit: personalCfg ? personalCfg.einheit : r.einheit, preis:r.preis, proTeilschritt: {} };
               byName[r.bezeichnung].menge += r.menge;
               byName[r.bezeichnung].betrag += r.betrag;
+              const tsName = r.teilschritt || r.arbeitsschritt;
+              byName[r.bezeichnung].proTeilschritt[tsName] = (byName[r.bezeichnung].proTeilschritt[tsName] || 0) + r.menge;
             });
-            Object.entries(byName).forEach(([name, v]) => addRow(name, v.menge, v.einheit, v.preis, v.betrag, `personal:${name}`, personalRundungMenge, personalRundungPreis));
+            Object.entries(byName).forEach(([name, v]) => {
+              const einheitLabel = personalCfg ? personalCfg.einheit : v.einheit;
+              const rechnungsweg = Object.entries(v.proTeilschritt).map(([ts, std]) => `${ts}: ${personalRundungMenge(std)} ${einheitLabel}`);
+              addRow(name, v.menge, v.einheit, v.preis, v.betrag, `personal:${name}`, personalRundungMenge, personalRundungPreis, rechnungsweg);
+            });
 
           }else if(kat === 'maschine'){
             // Maschinenaufwand: Artikel, die einer Maschinen-Sammelposition
@@ -2803,14 +2817,17 @@ async function recalc(){
             const materialRundungPreis = materialCfg ? (RUNDUNGSREGEL_FN[materialCfg.rundung_preis] || rundeCHF) : rundeCHF;
             const proArbeitsschritt = {};
             katZeilen.forEach(r => {
-              proArbeitsschritt[r.arbeitsschritt] = (proArbeitsschritt[r.arbeitsschritt] || 0) + r.betrag;
+              if(!proArbeitsschritt[r.arbeitsschritt]) proArbeitsschritt[r.arbeitsschritt] = { summe: 0, proArtikel: {} };
+              proArbeitsschritt[r.arbeitsschritt].summe += r.betrag;
+              proArbeitsschritt[r.arbeitsschritt].proArtikel[r.bezeichnung] = (proArbeitsschritt[r.arbeitsschritt].proArtikel[r.bezeichnung] || 0) + r.betrag;
             });
             // "Materialpaket "-Praefix gilt bewusst NUR fuer Offerte-Typ "Formel" -
             // fuer "Tagessatz" (Allgemein) ist das Verhalten noch nicht
             // abgestimmt, deshalb dort unveraendert nur der Arbeitsschritt-Titel.
-            Object.entries(proArbeitsschritt).forEach(([as, summe]) => {
+            Object.entries(proArbeitsschritt).forEach(([as, v]) => {
               const bezeichnung = currentBerechnungsmodell === 'formel' ? `Materialpaket ${as}` : as;
-              addRow(bezeichnung, 1, einheitLabel, summe, summe, `material:${as}`, materialRundungMenge, materialRundungPreis);
+              const rechnungsweg = Object.entries(v.proArtikel).map(([artikel, betrag]) => `${artikel}: ${fmtCHF(rundeCHF(betrag))}`);
+              addRow(bezeichnung, 1, einheitLabel, v.summe, v.summe, `material:${as}`, materialRundungMenge, materialRundungPreis, rechnungsweg);
             });
           }
         }
