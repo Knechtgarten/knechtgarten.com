@@ -402,6 +402,10 @@ input[type=number]{-moz-appearance:textfield;}
       <label for="addOptStandardInput" style="font-size:12.5px;margin:0;white-space:nowrap;" title="Wenn dieses Häckchen angewählt ist, wird beim Erstellen einer Offerte der Button von dieser Option standardmässig angewählt sein.">Standard-Option</label>
     </div>
     <div class="fld" style="display:flex;flex-direction:row;align-items:center;gap:6px;">
+      <input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="checkbox" id="addOptMehrfachauswahlInput" style="width:auto;flex:0 0 auto;">
+      <label for="addOptMehrfachauswahlInput" style="font-size:12.5px;margin:0;white-space:nowrap;" title="Wenn dieses Häckchen angewählt ist, kann diese Option zusammen mit jeder anderen Option angewählt werden. Optionen OHNE dieses Häckchen schliessen sich untereinander gegenseitig aus (wie ein klassisches Einzelauswahlfeld).">Mehrfachauswahl</label>
+    </div>
+    <div class="fld" style="display:flex;flex-direction:row;align-items:center;gap:6px;">
       <input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="checkbox" id="addOptMengenoptionInput" style="width:auto;flex:0 0 auto;">
       <label for="addOptMengenoptionInput" style="font-size:12.5px;margin:0;white-space:nowrap;" title="Wenn dieses Häckchen angewählt ist, kann beim Erstellen einer Offerte direkt neben dem Button eine Anzahl eingegeben werden (z.B. 2x). Die Menge aller Ressourcenzeilen dieser Option wird damit multipliziert.">Mengenoption</label>
     </div>
@@ -1464,8 +1468,8 @@ async function loadArbeitsschritte(){
           artikel_id, artikel(bezeichnung, einheit, artikelnummer_knecht),
           staffelgruppe_id, staffelgruppe(name, titel), zonengruppe_id, zonengruppe(name, titel),
           sonderposition_typ_id, sonderposition_typ(name, titel, hat_eigene_berechnung) ),
-        auswahlfeld ( id, name, mehrfachauswahl, reihenfolge,
-          auswahloption ( id, name, beschreibung, hinweistext, hinweisbild_url, ist_standard, mengenoption, mengenoption_einheit, reihenfolge,
+        auswahlfeld ( id, name, reihenfolge,
+          auswahloption ( id, name, beschreibung, hinweistext, hinweisbild_url, ist_standard, mengenoption, mengenoption_einheit, mehrfachauswahl, reihenfolge,
             ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, tagesleistung_menge, notiz, reihenfolge,
               zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4, mindestmenge, verschnitt_prozent, teilflaechen_kombination,
               artikel_id, artikel(bezeichnung, einheit, artikelnummer_knecht),
@@ -1595,7 +1599,6 @@ function renderAuswahlfeld(tsId, af){
   const activeOpt = optionen.find(o => o.id === activeOptionByAf[af.id]) || optionen[0];
   return `
     <div class="fieldblock">
-      ${af.mehrfachauswahl ? '<div class="afhead"><span class="badge">Mehrfachauswahl</span></div>' : ''}
       <div class="opttabsrow">
         <div class="opttabs">
           <button type="button" class="opttab addnew" onclick="openAddOptModal('${af.id}')">+ Option</button>
@@ -1968,7 +1971,7 @@ async function addTeilschritt(asId, name){
     // ein Teilschritt ohne jede Option war noch nie sinnvoll (siehe
     // renderTeilschritt: das Icon zum Bearbeiten/Entfernen bleibt bewusst
     // versteckt, bis mindestens eine Option existiert).
-    await sb.from('auswahlfeld').insert({ teilschritt_id: neuerTs.id, name, mehrfachauswahl: false, reihenfolge: 1 });
+    await sb.from('auswahlfeld').insert({ teilschritt_id: neuerTs.id, name, reihenfolge: 1 });
   }
   await loadArbeitsschritte();
   return true;
@@ -1980,19 +1983,24 @@ async function deleteTeilschritt(id){
   await loadArbeitsschritte();
 }
 
-// Innerhalb eines NICHT-Mehrfachauswahl-Auswahlfelds darf immer nur eine
-// Option den Standard-Haken tragen (sonst waere unklar, welche davon bei
-// einer neuen Offerte vorausgewaehlt werden soll) - bei Mehrfachauswahl
-// duerfen dagegen mehrere Optionen gleichzeitig Standard sein.
+// Innerhalb einer Gruppe exklusiver Optionen (kein eigener Mehrfachauswahl-
+// Haken, siehe toggleOption() in Tool A) darf immer nur eine gleichzeitig den
+// Standard-Haken tragen (sonst waere unklar, welche davon bei einer neuen
+// Offerte vorausgewaehlt werden soll) - Optionen MIT Mehrfachauswahl-Haken
+// duerfen dagegen beliebig viele gleichzeitig Standard sein, da sie ohnehin
+// frei miteinander kombinierbar sind.
 async function erzwingeEinzigenStandard(afId, keepOptId){
   const af = ARBEITSSCHRITTE.flatMap(a => a.teilschritt || []).map(t => t.auswahlfeld).find(a => a?.id === afId);
-  if(af?.mehrfachauswahl) return;
-  const { error } = await sb.from('auswahloption').update({ ist_standard: false }).eq('auswahlfeld_id', afId).neq('id', keepOptId);
+  const keepOpt = af?.auswahloption?.find(o => o.id === keepOptId);
+  if(keepOpt?.mehrfachauswahl) return;
+  const exklusiveIds = (af?.auswahloption || []).filter(o => !o.mehrfachauswahl && o.id !== keepOptId).map(o => o.id);
+  if(!exklusiveIds.length) return;
+  const { error } = await sb.from('auswahloption').update({ ist_standard: false }).in('id', exklusiveIds);
   if(error) console.error(error);
 }
 
-async function addOption(afId, name, istStandard, mengenoption, mengenoptionEinheit){
-  const { data, error } = await sb.from('auswahloption').insert({ auswahlfeld_id: afId, name, reihenfolge: 1, ist_standard: !!istStandard, mengenoption: !!mengenoption, mengenoption_einheit: mengenoptionEinheit || 'Stk.' }).select().single();
+async function addOption(afId, name, istStandard, mengenoption, mengenoptionEinheit, mehrfachauswahl){
+  const { data, error } = await sb.from('auswahloption').insert({ auswahlfeld_id: afId, name, reihenfolge: 1, ist_standard: !!istStandard, mengenoption: !!mengenoption, mengenoption_einheit: mengenoptionEinheit || 'Stk.', mehrfachauswahl: !!mehrfachauswahl }).select().single();
   if(error){ showToast(friendlyError(error), true); return false; }
   if(istStandard) await erzwingeEinzigenStandard(afId, data.id);
   await loadArbeitsschritte();
@@ -2040,6 +2048,7 @@ function openAddOptModal(afId, existingOpt){
   $('addOptHinweisbildWrap').classList.toggle('hidden', !existingOpt);
   $('addOptHinweistextInput').value = existingOpt?.hinweistext || '';
   $('addOptStandardInput').checked = !!existingOpt?.ist_standard;
+  $('addOptMehrfachauswahlInput').checked = !!existingOpt?.mehrfachauswahl;
   $('addOptMengenoptionInput').checked = !!existingOpt?.mengenoption;
   $('addOptMengenoptionEinheitSelect').innerHTML = einheitOptionsHtml(existingOpt?.mengenoption_einheit || 'Stk.');
   $('addOptMengenoptionEinheitWrap').classList.toggle('hidden', !$('addOptMengenoptionInput').checked);
@@ -2061,12 +2070,14 @@ $('addOptConfirm').addEventListener('click', async () => {
   const name = $('addOptInput').value.trim();
   if(!name) return;
   const istStandard = $('addOptStandardInput').checked;
+  const mehrfachauswahl = $('addOptMehrfachauswahlInput').checked;
   const mengenoption = $('addOptMengenoptionInput').checked;
   const mengenoptionEinheit = $('addOptMengenoptionEinheitSelect').value || 'Stk.';
   if(addOptEditingId){
     const payload = {
       name,
       ist_standard: istStandard,
+      mehrfachauswahl,
       mengenoption,
       mengenoption_einheit: mengenoptionEinheit,
       hinweistext: $('addOptHinweistextInput').value.trim() || null,
@@ -2078,7 +2089,7 @@ $('addOptConfirm').addEventListener('click', async () => {
     $('addOptOverlay').classList.remove('show');
     await loadArbeitsschritte();
   }else{
-    if(await addOption(addOptContext, name, istStandard, mengenoption, mengenoptionEinheit)) $('addOptOverlay').classList.remove('show');
+    if(await addOption(addOptContext, name, istStandard, mengenoption, mengenoptionEinheit, mehrfachauswahl)) $('addOptOverlay').classList.remove('show');
   }
 });
 $('addOptInput').addEventListener('keydown', e => { if(e.key === 'Enter') $('addOptConfirm').click(); });
@@ -2200,11 +2211,11 @@ async function duplicateTeilschrittInto(asId, ts, reihenfolge){
   if(ts.auswahlfeld){
     const af = ts.auswahlfeld;
     const { data: neuAf, error: afErr } = await sb.from('auswahlfeld')
-      .insert({ teilschritt_id: neuTs.id, name: af.name, mehrfachauswahl: af.mehrfachauswahl, reihenfolge: af.reihenfolge }).select().single();
+      .insert({ teilschritt_id: neuTs.id, name: af.name, reihenfolge: af.reihenfolge }).select().single();
     if(afErr) throw afErr;
     for(const opt of (af.auswahloption || [])){
       const { data: neuOpt, error: optErr } = await sb.from('auswahloption')
-        .insert({ auswahlfeld_id: neuAf.id, name: opt.name, beschreibung: opt.beschreibung, hinweistext: opt.hinweistext, hinweisbild_url: opt.hinweisbild_url, reihenfolge: opt.reihenfolge }).select().single();
+        .insert({ auswahlfeld_id: neuAf.id, name: opt.name, beschreibung: opt.beschreibung, hinweistext: opt.hinweistext, hinweisbild_url: opt.hinweisbild_url, mehrfachauswahl: opt.mehrfachauswahl, reihenfolge: opt.reihenfolge }).select().single();
       if(optErr) throw optErr;
       for(const rz of (opt.ressourcenzeile || [])){
         const { error: rzErr } = await sb.from('ressourcenzeile').insert({
@@ -3118,7 +3129,7 @@ async function duplicateOption(optId){
   if(!optObj) return;
   try{
     const { data: neuOpt, error } = await sb.from('auswahloption')
-      .insert({ auswahlfeld_id: afId, name: optObj.name + ' (Kopie)', beschreibung: optObj.beschreibung, hinweistext: optObj.hinweistext, hinweisbild_url: optObj.hinweisbild_url, reihenfolge: naechsteReihenfolge(geschwister) }).select().single();
+      .insert({ auswahlfeld_id: afId, name: optObj.name + ' (Kopie)', beschreibung: optObj.beschreibung, hinweistext: optObj.hinweistext, hinweisbild_url: optObj.hinweisbild_url, mehrfachauswahl: optObj.mehrfachauswahl, reihenfolge: naechsteReihenfolge(geschwister) }).select().single();
     if(error) throw error;
     for(const rz of (optObj.ressourcenzeile || [])){
       const { error: rzErr } = await sb.from('ressourcenzeile').insert({
