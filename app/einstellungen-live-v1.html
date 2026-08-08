@@ -763,8 +763,8 @@ input[type=number]{-moz-appearance:textfield;}
             </div>
             <div class="hint" style="margin-bottom:12px;">Die letzte Zeile ist immer leer zum Erfassen - sobald ein Name eingegeben ist, wird automatisch gespeichert und eine neue leere Zeile erscheint.</div>
             <table class="sgtable" style="table-layout:fixed;">
-              <colgroup><col><col><col style="width:90px;"><col style="width:80px;"><col style="width:75px;"><col style="width:95px;"><col style="width:40px;"></colgroup>
-              <thead><tr><th>Name</th><th>Adresse</th><th style="white-space:normal;">Pauschale</th><th style="white-space:normal;">km-Preis</th><th style="white-space:normal;">Marge %</th><th style="white-space:normal;">Mindestmenge m³</th><th></th></tr></thead>
+              <colgroup><col><col><col style="width:110px;"><col style="width:90px;"><col style="width:80px;"><col style="width:75px;"><col style="width:95px;"><col style="width:40px;"></colgroup>
+              <thead><tr><th>Name</th><th>Adresse</th><th style="white-space:normal;">Prüfung</th><th style="white-space:normal;">Pauschale</th><th style="white-space:normal;">km-Preis</th><th style="white-space:normal;">Marge %</th><th style="white-space:normal;">Mindestmenge m³</th><th></th></tr></thead>
               <tbody id="kiesTransportBody"></tbody>
             </table>
             <div class="status" id="kiesTransportStatus"></div>
@@ -783,8 +783,8 @@ input[type=number]{-moz-appearance:textfield;}
             </div>
             <div class="hint" style="margin-bottom:12px;">Die letzte Zeile ist immer leer zum Erfassen - sobald ein Name eingegeben ist, wird automatisch gespeichert und eine neue leere Zeile erscheint.</div>
             <table class="sgtable" style="table-layout:fixed;">
-              <colgroup><col><col><col style="width:90px;"><col style="width:80px;"><col style="width:75px;"><col style="width:95px;"><col style="width:40px;"></colgroup>
-              <thead><tr><th>Name</th><th>Adresse</th><th style="white-space:normal;">Pauschale</th><th style="white-space:normal;">km-Preis</th><th style="white-space:normal;">Marge %</th><th style="white-space:normal;">Mindestmenge m³</th><th></th></tr></thead>
+              <colgroup><col><col><col style="width:110px;"><col style="width:90px;"><col style="width:80px;"><col style="width:75px;"><col style="width:95px;"><col style="width:40px;"></colgroup>
+              <thead><tr><th>Name</th><th>Adresse</th><th style="white-space:normal;">Prüfung</th><th style="white-space:normal;">Pauschale</th><th style="white-space:normal;">km-Preis</th><th style="white-space:normal;">Marge %</th><th style="white-space:normal;">Mindestmenge m³</th><th></th></tr></thead>
               <tbody id="betonTransportBody"></tbody>
             </table>
             <div class="status" id="betonTransportStatus"></div>
@@ -820,6 +820,7 @@ const ICON = {
   zap: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z"/></svg>',
   upload: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M12 4l-4 4M12 4l4 4"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>',
   check: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>',
+  close: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   search: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>',
   lock: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>',
   unlock: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-1.8"/></svg>'
@@ -1818,6 +1819,36 @@ async function deleteStaffelstufe(id){
 // ---------------------------------------------------------------------------
 let KIESWERK_LISTEN = { kieswerk_kies: [], kieswerk_beton: [] };
 
+// Prueft eine Adresse ueber die Distance-Matrix-API (Adresse gegen sich selbst
+// getestet - schlaegt Google fehl, sie zu finden, kommt ein Status ungleich
+// 'OK' zurueck). Gleiches Muster/gleiche Edge Function wie die Distanz-
+// Adresslisten in Tool B ("Formeln Allgemein") - rein visuelle Rueckmeldung
+// beim Erfassen, damit eine falsche Kieswerk-Adresse (fruehere Fehlerquelle
+// bei der Kies-/Beton-Transport-Berechnung) sofort auffaellt.
+async function pruefeAdresseGeocoding(adresse){
+  try{
+    const { data: json, error: fnError } = await sb.functions.invoke('distance-matrix', {
+      body: { origin: adresse, destination: adresse }
+    });
+    if(fnError) throw fnError;
+    if(json.error) return { ok: false, status: json.error };
+    if(json.status && json.status !== 'OK'){
+      return { ok: false, status: json.status + (json.error_message ? ': ' + json.error_message : '') };
+    }
+    const el = json.rows?.[0]?.elements?.[0];
+    if(el?.status === 'OK') return { ok: true };
+    return { ok: false, status: el?.status || 'unbekannter Fehler' };
+  }catch(e){
+    console.error(e);
+    return { ok: false, status: 'Netzwerkfehler' };
+  }
+}
+function kwPruefzelleHtml(kw){
+  if(kw.geprueft_ok === true) return `<button class="btnlink kwCheckBtn" data-id="${kw.id}" style="color:#2E7D32;" title="Erneut prüfen">${ICON.check} Gefunden</button>`;
+  if(kw.geprueft_ok === false) return `<button class="btnlink kwCheckBtn" data-id="${kw.id}" style="color:var(--danger);" title="Erneut prüfen">${ICON.close} ${kw.geprueft_fehler || 'Nicht gefunden'}</button>`;
+  return `<button class="btnlink kwCheckBtn" data-id="${kw.id}" title="Adresse prüfen (Google)">Prüfen</button>`;
+}
+
 async function loadKieswerkListe(tabelle, zielId){
   const { data, error } = await sb.from(tabelle).select('*').order('reihenfolge');
   if(error){ console.error(error); return; }
@@ -1835,6 +1866,7 @@ function renderKieswerkListe(tabelle, zielId){
   const rows = liste.map(kw => `<tr data-id="${kw.id}">
     <td>${kwFeld(kw,'name','text')}</td>
     <td>${kwFeld(kw,'adresse','text')}</td>
+    <td>${kwPruefzelleHtml(kw)}</td>
     <td>${kwFeld(kw,'pauschale','number')}</td>
     <td>${kwFeld(kw,'km_preis','number')}</td>
     <td>${kwFeld(kw,'marge_pct','number')}</td>
@@ -1844,6 +1876,7 @@ function renderKieswerkListe(tabelle, zielId){
   const draftRow = `<tr class="kwDraftRow admin-only">
     <td>${kwFeld(null,'name','text')}</td>
     <td>${kwFeld(null,'adresse','text')}</td>
+    <td></td>
     <td>${kwFeld(null,'pauschale','number')}</td>
     <td>${kwFeld(null,'km_preis','number')}</td>
     <td>${kwFeld(null,'marge_pct','number')}</td>
@@ -1864,10 +1897,34 @@ function attachKieswerkListeHandlers(tabelle, zielId){
     const id = tr.dataset.id;
     tr.querySelectorAll('.kwFeld').forEach(inp => {
       inp.addEventListener('change', async () => {
-        const { error } = await sb.from(tabelle).update({ [inp.dataset.feld]: kwFeldWert(inp) }).eq('id', id);
+        const werte = { [inp.dataset.feld]: kwFeldWert(inp) };
+        // Adresse geaendert - alter Pruefstatus gilt nicht mehr, zuruecksetzen.
+        if(inp.dataset.feld === 'adresse'){ werte.geprueft_ok = null; werte.geprueft_fehler = null; }
+        const { error } = await sb.from(tabelle).update(werte).eq('id', id);
         if(error){ showToast(friendlyError(error), true); return; }
         showToast('Gespeichert.');
+        if(inp.dataset.feld === 'adresse'){
+          await loadKieswerkListe(tabelle, zielId);
+        }
       });
+    });
+  });
+  body.querySelectorAll('.kwCheckBtn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const tr = btn.closest('tr');
+      const id = tr.dataset.id;
+      const adresse = tr.querySelector('.kwFeld[data-feld="adresse"]').value.trim();
+      if(!adresse){ btn.textContent = 'Bitte Adresse eintragen'; btn.style.color = 'var(--danger)'; return; }
+      btn.disabled = true;
+      btn.textContent = 'Prüfe …';
+      btn.style.color = '';
+      const ergebnis = await pruefeAdresseGeocoding(adresse);
+      btn.disabled = false;
+      btn.innerHTML = ergebnis.ok ? `${ICON.check} Gefunden` : `${ICON.close} ${ergebnis.status}`;
+      btn.style.color = ergebnis.ok ? '#2E7D32' : 'var(--danger)';
+      await sb.from(tabelle).update({ geprueft_ok: ergebnis.ok, geprueft_fehler: ergebnis.ok ? null : ergebnis.status }).eq('id', id);
+      const row = KIESWERK_LISTEN[tabelle].find(x => x.id === id);
+      if(row){ row.geprueft_ok = ergebnis.ok; row.geprueft_fehler = ergebnis.ok ? null : ergebnis.status; }
     });
   });
   body.querySelectorAll('.kwDeleteBtn').forEach(btn => {
