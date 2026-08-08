@@ -405,6 +405,10 @@ input[type=number]{-moz-appearance:textfield;}
       <input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="checkbox" id="addOptMengenoptionInput" style="width:auto;flex:0 0 auto;">
       <label for="addOptMengenoptionInput" style="font-size:12.5px;margin:0;white-space:nowrap;" title="Wenn dieses Häckchen angewählt ist, kann beim Erstellen einer Offerte direkt neben dem Button eine Anzahl eingegeben werden (z.B. 2x). Die Menge aller Ressourcenzeilen dieser Option wird damit multipliziert.">Mengenoption</label>
     </div>
+    <div class="fld hidden" id="addOptMengenoptionEinheitWrap" style="max-width:160px;">
+      <label style="font-size:11px;color:var(--muted);">Einheit der Anzahl</label>
+      <select id="addOptMengenoptionEinheitSelect"></select>
+    </div>
     <div class="fld hidden" id="addOptHinweistextWrap">
       <label style="font-size:11px;color:var(--muted);">Hinweistext bei Button</label>
       <textarea id="addOptHinweistextInput" style="width:100%;min-height:36px;font:inherit;font-size:12.5px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;" placeholder="z.B. kurzer Hinweis, was diese Option beinhaltet …"></textarea>
@@ -1461,7 +1465,7 @@ async function loadArbeitsschritte(){
           staffelgruppe_id, staffelgruppe(name, titel), zonengruppe_id, zonengruppe(name, titel),
           sonderposition_typ_id, sonderposition_typ(name, titel, hat_eigene_berechnung) ),
         auswahlfeld ( id, name, mehrfachauswahl, reihenfolge,
-          auswahloption ( id, name, beschreibung, hinweistext, hinweisbild_url, ist_standard, mengenoption, reihenfolge,
+          auswahloption ( id, name, beschreibung, hinweistext, hinweisbild_url, ist_standard, mengenoption, mengenoption_einheit, reihenfolge,
             ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, tagesleistung_menge, notiz, reihenfolge,
               zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4, mindestmenge, verschnitt_prozent, teilflaechen_kombination,
               artikel_id, artikel(bezeichnung, einheit, artikelnummer_knecht),
@@ -1987,8 +1991,8 @@ async function erzwingeEinzigenStandard(afId, keepOptId){
   if(error) console.error(error);
 }
 
-async function addOption(afId, name, istStandard, mengenoption){
-  const { data, error } = await sb.from('auswahloption').insert({ auswahlfeld_id: afId, name, reihenfolge: 1, ist_standard: !!istStandard, mengenoption: !!mengenoption }).select().single();
+async function addOption(afId, name, istStandard, mengenoption, mengenoptionEinheit){
+  const { data, error } = await sb.from('auswahloption').insert({ auswahlfeld_id: afId, name, reihenfolge: 1, ist_standard: !!istStandard, mengenoption: !!mengenoption, mengenoption_einheit: mengenoptionEinheit || 'Stk.' }).select().single();
   if(error){ showToast(friendlyError(error), true); return false; }
   if(istStandard) await erzwingeEinzigenStandard(afId, data.id);
   await loadArbeitsschritte();
@@ -2037,6 +2041,8 @@ function openAddOptModal(afId, existingOpt){
   $('addOptHinweistextInput').value = existingOpt?.hinweistext || '';
   $('addOptStandardInput').checked = !!existingOpt?.ist_standard;
   $('addOptMengenoptionInput').checked = !!existingOpt?.mengenoption;
+  $('addOptMengenoptionEinheitSelect').innerHTML = einheitOptionsHtml(existingOpt?.mengenoption_einheit || 'Stk.');
+  $('addOptMengenoptionEinheitWrap').classList.toggle('hidden', !$('addOptMengenoptionInput').checked);
   addOptHinweisbildUrl = existingOpt?.hinweisbild_url || null;
   addOptHinweisbildVorschauAktualisieren();
   $('addOptOverlay').classList.add('show');
@@ -2047,17 +2053,22 @@ function renameOption(afId, optId){
   const opt = af?.auswahloption?.find(o => o.id === optId);
   if(opt) openAddOptModal(afId, opt);
 }
+$('addOptMengenoptionInput').addEventListener('change', () => {
+  $('addOptMengenoptionEinheitWrap').classList.toggle('hidden', !$('addOptMengenoptionInput').checked);
+});
 $('addOptCancel').addEventListener('click', () => $('addOptOverlay').classList.remove('show'));
 $('addOptConfirm').addEventListener('click', async () => {
   const name = $('addOptInput').value.trim();
   if(!name) return;
   const istStandard = $('addOptStandardInput').checked;
   const mengenoption = $('addOptMengenoptionInput').checked;
+  const mengenoptionEinheit = $('addOptMengenoptionEinheitSelect').value || 'Stk.';
   if(addOptEditingId){
     const payload = {
       name,
       ist_standard: istStandard,
       mengenoption,
+      mengenoption_einheit: mengenoptionEinheit,
       hinweistext: $('addOptHinweistextInput').value.trim() || null,
       hinweisbild_url: addOptHinweisbildUrl
     };
@@ -2067,7 +2078,7 @@ $('addOptConfirm').addEventListener('click', async () => {
     $('addOptOverlay').classList.remove('show');
     await loadArbeitsschritte();
   }else{
-    if(await addOption(addOptContext, name, istStandard, mengenoption)) $('addOptOverlay').classList.remove('show');
+    if(await addOption(addOptContext, name, istStandard, mengenoption, mengenoptionEinheit)) $('addOptOverlay').classList.remove('show');
   }
 });
 $('addOptInput').addEventListener('keydown', e => { if(e.key === 'Enter') $('addOptConfirm').click(); });
