@@ -1911,7 +1911,7 @@ $('termEditSave').addEventListener('click', async () => {
   const einheit = $('termEditEinheit').value.trim();
   if(!name){ $('termEditStatus').textContent = 'Bitte Name ausfuellen.'; $('termEditStatus').className = 'status err'; return; }
   if(!termEditGlieder){ $('termEditStatus').textContent = 'Diese Formel ist zu komplex fuer den einfachen Editor - bitte bei Bedarf melden.'; $('termEditStatus').className = 'status err'; return; }
-  const node = buildMengenAusdruck(termEditGlieder, einheit || null);
+  const node = buildMengenAusdruck(termEditGlieder);
   if(!node){ $('termEditStatus').textContent = 'Bitte mindestens ein Glied angeben.'; $('termEditStatus').className = 'status err'; return; }
 
   const offertentyp_id = formelBibliothekKategorie === 'allgemein' ? null : formelBibliothekKategorie;
@@ -2387,12 +2387,23 @@ function nodeFromGlied(g){
 // Automatische Einheiten-Umrechnung beim Verknuepfen von Gliedern: eval_ausdruck
 // rechnet rein numerisch, kennt also weder "cm" noch "m" - mischt eine Formel
 // z.B. Meter- und Zentimeter-Werte, waere das Ergebnis ohne diese Umrechnung
-// schlicht falsch (8 + 20 statt 8 + 0.2). Auch eine freie Zahl kann eine
-// Einheit bekommen (_einheit am lit-Knoten, siehe nodeFromGlied/gliedAusNode)
-// - dann zaehlt sie fuer die Umrechnung genau wie ein Eingabefeld/Term mit
-// dieser Einheit. Unbekannte/inkompatible Einheiten (Stk., Pauschale, m² usw.)
-// bleiben unangetastet. Zielwert je Familie ist die zuerst im Glied-Zug
-// vorkommende Einheit dieser Familie - alle weiteren werden darauf umgerechnet.
+// schlicht falsch. Auch eine freie Zahl kann eine Einheit bekommen (_einheit
+// am lit-Knoten, siehe nodeFromGlied/gliedAusNode) - dann zaehlt sie fuer die
+// Umrechnung genau wie ein Eingabefeld/Term mit dieser Einheit. Unbekannte/
+// inkompatible Einheiten (Stk., Pauschale, m² usw.) bleiben unangetastet.
+//
+// Jedes Glied wird auf eine FESTE kanonische Basiseinheit je Familie
+// umgerechnet (Laenge -> m, Masse -> kg, Volumen -> m³) - nicht mehr auf die
+// Einheit des zuerst vorkommenden Glieds. Der alte Ansatz war fuer additive
+// Formeln (a + b, gleiche Dimension) zufaellig richtig, aber bei einer
+// Multiplikation verschiedener Laengen zu einer Flaeche/einem Volumen (z.B.
+// "Breite (cm) x Dicke (cm) x Laenge (m)") strukturell falsch: er rechnet nur
+// die Glieder untereinander auf eine gemeinsame Einheit um, nicht zusaetzlich
+// auf die Ziel-Dimension der Multiplikation - das Ergebnis war um Zehnerpotenzen
+// daneben (siehe Betonkragen-Volumen-Fehler). Mit einer fixen Basiseinheit ist
+// das Ergebnis unabhaengig von Gliedreihenfolge UND Operator immer korrekt,
+// da m x m x m automatisch m³ ergibt, ohne dass eine separate Zielhinweis-
+// Logik noetig waere (die bisherige "zielEinheitHint" faellt darum weg).
 const EINHEIT_FAMILIE = {
   mm: 'laenge', cm: 'laenge', m: 'laenge', km: 'laenge',
   g: 'masse', kg: 'masse', t: 'masse',
@@ -2403,13 +2414,13 @@ const EINHEIT_FAKTOR = {
   g: 0.001, kg: 1, t: 1000,
   l: 0.001, 'm³': 1
 };
-function nodeFromGliedMitUmrechnung(g, zielProFamilie){
+const EINHEIT_KANONISCH = { laenge: 'm', masse: 'kg', volumen: 'm³' };
+function nodeFromGliedMitUmrechnung(g){
   const basis = nodeFromGlied(g);
   const einheit = gliedEinheitLabel(g);
   const familie = einheit && EINHEIT_FAMILIE[einheit];
   if(!familie) return basis;
-  if(!zielProFamilie[familie]){ zielProFamilie[familie] = einheit; return basis; }
-  const ziel = zielProFamilie[familie];
+  const ziel = EINHEIT_KANONISCH[familie];
   if(ziel === einheit) return basis;
   const faktor = EINHEIT_FAKTOR[einheit] / EINHEIT_FAKTOR[ziel];
   // _umrechnung markiert diesen Knoten als selbst erzeugt (nicht vom Nutzer
@@ -2419,22 +2430,12 @@ function nodeFromGliedMitUmrechnung(g, zielProFamilie){
   return { op: '*', args: [basis, { lit: faktor }], _umrechnung: true };
 }
 
-// zielEinheitHint (optional): erzwingt die Ziel-Einheit je Familie von Anfang
-// an (z.B. "m", weil der Term selbst als "m" beschriftet ist) statt einfach
-// die Einheit des ERSTEN Glieds zu nehmen - sonst haengt das Ergebnis von der
-// zufaelligen Reihenfolge der Glieder ab (Bug: "Beckenkonstruktion (cm) +
-// Poollaenge (m)" wurde bisher faelschlich nach cm umgerechnet, weil das
-// cm-Glied zuerst kam, obwohl der Term als "m" beschriftet war). Fehlt der
-// Hinweis (z.B. bei der Ressourcenzeilen-Menge-Formel, die keine eigene
-// Einheit hat), bleibt es beim bisherigen Verhalten (erstes Glied entscheidet).
-function buildMengenAusdruck(glieder, zielEinheitHint){
+function buildMengenAusdruck(glieder){
   const valid = glieder.filter(g => g.mode === 'lit' ? g.text !== '' && !isNaN(parseFloat(g.text)) : !!g.refId);
   if(!valid.length) return null;
-  const zielProFamilie = {};
-  if(zielEinheitHint && EINHEIT_FAMILIE[zielEinheitHint]) zielProFamilie[EINHEIT_FAMILIE[zielEinheitHint]] = zielEinheitHint;
-  let acc = nodeFromGliedMitUmrechnung(valid[0], zielProFamilie);
+  let acc = nodeFromGliedMitUmrechnung(valid[0]);
   for(let i = 1; i < valid.length; i++){
-    acc = { op: valid[i].op, args: [acc, nodeFromGliedMitUmrechnung(valid[i], zielProFamilie)] };
+    acc = { op: valid[i].op, args: [acc, nodeFromGliedMitUmrechnung(valid[i])] };
   }
   return acc;
 }
