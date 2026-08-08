@@ -189,6 +189,7 @@ main.wrap{padding-top:48px;padding-bottom:60px;}
 
 .afblock{margin-top:10px;padding-top:10px;border-top:1px solid var(--line);}
 .afblock label.flabel{display:block;font-size:11.5px;font-weight:700;color:var(--ink);margin-bottom:6px;}
+.tsanzeigewert{font-weight:400;color:var(--muted);margin-left:6px;}
 .optrow{display:flex;gap:5px;flex-wrap:wrap;}
 .opt{font-size:11px;font-weight:600;border:1px solid var(--line);background:#fff;color:var(--ink);
   border-radius:6px;padding:4px 9px;cursor:pointer;}
@@ -1589,6 +1590,8 @@ async function ladeFormelDaten(otId){
     .from('arbeitsschritt')
     .select(`id, name, reihenfolge, ausgeblendet,
       teilschritt ( id, name, beschreibung, ausgeblendet,
+        anzeige_eingabefeld_id, anzeige_eingabefeld:eingabefeld!anzeige_eingabefeld_id ( einheit ),
+        anzeige_term_id, anzeige_term:term!anzeige_term_id ( einheit, ausdruck ),
         ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, artikel_id,
           zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4, mindestmenge, verschnitt_prozent,
           artikel ( bezeichnung, einheit, vp_knecht ),
@@ -1634,18 +1637,26 @@ async function ladeFormelDaten(otId){
       // (kein optionId, keine Buttons fuer den Mitarbeiter).
       (ts.ressourcenzeile || []).forEach(rz => pushRz(rz, null, as.name, ts.name));
 
+      // Menge-Anzeige (Tool B: Ruler-Icon beim Teilschritt-Titel) - rein
+      // informativ, siehe renderTeilflaechen()/recalc(). Hoechstens eines von
+      // beiden ist gesetzt (DB-Constraint).
+      const anzeigeEingabefeldId = ts.anzeige_eingabefeld_id;
+      const anzeigeEingabefeldEinheit = ts.anzeige_eingabefeld?.einheit;
+      const anzeigeTermId = ts.anzeige_term_id;
+      const anzeigeTermEinheit = ts.anzeige_term?.einheit;
+      const anzeigeTermAusdruck = ts.anzeige_term?.ausdruck;
       if(ts.auswahlfeld){
         const af = ts.auswahlfeld;
         auswahlfelder.push({
-          id: af.id, name: af.name,
+          id: af.id, name: af.name, teilschrittId: ts.id,
           optionen: (af.auswahloption || []).map(o => ({ id: o.id, name: o.name, beschreibung: o.beschreibung, istStandard: o.ist_standard, mengenoption: o.mengenoption, mengenoptionEinheit: o.mengenoption_einheit, mehrfachauswahl: o.mehrfachauswahl, hinweistext: o.hinweistext, hinweisbildUrl: o.hinweisbild_url }))
         });
         (af.auswahloption || []).forEach(opt => {
           (opt.ressourcenzeile || []).forEach(rz => pushRz(rz, opt.id, as.name, ts.name));
         });
-        teilschritte.push({ id: ts.id, beschreibung: ts.beschreibung, optionIds: (af.auswahloption || []).map(o => o.id) });
+        teilschritte.push({ id: ts.id, beschreibung: ts.beschreibung, optionIds: (af.auswahloption || []).map(o => o.id), anzeigeEingabefeldId, anzeigeEingabefeldEinheit, anzeigeTermId, anzeigeTermEinheit, anzeigeTermAusdruck });
       }else{
-        teilschritte.push({ id: ts.id, beschreibung: ts.beschreibung, optionIds: null });
+        teilschritte.push({ id: ts.id, beschreibung: ts.beschreibung, optionIds: null, anzeigeEingabefeldId, anzeigeEingabefeldEinheit, anzeigeTermId, anzeigeTermEinheit, anzeigeTermAusdruck });
       }
     });
   });
@@ -1916,6 +1927,13 @@ function renderTeilflaechen(){
     auswahlfelder.forEach(af => {
       const div = document.createElement('div');
       div.className = 'afblock';
+      div.dataset.af = af.id;
+      // Menge-Anzeige (Tool B: Ruler-Icon beim Teilschritt-Titel) - rein
+      // informativ, Wert wird in recalc() pro Teilflaeche berechnet und hier
+      // nur als leerer Platzhalter vorbereitet (nichts Standardmaessiges,
+      // nur wenn in Tool B explizit zugeordnet).
+      const zugehoerigerTs = teilschritte.find(t => t.id === af.teilschrittId);
+      const hatAnzeige = !!(zugehoerigerTs?.anzeigeEingabefeldId || zugehoerigerTs?.anzeigeTermId);
       // Mengenoption (Tool B): Anzahl-Feld nur zeigen, solange die Option
       // aktiv ist - multipliziert in recalc() die Menge aller Ressourcenzeilen
       // dieser Option (z.B. "Poolskimmer einbauen" x2), wirkt sich dadurch
@@ -1938,7 +1956,7 @@ function renderTeilflaechen(){
           <button type="button" class="opt ${aktiv?'on':''}" data-opt="${o.id}">${o.name}</button>${anzahlHtml}
         </span>`;
       }).join('');
-      div.innerHTML = `<label class="flabel">${af.name}</label>
+      div.innerHTML = `<label class="flabel">${af.name}${hatAnzeige ? `<span class="tsanzeigewert" data-ts="${zugehoerigerTs.id}"></span>` : ''}</label>
         <div class="optrow">${optButtons}</div>`;
       afWrap.appendChild(div);
       div.querySelectorAll('.opt').forEach(btn => {
@@ -3202,6 +3220,30 @@ async function recalc(){
           const tfTotal = renderKostenblock(berechnet, tbcost, ':' + tf.clientKey, tf);
           if(zwischentotalEl) zwischentotalEl.textContent = fmtCHF(rundeCHF(tfTotal));
           grandTotal += tfTotal;
+
+          // Menge-Anzeige (Tool B: Ruler-Icon beim Teilschritt-Titel) - rein
+          // informativ, keine Kostenwirkung. Eingabefeld-Wert direkt aus
+          // werteMap, Formel-Wert ueber dieselbe eval_ausdruck-RPC wie
+          // Menge-Formeln (mit denselben Eingabefeld-/Systemwerten dieser
+          // Teilflaeche).
+          for(const ts of teilschritte){
+            if(!ts.anzeigeEingabefeldId && !ts.anzeigeTermId) continue;
+            const el = tfCard.querySelector(`.tsanzeigewert[data-ts="${ts.id}"]`);
+            if(!el) continue;
+            let wert = null, einheit = '';
+            if(ts.anzeigeEingabefeldId){
+              wert = tf.werteMap[ts.anzeigeEingabefeldId];
+              einheit = ts.anzeigeEingabefeldEinheit || '';
+            }else{
+              try{
+                const { data, error } = await sb.rpc('eval_ausdruck', { node: ts.anzeigeTermAusdruck, werte: { ...tf.werteMap, ...systemwerteMap } });
+                if(error) throw error;
+                wert = data;
+                einheit = ts.anzeigeTermEinheit || '';
+              }catch(e){ wert = null; }
+            }
+            el.textContent = wert != null ? `– ${Number(wert).toLocaleString('de-CH', { maximumFractionDigits: 2 })}${einheit ? ' ' + einheit : ''}` : '';
+          }
         }
       }
 
