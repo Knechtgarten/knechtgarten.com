@@ -1600,7 +1600,7 @@ async function ladeFormelDaten(otId){
           artikel ( bezeichnung, einheit, vp_knecht ),
           staffelgruppe ( name, titel, staffelstufe ( menge_von, menge_bis, artikel ( vp_knecht ) ) ),
           zonengruppe ( name, titel, zone ( artikel ( vp_knecht ), zone_plz ( plz ) ) ),
-          sonderposition_typ ( name, titel, einheit, mwst_satz_pct, lieferwagen_std_artikel_id, lieferwagen_transport_ort, lieferwagen_std_artikel:artikel!lieferwagen_std_artikel_id ( vp_knecht ) ) ),
+          sonderposition_typ ( name, titel, einheit, mwst_satz_pct, lieferwagen_std_artikel_id, lieferwagen_transport_ort, lieferwagen_std_artikel:artikel!lieferwagen_std_artikel_id ( vp_knecht, bezeichnung ) ) ),
         auswahlfeld ( id, name,
           auswahloption ( id, name, beschreibung, ist_standard, mengenoption, mengenoption_einheit, mehrfachauswahl, hinweistext, hinweisbild_url,
             ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, artikel_id,
@@ -1608,7 +1608,7 @@ async function ladeFormelDaten(otId){
               artikel ( bezeichnung, einheit, vp_knecht ),
               staffelgruppe ( name, titel, staffelstufe ( menge_von, menge_bis, artikel ( vp_knecht ) ) ),
               zonengruppe ( name, titel, zone ( artikel ( vp_knecht ), zone_plz ( plz ) ) ),
-              sonderposition_typ ( name, titel, einheit, mwst_satz_pct, lieferwagen_std_artikel_id, lieferwagen_transport_ort, lieferwagen_std_artikel:artikel!lieferwagen_std_artikel_id ( vp_knecht ) ) ) ) ) )`)
+              sonderposition_typ ( name, titel, einheit, mwst_satz_pct, lieferwagen_std_artikel_id, lieferwagen_transport_ort, lieferwagen_std_artikel:artikel!lieferwagen_std_artikel_id ( vp_knecht, bezeichnung ) ) ) ) ) )`)
     .eq('offertentyp_id', otId).eq('ausgeblendet', false).order('reihenfolge');
   if(asErr) throw asErr;
 
@@ -1621,7 +1621,17 @@ async function ladeFormelDaten(otId){
       arbeitsschritt: arbeitsschrittName,
       teilschritt: teilschrittName,
       kategorie: rz.kategorie,
-      artikelId: rz.artikel_id,
+      // Bei Sonderpositionen mit eigener Berechnung (Lieferwagentransport-
+      // Typen) faellt die Zeile auf den zentral hinterlegten Preis-Artikel
+      // zurueck (z.B. "Lieferwagen" oder ein Personal-Artikel, der auch
+      // anderswo als normale Ressourcenzeile eingesetzt ist). So werden
+      // solche Zeilen beim Aufsummieren (siehe recalc()) automatisch mit
+      // anderen Zeilen desselben Artikels zusammengefasst statt als eigene,
+      // scheinbar zusaetzliche Position zu erscheinen (z.B. der Vorarbeiter
+      // taucht nicht zweimal auf, nur weil er auch als Lieferwagenchauffeur
+      // eingesetzt wird).
+      artikelId: rz.artikel_id || rz.sonderposition_typ?.lieferwagen_std_artikel_id || null,
+      artikelBezeichnung: rz.artikel?.bezeichnung || rz.sonderposition_typ?.lieferwagen_std_artikel?.bezeichnung || null,
       bezeichnung: rz.bezeichnung_override || rz.artikel?.bezeichnung || rz.staffelgruppe?.titel || rz.staffelgruppe?.name || rz.zonengruppe?.titel || rz.zonengruppe?.name || rz.sonderposition_typ?.titel || rz.sonderposition_typ?.name || '(unbenannt)',
       einheit: rz.artikel?.einheit || '',
       preis: rz.preis_override ?? rz.artikel?.vp_knecht ?? 0,
@@ -2907,13 +2917,20 @@ async function recalc(){
             const personalCfg = currentBerechnungsmodell === 'formel' ? offertenPositionEinstellungen['personalaufwand'] : null;
             const personalRundungMenge = personalCfg ? (RUNDUNGSREGEL_FN[personalCfg.rundung_menge] || rundeMenge) : rundeMenge;
             const personalRundungPreis = personalCfg ? (RUNDUNGSREGEL_FN[personalCfg.rundung_preis] || rundeCHF) : rundeCHF;
+            // Gruppierung nach Artikel-Identitaet (nicht nach Bezeichnungstext):
+            // eine Sonderposition mit eigener Berechnung (z.B. "Lieferwagen-
+            // chauffeur") kann denselben Preis-Artikel nutzen wie eine normale
+            // Personal-Ressourcenzeile (z.B. "Polier / Vorarbeiter") - dann
+            // sollen ihre Stunden zusammengezaehlt werden, statt dass dieselbe
+            // Person hier zweimal als eigene Zeile auftaucht.
             const byName = {};
             katZeilen.forEach(r => {
-              if(!byName[r.bezeichnung]) byName[r.bezeichnung] = { menge:0, betrag:0, einheit: personalCfg ? personalCfg.einheit : r.einheit, preis:r.preis, proTeilschritt: {} };
-              byName[r.bezeichnung].menge += r.menge;
-              byName[r.bezeichnung].betrag += r.betrag;
+              const key = r.artikelId || r.bezeichnung;
+              if(!byName[key]) byName[key] = { name: r.artikelBezeichnung || r.bezeichnung, menge:0, betrag:0, einheit: personalCfg ? personalCfg.einheit : r.einheit, preis:r.preis, proTeilschritt: {} };
+              byName[key].menge += r.menge;
+              byName[key].betrag += r.betrag;
               const tsName = r.teilschritt || r.arbeitsschritt;
-              byName[r.bezeichnung].proTeilschritt[tsName] = (byName[r.bezeichnung].proTeilschritt[tsName] || 0) + r.menge;
+              byName[key].proTeilschritt[tsName] = (byName[key].proTeilschritt[tsName] || 0) + r.menge;
             });
             // "Inaktiv" nur zeigen, wenn im GESAMTEN Auswahlfeld gerade keine
             // Option aktiv ist (der Nutzer also alles abgewaehlt hat) - nicht
@@ -2924,19 +2941,20 @@ async function recalc(){
               const af = auswahlfelder.find(a => a.optionen.some(o => o.id === optionId));
               return !!af && !af.optionen.some(o => tf.selectedOptions.has(o.id));
             }
-            ressourcenzeilen.filter(rz => rz.kategorie === 'personal' && byName[rz.bezeichnung]).forEach(rz => {
+            ressourcenzeilen.filter(rz => rz.kategorie === 'personal' && byName[rz.artikelId || rz.bezeichnung]).forEach(rz => {
               if(rz.optionId == null || tf.selectedOptions.has(rz.optionId)) return;
+              const key = rz.artikelId || rz.bezeichnung;
               const tsName = rz.teilschritt || rz.arbeitsschritt;
-              if(byName[rz.bezeichnung].proTeilschritt[tsName] != null) return;
-              if(auswahlfeldKomplettLeer(rz.optionId)) byName[rz.bezeichnung].proTeilschritt[tsName] = 'inaktiv';
+              if(byName[key].proTeilschritt[tsName] != null) return;
+              if(auswahlfeldKomplettLeer(rz.optionId)) byName[key].proTeilschritt[tsName] = 'inaktiv';
             });
-            Object.entries(byName).forEach(([name, v]) => {
+            Object.values(byName).forEach(v => {
               const einheitLabel = personalCfg ? personalCfg.einheit : v.einheit;
               const rechnungsweg = Object.entries(v.proTeilschritt).map(([ts, std]) => ({
                 label: ts,
                 menge: std === 'inaktiv' ? 'Inaktiv' : `${personalRundungMenge(std)} ${einheitLabel}`
               }));
-              addRow(name, v.menge, v.einheit, v.preis, v.betrag, `personal:${name}`, personalRundungMenge, personalRundungPreis, rechnungsweg);
+              addRow(v.name, v.menge, v.einheit, v.preis, v.betrag, `personal:${v.name}`, personalRundungMenge, personalRundungPreis, rechnungsweg);
             });
 
           }else if(kat === 'maschine'){
@@ -2967,13 +2985,18 @@ async function recalc(){
               });
             }
             if(currentBerechnungsmodell === 'formel'){
+              // Gruppierung nach Artikel-Identitaet statt Bezeichnungstext -
+              // siehe Kommentar im Personal-Block oben (gleicher Grund: eine
+              // Sonderposition mit eigener Berechnung kann denselben Artikel
+              // nutzen wie eine normale Maschinen-Ressourcenzeile).
               const byName = {};
               restZeilen.forEach(r => {
-                if(!byName[r.bezeichnung]) byName[r.bezeichnung] = { menge:0, betrag:0, einheit:r.einheit, preis:r.preis };
-                byName[r.bezeichnung].menge += r.menge;
-                byName[r.bezeichnung].betrag += r.betrag;
+                const key = r.artikelId || r.bezeichnung;
+                if(!byName[key]) byName[key] = { name: r.artikelBezeichnung || r.bezeichnung, menge:0, betrag:0, einheit:r.einheit, preis:r.preis };
+                byName[key].menge += r.menge;
+                byName[key].betrag += r.betrag;
               });
-              Object.entries(byName).forEach(([name, v]) => addRow(name, v.menge, v.einheit, v.preis, v.betrag, `maschine:artikel:${name}`, maschineRundungMenge, maschineRundungPreis));
+              Object.values(byName).forEach(v => addRow(v.name, v.menge, v.einheit, v.preis, v.betrag, `maschine:artikel:${v.name}`, maschineRundungMenge, maschineRundungPreis));
             }else if(restZeilen.length){
               const summe = restZeilen.reduce((s, r) => s + r.betrag, 0);
               addRow('Maschinenaufwand', 1, maschineEinheit, summe, summe, 'maschine:budget', maschineRundungMenge, maschineRundungPreis);
@@ -3005,13 +3028,20 @@ async function recalc(){
                   restZeilen = restZeilen.filter(r => !(r.artikelId && sp.artikelIds.has(r.artikelId)));
                 });
               }
+              // Gruppierung nach Artikel-Identitaet statt Bezeichnungstext -
+              // siehe Kommentar im Personal-Block oben (gleicher Grund: z.B.
+              // "Lieferwagen" aus zwei verschiedenen Lieferwagentransport-
+              // Sonderpositionen soll sich zu einer Zeile summieren). Betrifft
+              // NICHT die separate, offertenweite "Lieferwagenfahrzeit"-Zeile
+              // weiter unten (eigener Mechanismus, eigene Formel Hin+Rueck).
               const byName = {};
               restZeilen.forEach(r => {
-                if(!byName[r.bezeichnung]) byName[r.bezeichnung] = { menge:0, betrag:0, einheit:r.einheit, preis:r.preis };
-                byName[r.bezeichnung].menge += r.menge;
-                byName[r.bezeichnung].betrag += r.betrag;
+                const key = r.artikelId || r.bezeichnung;
+                if(!byName[key]) byName[key] = { name: r.artikelBezeichnung || r.bezeichnung, menge:0, betrag:0, einheit:r.einheit, preis:r.preis };
+                byName[key].menge += r.menge;
+                byName[key].betrag += r.betrag;
               });
-              Object.entries(byName).forEach(([name, v]) => addRow(name, v.menge, v.einheit, v.preis, v.betrag, `logistik:artikel:${name}`, logistikRundungMenge, logistikRundungPreis));
+              Object.values(byName).forEach(v => addRow(v.name, v.menge, v.einheit, v.preis, v.betrag, `logistik:artikel:${v.name}`, logistikRundungMenge, logistikRundungPreis));
             }else{
               const proArbeitsschritt = {};
               katZeilen.forEach(r => {
