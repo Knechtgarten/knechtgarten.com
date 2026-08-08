@@ -1455,14 +1455,14 @@ async function loadArbeitsschritte(){
           zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4, mindestmenge, verschnitt_prozent, teilflaechen_kombination,
           artikel_id, artikel(bezeichnung, einheit, artikelnummer_knecht),
           staffelgruppe_id, staffelgruppe(name, titel), zonengruppe_id, zonengruppe(name, titel),
-          sonderposition_typ_id, sonderposition_typ(name, titel) ),
+          sonderposition_typ_id, sonderposition_typ(name, titel, hat_eigene_berechnung) ),
         auswahlfeld ( id, name, mehrfachauswahl, reihenfolge,
           auswahloption ( id, name, beschreibung, hinweistext, hinweisbild_url, ist_standard, reihenfolge,
             ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, tagesleistung_menge, notiz, reihenfolge,
               zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4, mindestmenge, verschnitt_prozent, teilflaechen_kombination,
               artikel_id, artikel(bezeichnung, einheit, artikelnummer_knecht),
               staffelgruppe_id, staffelgruppe(name, titel), zonengruppe_id, zonengruppe(name, titel),
-              sonderposition_typ_id, sonderposition_typ(name, titel) ) ) ) )`)
+              sonderposition_typ_id, sonderposition_typ(name, titel, hat_eigene_berechnung) ) ) ) )`)
     .eq('offertentyp_id', currentOffertentypId).order('reihenfolge');
   if(error){ console.error(error); return; }
   ARBEITSSCHRITTE = data;
@@ -2449,17 +2449,22 @@ async function openRzEditModal(rzId){
   // die Mindestmenge liegt bewusst am Kieswerk (Einstellungen), nicht hier -
   // deshalb genauso ausgeblendet wie bei der Staffelgruppe.
   const istStaffelSonderposition = !!ctx.rz.staffelgruppe;
+  // hat_eigene_berechnung ersetzt einen frueheren Namensvergleich (nur
+  // Kies-/Beton-Transport) - jetzt generisch fuer jede Sonderposition mit
+  // eigener Berechnung statt Artikel-Bezug (siehe Tool A recalc()), z.B. auch
+  // die Lieferwagentransport-Typen (Kieswerk/Betonwerk, Deponie, Magazin).
+  const istSonderberechnung = !!ctx.rz.sonderposition_typ?.hat_eigene_berechnung;
   const istKiesBetonTransport = ctx.rz.sonderposition_typ?.name === 'Kies-Transport' || ctx.rz.sonderposition_typ?.name === 'Beton-Transport';
-  rzEditOhneArtikel = istStaffelSonderposition || istKiesBetonTransport;
-  $('rzEditMengeExtras').classList.toggle('hidden', istStaffelSonderposition || istKiesBetonTransport);
-  $('rzEditMengeFormelHinweis').textContent = istStaffelSonderposition ? '(bestimmt die passende Staffelstufe)' : istKiesBetonTransport ? '(ergibt das Transportvolumen in m³)' : '';
+  rzEditOhneArtikel = istStaffelSonderposition || istSonderberechnung;
+  $('rzEditMengeExtras').classList.toggle('hidden', istStaffelSonderposition || istSonderberechnung);
+  $('rzEditMengeFormelHinweis').textContent = istStaffelSonderposition ? '(bestimmt die passende Staffelstufe)' : istKiesBetonTransport ? '(ergibt das Transportvolumen in m³)' : istSonderberechnung ? '(ergibt die Anzahl Fahrten)' : '';
 
   // Artikel nachtraeglich austauschbar machen (ausser bei Sonderposition-Zeilen,
   // die per Lookup-Schluessel/eigener Berechnung statt Artikel-Bezug arbeiten) -
   // sonst muesste man bei einem falsch gewaehlten Artikel die ganze Zeile inkl.
   // Formel neu bauen.
-  $('rzEditArtikelFld').classList.toggle('hidden', istStaffelSonderposition || istKiesBetonTransport);
-  if(!istStaffelSonderposition && !istKiesBetonTransport){
+  $('rzEditArtikelFld').classList.toggle('hidden', istStaffelSonderposition || istSonderberechnung);
+  if(!istStaffelSonderposition && !istSonderberechnung){
     $('rzEditArtikelInput').value = ctx.rz.artikel
       ? `${ctx.rz.artikel.bezeichnung}${ctx.rz.artikel.artikelnummer_knecht ? ' · ' + ctx.rz.artikel.artikelnummer_knecht : ''}`
       : '';
@@ -2770,17 +2775,20 @@ function anwendenSonderpositionAuswahl(typ, id, name){
     $('rzSonderKategorieSelect').classList.remove('hidden');
     $('rzSonderKategorieSelect').value = 'logistik';
   }
-  // Betonpumpe (Staffelgruppe) und Kies-/Beton-Transport (Sonderposition-Typ)
-  // nutzen zwar beide das gleiche Termline-Eingabewidget fuer die Menge-Formel,
-  // haben aber danach eine komplett eigene, hartcodierte Berechnung in Tool A -
-  // die Formel ergibt bei der Betonpumpe eine Staffelstufe, bei Kies-/
-  // Beton-Transport dagegen direkt das Transportvolumen in m3.
-  rzSonderMengeRelevant = typ === 'staffelgruppe' || (typ === 'sonderposition_typ' && (name === 'Kies-Transport' || name === 'Beton-Transport'));
+  // Betonpumpe (Staffelgruppe) und jede Sonderposition mit eigener Berechnung
+  // (hat_eigene_berechnung, z.B. Kies-/Beton-Transport oder die Lieferwagen-
+  // transport-Typen) nutzen zwar alle das gleiche Termline-Eingabewidget fuer
+  // die Menge-Formel, haben aber danach eine komplett eigene, hartcodierte
+  // Berechnung in Tool A - die Formel ergibt bei der Betonpumpe eine
+  // Staffelstufe, bei Kies-/Beton-Transport das Transportvolumen in m3, bei
+  // den Lieferwagentransport-Typen die Anzahl Fahrten.
+  const istKiesBetonTransport = typ === 'sonderposition_typ' && (name === 'Kies-Transport' || name === 'Beton-Transport');
+  rzSonderMengeRelevant = typ === 'staffelgruppe' || (typ === 'sonderposition_typ' && !!eintrag?.hat_eigene_berechnung);
   if(rzSonderMengeRelevant){
     rzEditGlieder = [{ op: null, mode: 'lit', refKind: null, refId: null, text: '' }];
     renderRzEditTermline('rzSonderTermline');
     $('rzSonderMengeFld').classList.remove('hidden');
-    $('rzSonderMengeFldHinweis').textContent = typ === 'staffelgruppe' ? '(bestimmt die passende Staffelstufe)' : '(ergibt das Transportvolumen in m³)';
+    $('rzSonderMengeFldHinweis').textContent = typ === 'staffelgruppe' ? '(bestimmt die passende Staffelstufe)' : istKiesBetonTransport ? '(ergibt das Transportvolumen in m³)' : '(ergibt die Anzahl Fahrten)';
   }else{
     $('rzSonderMengeFld').classList.add('hidden');
   }
@@ -2794,7 +2802,7 @@ async function ladeSonderpositionAuswahl(){
   const [sg, zg, sp] = await Promise.all([
     sb.from('staffelgruppe').select('id,name,kategorie').order('name'),
     sb.from('zonengruppe').select('id,name,kategorie').order('name'),
-    sb.from('sonderposition_typ').select('id,name,kategorie').order('name')
+    sb.from('sonderposition_typ').select('id,name,kategorie,hat_eigene_berechnung').order('name')
   ]);
   const fehler = sg.error || zg.error || sp.error;
   if(fehler){

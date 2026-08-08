@@ -1248,6 +1248,56 @@ async function ladeDistanzAdresslisten(){
   if(error){ console.error(error); } else { DEPONIE_DISTANZ_LISTE = data; }
 }
 
+// Adressliste fuer die Sonderposition "Lieferwagentransport Magazin" (Tool B)
+// - eigene Lagerorte, Verwaltung in Einstellungen -> Sonderpositionen.
+let MAGAZIN_ADRESSEN_LISTE = [];
+async function ladeMagazinAdressen(){
+  const { data, error } = await sb.from('magazin_adressen').select('id,name,adresse').order('reihenfolge');
+  if(error){ console.error(error); } else { MAGAZIN_ADRESSEN_LISTE = data; }
+}
+
+// Lieferwagentransport-Sonderpositionen (Kieswerk/Betonwerk, Deponie, Magazin):
+// eigener Lieferwagen holt/bringt Material - anders als Kies-/Beton-Transport
+// (das Kieswerk liefert) gibt es hier keine Pauschale/km-Preis pro Adresse,
+// sondern nur die einfache Fahrzeit (Nutzer-Entscheid: bei Bedarf x2 selbst in
+// der Menge-Formel) mal den Preis eines zentral hinterlegten "Lieferwagen
+// Std"-Artikels (Einstellungen -> Sonderpositionen). Gleiche Distance-Matrix-
+// Abfrage wie holeKieswerkDistanzKm(), zusaetzlich mit Fahrzeit.
+let lieferwagenTransportDistanzCache = {}; // "adresse::plz" -> {km, std} | null
+async function holeDistanzUndZeit(adresse, plz){
+  const key = adresse + '::' + plz;
+  if(lieferwagenTransportDistanzCache.hasOwnProperty(key)) return lieferwagenTransportDistanzCache[key];
+  try{
+    const { data, error } = await sb.functions.invoke('distance-matrix', {
+      body: { origin: adresse, destination: plz + ', Schweiz' }
+    });
+    if(error) throw error;
+    if(data?.error) throw new Error(data.error);
+    const el = data.rows?.[0]?.elements?.[0];
+    if(el?.status !== 'OK') throw new Error(el?.status || 'Distanz nicht ermittelbar');
+    const ergebnis = { km: el.distance.value / 1000, std: el.duration.value / 3600 };
+    lieferwagenTransportDistanzCache[key] = ergebnis;
+    return ergebnis;
+  }catch(e){
+    console.error(e);
+    lieferwagenTransportDistanzCache[key] = null;
+    return null;
+  }
+}
+async function ermittleNaechsteAdresseZeit(liste, plz){
+  if(!liste?.length || !plz) return null;
+  const ergebnisse = await Promise.all(liste.map(async a => ({ a, d: await holeDistanzUndZeit(a.adresse, plz) })));
+  const gueltige = ergebnisse.filter(e => e.d != null);
+  if(!gueltige.length) return null;
+  return gueltige.reduce((x, y) => y.d.km < x.d.km ? y : x);
+}
+function lieferwagenTransportAdressliste(typName){
+  if(typName === 'Lieferwagentransport Kieswerk/Betonwerk') return [...KIESWERK_KIES, ...KIESWERK_BETON];
+  if(typName === 'Lieferwagentransport Deponie') return DEPONIE_DISTANZ_LISTE;
+  if(typName === 'Lieferwagentransport Magazin') return MAGAZIN_ADRESSEN_LISTE;
+  return null;
+}
+
 async function holeKieswerkDistanzKm(adresse, plz){
   const key = adresse + '::' + plz;
   if(kiesBetonDistanzCache.hasOwnProperty(key)) return kiesBetonDistanzCache[key];
@@ -1523,7 +1573,7 @@ async function ladeFormelDaten(otId){
           artikel ( bezeichnung, einheit, vp_knecht ),
           staffelgruppe ( name, titel, staffelstufe ( menge_von, menge_bis, artikel ( vp_knecht ) ) ),
           zonengruppe ( name, titel, zone ( artikel ( vp_knecht ), zone_plz ( plz ) ) ),
-          sonderposition_typ ( name, titel, einheit, mwst_satz_pct ) ),
+          sonderposition_typ ( name, titel, einheit, mwst_satz_pct, lieferwagen_std_artikel_id, lieferwagen_std_artikel:artikel!lieferwagen_std_artikel_id ( vp_knecht ) ) ),
         auswahlfeld ( id, name, mehrfachauswahl,
           auswahloption ( id, name, beschreibung, ist_standard,
             ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, artikel_id,
@@ -1531,7 +1581,7 @@ async function ladeFormelDaten(otId){
               artikel ( bezeichnung, einheit, vp_knecht ),
               staffelgruppe ( name, titel, staffelstufe ( menge_von, menge_bis, artikel ( vp_knecht ) ) ),
               zonengruppe ( name, titel, zone ( artikel ( vp_knecht ), zone_plz ( plz ) ) ),
-              sonderposition_typ ( name, titel, einheit, mwst_satz_pct ) ) ) ) )`)
+              sonderposition_typ ( name, titel, einheit, mwst_satz_pct, lieferwagen_std_artikel_id, lieferwagen_std_artikel:artikel!lieferwagen_std_artikel_id ( vp_knecht ) ) ) ) ) )`)
     .eq('offertentyp_id', otId).eq('ausgeblendet', false).order('reihenfolge');
   if(asErr) throw asErr;
 
@@ -2412,6 +2462,7 @@ async function init(){
     await ladeLogistikSammelpositionen();
     await ladeKieswerke();
     await ladeDistanzAdresslisten();
+    await ladeMagazinAdressen();
 
     const params = new URLSearchParams(location.search);
     const deeplinkOfferteId = params.get('offerte');
@@ -2997,6 +3048,38 @@ async function recalc(){
             betrag = betrag * (1 + (kieswerk.marge_pct || 0) / 100);
             const preis = menge > 0 ? betrag / menge : 0;
             const bezeichnung = rz.bezeichnung + ` (${kieswerk.name})`;
+            return { ...rz, bezeichnung, einheit, menge, preis, betrag };
+          }
+          // Lieferwagentransport (Kieswerk/Betonwerk, Deponie, Magazin): eigener
+          // Lieferwagen holt/bringt Material - anders als Kies-/Beton-Transport
+          // oben keine Pauschale/km-Preis pro Adresse, sondern einfache
+          // Fahrzeit (naechstgelegene Adresse -> Kunde) mal Preis eines
+          // zentral hinterlegten "Lieferwagen Std"-Artikels (Einstellungen ->
+          // Sonderpositionen). Die Menge-Formel der Zeile ergibt die Anzahl
+          // Fahrten, genau wie bei jeder anderen Sonderposition frei editierbar.
+          const lwAdressliste = lieferwagenTransportAdressliste(rz.sonderpositionTyp?.name);
+          if(lwAdressliste){
+            const einheit = rz.sonderpositionTyp.einheit || 'Fahrt';
+            const stundenpreis = rz.sonderpositionTyp.lieferwagen_std_artikel?.vp_knecht;
+            if(stundenpreis == null){
+              return { ...rz, bezeichnung: rz.bezeichnung + ' (kein Lieferwagen-Std-Artikel hinterlegt)', einheit, menge: 0, preis: 0, betrag: 0 };
+            }
+            const naechste = await ermittleNaechsteAdresseZeit(lwAdressliste, kundePlzTrim);
+            if(!naechste){
+              return { ...rz, bezeichnung: rz.bezeichnung + ' (keine Adresse erfasst oder Distanz nicht ermittelbar)', einheit, menge: 0, preis: 0, betrag: 0 };
+            }
+            let mengeRoh;
+            try {
+              const { data, error } = await sb.rpc('eval_ausdruck', { node: rz.menge_ausdruck, werte: { ...tf.werteMap, ...systemwerteMap } });
+              if(error) throw error;
+              mengeRoh = data;
+            } catch(e) {
+              return { ...rz, bezeichnung: rz.bezeichnung + ` (Berechnung fehlgeschlagen: ${e.message || e})`, einheit, menge: 0, preis: 0, betrag: 0 };
+            }
+            const menge = mengeRoh * tfMenge;
+            const betrag = naechste.d.std * stundenpreis * menge;
+            const preis = menge > 0 ? betrag / menge : 0;
+            const bezeichnung = rz.bezeichnung + ` (${naechste.a.name})`;
             return { ...rz, bezeichnung, einheit, menge, preis, betrag };
           }
           if(rz.sonderpositionTyp){
