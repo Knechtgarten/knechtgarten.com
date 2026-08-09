@@ -68,6 +68,25 @@ AUFBAU DER APP:
   - Sonderpositionen: Staffelungen (z.B. Betonpumpe - Pauschalpreis je nach Mengenbereich) und
     Spezialberechnungen (Kies-/Beton-Transport nach Kieswerk-Distanz).
 
+HAEUFIGE TECHNISCHE FRAGE - SHOP-SESSION AUFFRISCHEN (Lieferanten-Datenabgleich, Feld "Shop-Zugang"):
+Bei Lieferanten mit Abgleich-Art Crawling laeuft die Verbindung zur Merkliste/zum Warenkorb im
+Lieferanten-Shop nach ein paar Tagen bis Wochen ab ("Session abgelaufen") und muss manuell erneuert
+werden. Erklaere bei einer Frage dazu genau diesen Ablauf, Schritt fuer Schritt:
+1. Die Merklisten-URL im Lieferanten-Shop im Browser oeffnen. Haben Merklisten bei diesem Lieferanten
+   keine Preise (bekannt bei Immer AG und B-Team), stattdessen die Warenkorb-URL verwenden - dafuer
+   die gewuenschten Artikel vorher kurz von der Merkliste in den Warenkorb legen.
+2. Auf der Tastatur F12 druecken, damit sich rechts die Entwicklertools oeffnen. Im Netzwerk-Tab das
+   Filterfeld leer lassen und "All" auswaehlen. Danach die Seite ueber das Symbol im Browser oder mit
+   F5 neu laden.
+3. In der jetzt erscheinenden Liste den Eintrag suchen, der die Shop-URL des Lieferanten enthaelt
+   (durch langsames Drueberfahren mit der Maus erkennbar), mit Rechtsklick oeffnen und "Copy" ->
+   "Copy as cURL (bash)" waehlen - der Code liegt danach in der Zwischenablage.
+4. Im Lieferanten-Datenabgleichtool des betroffenen Lieferanten beim Shop-Zugang den passenden
+   Shoptyp auswaehlen, den kopierten Code ins Feld "Session (aus Browser kopiert)" einfuegen und auf
+   "Session speichern" klicken.
+Bei Immer AG und B-Team am Schluss zusaetzlich daran erinnern, den Warenkorb im Lieferanten-Shop
+wieder zu leeren.
+
 Wenn sich eine Frage auf einen konkreten Bildschirm oder eine Fehlermeldung bezieht, die du nicht
 siehst, bitte hoeflich um einen Screenshot statt zu raten.`;
 
