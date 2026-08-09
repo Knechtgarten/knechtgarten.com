@@ -438,22 +438,6 @@ input[type=number]{-moz-appearance:textfield;}
         </div>
       </div>
 
-      <div class="section" id="ergaenzenSection">
-        <div class="sectionhead">
-          <div class="sectionheadtop">
-            <h3>In Artikelstamm übernehmen</h3>
-            <span class="spacer"></span>
-            <button class="segbtn uebernehmen-btn" id="ergaenzenUebernehmenBtn" disabled title="Verfügbar, sobald ein automatischer Abgleich abgeschlossen ist">Daten übernehmen</button>
-          </div>
-        </div>
-        <div class="tablewrap">
-          <table class="data">
-            <thead><tr><th><input type="checkbox" class="appcheck" id="ergaenzenCheckAll"></th><th>Artikel</th><th class="num">Preis</th></tr></thead>
-            <tbody id="ergaenzenBody"></tbody>
-          </table>
-        </div>
-      </div>
-
       <div class="section" id="nichtAbgeglichenSection">
         <div class="sectionhead">
           <div class="sectionheadtop">
@@ -690,7 +674,7 @@ async function init(){
   renderKategorie();
   renderGoogleSheetFelder();
   renderKaListe('merklisten', 'kaMerklistenBody');
-  renderPreisAbweichungen([]);
+  renderErgebnisListe([], []);
   renderNichtAbgeglichen([]);
 
   $('ladeHinweis').classList.add('hidden');
@@ -827,8 +811,6 @@ function wendeModusUndQuelleAn(modus, crawlingQuelle){
   // nichts auszuwaehlen - die ganze Karte weglassen statt nur einen
   // Hinweistext ohne echte Auswahl anzuzeigen.
   $('kategorieCard').classList.toggle('hidden', modus !== 'ergaenzen' || lieferantErlaubteKategorien().length === 1);
-  const ergaenzenSichtbar = modus === 'ergaenzen' && (istGoogleSheetQuelle() || crawlingQuelle === 'merkliste');
-  $('ergaenzenSection').style.display = ergaenzenSichtbar ? '' : 'none';
 }
 document.querySelectorAll('.segbtn[data-mode]').forEach(btn => {
   btn.addEventListener('click', async () => {
@@ -1251,25 +1233,6 @@ function renderNichtAbgeglichen(liste){
     tr.querySelector('[data-del]').addEventListener('click', () => loescheNichtAbgeglichenenArtikel(a, tr));
   });
 }
-let NEUE_ARTIKEL_LISTE = [];
-function renderNeueArtikel(liste){
-  NEUE_ARTIKEL_LISTE = liste;
-  $('ergaenzenBody').innerHTML = liste.map((a, i) => `
-    <tr data-i="${i}">
-      <td><input type="checkbox" class="ergaenzen-check appcheck" checked></td>
-      <td><div class="artname">${a.bezeichnung || '(ohne Bezeichnung)'}</div><div class="artmeta">${a.artikelnummer_lieferant}${a.kategorie ? ` · <span class="devtag" title="Kategorie wird von der Quelle vorgegeben">${KATEGORIE_LABEL[a.kategorie] || a.kategorie}</span>` : ''}</div></td>
-      <td class="num">${fmtCHF(a.ep_lieferant) || '–'}</td>
-    </tr>`).join('');
-  $('ergaenzenUebernehmenBtn').disabled = liste.length === 0;
-  $('ergaenzenUebernehmenBtn').classList.toggle('ready', liste.length > 0);
-  $('ergaenzenUebernehmenBtn').title = liste.length ? '' : 'Verfügbar, sobald ein automatischer Abgleich abgeschlossen ist';
-  // Wenn (fast) alle neuen Artikel ihre Kategorie schon selbst mitbringen,
-  // ist die manuelle Auswahl oben fuer diesen Abgleich irrelevant - Hinweis
-  // entsprechend anpassen statt stillschweigend zu ignorieren.
-  const alleHabenKategorie = liste.length > 0 && liste.every(a => a.kategorie);
-  $('kategorieCard').classList.toggle('kategorie-irrelevant', alleHabenKategorie);
-  $('kategorieAutoHinweis').style.display = alleHabenKategorie ? '' : 'none';
-}
 async function starteGoogleSheetAbgleich(){
   const zuordnung = LIEF.da.sheet_spalten_zuordnung;
   const link = (LIEF.da.sync_verbindung || {}).google_sheet_link;
@@ -1333,15 +1296,11 @@ async function verarbeiteGefundeneArtikel(gefundeneArtikel, quelleLabel, methode
     zuPruefen.push({ artikel: bestand, neuerPreis: sa.ep_lieferant });
   }
   if(fotosNachgetragen) logAnhaengen(`${fotosNachgetragen} fehlendes Foto nachgetragen.`);
-  renderPreisAbweichungen(zuPruefen);
-  logAnhaengen(`${zuPruefen.length} Preisänderung${zuPruefen.length === 1 ? '' : 'en'} gefunden - manuelle Prüfung nötig.`);
-
   const modus = effektiverModus();
-  if(modus === 'ergaenzen'){
-    const neue = gefundeneArtikel.filter(sa => !bestandNachNr.has(normArtikelnr(sa.artikelnummer_lieferant)));
-    renderNeueArtikel(neue);
-    logAnhaengen(`${neue.length} neue Artikel gefunden.`);
-  }
+  const neue = modus === 'ergaenzen' ? gefundeneArtikel.filter(sa => !bestandNachNr.has(normArtikelnr(sa.artikelnummer_lieferant))) : [];
+  renderErgebnisListe(zuPruefen, neue);
+  logAnhaengen(`${zuPruefen.length} Preisänderung${zuPruefen.length === 1 ? '' : 'en'} gefunden - manuelle Prüfung nötig.`);
+  if(modus === 'ergaenzen') logAnhaengen(`${neue.length} neue Artikel gefunden.`);
 
   const gefundeneNummern = new Set(gefundeneArtikel.map(sa => normArtikelnr(sa.artikelnummer_lieferant)));
   const nichtGefunden = ARTIKEL.filter(a => a.artikelnummer_lieferant && !gefundeneNummern.has(normArtikelnr(a.artikelnummer_lieferant)));
@@ -1669,7 +1628,7 @@ function findeDaeppBetonzusatzmittelSeite(seiten){
 // Parser ausgewertet. Jeder erkannte Artikel bringt schon seine eigene
 // Kategorie mit (siehe kategorie-Feld in parseDaeppBetonPdf/-BetonpumpePdf),
 // die manuellen Kategorie-Buttons im Abgleich-Fenster werden fuer diese
-// Artikel darum ignoriert (siehe renderNeueArtikel).
+// Artikel darum ignoriert (siehe renderErgebnisListe).
 async function parseDaeppGesamtFormat(file){
   const seiten = await extrahierePdfAlleSeiten(file);
   const betonSeite = findeDaeppBetonSeite(seiten);
@@ -1814,21 +1773,22 @@ function aktualisierePreisAbweichung(tr){
   const stufeClass = stufe === 2 ? ' stufe2' : stufe === 1 ? ' stufe1' : '';
   abwEl.innerHTML = `<span class="devtag${stufeClass}">${prozent >= 0 ? '+' : ''}${prozent.toFixed(1)}%</span>`;
 }
-// Zeigt JEDE gefundene Preisaenderung zur manuellen Kontrolle (kein
-// automatisches Uebernehmen mehr, siehe verarbeiteGefundeneArtikel).
-// Checkbox ist per Default angehakt - ausser bei Warnstufe 2, dort muss
-// bewusst aktiv angehakt werden (siehe Absprache: kleine, erwartete
-// Preisanpassungen bleiben bequem, grosse Ausreisser brauchen einen
-// bewussten Klick).
-function renderPreisAbweichungen(zeilen){
-  if(!zeilen.length){
-    $('preisBody').innerHTML = '<tr><td colspan="5" class="hint" style="margin:0;padding:10px 4px;">Keine Preisänderungen gefunden - wird nach dem nächsten Abgleich angezeigt.</td></tr>';
-    return;
-  }
-  $('preisBody').innerHTML = zeilen.map(({artikel: a, neuerPreis}) => {
+// Zeigt JEDE gefundene Preisaenderung UND jeden neuen Artikel in EINER
+// gemeinsamen Liste zur manuellen Kontrolle (kein automatisches Uebernehmen
+// mehr, siehe verarbeiteGefundeneArtikel) - genau das gleiche Muster wie bei
+// der Schnellerfassung (Tool "Lieferanten"): ein "Neu"-Badge statt einer
+// zweiten, separaten Box. Checkbox ist per Default angehakt - ausser bei
+// Warnstufe 2, dort muss bewusst aktiv angehakt werden (siehe Absprache:
+// kleine, erwartete Preisanpassungen bleiben bequem, grosse Ausreisser
+// brauchen einen bewussten Klick). Neue Artikel haben keine Abweichung -
+// dort steht stattdessen das "Neu"-Badge.
+let NEUE_ARTIKEL_LISTE = [];
+function renderErgebnisListe(preisZeilen, neueZeilen){
+  NEUE_ARTIKEL_LISTE = neueZeilen || [];
+  const preisHtml = (preisZeilen || []).map(({artikel: a, neuerPreis}) => {
     const stufe = berechnePreisAbweichungStufe(a.ep_lieferant, neuerPreis);
     return `
-    <tr data-id="${a.id}" data-alt="${a.ep_lieferant ?? ''}">
+    <tr data-typ="vorhanden" data-id="${a.id}" data-alt="${a.ep_lieferant ?? ''}">
       <td><input type="checkbox" class="preis-check appcheck" ${stufe === 2 ? '' : 'checked'}></td>
       <td><div class="artname">${a.bezeichnung}</div><div class="artmeta">${a.einheit}</div></td>
       <td class="num">${fmtCHF(a.ep_lieferant) || '–'}</td>
@@ -1836,10 +1796,26 @@ function renderPreisAbweichungen(zeilen){
       <td class="preis-abw hint" style="margin:0;">–</td>
     </tr>`;
   }).join('');
-  $('preisBody').querySelectorAll('tr[data-id]').forEach(tr => {
+  const neuHtml = NEUE_ARTIKEL_LISTE.map((a, i) => `
+    <tr data-typ="neu" data-i="${i}">
+      <td><input type="checkbox" class="preis-check appcheck" checked></td>
+      <td><div class="artname">${a.bezeichnung || '(ohne Bezeichnung)'}</div><div class="artmeta">${a.artikelnummer_lieferant}${a.kategorie ? ` · <span class="devtag" title="Kategorie wird von der Quelle vorgegeben">${KATEGORIE_LABEL[a.kategorie] || a.kategorie}</span>` : ''}</div></td>
+      <td class="num">–</td>
+      <td class="num">${fmtCHF(a.ep_lieferant) || '–'}</td>
+      <td class="preis-abw"><span class="devtag" style="background:var(--accent-blue);color:var(--primary);">Neu</span></td>
+    </tr>`).join('');
+  const gesamtHtml = preisHtml + neuHtml;
+  $('preisBody').innerHTML = gesamtHtml || '<tr><td colspan="5" class="hint" style="margin:0;padding:10px 4px;">Keine Preisänderungen oder neuen Artikel gefunden - wird nach dem nächsten Abgleich angezeigt.</td></tr>';
+  $('preisBody').querySelectorAll('tr[data-typ="vorhanden"]').forEach(tr => {
     aktualisierePreisAbweichung(tr);
     tr.querySelector('.preis-neu').addEventListener('input', () => aktualisierePreisAbweichung(tr));
   });
+  // Wenn (fast) alle neuen Artikel ihre Kategorie schon selbst mitbringen,
+  // ist die manuelle Auswahl oben fuer diesen Abgleich irrelevant - Hinweis
+  // entsprechend anpassen statt stillschweigend zu ignorieren.
+  const alleHabenKategorie = NEUE_ARTIKEL_LISTE.length > 0 && NEUE_ARTIKEL_LISTE.every(a => a.kategorie);
+  $('kategorieCard').classList.toggle('kategorie-irrelevant', alleHabenKategorie);
+  $('kategorieAutoHinweis').style.display = alleHabenKategorie ? '' : 'none';
 }
 $('preisCheckAll').addEventListener('change', () => {
   $('preisBody').querySelectorAll('.preis-check').forEach(cb => cb.checked = $('preisCheckAll').checked);
@@ -1862,81 +1838,78 @@ function abVpKnechtVorschlagRoh(a){
   if(marge == null || marge >= 100) return null;
   return epChf / (1 - marge / 100);
 }
+// Uebernimmt beide Zeilentypen aus der gemeinsamen Liste in einem Rutsch:
+// "vorhanden"-Zeilen aktualisieren nur den Preis, "neu"-Zeilen legen einen
+// neuen Artikel an (siehe renderErgebnisListe) - genau wie bei der
+// Schnellerfassung landet beides in derselben Kontrolle statt in zwei
+// getrennten Boxen mit zwei Buttons.
 $('preisUebernehmenBtn').addEventListener('click', async () => {
-  const zeilen = Array.from($('preisBody').querySelectorAll('tr[data-id]')).filter(tr => tr.querySelector('.preis-check').checked);
-  let anzahl = 0;
+  const zeilen = Array.from($('preisBody').querySelectorAll('tr[data-typ]')).filter(tr => tr.querySelector('.preis-check').checked);
+  if(!zeilen.length){ showToast('Keine Zeilen zum Übernehmen markiert.', true); return; }
+  const kategorieDefault = LIEF.da.kategorie_default || 'material';
+  let anzahlPreis = 0, anzahlNeu = 0;
   for(const tr of zeilen){
-    const artikelId = tr.dataset.id;
-    const alt = parseFloat(tr.dataset.alt) || null;
-    const neu = parseFloat(tr.querySelector('.preis-neu').value);
-    if(isNaN(neu) || alt === neu) continue;
-    const { error: updErr } = await sb.from('artikel').update({ ep_lieferant: neu }).eq('id', artikelId);
-    if(updErr){ showToast(friendlyError(updErr), true); continue; }
-    await sb.from('artikel_preis_verlauf').insert({
-      artikel_id: artikelId, alter_preis: alt, neuer_preis: neu,
-      quelle: 'abgleich', methode: 'manuell', lieferant_id: LIEFERANT_ID
-    });
-    const artikelObj = ARTIKEL.find(x => x.id === artikelId);
-    if(artikelObj && !artikelObj.preis_gesperrt){
-      const vorschlagRoh = abVpKnechtVorschlagRoh({ ...artikelObj, ep_lieferant: neu });
-      if(vorschlagRoh != null) await sb.from('artikel').update({ vp_knecht: Math.round(vorschlagRoh) }).eq('id', artikelId);
+    if(tr.dataset.typ === 'vorhanden'){
+      const artikelId = tr.dataset.id;
+      const alt = parseFloat(tr.dataset.alt) || null;
+      const neu = parseFloat(tr.querySelector('.preis-neu').value);
+      if(isNaN(neu) || alt === neu) continue;
+      const { error: updErr } = await sb.from('artikel').update({ ep_lieferant: neu }).eq('id', artikelId);
+      if(updErr){ showToast(friendlyError(updErr), true); continue; }
+      await sb.from('artikel_preis_verlauf').insert({
+        artikel_id: artikelId, alter_preis: alt, neuer_preis: neu,
+        quelle: 'abgleich', methode: 'manuell', lieferant_id: LIEFERANT_ID
+      });
+      const artikelObj = ARTIKEL.find(x => x.id === artikelId);
+      if(artikelObj && !artikelObj.preis_gesperrt){
+        const vorschlagRoh = abVpKnechtVorschlagRoh({ ...artikelObj, ep_lieferant: neu });
+        if(vorschlagRoh != null) await sb.from('artikel').update({ vp_knecht: Math.round(vorschlagRoh) }).eq('id', artikelId);
+      }
+      anzahlPreis++;
+    } else {
+      const a = NEUE_ARTIKEL_LISTE[parseInt(tr.dataset.i)];
+      if(!a) continue;
+      // Bringt der gefundene Artikel schon eine eigene Kategorie mit (z.B. aus
+      // einer PDF-Gesamtpreisliste mit mehreren Bereichen), hat die Vorrang vor
+      // der manuellen Auswahl oben - siehe kategorie-Feld in parseDaeppBetonPdf/
+      // -BetonpumpePdf.
+      const kategorie = a.kategorie || kategorieDefault;
+      const vpKnechtRoh = abVpKnechtVorschlagRoh({ ep_lieferant: a.ep_lieferant, vp_lieferant: a.vp_lieferant, waehrung: LIEF.da.waehrung });
+      const { data: neuArtikel, error: insErr } = await sb.from('artikel').insert({
+        lieferant_id: LIEFERANT_ID,
+        artikelnummer_lieferant: a.artikelnummer_lieferant,
+        artikelnummer_knecht: `${LIEF.kuerzel}_${a.artikelnummer_lieferant}`,
+        bezeichnung: a.bezeichnung || a.artikelnummer_lieferant,
+        einheit: a.einheit || 'Stk.',
+        ep_lieferant: a.ep_lieferant,
+        vp_lieferant: a.vp_lieferant,
+        vp_knecht: vpKnechtRoh != null ? Math.round(vpKnechtRoh) : null,
+        anmerkung: a.anmerkung || null,
+        foto_url: a.foto_url || null,
+        kategorie,
+        waehrung: LIEF.da.waehrung || 'CHF',
+        sync_easybill: true
+      }).select().single();
+      if(insErr){ showToast(friendlyError(insErr), true); continue; }
+      await sb.from('artikel_preis_verlauf').insert({
+        artikel_id: neuArtikel.id, alter_preis: null, neuer_preis: a.ep_lieferant,
+        quelle: 'abgleich', methode: 'google_sheet', lieferant_id: LIEFERANT_ID
+      });
+      anzahlNeu++;
     }
-    anzahl++;
   }
-  if(!anzahl){ showToast('Keine geänderten Preise zum Übernehmen markiert.', true); return; }
+  if(!anzahlPreis && !anzahlNeu){ showToast('Keine Änderungen übernommen.', true); return; }
   await sb.from('lieferant_datenabgleich').upsert({ lieferant_id: LIEFERANT_ID, letzter_abgleich_status: 'Erfolgreich', letzter_abgleich_zeitpunkt: new Date().toISOString() }, { onConflict: 'lieferant_id' });
-  showToast(`${anzahl} Preis(e) übernommen.`);
+  const teile = [];
+  if(anzahlPreis) teile.push(`${anzahlPreis} Preis(e)`);
+  if(anzahlNeu) teile.push(`${anzahlNeu} neue(r) Artikel`);
+  showToast(`${teile.join(' und ')} übernommen.`);
   // ARTIKEL im Hintergrund aktualisieren (fuer den naechsten Start-Klick),
   // die Sicht selbst aber leeren statt erneut die volle Artikelliste zu
   // zeigen - sie ist ja gerade erst uebernommen worden.
   const { data: artikel } = await sb.from('artikel').select('id,bezeichnung,einheit,ep_lieferant,vp_lieferant,waehrung,preis_gesperrt,artikelnummer_lieferant,foto_url').eq('lieferant_id', LIEFERANT_ID).order('bezeichnung');
   ARTIKEL = artikel || [];
   $('preisBody').innerHTML = '<tr><td colspan="5" class="hint">Übernommen - klicke "Start" für einen neuen Abgleich.</td></tr>';
-});
-$('ergaenzenCheckAll').addEventListener('change', () => {
-  $('ergaenzenBody').querySelectorAll('.ergaenzen-check').forEach(cb => cb.checked = $('ergaenzenCheckAll').checked);
-});
-$('ergaenzenUebernehmenBtn').addEventListener('click', async () => {
-  const rows = Array.from($('ergaenzenBody').querySelectorAll('tr[data-i]')).filter(tr => tr.querySelector('.ergaenzen-check').checked);
-  if(!rows.length){ showToast('Keine Artikel zum Übernehmen markiert.', true); return; }
-  const kategorieDefault = LIEF.da.kategorie_default || 'material';
-  let anzahl = 0;
-  for(const tr of rows){
-    const a = NEUE_ARTIKEL_LISTE[parseInt(tr.dataset.i)];
-    if(!a) continue;
-    // Bringt der gefundene Artikel schon eine eigene Kategorie mit (z.B. aus
-    // einer PDF-Gesamtpreisliste mit mehreren Bereichen), hat die Vorrang vor
-    // der manuellen Auswahl oben - siehe kategorie-Feld in parseDaeppBetonPdf/
-    // -BetonpumpePdf.
-    const kategorie = a.kategorie || kategorieDefault;
-    const vpKnechtRoh = abVpKnechtVorschlagRoh({ ep_lieferant: a.ep_lieferant, vp_lieferant: a.vp_lieferant, waehrung: LIEF.da.waehrung });
-    const { data: neuArtikel, error: insErr } = await sb.from('artikel').insert({
-      lieferant_id: LIEFERANT_ID,
-      artikelnummer_lieferant: a.artikelnummer_lieferant,
-      artikelnummer_knecht: `${LIEF.kuerzel}_${a.artikelnummer_lieferant}`,
-      bezeichnung: a.bezeichnung || a.artikelnummer_lieferant,
-      einheit: a.einheit || 'Stk.',
-      ep_lieferant: a.ep_lieferant,
-      vp_lieferant: a.vp_lieferant,
-      vp_knecht: vpKnechtRoh != null ? Math.round(vpKnechtRoh) : null,
-      anmerkung: a.anmerkung || null,
-      foto_url: a.foto_url || null,
-      kategorie,
-      waehrung: LIEF.da.waehrung || 'CHF',
-      sync_easybill: true
-    }).select().single();
-    if(insErr){ showToast(friendlyError(insErr), true); continue; }
-    await sb.from('artikel_preis_verlauf').insert({
-      artikel_id: neuArtikel.id, alter_preis: null, neuer_preis: a.ep_lieferant,
-      quelle: 'abgleich', methode: 'google_sheet', lieferant_id: LIEFERANT_ID
-    });
-    anzahl++;
-  }
-  if(!anzahl){ showToast('Keine neuen Artikel übernommen.', true); return; }
-  showToast(`${anzahl} neue(r) Artikel übernommen.`);
-  const { data: artikel } = await sb.from('artikel').select('id,bezeichnung,einheit,ep_lieferant,vp_lieferant,waehrung,preis_gesperrt,artikelnummer_lieferant,foto_url').eq('lieferant_id', LIEFERANT_ID).order('bezeichnung');
-  ARTIKEL = artikel || [];
-  $('ergaenzenBody').innerHTML = '<tr><td colspan="3" class="hint">Übernommen - klicke "Start" für einen neuen Abgleich.</td></tr>';
 });
 
 
