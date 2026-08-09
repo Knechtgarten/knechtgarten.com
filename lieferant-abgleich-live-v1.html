@@ -429,6 +429,10 @@ input[type=number]{-moz-appearance:textfield;}
             <span class="spacer"></span>
             <button class="segbtn uebernehmen-btn ready" id="preisUebernehmenBtn">Daten übernehmen</button>
           </div>
+          <div class="segrow" style="margin-top:8px;">
+            <button class="segbtn on" id="ansichtAlleBtn" type="button" data-tip="Zeigt alle im Shop/Sheet gefundenen Artikel, auch unveraenderte - gut zur Kontrolle, ob der Abgleich wirklich alles durchsucht hat.">Alle Artikel</button>
+            <button class="segbtn" id="ansichtNeuBtn" type="button" data-tip="Zeigt nur, was Aufmerksamkeit braucht: neue Artikel und Preisaenderungen.">Nur Neu/Geändert</button>
+          </div>
         </div>
         <div class="tablewrap">
           <table class="data">
@@ -674,7 +678,7 @@ async function init(){
   renderKategorie();
   renderGoogleSheetFelder();
   renderKaListe('merklisten', 'kaMerklistenBody');
-  renderErgebnisListe([], []);
+  renderErgebnisListe([], [], []);
   renderNichtAbgeglichen([]);
 
   $('ladeHinweis').classList.add('hidden');
@@ -1274,6 +1278,7 @@ async function starteGoogleSheetAbgleich(){
 async function verarbeiteGefundeneArtikel(gefundeneArtikel, quelleLabel, methode){
   const bestandNachNr = new Map(ARTIKEL.filter(a => a.artikelnummer_lieferant).map(a => [normArtikelnr(a.artikelnummer_lieferant), a]));
   const zuPruefen = [];
+  const unveraendert = [];
   let fotosNachgetragen = 0;
   for(const sa of gefundeneArtikel){
     const bestand = bestandNachNr.get(normArtikelnr(sa.artikelnummer_lieferant));
@@ -1291,16 +1296,23 @@ async function verarbeiteGefundeneArtikel(gefundeneArtikel, quelleLabel, methode
 
     const alt = bestand.ep_lieferant;
     const preisUnveraendert = sa.ep_lieferant == null || (alt != null && alt === sa.ep_lieferant);
-    if(preisUnveraendert) continue;
+    if(preisUnveraendert){
+      // Auch unveraenderte Treffer sammeln (statt zu verwerfen) - damit in
+      // der Ansicht "Alle Artikel" sichtbar ist, dass der Abgleich diesen
+      // Artikel wirklich gefunden und geprueft hat, siehe renderErgebnisListe.
+      unveraendert.push({ artikel: bestand, gefundenerPreis: sa.ep_lieferant });
+      continue;
+    }
 
     zuPruefen.push({ artikel: bestand, neuerPreis: sa.ep_lieferant });
   }
   if(fotosNachgetragen) logAnhaengen(`${fotosNachgetragen} fehlendes Foto nachgetragen.`);
   const modus = effektiverModus();
   const neue = modus === 'ergaenzen' ? gefundeneArtikel.filter(sa => !bestandNachNr.has(normArtikelnr(sa.artikelnummer_lieferant))) : [];
-  renderErgebnisListe(zuPruefen, neue);
+  renderErgebnisListe(zuPruefen, neue, unveraendert);
   logAnhaengen(`${zuPruefen.length} Preisänderung${zuPruefen.length === 1 ? '' : 'en'} gefunden - manuelle Prüfung nötig.`);
   if(modus === 'ergaenzen') logAnhaengen(`${neue.length} neue Artikel gefunden.`);
+  logAnhaengen(`${unveraendert.length} Artikel unverändert.`);
 
   const gefundeneNummern = new Set(gefundeneArtikel.map(sa => normArtikelnr(sa.artikelnummer_lieferant)));
   const nichtGefunden = ARTIKEL.filter(a => a.artikelnummer_lieferant && !gefundeneNummern.has(normArtikelnr(a.artikelnummer_lieferant)));
@@ -1773,19 +1785,32 @@ function aktualisierePreisAbweichung(tr){
   const stufeClass = stufe === 2 ? ' stufe2' : stufe === 1 ? ' stufe1' : '';
   abwEl.innerHTML = `<span class="devtag${stufeClass}">${prozent >= 0 ? '+' : ''}${prozent.toFixed(1)}%</span>`;
 }
-// Zeigt JEDE gefundene Preisaenderung UND jeden neuen Artikel in EINER
-// gemeinsamen Liste zur manuellen Kontrolle (kein automatisches Uebernehmen
-// mehr, siehe verarbeiteGefundeneArtikel) - genau das gleiche Muster wie bei
-// der Schnellerfassung (Tool "Lieferanten"): ein "Neu"-Badge statt einer
+// Zeigt JEDE gefundene Preisaenderung, jeden neuen Artikel UND (im Modus
+// "Alle Artikel") auch unveraenderte Treffer in EINER gemeinsamen Liste zur
+// manuellen Kontrolle (kein automatisches Uebernehmen mehr, siehe
+// verarbeiteGefundeneArtikel) - genau das gleiche Muster wie bei der
+// Schnellerfassung (Tool "Lieferanten"): ein "Neu"-Badge statt einer
 // zweiten, separaten Box. Checkbox ist per Default angehakt - ausser bei
 // Warnstufe 2, dort muss bewusst aktiv angehakt werden (siehe Absprache:
 // kleine, erwartete Preisanpassungen bleiben bequem, grosse Ausreisser
 // brauchen einen bewussten Klick). Neue Artikel haben keine Abweichung -
-// dort steht stattdessen das "Neu"-Badge.
+// dort steht stattdessen das "Neu"-Badge. Unveraenderte Artikel (gefunden,
+// aber Preis identisch) werden standardmaessig mitgezeigt, damit erkennbar
+// ist, dass der Abgleich wirklich alles durchsucht hat, nicht nur, dass
+// zufaellig nichts Neues dabei war - der Umschalter oben blendet sie bei
+// Bedarf aus, um nur auf tatsaechlich zu pruefende Zeilen zu fokussieren.
+let PREIS_ZEILEN_LISTE = [];
 let NEUE_ARTIKEL_LISTE = [];
-function renderErgebnisListe(preisZeilen, neueZeilen){
+let UNVERAENDERT_LISTE = [];
+let ANSICHT_ALLE_ZEIGEN = true;
+function renderErgebnisListe(preisZeilen, neueZeilen, unveraendertZeilen){
+  PREIS_ZEILEN_LISTE = preisZeilen || [];
   NEUE_ARTIKEL_LISTE = neueZeilen || [];
-  const preisHtml = (preisZeilen || []).map(({artikel: a, neuerPreis}) => {
+  UNVERAENDERT_LISTE = unveraendertZeilen || [];
+  renderErgebnisTabelle();
+}
+function renderErgebnisTabelle(){
+  const preisHtml = PREIS_ZEILEN_LISTE.map(({artikel: a, neuerPreis}) => {
     const stufe = berechnePreisAbweichungStufe(a.ep_lieferant, neuerPreis);
     return `
     <tr data-typ="vorhanden" data-id="${a.id}" data-alt="${a.ep_lieferant ?? ''}">
@@ -1804,8 +1829,23 @@ function renderErgebnisListe(preisZeilen, neueZeilen){
       <td class="num">${fmtCHF(a.ep_lieferant) || '–'}</td>
       <td class="preis-abw"><span class="devtag" style="background:var(--accent-blue);color:var(--primary);">Neu</span></td>
     </tr>`).join('');
-  const gesamtHtml = preisHtml + neuHtml;
-  $('preisBody').innerHTML = gesamtHtml || '<tr><td colspan="5" class="hint" style="margin:0;padding:10px 4px;">Keine Preisänderungen oder neuen Artikel gefunden - wird nach dem nächsten Abgleich angezeigt.</td></tr>';
+  const unveraendertHtml = !ANSICHT_ALLE_ZEIGEN ? '' : UNVERAENDERT_LISTE.map(({artikel: a, gefundenerPreis}) => `
+    <tr data-typ="unveraendert">
+      <td></td>
+      <td><div class="artname">${a.bezeichnung}</div><div class="artmeta">${a.einheit}</div></td>
+      <td class="num">${fmtCHF(a.ep_lieferant) || '–'}</td>
+      <td class="num">${fmtCHF(gefundenerPreis) || '–'}</td>
+      <td class="preis-abw hint" style="margin:0;">Unverändert</td>
+    </tr>`).join('');
+  const gesamtHtml = preisHtml + neuHtml + unveraendertHtml;
+  if(gesamtHtml){
+    $('preisBody').innerHTML = gesamtHtml;
+  } else {
+    const ausgeblendet = !ANSICHT_ALLE_ZEIGEN && UNVERAENDERT_LISTE.length
+      ? ` (${UNVERAENDERT_LISTE.length} unveränderte Artikel ausgeblendet - "Alle Artikel" oben zum Anzeigen.)`
+      : '';
+    $('preisBody').innerHTML = `<tr><td colspan="5" class="hint" style="margin:0;padding:10px 4px;">Keine Preisänderungen oder neuen Artikel gefunden - wird nach dem nächsten Abgleich angezeigt.${ausgeblendet}</td></tr>`;
+  }
   $('preisBody').querySelectorAll('tr[data-typ="vorhanden"]').forEach(tr => {
     aktualisierePreisAbweichung(tr);
     tr.querySelector('.preis-neu').addEventListener('input', () => aktualisierePreisAbweichung(tr));
@@ -1816,7 +1856,15 @@ function renderErgebnisListe(preisZeilen, neueZeilen){
   const alleHabenKategorie = NEUE_ARTIKEL_LISTE.length > 0 && NEUE_ARTIKEL_LISTE.every(a => a.kategorie);
   $('kategorieCard').classList.toggle('kategorie-irrelevant', alleHabenKategorie);
   $('kategorieAutoHinweis').style.display = alleHabenKategorie ? '' : 'none';
+  const gesamtAnzahl = PREIS_ZEILEN_LISTE.length + NEUE_ARTIKEL_LISTE.length + UNVERAENDERT_LISTE.length;
+  const zuPruefenAnzahl = PREIS_ZEILEN_LISTE.length + NEUE_ARTIKEL_LISTE.length;
+  $('ansichtAlleBtn').textContent = `Alle Artikel (${gesamtAnzahl})`;
+  $('ansichtNeuBtn').textContent = `Nur Neu/Geändert (${zuPruefenAnzahl})`;
+  $('ansichtAlleBtn').classList.toggle('on', ANSICHT_ALLE_ZEIGEN);
+  $('ansichtNeuBtn').classList.toggle('on', !ANSICHT_ALLE_ZEIGEN);
 }
+$('ansichtAlleBtn').addEventListener('click', () => { ANSICHT_ALLE_ZEIGEN = true; renderErgebnisTabelle(); });
+$('ansichtNeuBtn').addEventListener('click', () => { ANSICHT_ALLE_ZEIGEN = false; renderErgebnisTabelle(); });
 $('preisCheckAll').addEventListener('change', () => {
   $('preisBody').querySelectorAll('.preis-check').forEach(cb => cb.checked = $('preisCheckAll').checked);
 });
@@ -1844,7 +1892,10 @@ function abVpKnechtVorschlagRoh(a){
 // Schnellerfassung landet beides in derselben Kontrolle statt in zwei
 // getrennten Boxen mit zwei Buttons.
 $('preisUebernehmenBtn').addEventListener('click', async () => {
-  const zeilen = Array.from($('preisBody').querySelectorAll('tr[data-typ]')).filter(tr => tr.querySelector('.preis-check').checked);
+  // "unveraendert"-Zeilen haben keine Checkbox (nichts zu uebernehmen) -
+  // .preis-check kann bei ihnen also null sein, darum vorher filtern statt
+  // direkt auf .checked zuzugreifen.
+  const zeilen = Array.from($('preisBody').querySelectorAll('tr[data-typ]')).filter(tr => tr.querySelector('.preis-check')?.checked);
   if(!zeilen.length){ showToast('Keine Zeilen zum Übernehmen markiert.', true); return; }
   const kategorieDefault = LIEF.da.kategorie_default || 'material';
   let anzahlPreis = 0, anzahlNeu = 0;
@@ -1909,6 +1960,9 @@ $('preisUebernehmenBtn').addEventListener('click', async () => {
   // zeigen - sie ist ja gerade erst uebernommen worden.
   const { data: artikel } = await sb.from('artikel').select('id,bezeichnung,einheit,ep_lieferant,vp_lieferant,waehrung,preis_gesperrt,artikelnummer_lieferant,foto_url').eq('lieferant_id', LIEFERANT_ID).order('bezeichnung');
   ARTIKEL = artikel || [];
+  PREIS_ZEILEN_LISTE = []; NEUE_ARTIKEL_LISTE = []; UNVERAENDERT_LISTE = [];
+  $('ansichtAlleBtn').textContent = 'Alle Artikel (0)';
+  $('ansichtNeuBtn').textContent = 'Nur Neu/Geändert (0)';
   $('preisBody').innerHTML = '<tr><td colspan="5" class="hint">Übernommen - klicke "Start" für einen neuen Abgleich.</td></tr>';
 });
 
