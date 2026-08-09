@@ -364,6 +364,8 @@ tr.ezrow .ez-menge{width:50px;text-align:right;}
 tr.ezrow .ez-einheit{width:50px;}
 tr.ezrow .ez-preis{width:65px;text-align:right;}
 tr.ezrow .ez-del{margin-left:4px;}
+tr.ezunvollstaendig{background:#fff6e0;}
+tr.ezunvollstaendig input{background:#fffaf0;}
 .berechnet-val{color:var(--muted);font-size:10.5px;margin-right:4px;}
 input.korrektur-feld{width:44px;border:1px solid var(--line);border-radius:5px;padding:3px 5px;
   font:inherit;font-size:11px;text-align:right;background:#fff;}
@@ -1045,6 +1047,7 @@ let eingabefelder = [];       // [{id,name,einheit}]
 let auswahlfelder = [];       // [{id,name,mehrfachauswahl,optionen:[{id,name}]}]
 let ressourcenzeilen = [];    // [{optionId, arbeitsschritt, kategorie, bezeichnung, einheit, preis, menge_ausdruck}]
 let teilschritte = [];        // [{id, beschreibung, optionIds}] - optionIds=null wenn kein Auswahlfeld (immer aktiv)
+let freitextVorlagen = [];    // [{id, optionId, kategorie, bezeichnung, einheit, notiz, mengeVorschlag, preisVorschlag}] - optionId=null wenn immer aktiv (kein Auswahlfeld)
 
 // Tagessatz-Modell (Offertentyp "Allgemein") - nutzt seit der Umstellung
 // dieselbe Struktur wie Formel (arbeitsschritt > teilschritt > auswahlfeld >
@@ -1601,6 +1604,7 @@ async function ladeFormelDaten(otId){
           staffelgruppe ( name, titel, staffelstufe ( menge_von, menge_bis, artikel ( vp_knecht ) ) ),
           zonengruppe ( name, titel, zone ( artikel ( vp_knecht ), zone_plz ( plz ) ) ),
           sonderposition_typ ( name, titel, einheit, mwst_satz_pct, lieferwagen_std_artikel_id, lieferwagen_transport_ort, lieferwagen_std_artikel:artikel!lieferwagen_std_artikel_id ( vp_knecht, bezeichnung ) ) ),
+        option_freitext_vorlage ( id, kategorie, bezeichnung, einheit, notiz, menge_vorschlag, preis_vorschlag ),
         auswahlfeld ( id, name,
           auswahloption ( id, name, beschreibung, reihenfolge, ist_standard, mengenoption, mengenoption_einheit, mehrfachauswahl, hinweistext, hinweisbild_url,
             ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, artikel_id,
@@ -1608,7 +1612,8 @@ async function ladeFormelDaten(otId){
               artikel ( bezeichnung, einheit, vp_knecht ),
               staffelgruppe ( name, titel, staffelstufe ( menge_von, menge_bis, artikel ( vp_knecht ) ) ),
               zonengruppe ( name, titel, zone ( artikel ( vp_knecht ), zone_plz ( plz ) ) ),
-              sonderposition_typ ( name, titel, einheit, mwst_satz_pct, lieferwagen_std_artikel_id, lieferwagen_transport_ort, lieferwagen_std_artikel:artikel!lieferwagen_std_artikel_id ( vp_knecht, bezeichnung ) ) ) ) ) )`)
+              sonderposition_typ ( name, titel, einheit, mwst_satz_pct, lieferwagen_std_artikel_id, lieferwagen_transport_ort, lieferwagen_std_artikel:artikel!lieferwagen_std_artikel_id ( vp_knecht, bezeichnung ) ) ),
+            option_freitext_vorlage ( id, kategorie, bezeichnung, einheit, notiz, menge_vorschlag, preis_vorschlag ) ) ) )`)
     .eq('offertentyp_id', otId).eq('ausgeblendet', false).order('reihenfolge');
   if(asErr) throw asErr;
 
@@ -1644,11 +1649,19 @@ async function ladeFormelDaten(otId){
       sonderpositionTyp: rz.sonderposition_typ
     });
   }
+  freitextVorlagen = [];
+  function pushFreitextVorlagen(liste, optionId){
+    (liste || []).forEach(v => freitextVorlagen.push({
+      id: v.id, optionId, kategorie: v.kategorie, bezeichnung: v.bezeichnung,
+      einheit: v.einheit, notiz: v.notiz, mengeVorschlag: v.menge_vorschlag, preisVorschlag: v.preis_vorschlag
+    }));
+  }
   (arbeitsschritte || []).forEach(as => {
     (as.teilschritt || []).filter(ts => !ts.ausgeblendet).forEach(ts => {
       // Teilschritt ohne Auswahlfeld: seine Ressourcenzeilen gelten immer
       // (kein optionId, keine Buttons fuer den Mitarbeiter).
       (ts.ressourcenzeile || []).forEach(rz => pushRz(rz, null, as.name, ts.name));
+      pushFreitextVorlagen(ts.option_freitext_vorlage, null);
 
       // Menge-Anzeige (Tool B: Ruler-Icon beim Teilschritt-Titel) - rein
       // informativ, siehe renderTeilflaechen()/recalc(). Hoechstens eines von
@@ -1669,6 +1682,7 @@ async function ladeFormelDaten(otId){
         });
         (af.auswahloption || []).forEach(opt => {
           (opt.ressourcenzeile || []).forEach(rz => pushRz(rz, opt.id, as.name, ts.name));
+          pushFreitextVorlagen(opt.option_freitext_vorlage, opt.id);
         });
         teilschritte.push({ id: ts.id, beschreibung: ts.beschreibung, optionIds: (af.auswahloption || []).map(o => o.id), anzeigeEingabefeldId, anzeigeEingabefeldEinheit, anzeigeTermId, anzeigeTermEinheit, anzeigeTermAusdruck });
       }else{
@@ -2478,6 +2492,10 @@ async function speichernKlick(){
       await speichereAenderungen(titelVal);
     }
     $saveStatus.className = 'status ok';
+    if(unvollstaendigeFreitextZeilen.length){
+      const namen = [...new Set(unvollstaendigeFreitextZeilen.map(z => z.bezeichnung))].join(', ');
+      showToast(`Gespeichert - aber noch offen: ${namen} (Menge oder Preis fehlt noch).`, true);
+    }
   }catch(e){
     console.error(e);
     $saveStatus.textContent = 'Fehler beim Speichern: ' + (e.message || e);
@@ -2656,8 +2674,32 @@ $optionenTextBlock.addEventListener('input', () => { optionenTextManuellBearbeit
 // (null = keine Teilflaeche, z.B. Tagessatz) - bewusst keine kopierte Id/kein
 // kopierter Key, damit die Zuordnung automatisch stimmt, auch wenn sich
 // tf.clientKey/tf.dbId nach dem ersten Speichern noch aendert.
-let eigeneZeilen = []; // [{clientKey, dbId, kategorie, bezeichnung, menge, einheit, preis, tfRef}]
+let eigeneZeilen = []; // [{clientKey, dbId, kategorie, bezeichnung, menge, einheit, preis, tfRef, freitextVorlageId}]
 let eigeneZeileCounter = 0;
+// Wird bei jedem recalc() frisch gesammelt (siehe renderEigeneZeilenFuerKategorie)
+// - fuer die Sammel-Warnung beim Speichern, welche Freitext-Positionen noch
+// unvollstaendig sind.
+let unvollstaendigeFreitextZeilen = [];
+
+// Freitext-Position (Tool B: option_freitext_vorlage) - erzeugt automatisch
+// eine ganz normale "Eigene Position" pro Teilflaeche, sobald die zugehoerige
+// Option (oder immer, bei optionId=null) aktiv ist - genau einmal pro
+// Teilflaeche+Vorlage (freitextVorlageId verhindert Duplikate bei jedem
+// erneuten Aufruf). Menge/Preis kommen als Vorschlag aus der Vorlage (0,
+// falls keiner hinterlegt ist) und bleiben danach ganz normal editierbar,
+// so wie jede andere Eigene Position.
+function seedeFreitextZeilen(tf){
+  freitextVorlagen.forEach(v => {
+    if(v.optionId != null && !tf.selectedOptions.has(v.optionId)) return;
+    if(eigeneZeilen.some(z => z.freitextVorlageId === v.id && z.tfRef === tf)) return;
+    eigeneZeileCounter++;
+    eigeneZeilen.push({
+      clientKey: 'ez' + eigeneZeileCounter, dbId: null, kategorie: v.kategorie, bezeichnung: v.bezeichnung,
+      menge: v.mengeVorschlag ?? 0, einheit: v.einheit || '', preis: v.preisVorschlag ?? 0,
+      tfRef: tf, freitextVorlageId: v.id
+    });
+  });
+}
 
 // Korrektur einzelner berechneter Zeilen (Menge/Preis ueberschreiben, ohne den
 // berechneten Wert zu verlieren) - siehe addRow() weiter unten.
@@ -2694,8 +2736,15 @@ function renderEigeneZeilenFuerKategorie(kat, container, tf){
     const betrag = rundeCHF((z.menge || 0) * (z.preis || 0));
     summe += betrag;
     snapshotZeile(KAT_LABEL[kat], { bezeichnung: z.bezeichnung, menge: z.menge || 0, einheit: z.einheit || '', preis: z.preis || 0, betrag, geloescht: false });
+    // Aus einer Freitext-Position-Vorlage entstandene Zeile ohne Menge ODER
+    // Preis (weder Vorschlag noch bereits eingetragen) optisch markieren -
+    // sonst sieht man beim Ueberfliegen der Kostentabelle nicht, dass hier
+    // noch ein echter Wert fehlt statt bewusst 0 zu betragen.
+    const istUnvollstaendig = z.freitextVorlageId != null && ((z.menge || 0) === 0 || (z.preis || 0) === 0);
+    if(istUnvollstaendig) unvollstaendigeFreitextZeilen.push(z);
     const tr = document.createElement('tr');
-    tr.className = 'crow ezrow';
+    tr.className = 'crow ezrow' + (istUnvollstaendig ? ' ezunvollstaendig' : '');
+    tr.title = istUnvollstaendig ? 'Menge oder Preis noch nicht erfasst' : '';
     tr.innerHTML = `<td><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" class="ez-bez" value="${z.bezeichnung}"></td>
       <td style="text-align:right"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" class="ez-menge" type="number" step="0.01" value="${z.menge}"></td>
       <td><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" class="ez-einheit" value="${z.einheit}"></td>
@@ -2746,7 +2795,8 @@ async function ladeEigeneZeilen(offerteId){
     eigeneZeileCounter++;
     return {
       clientKey: 'ez' + eigeneZeileCounter, dbId: r.id, kategorie: r.kategorie, bezeichnung: r.bezeichnung, menge: r.menge, einheit: r.einheit, preis: r.preis,
-      tfRef: r.teilflaeche_id ? (teilflaechen.find(t => t.dbId === r.teilflaeche_id) || null) : null
+      tfRef: r.teilflaeche_id ? (teilflaechen.find(t => t.dbId === r.teilflaeche_id) || null) : null,
+      freitextVorlageId: r.freitext_vorlage_id
     };
   });
 }
@@ -2756,7 +2806,7 @@ async function speichereEigeneZeilen(offerteId){
   if(delErr) throw delErr;
   const echte = eigeneZeilen.filter(z => z.bezeichnung.trim());
   if(echte.length){
-    const rows = echte.map((z, i) => ({ offerte_id: offerteId, kategorie: z.kategorie, bezeichnung: z.bezeichnung.trim(), menge: z.menge || 0, einheit: z.einheit || '', preis: z.preis || 0, reihenfolge: i, teilflaeche_id: z.tfRef?.dbId ?? null }));
+    const rows = echte.map((z, i) => ({ offerte_id: offerteId, kategorie: z.kategorie, bezeichnung: z.bezeichnung.trim(), menge: z.menge || 0, einheit: z.einheit || '', preis: z.preis || 0, reihenfolge: i, teilflaeche_id: z.tfRef?.dbId ?? null, freitext_vorlage_id: z.freitextVorlageId ?? null }));
     const { error: insErr } = await sb.from('offerte_eigene_zeile').insert(rows);
     if(insErr) throw insErr;
   }
@@ -2837,6 +2887,7 @@ function versteckeOptionHinweis(){
 async function recalc(){
   if(!offertentypId) return;
   snapshotGruppen = {};
+  unvollstaendigeFreitextZeilen = [];
   try{
     let grandTotal = 0;
 
@@ -3146,6 +3197,7 @@ async function recalc(){
       // Kostenblock in ihrer eigenen Karte (siehe unten).
       $costbody.innerHTML = '';
       for(const [tfIndex, tf] of teilflaechen.entries()){
+        seedeFreitextZeilen(tf);
         const tfMenge = tf.menge || 1;
         const zugFaktorTf = zi => (zi.zugangsfaktoren?.[(tf.zugaenglichkeitStufe || 2) - 1]) ?? 1;
         // Mengenoption (Tool B, Option bearbeiten): multipliziert die Menge
