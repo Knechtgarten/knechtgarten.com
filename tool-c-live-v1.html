@@ -1050,7 +1050,23 @@ function amAktualisiereGesperrtButton(){
     btn.title = titel;
   });
 }
-document.querySelectorAll('.am-gesperrt-btn').forEach(btn => btn.addEventListener('click', () => { amGesperrt = !amGesperrt; amAktualisiereGesperrtButton(); }));
+document.querySelectorAll('.am-gesperrt-btn').forEach(btn => btn.addEventListener('click', () => {
+  amGesperrt = !amGesperrt;
+  amAktualisiereGesperrtButton();
+  if(amGesperrt){
+    // Beim Sperren eine bereits eingetragene Sondermarge sofort anwenden -
+    // bis jetzt war sie (bei entsperrtem Preis) nur Text ohne Wirkung.
+    const raw = $('amMargeKnecht').value.trim();
+    const einstand = amEinstandspreisChf();
+    if(raw !== ''){
+      const marge = parseFloat(raw);
+      if(!isNaN(marge) && marge < 100 && einstand != null){
+        $('amVpKnecht').value = (einstand / (1 - marge / 100)).toFixed(2);
+      }
+    }
+  }
+  amAktualisiereMargen();
+}));
 
 // ---------------------------------------------------------------------------
 // Marge Lieferant/Knecht: reine Live-Berechnung, wird nirgends gespeichert.
@@ -1068,10 +1084,13 @@ function amEinstandspreisChf(){
   const wechselkurs = aktuellerWechselkurs($('amWaehrung').value.trim().toUpperCase());
   return ek * wechselkurs;
 }
-// VP Knecht (Vorschlagswert, wird NICHT automatisch ins Feld geschrieben) -
-// pro Lieferant exklusiv einer von zwei Wegen, nie eine Mischung/Maximum:
+// VP Knecht (Vorschlagswert) - pro Lieferant exklusiv einer von zwei Wegen,
+// nie eine Mischung/Maximum:
 // - vp_lieferant_gleich_vp_knecht = true:  Endkundenpreis Lieferant x (1 + Zuschlag%)
 // - vp_lieferant_gleich_vp_knecht = false: Einstand / (1 - Marge%)
+// Solange der Preis NICHT gesperrt ist, wird dieser Vorschlag von
+// amAktualisiereMargen() live ins Feld geschrieben (jede EP-Aenderung wirkt
+// sofort) - erst das explizite Schloss friert den Preis ein.
 function amVpKnechtVorschlagRoh(einstand, minMarge){
   const da = LIEFERANTEN.find(l => l.id === $('amLieferant').value)?.lieferant_datenabgleich;
   const wechselkurs = aktuellerWechselkurs($('amWaehrung').value.trim().toUpperCase());
@@ -1104,6 +1123,13 @@ function amAktualisiereMargen(){
   const vorschlagRoh = amVpKnechtVorschlagRoh(einstand, minMarge);
   const vorschlag = vorschlagRoh != null ? Math.round(vorschlagRoh) : null;
   $('amVpKnecht').placeholder = vorschlag != null ? vorschlag.toFixed(2) : '—';
+
+  // Solange nicht gesperrt, folgt VP Knecht live dem Standard-Vorschlag -
+  // jede Aenderung an EP Lieferant wirkt sich sofort aus. Die Sondermarge
+  // greift hier bewusst NICHT (siehe amMargeKnecht-Handler unten) - erst das
+  // Schloss macht aus ihr eine dauerhafte, echte Ausnahme statt einer live
+  // wirksamen Berechnung.
+  if(!amGesperrt) $('amVpKnecht').value = vorschlag != null ? vorschlag.toFixed(2) : '';
 
   const vpKnechtRaw = $('amVpKnecht').value.trim();
   const vpKnechtEingegeben = vpKnechtRaw === '' ? null : parseFloat(vpKnechtRaw);
@@ -1142,6 +1168,12 @@ function amWaehrungAusLieferantSetzen(){
 ['amEpLief','amVpLief','amVpKnecht'].forEach(id => $(id).addEventListener('input', amAktualisiereMargen));
 $('amLieferant').addEventListener('change', () => { amWaehrungAusLieferantSetzen(); amAktualisiereMargen(); amMwstVorschlagFuellen(); });
 $('amMargeKnecht').addEventListener('input', () => {
+  // Wirkt erst, wenn der Preis gesperrt ist - bei entsperrtem Preis wird nur
+  // der Text im Feld gespeichert, ohne VP Knecht zu beeinflussen (der folgt
+  // ja live dem Standard-Vorschlag, siehe amAktualisiereMargen). Der Schloss-
+  // Klick-Handler unten wendet eine bereits eingetragene Sondermarge beim
+  // Sperren sofort an.
+  if(!amGesperrt) return;
   const raw = $('amMargeKnecht').value.trim();
   const einstand = amEinstandspreisChf();
   if(raw === ''){
@@ -1194,13 +1226,12 @@ $('amSave').addEventListener('click', async () => {
   const vpKnechtEingabe = parseFloat($('amVpKnecht').value);
   const vp_knecht = !isNaN(vpKnechtEingabe) ? vpKnechtEingabe
     : amVpKnechtVorschlag(amEinstandspreisChf(), LIEFERANTEN.find(l => l.id === lieferant_id)?.lieferant_datenabgleich?.minimum_marge_prozent);
-  // Sondermarge Artikel % ausgefuellt -> automatisch mitsperren (bewusste
-  // Preis-Ausnahme soll auch vor kuenftigen automatischen Neuberechnungen
-  // geschuetzt sein). Manuelles Schloss bleibt zusaetzlich moeglich. Das Feld
-  // zeigt die implizite Marge nur noch als Platzhalter an (siehe
-  // amAktualisiereMargen) - ein echter .value kommt ausschliesslich vom
-  // bewussten Eintippen, daher reicht die reine Leer-Pruefung hier.
-  const preis_gesperrt = amGesperrt || $('amMargeKnecht').value.trim() !== '';
+  // Gesperrt ist ausschliesslich das explizite Schloss - eine eingetragene
+  // Sondermarge allein sperrt NICHT mehr automatisch (das war der Fehler:
+  // VP Knecht folgte dann nie mehr live dem EP Lieferant). Ohne Schloss wird
+  // VP Knecht immer frisch aus dem aktuellen EP berechnet, auch wenn im
+  // Sondermarge-Feld noch Text steht (siehe amAktualisiereMargen).
+  const preis_gesperrt = amGesperrt;
 
   const payload = {
     bezeichnung, kategorie: $('amKategorie').value, einheit, lieferant_id,
