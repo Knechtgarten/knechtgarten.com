@@ -724,6 +724,7 @@ input[type=number]{-moz-appearance:textfield;}
               <div class="fld" style="margin:0;"><label>Stundenansatz-Artikel für Offerten-Gesamtmenge</label><button type="button" class="btn" id="lwStundenBtn" style="width:100%;text-align:left;background:#fff;color:var(--ink);border:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Artikel wählen…</button></div>
               <div class="fld" style="margin:0;"><label>km-Ansatz-Artikel für Offerten-Gesamtmenge</label><button type="button" class="btn" id="lwKmBtn" style="width:100%;text-align:left;background:#fff;color:var(--ink);border:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Artikel wählen…</button></div>
               <div class="fld" style="margin:0;"><label>Stundenansatz-Artikel Vorarbeiter</label><button type="button" class="btn" id="lwVorarbeiterBtn" style="width:100%;text-align:left;background:#fff;color:var(--ink);border:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Artikel wählen…</button></div>
+              <div class="fld" style="margin:0;"><label>Stundenansatz-Artikel Vorarbeiter Poolbau</label><button type="button" class="btn" id="lwVorarbeiterPoolbauBtn" style="width:100%;text-align:left;background:#fff;color:var(--ink);border:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Artikel wählen…</button></div>
               <div class="fld" style="margin:0;"><label>Stundenansatz-Artikel Gartenarbeiter</label><button type="button" class="btn" id="lwGartenarbeiterBtn" style="width:100%;text-align:left;background:#fff;color:var(--ink);border:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Artikel wählen…</button></div>
               <div class="fld" style="margin:0;max-width:220px;"><label>Stunden pro Arbeitstag</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="lwStundenProTag" type="number" step="0.1" min="0.1" placeholder="z.B. 8.5"></div>
             </div>
@@ -2302,7 +2303,7 @@ const LIEFERWAGEN_TRANSPORT_KARTEN = [
 let LWT_ZEILEN = {};
 async function ladeLwtZeilen(){
   const { data, error } = await sb.from('sonderposition_typ')
-    .select('id,name,titel,lieferwagen_std_artikel_id,lieferwagen_km_artikel_id,lieferwagen_transport_ort')
+    .select('id,name,titel,kategorie,lieferwagen_std_artikel_id,lieferwagen_km_artikel_id,lieferwagen_transport_ort')
     .not('lieferwagen_transport_ort', 'is', null)
     .order('erstellt_am');
   if(error){ console.error(error); return; }
@@ -2317,12 +2318,22 @@ function lwtArtikelZelleHtml(sp, feld, klasse){
 }
 function renderLwtZeilen(ort, bodyId){
   const zeilen = LWT_ZEILEN[ort] || [];
-  const rows = zeilen.map(sp => `<tr data-id="${sp.id}">
+  const rows = zeilen.map(sp => {
+    // km-Preis-Artikel ergibt nur bei der Fahrzeug-Zeile (Logistik) Sinn -
+    // bei Personal-Zeilen (Chauffeur/Vorarbeiter) wird immer nach Stunden
+    // entlohnt, nie nach Kilometern. Solange noch kein Std-Artikel gewaehlt
+    // ist (kategorie unbekannt), das km-Feld sicherheitshalber trotzdem
+    // zeigen - erst nach der Wahl weiss man, ob es Personal ist.
+    const kmZelle = sp.kategorie === 'personal'
+      ? '<span class="hint" style="margin:0;">–</span>'
+      : lwtArtikelZelleHtml(sp, 'lieferwagen_km_artikel_id', 'lwtKmArtikelBtn');
+    return `<tr data-id="${sp.id}">
     <td><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="text" class="lwtTitelFeld" value="${sp.titel || ''}"></td>
     <td>${lwtArtikelZelleHtml(sp, 'lieferwagen_std_artikel_id', 'lwtArtikelBtn')}</td>
-    <td>${lwtArtikelZelleHtml(sp, 'lieferwagen_km_artikel_id', 'lwtKmArtikelBtn')}</td>
+    <td>${kmZelle}</td>
     <td><button class="icobtn danger admin-only lwtDeleteBtn" data-id="${sp.id}" title="Position entfernen">${ICON.trash}</button></td>
-  </tr>`).join('');
+  </tr>`;
+  }).join('');
   const draftRow = `<tr class="lwtDraftRow admin-only" data-ort="${ort}">
     <td><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="text" class="lwtTitelFeld" placeholder="z.B. Lieferwagenchauffeur ${ort}"></td>
     <td></td>
@@ -2408,6 +2419,7 @@ function attachLwtHandlers(ort, bodyId){
 let lwStundenArtikelId = null;
 let lwKmArtikelId = null;
 let lwVorarbeiterArtikelId = null;
+let lwVorarbeiterPoolbauArtikelId = null;
 let lwGartenarbeiterArtikelId = null;
 
 async function loadLieferwagenKonfiguration(){
@@ -2416,10 +2428,12 @@ async function loadLieferwagenKonfiguration(){
   lwStundenArtikelId = data.stundenansatz_artikel_id;
   lwKmArtikelId = data.km_ansatz_artikel_id;
   lwVorarbeiterArtikelId = data.vorarbeiter_artikel_id;
+  lwVorarbeiterPoolbauArtikelId = data.vorarbeiter_poolbau_artikel_id;
   lwGartenarbeiterArtikelId = data.gartenarbeiter_artikel_id;
   $('lwStundenBtn').textContent = lwStundenArtikelId ? artikelBezeichnung(lwStundenArtikelId) : 'Artikel wählen…';
   $('lwKmBtn').textContent = lwKmArtikelId ? artikelBezeichnung(lwKmArtikelId) : 'Artikel wählen…';
   $('lwVorarbeiterBtn').textContent = lwVorarbeiterArtikelId ? artikelBezeichnung(lwVorarbeiterArtikelId) : 'Artikel wählen…';
+  $('lwVorarbeiterPoolbauBtn').textContent = lwVorarbeiterPoolbauArtikelId ? artikelBezeichnung(lwVorarbeiterPoolbauArtikelId) : 'Artikel wählen…';
   $('lwGartenarbeiterBtn').textContent = lwGartenarbeiterArtikelId ? artikelBezeichnung(lwGartenarbeiterArtikelId) : 'Artikel wählen…';
   $('lwStundenProTag').value = data.stunden_pro_arbeitstag ?? '';
 }
@@ -2435,6 +2449,10 @@ $('lwVorarbeiterBtn').addEventListener('click', () => {
   if(aktuelleRolle !== 'admin') return;
   openArtikelPicker(a => { lwVorarbeiterArtikelId = a.id; $('lwVorarbeiterBtn').textContent = a.bezeichnung; });
 });
+$('lwVorarbeiterPoolbauBtn').addEventListener('click', () => {
+  if(aktuelleRolle !== 'admin') return;
+  openArtikelPicker(a => { lwVorarbeiterPoolbauArtikelId = a.id; $('lwVorarbeiterPoolbauBtn').textContent = a.bezeichnung; });
+});
 $('lwGartenarbeiterBtn').addEventListener('click', () => {
   if(aktuelleRolle !== 'admin') return;
   openArtikelPicker(a => { lwGartenarbeiterArtikelId = a.id; $('lwGartenarbeiterBtn').textContent = a.bezeichnung; });
@@ -2446,6 +2464,7 @@ $('lwSpeichernBtn').addEventListener('click', async () => {
     stundenansatz_artikel_id: lwStundenArtikelId,
     km_ansatz_artikel_id: lwKmArtikelId,
     vorarbeiter_artikel_id: lwVorarbeiterArtikelId,
+    vorarbeiter_poolbau_artikel_id: lwVorarbeiterPoolbauArtikelId,
     gartenarbeiter_artikel_id: lwGartenarbeiterArtikelId,
     stunden_pro_arbeitstag: parseFloat($('lwStundenProTag').value) || null
   }).eq('id', true);
