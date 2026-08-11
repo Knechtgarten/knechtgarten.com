@@ -197,7 +197,7 @@ main.wrap{padding-top:48px;padding-bottom:60px;}
 .optwrap{display:inline-flex;align-items:stretch;}
 .lwswitch{position:relative;display:inline-block;width:38px;height:21px;flex-shrink:0;vertical-align:middle;}
 .lwswitch input{opacity:0;width:0;height:0;}
-.lwswitchslider{position:absolute;inset:0;background:var(--line);border-radius:21px;cursor:pointer;transition:background-color .15s;}
+.lwswitchslider{position:absolute;inset:0;background:#2f8f46;border-radius:21px;cursor:pointer;transition:background-color .15s;}
 .lwswitchslider::before{position:absolute;content:"";height:17px;width:17px;left:2px;top:2px;background:#fff;border-radius:50%;transition:transform .15s;box-shadow:0 1px 2px rgba(0,0,0,.25);}
 .lwswitch input:checked + .lwswitchslider{background:var(--primary);}
 .lwswitch input:checked + .lwswitchslider::before{transform:translateX(17px);}
@@ -1216,7 +1216,7 @@ async function ladeLogistikSammelpositionen(){
 
 async function ladeLieferwagenKonfiguration(){
   const { data, error } = await sb.from('lieferwagen_konfiguration')
-    .select('herkunft_adresse, stunden_pro_arbeitstag, stundenansatz_artikel:stundenansatz_artikel_id(vp_knecht), km_ansatz_artikel:km_ansatz_artikel_id(vp_knecht), vorarbeiter_artikel:vorarbeiter_artikel_id(vp_knecht), gartenarbeiter_artikel:gartenarbeiter_artikel_id(vp_knecht)')
+    .select('herkunft_adresse, stunden_pro_arbeitstag, stundenansatz_artikel:stundenansatz_artikel_id(vp_knecht), km_ansatz_artikel:km_ansatz_artikel_id(vp_knecht), vorarbeiter_artikel:vorarbeiter_artikel_id(vp_knecht), vorarbeiter_poolbau_artikel:vorarbeiter_poolbau_artikel_id(vp_knecht), gartenarbeiter_artikel:gartenarbeiter_artikel_id(vp_knecht)')
     .eq('id', true).single();
   if(error){ console.error(error); return; }
   lieferwagenKonfig = {
@@ -1224,6 +1224,7 @@ async function ladeLieferwagenKonfiguration(){
     stundenpreis: data.stundenansatz_artikel?.vp_knecht ?? null,
     kmpreis: data.km_ansatz_artikel?.vp_knecht ?? null,
     vorarbeiterPreis: data.vorarbeiter_artikel?.vp_knecht ?? null,
+    vorarbeiterPoolbauPreis: data.vorarbeiter_poolbau_artikel?.vp_knecht ?? null,
     gartenarbeiterPreis: data.gartenarbeiter_artikel?.vp_knecht ?? null,
     stundenProArbeitstag: data.stunden_pro_arbeitstag ?? null
   };
@@ -3487,17 +3488,20 @@ async function recalc(){
         // Zeile unten in der Kostentabelle umschaltbar war. Bewusst als
         // Ein/Aus-Schalter direkt bei der Lieferwagen-Zeile statt als
         // eigene Buttons oben rechts in der Karte (siehe Absprache).
-        const lwModusToggleHtml = `<span style="font-size:11px;color:var(--muted);">Std</span>
-            <label class="lwswitch"><input type="checkbox" id="lwModusToggle"${lieferwagenModus === 'distanz' ? ' checked' : ''}><span class="lwswitchslider"></span></label>
-            <span style="font-size:11px;color:var(--muted);">Km</span>
-            <span style="width:1px;height:18px;background:var(--line);"></span>`;
+        const stdAktiv = lieferwagenModus !== 'distanz';
+        const kmAktiv = lieferwagenModus === 'distanz';
+        const lwModusToggleHtml = `<span style="font-size:11px;${stdAktiv ? 'font-weight:700;color:#2f8f46;' : 'color:var(--muted);'}">Std</span>
+            <label class="lwswitch"><input type="checkbox" id="lwModusToggle"${kmAktiv ? ' checked' : ''}><span class="lwswitchslider"></span></label>
+            <span style="font-size:11px;${kmAktiv ? 'font-weight:700;color:var(--ink);' : 'color:var(--muted);'}">Km</span>`;
         $lwFrequenzKarte.innerHTML = `<div style="font-weight:700;color:var(--ink);margin-bottom:6px;">Lieferwagenfahrzeit${anzahlArbeitstage ? ` <span style="font-weight:400;color:var(--muted);font-size:12px;">– ${anzahlArbeitstage} Arbeitstag${anzahlArbeitstage === 1 ? '' : 'e'} berechnet</span>` : ''}</div>` +
-          lwPosten.map(p => `<div data-posten="${p.key}" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px;">
-            <span style="min-width:120px;font-size:12.5px;color:var(--muted);">${p.label}</span>
-            ${p.key === 'lieferwagen' ? lwModusToggleHtml : ''}
-            <button type="button" class="opt${p.aktuell === 'aus' ? ' on' : ''}" data-freq="aus">Aus</button>
-            <button type="button" class="opt${p.aktuell === 'woechentlich' ? ' on' : ''}" data-freq="woechentlich">Wöchentlich</button>
-            <button type="button" class="opt${p.aktuell === 'taeglich' ? ' on' : ''}" data-freq="taeglich">Täglich</button>
+          lwPosten.map(p => `<div data-posten="${p.key}" style="display:grid;grid-template-columns:120px 110px auto;align-items:center;gap:8px;margin-top:6px;">
+            <span style="font-size:12.5px;color:var(--muted);">${p.label}</span>
+            <span style="display:flex;align-items:center;gap:6px;">${p.key === 'lieferwagen' ? lwModusToggleHtml : ''}</span>
+            <span style="display:flex;gap:6px;flex-wrap:wrap;">
+              <button type="button" class="opt${p.aktuell === 'aus' ? ' on' : ''}" data-freq="aus">Aus</button>
+              <button type="button" class="opt${p.aktuell === 'woechentlich' ? ' on' : ''}" data-freq="woechentlich">Wöchentlich</button>
+              <button type="button" class="opt${p.aktuell === 'taeglich' ? ' on' : ''}" data-freq="taeglich">Täglich</button>
+            </span>
           </div>`).join('');
         $('lwModusToggle').addEventListener('change', () => { lieferwagenModus = $('lwModusToggle').checked ? 'distanz' : 'zeit'; recalc(); });
         lwPosten.forEach(p => {
