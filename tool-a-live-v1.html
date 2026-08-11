@@ -3295,6 +3295,33 @@ async function recalc(){
           // Hin- und Rueckfahrt zur Baustelle (lieferwagenModus). Die Menge-
           // Formel der Zeile ergibt weiterhin die Anzahl Fahrten, genau wie
           // bei jeder anderen Sonderposition frei editierbar.
+          // Lieferwagentransport "direkt" (ohne Adressliste/Distanzberechnung):
+          // fuer einzelne Sondertransporte bei einem Arbeitsschritt (z.B. "2
+          // Std fuer einen Sondertransport von Poolmaterial") - die Menge-
+          // Formel der Ressourcenzeile ergibt direkt die Stunden- bzw.
+          // Kilometerzahl statt einer Anzahl Fahrten. Achtung: wechselt die
+          // Offerte den globalen Km/Std-Schalter, gilt dieselbe Formel-Zahl
+          // dann als km statt Std (oder umgekehrt) - bei Bedarf die Formel
+          // pruefen/anpassen.
+          if(rz.sonderpositionTyp?.lieferwagen_transport_ort === 'direkt'){
+            const kmModus = lieferwagenModus === 'distanz';
+            const einheit = kmModus ? 'km' : 'Std';
+            const ansatz = kmModus ? rz.sonderpositionTyp.lieferwagen_km_artikel?.vp_knecht : rz.sonderpositionTyp.lieferwagen_std_artikel?.vp_knecht;
+            if(ansatz == null){
+              return { ...rz, bezeichnung: rz.bezeichnung + ` (kein ${kmModus ? 'Km' : 'Std'}-Preis-Artikel hinterlegt)`, einheit, menge: 0, preis: 0, betrag: 0 };
+            }
+            let mengeRoh;
+            try {
+              const { data, error } = await sb.rpc('eval_ausdruck', { node: rz.menge_ausdruck, werte: { ...tf.werteMap, ...systemwerteMap } });
+              if(error) throw error;
+              mengeRoh = data;
+            } catch(e) {
+              return { ...rz, bezeichnung: rz.bezeichnung + ` (Berechnung fehlgeschlagen: ${e.message || e})`, einheit, menge: 0, preis: 0, betrag: 0 };
+            }
+            const menge = mengeRoh * tfMenge * anzahlFaktorTf(rz);
+            const betrag = menge * ansatz;
+            return { ...rz, einheit, menge, preis: ansatz, betrag };
+          }
           const lwAdressliste = lieferwagenTransportAdressliste(rz.sonderpositionTyp?.lieferwagen_transport_ort);
           if(lwAdressliste){
             const einheit = rz.sonderpositionTyp.einheit || 'Fahrt';
