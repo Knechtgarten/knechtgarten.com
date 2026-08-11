@@ -551,6 +551,7 @@ input[type=number]{-moz-appearance:textfield;}
 
         <div id="offerteContentWrap">
           <div id="formelInhalt">
+            <div class="card hidden" id="lwFrequenzKarte"><!-- per JS befuellt --></div>
             <div id="teilbereiche"><!-- per JS befuellt --></div>
           </div>
 
@@ -2921,6 +2922,10 @@ async function recalc(){
     // da renderKostenblock() in beiden Faellen fuer alle Personal-Zeilen
     // durchlaufen wird).
     let gesamtPersonalStunden = 0;
+    // Wird weiter unten (sobald die Distanz zur Kunden-PLZ feststeht) wieder
+    // sichtbar gemacht und befuellt - hier vorsorglich ausblenden, falls
+    // dieses Mal z.B. keine PLZ gesetzt ist und der Block gar nicht laeuft.
+    $('lwFrequenzKarte').classList.add('hidden');
 
     // Wiederverwendbarer Kostenblock (Personal/Maschine/Logistik/Material
     // inkl. Sammelpositionen + Eigene Position + eigenes Zwischentotal).
@@ -3425,22 +3430,29 @@ async function recalc(){
         // Aus/Woechentlich/Taeglich - unabhaengig pro Posten waehlbar (z.B.
         // Vorarbeiter faehrt taeglich zurueck, Gartenarbeiter nur
         // woechentlich, oder der Lieferwagen selbst ist per Sonderabmachung
-        // kostenlos und nur das Personal kostet).
-        const freqRow = (label, aktuell, setFn, sichtbar) => {
-          if(!sichtbar) return;
-          const tr = document.createElement('tr');
-          tr.className = 'crow';
-          const btn = (freq, text) => `<button type="button" class="opt${aktuell === freq ? ' on' : ''}" data-freq="${freq}">${text}</button>`;
-          tr.innerHTML = `<td colspan="5"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-            <span style="min-width:120px;font-size:12.5px;color:var(--muted);">${label}</span>
-            ${btn('aus', 'Aus')}${btn('woechentlich', 'Wöchentlich')}${btn('taeglich', 'Täglich')}
-          </div></td>`;
-          tr.querySelectorAll('[data-freq]').forEach(b => b.addEventListener('click', () => { setFn(b.dataset.freq); recalc(); }));
-          $costbody.appendChild(tr);
-        };
-        freqRow('Lieferwagen', lieferwagenFrequenz, v => lieferwagenFrequenz = v, true);
-        freqRow('Vorarbeiter', vorarbeiterFrequenz, v => vorarbeiterFrequenz = v, lieferwagenKonfig.vorarbeiterPreis != null);
-        freqRow('Gartenarbeiter', gartenarbeiterFrequenz, v => gartenarbeiterFrequenz = v, lieferwagenKonfig.gartenarbeiterPreis != null);
+        // kostenlos und nur das Personal kostet). Bewusst zuoberst bei den
+        // Teilflaechen platziert statt unten in der Kostentabelle - gilt
+        // einmal fuer die ganze Offerte, nicht pro Teilflaeche (siehe
+        // Absprache), soll aber trotzdem gut sichtbar am Anfang stehen.
+        const lwPosten = [
+          { key: 'lieferwagen', label: 'Lieferwagen', aktuell: lieferwagenFrequenz, sichtbar: true, setFn: v => lieferwagenFrequenz = v },
+          { key: 'vorarbeiter', label: 'Vorarbeiter', aktuell: vorarbeiterFrequenz, sichtbar: lieferwagenKonfig.vorarbeiterPreis != null, setFn: v => vorarbeiterFrequenz = v },
+          { key: 'gartenarbeiter', label: 'Gartenarbeiter', aktuell: gartenarbeiterFrequenz, sichtbar: lieferwagenKonfig.gartenarbeiterPreis != null, setFn: v => gartenarbeiterFrequenz = v }
+        ].filter(p => p.sichtbar);
+        const $lwFrequenzKarte = $('lwFrequenzKarte');
+        $lwFrequenzKarte.classList.remove('hidden');
+        $lwFrequenzKarte.innerHTML = `<div style="font-weight:700;color:var(--ink);margin-bottom:6px;">Lieferwagenfahrzeit${anzahlArbeitstage ? ` <span style="font-weight:400;color:var(--muted);font-size:12px;">– ${anzahlArbeitstage} Arbeitstag${anzahlArbeitstage === 1 ? '' : 'e'} berechnet</span>` : ''}</div>` +
+          lwPosten.map(p => `<div data-posten="${p.key}" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px;">
+            <span style="min-width:120px;font-size:12.5px;color:var(--muted);">${p.label}</span>
+            <button type="button" class="opt${p.aktuell === 'aus' ? ' on' : ''}" data-freq="aus">Aus</button>
+            <button type="button" class="opt${p.aktuell === 'woechentlich' ? ' on' : ''}" data-freq="woechentlich">Wöchentlich</button>
+            <button type="button" class="opt${p.aktuell === 'taeglich' ? ' on' : ''}" data-freq="taeglich">Täglich</button>
+          </div>`).join('');
+        lwPosten.forEach(p => {
+          $lwFrequenzKarte.querySelectorAll(`[data-posten="${p.key}"] [data-freq]`).forEach(b => {
+            b.addEventListener('click', () => { p.setFn(b.dataset.freq); recalc(); });
+          });
+        });
 
         const lwFahrten = fahrtenFuer(lieferwagenFrequenz);
         const mengeStdGesamt = rundeMenge(stdGerundet * lwFahrten);
