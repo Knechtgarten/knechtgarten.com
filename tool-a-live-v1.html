@@ -3479,10 +3479,35 @@ async function recalc(){
         // Absprache), soll aber trotzdem gut sichtbar am Anfang stehen.
         const lwPosten = [
           { key: 'lieferwagen', label: 'Lieferwagen', aktuell: lieferwagenFrequenz, sichtbar: true, setFn: v => lieferwagenFrequenz = v },
-          { key: 'vorarbeiter', label: 'Vorarbeiter', aktuell: vorarbeiterFrequenz, sichtbar: lieferwagenKonfig.vorarbeiterPreis != null, setFn: v => vorarbeiterFrequenz = v },
-          { key: 'vorarbeiterPoolbau', label: 'Vorarbeiter Poolbau', aktuell: vorarbeiterPoolbauFrequenz, sichtbar: lieferwagenKonfig.vorarbeiterPoolbauPreis != null, setFn: v => vorarbeiterPoolbauFrequenz = v },
-          { key: 'gartenarbeiter', label: 'Gartenarbeiter', aktuell: gartenarbeiterFrequenz, sichtbar: lieferwagenKonfig.gartenarbeiterPreis != null, setFn: v => gartenarbeiterFrequenz = v }
+          { key: 'vorarbeiter', label: 'Vorarbeiter', aktuell: vorarbeiterFrequenz, sichtbar: lieferwagenKonfig.vorarbeiterPreis != null, setFn: v => vorarbeiterFrequenz = v, preis: lieferwagenKonfig.vorarbeiterPreis },
+          { key: 'vorarbeiterPoolbau', label: 'Vorarbeiter Poolbau', aktuell: vorarbeiterPoolbauFrequenz, sichtbar: lieferwagenKonfig.vorarbeiterPoolbauPreis != null, setFn: v => vorarbeiterPoolbauFrequenz = v, preis: lieferwagenKonfig.vorarbeiterPoolbauPreis },
+          { key: 'gartenarbeiter', label: 'Gartenarbeiter', aktuell: gartenarbeiterFrequenz, sichtbar: lieferwagenKonfig.gartenarbeiterPreis != null, setFn: v => gartenarbeiterFrequenz = v, preis: lieferwagenKonfig.gartenarbeiterPreis }
         ].filter(p => p.sichtbar);
+
+        // Werte JEDES Postens einmal hier vorab berechnen - dienen sowohl der
+        // kleinen, dezenten Vorschau direkt in dieser Karte als auch weiter
+        // unten den echten Kostentabellen-Zeilen (dieselben Werte, nicht
+        // zweimal berechnet). Die Vorschau hier ist rein informativ/optisch -
+        // sie zaehlt selbst nicht zusaetzlich ins Total, das passiert
+        // weiterhin nur einmal unten bei grandTotal.
+        const lwFahrten = fahrtenFuer(lieferwagenFrequenz);
+        const mengeStdGesamt = rundeMenge(stdGerundet * lwFahrten);
+        const mengeKmGesamt = rundeMenge(kmGerundet * lwFahrten);
+        const betragZeit = rundeCHF(mengeStdGesamt * stundenpreisGerundet);
+        const betragKm = rundeCHF(mengeKmGesamt * kmpreisGerundet);
+        lwPosten.forEach(p => {
+          if(p.key === 'lieferwagen'){
+            p.vorschauMenge = lieferwagenModus === 'distanz' ? mengeKmGesamt : mengeStdGesamt;
+            p.vorschauEinheit = lieferwagenModus === 'distanz' ? 'km' : 'Std';
+            p.vorschauBetrag = lieferwagenModus === 'distanz' ? betragKm : betragZeit;
+          }else{
+            const fahrten = fahrtenFuer(p.aktuell);
+            p.vorschauMenge = rundeMenge(stdGerundet * fahrten);
+            p.vorschauEinheit = 'Std';
+            p.vorschauBetrag = rundeCHF(p.vorschauMenge * rundeCHF(p.preis));
+          }
+        });
+
         const $lwFrequenzKarte = $('lwFrequenzKarte');
         $lwFrequenzKarte.classList.remove('hidden');
         // Km/Std-Umschalter gilt fuer die ganze Offerte: sowohl fuer die
@@ -3498,7 +3523,7 @@ async function recalc(){
             <span class="trk"><span class="thumb">${kmAktiv ? 'Km' : 'Std'}</span></span>
           </label>`;
         $lwFrequenzKarte.innerHTML = `<div style="font-weight:700;color:var(--ink);margin-bottom:6px;">Lieferwagenfahrzeit${anzahlArbeitstage ? ` <span style="font-weight:400;color:var(--muted);font-size:12px;">– ${anzahlArbeitstage} Arbeitstag${anzahlArbeitstage === 1 ? '' : 'e'} berechnet</span>` : ''}</div>` +
-          lwPosten.map(p => `<div data-posten="${p.key}" style="display:grid;grid-template-columns:120px 110px auto;align-items:center;gap:8px;margin-top:6px;">
+          lwPosten.map(p => `<div data-posten="${p.key}" style="display:grid;grid-template-columns:120px 110px auto 130px;align-items:center;gap:8px;margin-top:6px;">
             <span style="font-size:12.5px;color:var(--muted);">${p.label}</span>
             <span style="display:flex;align-items:center;gap:6px;">${p.key === 'lieferwagen' ? lwModusToggleHtml : ''}</span>
             <span style="display:flex;gap:6px;flex-wrap:wrap;">
@@ -3506,6 +3531,7 @@ async function recalc(){
               <button type="button" class="opt${p.aktuell === 'woechentlich' ? ' on' : ''}" data-freq="woechentlich">Wöchentlich</button>
               <button type="button" class="opt${p.aktuell === 'taeglich' ? ' on' : ''}" data-freq="taeglich">Täglich</button>
             </span>
+            <span style="font-size:10.5px;color:var(--muted);opacity:.7;text-align:right;white-space:nowrap;">${p.vorschauMenge} ${p.vorschauEinheit} · ${fmtCHF(p.vorschauBetrag)}</span>
           </div>`).join('');
         $('lwModusToggle').addEventListener('change', () => { lieferwagenModus = $('lwModusToggle').checked ? 'distanz' : 'zeit'; recalc(); });
         lwPosten.forEach(p => {
@@ -3513,12 +3539,6 @@ async function recalc(){
             b.addEventListener('click', () => { p.setFn(b.dataset.freq); recalc(); });
           });
         });
-
-        const lwFahrten = fahrtenFuer(lieferwagenFrequenz);
-        const mengeStdGesamt = rundeMenge(stdGerundet * lwFahrten);
-        const mengeKmGesamt = rundeMenge(kmGerundet * lwFahrten);
-        const betragZeit = rundeCHF(mengeStdGesamt * stundenpreisGerundet);
-        const betragKm = rundeCHF(mengeKmGesamt * kmpreisGerundet);
 
         const addLwRow = (modus, bezeichnung, menge, einheit, preis, betrag) => {
           const tr = document.createElement('tr');
@@ -3537,27 +3557,20 @@ async function recalc(){
         snapshotZeile('Lieferwagenfahrzeit', { bezeichnung: 'Fahrzeit (Hin- und Rückfahrt)', menge: mengeStdGesamt, einheit: 'Std', preis: stundenpreisGerundet, betrag: betragZeit, geloescht: false, aktiv: lieferwagenFrequenz !== 'aus' && lieferwagenModus === 'zeit' });
         snapshotZeile('Lieferwagenfahrzeit', { bezeichnung: 'Fahrstrecke (Hin- und Rückfahrt)', menge: mengeKmGesamt, einheit: 'km', preis: kmpreisGerundet, betrag: betragKm, geloescht: false, aktiv: lieferwagenFrequenz !== 'aus' && lieferwagenModus === 'distanz' });
 
-        // Vorarbeiter/Gartenarbeiter: immer Std-basiert, gleiche Einzelfahrt-
-        // Fahrzeit wie der Lieferwagen, aber eigene Frequenz + eigener
-        // Stundenansatz (siehe Absprache Lieferwagenfahrzeit-Personalaufwand).
-        [
-          { label: 'Vorarbeiter im Lieferwagen', preis: lieferwagenKonfig.vorarbeiterPreis, frequenz: vorarbeiterFrequenz },
-          { label: 'Vorarbeiter Poolbau im Lieferwagen', preis: lieferwagenKonfig.vorarbeiterPoolbauPreis, frequenz: vorarbeiterPoolbauFrequenz },
-          { label: 'Gartenarbeiter im Lieferwagen', preis: lieferwagenKonfig.gartenarbeiterPreis, frequenz: gartenarbeiterFrequenz }
-        ].forEach(p => {
-          if(p.preis == null) return;
-          const fahrten = fahrtenFuer(p.frequenz);
-          const mengeStd = rundeMenge(stdGerundet * fahrten);
+        // Vorarbeiter/Vorarbeiter Poolbau/Gartenarbeiter: Menge/Betrag wurden
+        // oben bereits pro Posten berechnet (p.vorschauMenge/vorschauBetrag) -
+        // hier nur noch Kostentabellen-Zeile + Total + Snapshot je Posten.
+        lwPosten.filter(p => p.key !== 'lieferwagen').forEach(p => {
+          const label = `${p.label} im Lieferwagen`;
           const preisGerundet = rundeCHF(p.preis);
-          const betrag = rundeCHF(mengeStd * preisGerundet);
           const tr = document.createElement('tr');
           tr.className = 'crow';
-          tr.innerHTML = `<td>${p.label}</td><td style="text-align:right">${mengeStd}</td>
+          tr.innerHTML = `<td>${label}</td><td style="text-align:right">${p.vorschauMenge}</td>
             <td style="color:var(--muted)">Std</td><td style="text-align:right">${fmtCHF(preisGerundet)}</td>
-            <td class="cbetrag">${fmtCHF(betrag)}</td>`;
+            <td class="cbetrag">${fmtCHF(p.vorschauBetrag)}</td>`;
           $costbody.appendChild(tr);
-          if(p.frequenz !== 'aus') grandTotal += betrag;
-          snapshotZeile('Lieferwagenfahrzeit', { bezeichnung: p.label, menge: mengeStd, einheit: 'Std', preis: preisGerundet, betrag, geloescht: false, aktiv: p.frequenz !== 'aus' });
+          if(p.aktuell !== 'aus') grandTotal += p.vorschauBetrag;
+          snapshotZeile('Lieferwagenfahrzeit', { bezeichnung: label, menge: p.vorschauMenge, einheit: 'Std', preis: preisGerundet, betrag: p.vorschauBetrag, geloescht: false, aktiv: p.aktuell !== 'aus' });
         });
       }
     }
