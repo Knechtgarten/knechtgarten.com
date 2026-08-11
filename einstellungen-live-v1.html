@@ -855,15 +855,14 @@ input[type=number]{-moz-appearance:textfield;}
         </div>
 
         <div class="card">
-          <div class="cardheader" onclick="toggleCard(this)"><span class="cardchevron">&#9656;</span><div class="cardlabel">Lieferwagentransport Einzelfahrt</div></div>
+          <div class="cardheader" onclick="toggleCard(this)"><span class="cardchevron">&#9656;</span><div class="cardlabel">Lieferwagen Einzelfahrt in Km oder Std.</div></div>
           <div class="hint">Für einzelne Sondertransporte bei einem Arbeitsschritt, ohne Adressliste/Distanzberechnung - die Menge-Formel der Ressourcenzeile in Tool B ergibt direkt die Stunden- bzw. Kilometerzahl (je nachdem, welcher Preis-Artikel unten gerade gilt), z.B. "2 Std für einen Sondertransport von Poolmaterial".</div>
           <div class="cardbody hidden">
-            <div class="hint" style="margin-bottom:6px;">Beliebig viele Positionen - Kategorie/Einheit/MwSt kommen automatisch vom gewählten Std-Artikel. Letzte Zeile ist immer leer zum Erfassen einer weiteren Position.</div>
-            <table class="sgtable" style="table-layout:fixed;">
-              <colgroup><col><col><col><col style="width:40px;"></colgroup>
-              <thead><tr><th>Titel</th><th>Artikel (Std)</th><th>Artikel (km)</th><th></th></tr></thead>
-              <tbody id="lwDirektTransportZeilenBody"></tbody>
-            </table>
+            <div class="hint" style="margin-bottom:6px;">Nur der Lieferwagen-Artikel (Std oder km) - keine weiteren Positionen, damit hier kein Durcheinander mit Personal-Zeilen entstehen kann.</div>
+            <div style="display:flex;flex-direction:column;gap:10px;max-width:600px;">
+              <div class="fld" style="margin:0;"><label>Artikel (Std)</label><button type="button" class="btn" id="lwDirektStdBtn" style="width:100%;text-align:left;background:#fff;color:var(--ink);border:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Artikel wählen…</button></div>
+              <div class="fld" style="margin:0;"><label>Artikel (km)</label><button type="button" class="btn" id="lwDirektKmBtn" style="width:100%;text-align:left;background:#fff;color:var(--ink);border:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Artikel wählen…</button></div>
+            </div>
             <div class="status" id="lwDirektTransportStatus"></div>
           </div>
         </div>
@@ -973,6 +972,7 @@ function zeigeAbschnitt(name){
     ladeEinfacheAdressliste('magazin_adressen', 'magazinTransportBody');
     ladeEinheiten().then(ladeSonderpositionTypKategorien);
     ladeLwtZeilen();
+    ladeLwDirektEinzelfahrt();
   }
   if(name === 'benutzer'){ loadBenutzer(); loadModulSichtbarkeit(); }
 }
@@ -2294,11 +2294,11 @@ async function ladeSonderpositionTypKategorien(){
 const LIEFERWAGEN_TRANSPORT_KARTEN = [
   { ort: 'kieswerk_betonwerk', bodyId: 'lwKiesTransportZeilenBody' },
   { ort: 'deponie', bodyId: 'lwDeponieTransportZeilenBody' },
-  { ort: 'magazin', bodyId: 'lwMagazinTransportZeilenBody' },
-  // 'direkt' = ohne Adressliste/Distanzberechnung (siehe Karte "Lieferwagen-
-  // transport - direkt") - dieselben ladeLwtZeilen/renderLwtZeilen/
-  // attachLwtHandlers-Funktionen decken das schon generisch mit ab.
-  { ort: 'direkt', bodyId: 'lwDirektTransportZeilenBody' }
+  { ort: 'magazin', bodyId: 'lwMagazinTransportZeilenBody' }
+  // 'direkt' (Lieferwagen Einzelfahrt) nutzt bewusst NICHT dieses generische
+  // Mehrzeilen-Muster - siehe ladeLwDirektEinzelfahrt() weiter unten: genau
+  // eine feste Zeile, nur Std-/km-Artikel, kein Titel/Hinzufuegen/Loeschen,
+  // damit hier keine falsch kategorisierten Zusatzzeilen entstehen koennen.
 ];
 let LWT_ZEILEN = {};
 async function ladeLwtZeilen(){
@@ -2414,6 +2414,56 @@ function attachLwtHandlers(ort, bodyId){
     });
   }
 }
+
+// ---------------------------------------------------------------------------
+// Lieferwagen Einzelfahrt in Km oder Std. - bewusst genau EINE feste Zeile
+// (kategorie 'logistik', lieferwagen_transport_ort 'direkt'), kein Titel-Feld,
+// kein Hinzufuegen/Loeschen - verhindert strukturell, dass hier faelschlich
+// mehrere/andere Positionen (z.B. Personal) landen und ein Durcheinander
+// entsteht. Wird beim ersten Aufruf automatisch angelegt, falls noch nicht
+// vorhanden.
+// ---------------------------------------------------------------------------
+let LW_DIREKT_ID = null;
+async function ladeLwDirektEinzelfahrt(){
+  let { data, error } = await sb.from('sonderposition_typ')
+    .select('id,lieferwagen_std_artikel_id,lieferwagen_km_artikel_id')
+    .eq('lieferwagen_transport_ort', 'direkt')
+    .maybeSingle();
+  if(error){ console.error(error); showToast(friendlyError(error), true); return; }
+  if(!data){
+    const insertRes = await sb.from('sonderposition_typ').insert({
+      name: 'Lieferwagen Einzelfahrt', titel: 'Lieferwagen Einzelfahrt', kategorie: 'logistik',
+      einheit: 'Fahrt', mwst_satz_pct: 8.1, hat_eigene_berechnung: true, lieferwagen_transport_ort: 'direkt'
+    }).select('id,lieferwagen_std_artikel_id,lieferwagen_km_artikel_id').single();
+    if(insertRes.error){ console.error(insertRes.error); showToast(friendlyError(insertRes.error), true); return; }
+    data = insertRes.data;
+  }
+  LW_DIREKT_ID = data.id;
+  $('lwDirektStdBtn').textContent = data.lieferwagen_std_artikel_id ? artikelBezeichnung(data.lieferwagen_std_artikel_id) : 'Artikel wählen…';
+  $('lwDirektKmBtn').textContent = data.lieferwagen_km_artikel_id ? artikelBezeichnung(data.lieferwagen_km_artikel_id) : 'Artikel wählen…';
+}
+$('lwDirektStdBtn').addEventListener('click', () => {
+  if(aktuelleRolle !== 'admin' || !LW_DIREKT_ID) return;
+  openArtikelPicker(a => {
+    sb.from('sonderposition_typ').update({
+      lieferwagen_std_artikel_id: a.id, kategorie: a.kategorie, einheit: a.einheit, mwst_satz_pct: lwtEffektiveMwst(a)
+    }).eq('id', LW_DIREKT_ID).then(({ error }) => {
+      if(error){ showToast(friendlyError(error), true); return; }
+      showToast('Artikel gespeichert.');
+      $('lwDirektStdBtn').textContent = a.bezeichnung;
+    });
+  });
+});
+$('lwDirektKmBtn').addEventListener('click', () => {
+  if(aktuelleRolle !== 'admin' || !LW_DIREKT_ID) return;
+  openArtikelPicker(a => {
+    sb.from('sonderposition_typ').update({ lieferwagen_km_artikel_id: a.id }).eq('id', LW_DIREKT_ID).then(({ error }) => {
+      if(error){ showToast(friendlyError(error), true); return; }
+      showToast('Artikel gespeichert.');
+      $('lwDirektKmBtn').textContent = a.bezeichnung;
+    });
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Preisfindung: Lieferwagenfahrzeit-Konfiguration (Herkunftsadresse + welcher
