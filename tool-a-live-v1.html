@@ -1079,6 +1079,12 @@ let tfCounter = 0;
 let lieferwagenKonfig = null; // {herkunft_adresse, stundenpreis, kmpreis}
 let lieferwagenModus = 'zeit'; // 'zeit' | 'distanz'
 let lieferwagenDistanzCache = {}; // {plz: {stdHinRueck, kmHinRueck} | null}
+// Frequenz (aus/woechentlich/taeglich) je Posten - unabhaengig voneinander
+// waehlbar, siehe Absprache Lieferwagenfahrzeit-Personalaufwand: bestimmt,
+// wie oft die (einmal berechnete) Hin+Rueck-Fahrt tatsaechlich anfaellt.
+let lieferwagenFrequenz = 'taeglich';
+let vorarbeiterFrequenz = 'taeglich';
+let gartenarbeiterFrequenz = 'taeglich';
 
 // Kies-/Beton-Transport (Sonderposition mit Kieswerk-Auswahl): Pauschale +
 // km-Preis pro Kieswerk (Einstellungen -> Sonderpositionen),
@@ -1203,13 +1209,16 @@ async function ladeLogistikSammelpositionen(){
 
 async function ladeLieferwagenKonfiguration(){
   const { data, error } = await sb.from('lieferwagen_konfiguration')
-    .select('herkunft_adresse, stundenansatz_artikel:stundenansatz_artikel_id(vp_knecht), km_ansatz_artikel:km_ansatz_artikel_id(vp_knecht)')
+    .select('herkunft_adresse, stunden_pro_arbeitstag, stundenansatz_artikel:stundenansatz_artikel_id(vp_knecht), km_ansatz_artikel:km_ansatz_artikel_id(vp_knecht), vorarbeiter_artikel:vorarbeiter_artikel_id(vp_knecht), gartenarbeiter_artikel:gartenarbeiter_artikel_id(vp_knecht)')
     .eq('id', true).single();
   if(error){ console.error(error); return; }
   lieferwagenKonfig = {
     herkunft_adresse: data.herkunft_adresse,
     stundenpreis: data.stundenansatz_artikel?.vp_knecht ?? null,
-    kmpreis: data.km_ansatz_artikel?.vp_knecht ?? null
+    kmpreis: data.km_ansatz_artikel?.vp_knecht ?? null,
+    vorarbeiterPreis: data.vorarbeiter_artikel?.vp_knecht ?? null,
+    gartenarbeiterPreis: data.gartenarbeiter_artikel?.vp_knecht ?? null,
+    stundenProArbeitstag: data.stunden_pro_arbeitstag ?? null
   };
 }
 
@@ -2083,10 +2092,13 @@ function setMode(neu){
 
 async function ladeBestehendeOfferte(offerteId){
   const { data: offerte, error: oErr } = await sb
-    .from('offerte').select('id, titel, datum, status, notiz, offertentyp_id, lieferwagen_modus, beschreibung_block, beschreibung_manuell, optionen_text_liste, optionen_text_manuell, kosten_snapshot, offertnummer').eq('id', offerteId).single();
+    .from('offerte').select('id, titel, datum, status, notiz, offertentyp_id, lieferwagen_modus, lieferwagen_frequenz, vorarbeiter_frequenz, gartenarbeiter_frequenz, beschreibung_block, beschreibung_manuell, optionen_text_liste, optionen_text_manuell, kosten_snapshot, offertnummer').eq('id', offerteId).single();
   if(oErr){ console.error(oErr); $saveStatus.textContent = 'Fehler beim Laden: ' + oErr.message; $saveStatus.className='status err'; return; }
 
   lieferwagenModus = offerte.lieferwagen_modus || 'zeit';
+  lieferwagenFrequenz = offerte.lieferwagen_frequenz || 'taeglich';
+  vorarbeiterFrequenz = offerte.vorarbeiter_frequenz || 'taeglich';
+  gartenarbeiterFrequenz = offerte.gartenarbeiter_frequenz || 'taeglich';
   zeigeBauteilCard();
   await ladeDatenFuerOffertentyp(offerte.offertentyp_id);
 
@@ -2185,6 +2197,9 @@ async function starteNeueOfferte(otId){
   zeigeBauteilCard();
   setMode('new');
   lieferwagenModus = 'zeit';
+  lieferwagenFrequenz = 'taeglich';
+  vorarbeiterFrequenz = 'taeglich';
+  gartenarbeiterFrequenz = 'taeglich';
   await ladeDatenFuerOffertentyp(otId);
   if(currentBerechnungsmodell === 'tagessatz'){
     teilschrittTage = {};
@@ -2354,6 +2369,7 @@ async function speichereNeueOfferte(titelVal){
       kunde_id: kundeId, offertentyp_id: offertentypId, titel: titelVal,
       datum: $offerteDatum.value || heuteAlsDatumsstring(), status: offerteStatus, notiz: notizWert(),
       betrag_total: letzterGrandTotal, lieferwagen_modus: lieferwagenModus,
+      lieferwagen_frequenz: lieferwagenFrequenz, vorarbeiter_frequenz: vorarbeiterFrequenz, gartenarbeiter_frequenz: gartenarbeiterFrequenz,
       beschreibung_block: $beschreibungBlock.value.trim() || null, beschreibung_manuell: beschreibungManuellBearbeitet,
       optionen_text_liste: $optionenTextBlock.value.trim() || null, optionen_text_manuell: optionenTextManuellBearbeitet,
       kosten_snapshot: letzterKostenSnapshot, offertnummer
@@ -2413,6 +2429,7 @@ async function speichereAenderungen(titelVal){
     titel: titelVal, datum: $offerteDatum.value || heuteAlsDatumsstring(),
     status: offerteStatus, notiz: notizWert(),
     betrag_total: letzterGrandTotal, lieferwagen_modus: lieferwagenModus,
+    lieferwagen_frequenz: lieferwagenFrequenz, vorarbeiter_frequenz: vorarbeiterFrequenz, gartenarbeiter_frequenz: gartenarbeiterFrequenz,
     beschreibung_block: $beschreibungBlock.value.trim() || null, beschreibung_manuell: beschreibungManuellBearbeitet,
     optionen_text_liste: $optionenTextBlock.value.trim() || null, optionen_text_manuell: optionenTextManuellBearbeitet,
     kosten_snapshot: letzterKostenSnapshot
@@ -2897,6 +2914,13 @@ async function recalc(){
   unvollstaendigeFreitextZeilen = [];
   try{
     let grandTotal = 0;
+    // Gesamtstunden Personal ueber die GANZE Offerte (alle Teilflaechen/
+    // Optionen zusammen) - Grundlage fuer "Anzahl Arbeitstage" bei der
+    // Lieferwagenfahrzeit weiter unten. Wird innerhalb von renderKostenblock()
+    // im Personal-Zweig hochgezaehlt (deckt Formel wie Tagessatz gleich ab,
+    // da renderKostenblock() in beiden Faellen fuer alle Personal-Zeilen
+    // durchlaufen wird).
+    let gesamtPersonalStunden = 0;
 
     // Wiederverwendbarer Kostenblock (Personal/Maschine/Logistik/Material
     // inkl. Sammelpositionen + Eigene Position + eigenes Zwischentotal).
@@ -3004,6 +3028,7 @@ async function recalc(){
               const tsName = r.teilschritt || r.arbeitsschritt;
               byName[key].proTeilschritt[tsName] = (byName[key].proTeilschritt[tsName] || 0) + r.menge;
             });
+            gesamtPersonalStunden += Object.values(byName).reduce((s, v) => s + v.menge, 0);
             // "Inaktiv" nur zeigen, wenn im GESAMTEN Auswahlfeld gerade keine
             // Option aktiv ist (der Nutzer also alles abgewaehlt hat) - nicht
             // schon dann, wenn nur eine ANDERE Option desselben Feldes aktiv
@@ -3378,13 +3403,50 @@ async function recalc(){
         const kmGerundet = rundeMenge(distanz.kmHinRueck);
         const stundenpreisGerundet = rundeCHF(lieferwagenKonfig.stundenpreis);
         const kmpreisGerundet = rundeCHF(lieferwagenKonfig.kmpreis);
-        const betragZeit = rundeCHF(stdGerundet * stundenpreisGerundet);
-        const betragKm = rundeCHF(kmGerundet * kmpreisGerundet);
+
+        // Anzahl Arbeitstage aus den Gesamtstunden Personal ueber die ganze
+        // Offerte - Grundlage fuer "woechentlich"/"taeglich" bei allen drei
+        // Postens (Lieferwagen/Vorarbeiter/Gartenarbeiter): das Personal
+        // faehrt taeglich heim, darum so viele Fahrten wie Arbeitstage
+        // noetig sind, bzw. eine Fahrt pro angefangener Woche (aufgerundet,
+        // 5-Tage-Woche) bei "woechentlich".
+        const anzahlArbeitstage = lieferwagenKonfig.stundenProArbeitstag > 0
+          ? Math.ceil(gesamtPersonalStunden / lieferwagenKonfig.stundenProArbeitstag)
+          : 0;
+        const fahrtenFuer = frequenz => frequenz === 'taeglich' ? anzahlArbeitstage
+          : frequenz === 'woechentlich' ? Math.ceil(anzahlArbeitstage / 5)
+          : 0;
 
         const trHead = document.createElement('tr');
         trHead.className = 'cgrouphead';
-        trHead.innerHTML = `<td colspan="5">Lieferwagenfahrzeit</td>`;
+        trHead.innerHTML = `<td colspan="5">Lieferwagenfahrzeit${anzahlArbeitstage ? ` <span style="font-weight:400;color:var(--muted);font-size:11px;">– ${anzahlArbeitstage} Arbeitstag${anzahlArbeitstage === 1 ? '' : 'e'} berechnet</span>` : ''}</td>`;
         $costbody.appendChild(trHead);
+
+        // Aus/Woechentlich/Taeglich - unabhaengig pro Posten waehlbar (z.B.
+        // Vorarbeiter faehrt taeglich zurueck, Gartenarbeiter nur
+        // woechentlich, oder der Lieferwagen selbst ist per Sonderabmachung
+        // kostenlos und nur das Personal kostet).
+        const freqRow = (label, aktuell, setFn, sichtbar) => {
+          if(!sichtbar) return;
+          const tr = document.createElement('tr');
+          tr.className = 'crow';
+          const btn = (freq, text) => `<button type="button" class="opt${aktuell === freq ? ' on' : ''}" data-freq="${freq}">${text}</button>`;
+          tr.innerHTML = `<td colspan="5"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span style="min-width:120px;font-size:12.5px;color:var(--muted);">${label}</span>
+            ${btn('aus', 'Aus')}${btn('woechentlich', 'Wöchentlich')}${btn('taeglich', 'Täglich')}
+          </div></td>`;
+          tr.querySelectorAll('[data-freq]').forEach(b => b.addEventListener('click', () => { setFn(b.dataset.freq); recalc(); }));
+          $costbody.appendChild(tr);
+        };
+        freqRow('Lieferwagen', lieferwagenFrequenz, v => lieferwagenFrequenz = v, true);
+        freqRow('Vorarbeiter', vorarbeiterFrequenz, v => vorarbeiterFrequenz = v, lieferwagenKonfig.vorarbeiterPreis != null);
+        freqRow('Gartenarbeiter', gartenarbeiterFrequenz, v => gartenarbeiterFrequenz = v, lieferwagenKonfig.gartenarbeiterPreis != null);
+
+        const lwFahrten = fahrtenFuer(lieferwagenFrequenz);
+        const mengeStdGesamt = rundeMenge(stdGerundet * lwFahrten);
+        const mengeKmGesamt = rundeMenge(kmGerundet * lwFahrten);
+        const betragZeit = rundeCHF(mengeStdGesamt * stundenpreisGerundet);
+        const betragKm = rundeCHF(mengeKmGesamt * kmpreisGerundet);
 
         const addLwRow = (modus, bezeichnung, menge, einheit, preis, betrag) => {
           const tr = document.createElement('tr');
@@ -3396,12 +3458,34 @@ async function recalc(){
           tr.addEventListener('click', () => { lieferwagenModus = modus; recalc(); });
           $costbody.appendChild(tr);
         };
-        addLwRow('zeit', 'Fahrzeit (Hin- und Rückfahrt)', stdGerundet, 'Std', stundenpreisGerundet, betragZeit);
-        addLwRow('distanz', 'Fahrstrecke (Hin- und Rückfahrt)', kmGerundet, 'km', kmpreisGerundet, betragKm);
+        addLwRow('zeit', 'Fahrzeit (Hin- und Rückfahrt)', mengeStdGesamt, 'Std', stundenpreisGerundet, betragZeit);
+        addLwRow('distanz', 'Fahrstrecke (Hin- und Rückfahrt)', mengeKmGesamt, 'km', kmpreisGerundet, betragKm);
 
-        grandTotal += (lieferwagenModus === 'distanz') ? betragKm : betragZeit;
-        snapshotZeile('Lieferwagenfahrzeit', { bezeichnung: 'Fahrzeit (Hin- und Rückfahrt)', menge: stdGerundet, einheit: 'Std', preis: stundenpreisGerundet, betrag: betragZeit, geloescht: false, aktiv: lieferwagenModus === 'zeit' });
-        snapshotZeile('Lieferwagenfahrzeit', { bezeichnung: 'Fahrstrecke (Hin- und Rückfahrt)', menge: kmGerundet, einheit: 'km', preis: kmpreisGerundet, betrag: betragKm, geloescht: false, aktiv: lieferwagenModus === 'distanz' });
+        if(lieferwagenFrequenz !== 'aus') grandTotal += (lieferwagenModus === 'distanz') ? betragKm : betragZeit;
+        snapshotZeile('Lieferwagenfahrzeit', { bezeichnung: 'Fahrzeit (Hin- und Rückfahrt)', menge: mengeStdGesamt, einheit: 'Std', preis: stundenpreisGerundet, betrag: betragZeit, geloescht: false, aktiv: lieferwagenFrequenz !== 'aus' && lieferwagenModus === 'zeit' });
+        snapshotZeile('Lieferwagenfahrzeit', { bezeichnung: 'Fahrstrecke (Hin- und Rückfahrt)', menge: mengeKmGesamt, einheit: 'km', preis: kmpreisGerundet, betrag: betragKm, geloescht: false, aktiv: lieferwagenFrequenz !== 'aus' && lieferwagenModus === 'distanz' });
+
+        // Vorarbeiter/Gartenarbeiter: immer Std-basiert, gleiche Einzelfahrt-
+        // Fahrzeit wie der Lieferwagen, aber eigene Frequenz + eigener
+        // Stundenansatz (siehe Absprache Lieferwagenfahrzeit-Personalaufwand).
+        [
+          { label: 'Vorarbeiter im Lieferwagen', preis: lieferwagenKonfig.vorarbeiterPreis, frequenz: vorarbeiterFrequenz },
+          { label: 'Gartenarbeiter im Lieferwagen', preis: lieferwagenKonfig.gartenarbeiterPreis, frequenz: gartenarbeiterFrequenz }
+        ].forEach(p => {
+          if(p.preis == null) return;
+          const fahrten = fahrtenFuer(p.frequenz);
+          const mengeStd = rundeMenge(stdGerundet * fahrten);
+          const preisGerundet = rundeCHF(p.preis);
+          const betrag = rundeCHF(mengeStd * preisGerundet);
+          const tr = document.createElement('tr');
+          tr.className = 'crow';
+          tr.innerHTML = `<td>${p.label}</td><td style="text-align:right">${mengeStd}</td>
+            <td style="color:var(--muted)">Std</td><td style="text-align:right">${fmtCHF(preisGerundet)}</td>
+            <td class="cbetrag">${fmtCHF(betrag)}</td>`;
+          $costbody.appendChild(tr);
+          if(p.frequenz !== 'aus') grandTotal += betrag;
+          snapshotZeile('Lieferwagenfahrzeit', { bezeichnung: p.label, menge: mengeStd, einheit: 'Std', preis: preisGerundet, betrag, geloescht: false, aktiv: p.frequenz !== 'aus' });
+        });
       }
     }
 
