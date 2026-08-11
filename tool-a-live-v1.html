@@ -1614,7 +1614,7 @@ async function ladeFormelDaten(otId){
           artikel ( bezeichnung, einheit, vp_knecht ),
           staffelgruppe ( name, titel, staffelstufe ( menge_von, menge_bis, artikel ( vp_knecht ) ) ),
           zonengruppe ( name, titel, zone ( artikel ( vp_knecht ), zone_plz ( plz ) ) ),
-          sonderposition_typ ( name, titel, einheit, mwst_satz_pct, lieferwagen_std_artikel_id, lieferwagen_transport_ort, lieferwagen_std_artikel:artikel!lieferwagen_std_artikel_id ( vp_knecht, bezeichnung ) ) ),
+          sonderposition_typ ( name, titel, einheit, mwst_satz_pct, lieferwagen_std_artikel_id, lieferwagen_km_artikel_id, lieferwagen_transport_ort, lieferwagen_std_artikel:artikel!lieferwagen_std_artikel_id ( vp_knecht, bezeichnung ), lieferwagen_km_artikel:artikel!lieferwagen_km_artikel_id ( vp_knecht, bezeichnung ) ) ),
         option_freitext_vorlage ( id, kategorie, bezeichnung, einheit, notiz, menge_vorschlag, preis_vorschlag ),
         auswahlfeld ( id, name,
           auswahloption ( id, name, beschreibung, reihenfolge, ist_standard, mengenoption, mengenoption_einheit, mehrfachauswahl, hinweistext, hinweisbild_url,
@@ -1623,7 +1623,7 @@ async function ladeFormelDaten(otId){
               artikel ( bezeichnung, einheit, vp_knecht ),
               staffelgruppe ( name, titel, staffelstufe ( menge_von, menge_bis, artikel ( vp_knecht ) ) ),
               zonengruppe ( name, titel, zone ( artikel ( vp_knecht ), zone_plz ( plz ) ) ),
-              sonderposition_typ ( name, titel, einheit, mwst_satz_pct, lieferwagen_std_artikel_id, lieferwagen_transport_ort, lieferwagen_std_artikel:artikel!lieferwagen_std_artikel_id ( vp_knecht, bezeichnung ) ) ),
+              sonderposition_typ ( name, titel, einheit, mwst_satz_pct, lieferwagen_std_artikel_id, lieferwagen_km_artikel_id, lieferwagen_transport_ort, lieferwagen_std_artikel:artikel!lieferwagen_std_artikel_id ( vp_knecht, bezeichnung ), lieferwagen_km_artikel:artikel!lieferwagen_km_artikel_id ( vp_knecht, bezeichnung ) ) ),
             option_freitext_vorlage ( id, kategorie, bezeichnung, einheit, notiz, menge_vorschlag, preis_vorschlag ) ) ) )`)
     .eq('offertentyp_id', otId).eq('ausgeblendet', false).order('reihenfolge');
   if(asErr) throw asErr;
@@ -3288,16 +3288,20 @@ async function recalc(){
           // Lieferwagentransport (Kieswerk/Betonwerk, Deponie, Magazin): eigener
           // Lieferwagen holt/bringt Material - anders als Kies-/Beton-Transport
           // oben keine Pauschale/km-Preis pro Adresse, sondern einfache
-          // Fahrzeit (naechstgelegene Adresse -> Kunde) mal Preis eines
-          // zentral hinterlegten "Lieferwagen Std"-Artikels (Einstellungen ->
-          // Sonderpositionen). Die Menge-Formel der Zeile ergibt die Anzahl
-          // Fahrten, genau wie bei jeder anderen Sonderposition frei editierbar.
+          // Fahrzeit/-strecke (naechstgelegene Adresse -> Kunde) mal Preis
+          // eines zentral hinterlegten Preis-Artikels (Einstellungen ->
+          // Sonderpositionen) - welcher der beiden Artikel (Std oder km)
+          // gilt, entscheidet derselbe globale Km/Std-Schalter wie bei der
+          // Hin- und Rueckfahrt zur Baustelle (lieferwagenModus). Die Menge-
+          // Formel der Zeile ergibt weiterhin die Anzahl Fahrten, genau wie
+          // bei jeder anderen Sonderposition frei editierbar.
           const lwAdressliste = lieferwagenTransportAdressliste(rz.sonderpositionTyp?.lieferwagen_transport_ort);
           if(lwAdressliste){
             const einheit = rz.sonderpositionTyp.einheit || 'Fahrt';
-            const stundenpreis = rz.sonderpositionTyp.lieferwagen_std_artikel?.vp_knecht;
-            if(stundenpreis == null){
-              return { ...rz, bezeichnung: rz.bezeichnung + ' (kein Preis-Artikel hinterlegt)', einheit, menge: 0, preis: 0, betrag: 0 };
+            const kmModus = lieferwagenModus === 'distanz';
+            const ansatz = kmModus ? rz.sonderpositionTyp.lieferwagen_km_artikel?.vp_knecht : rz.sonderpositionTyp.lieferwagen_std_artikel?.vp_knecht;
+            if(ansatz == null){
+              return { ...rz, bezeichnung: rz.bezeichnung + ` (kein ${kmModus ? 'Km' : 'Std'}-Preis-Artikel hinterlegt)`, einheit, menge: 0, preis: 0, betrag: 0 };
             }
             const naechste = await ermittleNaechsteAdresseZeit(lwAdressliste, kundePlzTrim);
             if(!naechste){
@@ -3312,7 +3316,8 @@ async function recalc(){
               return { ...rz, bezeichnung: rz.bezeichnung + ` (Berechnung fehlgeschlagen: ${e.message || e})`, einheit, menge: 0, preis: 0, betrag: 0 };
             }
             const menge = mengeRoh * tfMenge * anzahlFaktorTf(rz);
-            const betrag = naechste.d.std * stundenpreis * menge;
+            const einzelwert = kmModus ? naechste.d.km : naechste.d.std;
+            const betrag = einzelwert * ansatz * menge;
             const preis = menge > 0 ? betrag / menge : 0;
             const bezeichnung = rz.bezeichnung + ` (${naechste.a.name})`;
             return { ...rz, bezeichnung, einheit, menge, preis, betrag };
