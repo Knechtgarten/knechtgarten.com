@@ -162,8 +162,11 @@ main.wrap{padding-top:48px;padding-bottom:60px;}
 .tbcard.collapsed .tbbody{display:none;}
 .dimsrows{display:flex;flex-direction:column;gap:10px;margin-bottom:4px;}
 .dimsrow{display:flex;gap:14px;flex-wrap:wrap;}
-.dimstitel{font-size:12.5px;font-weight:700;color:var(--ink);}
-.dimstitel:not(:first-child){margin-top:4px;}
+.dimsrow.zu{display:none;}
+.dimstitel{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;color:var(--ink);border-top:1px solid var(--line);padding-top:8px;cursor:pointer;}
+.dimstitel:first-child{border-top:none;padding-top:0;}
+.dimstitelchev{display:inline-flex;flex-shrink:0;color:var(--muted);transition:transform .15s;}
+.dimstitel.zu .dimstitelchev{transform:rotate(-90deg);}
 .tbdim label{display:block;font-size:11px;font-weight:600;color:var(--ink);margin-bottom:3px;white-space:nowrap;}
 .tbdim input{width:80px;border:1px solid var(--line);border-radius:6px;padding:6px 7px;font:inherit;font-size:12.5px;color:var(--ink);}
 .tbdim input:focus{outline:none;border-color:var(--primary);}
@@ -224,10 +227,13 @@ main.wrap{padding-top:48px;padding-bottom:60px;}
 .opt.on{background:var(--primary);color:#fff;border-color:var(--primary);}
 .optwrap{display:inline-flex;align-items:stretch;}
 /* Vorarbeiter/Gartenarbeiter im Lieferwagenfahrzeit-Block bewusst dezenter
-   als der Lieferwagen selbst (Absprache) - auch der aktive Zustand weniger
-   kraeftig statt volles dunkles Navy. */
+   als der Lieferwagen selbst (Absprache) - der inaktive Zustand ist bei
+   diesen beiden schwaecher. Der AKTIVE Zustand ist bei allen drei Posten
+   (inkl. Lieferwagen) einheitlich hellblau statt dunklem Navy - das
+   dunkle Navy bleibt der allgemeinen .opt.on-Farbe (Auswahlfeld-Optionen
+   ausserhalb der Lieferwagenfahrzeit-Karte) vorbehalten. */
 [data-posten="vorarbeiter"] .opt, [data-posten="gartenarbeiter"] .opt{color:var(--muted);border-color:var(--line);}
-[data-posten="vorarbeiter"] .opt.on, [data-posten="gartenarbeiter"] .opt.on{background:var(--accent-blue);color:var(--primary);border-color:var(--accent-blue);}
+[data-posten="lieferwagen"] .opt.on, [data-posten="vorarbeiter"] .opt.on, [data-posten="gartenarbeiter"] .opt.on{background:var(--accent-blue);color:var(--primary);border-color:var(--accent-blue);}
 .lwmodesw{position:relative;display:inline-block;width:58px;height:24px;flex-shrink:0;vertical-align:middle;}
 .lwmodesw input{opacity:0;width:0;height:0;position:absolute;}
 .lwmodesw .trk{position:absolute;inset:0;background:var(--line);border-radius:12px;cursor:pointer;}
@@ -1112,6 +1118,11 @@ let bereichOptionAnzahl = {};
 let bereichZugaenglichkeitStufe = 2;
 let bereichKonfigEingeklappt = false;
 let bereichAfOffenState = {};
+// Auf/Zu-Zustand der Zwischentitel bei den Eingabefeldern - rein visueller
+// Render-Zustand (nicht in der DB gespeichert, wie bereichAfOffenState),
+// unabhaengig von den Gewaehlte/Alle-oeffnen/schliessen-Sammelbuttons der
+// Auswahlfelder (bewusst getrennte Mechanik). Leer = alle offen.
+let bereichZwischentitelZu = {};
 
 // Lieferwagenfahrzeit (Preisfindung Phase 3): einmal pro Offerte anhand der
 // Kunde-PLZ ueber Google Distance Matrix berechnet, Nutzer waehlt Zeit/km.
@@ -1846,6 +1857,7 @@ function initBereich(){
   bereichZugaenglichkeitStufe = 2;
   bereichKonfigEingeklappt = false;
   bereichAfOffenState = {};
+  bereichZwischentitelZu = {};
 }
 
 function aktualisiereZugAnzeige(container){
@@ -1924,18 +1936,27 @@ function renderBereich(){
   // automatisch eine neue Zeile (bis zum naechsten Zwischentitel oder Ende).
   const dimsWrap = $teilbereiche.querySelector('.dimsrows');
   let aktuelleDimsZeile = null;
+  // Zu-/Aufklapp-Zustand des Abschnitts unter dem zuletzt gesehenen
+  // Zwischentitel - gilt fuer alle Felder bis zum naechsten Zwischentitel.
+  // Neue Offerte/kein Zwischentitel vorhanden = alles offen.
+  let aktuellerAbschnittZu = false;
   eingabefelder.filter(ef => !ef.ausgeblendet).forEach(ef => {
     if(ef.ist_titel){
+      aktuellerAbschnittZu = !!bereichZwischentitelZu[ef.id];
       const titel = document.createElement('div');
-      titel.className = 'dimstitel';
-      titel.textContent = ef.name;
+      titel.className = 'dimstitel' + (aktuellerAbschnittZu ? ' zu' : '');
+      titel.innerHTML = `<span class="dimstitelchev">${ICON.chevronDown}</span>${escHtml(ef.name)}`;
+      titel.addEventListener('click', () => {
+        bereichZwischentitelZu[ef.id] = !bereichZwischentitelZu[ef.id];
+        renderBereich();
+      });
       dimsWrap.appendChild(titel);
       aktuelleDimsZeile = null;
       return;
     }
     if(!aktuelleDimsZeile){
       aktuelleDimsZeile = document.createElement('div');
-      aktuelleDimsZeile.className = 'dimsrow';
+      aktuelleDimsZeile.className = 'dimsrow' + (aktuellerAbschnittZu ? ' zu' : '');
       dimsWrap.appendChild(aktuelleDimsZeile);
     }
     renderEinDim(ef, aktuelleDimsZeile);
@@ -2266,6 +2287,7 @@ async function ladeBestehendeOfferte(offerteId){
     bereichZugaenglichkeitStufe = offerte.zugaenglichkeit_stufe ?? 2;
     bereichKonfigEingeklappt = false;
     bereichAfOffenState = {};
+    bereichZwischentitelZu = {};
     renderBereich();
   }
 
