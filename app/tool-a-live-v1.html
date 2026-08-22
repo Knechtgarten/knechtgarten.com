@@ -167,14 +167,16 @@ main.wrap{padding-top:48px;padding-bottom:60px;}
 .tbdim input:focus{outline:none;border-color:var(--primary);}
 .tbdim input.untermindest{border-color:var(--danger);background:#FBEFEC;}
 .tbdim .unit{font-size:10px;color:var(--muted);margin-left:3px;}
-.tbdimzusatz{font-size:10.5px;color:var(--muted);font-style:italic;margin:-1px 0 3px;}
+.tbdim input.tbdimzusatz{display:block;width:100%;font-size:10.5px;font-style:italic;color:var(--ink);border:none;border-bottom:1px dashed var(--line);border-radius:0;padding:0 0 3px;margin-bottom:4px;background:transparent;}
+.tbdim input.tbdimzusatz:focus{outline:none;border-bottom-color:var(--primary);}
+.tbdim input.tbdimzusatz::placeholder{font-style:italic;color:var(--muted);}
 .tbdiminput{display:flex;align-items:center;gap:5px;}
 .tbdimformelbtn{flex:0 0 auto;width:24px;height:24px;display:flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--muted);cursor:pointer;padding:0;}
 .tbdimformelbtn:hover{color:var(--primary);border-color:var(--primary);}
 .tbdimformelbtn.aktiv{color:#fff;background:var(--primary);border-color:var(--primary);}
 .tbdimformelrow{margin-top:4px;}
 .tbdimformelrow.hidden{display:none;}
-.tbdimformelinput{width:110px;border:1px solid var(--line);border-radius:6px;padding:5px 7px;font:inherit;font-size:12px;color:var(--ink);}
+.tbdim .tbdimformelinput{width:110px;border:1px solid var(--line);border-radius:6px;padding:5px 7px;font:inherit;font-size:12px;color:var(--ink);}
 
 /* Konfiguration (Masse/Zugaenglichkeit/Optionen) - eigenes, unabhaengig
    auf-/zuklappbares Feld, getrennt von der Kostentabelle darunter. */
@@ -1100,6 +1102,7 @@ let tagessatzOffenIds = new Set();  // Arbeitsschritt-IDs, die gerade aufgeklapp
 // sauber abbilden). Welches Kieswerk fuer Kies-/Beton-Transport gilt, wird
 // automatisch anhand der Kunde-PLZ ermittelt (siehe ermittleNaechstesKieswerk()).
 let bereichWerteMap = {};
+let bereichNotizMap = {};
 let bereichSelectedOptions = new Set();
 let bereichOptionAnzahl = {};
 let bereichZugaenglichkeitStufe = 2;
@@ -1649,7 +1652,7 @@ function setzeInhaltModus(modell){
 }
 
 async function ladeFormelDaten(otId){
-  const { data: efs, error: efErr } = await sb.from('eingabefeld').select('id,name,einheit,typ,fixer_wert,mindestwert,beschriftung,erklaerung,ausgeblendet,reihenfolge,zeilennummer,zusatztext,flaechenformel_moeglich').eq('offertentyp_id', otId).order('reihenfolge');
+  const { data: efs, error: efErr } = await sb.from('eingabefeld').select('id,name,einheit,typ,fixer_wert,mindestwert,beschriftung,erklaerung,ausgeblendet,reihenfolge,zeilennummer,zusatztext_moeglich,flaechenformel_moeglich').eq('offertentyp_id', otId).order('reihenfolge');
   if(efErr) throw efErr;
   eingabefelder = efs;
 
@@ -1828,6 +1831,7 @@ async function ladeDatenFuerOffertentyp(otId){
 function initBereich(){
   bereichWerteMap = {};
   eingabefelder.forEach(ef => { bereichWerteMap[ef.id] = (ef.typ === 'zahl' && ef.fixer_wert != null) ? ef.fixer_wert : (START_WERTE[ef.name] ?? 0); });
+  bereichNotizMap = {};
   // Standardmaessig ausgewaehlt ist, was in Tool B als "Standard" markiert
   // wurde (Haekchen bei der Option) - ist bei keiner Option eines
   // Auswahlfelds ein Haekchen gesetzt, startet dieses Auswahlfeld bewusst
@@ -2082,21 +2086,27 @@ function renderEinDim(ef, container){
   div.className = 'tbdim';
   const beschriftung = ef.beschriftung || ef.name;
   const erklaerungAttr = ef.erklaerung ? ` title="${ef.erklaerung.replace(/"/g, '&quot;')}"` : '';
-  const zusatztextHtml = ef.zusatztext ? `<div class="tbdimzusatz">${escHtml(ef.zusatztext)}</div>` : '';
+  const zusatztextHtml = ef.zusatztext_moeglich ? `<input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="text" class="tbdimzusatz" placeholder="z.B. Vor dem Haus" value="${escHtml(bereichNotizMap[ef.id] ?? '')}">` : '';
   if(ef.typ === 'ja_nein'){
     const wertLabel = ef.fixer_wert != null ? ` (${ef.fixer_wert}${ef.einheit ? ' ' + ef.einheit : ''})` : '';
     div.innerHTML = `<label${erklaerungAttr}>${beschriftung}${wertLabel}</label>${zusatztextHtml}<input type="checkbox" ${bereichWerteMap[ef.id] ? 'checked' : ''}>`;
     container.appendChild(div);
-    div.querySelector('input').addEventListener('change', e => {
+    div.querySelector('input[type="checkbox"]').addEventListener('change', e => {
       bereichWerteMap[ef.id] = e.target.checked ? (ef.fixer_wert ?? 0) : 0;
       recalc();
     });
+    if(ef.zusatztext_moeglich){
+      div.querySelector('.tbdimzusatz').addEventListener('input', e => { bereichNotizMap[ef.id] = e.target.value; });
+    }
     return;
   }
   const mindestTitel = ef.mindestwert != null ? ` title="Sollte mindestens ${ef.mindestwert} ${ef.einheit || ''} sein"` : erklaerungAttr;
   const formelBtnHtml = ef.flaechenformel_moeglich ? `<button type="button" class="tbdimformelbtn" title="Wert als Formel berechnen (z.B. 5x9+2x3)">${ICON.calc}</button>` : '';
   div.innerHTML = `<label${erklaerungAttr}>${beschriftung} (${ef.einheit})</label>${zusatztextHtml}<div class="tbdiminput"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="number" step="0.01" value="${bereichWerteMap[ef.id] ?? 0}"${mindestTitel}>${formelBtnHtml}</div>${ef.flaechenformel_moeglich ? `<div class="tbdimformelrow hidden"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="text" class="tbdimformelinput" placeholder="z.B. 5x9+2x3"></div>` : ''}`;
   container.appendChild(div);
+  if(ef.zusatztext_moeglich){
+    div.querySelector('.tbdimzusatz').addEventListener('input', e => { bereichNotizMap[ef.id] = e.target.value; });
+  }
   const input = div.querySelector('input[type="number"]');
   input.classList.toggle('untermindest', ef.mindestwert != null && (bereichWerteMap[ef.id] ?? 0) < ef.mindestwert);
   input.addEventListener('input', e => {
@@ -2218,10 +2228,15 @@ async function ladeBestehendeOfferte(offerteId){
     const { data: auswahlRows, error: auswahlErr2 } = await sb
       .from('offerte_auswahl').select('option_id, anzahl').eq('offerte_id', offerteId);
     if(auswahlErr2){ console.error(auswahlErr2); $saveStatus.textContent = 'Fehler beim Laden: ' + auswahlErr2.message; $saveStatus.className='status err'; return; }
+    const { data: efNotizen, error: notizErr } = await sb
+      .from('offerte_eingabefeld_notiz').select('eingabefeld_id, notiz').eq('offerte_id', offerteId);
+    if(notizErr){ console.error(notizErr); $saveStatus.textContent = 'Fehler beim Laden: ' + notizErr.message; $saveStatus.className='status err'; return; }
 
     bereichWerteMap = {};
     eingabefelder.forEach(ef => { bereichWerteMap[ef.id] = 0; });
     (efWerte || []).forEach(w => { bereichWerteMap[w.eingabefeld_id] = w.wert; });
+    bereichNotizMap = {};
+    (efNotizen || []).forEach(n => { bereichNotizMap[n.eingabefeld_id] = n.notiz; });
     bereichSelectedOptions = new Set((auswahlRows || []).map(a => a.option_id));
     // Nachtraeglich in Tool B als "Standard" markierte Optionen fuer ein
     // Auswahlfeld, das bei dieser (bereits gespeicherten) Offerte noch
@@ -2479,6 +2494,12 @@ async function speichereNeueOfferte(titelVal){
         .insert([...bereichSelectedOptions].map(oid => ({ offerte_id: offerte.id, option_id: oid, anzahl: bereichOptionAnzahl?.[oid] ?? 1 })));
       if(aErr) throw aErr;
     }
+    const notizRows = eingabefelder.filter(ef => ef.zusatztext_moeglich && bereichNotizMap[ef.id]?.trim())
+      .map(ef => ({ offerte_id: offerte.id, eingabefeld_id: ef.id, notiz: bereichNotizMap[ef.id].trim() }));
+    if(notizRows.length){
+      const { error: nErr } = await sb.from('offerte_eingabefeld_notiz').insert(notizRows);
+      if(nErr) throw nErr;
+    }
   }
 
   await speichereEigeneZeilen(offerte.id);
@@ -2535,6 +2556,15 @@ async function speichereAenderungen(titelVal){
       const { error: aErr } = await sb.from('offerte_auswahl')
         .insert([...bereichSelectedOptions].map(oid => ({ offerte_id: currentOfferteId, option_id: oid, anzahl: bereichOptionAnzahl?.[oid] ?? 1 })));
       if(aErr) throw aErr;
+    }
+
+    const { error: delNotizErr } = await sb.from('offerte_eingabefeld_notiz').delete().eq('offerte_id', currentOfferteId);
+    if(delNotizErr) throw delNotizErr;
+    const notizRows = eingabefelder.filter(ef => ef.zusatztext_moeglich && bereichNotizMap[ef.id]?.trim())
+      .map(ef => ({ offerte_id: currentOfferteId, eingabefeld_id: ef.id, notiz: bereichNotizMap[ef.id].trim() }));
+    if(notizRows.length){
+      const { error: nErr } = await sb.from('offerte_eingabefeld_notiz').insert(notizRows);
+      if(nErr) throw nErr;
     }
   }
 
