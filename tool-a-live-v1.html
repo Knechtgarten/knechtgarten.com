@@ -162,7 +162,7 @@ main.wrap{padding-top:48px;padding-bottom:60px;}
 .tbcard.collapsed .tbbody{display:none;}
 .dimsrows{display:flex;flex-direction:column;gap:10px;margin-bottom:4px;}
 .dimsrow{display:flex;gap:10px;flex-wrap:wrap;}
-.dimsrow.zu{display:none;}
+.dimsrow.zu,.dimstabellewrap.zu{display:none;}
 .dimstitel{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;color:var(--ink);border-top:1px solid var(--line);padding-top:8px;cursor:pointer;}
 .dimstitel:first-child{border-top:none;padding-top:0;}
 .dimstitelchev{display:inline-flex;flex-shrink:0;color:var(--muted);transition:transform .15s;}
@@ -186,6 +186,24 @@ main.wrap{padding-top:48px;padding-bottom:60px;}
 .tbdimformelrow{margin-top:4px;}
 .tbdimformelrow.hidden{display:none;}
 .tbdim .tbdimformelinput{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:6px;padding:5px 7px;font:inherit;font-size:12px;color:var(--ink);}
+
+/* Tabelle-Eingabefeld (Konfigurator): Zellen sind .tbdim.tabellenzelle, um
+   Zusatztext/Flaechenformel-Overlay 1:1 wie bei einzelnen Eingabefeldern
+   wiederzuverwenden - nur die feste Breite von .tbdim wird hier ausser
+   Kraft gesetzt (soll die Tabellenspalte fuellen, nicht 140px). */
+.tabellewrap{margin-top:4px;}
+.tabellentab{width:100%;border-collapse:collapse;}
+.tabellentab th{font-size:11px;font-weight:600;color:var(--ink);text-align:left;padding:0 8px 6px;border-bottom:2px solid var(--accent-lime);}
+.tabellentab th.berechnet{color:var(--muted);}
+.tabellentab th:first-child,.tabellentab td:first-child{padding-left:0;}
+.tabellentab td{padding:8px 8px 8px 0;vertical-align:top;}
+.tbdim.tabellenzelle{width:100%;flex:none;}
+.tabellenzeilenname{width:100%;box-sizing:border-box;border:1px solid transparent;border-radius:6px;padding:6px 4px;font:inherit;font-size:12.5px;font-weight:600;color:var(--ink);background:transparent;}
+.tabellenzeilenname:hover,.tabellenzeilenname:focus{outline:none;border-color:var(--line);background:#fff;}
+.tabellenberechnet{width:100%;box-sizing:border-box;border:1px dashed var(--line);border-radius:6px;padding:6px 7px;font:inherit;font-size:12.5px;color:var(--muted);background:var(--soft);}
+.tabellenzeilendel{color:var(--muted);cursor:pointer;text-align:center;}
+.tabellenzeilendel:hover{color:var(--danger);}
+.tabellenaddzeile{font-size:11.5px;font-weight:600;color:var(--primary);margin-top:2px;display:inline-flex;align-items:center;gap:4px;cursor:pointer;}
 
 /* Konfiguration (Masse/Zugaenglichkeit/Optionen) - eigenes, unabhaengig
    auf-/zuklappbares Feld, getrennt von der Kostentabelle darunter. */
@@ -984,6 +1002,38 @@ async function speichereGeometrieElemente(offerteId){
   }
 }
 
+// Tabellen-Eingabefeld: alte Zeilen komplett ersetzen (wie bei
+// offerte_auswahl) statt einzeln zu diffen - es gibt keine Fremdschluessel
+// von aussen auf offerte_tabelle_zeile.id, darum unproblematisch. Werte von
+// Berechnungsspalten werden bewusst NICHT gespeichert (wie jede andere
+// Formel auch immer live neu ausgewertet, siehe berechneAlleTabellenwerte()).
+async function speichereTabellenZeilen(offerteId){
+  const { error: delErr } = await sb.from('offerte_tabelle_zeile').delete().eq('offerte_id', offerteId);
+  if(delErr) throw delErr;
+  const zeilenListe = [];
+  Object.entries(bereichTabelleZeilen).forEach(([efId, zeilen]) => {
+    zeilen.forEach((z, i) => zeilenListe.push({ eingabefeld_id: efId, zeile: z, reihenfolge: i + 1 }));
+  });
+  if(!zeilenListe.length) return;
+  const { data: neueZeilen, error: insErr } = await sb.from('offerte_tabelle_zeile')
+    .insert(zeilenListe.map(t => ({ offerte_id: offerteId, eingabefeld_id: t.eingabefeld_id, name: t.zeile.name, reihenfolge: t.reihenfolge })))
+    .select();
+  if(insErr) throw insErr;
+  const werteRows = [];
+  neueZeilen.forEach((neu, i) => {
+    const t = zeilenListe[i];
+    Object.entries(t.zeile.werte).forEach(([spalteId, wertObj]) => {
+      const spalteInfo = (TABELLEN_SPALTEN[t.eingabefeld_id] || []).find(s => s.id === spalteId);
+      if(spalteInfo?.ist_berechnung) return;
+      werteRows.push({ zeile_id: neu.id, spalte_id: spalteId, wert: wertObj.wert ?? 0, notiz: wertObj.notiz || null });
+    });
+  });
+  if(werteRows.length){
+    const { error: wErr } = await sb.from('offerte_tabelle_wert').insert(werteRows);
+    if(wErr) throw wErr;
+  }
+}
+
 // Notiz-Text und Geometrie-Elemente hingen bisher komplett am grossen
 // "Offerte speichern"-Button - beim Schliessen des Notizen-Panels wirkte es
 // so, als seien sie gesichert, tatsaechlich waren sie nur im DOM/JS-State und
@@ -1125,6 +1175,15 @@ let bereichAfOffenState = {};
 // unabhaengig von den Gewaehlte/Alle-oeffnen/schliessen-Sammelbuttons der
 // Auswahlfelder (bewusst getrennte Mechanik). Leer = alle offen.
 let bereichZwischentitelZu = {};
+// Tabellen-Eingabefeld: Spalten kommen aus der Vorlage (TABELLEN_SPALTEN,
+// wie eingabefelder/auswahlfelder), die Zeilen selbst (Name + Werte je
+// Spalte) gehoeren zur Offerte - bereichTabelleZeilen: { eingabefeld_id:
+// [{_key, id, name, werte: {spalte_id: {wert, notiz}}}] }. _key ist ein
+// stabiler Client-Schluessel fuer noch nicht gespeicherte Zeilen (analog
+// zu efTabelleSpalten in Tool B).
+let TABELLEN_SPALTEN = {};
+let bereichTabelleZeilen = {};
+let tabelleZeileCounter = 0;
 
 // Lieferwagenfahrzeit (Preisfindung Phase 3): einmal pro Offerte anhand der
 // Kunde-PLZ ueber Google Distance Matrix berechnet, Nutzer waehlt Zeit/km.
@@ -1669,9 +1728,22 @@ function setzeInhaltModus(modell){
 }
 
 async function ladeFormelDaten(otId){
-  const { data: efs, error: efErr } = await sb.from('eingabefeld').select('id,name,einheit,typ,fixer_wert,mindestwert,beschriftung,erklaerung,ausgeblendet,reihenfolge,ist_titel,zusatztext_moeglich,flaechenformel_moeglich').eq('offertentyp_id', otId).order('reihenfolge');
+  const { data: efs, error: efErr } = await sb.from('eingabefeld').select('id,name,einheit,typ,fixer_wert,mindestwert,beschriftung,erklaerung,ausgeblendet,reihenfolge,ist_titel,ist_tabelle,zusatztext_moeglich,flaechenformel_moeglich').eq('offertentyp_id', otId).order('reihenfolge');
   if(efErr) throw efErr;
   eingabefelder = efs;
+
+  // Spalten der Tabellen-Eingabefelder dieses Offertentyps, gruppiert nach
+  // eingabefeld_id - Zeilen/Werte selbst gehoeren zur Offerte, nicht zur
+  // Vorlage (siehe bereichTabelleZeilen).
+  const tabellenIds = eingabefelder.filter(ef => ef.ist_tabelle).map(ef => ef.id);
+  TABELLEN_SPALTEN = {};
+  if(tabellenIds.length){
+    const { data: spalten, error: spErr } = await sb.from('eingabefeld_tabelle_spalte')
+      .select('id,eingabefeld_id,name,einheit,reihenfolge,ist_berechnung,ausdruck,zusatztext_moeglich,flaechenformel_moeglich')
+      .in('eingabefeld_id', tabellenIds).order('reihenfolge');
+    if(spErr) throw spErr;
+    (spalten || []).forEach(s => { (TABELLEN_SPALTEN[s.eingabefeld_id] ||= []).push(s); });
+  }
 
   const { data: arbeitsschritte, error: asErr } = await sb
     .from('arbeitsschritt')
@@ -1860,6 +1932,7 @@ function initBereich(){
   bereichKonfigEingeklappt = false;
   bereichAfOffenState = {};
   bereichZwischentitelZu = {};
+  bereichTabelleZeilen = {};
 }
 
 function aktualisiereZugAnzeige(container){
@@ -1948,6 +2021,9 @@ function renderBereich(){
     if(ef.ist_titel){
       abschnitte.push({ titel: ef });
       aktuellerFelderAbschnitt = null;
+    }else if(ef.ist_tabelle){
+      abschnitte.push({ tabelle: ef });
+      aktuellerFelderAbschnitt = null;
     }else{
       if(!aktuellerFelderAbschnitt){
         aktuellerFelderAbschnitt = { felder: [] };
@@ -1972,6 +2048,13 @@ function renderBereich(){
         renderBereich();
       });
       dimsWrap.appendChild(titel);
+      return;
+    }
+    if(abschnitt.tabelle){
+      const wrap = document.createElement('div');
+      wrap.className = 'dimstabellewrap' + (aktuellerAbschnittZu ? ' zu' : '');
+      dimsWrap.appendChild(wrap);
+      renderTabelle(abschnitt.tabelle, wrap);
       return;
     }
     const zeigeZusatztextZeile = abschnitt.felder.some(f => f.zusatztext_moeglich);
@@ -2193,6 +2276,141 @@ function renderEinDim(ef, container, zeigeZusatztextZeile){
   }
 }
 
+// ---------------------------------------------------------------------------
+// Tabelle-Eingabefeld: fuer wiederkehrende Zeilen, deren Anzahl erst pro
+// Offerte feststeht (z.B. mehrere Troege). Spalten kommen aus der Vorlage
+// (TABELLEN_SPALTEN), Zeilen (Name + Werte) gehoeren zur Offerte
+// (bereichTabelleZeilen). Eingabe-Zellen sind .tbdim.tabellenzelle und nutzen
+// dieselbe Zusatztext-/Flaechenformel-Logik wie renderEinDim (siehe CSS).
+// ---------------------------------------------------------------------------
+function renderTabelleZeileZelle(spalte, zeile, tdEl){
+  const wertObj = zeile.werte[spalte.id] || (zeile.werte[spalte.id] = { wert: 0, notiz: '' });
+  if(spalte.ist_berechnung){
+    tdEl.innerHTML = `<input type="number" class="tabellenberechnet" data-zeile="${zeile._key}" data-spalte="${spalte.id}" value="${wertObj.wert ?? 0}" readonly tabindex="-1">`;
+    return;
+  }
+  const div = document.createElement('div');
+  div.className = 'tbdim tabellenzelle';
+  const zusatztextHtml = spalte.zusatztext_moeglich
+    ? `<div class="tbdimzusatzwrap"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="text" class="tbdimzusatz" placeholder="z.B. Vor dem Haus" value="${escHtml(wertObj.notiz || '')}"></div>`
+    : '';
+  const formelBtnHtml = spalte.flaechenformel_moeglich ? `<button type="button" class="tbdimformelbtn" title="Wert als Formel berechnen (z.B. 5x9+2x3)">${ICON.calc}</button>` : '';
+  div.innerHTML = `${zusatztextHtml}<div class="tbdiminput"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="number" step="0.01" value="${wertObj.wert ?? 0}">${formelBtnHtml}</div>` +
+    (spalte.flaechenformel_moeglich ? `<div class="tbdimformelrow hidden"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="text" class="tbdimformelinput" placeholder="z.B. 5x9+2x3"></div>` : '');
+  tdEl.appendChild(div);
+  if(spalte.zusatztext_moeglich){
+    div.querySelector('.tbdimzusatz').addEventListener('input', e => { wertObj.notiz = e.target.value; });
+  }
+  const input = div.querySelector('input[type="number"]');
+  input.addEventListener('input', e => {
+    wertObj.wert = parseFloat(e.target.value) || 0;
+    recalc();
+  });
+  if(spalte.flaechenformel_moeglich){
+    const formelBtn = div.querySelector('.tbdimformelbtn');
+    const formelRow = div.querySelector('.tbdimformelrow');
+    const formelInput = div.querySelector('.tbdimformelinput');
+    formelBtn.addEventListener('click', () => {
+      const versteckt = formelRow.classList.toggle('hidden');
+      formelBtn.classList.toggle('aktiv', !versteckt);
+      if(!versteckt) formelInput.focus();
+    });
+    formelInput.addEventListener('input', () => {
+      const ergebnis = berechneFlaechenformel(formelInput.value);
+      if(ergebnis === null) return;
+      input.value = Math.round(ergebnis * 100) / 100;
+      input.dispatchEvent(new Event('input'));
+    });
+    formelInput.addEventListener('keydown', e => {
+      if(e.key === 'Enter'){ formelRow.classList.add('hidden'); formelBtn.classList.remove('aktiv'); }
+    });
+  }
+}
+
+function renderTabelle(ef, container){
+  const spalten = TABELLEN_SPALTEN[ef.id] || [];
+  const zeilen = bereichTabelleZeilen[ef.id] || (bereichTabelleZeilen[ef.id] = []);
+  const wrap = document.createElement('div');
+  wrap.className = 'tabellewrap';
+  wrap.innerHTML = `
+    <table class="tabellentab">
+      <thead><tr>
+        <th style="width:26%;"></th>
+        ${spalten.map(s => `<th${s.ist_berechnung ? ' class="berechnet"' : ''}>${escHtml(s.name)} (${escHtml(s.einheit)})</th>`).join('')}
+        <th style="width:24px;"></th>
+      </tr></thead>
+      <tbody></tbody>
+    </table>
+    <span class="tabellenaddzeile">+ Zeile hinzufügen</span>`;
+  container.appendChild(wrap);
+  const tbody = wrap.querySelector('tbody');
+  zeilen.forEach(zeile => {
+    const tr = document.createElement('tr');
+    const tdName = document.createElement('td');
+    tdName.innerHTML = `<input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="text" class="tabellenzeilenname" value="${escHtml(zeile.name)}" placeholder="Bezeichnung">`;
+    tdName.querySelector('input').addEventListener('input', e => { zeile.name = e.target.value; });
+    tr.appendChild(tdName);
+    spalten.forEach(s => {
+      const td = document.createElement('td');
+      renderTabelleZeileZelle(s, zeile, td);
+      tr.appendChild(td);
+    });
+    const tdDel = document.createElement('td');
+    tdDel.className = 'tabellenzeilendel';
+    tdDel.innerHTML = ICON.trash;
+    tdDel.addEventListener('click', () => {
+      bereichTabelleZeilen[ef.id] = bereichTabelleZeilen[ef.id].filter(z => z !== zeile);
+      renderBereich();
+      recalc();
+    });
+    tr.appendChild(tdDel);
+    tbody.appendChild(tr);
+  });
+  wrap.querySelector('.tabellenaddzeile').addEventListener('click', () => {
+    bereichTabelleZeilen[ef.id].push({ _key: ++tabelleZeileCounter, id: null, name: `Zeile ${bereichTabelleZeilen[ef.id].length + 1}`, werte: {} });
+    renderBereich();
+    recalc();
+  });
+}
+
+// Wertet alle Berechnungsspalten aller Tabellen pro Zeile neu aus (schreibt
+// das Ergebnis in zeile.werte UND direkt ins bereits gerenderte, schreib-
+// geschuetzte Zellenfeld, damit ein einzelner Zellenwert live nachzieht, ohne
+// die ganze Tabelle neu zu rendern und dabei den Eingabefokus zu verlieren)
+// und liefert je Spalte die Summe ueber alle Zeilen - das ist der Wert, den
+// alle UEBRIGEN Formeln (Ressourcenzeile/Term) unter der Spalten-Id sehen.
+// Reihenfolge der Spalten = DB-Reihenfolge, eine Berechnungsspalte kann daher
+// nur auf eine WEITER OBEN stehende Spalte derselben Zeile verweisen.
+async function berechneAlleTabellenwerte(systemwerteMap){
+  const tabelleSummenMap = {};
+  for(const ef of eingabefelder){
+    if(!ef.ist_tabelle) continue;
+    const spalten = TABELLEN_SPALTEN[ef.id] || [];
+    const zeilen = bereichTabelleZeilen[ef.id] || [];
+    for(const zeile of zeilen){
+      const zeilenWerte = {};
+      spalten.forEach(s => { if(!s.ist_berechnung) zeilenWerte[s.id] = zeile.werte[s.id]?.wert ?? 0; });
+      for(const s of spalten){
+        if(!s.ist_berechnung) continue;
+        let wert = 0;
+        try{
+          const { data, error } = await sb.rpc('eval_ausdruck', { node: s.ausdruck, werte: { ...bereichWerteMap, ...systemwerteMap, ...zeilenWerte } });
+          if(error) throw error;
+          wert = data ?? 0;
+        }catch(e){ wert = 0; }
+        zeile.werte[s.id] = { wert, notiz: zeile.werte[s.id]?.notiz || '' };
+        zeilenWerte[s.id] = wert;
+        const input = $teilbereiche.querySelector(`.tabellenberechnet[data-zeile="${zeile._key}"][data-spalte="${s.id}"]`);
+        if(input) input.value = wert;
+      }
+    }
+    spalten.forEach(s => {
+      tabelleSummenMap[s.id] = zeilen.reduce((summe, z) => summe + (z.werte[s.id]?.wert ?? 0), 0);
+    });
+  }
+  return tabelleSummenMap;
+}
+
 let offertenListe = [];
 
 async function loadOfferteListe(){
@@ -2261,6 +2479,11 @@ async function ladeBestehendeOfferte(offerteId){
   await ladeDatenFuerOffertentyp(offerte.offertentyp_id);
 
   if(currentBerechnungsmodell === 'tagessatz'){
+    // Sicherheitsnetz falls vorher eine Formel-Offerte mit Tabellenzeilen
+    // offen war - der Formel-Zweig unten setzt bereichTabelleZeilen zwar
+    // zurueck, dieser Tagessatz-Zweig sonst nicht (speichereTabellenZeilen
+    // laeuft aber fuer beide Modelle unconditional).
+    bereichTabelleZeilen = {};
     const { data: tage, error } = await sb.from('offerte_teilschritt_tage')
       .select('teilschritt_id, anzahl_tage').eq('offerte_id', offerteId);
     if(error){ console.error(error); $saveStatus.textContent = 'Fehler beim Laden: ' + error.message; $saveStatus.className='status err'; return; }
@@ -2288,6 +2511,16 @@ async function ladeBestehendeOfferte(offerteId){
     const { data: efNotizen, error: notizErr } = await sb
       .from('offerte_eingabefeld_notiz').select('eingabefeld_id, notiz').eq('offerte_id', offerteId);
     if(notizErr){ console.error(notizErr); $saveStatus.textContent = 'Fehler beim Laden: ' + notizErr.message; $saveStatus.className='status err'; return; }
+    const { data: tabZeilen, error: tabZeilenErr } = await sb
+      .from('offerte_tabelle_zeile').select('id, eingabefeld_id, name, reihenfolge').eq('offerte_id', offerteId).order('reihenfolge');
+    if(tabZeilenErr){ console.error(tabZeilenErr); $saveStatus.textContent = 'Fehler beim Laden: ' + tabZeilenErr.message; $saveStatus.className='status err'; return; }
+    let tabWerte = [];
+    if(tabZeilen && tabZeilen.length){
+      const { data: twData, error: tabWerteErr } = await sb
+        .from('offerte_tabelle_wert').select('zeile_id, spalte_id, wert, notiz').in('zeile_id', tabZeilen.map(z => z.id));
+      if(tabWerteErr){ console.error(tabWerteErr); $saveStatus.textContent = 'Fehler beim Laden: ' + tabWerteErr.message; $saveStatus.className='status err'; return; }
+      tabWerte = twData || [];
+    }
 
     bereichWerteMap = {};
     eingabefelder.forEach(ef => { bereichWerteMap[ef.id] = 0; });
@@ -2310,6 +2543,12 @@ async function ladeBestehendeOfferte(offerteId){
     bereichKonfigEingeklappt = false;
     bereichAfOffenState = {};
     bereichZwischentitelZu = {};
+    bereichTabelleZeilen = {};
+    (tabZeilen || []).forEach(z => {
+      const werte = {};
+      tabWerte.filter(w => w.zeile_id === z.id).forEach(w => { werte[w.spalte_id] = { wert: w.wert, notiz: w.notiz || '' }; });
+      (bereichTabelleZeilen[z.eingabefeld_id] ||= []).push({ _key: ++tabelleZeileCounter, id: z.id, name: z.name, werte });
+    });
     renderBereich();
   }
 
@@ -2371,6 +2610,12 @@ async function starteNeueOfferte(otId){
   eigeneZeilen = []; eigeneZeileCounter = 0;
   zeilenKorrekturen = {};
   geometrieElemente = [];
+  // Sicherheitsnetz falls vorher eine Formel-Offerte mit Tabellenzeilen offen
+  // war: initBereich() (oben im else-Zweig) setzt das zwar schon zurueck,
+  // aber der Tagessatz-Zweig ruft initBereich() gar nicht auf - ohne das hier
+  // wuerden alte Tabellenzeilen sonst faelschlich mit der neuen Offerte
+  // gespeichert (speichereTabellenZeilen laeuft fuer beide Modelle).
+  bereichTabelleZeilen = {};
   renderGeometrieResultate();
   beschreibungManuellBearbeitet = false;
   $beschreibungBlock.value = '';
@@ -2563,6 +2808,7 @@ async function speichereNeueOfferte(titelVal){
   await speichereEigeneZeilen(offerte.id);
   await speichereZeilenKorrekturen(offerte.id);
   await speichereGeometrieElemente(offerte.id);
+  await speichereTabellenZeilen(offerte.id);
 
   $saveStatus.textContent = `Gespeichert (Offerte-ID ${offerte.id.slice(0,8)}…).`;
   currentOfferteId = offerte.id;
@@ -2629,6 +2875,7 @@ async function speichereAenderungen(titelVal){
   await speichereEigeneZeilen(currentOfferteId);
   await speichereZeilenKorrekturen(currentOfferteId);
   await speichereGeometrieElemente(currentOfferteId);
+  await speichereTabellenZeilen(currentOfferteId);
 
   $saveStatus.textContent = 'Änderungen gespeichert.';
   await loadOfferteListe();
@@ -3507,6 +3754,11 @@ async function recalc(){
       // von der Kunde-PLZ ab, nicht von der Teilflaeche - daher einmal pro
       // Neuberechnung ermitteln, nicht pro Teilflaeche/Zeile.
       const systemwerteMap = await berechneSystemwerteMap();
+      // Tabellen-Eingabefelder: Berechnungsspalten (z.B. Volumen = Flaeche x
+      // Hoehe) pro Zeile neu auswerten und gleich die Summen je Spalte bilden
+      // - diese Summen stehen danach wie ein ganz normaler Eingabefeld-Wert
+      // fuer alle Formeln unten zur Verfuegung (siehe tabelleSummenMap unten).
+      const tabelleSummenMap = await berechneAlleTabellenwerte(systemwerteMap);
       // Naechstgelegenes Kieswerk/Betonwerk zur Kunde-PLZ - haengt nur von der
       // PLZ ab (nicht von der Teilflaeche/Option), daher einmal pro
       // Neuberechnung ermitteln statt pro Teilflaeche/Zeile.
@@ -3549,7 +3801,7 @@ async function recalc(){
             // Pauschale, zum Schluss die Marge (siehe Nutzer-Vorgabe).
             let mengeRoh;
             try {
-              const { data, error } = await sb.rpc('eval_ausdruck', { node: rz.menge_ausdruck, werte: { ...bereichWerteMap, ...systemwerteMap } });
+              const { data, error } = await sb.rpc('eval_ausdruck', { node: rz.menge_ausdruck, werte: { ...bereichWerteMap, ...systemwerteMap, ...tabelleSummenMap } });
               if(error) throw error;
               mengeRoh = data;
             } catch(e) {
@@ -3590,7 +3842,7 @@ async function recalc(){
             }
             let mengeRoh;
             try {
-              const { data, error } = await sb.rpc('eval_ausdruck', { node: rz.menge_ausdruck, werte: { ...bereichWerteMap, ...systemwerteMap } });
+              const { data, error } = await sb.rpc('eval_ausdruck', { node: rz.menge_ausdruck, werte: { ...bereichWerteMap, ...systemwerteMap, ...tabelleSummenMap } });
               if(error) throw error;
               mengeRoh = data;
             } catch(e) {
@@ -3614,7 +3866,7 @@ async function recalc(){
             }
             let mengeRoh;
             try {
-              const { data, error } = await sb.rpc('eval_ausdruck', { node: rz.menge_ausdruck, werte: { ...bereichWerteMap, ...systemwerteMap } });
+              const { data, error } = await sb.rpc('eval_ausdruck', { node: rz.menge_ausdruck, werte: { ...bereichWerteMap, ...systemwerteMap, ...tabelleSummenMap } });
               if(error) throw error;
               mengeRoh = data;
             } catch(e) {
@@ -3632,7 +3884,7 @@ async function recalc(){
           }
           let mengeRoh;
           try {
-            const { data, error } = await sb.rpc('eval_ausdruck', { node: rz.menge_ausdruck, werte: { ...bereichWerteMap, ...systemwerteMap } });
+            const { data, error } = await sb.rpc('eval_ausdruck', { node: rz.menge_ausdruck, werte: { ...bereichWerteMap, ...systemwerteMap, ...tabelleSummenMap } });
             if(error) throw error;
             mengeRoh = data;
           } catch(e) {
@@ -3674,7 +3926,7 @@ async function recalc(){
           einheit = ts.anzeigeEingabefeldEinheit || '';
         }else{
           try{
-            const { data, error } = await sb.rpc('eval_ausdruck', { node: ts.anzeigeTermAusdruck, werte: { ...bereichWerteMap, ...systemwerteMap } });
+            const { data, error } = await sb.rpc('eval_ausdruck', { node: ts.anzeigeTermAusdruck, werte: { ...bereichWerteMap, ...systemwerteMap, ...tabelleSummenMap } });
             if(error) throw error;
             wert = data;
             einheit = ts.anzeigeTermEinheit || '';
