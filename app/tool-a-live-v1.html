@@ -160,12 +160,21 @@ main.wrap{padding-top:48px;padding-bottom:60px;}
 .tbcard.collapsed .tbchev{transform:rotate(-90deg);}
 .tbbody{padding:0;}
 .tbcard.collapsed .tbbody{display:none;}
-.dimsrow{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:4px;}
+.dimsrows{display:flex;flex-direction:column;gap:10px;margin-bottom:4px;}
+.dimsrow{display:flex;gap:14px;flex-wrap:wrap;}
 .tbdim label{display:block;font-size:11px;font-weight:600;color:var(--ink);margin-bottom:3px;white-space:nowrap;}
 .tbdim input{width:80px;border:1px solid var(--line);border-radius:6px;padding:6px 7px;font:inherit;font-size:12.5px;color:var(--ink);}
 .tbdim input:focus{outline:none;border-color:var(--primary);}
 .tbdim input.untermindest{border-color:var(--danger);background:#FBEFEC;}
 .tbdim .unit{font-size:10px;color:var(--muted);margin-left:3px;}
+.tbdimzusatz{font-size:10.5px;color:var(--muted);font-style:italic;margin:-1px 0 3px;}
+.tbdiminput{display:flex;align-items:center;gap:5px;}
+.tbdimformelbtn{flex:0 0 auto;width:24px;height:24px;display:flex;align-items:center;justify-content:center;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--muted);cursor:pointer;padding:0;}
+.tbdimformelbtn:hover{color:var(--primary);border-color:var(--primary);}
+.tbdimformelbtn.aktiv{color:#fff;background:var(--primary);border-color:var(--primary);}
+.tbdimformelrow{margin-top:4px;}
+.tbdimformelrow.hidden{display:none;}
+.tbdimformelinput{width:110px;border:1px solid var(--line);border-radius:6px;padding:5px 7px;font:inherit;font-size:12px;color:var(--ink);}
 
 /* Konfiguration (Masse/Zugaenglichkeit/Optionen) - eigenes, unabhaengig
    auf-/zuklappbares Feld, getrennt von der Kostentabelle darunter. */
@@ -673,7 +682,8 @@ const ICON = {
   restore: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>',
   check: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l6 6L20 6"/></svg>',
   close: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
-  chevronDown: '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>'
+  chevronDown: '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>',
+  calc: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><path d="M8 7h8"/><path d="M8 12h.01M12 12h.01M16 12h.01M8 16h.01M12 16h.01M16 16h.01"/></svg>'
 };
 const $status = document.getElementById('status');
 const $costbody = document.getElementById('costbody');
@@ -1639,7 +1649,7 @@ function setzeInhaltModus(modell){
 }
 
 async function ladeFormelDaten(otId){
-  const { data: efs, error: efErr } = await sb.from('eingabefeld').select('id,name,einheit,typ,fixer_wert,mindestwert,beschriftung,erklaerung,ausgeblendet,reihenfolge').eq('offertentyp_id', otId).order('reihenfolge');
+  const { data: efs, error: efErr } = await sb.from('eingabefeld').select('id,name,einheit,typ,fixer_wert,mindestwert,beschriftung,erklaerung,ausgeblendet,reihenfolge,zeilennummer,zusatztext,flaechenformel_moeglich').eq('offertentyp_id', otId).order('reihenfolge');
   if(efErr) throw efErr;
   eingabefelder = efs;
 
@@ -1855,7 +1865,7 @@ function renderBereich(){
         <span class="konfiglabel">Konfiguration</span>
       </div>
       <div class="konfigbody">
-        <div class="dimsrow"></div>
+        <div class="dimsrows"></div>
         <div class="afblock zugblock">
           <label class="flabel">Zugänglichkeit Standort</label>
           <div class="zugwrap">
@@ -1900,33 +1910,21 @@ function renderBereich(){
     });
   });
 
-  const geoWrap = $teilbereiche.querySelector('.dimsrow');
-  eingabefelder.filter(ef => !ef.ausgeblendet).forEach(ef => {
-    const div = document.createElement('div');
-    div.className = 'tbdim';
-    const beschriftung = ef.beschriftung || ef.name;
-    const erklaerungAttr = ef.erklaerung ? ` title="${ef.erklaerung.replace(/"/g, '&quot;')}"` : '';
-    if(ef.typ === 'ja_nein'){
-      const wertLabel = ef.fixer_wert != null ? ` (${ef.fixer_wert}${ef.einheit ? ' ' + ef.einheit : ''})` : '';
-      div.innerHTML = `<label${erklaerungAttr}>${beschriftung}${wertLabel}</label><input type="checkbox" ${bereichWerteMap[ef.id] ? 'checked' : ''}>`;
-      geoWrap.appendChild(div);
-      div.querySelector('input').addEventListener('change', e => {
-        bereichWerteMap[ef.id] = e.target.checked ? (ef.fixer_wert ?? 0) : 0;
-        recalc();
-      });
-    }else{
-      const mindestTitel = ef.mindestwert != null ? ` title="Sollte mindestens ${ef.mindestwert} ${ef.einheit || ''} sein"` : erklaerungAttr;
-      div.innerHTML = `<label${erklaerungAttr}>${beschriftung} (${ef.einheit})</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="number" step="0.01" value="${bereichWerteMap[ef.id] ?? 0}"${mindestTitel}>`;
-      geoWrap.appendChild(div);
-      const input = div.querySelector('input');
-      input.classList.toggle('untermindest', ef.mindestwert != null && (bereichWerteMap[ef.id] ?? 0) < ef.mindestwert);
-      input.addEventListener('input', e => {
-        const wert = parseFloat(e.target.value) || 0;
-        bereichWerteMap[ef.id] = wert;
-        input.classList.toggle('untermindest', ef.mindestwert != null && wert < ef.mindestwert);
-        recalc();
-      });
-    }
+  const dimsWrap = $teilbereiche.querySelector('.dimsrows');
+  const sichtbareEingabefelder = eingabefelder.filter(ef => !ef.ausgeblendet);
+  const dimGruppen = new Map();
+  sichtbareEingabefelder.forEach(ef => {
+    const key = (ef.zeilennummer === null || ef.zeilennummer === undefined) ? 'default' : ef.zeilennummer;
+    if(!dimGruppen.has(key)) dimGruppen.set(key, []);
+    dimGruppen.get(key).push(ef);
+  });
+  const positiveZeilen = [...dimGruppen.keys()].filter(k => typeof k === 'number' && k > 0).sort((a, b) => a - b);
+  const dimReihenfolge = [0, 'default', ...positiveZeilen].filter(k => dimGruppen.has(k));
+  dimReihenfolge.forEach(key => {
+    const row = document.createElement('div');
+    row.className = 'dimsrow';
+    dimsWrap.appendChild(row);
+    dimGruppen.get(key).forEach(ef => renderEinDim(ef, row));
   });
 
   aktualisiereZugAnzeige($teilbereiche);
@@ -2059,6 +2057,71 @@ function renderBereich(){
     const modus = bulkGewaehltPasst ? 'gewaehlt' : bulkAllePasst ? 'alle' : bulkKeinePasst ? 'keine' : null;
     $teilbereiche.querySelectorAll('.afBulkBtn').forEach(btn => {
       btn.classList.toggle('aktiv', btn.dataset.mode === modus);
+    });
+  }
+}
+
+// Wertet eine Formel wie "5x9+2x3" aus: Terme werden bei "+" getrennt, jeder
+// Term bei x/×/* multipliziert, die Terme aufsummiert. Gibt null zurueck,
+// wenn die Formel (noch) nicht gueltig/vollstaendig ist - der Aufrufer laesst
+// den bisherigen Feldwert dann einfach unveraendert stehen.
+function berechneFlaechenformel(text){
+  const terme = text.split('+').map(t => t.trim()).filter(t => t !== '');
+  if(!terme.length) return null;
+  let summe = 0;
+  for(const term of terme){
+    const faktoren = term.split(/[x×*]/i).map(f => parseFloat(f.trim().replace(',', '.')));
+    if(faktoren.some(f => isNaN(f))) return null;
+    summe += faktoren.reduce((a, b) => a * b, 1);
+  }
+  return summe;
+}
+
+function renderEinDim(ef, container){
+  const div = document.createElement('div');
+  div.className = 'tbdim';
+  const beschriftung = ef.beschriftung || ef.name;
+  const erklaerungAttr = ef.erklaerung ? ` title="${ef.erklaerung.replace(/"/g, '&quot;')}"` : '';
+  const zusatztextHtml = ef.zusatztext ? `<div class="tbdimzusatz">${escHtml(ef.zusatztext)}</div>` : '';
+  if(ef.typ === 'ja_nein'){
+    const wertLabel = ef.fixer_wert != null ? ` (${ef.fixer_wert}${ef.einheit ? ' ' + ef.einheit : ''})` : '';
+    div.innerHTML = `<label${erklaerungAttr}>${beschriftung}${wertLabel}</label>${zusatztextHtml}<input type="checkbox" ${bereichWerteMap[ef.id] ? 'checked' : ''}>`;
+    container.appendChild(div);
+    div.querySelector('input').addEventListener('change', e => {
+      bereichWerteMap[ef.id] = e.target.checked ? (ef.fixer_wert ?? 0) : 0;
+      recalc();
+    });
+    return;
+  }
+  const mindestTitel = ef.mindestwert != null ? ` title="Sollte mindestens ${ef.mindestwert} ${ef.einheit || ''} sein"` : erklaerungAttr;
+  const formelBtnHtml = ef.flaechenformel_moeglich ? `<button type="button" class="tbdimformelbtn" title="Wert als Formel berechnen (z.B. 5x9+2x3)">${ICON.calc}</button>` : '';
+  div.innerHTML = `<label${erklaerungAttr}>${beschriftung} (${ef.einheit})</label>${zusatztextHtml}<div class="tbdiminput"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="number" step="0.01" value="${bereichWerteMap[ef.id] ?? 0}"${mindestTitel}>${formelBtnHtml}</div>${ef.flaechenformel_moeglich ? `<div class="tbdimformelrow hidden"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="text" class="tbdimformelinput" placeholder="z.B. 5x9+2x3"></div>` : ''}`;
+  container.appendChild(div);
+  const input = div.querySelector('input[type="number"]');
+  input.classList.toggle('untermindest', ef.mindestwert != null && (bereichWerteMap[ef.id] ?? 0) < ef.mindestwert);
+  input.addEventListener('input', e => {
+    const wert = parseFloat(e.target.value) || 0;
+    bereichWerteMap[ef.id] = wert;
+    input.classList.toggle('untermindest', ef.mindestwert != null && wert < ef.mindestwert);
+    recalc();
+  });
+  if(ef.flaechenformel_moeglich){
+    const formelBtn = div.querySelector('.tbdimformelbtn');
+    const formelRow = div.querySelector('.tbdimformelrow');
+    const formelInput = div.querySelector('.tbdimformelinput');
+    formelBtn.addEventListener('click', () => {
+      const versteckt = formelRow.classList.toggle('hidden');
+      formelBtn.classList.toggle('aktiv', !versteckt);
+      if(!versteckt) formelInput.focus();
+    });
+    formelInput.addEventListener('input', () => {
+      const ergebnis = berechneFlaechenformel(formelInput.value);
+      if(ergebnis === null) return;
+      input.value = Math.round(ergebnis * 100) / 100;
+      input.dispatchEvent(new Event('input'));
+    });
+    formelInput.addEventListener('keydown', e => {
+      if(e.key === 'Enter'){ formelRow.classList.add('hidden'); formelBtn.classList.remove('aktiv'); }
     });
   }
 }
