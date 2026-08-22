@@ -1935,13 +1935,32 @@ function renderBereich(){
   // erscheint als Zwischenueberschrift, alle danach folgenden Felder starten
   // automatisch eine neue Zeile (bis zum naechsten Zwischentitel oder Ende).
   const dimsWrap = $teilbereiche.querySelector('.dimsrows');
-  let aktuelleDimsZeile = null;
+  // Erst in Abschnitte gruppieren (Zwischentitel bzw. ein Lauf von echten
+  // Feldern bis zum naechsten Zwischentitel), damit pro Feld-Abschnitt schon
+  // VOR dem Rendern feststeht, ob irgendein Feld darin einen Zusatztext hat -
+  // nur dann reservieren ALLE Felder dieses Abschnitts die Zusatztext-Zeile,
+  // sonst faellt der Leerraum darueber komplett weg.
+  const abschnitte = [];
+  let aktuellerFelderAbschnitt = null;
+  eingabefelder.filter(ef => !ef.ausgeblendet).forEach(ef => {
+    if(ef.ist_titel){
+      abschnitte.push({ titel: ef });
+      aktuellerFelderAbschnitt = null;
+    }else{
+      if(!aktuellerFelderAbschnitt){
+        aktuellerFelderAbschnitt = { felder: [] };
+        abschnitte.push(aktuellerFelderAbschnitt);
+      }
+      aktuellerFelderAbschnitt.felder.push(ef);
+    }
+  });
   // Zu-/Aufklapp-Zustand des Abschnitts unter dem zuletzt gesehenen
   // Zwischentitel - gilt fuer alle Felder bis zum naechsten Zwischentitel.
   // Neue Offerte/kein Zwischentitel vorhanden = alles offen.
   let aktuellerAbschnittZu = false;
-  eingabefelder.filter(ef => !ef.ausgeblendet).forEach(ef => {
-    if(ef.ist_titel){
+  abschnitte.forEach(abschnitt => {
+    if(abschnitt.titel){
+      const ef = abschnitt.titel;
       aktuellerAbschnittZu = !!bereichZwischentitelZu[ef.id];
       const titel = document.createElement('div');
       titel.className = 'dimstitel' + (aktuellerAbschnittZu ? ' zu' : '');
@@ -1951,15 +1970,13 @@ function renderBereich(){
         renderBereich();
       });
       dimsWrap.appendChild(titel);
-      aktuelleDimsZeile = null;
       return;
     }
-    if(!aktuelleDimsZeile){
-      aktuelleDimsZeile = document.createElement('div');
-      aktuelleDimsZeile.className = 'dimsrow' + (aktuellerAbschnittZu ? ' zu' : '');
-      dimsWrap.appendChild(aktuelleDimsZeile);
-    }
-    renderEinDim(ef, aktuelleDimsZeile);
+    const zeigeZusatztextZeile = abschnitt.felder.some(f => f.zusatztext_moeglich);
+    const row = document.createElement('div');
+    row.className = 'dimsrow' + (aktuellerAbschnittZu ? ' zu' : '');
+    dimsWrap.appendChild(row);
+    abschnitt.felder.forEach(ef => renderEinDim(ef, row, zeigeZusatztextZeile));
   });
 
   aktualisiereZugAnzeige($teilbereiche);
@@ -2112,16 +2129,19 @@ function berechneFlaechenformel(text){
   return summe;
 }
 
-function renderEinDim(ef, container){
+function renderEinDim(ef, container, zeigeZusatztextZeile){
   const div = document.createElement('div');
   div.className = 'tbdim';
   const beschriftung = ef.beschriftung || ef.name;
   const erklaerungAttr = ef.erklaerung ? ` title="${ef.erklaerung.replace(/"/g, '&quot;')}"` : '';
-  // Wrapper wird IMMER gerendert (auch leer), damit alle Eingabefelder einer
-  // Zeile gleich viel Platz ueber dem Eingabefeld reservieren und die
-  // Eingabefelder selbst - egal ob mit oder ohne Zusatztext - auf gleicher
-  // Hoehe stehen.
-  const zusatztextHtml = `<div class="tbdimzusatzwrap">${ef.zusatztext_moeglich ? `<input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="text" class="tbdimzusatz" placeholder="z.B. Vor dem Haus" value="${escHtml(bereichNotizMap[ef.id] ?? '')}">` : ''}</div>`;
+  // Der Wrapper wird nur gerendert, wenn IRGENDEIN Feld im selben Abschnitt
+  // (siehe renderBereich()) einen Zusatztext hat - dann aber bei ALLEN
+  // Feldern des Abschnitts (auch leer), damit die Eingabefelder auf gleicher
+  // Hoehe stehen. Hat kein Feld im Abschnitt einen Zusatztext, faellt der
+  // Leerraum darueber komplett weg.
+  const zusatztextHtml = zeigeZusatztextZeile
+    ? `<div class="tbdimzusatzwrap">${ef.zusatztext_moeglich ? `<input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" type="text" class="tbdimzusatz" placeholder="z.B. Vor dem Haus" value="${escHtml(bereichNotizMap[ef.id] ?? '')}">` : ''}</div>`
+    : '';
   if(ef.typ === 'ja_nein'){
     const wertLabel = ef.fixer_wert != null ? ` (${ef.fixer_wert}${ef.einheit ? ' ' + ef.einheit : ''})` : '';
     div.innerHTML = `<label${erklaerungAttr}>${beschriftung}${wertLabel}</label>${zusatztextHtml}<input type="checkbox" ${bereichWerteMap[ef.id] ? 'checked' : ''}>`;
