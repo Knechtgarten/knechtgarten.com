@@ -1036,21 +1036,41 @@ async function kopiereOfferteFuerKunde(zielKunde){
       // direkt auf offerte (schon oben beim Insert mitkopiert) - Masse/
       // Auswahl haengen jetzt direkt an offerte_id statt an einer
       // Teilflaeche, darum kein Id-Mapping mehr noetig.
-      const [eigene, korrektur, geo, efWerte, auswahl, efNotizen] = await Promise.all([
+      const [eigene, korrektur, geo, efWerte, auswahl, efNotizen, tabZeilen] = await Promise.all([
         sb.from('offerte_eigene_zeile').select('kategorie, bezeichnung, menge, einheit, preis, reihenfolge').eq('offerte_id', kopierQuelle.id),
         sb.from('offerte_zeilen_korrektur').select('zeilen_schluessel, menge_korrektur, preis_korrektur, geloescht').eq('offerte_id', kopierQuelle.id),
         sb.from('offerte_geometrie_element').select('form_typ, bezeichnung, anzahl, masse, flaeche, volumen, reihenfolge').eq('offerte_id', kopierQuelle.id),
         sb.from('offerte_eingabefeld_wert').select('eingabefeld_id, wert').eq('offerte_id', kopierQuelle.id),
         sb.from('offerte_auswahl').select('option_id, anzahl').eq('offerte_id', kopierQuelle.id),
-        sb.from('offerte_eingabefeld_notiz').select('eingabefeld_id, notiz').eq('offerte_id', kopierQuelle.id)
+        sb.from('offerte_eingabefeld_notiz').select('eingabefeld_id, notiz').eq('offerte_id', kopierQuelle.id),
+        sb.from('offerte_tabelle_zeile').select('eingabefeld_id, name, reihenfolge, offerte_tabelle_wert(spalte_id, wert, notiz)').eq('offerte_id', kopierQuelle.id)
       ]);
-      for(const r of [eigene, korrektur, geo, efWerte, auswahl, efNotizen]) if(r.error) throw r.error;
+      for(const r of [eigene, korrektur, geo, efWerte, auswahl, efNotizen, tabZeilen]) if(r.error) throw r.error;
       if(eigene.data.length){ const { error } = await sb.from('offerte_eigene_zeile').insert(eigene.data.map(r => ({...r, offerte_id: neu.id}))); if(error) throw error; }
       if(korrektur.data.length){ const { error } = await sb.from('offerte_zeilen_korrektur').insert(korrektur.data.map(r => ({...r, offerte_id: neu.id}))); if(error) throw error; }
       if(geo.data.length){ const { error } = await sb.from('offerte_geometrie_element').insert(geo.data.map(r => ({...r, offerte_id: neu.id}))); if(error) throw error; }
       if(efWerte.data.length){ const { error } = await sb.from('offerte_eingabefeld_wert').insert(efWerte.data.map(r => ({...r, offerte_id: neu.id}))); if(error) throw error; }
       if(auswahl.data.length){ const { error } = await sb.from('offerte_auswahl').insert(auswahl.data.map(r => ({...r, offerte_id: neu.id}))); if(error) throw error; }
       if(efNotizen.data.length){ const { error } = await sb.from('offerte_eingabefeld_notiz').insert(efNotizen.data.map(r => ({...r, offerte_id: neu.id}))); if(error) throw error; }
+      if(tabZeilen.data.length){
+        // Zeilen brauchen neue Ids (offerte_tabelle_wert haengt daran) - erst
+        // die Zeilen kopieren, dann mit den zurueckgegebenen neuen Ids die
+        // Werte kopieren (gleiche Reihenfolge wie beim Insert).
+        const { data: neueZeilen, error: tzErr } = await sb.from('offerte_tabelle_zeile')
+          .insert(tabZeilen.data.map(z => ({ offerte_id: neu.id, eingabefeld_id: z.eingabefeld_id, name: z.name, reihenfolge: z.reihenfolge })))
+          .select();
+        if(tzErr) throw tzErr;
+        const werteRows = [];
+        neueZeilen.forEach((neuZeile, i) => {
+          (tabZeilen.data[i].offerte_tabelle_wert || []).forEach(w => {
+            werteRows.push({ zeile_id: neuZeile.id, spalte_id: w.spalte_id, wert: w.wert, notiz: w.notiz });
+          });
+        });
+        if(werteRows.length){
+          const { error: twErr } = await sb.from('offerte_tabelle_wert').insert(werteRows);
+          if(twErr) throw twErr;
+        }
+      }
     }
 
     $('kundeWahlOvl').classList.remove('show');
