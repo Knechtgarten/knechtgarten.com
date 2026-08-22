@@ -111,6 +111,19 @@ td{padding:6px 6px;border-bottom:1px solid var(--soft);vertical-align:top;}
 .icobtn.active{background:var(--primary);color:#fff;border-color:var(--primary);}
 .icobtn.active:hover{background:var(--primary-l);color:#fff;border-color:var(--primary-l);}
 
+/* Tabelle-Eingabefeld: Spalten-Baukasten im "Tabelle hinzufuegen"-Modal. */
+.spaltenlist{display:flex;flex-direction:column;gap:8px;margin-bottom:8px;}
+.spaltencard{border:1px solid var(--line);border-radius:8px;background:#fcfdfe;padding:8px 10px;}
+.spaltentop{display:flex;gap:6px;align-items:center;}
+.spaltentop input,.spaltentop select{border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:inherit;font-size:12.5px;color:var(--ink);background:#fff;}
+.spaltentop input.spaltenname{flex:1;min-width:0;}
+.spaltentop select.spalteneinheit{width:100px;flex-shrink:0;}
+.spaltentop select.spaltentyp{width:118px;flex-shrink:0;font-weight:600;color:var(--primary);}
+.spaltensub{margin-top:8px;padding-left:20px;}
+.spaltensub-checks{display:flex;gap:16px;flex-wrap:wrap;align-items:center;}
+.spaltencheck{display:flex;align-items:center;gap:5px;font-size:11.5px;font-weight:400;color:var(--ink);cursor:pointer;}
+.spaltencheck input{width:auto;}
+
 .nest{margin-left:16px;padding-left:14px;border-left:2px solid var(--line);margin-top:8px;}
 
 /* Arbeitsschritt-Karte - helles Kopfband mit linkem Akzentstrich, wie im finalen Mockup */
@@ -492,6 +505,21 @@ input[type=number]{-moz-appearance:textfield;}
   </div>
 </div>
 
+<div class="overlay" id="efTabelleOverlay">
+  <div class="modal" style="max-width:620px;">
+    <div class="modalhead"><div class="sub" id="efTabelleModalTitel">Tabelle hinzufügen</div></div>
+    <div class="fld"><label>Name</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="efTabelleName" placeholder="z.B. Tröge"></div>
+    <div class="hint" style="margin-top:10px;">Spalten (gelten für jede Zeile)</div>
+    <div class="spaltenlist" id="efTabelleSpaltenListe"></div>
+    <button class="btnlink" id="efTabelleSpalteAddBtn">+ Spalte hinzufügen</button>
+    <div class="hint" style="margin-top:12px;">Zeilen (z.B. «Trog 1», «Trog 2») werden nicht hier, sondern direkt im Konfigurator in der Offerte erfasst.</div>
+    <div class="modalbtns">
+      <button class="btnlink" id="efTabelleCancel">Abbrechen</button>
+      <button class="btn" id="efTabelleSave">Speichern</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="termEditOverlay">
   <div class="modal wide">
     <div class="modalhead" style="display:flex;align-items:flex-start;gap:8px;">
@@ -583,6 +611,7 @@ input[type=number]{-moz-appearance:textfield;}
       <div class="gt">Werte</div>
       <div id="varPickerTerms"></div>
     </div>
+    <div id="varPickerTabellen"></div>
     <div class="modalbtns"><button class="btnlink" id="varPickerCancel">Abbrechen</button></div>
   </div>
 </div>
@@ -797,6 +826,7 @@ input[type=number]{-moz-appearance:textfield;}
       </table>
       <button class="btn admin-only" id="addEfBtn">+ Eingabefeld hinzufügen</button>
       <button class="btnlink admin-only" id="addEfTitelBtn" style="margin-left:14px;">+ Zwischentitel hinzufügen</button>
+      <button class="btnlink admin-only" id="addEfTabelleBtn" style="margin-left:14px;">+ Tabelle hinzufügen</button>
     </div>
   </div>
 
@@ -874,17 +904,30 @@ let OFFERTENTYPEN = [];
 let EINHEITEN = [];   // zentrale Einheiten-Liste (Einstellungen -> Berechnungsregeln), fuer alle Einheit-Auswahlfelder
 let EINGABEFELDER = [];   // nur fuer die Formel-Bibliothek-Ansicht, kategorie-gefiltert (Allgemein ODER ein Offertentyp)
 let TERMS = [];
+let TABELLE_SPALTEN = {}; // { eingabefeld_id: [spalten] }, nur fuer die aktuelle Kategorie (wie EINGABEFELDER)
 // Immer ALLE Eingabefelder/Terms aus allen Offertentypen (nicht nur Allgemein +
 // aktueller Offertentyp) - fuer refLabel()/ausdruckPreview() und den
 // Mengenfenster-Picker, unabhaengig davon, welche Kategorie die
 // Formel-Bibliothek-Seite gerade zeigt.
 let ALLE_EINGABEFELDER = [];
 let ALLE_TERMS = [];
+// Tabellen-Eingabefelder (eingabefeld.ist_tabelle=true) + ihre Spalten,
+// offertentyp-uebergreifend - fuer denselben Zweck wie ALLE_EINGABEFELDER/
+// ALLE_TERMS: Formel-Vorschau (labelFuerNode/refLabel) und den Auswahl-Picker.
+let ALLE_TABELLEN = [];
+let ALLE_TABELLE_SPALTEN = [];
 async function ladeAlleVariablen(){
   const { data: efs } = await sb.from('eingabefeld').select('id,name,einheit,offertentyp_id,typ,reihenfolge').order('reihenfolge');
   ALLE_EINGABEFELDER = efs || [];
   const { data: terms } = await sb.from('term').select('id,name,typ,wert,ausdruck,einheit,offertentyp_id,systemwert_key,reihenfolge').order('reihenfolge');
   ALLE_TERMS = terms || [];
+  const { data: tabellen } = await sb.from('eingabefeld').select('id,name,offertentyp_id').eq('ist_tabelle', true);
+  ALLE_TABELLEN = tabellen || [];
+  const tabellenIds = ALLE_TABELLEN.map(t => t.id);
+  const { data: spalten } = tabellenIds.length
+    ? await sb.from('eingabefeld_tabelle_spalte').select('id,eingabefeld_id,name,einheit,reihenfolge,ist_berechnung,ausdruck').in('eingabefeld_id', tabellenIds).order('reihenfolge')
+    : { data: [] };
+  ALLE_TABELLE_SPALTEN = spalten || [];
   // Systemwerte hier (statt nur beim Laden der Allgemein-Seite) sicherstellen -
   // sonst fehlen neu hinzugefuegte Systemwerte im Auswahl-Picker (varPicker*),
   // solange niemand zufaellig die Allgemein-Seite der Formel-Bibliothek
@@ -978,7 +1021,16 @@ function showToast(message, isErr){
   setTimeout(() => t.remove(), 4000);
 }
 
+// "Tabellenname – Spaltenname" - macht auch ausserhalb der eigenen Tabelle
+// (z.B. in einer Ressourcenzeilen-Formel) klar, woher der Wert kommt.
+function spalteLabel(id){
+  const spalte = ALLE_TABELLE_SPALTEN.find(s => s.id === id);
+  if(!spalte) return '?';
+  const tabelle = ALLE_TABELLEN.find(t => t.id === spalte.eingabefeld_id);
+  return (tabelle ? tabelle.name + ' – ' : '') + spalte.name;
+}
 function refLabel(kind, id){
+  if(kind === 'spalte') return spalteLabel(id);
   const list = kind === 'eingabefeld' ? ALLE_EINGABEFELDER : ALLE_TERMS;
   const item = list.find(x => x.id === id);
   return item ? item.name : '?';
@@ -1148,6 +1200,19 @@ async function loadFormelBibliothek(){
   const { data: efs, error: efErr } = await efQuery;
   if(efErr){ console.error(efErr); return; }
   EINGABEFELDER = efs;
+
+  // Spalten der Tabellen-Eingabefelder dieser Kategorie, gruppiert nach
+  // eingabefeld_id - fuer die Spaltenanzahl in der Uebersicht und zum
+  // Vorbelegen des Tabelle-Editors.
+  const tabellenIds = EINGABEFELDER.filter(e => e.ist_tabelle).map(e => e.id);
+  TABELLE_SPALTEN = {};
+  if(tabellenIds.length){
+    const { data: spalten, error: spErr } = await sb.from('eingabefeld_tabelle_spalte')
+      .select('id,eingabefeld_id,name,einheit,reihenfolge,ist_berechnung,ausdruck,zusatztext_moeglich,flaechenformel_moeglich')
+      .in('eingabefeld_id', tabellenIds).order('reihenfolge');
+    if(spErr){ console.error(spErr); return; }
+    (spalten || []).forEach(s => { (TABELLE_SPALTEN[s.eingabefeld_id] ||= []).push(s); });
+  }
 
   let termQuery = sb.from('term').select('id,name,typ,wert,ausdruck,einheit,offertentyp_id,systemwert_key,reihenfolge,notiz').order('reihenfolge');
   termQuery = istAllgemein ? termQuery.is('offertentyp_id', null) : termQuery.eq('offertentyp_id', formelBibliothekKategorie);
@@ -1407,7 +1472,8 @@ function renderDistanzAdresslisten(){
 }
 
 function renderEingabefelder(){
-  $('eingabefelderBody').innerHTML = EINGABEFELDER.map(ef => ef.ist_titel ? `
+  $('eingabefelderBody').innerHTML = EINGABEFELDER.map(ef => {
+    if(ef.ist_titel) return `
     <tr data-ef="${ef.id}" class="ef-titelrow">
       <td><span class="draghandle admin-only" title="Verschieben">${ICON.drag}</span></td>
       <td colspan="5" class="ef-titelzelle">${ef.name}</td>
@@ -1415,7 +1481,21 @@ function renderEingabefelder(){
         <button class="icobtn admin-only" onclick="openEingabefeldTitelModal('${ef.id}')" title="Bearbeiten">${ICON.edit}</button>
         <button class="icobtn admin-only danger" onclick="deleteEingabefeld('${ef.id}')" title="Löschen">${ICON.trash}</button>
       </td>
-    </tr>` : `
+    </tr>`;
+    if(ef.ist_tabelle){
+      const anzahlSpalten = (TABELLE_SPALTEN[ef.id] || []).length;
+      return `
+    <tr data-ef="${ef.id}" class="ef-titelrow">
+      <td><span class="draghandle admin-only" title="Verschieben">${ICON.drag}</span></td>
+      <td class="ef-titelzelle">${ef.name}</td>
+      <td colspan="4" style="color:var(--muted);">Tabelle · ${anzahlSpalten} Spalte${anzahlSpalten === 1 ? '' : 'n'}</td>
+      <td style="display:flex;gap:4px;justify-content:flex-end;">
+        <button class="icobtn admin-only" onclick="openEingabefeldTabelleModal('${ef.id}')" title="Bearbeiten">${ICON.edit}</button>
+        <button class="icobtn admin-only danger" onclick="deleteEingabefeld('${ef.id}')" title="Löschen">${ICON.trash}</button>
+      </td>
+    </tr>`;
+    }
+    return `
     <tr data-ef="${ef.id}">
       <td><span class="draghandle admin-only" title="Verschieben">${ICON.drag}</span></td>
       <td>${ef.name}</td>
@@ -1428,7 +1508,8 @@ function renderEingabefelder(){
         <button class="icobtn admin-only" onclick="openEditEingabefeldModal('${ef.id}')" title="Bearbeiten">${ICON.edit}</button>
         <button class="icobtn admin-only danger" onclick="deleteEingabefeld('${ef.id}')" title="Löschen">${ICON.trash}</button>
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
   setupDragReorder($('eingabefelderBody'), 'tr', ids => persistReihenfolge('eingabefeld', ids), 'ef');
 }
 async function toggleAusgeblendet(id, aktuell){
@@ -1548,6 +1629,164 @@ $('efTitelSave').addEventListener('click', async () => {
   await loadFormelBibliothek();
 });
 $('efTitelName').addEventListener('keydown', e => { if(e.key === 'Enter') $('efTitelSave').click(); });
+
+// ---------------------------------------------------------------------------
+// Tabelle-Eingabefeld: fuer wiederkehrende Zeilen, deren Anzahl erst pro
+// Offerte feststeht (z.B. mehrere Troege). Spalten werden hier komplett im
+// Speicher aufgebaut (efTabelleSpalten, mit stabilem _key statt echter id
+// solange nicht gespeichert) und erst beim Klick auf "Speichern" auf einmal
+// mit der DB abgeglichen (bestehende Spalten per id aktualisieren, damit
+// Formel-Referenzen/gespeicherte Zellenwerte nicht verwaisen, entfernte
+// Spalten loeschen, neue einfuegen).
+// ---------------------------------------------------------------------------
+let efTabelleId = null;
+let efTabelleSpalten = [];
+let efTabelleSpalteCounter = 0;
+
+function gliederAusAusdruck(node){
+  const flat = flattenMengenAusdruck(node);
+  return (flat && flat.length) ? flat.map((f, i) => gliedAusNode(i === 0 ? null : f.op, f.node)) : null;
+}
+function neueEfTabelleSpalte(){
+  return { id: null, name: '', einheit: '', ist_berechnung: false, zusatztext_moeglich: false, flaechenformel_moeglich: false, glieder: null, _key: ++efTabelleSpalteCounter };
+}
+function openNeueEingabefeldTabelleModal(){
+  efTabelleId = null;
+  $('efTabelleModalTitel').textContent = 'Tabelle hinzufügen';
+  $('efTabelleName').value = '';
+  efTabelleSpalten = [];
+  renderEfTabelleSpalten();
+  $('efTabelleOverlay').classList.add('show');
+  $('efTabelleName').focus();
+}
+function openEingabefeldTabelleModal(id){
+  const ef = EINGABEFELDER.find(e => e.id === id);
+  if(!ef) return;
+  efTabelleId = id;
+  $('efTabelleModalTitel').textContent = 'Tabelle bearbeiten';
+  $('efTabelleName').value = ef.name;
+  efTabelleSpalten = (TABELLE_SPALTEN[id] || []).map(s => ({
+    id: s.id, name: s.name, einheit: s.einheit, ist_berechnung: s.ist_berechnung,
+    zusatztext_moeglich: s.zusatztext_moeglich, flaechenformel_moeglich: s.flaechenformel_moeglich,
+    glieder: s.ist_berechnung ? gliederAusAusdruck(s.ausdruck) : null,
+    _key: ++efTabelleSpalteCounter
+  }));
+  renderEfTabelleSpalten();
+  $('efTabelleOverlay').classList.add('show');
+}
+function renderEfTabelleSpalteFormel(s){
+  const wrap = $(`efTabelleFormelWrap_${s._key}`);
+  if(wrap) renderGliedstack(s.glieder, wrap, () => renderEfTabelleSpalteFormel(s), { tabelleKontextId: efTabelleId, excludeSpalteId: s.id });
+}
+function renderEfTabelleSpalten(){
+  $('efTabelleSpaltenListe').innerHTML = efTabelleSpalten.map(s => `
+    <div class="spaltencard" data-key="${s._key}">
+      <div class="spaltentop">
+        <span class="draghandle" title="Verschieben">${ICON.drag}</span>
+        <input class="spaltenname" data-k="name" value="${(s.name || '').replace(/"/g, '&quot;')}" placeholder="Spaltenname">
+        <select class="spalteneinheit" data-k="einheit">${einheitOptionsHtml(s.einheit || '', true)}</select>
+        <select class="spaltentyp" data-k="typ">
+          <option value="eingabe" ${!s.ist_berechnung ? 'selected' : ''}>Eingabe</option>
+          <option value="berechnung" ${s.ist_berechnung ? 'selected' : ''}>Berechnung</option>
+        </select>
+        <button type="button" class="icobtn danger" data-action="entfernen" title="Entfernen">${ICON.trash}</button>
+      </div>
+      <div class="spaltensub">
+        ${s.ist_berechnung ? `
+          <div id="efTabelleFormelWrap_${s._key}"></div>
+          ${!s.id ? '<div class="hint" style="margin-top:4px;">Andere Spalten dieser Tabelle stehen als Formel-Baustein erst nach dem ersten Speichern zur Auswahl.</div>' : ''}
+        ` : `
+          <div class="spaltensub-checks">
+            <label class="spaltencheck"><input type="checkbox" data-k="zusatztext_moeglich" ${s.zusatztext_moeglich ? 'checked' : ''}> Zusatztext ermöglichen</label>
+            <label class="spaltencheck"><input type="checkbox" data-k="flaechenformel_moeglich" ${s.flaechenformel_moeglich ? 'checked' : ''}> Flächenformel ermöglichen</label>
+          </div>
+        `}
+      </div>
+    </div>`).join('') || '<div class="hint">Noch keine Spalten.</div>';
+
+  efTabelleSpalten.forEach(s => {
+    const card = $('efTabelleSpaltenListe').querySelector(`.spaltencard[data-key="${s._key}"]`);
+    if(!card) return;
+    card.querySelector('[data-k="name"]').addEventListener('input', e => { s.name = e.target.value; });
+    card.querySelector('[data-k="einheit"]').addEventListener('change', e => { s.einheit = e.target.value; });
+    card.querySelector('[data-k="typ"]').addEventListener('change', e => {
+      s.ist_berechnung = e.target.value === 'berechnung';
+      if(s.ist_berechnung && !s.glieder) s.glieder = [{ op: null, mode: 'lit', refKind: null, refId: null, text: '' }];
+      renderEfTabelleSpalten();
+    });
+    card.querySelector('[data-k="zusatztext_moeglich"]')?.addEventListener('change', e => { s.zusatztext_moeglich = e.target.checked; });
+    card.querySelector('[data-k="flaechenformel_moeglich"]')?.addEventListener('change', e => { s.flaechenformel_moeglich = e.target.checked; });
+    card.querySelector('[data-action="entfernen"]').addEventListener('click', () => {
+      efTabelleSpalten = efTabelleSpalten.filter(x => x !== s);
+      renderEfTabelleSpalten();
+    });
+    if(s.ist_berechnung){
+      if(!s.glieder) s.glieder = [{ op: null, mode: 'lit', refKind: null, refId: null, text: '' }];
+      renderEfTabelleSpalteFormel(s);
+    }
+  });
+
+  setupDragReorder($('efTabelleSpaltenListe'), '.spaltencard', ids => {
+    efTabelleSpalten = ids.map(k => efTabelleSpalten.find(s => String(s._key) === k)).filter(Boolean);
+  }, 'key');
+}
+$('addEfTabelleBtn').addEventListener('click', () => openNeueEingabefeldTabelleModal());
+$('efTabelleSpalteAddBtn').addEventListener('click', () => { efTabelleSpalten.push(neueEfTabelleSpalte()); renderEfTabelleSpalten(); });
+$('efTabelleCancel').addEventListener('click', () => $('efTabelleOverlay').classList.remove('show'));
+$('efTabelleSave').addEventListener('click', async () => {
+  const fehler = msg => showToast(msg, true);
+  const name = $('efTabelleName').value.trim();
+  if(!name) return fehler('Bitte einen Namen eingeben.');
+  if(!efTabelleSpalten.length) return fehler('Bitte mindestens eine Spalte hinzufuegen.');
+  for(const s of efTabelleSpalten){
+    if(!s.name.trim()) return fehler('Bitte bei jeder Spalte einen Namen eingeben.');
+    if(!s.einheit) return fehler(`Bitte bei Spalte "${s.name}" eine Einheit waehlen.`);
+    if(s.ist_berechnung){
+      if(!s.glieder) return fehler(`Formel bei Spalte "${s.name}" ist zu komplex fuer den einfachen Editor.`);
+      if(!buildMengenAusdruck(s.glieder)) return fehler(`Bitte bei Spalte "${s.name}" eine Formel angeben.`);
+    }
+  }
+
+  const offertentyp_id = formelBibliothekKategorie === 'allgemein' ? null : formelBibliothekKategorie;
+  let tabelleId = efTabelleId;
+  if(tabelleId === null){
+    const reihenfolge = EINGABEFELDER.length ? Math.max(...EINGABEFELDER.map(e => e.reihenfolge || 0)) + 1 : 1;
+    const { data: neu, error } = await sb.from('eingabefeld').insert({ offertentyp_id, name, einheit: '', ist_tabelle: true, reihenfolge }).select().single();
+    if(error) return fehler(friendlyError(error));
+    tabelleId = neu.id;
+  }else{
+    const { error } = await sb.from('eingabefeld').update({ name }).eq('id', tabelleId);
+    if(error) return fehler(friendlyError(error));
+  }
+
+  const keepIds = efTabelleSpalten.filter(s => s.id).map(s => s.id);
+  const removedIds = (TABELLE_SPALTEN[efTabelleId] || []).map(s => s.id).filter(id => !keepIds.includes(id));
+  for(const id of removedIds){
+    const { error } = await sb.from('eingabefeld_tabelle_spalte').delete().eq('id', id);
+    if(error) return fehler(friendlyError(error));
+  }
+
+  for(let i = 0; i < efTabelleSpalten.length; i++){
+    const s = efTabelleSpalten[i];
+    const ausdruck = s.ist_berechnung ? buildMengenAusdruck(s.glieder) : null;
+    const payload = {
+      eingabefeld_id: tabelleId, name: s.name.trim(), einheit: s.einheit, reihenfolge: i + 1,
+      ist_berechnung: s.ist_berechnung, ausdruck,
+      zusatztext_moeglich: s.ist_berechnung ? false : s.zusatztext_moeglich,
+      flaechenformel_moeglich: s.ist_berechnung ? false : s.flaechenformel_moeglich
+    };
+    if(s.id){
+      const { error } = await sb.from('eingabefeld_tabelle_spalte').update(payload).eq('id', s.id);
+      if(error) return fehler(friendlyError(error));
+    }else{
+      const { error } = await sb.from('eingabefeld_tabelle_spalte').insert(payload);
+      if(error) return fehler(friendlyError(error));
+    }
+  }
+
+  $('efTabelleOverlay').classList.remove('show');
+  await loadFormelBibliothek();
+});
 
 function renderTerms(){
   // Systemwert-Terms erscheinen nicht hier, sondern in der eigenen
@@ -1934,11 +2173,27 @@ async function pruefeVerwendung(id){
       treffer.push(`Ressourcenzeile "${bez}"`);
     }
   });
+  const { data: spalten } = await sb.from('eingabefeld_tabelle_spalte').select('id,name,eingabefeld_id,ausdruck').eq('ist_berechnung', true);
+  (spalten || []).forEach(s => {
+    if(s.id !== id && s.ausdruck && JSON.stringify(s.ausdruck).includes(nadel)){
+      const tabelle = ALLE_TABELLEN.find(t => t.id === s.eingabefeld_id);
+      treffer.push(`Berechnungsspalte "${tabelle ? tabelle.name + ' – ' : ''}${s.name}"`);
+    }
+  });
   return treffer;
 }
 
 async function deleteEingabefeld(id){
+  const ef = EINGABEFELDER.find(e => e.id === id);
   const verwendungen = await pruefeVerwendung(id);
+  if(ef?.ist_tabelle){
+    // Loeschen der Tabelle loescht (Cascade) auch alle ihre Spalten - darum
+    // hier zusaetzlich pruefen, ob eine dieser Spalten anderswo (z.B. in
+    // einer Ressourcenzeilen-Formel) referenziert wird.
+    for(const s of (TABELLE_SPALTEN[id] || [])){
+      verwendungen.push(...await pruefeVerwendung(s.id));
+    }
+  }
   if(verwendungen.length){
     showToast(`Kann nicht geloescht werden - wird noch verwendet in: ${verwendungen.join(', ')}. Bitte zuerst dort entfernen.`, true);
     return;
@@ -2553,6 +2808,7 @@ function labelFuerNode(node){
   if(node.lit !== undefined) return String(node.lit);
   if(node.ref === 'eingabefeld') return ALLE_EINGABEFELDER.find(e => e.id === node.id)?.name || '?';
   if(node.ref === 'term') return ALLE_TERMS.find(t => t.id === node.id)?.name || '?';
+  if(node.ref === 'spalte') return spalteLabel(node.id);
   return '?';
 }
 
@@ -3136,7 +3392,11 @@ async function deleteFreitextVorlage(id){
   await loadArbeitsschritte();
 }
 
-function erzeugeCombofield(glied, glieder, renderFn){
+// vpContext: optional { tabelleKontextId, excludeSpalteId } - nur von der
+// Tabellen-Berechnungsspalte gesetzt (siehe renderEfTabelleSpalteFormel),
+// steuert im Auswahl-Picker, ob Tabellenspalten als Zeilenwert (eigene
+// Tabelle) oder als Summe (alle Tabellen) angeboten werden.
+function erzeugeCombofield(glied, glieder, renderFn, vpContext){
   const box = document.createElement('div');
   box.className = 'combofield';
   const input = document.createElement('input');
@@ -3147,7 +3407,7 @@ function erzeugeCombofield(glied, glieder, renderFn){
   box.appendChild(input);
   const btn = document.createElement('button');
   btn.type = 'button'; btn.innerHTML = ICON.chevronDown;
-  btn.addEventListener('click', () => openVarPicker(glieder, glieder.indexOf(glied), renderFn));
+  btn.addEventListener('click', () => openVarPicker(glieder, glieder.indexOf(glied), renderFn, vpContext?.tabelleKontextId, vpContext?.excludeSpalteId));
   box.appendChild(btn);
   return box;
 }
@@ -3158,10 +3418,11 @@ function erzeugeCombofield(glied, glieder, renderFn){
 // - identische Optik ueberall, statt frueher zwei unterschiedlicher Layouts.
 function gliedEinheitLabel(g){
   if(g.mode === 'lit') return g.einheit || '';
+  if(g.refKind === 'spalte') return ALLE_TABELLE_SPALTEN.find(s => s.id === g.refId)?.einheit || '';
   const list = g.refKind === 'eingabefeld' ? ALLE_EINGABEFELDER : ALLE_TERMS;
   return list.find(x => x.id === g.refId)?.einheit || '';
 }
-function renderGliedstack(glieder, wrap, renderAgain){
+function renderGliedstack(glieder, wrap, renderAgain, vpContext){
   wrap.innerHTML = '';
   if(!glieder){
     wrap.innerHTML = '<div class="hint">Diese Formel ist zu komplex fuer den einfachen Editor - bitte bei Bedarf melden.</div>';
@@ -3183,7 +3444,7 @@ function renderGliedstack(glieder, wrap, renderAgain){
     }
     const row = document.createElement('div');
     row.className = 'gliedrow';
-    row.appendChild(erzeugeCombofield(g, glieder, renderAgain));
+    row.appendChild(erzeugeCombofield(g, glieder, renderAgain, vpContext));
     if(g.mode === 'lit'){
       const unitSel = document.createElement('select');
       unitSel.className = 'gliedunit gliedunitsel';
@@ -3256,6 +3517,34 @@ function renderVarPickerListen(){
   $('varPickerTerms').innerHTML = ALLE_TERMS.filter(t => passt(t.offertentyp_id)).map(t =>
     `<div class="varitem" onclick="waehleVar('term','${t.id}')"><b>${t.name}</b><span>${t.typ==='konstante'?fmtNum(t.wert):t.typ==='systemwert'?'Systemwert':ausdruckPreview(t.ausdruck)}</span></div>`
   ).join('') || '<div class="hint">Keine vorhanden.</div>';
+
+  // Tabellen-Spalten: im normalen Formel-Kontext alle Tabellen dieser
+  // Kategorie mit "Summe ueber alle Zeilen" - beim Bearbeiten einer
+  // Berechnungsspalte dagegen NUR die anderen (bereits gespeicherten)
+  // Spalten der eigenen Tabelle, als Wert DIESER Zeile (siehe vpTabelleKontextId
+  // in openVarPicker). Andere Tabellen werden dort bewusst nicht angeboten,
+  // um die Doppeldeutigkeit Summe/Zeilenwert zu vermeiden. Im Einzelwert-Modus
+  // (z.B. "Menge anzeigen") gar nicht anbieten - der kennt nur eingabefeld/term.
+  let tabellenHtml = '';
+  if(vpEinzelwertCallback){
+    // nichts anbieten
+  }else if(vpTabelleKontextId){
+    const spalten = ALLE_TABELLE_SPALTEN.filter(s => s.eingabefeld_id === vpTabelleKontextId && s.id !== vpExcludeSpalteId);
+    if(spalten.length){
+      tabellenHtml = `<div class="vargroup"><div class="gt">Spalten dieser Tabelle</div>` +
+        spalten.map(s => `<div class="varitem" onclick="waehleVar('spalte','${s.id}')"><b>${s.name}</b><span>Wert dieser Zeile · ${s.einheit}</span></div>`).join('') +
+        `</div>`;
+    }
+  }else{
+    ALLE_TABELLEN.filter(t => passt(t.offertentyp_id)).forEach(t => {
+      const spalten = ALLE_TABELLE_SPALTEN.filter(s => s.eingabefeld_id === t.id);
+      if(!spalten.length) return;
+      tabellenHtml += `<div class="vargroup"><div class="gt">${t.name} (Tabelle)</div>` +
+        spalten.map(s => `<div class="varitem" onclick="waehleVar('spalte','${s.id}')"><b>${t.name} – ${s.name}</b><span>Summe über alle Zeilen · ${s.einheit}</span></div>`).join('') +
+        `</div>`;
+    });
+  }
+  $('varPickerTabellen').innerHTML = tabellenHtml;
 }
 let vpGlieder = null, vpRenderFn = null;
 // vpEinzelwertCallback: alternativer Modus zum normalen Formel-Glied-Picker -
@@ -3263,9 +3552,16 @@ let vpGlieder = null, vpRenderFn = null;
 // Eingabefeld/Wert ausgewaehlt und direkt an einen Callback uebergeben (siehe
 // openMengeAnzeigenPicker). null = normaler Formel-Modus.
 let vpEinzelwertCallback = null;
-function openVarPicker(glieder, index, renderFn){
+// Nur gesetzt, wenn gerade die Formel EINER Berechnungsspalte bearbeitet wird
+// (siehe renderVarPickerListen) - dann duerfen nur die anderen Spalten
+// DERSELBEN Tabelle gewaehlt werden (als Zeilenwert), nicht andere Tabellen.
+let vpTabelleKontextId = null;
+let vpExcludeSpalteId = null;
+function openVarPicker(glieder, index, renderFn, tabelleKontextId, excludeSpalteId){
   vpGlieder = glieder; rzEditPickerIndex = index; vpRenderFn = renderFn;
   vpEinzelwertCallback = null;
+  vpTabelleKontextId = tabelleKontextId || null;
+  vpExcludeSpalteId = excludeSpalteId || null;
   varPickerScopeId = formelBibliothekKategorie;
   renderVarPickerScopeTabs();
   renderVarPickerListen();
@@ -3281,7 +3577,7 @@ function waehleVar(kind, id){
   }
   const g = vpGlieder[rzEditPickerIndex];
   g.mode = 'ref'; g.refKind = kind; g.refId = id;
-  g.text = kind === 'eingabefeld' ? ALLE_EINGABEFELDER.find(e=>e.id===id)?.name : ALLE_TERMS.find(t=>t.id===id)?.name;
+  g.text = kind === 'spalte' ? spalteLabel(id) : kind === 'eingabefeld' ? ALLE_EINGABEFELDER.find(e=>e.id===id)?.name : ALLE_TERMS.find(t=>t.id===id)?.name;
   $('varPickerOverlay').classList.remove('show');
   vpRenderFn();
 }
@@ -3298,6 +3594,8 @@ function openMengeAnzeigenPicker(tsId){
     if(error){ showToast(friendlyError(error), true); return; }
     await loadArbeitsschritte();
   };
+  vpTabelleKontextId = null;
+  vpExcludeSpalteId = null;
   varPickerScopeId = formelBibliothekKategorie;
   renderVarPickerScopeTabs();
   renderVarPickerListen();
