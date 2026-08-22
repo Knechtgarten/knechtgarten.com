@@ -995,7 +995,7 @@ async function kopiereOfferteFuerKunde(zielKunde){
   $('kwStatus').className = 'status';
   try{
     const { data: quelle, error: qErr } = await sb.from('offerte')
-      .select('id, titel, betrag_total, lieferwagen_modus, offertentyp_id')
+      .select('id, titel, betrag_total, lieferwagen_modus, offertentyp_id, zugaenglichkeit_stufe')
       .eq('id', kopierQuelle.id).single();
     if(qErr) throw qErr;
 
@@ -1004,6 +1004,7 @@ async function kopiereOfferteFuerKunde(zielKunde){
       kunde_id: zielKunde.id, offertentyp_id: quelle.offertentyp_id, titel: quelle.titel,
       datum: heuteAlsDatumsstring(), status: 'offen', notiz: null,
       betrag_total: quelle.betrag_total, lieferwagen_modus: quelle.lieferwagen_modus || 'zeit',
+      zugaenglichkeit_stufe: quelle.zugaenglichkeit_stufe ?? 2,
       beschreibung_block: null, beschreibung_manuell: false, kosten_snapshot: null, offertnummer
     }).select().single();
     if(nErr) throw nErr;
@@ -1031,43 +1032,23 @@ async function kopiereOfferteFuerKunde(zielKunde){
       if(korrektur.data.length){ const { error } = await sb.from('offerte_zeilen_korrektur').insert(korrektur.data.map(r => ({...r, offerte_id: neu.id}))); if(error) throw error; }
       if(geo.data.length){ const { error } = await sb.from('offerte_geometrie_element').insert(geo.data.map(r => ({...r, offerte_id: neu.id}))); if(error) throw error; }
     }else{ // formel
-      const [eigene, korrektur, geo, tfs] = await Promise.all([
-        sb.from('offerte_eigene_zeile').select('kategorie, bezeichnung, menge, einheit, preis, reihenfolge, teilflaeche_id').eq('offerte_id', kopierQuelle.id),
+      // zugaenglichkeit_stufe liegt seit "Teilbereiche moeglich entfernt"
+      // direkt auf offerte (schon oben beim Insert mitkopiert) - Masse/
+      // Auswahl haengen jetzt direkt an offerte_id statt an einer
+      // Teilflaeche, darum kein Id-Mapping mehr noetig.
+      const [eigene, korrektur, geo, efWerte, auswahl] = await Promise.all([
+        sb.from('offerte_eigene_zeile').select('kategorie, bezeichnung, menge, einheit, preis, reihenfolge').eq('offerte_id', kopierQuelle.id),
         sb.from('offerte_zeilen_korrektur').select('zeilen_schluessel, menge_korrektur, preis_korrektur, geloescht').eq('offerte_id', kopierQuelle.id),
         sb.from('offerte_geometrie_element').select('form_typ, bezeichnung, anzahl, masse, flaeche, volumen, reihenfolge').eq('offerte_id', kopierQuelle.id),
-        sb.from('teilflaeche').select('id, name, menge, zugaenglichkeit_stufe, reihenfolge, teilflaeche_eingabefeld_wert(eingabefeld_id, wert), teilflaeche_auswahl(option_id, anzahl)')
-          .eq('offerte_id', kopierQuelle.id).order('reihenfolge')
+        sb.from('offerte_eingabefeld_wert').select('eingabefeld_id, wert').eq('offerte_id', kopierQuelle.id),
+        sb.from('offerte_auswahl').select('option_id, anzahl').eq('offerte_id', kopierQuelle.id)
       ]);
-      for(const r of [eigene, korrektur, geo, tfs]) if(r.error) throw r.error;
+      for(const r of [eigene, korrektur, geo, efWerte, auswahl]) if(r.error) throw r.error;
+      if(eigene.data.length){ const { error } = await sb.from('offerte_eigene_zeile').insert(eigene.data.map(r => ({...r, offerte_id: neu.id}))); if(error) throw error; }
       if(korrektur.data.length){ const { error } = await sb.from('offerte_zeilen_korrektur').insert(korrektur.data.map(r => ({...r, offerte_id: neu.id}))); if(error) throw error; }
       if(geo.data.length){ const { error } = await sb.from('offerte_geometrie_element').insert(geo.data.map(r => ({...r, offerte_id: neu.id}))); if(error) throw error; }
-      // "Eigene Position" haengt jetzt an einer Teilflaeche (teilflaeche_id) -
-      // muss deshalb erst NACH dem Anlegen der neuen Teilflaechen unten mit
-      // der neuen Teilflaeche-Id eingefuegt werden (Mapping alt->neu noetig).
-      const tfIdMapping = {};
-      for(const tf of tfs.data){
-        const { data: neueTf, error: tfErr } = await sb.from('teilflaeche').insert({
-          offerte_id: neu.id, name: tf.name, reihenfolge: tf.reihenfolge, menge: tf.menge, zugaenglichkeit_stufe: tf.zugaenglichkeit_stufe
-        }).select().single();
-        if(tfErr) throw tfErr;
-        tfIdMapping[tf.id] = neueTf.id;
-        if(tf.teilflaeche_eingabefeld_wert.length){
-          const { error } = await sb.from('teilflaeche_eingabefeld_wert')
-            .insert(tf.teilflaeche_eingabefeld_wert.map(w => ({ teilflaeche_id: neueTf.id, eingabefeld_id: w.eingabefeld_id, wert: w.wert })));
-          if(error) throw error;
-        }
-        if(tf.teilflaeche_auswahl.length){
-          const { error } = await sb.from('teilflaeche_auswahl')
-            .insert(tf.teilflaeche_auswahl.map(a => ({ teilflaeche_id: neueTf.id, option_id: a.option_id, anzahl: a.anzahl ?? 1 })));
-          if(error) throw error;
-        }
-      }
-      if(eigene.data.length){
-        const { error } = await sb.from('offerte_eigene_zeile').insert(eigene.data.map(r => ({
-          ...r, offerte_id: neu.id, teilflaeche_id: r.teilflaeche_id ? (tfIdMapping[r.teilflaeche_id] || null) : null
-        })));
-        if(error) throw error;
-      }
+      if(efWerte.data.length){ const { error } = await sb.from('offerte_eingabefeld_wert').insert(efWerte.data.map(r => ({...r, offerte_id: neu.id}))); if(error) throw error; }
+      if(auswahl.data.length){ const { error } = await sb.from('offerte_auswahl').insert(auswahl.data.map(r => ({...r, offerte_id: neu.id}))); if(error) throw error; }
     }
 
     $('kundeWahlOvl').classList.remove('show');
