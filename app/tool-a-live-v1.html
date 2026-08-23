@@ -1154,6 +1154,12 @@ let eingabefelder = [];       // [{id,name,einheit}]
 let auswahlfelder = [];       // [{id,name,mehrfachauswahl,optionen:[{id,name}]}]
 let ressourcenzeilen = [];    // [{optionId, arbeitsschritt, kategorie, bezeichnung, einheit, preis, menge_ausdruck}]
 let teilschritte = [];        // [{id, beschreibung, optionIds}] - optionIds=null wenn kein Auswahlfeld (immer aktiv)
+// Nur im Formel-Modell befuellt (siehe ladeFormelDaten): optionId -> Name +
+// "Eigene Offertenposition"-Haeckchen (Tool B, Option bearbeiten). Wird beim
+// Materialaufwand gebraucht, um markierte Optionen aus dem Materialpaket
+// herauszuloesen und stattdessen als eigene Zeile "{Arbeitsschritt} –
+// {Option}" auszuweisen (siehe renderKostenblock()).
+let OPTION_INFO = {};
 let freitextVorlagen = [];    // [{id, optionId, kategorie, bezeichnung, einheit, notiz, mengeVorschlag, preisVorschlag}] - optionId=null wenn immer aktiv (kein Auswahlfeld)
 
 // Tagessatz-Modell (Offertentyp "Allgemein") - nutzt seit der Umstellung
@@ -1773,7 +1779,7 @@ async function ladeFormelDaten(otId){
           sonderposition_typ ( name, titel, einheit, mwst_satz_pct, lieferwagen_std_artikel_id, lieferwagen_km_artikel_id, lieferwagen_transport_ort, lieferwagen_std_artikel:artikel!lieferwagen_std_artikel_id ( vp_knecht, bezeichnung ), lieferwagen_km_artikel:artikel!lieferwagen_km_artikel_id ( vp_knecht, bezeichnung ) ) ),
         option_freitext_vorlage ( id, kategorie, bezeichnung, einheit, notiz, menge_vorschlag, preis_vorschlag ),
         auswahlfeld ( id, name,
-          auswahloption ( id, name, beschreibung, reihenfolge, ist_standard, mengenoption, mengenoption_einheit, mehrfachauswahl, hinweistext, hinweisbild_url,
+          auswahloption ( id, name, beschreibung, reihenfolge, ist_standard, mengenoption, mengenoption_einheit, mehrfachauswahl, ist_eigene_offertenposition, hinweistext, hinweisbild_url,
             ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, artikel_id,
               zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4, mindestmenge, verschnitt_prozent,
               artikel ( bezeichnung, einheit, vp_knecht ),
@@ -1787,6 +1793,7 @@ async function ladeFormelDaten(otId){
   ressourcenzeilen = [];
   auswahlfelder = [];
   teilschritte = [];
+  OPTION_INFO = {};
   function pushRz(rz, optionId, arbeitsschrittName, teilschrittName){
     ressourcenzeilen.push({
       optionId,
@@ -1856,6 +1863,7 @@ async function ladeFormelDaten(otId){
         (af.auswahloption || []).forEach(opt => {
           (opt.ressourcenzeile || []).forEach(rz => pushRz(rz, opt.id, as.name, ts.name));
           pushFreitextVorlagen(opt.option_freitext_vorlage, opt.id);
+          OPTION_INFO[opt.id] = { name: opt.name, arbeitsschritt: as.name, istEigenePosition: !!opt.ist_eigene_offertenposition };
         });
         teilschritte.push({ id: ts.id, beschreibung: ts.beschreibung, optionIds: (af.auswahloption || []).map(o => o.id), anzeigeEingabefeldId, anzeigeEingabefeldEinheit, anzeigeTermId, anzeigeTermEinheit, anzeigeTermAusdruck });
       }else{
@@ -1866,6 +1874,10 @@ async function ladeFormelDaten(otId){
 }
 
 async function ladeTagessatzDaten(otId){
+  // Tagessatz kennt "Eigene Offertenposition" (noch) nicht - Map leeren,
+  // damit keine Eintraege einer zuvor im selben Tab geladenen Formel-Offerte
+  // haengen bleiben.
+  OPTION_INFO = {};
   const { data: arbeitsschritte, error } = await sb
     .from('arbeitsschritt')
     .select(`id, name, reihenfolge,
@@ -3608,8 +3620,13 @@ async function recalc(){
             // Zehnerschritt sein), siehe Einstellungen > Rechenlogik.
             const materialRundungMenge = n => Math.ceil(n);
             const materialRundungPreis = materialCfg ? (RUNDUNGSREGEL_FN[materialCfg.rundung_preis] || rundeCHF) : rundeCHF;
+            // Optionen mit "Eigene Offertenposition" (Tool B, Option
+            // bearbeiten) fliessen nicht ins Materialpaket ihres
+            // Arbeitsschritts, sondern werden unten separat ausgewiesen.
+            const paketZeilen = katZeilen.filter(r => !OPTION_INFO[r.optionId]?.istEigenePosition);
+            const eigeneZeilen = katZeilen.filter(r => OPTION_INFO[r.optionId]?.istEigenePosition);
             const proArbeitsschritt = {};
-            katZeilen.forEach(r => {
+            paketZeilen.forEach(r => {
               if(!proArbeitsschritt[r.arbeitsschritt]) proArbeitsschritt[r.arbeitsschritt] = { summe: 0, proArtikel: {} };
               proArbeitsschritt[r.arbeitsschritt].summe += r.betrag;
               const pa = proArbeitsschritt[r.arbeitsschritt].proArtikel;
@@ -3629,6 +3646,34 @@ async function recalc(){
                 betrag: fmtCHF(rundeCHF(a.betrag))
               }));
               addRow(bezeichnung, 1, einheitLabel, v.summe, v.summe, `material:${as}`, materialRundungMenge, materialRundungPreis, rechnungsweg);
+            });
+            // Herausgeloeste Optionen: eine Zeile pro Option ("Arbeitsschritt
+            // – Option"), gleich aufgebaut wie eine Materialpaket-Zeile
+            // (inkl. Aufschluesselung beim Drueberfahren) - nur eben nicht
+            // mit den anderen Optionen des Arbeitsschritts zusammengezaehlt.
+            // Nicht angewaehlte Optionen tauchen hier gar nicht erst auf
+            // (katZeilen enthaelt nur ausgewaehlte Optionen, siehe "aktive"
+            // weiter oben) - eine Summe von exakt 0 wird trotzdem uebersprungen.
+            const proOption = {};
+            eigeneZeilen.forEach(r => {
+              if(!proOption[r.optionId]) proOption[r.optionId] = { summe: 0, proArtikel: {} };
+              proOption[r.optionId].summe += r.betrag;
+              const pa = proOption[r.optionId].proArtikel;
+              if(!pa[r.bezeichnung]) pa[r.bezeichnung] = { menge: 0, einheit: r.einheit, preis: r.preis, betrag: 0 };
+              pa[r.bezeichnung].menge += r.menge;
+              pa[r.bezeichnung].betrag += r.betrag;
+            });
+            Object.entries(proOption).forEach(([optionId, v]) => {
+              if(!v.summe) return;
+              const info = OPTION_INFO[optionId];
+              const bezeichnung = `${info?.arbeitsschritt || ''} – ${info?.name || ''}`;
+              const rechnungsweg = Object.entries(v.proArtikel).map(([artikel, a]) => ({
+                label: artikel,
+                menge: `${rundeMenge(a.menge)} ${a.einheit}`,
+                preis: fmtCHF(rundeCHF(a.preis)),
+                betrag: fmtCHF(rundeCHF(a.betrag))
+              }));
+              addRow(bezeichnung, 1, einheitLabel, v.summe, v.summe, `material:eigen:${optionId}`, materialRundungMenge, materialRundungPreis, rechnungsweg);
             });
           }
         }

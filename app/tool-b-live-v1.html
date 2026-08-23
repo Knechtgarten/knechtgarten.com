@@ -429,6 +429,10 @@ input[type=number]{-moz-appearance:textfield;}
       <label for="addOptMengenoptionInput" style="font-size:12.5px;margin:0;white-space:nowrap;" title="Wenn dieses Häckchen angewählt ist, kann beim Erstellen einer Offerte direkt neben dem Button eine Anzahl eingegeben werden (z.B. 2x). Die Menge aller Ressourcenzeilen dieser Option wird damit multipliziert.">Mengenoption</label>
       <select id="addOptMengenoptionEinheitSelect" class="hidden" style="width:auto;font-size:11px;padding:2px 4px;margin-left:2px;" title="Einheit der Anzahl"></select>
     </div>
+    <div class="fld" style="display:flex;flex-direction:row;align-items:center;gap:6px;">
+      <input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="checkbox" id="addOptEigenePositionInput" style="width:auto;flex:0 0 auto;">
+      <label for="addOptEigenePositionInput" style="font-size:12.5px;margin:0;white-space:nowrap;" title="Der Materialaufwand dieser Option wird nicht ins Materialpaket des Arbeitsschritts gezaehlt, sondern als eigene Position (Arbeitsschritt – Option) in der Offerte ausgewiesen.">Eigene Offertenposition</label>
+    </div>
     <div class="fld hidden" id="addOptHinweistextWrap">
       <label style="font-size:11px;color:var(--muted);">Hinweistext bei Button</label>
       <textarea id="addOptHinweistextInput" style="width:100%;min-height:36px;font:inherit;font-size:12.5px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;" placeholder="z.B. kurzer Hinweis, was diese Option beinhaltet …"></textarea>
@@ -1825,7 +1829,7 @@ async function loadArbeitsschritte(){
           sonderposition_typ_id, sonderposition_typ(name, titel, hat_eigene_berechnung) ),
         option_freitext_vorlage ( id, kategorie, bezeichnung, einheit, notiz, menge_vorschlag, preis_vorschlag, reihenfolge ),
         auswahlfeld ( id, name, reihenfolge,
-          auswahloption ( id, name, beschreibung, hinweistext, hinweisbild_url, ist_standard, mengenoption, mengenoption_einheit, mehrfachauswahl, reihenfolge,
+          auswahloption ( id, name, beschreibung, hinweistext, hinweisbild_url, ist_standard, mengenoption, mengenoption_einheit, mehrfachauswahl, ist_eigene_offertenposition, reihenfolge,
             ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, tagesleistung_menge, notiz, reihenfolge,
               zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4, mindestmenge, verschnitt_prozent,
               artikel_id, artikel(bezeichnung, einheit, artikelnummer_knecht),
@@ -2366,8 +2370,8 @@ async function erzwingeEinzigenStandard(afId, keepOptId){
   if(error) console.error(error);
 }
 
-async function addOption(afId, name, istStandard, mengenoption, mengenoptionEinheit, mehrfachauswahl){
-  const { data, error } = await sb.from('auswahloption').insert({ auswahlfeld_id: afId, name, reihenfolge: 1, ist_standard: !!istStandard, mengenoption: !!mengenoption, mengenoption_einheit: mengenoptionEinheit || 'Stk.', mehrfachauswahl: !!mehrfachauswahl }).select().single();
+async function addOption(afId, name, istStandard, mengenoption, mengenoptionEinheit, mehrfachauswahl, eigenePosition){
+  const { data, error } = await sb.from('auswahloption').insert({ auswahlfeld_id: afId, name, reihenfolge: 1, ist_standard: !!istStandard, mengenoption: !!mengenoption, mengenoption_einheit: mengenoptionEinheit || 'Stk.', mehrfachauswahl: !!mehrfachauswahl, ist_eigene_offertenposition: !!eigenePosition }).select().single();
   if(error){ showToast(friendlyError(error), true); return false; }
   if(istStandard) await erzwingeEinzigenStandard(afId, data.id);
   await loadArbeitsschritte();
@@ -2419,6 +2423,7 @@ function openAddOptModal(afId, existingOpt){
   $('addOptMengenoptionInput').checked = !!existingOpt?.mengenoption;
   $('addOptMengenoptionEinheitSelect').innerHTML = einheitOptionsHtml(existingOpt?.mengenoption_einheit || 'Stk.');
   $('addOptMengenoptionEinheitSelect').classList.toggle('hidden', !$('addOptMengenoptionInput').checked);
+  $('addOptEigenePositionInput').checked = !!existingOpt?.ist_eigene_offertenposition;
   addOptHinweisbildUrl = existingOpt?.hinweisbild_url || null;
   addOptHinweisbildVorschauAktualisieren();
   $('addOptOverlay').classList.add('show');
@@ -2440,6 +2445,7 @@ $('addOptConfirm').addEventListener('click', async () => {
   const mehrfachauswahl = $('addOptMehrfachauswahlInput').checked;
   const mengenoption = $('addOptMengenoptionInput').checked;
   const mengenoptionEinheit = $('addOptMengenoptionEinheitSelect').value || 'Stk.';
+  const eigenePosition = $('addOptEigenePositionInput').checked;
   if(addOptEditingId){
     const payload = {
       name,
@@ -2447,6 +2453,7 @@ $('addOptConfirm').addEventListener('click', async () => {
       mehrfachauswahl,
       mengenoption,
       mengenoption_einheit: mengenoptionEinheit,
+      ist_eigene_offertenposition: eigenePosition,
       hinweistext: $('addOptHinweistextInput').value.trim() || null,
       hinweisbild_url: addOptHinweisbildUrl
     };
@@ -2456,7 +2463,7 @@ $('addOptConfirm').addEventListener('click', async () => {
     $('addOptOverlay').classList.remove('show');
     await loadArbeitsschritte();
   }else{
-    if(await addOption(addOptContext, name, istStandard, mengenoption, mengenoptionEinheit, mehrfachauswahl)) $('addOptOverlay').classList.remove('show');
+    if(await addOption(addOptContext, name, istStandard, mengenoption, mengenoptionEinheit, mehrfachauswahl, eigenePosition)) $('addOptOverlay').classList.remove('show');
   }
 });
 $('addOptInput').addEventListener('keydown', e => { if(e.key === 'Enter') $('addOptConfirm').click(); });
