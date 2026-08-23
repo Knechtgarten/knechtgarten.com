@@ -202,11 +202,11 @@ table.an-refp input.zahl{text-align:right;}
 .an-addbtn:hover{border-color:var(--primary);}
 .an-sumtool-wrap{margin-top:20px;}
 table.an-sumtool{width:100%;border-collapse:collapse;font-size:12.5px;table-layout:fixed;}
-table.an-sumtool th{padding:0 5px 6px;}
-table.an-sumtool th input{width:100%;border:1px solid var(--line);border-radius:5px;padding:5px 6px;font-size:12px;font-weight:700;color:var(--ink);text-align:center;background:var(--soft);}
-table.an-sumtool th input:focus{outline:none;border-color:var(--primary);background:#fff;}
+table.an-sumtool th{padding:0 5px 6px;text-align:left;font-size:11px;font-weight:700;color:var(--muted);}
+table.an-sumtool th.col-num{text-align:right;width:110px;}
 table.an-sumtool td{padding:3px 5px;}
-table.an-sumtool td input{width:100%;border:1px solid var(--line);border-radius:5px;padding:5px 6px;font-size:12.5px;text-align:right;color:var(--ink);}
+table.an-sumtool td input{width:100%;border:1px solid var(--line);border-radius:5px;padding:5px 6px;font-size:12.5px;color:var(--ink);}
+table.an-sumtool td input.col-num{text-align:right;}
 table.an-sumtool td input:focus{outline:none;border-color:var(--primary);}
 .an-sumrow td{border-top:2px solid var(--primary);padding-top:7px;}
 .an-sumval{display:block;text-align:right;font-weight:700;color:var(--primary);padding:5px 6px;font-variant-numeric:tabular-nums;}
@@ -459,9 +459,9 @@ input[type=number]{-moz-appearance:textfield;}
           </div>
           <div class="an-sumtool-wrap">
             <table class="an-sumtool">
-              <thead><tr id="anSumHeadRow"></tr></thead>
+              <thead><tr><th>Text/Artikel</th><th class="col-num">Anzahl</th><th class="col-num">Betrag</th><th class="col-num">Summe</th></tr></thead>
               <tbody id="anSumBody"></tbody>
-              <tfoot><tr class="an-sumrow" id="anSumFootRow"></tr></tfoot>
+              <tfoot><tr class="an-sumrow"><td colspan="3" style="text-align:right;font-weight:700;">Total</td><td><span class="an-sumval" id="anSumGesamt">0</span></td></tr></tfoot>
             </table>
           </div>
           <button class="an-addbtn" id="anSumAddBtn" type="button" style="margin-top:12px;">+ Zeile hinzufügen</button>
@@ -1463,11 +1463,12 @@ $('bulkSyncSelect').addEventListener('change', async () => {
 // Notizen & Referenzen (Artikel): freies Notizfeld (Rich-Text, gleiches Muster
 // wie die Offerten-Notizen in Tool A) + eine informative Referenzpreise-Liste
 // (andere Lieferanten/Quellen, keine Verknuepfung mit dem Artikel-Datensatz)
-// + ein einfaches 5-Spalten-Zusammenzaehl-Werkzeug. Alles wird gesammelt beim
-// Schliessen des Fensters gespeichert (kein Autosave pro Tastendruck noetig).
+// + ein einfaches Zusammenzaehl-Werkzeug mit 4 festen Spalten (Text/Artikel,
+// Anzahl, Betrag, Summe - Summe wird live aus Anzahl x Betrag berechnet, kein
+// eigenes Eingabefeld). Alles wird gesammelt beim Schliessen des Fensters
+// gespeichert (kein Autosave pro Tastendruck noetig).
 // ---------------------------------------------------------------------------
 let anArtikelId = null;
-const AN_SUM_SPALTEN = 5;
 const $anNotiz = document.getElementById('anNotiz');
 
 // Effektiver EK wie im Artikel-Modal (amEffektiverEkLieferant).
@@ -1538,29 +1539,35 @@ $('anRefpAddBtn').addEventListener('click', () => {
   tr.querySelector('input').focus();
 });
 
+// Summe je Zeile = Anzahl x Betrag (nur berechnet, kein eigenes Feld, siehe
+// anZeileSumme) - Gesamttotal unten ist die Summe dieser Zeilen-Summen. Ein
+// leeres Anzahl- oder Betrag-Feld zaehlt als 0, nicht als "Zeile ignorieren" -
+// so bleibt z.B. eine reine Anzahl ohne Preis sichtbar.
+function anZeileSumme(tr){
+  const anzahl = parseFloat(tr.querySelector('.an-anzahl').value.replace(',', '.')) || 0;
+  const betrag = parseFloat(tr.querySelector('.an-betrag').value.replace(',', '.')) || 0;
+  return anzahl * betrag;
+}
 function anBerechneSummen(){
   const body = document.getElementById('anSumBody');
-  const foot = document.getElementById('anSumFootRow');
-  for(let col=0; col<AN_SUM_SPALTEN; col++){
-    let summe = 0, hatWert = false;
-    body.querySelectorAll('tr').forEach(tr => {
-      const val = tr.children[col].querySelector('input').value.replace(',', '.');
-      const n = parseFloat(val);
-      if(!isNaN(n)){ summe += n; hatWert = true; }
-    });
-    foot.children[col].querySelector('.an-sumval').textContent = hatWert ? summe.toLocaleString('de-CH', {maximumFractionDigits:2}) : '0';
-  }
+  let gesamt = 0;
+  body.querySelectorAll('tr').forEach(tr => {
+    const summe = anZeileSumme(tr);
+    gesamt += summe;
+    tr.querySelector('.an-sumval').textContent = summe.toLocaleString('de-CH', {maximumFractionDigits:2});
+  });
+  document.getElementById('anSumGesamt').textContent = gesamt.toLocaleString('de-CH', {maximumFractionDigits:2});
 }
-function anNeueSumZeile(werte){
-  const w = werte || [];
+function anNeueSumZeile(zeile){
+  const z = zeile || {};
   const tr = document.createElement('tr');
-  for(let i=0;i<AN_SUM_SPALTEN;i++){
-    const td = document.createElement('td');
-    td.innerHTML = `<input type="text" inputmode="decimal" placeholder="–" value="${w[i] ?? ''}">`;
-    tr.appendChild(td);
-  }
+  tr.innerHTML = `
+    <td><input type="text" class="an-text" placeholder="z.B. Schraube M8" value="${escAttr(z.text || '')}"></td>
+    <td><input type="text" inputmode="decimal" class="an-anzahl col-num" placeholder="–" value="${z.anzahl ?? ''}"></td>
+    <td><input type="text" inputmode="decimal" class="an-betrag col-num" placeholder="–" value="${z.betrag ?? ''}"></td>
+    <td><span class="an-sumval">0</span></td>`;
   document.getElementById('anSumBody').appendChild(tr);
-  tr.querySelectorAll('input').forEach(inp => inp.addEventListener('input', anBerechneSummen));
+  tr.querySelectorAll('.an-anzahl, .an-betrag').forEach(inp => inp.addEventListener('input', anBerechneSummen));
   return tr;
 }
 $('anSumAddBtn').addEventListener('click', () => {
@@ -1569,21 +1576,8 @@ $('anSumAddBtn').addEventListener('click', () => {
 });
 
 function anRenderSumTool(daten){
-  const titel = daten?.titel || [];
-  const zeilen = (daten?.zeilen && daten.zeilen.length) ? daten.zeilen : [[], []];
-  const headRow = document.getElementById('anSumHeadRow');
-  const footRow = document.getElementById('anSumFootRow');
-  headRow.innerHTML = '';
-  footRow.innerHTML = '';
+  const zeilen = (daten?.zeilen && daten.zeilen.length) ? daten.zeilen : [{}, {}];
   document.getElementById('anSumBody').innerHTML = '';
-  for(let i=0;i<AN_SUM_SPALTEN;i++){
-    const th = document.createElement('th');
-    th.innerHTML = `<input placeholder="Titel …" value="${escAttr(titel[i] || '')}">`;
-    headRow.appendChild(th);
-    const td = document.createElement('td');
-    td.innerHTML = '<span class="an-sumval">0</span>';
-    footRow.appendChild(td);
-  }
   zeilen.forEach(z => anNeueSumZeile(z));
   anBerechneSummen();
 }
@@ -1650,19 +1644,20 @@ async function anSchliessenUndSpeichern(){
     };
   }).filter(z => z.lieferant || z.artikel || z.beschreibung || z.ek != null || z.vp != null);
 
-  const titel = Array.from(document.querySelectorAll('#anSumHeadRow input')).map(inp => inp.value.trim());
-  const zeilen = Array.from(document.querySelectorAll('#anSumBody tr')).map(tr =>
-    Array.from(tr.querySelectorAll('input')).map(inp => inp.value.trim() === '' ? null : parseFloat(inp.value.replace(',', '.')))
-  ).filter(z => z.some(v => v != null));
+  const zeilen = Array.from(document.querySelectorAll('#anSumBody tr')).map(tr => ({
+    text: tr.querySelector('.an-text').value.trim(),
+    anzahl: tr.querySelector('.an-anzahl').value.trim() === '' ? null : parseFloat(tr.querySelector('.an-anzahl').value.replace(',', '.')),
+    betrag: tr.querySelector('.an-betrag').value.trim() === '' ? null : parseFloat(tr.querySelector('.an-betrag').value.replace(',', '.')),
+  })).filter(z => z.text || z.anzahl != null || z.betrag != null);
 
   const { error } = await sb.from('artikel').update({
     notiz: $anNotiz.innerHTML,
     referenzpreise,
-    zusammenzaehl_tool: { titel, zeilen },
+    zusammenzaehl_tool: { zeilen },
   }).eq('id', anArtikelId);
   if(error){ $('anStatus').textContent = friendlyError(error); $('anStatus').className = 'status err'; return; }
   const a = ARTIKEL.find(x => x.id === anArtikelId);
-  if(a){ a.notiz = $anNotiz.innerHTML; a.referenzpreise = referenzpreise; a.zusammenzaehl_tool = { titel, zeilen }; }
+  if(a){ a.notiz = $anNotiz.innerHTML; a.referenzpreise = referenzpreise; a.zusammenzaehl_tool = { zeilen }; }
   // Das Notizen-Fenster wird immer aus dem Artikel-Bearbeiten-Fenster
   // heraus geoeffnet (das im Hintergrund offen bleibt) - Icon-Farbe dort
   // gleich live nachziehen, ohne dass man das Fenster neu oeffnen muss.
