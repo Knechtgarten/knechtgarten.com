@@ -162,7 +162,15 @@ main.wrap{padding-top:48px;padding-bottom:60px;}
 .tbcard.collapsed .tbbody{display:none;}
 .dimsrows{display:flex;flex-direction:column;gap:10px;margin-bottom:4px;}
 .dimsrow{display:flex;gap:10px;flex-wrap:wrap;}
-.dimsrow.zu,.dimstabellewrap.zu{display:none;}
+.dimsrow.zu{display:none;}
+/* Bei einer Tabelle mit zusammengelegtem Zwischentitel (siehe .hattitel
+   unten) bleibt die Kopfzeile (mit dem Titel/Pfeil) immer sichtbar - nur
+   Zeilen + "Zeile hinzufuegen" werden beim Zuklappen versteckt, sonst
+   koennte man nicht mehr aufklappen. */
+.dimstabellewrap.zu .tabellentab tbody,.dimstabellewrap.zu .tabellenaddzeile{display:none;}
+.dimstabellewrap.hattitel{border-top:2px solid var(--accent-blue);padding-top:8px;}
+.dimstabellewrap.hattitel:first-child{border-top:none;padding-top:0;}
+.dimstabellewrap.zu .dimstitelchev{transform:rotate(-90deg);}
 .dimstitel{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;color:var(--ink);border-top:2px solid var(--accent-blue);padding-top:8px;cursor:pointer;}
 .dimstitel:first-child{border-top:none;padding-top:0;}
 .dimstitelchev{display:inline-flex;flex-shrink:0;color:var(--muted);transition:transform .15s;}
@@ -193,9 +201,10 @@ main.wrap{padding-top:48px;padding-bottom:60px;}
    Kraft gesetzt (soll die Tabellenspalte fuellen, nicht 140px). */
 .tabellewrap{margin-top:4px;}
 .tabellentab{width:100%;border-collapse:collapse;}
-.tabellentab th{font-size:11px;font-weight:600;color:var(--ink);text-align:left;padding:0 8px 6px;border-bottom:1px solid var(--line);}
+.tabellentab th{font-size:11px;font-weight:600;color:var(--ink);text-align:left;padding:0 8px 6px;}
 .tabellentab th.berechnet{color:var(--muted);}
 .tabellentab th:first-child,.tabellentab td:first-child{padding-left:0;}
+.tabellentitelzelle{font-size:12.5px;font-weight:700;color:var(--ink);cursor:pointer;white-space:nowrap;}
 .tabellentab td{padding:8px 8px 8px 0;vertical-align:top;}
 .tbdim.tabellenzelle{width:100%;flex:none;}
 .tabellenzeilenname{width:100%;box-sizing:border-box;border:1px solid transparent;border-radius:6px;padding:6px 4px;font:inherit;font-size:12.5px;font-weight:600;color:var(--ink);background:transparent;}
@@ -2036,10 +2045,15 @@ function renderBereich(){
   // Zwischentitel - gilt fuer alle Felder bis zum naechsten Zwischentitel.
   // Neue Offerte/kein Zwischentitel vorhanden = alles offen.
   let aktuellerAbschnittZu = false;
-  abschnitte.forEach(abschnitt => {
+  abschnitte.forEach((abschnitt, i) => {
     if(abschnitt.titel){
       const ef = abschnitt.titel;
       aktuellerAbschnittZu = !!bereichZwischentitelZu[ef.id];
+      // Steht direkt danach eine Tabelle, wird der Titel in deren Kopfzeile
+      // gerendert (auf gleicher Hoehe wie die Spaltentitel) statt als eigene
+      // Zeile darueber - siehe renderTabelle(). Hier dann nur den Auf-/Zu-
+      // Zustand uebernehmen, nichts zusaetzlich anzeigen.
+      if(abschnitte[i + 1]?.tabelle) return;
       const titel = document.createElement('div');
       titel.className = 'dimstitel' + (aktuellerAbschnittZu ? ' zu' : '');
       titel.innerHTML = `<span class="dimstitelchev">${ICON.chevronDown}</span>${escHtml(ef.name)}`;
@@ -2051,10 +2065,11 @@ function renderBereich(){
       return;
     }
     if(abschnitt.tabelle){
+      const titelEf = abschnitte[i - 1]?.titel || null;
       const wrap = document.createElement('div');
-      wrap.className = 'dimstabellewrap' + (aktuellerAbschnittZu ? ' zu' : '');
+      wrap.className = 'dimstabellewrap' + (aktuellerAbschnittZu ? ' zu' : '') + (titelEf ? ' hattitel' : '');
       dimsWrap.appendChild(wrap);
-      renderTabelle(abschnitt.tabelle, wrap);
+      renderTabelle(abschnitt.tabelle, wrap, titelEf);
       return;
     }
     const zeigeZusatztextZeile = abschnitt.felder.some(f => f.zusatztext_moeglich);
@@ -2327,20 +2342,31 @@ function renderTabelleZeileZelle(spalte, zeile, tdEl){
   }
 }
 
-function renderTabelle(ef, container){
+function renderTabelle(ef, container, titelEf){
   const spalten = TABELLEN_SPALTEN[ef.id] || [];
   const zeilen = bereichTabelleZeilen[ef.id] || (bereichTabelleZeilen[ef.id] = []);
+  // Vorschlagsname fuer neue Zeilen: Text des davorstehenden Zwischentitels
+  // (z.B. "Trog Hochbeet" -> "Trog Hochbeet 1", "Trog Hochbeet 2") - ohne
+  // Zwischentitel faellt das auf den (nur intern sichtbaren) Tabellennamen
+  // zurueck.
+  const titelText = titelEf ? titelEf.name : ef.name;
   // Eine ganz leere Tabelle wirkt wie eine Sackgasse (nur ein Link, keine
   // Eingabemoeglichkeit sichtbar) - darum immer mindestens eine Zeile zeigen.
   // Loescht man die letzte Zeile, kommt beim naechsten Rendern automatisch
   // wieder eine frische leere Zeile nach.
-  if(!zeilen.length) zeilen.push({ _key: ++tabelleZeileCounter, id: null, name: 'Zeile 1', werte: {} });
+  if(!zeilen.length) zeilen.push({ _key: ++tabelleZeileCounter, id: null, name: `${titelText} 1`, werte: {} });
   const wrap = document.createElement('div');
   wrap.className = 'tabellewrap';
+  // Zwischentitel wird - falls vorhanden - direkt in die Kopfzeile gesetzt
+  // (gleiche Hoehe wie die Spaltentitel) statt als eigene Zeile darueber;
+  // derselbe Pfeil dient weiterhin zum Auf-/Zuklappen (siehe renderBereich()).
+  const titelZelleHtml = titelEf
+    ? `<span class="dimstitelchev">${ICON.chevronDown}</span>${escHtml(titelEf.name)}`
+    : '';
   wrap.innerHTML = `
     <table class="tabellentab">
       <thead><tr>
-        <th style="width:26%;"></th>
+        <th class="tabellentitelzelle" style="width:26%;">${titelZelleHtml}</th>
         ${spalten.map(s => `<th${s.ist_berechnung ? ' class="berechnet"' : ''}>${escHtml(s.name)} (${escHtml(s.einheit)})</th>`).join('')}
         <th style="width:24px;"></th>
       </tr></thead>
@@ -2348,6 +2374,12 @@ function renderTabelle(ef, container){
     </table>
     <span class="tabellenaddzeile">+ Zeile hinzufügen</span>`;
   container.appendChild(wrap);
+  if(titelEf){
+    wrap.querySelector('.tabellentitelzelle').addEventListener('click', () => {
+      bereichZwischentitelZu[titelEf.id] = !bereichZwischentitelZu[titelEf.id];
+      renderBereich();
+    });
+  }
   const tbody = wrap.querySelector('tbody');
   zeilen.forEach(zeile => {
     const tr = document.createElement('tr');
@@ -2372,7 +2404,7 @@ function renderTabelle(ef, container){
     tbody.appendChild(tr);
   });
   wrap.querySelector('.tabellenaddzeile').addEventListener('click', () => {
-    bereichTabelleZeilen[ef.id].push({ _key: ++tabelleZeileCounter, id: null, name: `Zeile ${bereichTabelleZeilen[ef.id].length + 1}`, werte: {} });
+    bereichTabelleZeilen[ef.id].push({ _key: ++tabelleZeileCounter, id: null, name: `${titelText} ${bereichTabelleZeilen[ef.id].length + 1}`, werte: {} });
     renderBereich();
     recalc();
   });
