@@ -163,13 +163,13 @@ main.wrap{padding-top:48px;padding-bottom:60px;}
 .dimsrows{display:flex;flex-direction:column;gap:10px;margin-bottom:4px;}
 .dimsrow{display:flex;gap:10px;flex-wrap:wrap;}
 .dimsrow.zu{display:none;}
-/* Bei einer Tabelle mit zusammengelegtem Zwischentitel (siehe .hattitel
-   unten) bleibt die Kopfzeile (mit dem Titel/Pfeil) immer sichtbar - nur
-   Zeilen + "Zeile hinzufuegen" werden beim Zuklappen versteckt, sonst
-   koennte man nicht mehr aufklappen. */
+/* Eine Tabelle bringt ihren Titel immer selbst mit (siehe renderTabelle()) -
+   die Kopfzeile (mit Titel/Pfeil) bleibt beim Zuklappen darum immer sichtbar,
+   nur Zeilen + "Zeile hinzufuegen" werden versteckt, sonst koennte man nicht
+   mehr aufklappen. */
 .dimstabellewrap.zu .tabellentab tbody,.dimstabellewrap.zu .tabellenaddzeile{display:none;}
-.dimstabellewrap.hattitel{border-top:2px solid var(--accent-blue);padding-top:8px;}
-.dimstabellewrap.hattitel:first-child{border-top:none;padding-top:0;}
+.dimstabellewrap{border-top:2px solid var(--accent-blue);padding-top:8px;}
+.dimstabellewrap:first-child{border-top:none;padding-top:0;}
 .dimstabellewrap.zu .dimstitelchev{transform:rotate(-90deg);}
 .dimstitel{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;color:var(--ink);border-top:2px solid var(--accent-blue);padding-top:8px;cursor:pointer;}
 .dimstitel:first-child{border-top:none;padding-top:0;}
@@ -2045,15 +2045,10 @@ function renderBereich(){
   // Zwischentitel - gilt fuer alle Felder bis zum naechsten Zwischentitel.
   // Neue Offerte/kein Zwischentitel vorhanden = alles offen.
   let aktuellerAbschnittZu = false;
-  abschnitte.forEach((abschnitt, i) => {
+  abschnitte.forEach(abschnitt => {
     if(abschnitt.titel){
       const ef = abschnitt.titel;
       aktuellerAbschnittZu = !!bereichZwischentitelZu[ef.id];
-      // Steht direkt danach eine Tabelle, wird der Titel in deren Kopfzeile
-      // gerendert (auf gleicher Hoehe wie die Spaltentitel) statt als eigene
-      // Zeile darueber - siehe renderTabelle(). Hier dann nur den Auf-/Zu-
-      // Zustand uebernehmen, nichts zusaetzlich anzeigen.
-      if(abschnitte[i + 1]?.tabelle) return;
       const titel = document.createElement('div');
       titel.className = 'dimstitel' + (aktuellerAbschnittZu ? ' zu' : '');
       titel.innerHTML = `<span class="dimstitelchev">${ICON.chevronDown}</span>${escHtml(ef.name)}`;
@@ -2065,11 +2060,15 @@ function renderBereich(){
       return;
     }
     if(abschnitt.tabelle){
-      const titelEf = abschnitte[i - 1]?.titel || null;
+      // Eine Tabelle bringt ihren Titel (Name aus Tool B) immer selbst mit -
+      // anders als bei einzelnen Eingabefeldern braucht es dafuer keinen
+      // separaten Zwischentitel (der Auf-/Zu-Zustand haengt darum auch am
+      // eigenen eingabefeld.id, nicht an einem vorangehenden Zwischentitel).
+      const ef = abschnitt.tabelle;
       const wrap = document.createElement('div');
-      wrap.className = 'dimstabellewrap' + (aktuellerAbschnittZu ? ' zu' : '') + (titelEf ? ' hattitel' : '');
+      wrap.className = 'dimstabellewrap' + (bereichZwischentitelZu[ef.id] ? ' zu' : '');
       dimsWrap.appendChild(wrap);
-      renderTabelle(abschnitt.tabelle, wrap, titelEf);
+      renderTabelle(ef, wrap);
       return;
     }
     const zeigeZusatztextZeile = abschnitt.felder.some(f => f.zusatztext_moeglich);
@@ -2342,14 +2341,14 @@ function renderTabelleZeileZelle(spalte, zeile, tdEl){
   }
 }
 
-function renderTabelle(ef, container, titelEf){
+function renderTabelle(ef, container){
   const spalten = TABELLEN_SPALTEN[ef.id] || [];
   const zeilen = bereichTabelleZeilen[ef.id] || (bereichTabelleZeilen[ef.id] = []);
-  // Vorschlagsname fuer neue Zeilen: Text des davorstehenden Zwischentitels
-  // (z.B. "Trog Hochbeet" -> "Trog Hochbeet 1", "Trog Hochbeet 2") - ohne
-  // Zwischentitel faellt das auf den (nur intern sichtbaren) Tabellennamen
-  // zurueck.
-  const titelText = titelEf ? titelEf.name : ef.name;
+  // Der Tabellenname (aus Tool B) ist zugleich der Titel in der Kopfzeile UND
+  // der Vorschlagsname fuer neue Zeilen (z.B. "Trog, Hochbeet" -> "Trog,
+  // Hochbeet 1", "Trog, Hochbeet 2") - anders als bei einzelnen Eingabefeldern
+  // braucht eine Tabelle darum keinen separaten Zwischentitel.
+  const titelText = ef.name;
   // Eine ganz leere Tabelle wirkt wie eine Sackgasse (nur ein Link, keine
   // Eingabemoeglichkeit sichtbar) - darum immer mindestens eine Zeile zeigen.
   // Loescht man die letzte Zeile, kommt beim naechsten Rendern automatisch
@@ -2357,12 +2356,10 @@ function renderTabelle(ef, container, titelEf){
   if(!zeilen.length) zeilen.push({ _key: ++tabelleZeileCounter, id: null, name: `${titelText} 1`, werte: {} });
   const wrap = document.createElement('div');
   wrap.className = 'tabellewrap';
-  // Zwischentitel wird - falls vorhanden - direkt in die Kopfzeile gesetzt
-  // (gleiche Hoehe wie die Spaltentitel) statt als eigene Zeile darueber;
-  // derselbe Pfeil dient weiterhin zum Auf-/Zuklappen (siehe renderBereich()).
-  const titelZelleHtml = titelEf
-    ? `<span class="dimstitelchev">${ICON.chevronDown}</span>${escHtml(titelEf.name)}`
-    : '';
+  // Titel sitzt direkt in der Kopfzeile (gleiche Hoehe wie die Spaltentitel)
+  // statt als eigene Zeile darueber; derselbe Pfeil dient zum Auf-/Zuklappen
+  // (siehe renderBereich()).
+  const titelZelleHtml = `<span class="dimstitelchev">${ICON.chevronDown}</span>${escHtml(ef.name)}`;
   wrap.innerHTML = `
     <table class="tabellentab">
       <thead><tr>
@@ -2374,12 +2371,10 @@ function renderTabelle(ef, container, titelEf){
     </table>
     <span class="tabellenaddzeile">+ Zeile hinzufügen</span>`;
   container.appendChild(wrap);
-  if(titelEf){
-    wrap.querySelector('.tabellentitelzelle').addEventListener('click', () => {
-      bereichZwischentitelZu[titelEf.id] = !bereichZwischentitelZu[titelEf.id];
-      renderBereich();
-    });
-  }
+  wrap.querySelector('.tabellentitelzelle').addEventListener('click', () => {
+    bereichZwischentitelZu[ef.id] = !bereichZwischentitelZu[ef.id];
+    renderBereich();
+  });
   const tbody = wrap.querySelector('tbody');
   zeilen.forEach(zeile => {
     const tr = document.createElement('tr');
