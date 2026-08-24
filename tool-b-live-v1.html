@@ -1978,6 +1978,11 @@ function renderTeilschritt(asId, ts, nummer){
       </div>
       <div class="tsbody ${ts.ausgeblendet?'is-hidden':''}">
         ${hatAf ? renderAuswahlfeld(ts.id, af) : renderRessourcenTabelle('teilschritt', ts.id, ts.ressourcenzeile || [], ts.option_freitext_vorlage || [])}
+        ${(!hatAf && currentBerechnungsmodell === 'tagessatz') ? `
+        <div class="fld" style="margin-top:14px;">
+          <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;">Text (erscheint am Schluss der Offerte, wenn fuer diesen Teilschritt Tage eingetragen sind)</label>
+          <textarea style="width:100%;min-height:50px;font:inherit;font-size:12.5px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;" placeholder="z.B. Hinweis zu diesem Arbeitsschritt …" onblur="speichereTeilschrittBeschreibung('${ts.id}', this.value)">${ts.beschreibung || ''}</textarea>
+        </div>` : ''}
       </div>
     </div>`;
 }
@@ -2029,6 +2034,17 @@ async function speichereOptionBeschreibung(optId, value){
   const opt = ARBEITSSCHRITTE.flatMap(a => a.teilschritt || []).map(t => t.auswahlfeld).filter(Boolean)
     .flatMap(af => af.auswahloption || []).find(o => o.id === optId);
   if(opt) opt.beschreibung = neu;
+}
+// Gleiches Prinzip wie speichereOptionBeschreibung, nur fuer Teilschritte
+// OHNE Auswahlfeld (die haben ja keine Option, an der der Text sonst haengen
+// koennte) - bewusst nur bei Tagessatz gezeigt (siehe renderTeilschritt),
+// beim Formel-Modell uebernimmt diese Rolle der Options-Text.
+async function speichereTeilschrittBeschreibung(tsId, value){
+  const neu = value.trim() || null;
+  const { error } = await sb.from('teilschritt').update({ beschreibung: neu }).eq('id', tsId);
+  if(error){ showToast(friendlyError(error), true); return; }
+  const ts = ARBEITSSCHRITTE.flatMap(a => a.teilschritt || []).find(t => t.id === tsId);
+  if(ts) ts.beschreibung = neu;
 }
 
 // ---------------------------------------------------------------------------
@@ -2128,27 +2144,27 @@ function freitextVorlageMengeHtml(v){
   return teile.length ? `<span class="hint" title="Vorschlag - Mitarbeiter kann das bei der Offerte anpassen">${teile.join(' · ')}</span>` : `<span class="hint">Menge/Preis bei der Offerte</span>`;
 }
 function renderRessourcenTabelle(kontextTyp, kontextId, zeilen, freitextVorlagen){
-  // Tagessatz kennt keine Teilflaechen/Formel-Mengen - dort ist die Menge
-  // pro Ressourcenzeile in der Vorlage nicht relevant (der Mitarbeiter setzt
-  // sie bei Bedarf direkt in der Offerte via Zeilen-Korrektur), daher keine
-  // Menge-/TF-Spalte und kein Umweg ueber das Ressourcenzeile-Formular beim
-  // Hinzufuegen - der Artikel-Picker oeffnet sich direkt.
+  // Tagessatz-Ressourcenzeilen tragen eine schlichte Tagesleistungsmenge statt
+  // einer Formel (siehe openRzEditModal) - "+ Artikel hinzufuegen" oeffnet
+  // trotzdem direkt den Artikel-Picker (schneller Erstwert 9), die
+  // Tagesleistung wird danach ueber den Bearbeiten-Stift (oeffnet dasselbe
+  // rzEdit-Modal wie bei Formel) angepasst. Menge-Spalte darum fuer beide
+  // Modelle sichtbar - rzMengeZelleHtml() zeigt je nach Zeile automatisch
+  // "X / Tag" oder die Formel-Vorschau.
   const istTagessatz = currentBerechnungsmodell === 'tagessatz';
   return `
     <div class="nest" style="margin-left:0;padding-left:0;border-left:none;">
       <table class="res">
-        <thead><tr><th style="width:20px;"></th><th class="c-typ">Typ</th><th>Artikel</th>${istTagessatz ? '' : '<th class="c-menge">Menge</th>'}<th class="c-actions"></th></tr></thead>
+        <thead><tr><th style="width:20px;"></th><th class="c-typ">Typ</th><th>Artikel</th><th class="c-menge">Menge</th><th class="c-actions"></th></tr></thead>
         <tbody>
           ${(zeilen||[]).map(rz => `
             <tr data-rz="${rz.id}">
               <td><span class="draghandle" title="Verschieben">${ICON.drag}</span></td>
               <td><span class="pill ${rz.kategorie}">${rz.kategorie}</span></td>
               <td class="artikelcell"><div class="artikelcell-inner">${rzArtikelZelleHtml(rz)}</div></td>
-              ${istTagessatz ? '' : `<td>${rzMengeZelleHtml(rz)}</td>`}
+              <td>${rzMengeZelleHtml(rz)}</td>
               <td>
-                ${rz.zonengruppe ? '' : (istTagessatz
-                  ? `<button class="icobtn" onclick="openArtikelPickerUpdate('${rz.id}')" title="Artikel ändern">${ICON.edit}</button>`
-                  : `<button class="icobtn" onclick="openRzEditModal('${rz.id}')" title="Formel anpassen">${ICON.edit}</button>`)}
+                ${rz.zonengruppe ? '' : `<button class="icobtn" onclick="openRzEditModal('${rz.id}')" title="${istTagessatz ? 'Tagesleistungsmenge/Artikel anpassen' : 'Formel anpassen'}">${ICON.edit}</button>`}
                 <button class="icobtn" onclick="duplicateRessourcenzeile('${rz.id}')" title="Zeile duplizieren (inkl. Formel/Faktoren) - danach z.B. nur den Artikel wechseln">${ICON.copy}</button>
                 <button class="icobtn" onclick="deleteRessourcenzeile('${rz.id}')">${ICON.trash}</button>
               </td>
@@ -2992,20 +3008,9 @@ let apFilterLieferantId = null;
 // Umweg ueber das Ressourcenzeile-Formular) - ist dieser Kontext gesetzt,
 // legt waehleArtikel() die Ressourcenzeile sofort mit Tagesleistungsmenge 0 an.
 let apDirektKontext = null;
-// Tagessatz-Ressourcenzeile nachtraeglich den Artikel wechseln: oeffnet
-// denselben Picker direkt (kein rzEdit-Modal mit Tagesleistung/Mindestmenge/
-// Verschnitt - die sind fuer Tagessatz nicht relevant), Auswahl schreibt
-// artikel_id/kategorie sofort in die bestehende Zeile.
-let apUpdateRzId = null;
 
 function openArtikelPickerDirekt(kontextTyp, kontextId){
   apDirektKontext = { kontextTyp, kontextId };
-  openArtikelPicker();
-}
-
-function openArtikelPickerUpdate(rzId){
-  apDirektKontext = null;
-  apUpdateRzId = rzId;
   openArtikelPicker();
 }
 
@@ -3114,16 +3119,6 @@ async function waehleArtikel(id){
     await loadArbeitsschritte();
     return;
   }
-  if(apUpdateRzId){
-    const rzId = apUpdateRzId;
-    apUpdateRzId = null;
-    $('artikelPickerOverlay').classList.remove('show');
-    const { error } = await sb.from('ressourcenzeile').update({ artikel_id: a.id, kategorie: a.kategorie }).eq('id', rzId);
-    if(error){ showToast(friendlyError(error), true); return; }
-    showToast('Artikel geändert.');
-    await loadArbeitsschritte();
-    return;
-  }
   rzEditArtikelId = a.id;
   rzEditKategorie = a.kategorie;
   $('rzEditArtikelInput').value = `${a.bezeichnung}${a.artikelnummer_knecht ? ' · ' + a.artikelnummer_knecht : ''}`;
@@ -3133,7 +3128,7 @@ async function waehleArtikel(id){
   $('rzEditArtikelSuggest').classList.remove('show');
 }
 $('rzEditArtikelBtn').addEventListener('click', () => {
-  apDirektKontext = null; apUpdateRzId = null;
+  apDirektKontext = null;
   $('rzEditArtikelSuggest').classList.remove('show');
   openArtikelPicker();
 });
@@ -3177,7 +3172,7 @@ $('rzEditArtikelInput').addEventListener('keydown', e => {
 $('rzEditArtikelInput').addEventListener('blur', () => {
   setTimeout(() => $('rzEditArtikelSuggest').classList.remove('show'), 150);
 });
-$('artikelPickerCancel').addEventListener('click', () => { apDirektKontext = null; apUpdateRzId = null; $('artikelPickerOverlay').classList.remove('show'); });
+$('artikelPickerCancel').addEventListener('click', () => { apDirektKontext = null; $('artikelPickerOverlay').classList.remove('show'); });
 
 // ---------------------------------------------------------------------------
 // Sonderposition (Staffelgruppe/Zonengruppe/Sonderposition-Typ): eigenes,
