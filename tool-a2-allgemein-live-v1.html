@@ -1716,6 +1716,49 @@ function renderTagessatzInhalt(){
       recalc();
     });
   });
+  // Rechnungsweg-Tooltip auch hier (nicht nur in der Kostentabelle unten) -
+  // zeigt beim Drueberfahren, welche Ressourcenzeilen mit welcher Menge/
+  // Preis/Betrag zum aktuell eingetragenen Tage-Wert dieses Teilschritts
+  // beitragen, analog zur Materialpaket-Aufschluesselung.
+  $tagessatzInhalt.querySelectorAll('.tsrow[data-ts]').forEach(row => {
+    const tsId = row.dataset.ts;
+    row.addEventListener('mouseenter', () => {
+      const tage = teilschrittTage[tsId] || 0;
+      const ausgewaehlt = tagessatzAuswahl[tsId] || new Set();
+      const aktive = tagessatzRessourcenzeilen.filter(rz => rz.teilschrittId === tsId && (rz.optionId == null || ausgewaehlt.has(rz.optionId)));
+      if(!aktive.length) return;
+      const rechnungsweg = aktive.map(rz => {
+        const menge = rundeMenge((rz.tagesleistungMenge || 0) * tage);
+        return { label: rz.bezeichnung, menge: `${menge} ${rz.einheit || 'Std'}`, preis: fmtCHF(rz.preis), betrag: fmtCHF(rundeCHF(menge * rz.preis)) };
+      });
+      zeigeRechnungsweg(row, rechnungsweg, '');
+    });
+    row.addEventListener('mouseleave', versteckeRechnungsweg);
+  });
+  // Gleicher Tooltip fuer eigene Teilschritte - Ressourcenzeilen direkt
+  // gemaess ts.zeilen, dazu Personal/Team-Tage (falls Team-Modus aktiv) mit
+  // den gleichen Vorarbeiter/Gartenarbeiter-Werten wie in summeEigenerTeilschritt().
+  $tagessatzInhalt.querySelectorAll('.tsrow.eigen[data-ets]').forEach(row => {
+    const ts = eigeneTeilschritte.find(t => t.id === row.dataset.ets);
+    if(!ts) return;
+    row.addEventListener('mouseenter', () => {
+      const rechnungsweg = ts.zeilen.map(z => ({ label: z.bezeichnung, menge: `${rundeMenge(z.menge)} ${z.einheit}`, preis: fmtCHF(z.preis), betrag: fmtCHF(rundeCHF(z.menge * z.preis)) }));
+      if(!ts.personalIndividuell && ts.personalTage > 0 && lieferwagenKonfig?.stundenProArbeitstag > 0){
+        const std = ts.personalTage * lieferwagenKonfig.stundenProArbeitstag;
+        if(lieferwagenKonfig.vorarbeiterPreis != null || lieferwagenKonfig.vorarbeiterPoolbauPreis != null){
+          const preis = (vorarbeiterTyp === 'pool' ? lieferwagenKonfig.vorarbeiterPoolbauPreis : lieferwagenKonfig.vorarbeiterPreis) ?? 0;
+          const label = vorarbeiterTyp === 'pool' ? (lieferwagenKonfig.vorarbeiterPoolbauArtikelBezeichnung || 'Vorarbeiter') : (lieferwagenKonfig.vorarbeiterArtikelBezeichnung || 'Vorarbeiter');
+          rechnungsweg.push({ label, menge: `${rundeMenge(std)} Std`, preis: fmtCHF(preis), betrag: fmtCHF(rundeCHF(std * preis)) });
+        }
+        if(lieferwagenKonfig.gartenarbeiterPreis != null){
+          rechnungsweg.push({ label: lieferwagenKonfig.gartenarbeiterArtikelBezeichnung || 'Gartenarbeiter', menge: `${rundeMenge(std)} Std`, preis: fmtCHF(lieferwagenKonfig.gartenarbeiterPreis), betrag: fmtCHF(rundeCHF(std * lieferwagenKonfig.gartenarbeiterPreis)) });
+        }
+      }
+      if(!rechnungsweg.length) return;
+      zeigeRechnungsweg(row, rechnungsweg, '');
+    });
+    row.addEventListener('mouseleave', versteckeRechnungsweg);
+  });
   $tagessatzInhalt.querySelectorAll('.opt').forEach(btn => {
     btn.addEventListener('click', () => {
       const tsId = btn.closest('.tsrow').dataset.ts;
