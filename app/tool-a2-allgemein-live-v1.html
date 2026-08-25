@@ -246,6 +246,20 @@ tr.crow td{padding:6px 8px 6px 0;border-bottom:1px solid var(--soft);vertical-al
 td.cbetrag{font-weight:700;text-align:right;white-space:nowrap;color:var(--ink);}
 tr.ctotalrow td{padding:12px 0 4px;font-size:15px;font-weight:800;color:var(--primary);border-top:2px solid var(--line);}
 tr.ctotalrow .ctotalval{text-align:right;white-space:nowrap;}
+
+/* Rechnungsweg-Tooltip: gleiches Muster wie tool-a-live-v1.html (Mengenrechner) -
+   eigenes kleines Popup statt title-Attribut, folgt der Zeile beim Hover. */
+.rzw-pop{position:fixed;z-index:500;background:#fff;border:1px solid var(--line);border-radius:8px;
+  box-shadow:0 8px 24px rgba(0,0,0,.18);padding:8px 10px;font-size:12px;line-height:1.7;
+  max-width:460px;display:none;}
+.rzw-pop.show{display:block;}
+.rzw-row{display:flex;align-items:baseline;gap:10px;}
+.rzw-row .rzw-label{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:210px;margin-right:auto;color:var(--ink);}
+.rzw-row .rzw-menge,.rzw-row .rzw-preis,.rzw-row .rzw-betrag{flex:none;white-space:nowrap;text-align:right;color:var(--muted);}
+.rzw-row .rzw-menge{width:64px;}
+.rzw-row .rzw-preis{width:72px;}
+.rzw-row .rzw-betrag{width:84px;color:var(--ink);font-weight:600;}
+.rzw-simple{white-space:nowrap;color:var(--ink);}
 .descwrap{margin-top:6px;}
 .descblock{width:100%;min-height:44px;font:inherit;font-size:11.5px;color:var(--ink);line-height:1.5;
   background:var(--soft);border:1px solid transparent;border-radius:7px;padding:9px 11px;resize:vertical;}
@@ -460,6 +474,8 @@ input[type=number]{-moz-appearance:textfield;}
     <button type="button" class="btn" id="supportChatSendBtn">Senden</button>
   </div>
 </div>
+
+<div class="rzw-pop" id="rzwPop"></div>
 
 <div class="wrap hidden" id="loginwrap">
   <div class="loginwrap">
@@ -2485,6 +2501,35 @@ function snapshotZeile(label, zeile){
   (snapshotGruppen[label] = snapshotGruppen[label] || []).push(zeile);
 }
 
+// Rechnungsweg-Tooltip (gleiches Muster wie tool-a-live-v1.html): rechnungsweg
+// ist entweder null (einfache Zeile, nur der einzeilige Text) oder ein Array
+// {label, menge, preis, betrag} - jeder Eintrag eine eigene, per CSS
+// gekuerzte/spaltenweise ausgerichtete Zeile.
+function zeigeRechnungsweg(tr, rechnungsweg, simpleText){
+  const pop = $('rzwPop');
+  pop.innerHTML = (rechnungsweg && rechnungsweg.length)
+    ? rechnungsweg.map(z => `<div class="rzw-row">
+        <span class="rzw-label" title="${String(z.label).replace(/"/g,'&quot;')}">${z.label}</span>
+        ${z.menge != null ? `<span class="rzw-menge">${z.menge}</span>` : ''}
+        ${z.preis != null ? `<span class="rzw-preis">${z.preis}</span>` : ''}
+        ${z.betrag != null ? `<span class="rzw-betrag">${z.betrag}</span>` : ''}
+      </div>`).join('')
+    : `<div class="rzw-simple">${simpleText}</div>`;
+  const rect = tr.getBoundingClientRect();
+  pop.classList.add('show');
+  const popRect = pop.getBoundingClientRect();
+  pop.style.left = Math.max(4, Math.min(rect.left, window.innerWidth - popRect.width - 4)) + 'px';
+  const platzUnten = window.innerHeight - rect.bottom - 4;
+  if(popRect.height <= platzUnten || rect.top - popRect.height - 4 < 0){
+    pop.style.top = (rect.bottom + 4) + 'px';
+  }else{
+    pop.style.top = (rect.top - popRect.height - 4) + 'px';
+  }
+}
+function versteckeRechnungsweg(){
+  $('rzwPop').classList.remove('show');
+}
+
 async function recalc(){
   if(!offertentypId) return;
   snapshotGruppen = {};
@@ -2528,7 +2573,7 @@ async function recalc(){
 
     $costbody.innerHTML = '';
     let grandTotal = 0;
-    function addRow(bezeichnung, menge, einheit, preis, betrag, schluessel, rundungMengeFn = rundeMenge, rundungPreisFn = rundeCHF){
+    function addRow(bezeichnung, menge, einheit, preis, betrag, schluessel, rundungMengeFn = rundeMenge, rundungPreisFn = rundeCHF, rechnungsweg = null){
       const k = zeilenKorrekturen[schluessel] || {};
       const effMenge = rundungMengeFn(k.menge_korrektur != null ? k.menge_korrektur : menge);
       const effPreis = rundungPreisFn(k.preis_korrektur != null ? k.preis_korrektur : preis);
@@ -2542,12 +2587,21 @@ async function recalc(){
       const preisAbweicht = k.preis_korrektur != null && rundungPreisFn(k.preis_korrektur) !== rundungPreisFn(preis);
       if(!geloescht) grandTotal += effBetrag;
       snapshotZeile(KAT_LABEL[schluessel.split(':')[0]] || schluessel, { bezeichnung, menge: effMenge, einheit, preis: effPreis, betrag: effBetrag, geloescht });
+      // Immer mit zwei Nachkommastellen zeigen (z.B. "102.00" statt "102") -
+      // sieht sonst nicht nach einem Preis aus.
+      const preisFeldWert = k.preis_korrektur != null ? Number(k.preis_korrektur).toFixed(2) : '';
       const tr = document.createElement('tr');
       tr.className = 'crow' + (geloescht ? ' zgeloescht' : '');
+      // Rechnungsweg-Tooltip beim Hover - ohne Breakdown reicht "Menge x Preis
+      // = Betrag", mit Breakdown (z.B. pro Arbeitsschritt/Artikel) zeigt das
+      // eigene Popup die einzelnen Beitraege (siehe Aufrufstellen weiter unten).
+      const rechnungswegSimple = `${effMenge} ${einheit} × ${fmtCHF(effPreis)} = ${fmtCHF(effBetrag)}`;
+      tr.addEventListener('mouseenter', () => zeigeRechnungsweg(tr, rechnungsweg, rechnungswegSimple));
+      tr.addEventListener('mouseleave', versteckeRechnungsweg);
       tr.innerHTML = `<td>${bezeichnung}</td>
-        <td style="text-align:right"><span class="berechnet-val">${mengeAbweicht ? rundungMengeFn(menge) : ''}</span><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" class="korrektur-feld" data-feld="menge" placeholder="Korr." value="${k.menge_korrektur ?? ''}" ${geloescht ? 'disabled' : ''}></td>
+        <td style="text-align:right"><span class="berechnet-val">${mengeAbweicht ? rundungMengeFn(menge) : ''}</span><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="korrektur-feld" data-feld="menge" placeholder="Korr." value="${k.menge_korrektur ?? ''}" ${geloescht ? 'disabled' : ''}></td>
         <td style="color:var(--muted)">${einheit}</td>
-        <td style="text-align:right"><span class="berechnet-val">${preisAbweicht ? fmtCHF(rundungPreisFn(preis)) : ''}</span><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" class="korrektur-feld" data-feld="preis" placeholder="Korr." value="${k.preis_korrektur ?? ''}" ${geloescht ? 'disabled' : ''}></td>
+        <td style="text-align:right"><span class="berechnet-val">${preisAbweicht ? fmtCHF(rundungPreisFn(preis)) : ''}</span><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="korrektur-feld" data-feld="preis" placeholder="Korr." value="${preisFeldWert}" ${geloescht ? 'disabled' : ''}></td>
         <td class="cbetrag">${fmtCHF(effBetrag)} <button type="button" class="icobtn zeile-del" title="${geloescht ? 'Zeile wiederherstellen' : 'Zeile entfernen'}">${geloescht ? ICON.restore : ICON.trash}</button></td>`;
       $costbody.appendChild(tr);
       tr.querySelectorAll('.korrektur-feld').forEach(inp => {
@@ -2585,11 +2639,15 @@ async function recalc(){
           const personalRundungPreis = personalCfg ? (RUNDUNGSREGEL_FN[personalCfg.rundung_preis] || rundeCHF) : rundeCHF;
           const byName = {};
           zeilen.forEach(r => {
-            if(!byName[r.bezeichnung]) byName[r.bezeichnung] = { menge:0, betrag:0, einheit: personalCfg ? personalCfg.einheit : r.einheit, preis:r.preis };
+            if(!byName[r.bezeichnung]) byName[r.bezeichnung] = { menge:0, betrag:0, einheit: personalCfg ? personalCfg.einheit : r.einheit, preis:r.preis, proAs:{} };
             byName[r.bezeichnung].menge += r.menge;
             byName[r.bezeichnung].betrag += r.betrag;
+            byName[r.bezeichnung].proAs[r.arbeitsschritt] = (byName[r.bezeichnung].proAs[r.arbeitsschritt] || 0) + r.menge;
           });
-          Object.entries(byName).forEach(([name, v]) => addRow(name, v.menge, v.einheit, v.preis, v.betrag, `personal:${name}`, personalRundungMenge, personalRundungPreis));
+          Object.entries(byName).forEach(([name, v]) => {
+            const rechnungsweg = Object.entries(v.proAs).map(([as, menge]) => ({ label: as, menge: `${personalRundungMenge(menge)} ${v.einheit}` }));
+            addRow(name, v.menge, v.einheit, v.preis, v.betrag, `personal:${name}`, personalRundungMenge, personalRundungPreis, rechnungsweg);
+          });
 
         }else if(kat === 'maschine'){
           // Maschinenaufwand: identisches Muster wie Tool A (Formel) -
@@ -2608,18 +2666,31 @@ async function recalc(){
               const zugehoerig = restZeilen.filter(r => r.artikelId && sp.artikelIds.has(r.artikelId));
               if(zugehoerig.length){
                 const summeSp = zugehoerig.reduce((s, r) => s + r.betrag, 0);
-                addRow(`Maschinenaufwand ${sp.name}`, 1, maschineEinheit, summeSp, summeSp, `maschine:sammelposition:${sp.id}`, maschineRundungMenge, maschineRundungPreis);
+                const proArtikelSp = {};
+                zugehoerig.forEach(r => {
+                  if(!proArtikelSp[r.bezeichnung]) proArtikelSp[r.bezeichnung] = { menge:0, einheit:r.einheit, preis:r.preis, betrag:0 };
+                  proArtikelSp[r.bezeichnung].menge += r.menge;
+                  proArtikelSp[r.bezeichnung].betrag += r.betrag;
+                });
+                const rechnungswegSp = Object.entries(proArtikelSp).map(([artikel, a]) => ({
+                  label: artikel, menge: `${rundeMenge(a.menge)} ${a.einheit}`, preis: fmtCHF(rundeCHF(a.preis)), betrag: fmtCHF(rundeCHF(a.betrag))
+                }));
+                addRow(`Maschinenaufwand ${sp.name}`, 1, maschineEinheit, summeSp, summeSp, `maschine:sammelposition:${sp.id}`, maschineRundungMenge, maschineRundungPreis, rechnungswegSp);
               }
               restZeilen = restZeilen.filter(r => !(r.artikelId && sp.artikelIds.has(r.artikelId)));
             });
           }
           const byNameMaschine = {};
           restZeilen.forEach(r => {
-            if(!byNameMaschine[r.bezeichnung]) byNameMaschine[r.bezeichnung] = { menge:0, betrag:0, einheit:r.einheit, preis:r.preis };
+            if(!byNameMaschine[r.bezeichnung]) byNameMaschine[r.bezeichnung] = { menge:0, betrag:0, einheit:r.einheit, preis:r.preis, proAs:{} };
             byNameMaschine[r.bezeichnung].menge += r.menge;
             byNameMaschine[r.bezeichnung].betrag += r.betrag;
+            byNameMaschine[r.bezeichnung].proAs[r.arbeitsschritt] = (byNameMaschine[r.bezeichnung].proAs[r.arbeitsschritt] || 0) + r.menge;
           });
-          Object.entries(byNameMaschine).forEach(([name, v]) => addRow(name, v.menge, v.einheit, v.preis, v.betrag, `maschine:artikel:${name}`, maschineRundungMenge, maschineRundungPreis));
+          Object.entries(byNameMaschine).forEach(([name, v]) => {
+            const rechnungsweg = Object.entries(v.proAs).map(([as, menge]) => ({ label: as, menge: `${maschineRundungMenge(menge)} ${v.einheit}` }));
+            addRow(name, v.menge, v.einheit, v.preis, v.betrag, `maschine:artikel:${name}`, maschineRundungMenge, maschineRundungPreis, rechnungsweg);
+          });
 
         }else if(kat === 'logistik'){
           // Logistikaufwand: identisches Muster wie Maschinenaufwand (siehe
@@ -2636,18 +2707,31 @@ async function recalc(){
               const zugehoerig = restZeilenLogistik.filter(r => r.artikelId && sp.artikelIds.has(r.artikelId));
               if(zugehoerig.length){
                 const summeSp = zugehoerig.reduce((s, r) => s + r.betrag, 0);
-                addRow(`Logistikaufwand ${sp.name}`, 1, logistikEinheit, summeSp, summeSp, `logistik:sammelposition:${sp.id}`, logistikRundungMenge, logistikRundungPreis);
+                const proArtikelSp = {};
+                zugehoerig.forEach(r => {
+                  if(!proArtikelSp[r.bezeichnung]) proArtikelSp[r.bezeichnung] = { menge:0, einheit:r.einheit, preis:r.preis, betrag:0 };
+                  proArtikelSp[r.bezeichnung].menge += r.menge;
+                  proArtikelSp[r.bezeichnung].betrag += r.betrag;
+                });
+                const rechnungswegSp = Object.entries(proArtikelSp).map(([artikel, a]) => ({
+                  label: artikel, menge: `${rundeMenge(a.menge)} ${a.einheit}`, preis: fmtCHF(rundeCHF(a.preis)), betrag: fmtCHF(rundeCHF(a.betrag))
+                }));
+                addRow(`Logistikaufwand ${sp.name}`, 1, logistikEinheit, summeSp, summeSp, `logistik:sammelposition:${sp.id}`, logistikRundungMenge, logistikRundungPreis, rechnungswegSp);
               }
               restZeilenLogistik = restZeilenLogistik.filter(r => !(r.artikelId && sp.artikelIds.has(r.artikelId)));
             });
           }
           const byNameLogistik = {};
           restZeilenLogistik.forEach(r => {
-            if(!byNameLogistik[r.bezeichnung]) byNameLogistik[r.bezeichnung] = { menge:0, betrag:0, einheit:r.einheit, preis:r.preis };
+            if(!byNameLogistik[r.bezeichnung]) byNameLogistik[r.bezeichnung] = { menge:0, betrag:0, einheit:r.einheit, preis:r.preis, proAs:{} };
             byNameLogistik[r.bezeichnung].menge += r.menge;
             byNameLogistik[r.bezeichnung].betrag += r.betrag;
+            byNameLogistik[r.bezeichnung].proAs[r.arbeitsschritt] = (byNameLogistik[r.bezeichnung].proAs[r.arbeitsschritt] || 0) + r.menge;
           });
-          Object.entries(byNameLogistik).forEach(([name, v]) => addRow(name, v.menge, v.einheit, v.preis, v.betrag, `logistik:artikel:${name}`, logistikRundungMenge, logistikRundungPreis));
+          Object.entries(byNameLogistik).forEach(([name, v]) => {
+            const rechnungsweg = Object.entries(v.proAs).map(([as, menge]) => ({ label: as, menge: `${logistikRundungMenge(menge)} ${v.einheit}` }));
+            addRow(name, v.menge, v.einheit, v.preis, v.betrag, `logistik:artikel:${name}`, logistikRundungMenge, logistikRundungPreis, rechnungsweg);
+          });
 
         }else{
           // Materialaufwand: eine Zeile PRO Arbeitsschritt ("Materialpaket
@@ -2661,8 +2745,20 @@ async function recalc(){
           const materialRundungMenge = n => Math.ceil(n);
           const materialRundungPreis = materialCfg ? (RUNDUNGSREGEL_FN[materialCfg.rundung_preis] || rundeCHF) : rundeCHF;
           const proGruppe = {};
-          zeilen.forEach(r => { proGruppe[r.arbeitsschritt] = (proGruppe[r.arbeitsschritt] || 0) + r.betrag; });
-          Object.entries(proGruppe).forEach(([g, summe]) => addRow(`Materialpaket ${g}`, 1, einheitLabel, summe, summe, `material:${g}`, materialRundungMenge, materialRundungPreis));
+          zeilen.forEach(r => {
+            if(!proGruppe[r.arbeitsschritt]) proGruppe[r.arbeitsschritt] = { summe:0, proArtikel:{} };
+            proGruppe[r.arbeitsschritt].summe += r.betrag;
+            const pa = proGruppe[r.arbeitsschritt].proArtikel;
+            if(!pa[r.bezeichnung]) pa[r.bezeichnung] = { menge:0, einheit:r.einheit, preis:r.preis, betrag:0 };
+            pa[r.bezeichnung].menge += r.menge;
+            pa[r.bezeichnung].betrag += r.betrag;
+          });
+          Object.entries(proGruppe).forEach(([g, v]) => {
+            const rechnungsweg = Object.entries(v.proArtikel).map(([artikel, a]) => ({
+              label: artikel, menge: `${rundeMenge(a.menge)} ${a.einheit}`, preis: fmtCHF(rundeCHF(a.preis)), betrag: fmtCHF(rundeCHF(a.betrag))
+            }));
+            addRow(`Materialpaket ${g}`, 1, einheitLabel, v.summe, v.summe, `material:${g}`, materialRundungMenge, materialRundungPreis, rechnungsweg);
+          });
         }
       }
 
