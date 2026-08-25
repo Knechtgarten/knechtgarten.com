@@ -332,6 +332,9 @@ tr.ezrow .ez-menge{width:50px;text-align:right;}
 tr.ezrow .ez-einheit{width:50px;}
 tr.ezrow .ez-preis{width:65px;text-align:right;}
 tr.ezrow .ez-del{margin-left:4px;}
+tr.ezlinksrow td{border-bottom:none;padding-top:8px;}
+.ez-add-link{color:var(--primary);font-size:12px;font-weight:600;cursor:pointer;margin-right:18px;}
+.ez-add-link:hover{color:var(--primary-l);text-decoration:underline;}
 tr.crow.zgeloescht{opacity:.55;text-decoration:line-through;}
 tr.crow .zeile-del{margin-left:4px;}
 
@@ -708,6 +711,39 @@ input[type=number]{-moz-appearance:textfield;}
     </table>
     <div class="geomodalfoot">
       <button type="button" class="notizopenbtn" id="tsMengenFertigBtn">Fertig</button>
+    </div>
+  </div>
+</div>
+
+<!-- Eigene Position (offertenweit, nicht an einen Teilschritt gebunden) -
+     siehe renderEigeneZeilenFuerKategorie()/openEigenePositionModal(). -->
+<div class="ovl" id="eigenePositionOvl">
+  <div class="ovlbox medium">
+    <div class="geomodalhead">
+      <span class="t">Eigene Position</span>
+      <button type="button" class="notiztoolbtn" id="eigenePositionCloseX" title="Schliessen"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+    <div class="fld" style="margin-bottom:10px;">
+      <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;">Bezeichnung</label>
+      <input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="text" id="eigenePositionBez" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;color:var(--ink);" placeholder="z.B. Spezialanfertigung">
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
+      <div class="fld">
+        <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;">Menge</label>
+        <input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="number" step="0.01" id="eigenePositionMenge" value="1" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;color:var(--ink);text-align:right;">
+      </div>
+      <div class="fld">
+        <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;">Einheit</label>
+        <input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="text" id="eigenePositionEinheit" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;color:var(--ink);" placeholder="Stk">
+      </div>
+      <div class="fld">
+        <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;">Preis</label>
+        <input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="number" step="0.01" id="eigenePositionPreis" value="0" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;color:var(--ink);text-align:right;">
+      </div>
+    </div>
+    <div class="geomodalfoot">
+      <button type="button" class="btnlink" id="eigenePositionAbbrechenBtn">Abbrechen</button>
+      <button type="button" class="notizopenbtn" id="eigenePositionSpeichernBtn">Speichern</button>
     </div>
   </div>
 </div>
@@ -2049,7 +2085,7 @@ function wireEtsZeile(tr){
     });
   });
   artikelInput.addEventListener('blur', () => setTimeout(() => dropdown.classList.remove('show'), 150));
-  tr.querySelector('.ets-artikel-picker-btn').addEventListener('click', () => openEtsArtikelPicker(key));
+  tr.querySelector('.ets-artikel-picker-btn').addEventListener('click', () => openEtsArtikelPicker(key, { erlaubtPersonal: etsPersonalIndividuell }));
   const mengeInput = tr.querySelector('.ets-menge-input');
   if(mengeInput && !mengeInput.disabled){
     mengeInput.addEventListener('input', () => {
@@ -2079,6 +2115,15 @@ let etsPickerZielKey = null;
 let etsPickerKategorie = null;
 let etsPickerGruppeId = null;
 let etsPickerLieferantId = null;
+// Wohin die Auswahl geht: standardmaessig in eine Ressourcenzeile des
+// eigenen Teilschritts (waehleArtikelFuerZeile), aber auch von "Position
+// aus Artikelstamm" (siehe renderEigeneZeilenFuerKategorie) mit einem
+// eigenen Callback wiederverwendet - dasselbe Fenster, andere Zielstelle.
+let etsPickerOnSelect = null;
+// Nur im "einzeln erfassen"-Modus des eigenen Teilschritts ist Personal
+// gesperrt (dort gibt es dafuer das Team-Tage-Feld) - bei "Position aus
+// Artikelstamm" gilt diese Einschraenkung nicht.
+let etsPickerErlaubtPersonal = true;
 const ETS_PICKER_KATEGORIEN = [
   { key: null, label: 'Alle' }, { key: 'material', label: 'Material' }, { key: 'personal', label: 'Personal' },
   { key: 'maschine', label: 'Maschine' }, { key: 'logistik', label: 'Logistik' }
@@ -2091,16 +2136,16 @@ function etsPickerListeAusArtikeln(idFeld, nameFeld){
   ARTIKEL_ALLE.forEach(a => { if(a[idFeld] && !gesehen.has(a[idFeld])) gesehen.set(a[idFeld], a[nameFeld]); });
   return [...gesehen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
 }
-function openEtsArtikelPicker(key){
+function openEtsArtikelPicker(key, opts){
+  opts = opts || {};
   etsPickerZielKey = key;
-  etsPickerKategorie = null;
+  etsPickerOnSelect = opts.onSelect || null;
+  etsPickerErlaubtPersonal = opts.erlaubtPersonal !== undefined ? opts.erlaubtPersonal : true;
+  etsPickerKategorie = opts.presetKategorie || null;
   etsPickerGruppeId = null;
   etsPickerLieferantId = null;
   $('etsPickerSuche').value = '';
-  // Kategorie "Personal" nur anbieten, wenn dieser Teilschritt tatsaechlich
-  // im "einzeln erfassen"-Modus ist - im Team-Modus gibt es dafuer das
-  // Personal/Team-Tage-Feld oben (siehe etsPersonalIndividuell).
-  const pickerKategorien = etsPersonalIndividuell ? ETS_PICKER_KATEGORIEN : ETS_PICKER_KATEGORIEN.filter(k => k.key !== 'personal');
+  const pickerKategorien = etsPickerErlaubtPersonal ? ETS_PICKER_KATEGORIEN : ETS_PICKER_KATEGORIEN.filter(k => k.key !== 'personal');
   $('etsPickerKategorien').innerHTML = pickerKategorien.map(k =>
     `<button type="button" class="opt" data-kat="${k.key || ''}">${k.label}</button>`).join('');
   $('etsPickerKategorien').querySelectorAll('button').forEach(btn => {
@@ -2128,7 +2173,7 @@ function renderEtsArtikelPickerListe(){
   $('etsPickerGruppen').querySelectorAll('button').forEach(btn => btn.classList.toggle('on', (btn.dataset.gr || null) === etsPickerGruppeId));
   const q = $('etsPickerSuche').value.trim().toLowerCase();
   const treffer = ARTIKEL_ALLE.filter(a => {
-    if(!etsPersonalIndividuell && a.kategorie === 'personal') return false;
+    if(!etsPickerErlaubtPersonal && a.kategorie === 'personal') return false;
     if(etsPickerKategorie && a.kategorie !== etsPickerKategorie) return false;
     if(etsPickerGruppeId && a.artikelgruppeId !== etsPickerGruppeId) return false;
     if(etsPickerLieferantId && a.lieferantId !== etsPickerLieferantId) return false;
@@ -2145,7 +2190,9 @@ function renderEtsArtikelPickerListe(){
     </tr>`).join('') || '<tr><td colspan="5" style="color:var(--muted);cursor:default;">Keine Treffer.</td></tr>';
   $('etsPickerBody').querySelectorAll('tr[data-id]').forEach(row => {
     row.addEventListener('click', () => {
-      waehleArtikelFuerZeile(etsPickerZielKey, ARTIKEL_ALLE.find(a => a.id === row.dataset.id));
+      const a = ARTIKEL_ALLE.find(x => x.id === row.dataset.id);
+      if(etsPickerOnSelect) etsPickerOnSelect(a);
+      else waehleArtikelFuerZeile(etsPickerZielKey, a);
       $('etsArtikelPickerOvl').classList.remove('show');
     });
   });
@@ -2786,65 +2833,65 @@ function renderEigeneZeilenFuerKategorie(kat){
     });
   });
 
-  const trDraft = document.createElement('tr');
-  trDraft.className = 'crow ezrow ezdraft';
-  trDraft.innerHTML = `<td><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" class="ez-bez" placeholder="+ Eigene Position"></td>
-    <td style="text-align:right"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" class="ez-menge" type="number" step="0.01" placeholder="Menge" value="1"></td>
-    <td><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" class="ez-einheit" placeholder="Einheit"></td>
-    <td style="text-align:right"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" class="ez-preis" type="number" step="0.01" placeholder="Preis" value="0"></td>
-    <td class="cbetrag">–</td>`;
-  $costbody.appendChild(trDraft);
-  const commitDraft = () => {
-    const bez = trDraft.querySelector('.ez-bez').value.trim();
-    if(!bez) return;
-    eigeneZeileCounter++;
-    eigeneZeilen.push({
-      clientKey: 'ez' + eigeneZeileCounter, dbId: null, kategorie: kat, bezeichnung: bez,
-      menge: parseFloat(trDraft.querySelector('.ez-menge').value) || 0,
-      einheit: trDraft.querySelector('.ez-einheit').value.trim(),
-      preis: parseFloat(trDraft.querySelector('.ez-preis').value) || 0
-    });
-    recalc();
-  };
-  trDraft.querySelectorAll('input').forEach(inp => inp.addEventListener('change', commitDraft));
-
-  // Zweiter Einstiegspunkt fuer eine eigene Position: Artikel aus dem
-  // Artikelstamm suchen statt Bezeichnung/Einheit/Preis frei zu erfassen -
-  // landet nach der Auswahl als ganz normale eigene Zeile (gleiche Tabelle,
-  // gleiche Felder, weiterhin frei nachtraeglich aenderbar).
-  const trArtikelDraft = document.createElement('tr');
-  trArtikelDraft.className = 'crow ezrow ezdraft';
-  trArtikelDraft.innerHTML = `<td style="position:relative;">
-      <input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="text" class="ez-artikel-input" placeholder="+ Position aus Artikelstamm">
-      <div class="kv-dropdown"></div>
-    </td>
-    <td colspan="3"></td>
-    <td class="cbetrag">–</td>`;
-  $costbody.appendChild(trArtikelDraft);
-  const artikelInput = trArtikelDraft.querySelector('.ez-artikel-input');
-  const artikelDropdown = trArtikelDraft.querySelector('.kv-dropdown');
-  artikelInput.addEventListener('input', () => {
-    const q = artikelInput.value.trim().toLowerCase();
-    if(!q){ artikelDropdown.classList.remove('show'); return; }
-    const treffer = ARTIKEL_ALLE.filter(a => a.kategorie === kat && (a.bezeichnung.toLowerCase().includes(q) || (a.artikelnummer_knecht || '').toLowerCase().includes(q))).slice(0, 30);
-    artikelDropdown.innerHTML = treffer.length
-      ? treffer.map(a => `<div class="kv-item" data-id="${a.id}">${escHtml(a.bezeichnung)}<span class="kv-muted">${escHtml(a.einheit)}${a.artikelnummer_knecht ? ' · ' + escHtml(a.artikelnummer_knecht) : ''}</span></div>`).join('')
-      : '<div class="kv-item" style="cursor:default;color:var(--muted);">Keine Treffer</div>';
-    artikelDropdown.classList.add('show');
-    artikelDropdown.querySelectorAll('.kv-item[data-id]').forEach(item => {
-      item.addEventListener('click', () => {
-        const a = ARTIKEL_ALLE.find(x => x.id === item.dataset.id);
+  // Zwei Einstiegspunkte, beide nur Links statt einer staendig sichtbaren
+  // Eingabezeile - "Eigene Position" oeffnet ein kleines Fenster fuer
+  // Bezeichnung/Menge/Einheit/Preis (openEigenePositionModal), "Position aus
+  // Artikelstamm" den grossen Artikel-Katalog (openEtsArtikelPicker,
+  // gleiches Fenster wie beim eigenen Teilschritt). Beide landen am Ende als
+  // ganz normale eigene Zeile (gleiche Tabelle, weiterhin frei aenderbar).
+  const trLinks = document.createElement('tr');
+  trLinks.className = 'crow ezlinksrow';
+  trLinks.innerHTML = `<td colspan="5">
+      <span class="ez-add-link" data-art="eigen">+ Eigene Position</span>
+      <span class="ez-add-link" data-art="artikelstamm">+ Position aus Artikelstamm</span>
+    </td>`;
+  $costbody.appendChild(trLinks);
+  trLinks.querySelector('[data-art="eigen"]').addEventListener('click', () => openEigenePositionModal(kat));
+  trLinks.querySelector('[data-art="artikelstamm"]').addEventListener('click', () => {
+    openEtsArtikelPicker(null, {
+      presetKategorie: kat, erlaubtPersonal: true,
+      onSelect: a => {
         eigeneZeileCounter++;
         eigeneZeilen.push({ clientKey: 'ez' + eigeneZeileCounter, dbId: null, kategorie: kat, bezeichnung: a.bezeichnung, menge: 1, einheit: a.einheit, preis: a.vp_knecht ?? 0 });
         recalc();
         planAutosave();
-      });
+      }
     });
   });
-  artikelInput.addEventListener('blur', () => setTimeout(() => artikelDropdown.classList.remove('show'), 150));
 
   return summe;
 }
+
+let eigenePositionKat = null;
+function openEigenePositionModal(kat){
+  eigenePositionKat = kat;
+  $('eigenePositionBez').value = '';
+  $('eigenePositionMenge').value = 1;
+  $('eigenePositionEinheit').value = '';
+  $('eigenePositionPreis').value = 0;
+  $('eigenePositionOvl').classList.add('show');
+  $('eigenePositionBez').focus();
+}
+function eigenePositionSchliessen(){
+  $('eigenePositionOvl').classList.remove('show');
+}
+function eigenePositionSpeichern(){
+  const bez = $('eigenePositionBez').value.trim();
+  if(!bez) return;
+  eigeneZeileCounter++;
+  eigeneZeilen.push({
+    clientKey: 'ez' + eigeneZeileCounter, dbId: null, kategorie: eigenePositionKat, bezeichnung: bez,
+    menge: parseFloat($('eigenePositionMenge').value) || 0,
+    einheit: $('eigenePositionEinheit').value.trim(),
+    preis: parseFloat($('eigenePositionPreis').value) || 0
+  });
+  eigenePositionSchliessen();
+  recalc();
+  planAutosave();
+}
+$('eigenePositionCloseX').addEventListener('click', eigenePositionSchliessen);
+$('eigenePositionAbbrechenBtn').addEventListener('click', eigenePositionSchliessen);
+$('eigenePositionSpeichernBtn').addEventListener('click', eigenePositionSpeichern);
 
 async function ladeEigeneZeilen(offerteId){
   const { data, error } = await sb.from('offerte_eigene_zeile').select('*').eq('offerte_id', offerteId).order('reihenfolge');
