@@ -120,13 +120,6 @@ main.wrap{padding-top:48px;padding-bottom:60px;}
   padding:9px 16px;cursor:pointer;}
 .savebtn:hover{background:var(--primary-l);}
 .savebtn:disabled{background:var(--line);color:var(--muted);cursor:not-allowed;}
-/* Hellgruene Variante fuer den "Aenderungen speichern"-Button (oben im
-   Offerten-Toolbar UND unten unter der Kostentabelle) - bewusst eine eigene
-   Modifier-Klasse statt .savebtn direkt umzufaerben, da .savebtn auch fuer
-   Login/Logout verwendet wird und dort dunkel bleiben soll. */
-.savebtn.hellgruen{background:var(--accent-lime);color:var(--primary);}
-.savebtn.hellgruen:hover{background:#c3ce4f;}
-.savebtn.small{font-size:12px;padding:6px 12px;flex-shrink:0;}
 .btnlink{font-size:12.5px;font-weight:600;color:var(--primary);background:none;border:none;cursor:pointer;padding:0;}
 .btnlink:hover{text-decoration:underline;}
 
@@ -349,6 +342,7 @@ tr.crow .zeile-del{margin-left:4px;}
 .status{font-size:11px;color:var(--muted);margin-top:8px;}
 .status.err{color:var(--danger);}
 .status.ok{color:#3d7a3d;}
+.status.inline{margin-top:0;white-space:nowrap;}
 .loginlinks{display:flex;justify-content:space-between;margin-top:10px;}
 .loginlinks .btnlink{font-size:11.5px;font-weight:600;}
 .pendingcard{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:28px 26px;width:100%;max-width:360px;text-align:center;}
@@ -609,7 +603,7 @@ input[type=number]{-moz-appearance:textfield;}
           <div class="bauteiltitle" id="bauteiltitel">Allgemein</div>
           <span class="offnrbadge hidden" id="offnrBadge"></span>
           <span class="tbspacer"></span>
-          <button type="button" class="savebtn hellgruen small" id="saveBtnTop">Änderungen speichern</button>
+          <span class="status inline" id="saveStatusTop"></span>
           <button type="button" class="statusicon open" id="statusOffen" title="Offen"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="7"/></svg></button>
           <button type="button" class="statusicon confirm" id="statusBestaetigt" title="Bestätigt"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l6 6L20 6"/></svg></button>
           <button type="button" class="statusicon reject" id="statusAbgelehnt" title="Abgelehnt"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
@@ -650,9 +644,7 @@ input[type=number]{-moz-appearance:textfield;}
             </div>
           </div>
           <div class="status" id="status"></div>
-
-          <button class="savebtn hellgruen" id="saveBtn" style="margin-top:14px;">Offerte speichern</button>
-          <div class="status" id="saveStatus"></div>
+          <div class="status" id="saveStatus" style="margin-top:14px;"></div>
         </div>
 
         <div id="notizPanel" class="hidden">
@@ -1116,8 +1108,7 @@ const $statusBestaetigt = document.getElementById('statusBestaetigt');
 const $statusAbgelehnt = document.getElementById('statusAbgelehnt');
 const $deleteOfferteBtn = document.getElementById('deleteOfferteBtn');
 const $delconfirm = document.getElementById('delconfirm');
-const $saveBtn = document.getElementById('saveBtn');
-const $saveBtnTop = document.getElementById('saveBtnTop');
+const $saveStatusTop = document.getElementById('saveStatusTop');
 const $saveStatus = document.getElementById('saveStatus');
 const $bauteiltitel = document.getElementById('bauteiltitel');
 const $tagessatzInhalt = document.getElementById('tagessatzInhalt');
@@ -2283,8 +2274,9 @@ function renderOfferteListe(){
     </div>`;
   }).join('');
   $offlist.querySelectorAll('.offitem').forEach(el => {
-    el.addEventListener('click', () => {
+    el.addEventListener('click', async () => {
       const modell = el.dataset.modell;
+      await flushAutosave(); // noch ausstehende Aenderungen der aktuellen Offerte nicht verlieren
       if(modell === 'formel'){ location.href = `tool-a-live-v1.html?offerte=${el.dataset.id}`; return; }
       if(modell === 'artikel'){ location.href = `tool-a3-artikel-live-v1.html?offerte=${el.dataset.id}`; return; }
       ladeBestehendeOfferte(el.dataset.id);
@@ -2296,8 +2288,6 @@ let mode = 'new';
 let currentOfferteId = null;
 function setMode(neu){
   mode = neu;
-  $saveBtn.textContent = mode === 'new' ? 'Offerte speichern' : 'Änderungen speichern';
-  $saveBtnTop.textContent = $saveBtn.textContent;
   $deleteOfferteBtn.classList.toggle('hidden', mode !== 'edit');
   $delconfirm.classList.remove('show');
   if(mode === 'new') currentOfferteId = null;
@@ -2418,8 +2408,9 @@ async function starteNeueOfferte(otId){
   await recalc();
 }
 
-$neueOfferteBtn.addEventListener('click', () => {
+$neueOfferteBtn.addEventListener('click', async () => {
   if(!OFFERTENTYPEN.length) return;
+  await flushAutosave(); // noch ausstehende Aenderungen der bisherigen Offerte nicht verlieren
   // Aktuell gibt es nur einen Tagessatz-Offertentyp ("Allgemein") - falls
   // spaeter mehrere existieren, hier ggf. eine Auswahl ergaenzen.
   starteNeueOfferte(OFFERTENTYPEN[0].id);
@@ -2485,6 +2476,7 @@ $('notizListBtn').addEventListener('mousedown', e => e.preventDefault());
 $('notizListBtn').addEventListener('click', () => notizFormat('insertUnorderedList'));
 document.getElementById('delconfirmOk').addEventListener('click', async () => {
   if(!currentOfferteId) return;
+  cancelAutosave(); // keine ausstehende Aenderung mehr auf die gleich geloeschte Offerte schreiben
   const { error } = await sb.from('offerte').delete().eq('id', currentOfferteId);
   if(error){ $saveStatus.textContent = 'Fehler beim Löschen: ' + error.message; $saveStatus.className = 'status err'; return; }
   $delconfirm.classList.remove('show');
@@ -2587,21 +2579,52 @@ async function speichereAenderungen(titelVal){
   await loadOfferteListe();
 }
 
-// Gemeinsame Speichern-Logik fuer beide Buttons (oben im Toolbar + unten
-// unter der Kostentabelle, siehe $saveBtnTop/$saveBtn) - identisches
-// Verhalten, nur zwei Stellen zum Anklicken.
-async function speichernKlick(){
+// ---------------------------------------------------------------------------
+// Autosave: kein expliziter "Speichern"-Button mehr - jede Aenderung
+// speichert sich nach einer kurzen Pause selbst. Ausgeloest per
+// Event-Delegation (input/change/click) auf #bauteilCard und alle
+// Overlay-Fenster (.ovl), statt jeden einzelnen Feld-Handler im Code
+// separat anzupassen - ein zusaetzlicher, folgenloser Anstoss (z.B. durch
+// einen Klick, der nichts aendert) loest hoechstens ein unnoetiges, aber
+// harmloses erneutes Speichern aus.
+// ---------------------------------------------------------------------------
+let autosaveTimer = null;
+const AUTOSAVE_DELAY_MS = 1500;
+
+// Spiegelt die Statusmeldung zusaetzlich in die kompakte Anzeige oben im
+// Toolbar (siehe #saveStatusTop) - dort ohne Scrollen sichtbar.
+function spiegleSaveStatusOben(){
+  $saveStatusTop.textContent = $saveStatus.textContent;
+  $saveStatusTop.className = 'status inline' + ($saveStatus.className.includes('ok') ? ' ok' : $saveStatus.className.includes('err') ? ' err' : '');
+}
+
+function planAutosave(){
+  if(autosaveTimer) clearTimeout(autosaveTimer);
+  $saveStatus.textContent = 'Ungespeicherte Änderungen …';
+  $saveStatus.className = 'status';
+  spiegleSaveStatusOben();
+  autosaveTimer = setTimeout(fuehreAutosaveDurch, AUTOSAVE_DELAY_MS);
+}
+function cancelAutosave(){
+  if(autosaveTimer){ clearTimeout(autosaveTimer); autosaveTimer = null; }
+}
+// Vor dem Wechsel zu einer anderen Offerte oder dem Loeschen der aktuellen
+// noch ausstehende Aenderungen sofort schreiben, statt sie zu verlieren.
+async function flushAutosave(){
+  if(!autosaveTimer) return;
+  clearTimeout(autosaveTimer);
+  autosaveTimer = null;
+  await fuehreAutosaveDurch();
+}
+
+async function fuehreAutosaveDurch(){
+  autosaveTimer = null;
   currentKundeName = $kundeSuche.value.trim();
   const titelVal = $offerteTitel.value.trim();
-  if(!currentKundeName || !titelVal){
-    $saveStatus.textContent = 'Bitte Kunde (oben) und Offerte-Titel ausfüllen.';
-    $saveStatus.className = 'status err';
-    return;
-  }
-  $saveBtn.disabled = true;
-  $saveBtnTop.disabled = true;
+  if(!currentKundeName || !titelVal) return;
   $saveStatus.textContent = 'Speichere …';
   $saveStatus.className = 'status';
+  spiegleSaveStatusOben();
   try{
     await recalc();
     if(mode === 'new'){ await speichereNeueOfferte(titelVal); }
@@ -2611,13 +2634,13 @@ async function speichernKlick(){
     console.error(e);
     $saveStatus.textContent = 'Fehler beim Speichern: ' + (e.message || e);
     $saveStatus.className = 'status err';
-  }finally{
-    $saveBtn.disabled = false;
-    $saveBtnTop.disabled = false;
   }
+  spiegleSaveStatusOben();
 }
-$saveBtn.addEventListener('click', speichernKlick);
-$saveBtnTop.addEventListener('click', speichernKlick);
+
+document.addEventListener('input', e => { if(e.target.closest('#bauteilCard') || e.target.closest('.ovl')) planAutosave(); });
+document.addEventListener('change', e => { if(e.target.closest('#bauteilCard') || e.target.closest('.ovl')) planAutosave(); });
+document.addEventListener('click', e => { if(e.target.closest('#bauteilCard') || e.target.closest('.ovl')) planAutosave(); });
 
 // ---------------------------------------------------------------------------
 // Beschreibungs-Blocktext: fortlaufender Text ohne Titel, automatisch aus den

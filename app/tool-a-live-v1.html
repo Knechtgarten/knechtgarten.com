@@ -453,6 +453,7 @@ tr.crow .zeile-del{margin-left:4px;}
 .btnlink:hover{text-decoration:underline;}
 .status.err{color:var(--danger);}
 .status.ok{color:#3d7a3d;}
+.status.inline{margin-top:0;white-space:nowrap;}
 .loginlinks{display:flex;justify-content:space-between;margin-top:10px;}
 .loginlinks .btnlink{font-size:11.5px;font-weight:600;}
 .pendingcard{background:var(--card);border:1px solid var(--line);border-radius:11px;padding:28px 26px;width:100%;max-width:360px;text-align:center;}
@@ -609,7 +610,7 @@ input[type=number]{-moz-appearance:textfield;}
         </div>
 
         <div class="topsavewrap">
-          <button type="button" class="savebtn" id="saveBtnTop">Offerte speichern</button>
+          <span class="status inline" id="saveStatusTop"></span>
           <div class="offnrwrap hidden" id="offnrWrap"><span class="offnrbadge" id="offnrBadge"></span></div>
           <div class="notizbtnwrap">
             <button type="button" class="notizopenbtn" id="notizOpenBtn">Notizen + Berechnungen</button>
@@ -648,9 +649,7 @@ input[type=number]{-moz-appearance:textfield;}
             </div>
           </div>
           <div class="status" id="status"></div>
-
-          <button class="savebtn" id="saveBtn" style="margin-top:14px;">Offerte speichern</button>
-          <div class="status" id="saveStatus"></div>
+          <div class="status" id="saveStatus" style="margin-top:14px;"></div>
         </div>
 
         <div id="notizPanel" class="hidden">
@@ -1075,7 +1074,7 @@ const $statusBestaetigt = document.getElementById('statusBestaetigt');
 const $statusAbgelehnt = document.getElementById('statusAbgelehnt');
 const $deleteOfferteBtn = document.getElementById('deleteOfferteBtn');
 const $delconfirm = document.getElementById('delconfirm');
-const $saveBtn = document.getElementById('saveBtn');
+const $saveStatusTop = document.getElementById('saveStatusTop');
 const $saveStatus = document.getElementById('saveStatus');
 const $bauteiltitel = document.getElementById('bauteiltitel');
 const $formelInhalt = document.getElementById('formelInhalt');
@@ -2505,10 +2504,11 @@ function renderOfferteListe(){
     </div>`;
   }).join('');
   $offlist.querySelectorAll('.offitem').forEach(el => {
-    el.addEventListener('click', () => {
+    el.addEventListener('click', async () => {
       // Formel UND Tagessatz laedt Tool A weiterhin selbst (ladeDatenFuerOffertentyp
       // verzweigt intern) - nur 'artikel' hat hier kein eigenes Ladeverfahren und
       // muss weggeleitet werden.
+      await flushAutosave(); // noch ausstehende Aenderungen der aktuellen Offerte nicht verlieren
       if(el.dataset.modell === 'artikel'){ location.href = `tool-a3-artikel-live-v1.html?offerte=${el.dataset.id}`; return; }
       ladeBestehendeOfferte(el.dataset.id);
     });
@@ -2520,8 +2520,6 @@ let currentOfferteId = null;
 
 function setMode(neu){
   mode = neu;
-  $saveBtn.textContent = mode === 'new' ? 'Offerte speichern' : 'Änderungen speichern';
-  $('saveBtnTop').textContent = $saveBtn.textContent;
   $deleteOfferteBtn.classList.toggle('hidden', mode !== 'edit');
   $delconfirm.classList.remove('show');
   if(mode === 'new') currentOfferteId = null;
@@ -2716,8 +2714,9 @@ function zeigeNeueOfferteAuswahl(){
     return `<button type="button" style="${stil}" data-ot="${o.id}">${o.name}</button>`;
   }).join('');
   $('notButtons').querySelectorAll('button').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       $('neueOfferteTypOvl').classList.remove('show');
+      await flushAutosave(); // noch ausstehende Aenderungen der bisherigen Offerte nicht verlieren
       starteNeueOfferte(btn.dataset.ot);
     });
   });
@@ -2732,13 +2731,13 @@ $('notizOpenBtn').addEventListener('click', () => {
     $('notizPanel').classList.add('hidden');
     $('offerteContentWrap').classList.remove('hidden');
     $('notizOpenBtn').textContent = 'Notizen + Berechnungen';
-    $('saveBtnTop').classList.remove('hidden');
+    $saveStatusTop.classList.remove('hidden');
     speichereNotizenUndGeometrie();
   }else{
     $('offerteContentWrap').classList.add('hidden');
     $('notizPanel').classList.remove('hidden');
     $('notizOpenBtn').textContent = 'Notizen schliessen';
-    $('saveBtnTop').classList.add('hidden');
+    $saveStatusTop.classList.add('hidden');
     $offerteNotiz.focus();
   }
 });
@@ -2788,6 +2787,7 @@ $deleteOfferteBtn.addEventListener('click', () => { $delconfirm.classList.add('s
 document.getElementById('delconfirmCancel').addEventListener('click', () => { $delconfirm.classList.remove('show'); });
 document.getElementById('delconfirmOk').addEventListener('click', async () => {
   if(!currentOfferteId) return;
+  cancelAutosave(); // keine ausstehende Aenderung mehr auf die gleich geloeschte Offerte schreiben
   const { error } = await sb.from('offerte').delete().eq('id', currentOfferteId);
   if(error){ $saveStatus.textContent = 'Fehler beim Löschen: ' + error.message; $saveStatus.className = 'status err'; return; }
   $delconfirm.classList.remove('show');
@@ -2943,18 +2943,52 @@ async function speichereAenderungen(titelVal){
   await loadOfferteListe();
 }
 
-async function speichernKlick(){
+// ---------------------------------------------------------------------------
+// Autosave: kein expliziter "Speichern"-Button mehr - jede Aenderung
+// speichert sich nach einer kurzen Pause selbst. Ausgeloest per
+// Event-Delegation (input/change/click) auf #bauteilCard und alle
+// Overlay-Fenster (.ovl), statt jeden einzelnen Feld-Handler im Code
+// separat anzupassen - ein zusaetzlicher, folgenloser Anstoss (z.B. durch
+// einen Klick, der nichts aendert) loest hoechstens ein unnoetiges, aber
+// harmloses erneutes Speichern aus.
+// ---------------------------------------------------------------------------
+let autosaveTimer = null;
+const AUTOSAVE_DELAY_MS = 1500;
+
+// Spiegelt die Statusmeldung zusaetzlich in die kompakte Anzeige oben im
+// Toolbar (siehe #saveStatusTop) - dort ohne Scrollen sichtbar.
+function spiegleSaveStatusOben(){
+  $saveStatusTop.textContent = $saveStatus.textContent;
+  $saveStatusTop.className = 'status inline' + ($saveStatus.className.includes('ok') ? ' ok' : $saveStatus.className.includes('err') ? ' err' : '');
+}
+
+function planAutosave(){
+  if(autosaveTimer) clearTimeout(autosaveTimer);
+  $saveStatus.textContent = 'Ungespeicherte Änderungen …';
+  $saveStatus.className = 'status';
+  spiegleSaveStatusOben();
+  autosaveTimer = setTimeout(fuehreAutosaveDurch, AUTOSAVE_DELAY_MS);
+}
+function cancelAutosave(){
+  if(autosaveTimer){ clearTimeout(autosaveTimer); autosaveTimer = null; }
+}
+// Vor dem Wechsel zu einer anderen Offerte oder dem Loeschen der aktuellen
+// noch ausstehende Aenderungen sofort schreiben, statt sie zu verlieren.
+async function flushAutosave(){
+  if(!autosaveTimer) return;
+  clearTimeout(autosaveTimer);
+  autosaveTimer = null;
+  await fuehreAutosaveDurch();
+}
+
+async function fuehreAutosaveDurch(){
+  autosaveTimer = null;
   currentKundeName = $kundeSuche.value.trim();
   const titelVal = $offerteTitel.value.trim();
-  if(!currentKundeName || !titelVal){
-    $saveStatus.textContent = 'Bitte Kunde (oben) und Offerte-Titel ausfuellen.';
-    $saveStatus.className = 'status err';
-    return;
-  }
-  $saveBtn.disabled = true;
-  $('saveBtnTop').disabled = true;
+  if(!currentKundeName || !titelVal) return;
   $saveStatus.textContent = 'Speichere …';
   $saveStatus.className = 'status';
+  spiegleSaveStatusOben();
   try{
     await recalc(); // sicherstellen, dass letzterGrandTotal nicht von einer noch laufenden Berechnung stammt
     if(mode === 'new'){
@@ -2971,13 +3005,13 @@ async function speichernKlick(){
     console.error(e);
     $saveStatus.textContent = 'Fehler beim Speichern: ' + (e.message || e);
     $saveStatus.className = 'status err';
-  }finally{
-    $saveBtn.disabled = false;
-    $('saveBtnTop').disabled = false;
   }
+  spiegleSaveStatusOben();
 }
-$saveBtn.addEventListener('click', speichernKlick);
-$('saveBtnTop').addEventListener('click', speichernKlick);
+
+document.addEventListener('input', e => { if(e.target.closest('#bauteilCard') || e.target.closest('.ovl')) planAutosave(); });
+document.addEventListener('change', e => { if(e.target.closest('#bauteilCard') || e.target.closest('.ovl')) planAutosave(); });
+document.addEventListener('click', e => { if(e.target.closest('#bauteilCard') || e.target.closest('.ovl')) planAutosave(); });
 
 // Aufruf via ?offerte=<id> (z.B. aus der Kunden-Uebersicht "Oeffnen") - laedt
 // den zugehoerigen Kunden vor und springt direkt in die Offerte.
