@@ -193,16 +193,11 @@ main.wrap{padding-top:48px;padding-bottom:60px;}
   color:#5B6100;background:var(--accent-lime);border-radius:4px;padding:1px 6px;margin-left:8px;vertical-align:1px;}
 .tsrowactions{width:15px;flex-shrink:0;display:flex;justify-content:center;}
 .tsrowactions svg{cursor:pointer;color:var(--muted);}
-.tbhead .tsrowactions svg{color:rgba(255,255,255,.75);}
-.tsrowactions .ets-del:hover,.tsrowactions .ea-del:hover{color:var(--danger);}
+.tsrowactions .ets-del:hover{color:var(--danger);}
 .tsrowactions .ets-edit:hover{color:var(--primary);}
 .addts{display:flex;align-items:center;gap:6px;padding:9px 0 2px;margin-top:2px;border-top:1px dashed var(--line);
   color:var(--primary);font-size:12px;font-weight:600;cursor:pointer;}
 .addts:hover{color:var(--primary-l);}
-.tbcard.neu{border:1.5px dashed var(--primary-l);background:transparent;box-shadow:none;}
-.tbcard.neu .tbhead{background:transparent;color:var(--primary-l);cursor:pointer;}
-.tbcard.neu .tbhead:hover{background:var(--soft);}
-.tbcard.neu .tbname{color:var(--primary-l);}
 
 table.etstab{width:100%;border-collapse:collapse;font-size:12.5px;table-layout:fixed;margin-top:4px;}
 table.etstab th{text-align:left;font-size:10.5px;font-weight:700;color:var(--muted);padding:0 6px 6px 0;}
@@ -1075,21 +1070,15 @@ async function ladeArtikelAlle(){
   if(error){ console.error(error); return; }
   ARTIKEL_ALLE = data || [];
 }
-let eigeneArbeitsschritte = []; // [{id, name, reihenfolge}]
-let eigeneTeilschritte = [];    // [{id, arbeitsschrittId, eigenerArbeitsschrittId, name, beschreibung, zeilen:[{id,artikelId,menge,bezeichnung,einheit,kategorie,preis}]}]
+let eigeneTeilschritte = []; // [{id, arbeitsschrittId, name, beschreibung, zeilen:[{id,artikelId,menge,bezeichnung,einheit,kategorie,preis}]}]
 
 async function ladeEigeneTeilschritte(offerteId){
-  const { data: as, error: asErr } = await sb.from('offerte_eigener_arbeitsschritt')
-    .select('id, name, reihenfolge').eq('offerte_id', offerteId).order('reihenfolge');
-  if(asErr) throw asErr;
-  eigeneArbeitsschritte = as || [];
-
   const { data: ts, error: tsErr } = await sb.from('offerte_eigener_teilschritt')
-    .select('id, arbeitsschritt_id, eigener_arbeitsschritt_id, name, beschreibung, reihenfolge, offerte_eigene_teilschritt_zeile(id, artikel_id, menge, reihenfolge, artikel(bezeichnung, artikelnummer_knecht, einheit, kategorie, vp_knecht))')
+    .select('id, arbeitsschritt_id, name, beschreibung, reihenfolge, offerte_eigene_teilschritt_zeile(id, artikel_id, menge, reihenfolge, artikel(bezeichnung, artikelnummer_knecht, einheit, kategorie, vp_knecht))')
     .eq('offerte_id', offerteId).order('reihenfolge');
   if(tsErr) throw tsErr;
   eigeneTeilschritte = (ts || []).map(t => ({
-    id: t.id, arbeitsschrittId: t.arbeitsschritt_id, eigenerArbeitsschrittId: t.eigener_arbeitsschritt_id,
+    id: t.id, arbeitsschrittId: t.arbeitsschritt_id,
     name: t.name, beschreibung: t.beschreibung,
     zeilen: (t.offerte_eigene_teilschritt_zeile || []).slice().sort((a, b) => (a.reihenfolge||0) - (b.reihenfolge||0)).map(z => ({
       id: z.id, artikelId: z.artikel_id, menge: z.menge,
@@ -1546,11 +1535,12 @@ function eigenerTeilschrittRowHtml(ts){
       </div>
     </div>`;
 }
-// "+ Eigener Teilschritt hinzufuegen" haengt entweder an einem Vorlagen-
-// Arbeitsschritt (asId) oder an einem eigenen Arbeitsschritt (eaId) - immer
-// nur eines von beiden, siehe DB-Check in offerte_eigener_teilschritt.
-function addEtsLinkHtml(asId, eaId){
-  return `<div class="addts" data-as="${asId||''}" data-ea="${eaId||''}">
+// "+ Eigener Teilschritt hinzufuegen" haengt immer an einem echten Vorlagen-
+// Arbeitsschritt - fuer einen komplett eigenen "Bucket" legt der Nutzer bei
+// Bedarf selbst einen leeren Arbeitsschritt in der Vorlage an (z.B. "Eigene
+// Arbeitsschritte"), siehe Absprache.
+function addEtsLinkHtml(asId){
+  return `<div class="addts" data-as="${asId}">
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
     Eigener Teilschritt hinzufügen
   </div>`;
@@ -1586,38 +1576,15 @@ function renderTagessatzInhalt(){
             </div>`;
           }).join('')}
           ${eigeneFuerAs.map(eigenerTeilschrittRowHtml).join('')}
-          ${addEtsLinkHtml(as.id, null)}
+          ${addEtsLinkHtml(as.id)}
         </div>
       </div>`;
-    }).join('') +
-    eigeneArbeitsschritte.map(ea => {
-      const eigeneFuerEa = eigeneTeilschritte.filter(ts => ts.eigenerArbeitsschrittId === ea.id);
-      const offen = tagessatzOffenIds.has(ea.id);
-      return `
-      <div class="tbcard ${offen ? '' : 'collapsed'}" data-ea="${ea.id}">
-        <div class="tbhead">
-          <span class="tbchev">${ICON.chevronDown}</span>
-          <span class="tbname">${ea.name}</span>
-          <div class="tsrowactions">${ICON.trash.replace('<svg ', '<svg class="ea-del" title="Eigenen Arbeitsschritt löschen" ')}</div>
-        </div>
-        <div class="tbbody">
-          ${eigeneFuerEa.map(eigenerTeilschrittRowHtml).join('')}
-          ${addEtsLinkHtml(null, ea.id)}
-        </div>
-      </div>`;
-    }).join('') +
-    `<div class="tbcard neu" id="eaNeuCard">
-      <div class="tbhead" id="eaNeuHead">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-        <span class="tbname">Eigener Arbeitsschritt hinzufügen</span>
-      </div>
-    </div>`;
+    }).join('');
 
-  $tagessatzInhalt.querySelectorAll('.tbcard[data-as] > .tbhead, .tbcard[data-ea] > .tbhead').forEach(head => {
-    head.addEventListener('click', e => {
-      if(e.target.closest('.ea-del')) return;
+  $tagessatzInhalt.querySelectorAll('.tbcard[data-as] > .tbhead').forEach(head => {
+    head.addEventListener('click', () => {
       const card = head.closest('.tbcard');
-      const id = card.dataset.as || card.dataset.ea;
+      const id = card.dataset.as;
       if(tagessatzOffenIds.has(id)) tagessatzOffenIds.delete(id); else tagessatzOffenIds.add(id);
       card.classList.toggle('collapsed');
     });
@@ -1645,14 +1612,14 @@ function renderTagessatzInhalt(){
   $tagessatzInhalt.querySelectorAll('.addts').forEach(link => {
     link.addEventListener('click', e => {
       e.stopPropagation();
-      openEigenerTeilschrittModal({ arbeitsschrittId: link.dataset.as || null, eigenerArbeitsschrittId: link.dataset.ea || null }, null);
+      openEigenerTeilschrittModal({ arbeitsschrittId: link.dataset.as }, null);
     });
   });
   $tagessatzInhalt.querySelectorAll('.ets-edit').forEach(icon => {
     icon.addEventListener('click', e => {
       e.stopPropagation();
       const ts = eigeneTeilschritte.find(t => t.id === icon.closest('.tsrow').dataset.ets);
-      openEigenerTeilschrittModal({ arbeitsschrittId: ts.arbeitsschrittId, eigenerArbeitsschrittId: ts.eigenerArbeitsschrittId }, ts);
+      openEigenerTeilschrittModal({ arbeitsschrittId: ts.arbeitsschrittId }, ts);
     });
   });
   $tagessatzInhalt.querySelectorAll('.ets-del').forEach(icon => {
@@ -1661,51 +1628,8 @@ function renderTagessatzInhalt(){
       await loescheEigenerTeilschritt(icon.closest('.tsrow').dataset.ets);
     });
   });
-  $tagessatzInhalt.querySelectorAll('.ea-del').forEach(icon => {
-    icon.addEventListener('click', async e => {
-      e.stopPropagation();
-      await loescheEigenerArbeitsschritt(icon.closest('.tbcard').dataset.ea);
-    });
-  });
-  $('eaNeuHead').addEventListener('click', () => startEigenerArbeitsschrittEingabe());
 }
 
-// Klick auf "+ Eigener Arbeitsschritt hinzufuegen" macht daraus direkt ein
-// Eingabefeld (gleiches Muster wie die Eigene-Position-Draftzeile) statt
-// ein eigenes Prompt-Fenster zu brauchen.
-function startEigenerArbeitsschrittEingabe(){
-  const card = $('eaNeuCard');
-  card.querySelector('.tbhead').innerHTML = `<input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="text" id="eaNeuInput" placeholder="Name des Arbeitsschritts …" style="width:100%;border:1px solid var(--primary-l);border-radius:6px;padding:5px 8px;font:inherit;font-size:12.5px;background:#fff;color:var(--ink);">`;
-  const inp = $('eaNeuInput');
-  inp.focus();
-  const commit = async () => {
-    const name = inp.value.trim();
-    if(!name){ renderTagessatzInhalt(); return; }
-    if(!currentOfferteId){
-      $saveStatus.textContent = 'Bitte die Offerte zuerst einmal speichern, bevor eigene Arbeitsschritte hinzugefügt werden.';
-      $saveStatus.className = 'status err';
-      renderTagessatzInhalt();
-      return;
-    }
-    const { data, error } = await sb.from('offerte_eigener_arbeitsschritt')
-      .insert({ offerte_id: currentOfferteId, name, reihenfolge: eigeneArbeitsschritte.length + 1 }).select().single();
-    if(error){ $saveStatus.textContent = 'Fehler beim Speichern: ' + error.message; $saveStatus.className = 'status err'; renderTagessatzInhalt(); return; }
-    eigeneArbeitsschritte.push({ id: data.id, name: data.name, reihenfolge: data.reihenfolge });
-    tagessatzOffenIds.add(data.id);
-    renderTagessatzInhalt();
-  };
-  inp.addEventListener('keydown', e => { if(e.key === 'Enter') commit(); });
-  inp.addEventListener('blur', commit);
-}
-async function loescheEigenerArbeitsschritt(id){
-  if(!confirm('Diesen eigenen Arbeitsschritt inkl. seiner Teilschritte wirklich löschen?')) return;
-  const { error } = await sb.from('offerte_eigener_arbeitsschritt').delete().eq('id', id);
-  if(error){ $saveStatus.textContent = 'Fehler beim Löschen: ' + error.message; $saveStatus.className = 'status err'; return; }
-  eigeneArbeitsschritte = eigeneArbeitsschritte.filter(a => a.id !== id);
-  eigeneTeilschritte = eigeneTeilschritte.filter(t => t.eigenerArbeitsschrittId !== id);
-  renderTagessatzInhalt();
-  recalc();
-}
 async function loescheEigenerTeilschritt(id){
   if(!confirm('Diesen eigenen Teilschritt wirklich löschen?')) return;
   const { error } = await sb.from('offerte_eigener_teilschritt').delete().eq('id', id);
@@ -1720,7 +1644,7 @@ async function loescheEigenerTeilschritt(id){
 // erfassen, immer eine leere "Draft"-Zeile am Ende (gleiches Prinzip wie die
 // Eigene-Position-Zeile), kein separates Artikel-Hinzufuegen-Modal.
 // ---------------------------------------------------------------------------
-let etsKontext = null;   // {arbeitsschrittId, eigenerArbeitsschrittId} - Ziel des (neuen) Teilschritts
+let etsKontext = null;   // {arbeitsschrittId} - Ziel des (neuen) Teilschritts
 let etsEditId = null;    // id des bestehenden offerte_eigener_teilschritt, oder null bei "neu"
 let etsZeilen = [];      // [{clientKey, artikelId, bezeichnung, einheit, kategorie, preis, menge}]
 let etsZeilenCounter = 0;
@@ -1817,8 +1741,7 @@ async function etsSpeichern(){
   const beschreibung = $('etsBeschreibungInput').value.trim() || null;
   const payload = {
     offerte_id: currentOfferteId,
-    arbeitsschritt_id: etsKontext.arbeitsschrittId || null,
-    eigener_arbeitsschritt_id: etsKontext.eigenerArbeitsschrittId || null,
+    arbeitsschritt_id: etsKontext.arbeitsschrittId,
     name, beschreibung
   };
   let tsId = etsEditId;
@@ -1839,7 +1762,7 @@ async function etsSpeichern(){
     if(insErr){ $('etsStatus').textContent = 'Fehler: ' + insErr.message; $('etsStatus').className = 'status err'; return; }
   }
   const neuerTs = {
-    id: tsId, arbeitsschrittId: etsKontext.arbeitsschrittId, eigenerArbeitsschrittId: etsKontext.eigenerArbeitsschrittId,
+    id: tsId, arbeitsschrittId: etsKontext.arbeitsschrittId,
     name, beschreibung,
     zeilen: etsZeilen.map(z => ({ id: null, artikelId: z.artikelId, menge: z.menge, bezeichnung: z.bezeichnung, einheit: z.einheit, kategorie: z.kategorie, preis: z.preis }))
   };
@@ -2018,7 +1941,6 @@ async function starteNeueOfferte(otId){
   teilschrittTage = {};
   tagessatzAuswahl = {};
   tagessatzOffenIds = new Set();
-  eigeneArbeitsschritte = [];
   eigeneTeilschritte = [];
   tagessatzAuswahlfelder.forEach(af => {
     const standards = af.optionen.filter(o => o.istStandard);
@@ -2438,13 +2360,10 @@ async function recalc(){
 
     // Eigene Teilschritte (siehe openEigenerTeilschrittModal): Menge gilt
     // direkt, kein Tagesleistung-Faktor. "arbeitsschritt" fuer die
-    // Materialpaket-Gruppierung ist der Name des uebergeordneten (echten
-    // oder eigenen) Arbeitsschritts, damit sich das gleich verhaelt wie
-    // normale Zeilen.
+    // Materialpaket-Gruppierung ist der Name des uebergeordneten Vorlagen-
+    // Arbeitsschritts, damit sich das gleich verhaelt wie normale Zeilen.
     eigeneTeilschritte.forEach(ts => {
-      const asName = ts.arbeitsschrittId
-        ? (tagessatzArbeitsschritte.find(a => a.id === ts.arbeitsschrittId)?.name || ts.name)
-        : (eigeneArbeitsschritte.find(a => a.id === ts.eigenerArbeitsschrittId)?.name || ts.name);
+      const asName = tagessatzArbeitsschritte.find(a => a.id === ts.arbeitsschrittId)?.name || ts.name;
       ts.zeilen.forEach(z => {
         alleZeilen.push({ kategorie: z.kategorie, arbeitsschritt: asName, bezeichnung: z.bezeichnung, einheit: z.einheit || 'Stk', preis: z.preis, menge: z.menge, betrag: z.menge * z.preis, artikelId: z.artikelId });
       });
