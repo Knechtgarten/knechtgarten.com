@@ -371,7 +371,7 @@ tr.crow .zeile-del{margin-left:4px;}
   border-radius:6px;padding:2px 6px;margin:-2px -6px;font-family:inherit;background:transparent;}
 .etstitleinput:hover{border-color:var(--line);}
 .etstitleinput:focus{outline:none;border-color:var(--primary);background:var(--soft);}
-.geomodalfoot{display:flex;justify-content:flex-end;margin-top:6px;border-top:1px solid var(--line);padding-top:16px;}
+.geomodalfoot{display:flex;justify-content:flex-end;gap:20px;margin-top:6px;border-top:1px solid var(--line);padding-top:16px;}
 .geogroup{border:1px solid var(--line);border-radius:9px;padding:14px 14px 10px;margin-bottom:12px;position:relative;background:var(--soft);}
 .geogroupbody{display:flex;gap:16px;align-items:center;}
 .geodiagram{flex:0 0 168px;display:flex;align-items:center;justify-content:center;padding-top:4px;}
@@ -658,7 +658,18 @@ input[type=number]{-moz-appearance:textfield;}
       <button type="button" class="notiztoolbtn" id="etsPickerCloseX" title="Schliessen"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
     <input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="text" id="etsPickerSuche" placeholder="Suchen nach Bezeichnung oder Artikelnummer …" style="width:100%;border:1px solid var(--line);border-radius:7px;padding:8px 10px;font:inherit;font-size:12.5px;margin-bottom:10px;">
-    <div class="optrow" id="etsPickerKategorien" style="margin-bottom:10px;"></div>
+    <div class="fld" style="margin-bottom:8px;">
+      <label style="font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);font-weight:700;display:block;margin-bottom:4px;">Kategorie</label>
+      <div class="optrow" id="etsPickerKategorien"></div>
+    </div>
+    <div class="fld" style="margin-bottom:8px;">
+      <label style="font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);font-weight:700;display:block;margin-bottom:4px;">Gruppe</label>
+      <div class="optrow" id="etsPickerGruppen"></div>
+    </div>
+    <div class="fld" style="margin-bottom:10px;max-width:260px;">
+      <label style="font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);font-weight:700;display:block;margin-bottom:4px;">Lieferant</label>
+      <select id="etsPickerLieferant" style="width:100%;border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:inherit;font-size:12.5px;color:var(--ink);"></select>
+    </div>
     <div style="max-height:50vh;overflow-y:auto;border:1px solid var(--line);border-radius:8px;">
       <table class="etspicktab">
         <thead><tr><th>Artikelnummer</th><th>Bezeichnung</th><th>Kategorie</th><th>Einheit</th><th class="etscol-num">VP Knecht</th></tr></thead>
@@ -1106,10 +1117,18 @@ async function ladeLogistikSammelpositionenTagessatz(){
 let ARTIKEL_ALLE = [];
 async function ladeArtikelAlle(){
   const { data, error } = await sb.from('artikel')
-    .select('id, bezeichnung, artikelnummer_knecht, einheit, kategorie, vp_knecht')
+    .select('id, bezeichnung, artikelnummer_knecht, einheit, kategorie, vp_knecht, artikelgruppe_id, lieferant_id, artikelgruppe(name), lieferant(name)')
     .order('bezeichnung');
   if(error){ console.error(error); return; }
-  ARTIKEL_ALLE = data || [];
+  // Gruppe/Lieferant flach ablegen statt verschachtelt - braucht der grosse
+  // Artikel-Katalog im Eigener-Teilschritt-Fenster fuer seine Filter (siehe
+  // openEtsArtikelPicker), ohne dafuer extra Tabellen laden zu muessen.
+  ARTIKEL_ALLE = (data || []).map(a => ({
+    id: a.id, bezeichnung: a.bezeichnung, artikelnummer_knecht: a.artikelnummer_knecht, einheit: a.einheit,
+    kategorie: a.kategorie, vp_knecht: a.vp_knecht,
+    artikelgruppeId: a.artikelgruppe_id, artikelgruppeName: a.artikelgruppe?.name || null,
+    lieferantId: a.lieferant_id, lieferantName: a.lieferant?.name || null
+  }));
 }
 let eigeneTeilschritte = []; // [{id, arbeitsschrittId, name, beschreibung, zeilen:[{id,artikelId,menge,bezeichnung,einheit,kategorie,preis}]}]
 
@@ -1792,28 +1811,56 @@ function etsAbbrechen(){
 // ---------------------------------------------------------------------------
 let etsPickerZielKey = null;
 let etsPickerKategorie = null;
+let etsPickerGruppeId = null;
+let etsPickerLieferantId = null;
 const ETS_PICKER_KATEGORIEN = [
   { key: null, label: 'Alle' }, { key: 'material', label: 'Material' }, { key: 'personal', label: 'Personal' },
   { key: 'maschine', label: 'Maschine' }, { key: 'logistik', label: 'Logistik' }
 ];
+// Gruppen/Lieferanten kommen direkt aus den geladenen Artikeln (Set der
+// tatsaechlich vorkommenden Kombinationen) statt einer eigenen Abfrage -
+// ARTIKEL_ALLE ist ja schon vollstaendig geladen (siehe ladeArtikelAlle()).
+function etsPickerListeAusArtikeln(idFeld, nameFeld){
+  const gesehen = new Map();
+  ARTIKEL_ALLE.forEach(a => { if(a[idFeld] && !gesehen.has(a[idFeld])) gesehen.set(a[idFeld], a[nameFeld]); });
+  return [...gesehen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+}
 function openEtsArtikelPicker(key){
   etsPickerZielKey = key;
   etsPickerKategorie = null;
+  etsPickerGruppeId = null;
+  etsPickerLieferantId = null;
   $('etsPickerSuche').value = '';
   $('etsPickerKategorien').innerHTML = ETS_PICKER_KATEGORIEN.map(k =>
-    `<button type="button" class="opt${k.key === etsPickerKategorie ? ' on' : ''}" data-kat="${k.key || ''}">${k.label}</button>`).join('');
+    `<button type="button" class="opt" data-kat="${k.key || ''}">${k.label}</button>`).join('');
   $('etsPickerKategorien').querySelectorAll('button').forEach(btn => {
     btn.addEventListener('click', () => { etsPickerKategorie = btn.dataset.kat || null; renderEtsArtikelPickerListe(); });
   });
+  const gruppen = etsPickerListeAusArtikeln('artikelgruppeId', 'artikelgruppeName');
+  $('etsPickerGruppen').innerHTML = `<button type="button" class="opt" data-gr="">Alle</button>` +
+    gruppen.map(g => `<button type="button" class="opt" data-gr="${g.id}">${escHtml(g.name)}</button>`).join('');
+  $('etsPickerGruppen').querySelectorAll('button').forEach(btn => {
+    btn.addEventListener('click', () => { etsPickerGruppeId = btn.dataset.gr || null; renderEtsArtikelPickerListe(); });
+  });
+  const lieferanten = etsPickerListeAusArtikeln('lieferantId', 'lieferantName');
+  $('etsPickerLieferant').innerHTML = `<option value="">Alle</option>` +
+    lieferanten.map(l => `<option value="${l.id}">${escHtml(l.name)}</option>`).join('');
+  // onchange statt addEventListener - das Element bleibt beim erneuten
+  // Oeffnen bestehen (nur innerHTML wird neu gesetzt), addEventListener
+  // wuerde sich also bei jedem Oeffnen zusaetzlich aufsummieren.
+  $('etsPickerLieferant').onchange = () => { etsPickerLieferantId = $('etsPickerLieferant').value || null; renderEtsArtikelPickerListe(); };
   renderEtsArtikelPickerListe();
   $('etsArtikelPickerOvl').classList.add('show');
   $('etsPickerSuche').focus();
 }
 function renderEtsArtikelPickerListe(){
   $('etsPickerKategorien').querySelectorAll('button').forEach(btn => btn.classList.toggle('on', (btn.dataset.kat || null) === etsPickerKategorie));
+  $('etsPickerGruppen').querySelectorAll('button').forEach(btn => btn.classList.toggle('on', (btn.dataset.gr || null) === etsPickerGruppeId));
   const q = $('etsPickerSuche').value.trim().toLowerCase();
   const treffer = ARTIKEL_ALLE.filter(a => {
     if(etsPickerKategorie && a.kategorie !== etsPickerKategorie) return false;
+    if(etsPickerGruppeId && a.artikelgruppeId !== etsPickerGruppeId) return false;
+    if(etsPickerLieferantId && a.lieferantId !== etsPickerLieferantId) return false;
     if(q && !`${a.bezeichnung} ${a.artikelnummer_knecht || ''}`.toLowerCase().includes(q)) return false;
     return true;
   });
