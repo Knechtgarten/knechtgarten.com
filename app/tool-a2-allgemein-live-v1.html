@@ -300,6 +300,7 @@ table.cost thead th:nth-child(5){text-align:right;}
 tr.cgrouphead td{font-size:11px;font-weight:700;color:var(--primary);text-transform:uppercase;letter-spacing:.03em;
   padding:12px 0 5px;border-bottom:1px solid var(--line);}
 tr.crow td{padding:6px 8px 6px 0;border-bottom:1px solid var(--soft);vertical-align:middle;}
+td.cmenge,td.cpreis{text-align:right;white-space:nowrap;color:var(--ink);}
 td.cbetrag{font-weight:700;text-align:right;white-space:nowrap;color:var(--ink);}
 tr.ctotalrow td{padding:12px 0 4px;font-size:15px;font-weight:800;color:var(--primary);border-top:2px solid var(--line);}
 tr.ctotalrow .ctotalval{text-align:right;white-space:nowrap;}
@@ -331,11 +332,6 @@ tr.ezrow .ez-menge{width:50px;text-align:right;}
 tr.ezrow .ez-einheit{width:50px;}
 tr.ezrow .ez-preis{width:65px;text-align:right;}
 tr.ezrow .ez-del{margin-left:4px;}
-.berechnet-val{color:var(--muted);font-size:10.5px;margin-right:4px;}
-input.korrektur-feld{width:44px;border:1px solid var(--line);border-radius:5px;padding:3px 5px;
-  font:inherit;font-size:11px;text-align:right;background:#fff;}
-input.korrektur-feld::placeholder{color:var(--muted);}
-input.korrektur-feld:disabled{background:var(--soft);color:var(--muted);}
 tr.crow.zgeloescht{opacity:.55;text-decoration:line-through;}
 tr.crow .zeile-del{margin-left:4px;}
 
@@ -2812,6 +2808,41 @@ function renderEigeneZeilenFuerKategorie(kat){
   };
   trDraft.querySelectorAll('input').forEach(inp => inp.addEventListener('change', commitDraft));
 
+  // Zweiter Einstiegspunkt fuer eine eigene Position: Artikel aus dem
+  // Artikelstamm suchen statt Bezeichnung/Einheit/Preis frei zu erfassen -
+  // landet nach der Auswahl als ganz normale eigene Zeile (gleiche Tabelle,
+  // gleiche Felder, weiterhin frei nachtraeglich aenderbar).
+  const trArtikelDraft = document.createElement('tr');
+  trArtikelDraft.className = 'crow ezrow ezdraft';
+  trArtikelDraft.innerHTML = `<td style="position:relative;">
+      <input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="text" class="ez-artikel-input" placeholder="+ Position aus Artikelstamm">
+      <div class="kv-dropdown"></div>
+    </td>
+    <td colspan="3"></td>
+    <td class="cbetrag">–</td>`;
+  $costbody.appendChild(trArtikelDraft);
+  const artikelInput = trArtikelDraft.querySelector('.ez-artikel-input');
+  const artikelDropdown = trArtikelDraft.querySelector('.kv-dropdown');
+  artikelInput.addEventListener('input', () => {
+    const q = artikelInput.value.trim().toLowerCase();
+    if(!q){ artikelDropdown.classList.remove('show'); return; }
+    const treffer = ARTIKEL_ALLE.filter(a => a.kategorie === kat && (a.bezeichnung.toLowerCase().includes(q) || (a.artikelnummer_knecht || '').toLowerCase().includes(q))).slice(0, 30);
+    artikelDropdown.innerHTML = treffer.length
+      ? treffer.map(a => `<div class="kv-item" data-id="${a.id}">${escHtml(a.bezeichnung)}<span class="kv-muted">${escHtml(a.einheit)}${a.artikelnummer_knecht ? ' · ' + escHtml(a.artikelnummer_knecht) : ''}</span></div>`).join('')
+      : '<div class="kv-item" style="cursor:default;color:var(--muted);">Keine Treffer</div>';
+    artikelDropdown.classList.add('show');
+    artikelDropdown.querySelectorAll('.kv-item[data-id]').forEach(item => {
+      item.addEventListener('click', () => {
+        const a = ARTIKEL_ALLE.find(x => x.id === item.dataset.id);
+        eigeneZeileCounter++;
+        eigeneZeilen.push({ clientKey: 'ez' + eigeneZeileCounter, dbId: null, kategorie: kat, bezeichnung: a.bezeichnung, menge: 1, einheit: a.einheit, preis: a.vp_knecht ?? 0 });
+        recalc();
+        planAutosave();
+      });
+    });
+  });
+  artikelInput.addEventListener('blur', () => setTimeout(() => artikelDropdown.classList.remove('show'), 150));
+
   return summe;
 }
 
@@ -2948,22 +2979,20 @@ async function recalc(){
     $costbody.innerHTML = '';
     let grandTotal = 0;
     function addRow(bezeichnung, menge, einheit, preis, betrag, schluessel, rundungMengeFn = rundeMenge, rundungPreisFn = rundeCHF, rechnungsweg = null){
+      // Menge/Preis werden hier NICHT mehr korrigiert (das war der alte
+      // aggregierte Korrektur-Mechanismus) - jede Quelle, die in diese
+      // Summenzeile einfliesst, hat jetzt eine eigene, praezisere Korrektur
+      // weiter oben (Vorlagen-Teilschritt: Stift-Icon/openTsMengenModal,
+      // Lieferwagenfahrzeit: Frequenz-Karte, eigener Teilschritt: direkt im
+      // Bearbeiten-Fenster). Nur das Deaktivieren der ganzen Summenzeile
+      // (geloescht) bleibt hier bestehen, siehe zeilenKorrekturen.
       const k = zeilenKorrekturen[schluessel] || {};
-      const effMenge = rundungMengeFn(k.menge_korrektur != null ? k.menge_korrektur : menge);
-      const effPreis = rundungPreisFn(k.preis_korrektur != null ? k.preis_korrektur : preis);
+      const effMenge = rundungMengeFn(menge);
+      const effPreis = rundungPreisFn(preis);
       const effBetrag = rundeCHF(effMenge * effPreis);
       const geloescht = !!k.geloescht;
-      // Der urspruengliche Berechnungswert wird nur fein daneben angezeigt,
-      // wenn tatsaechlich eine abweichende Korrektur eingetragen ist - sonst
-      // bleibt die Stelle leer (auch wenn ein Korrekturwert gespeichert ist,
-      // der zufaellig wieder dem Berechnungswert entspricht).
-      const mengeAbweicht = k.menge_korrektur != null && rundungMengeFn(k.menge_korrektur) !== rundungMengeFn(menge);
-      const preisAbweicht = k.preis_korrektur != null && rundungPreisFn(k.preis_korrektur) !== rundungPreisFn(preis);
       if(!geloescht) grandTotal += effBetrag;
       snapshotZeile(KAT_LABEL[schluessel.split(':')[0]] || schluessel, { bezeichnung, menge: effMenge, einheit, preis: effPreis, betrag: effBetrag, geloescht });
-      // Immer mit zwei Nachkommastellen zeigen (z.B. "102.00" statt "102") -
-      // sieht sonst nicht nach einem Preis aus.
-      const preisFeldWert = k.preis_korrektur != null ? Number(k.preis_korrektur).toFixed(2) : '';
       const tr = document.createElement('tr');
       tr.className = 'crow' + (geloescht ? ' zgeloescht' : '');
       // Rechnungsweg-Tooltip beim Hover - ohne Breakdown reicht "Menge x Preis
@@ -2973,20 +3002,11 @@ async function recalc(){
       tr.addEventListener('mouseenter', () => zeigeRechnungsweg(tr, rechnungsweg, rechnungswegSimple));
       tr.addEventListener('mouseleave', versteckeRechnungsweg);
       tr.innerHTML = `<td>${bezeichnung}</td>
-        <td style="text-align:right"><span class="berechnet-val">${mengeAbweicht ? rundungMengeFn(menge) : ''}</span><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="korrektur-feld" data-feld="menge" placeholder="Korr." value="${k.menge_korrektur ?? ''}" ${geloescht ? 'disabled' : ''}></td>
+        <td class="cmenge">${effMenge}</td>
         <td style="color:var(--muted)">${einheit}</td>
-        <td style="text-align:right"><span class="berechnet-val">${preisAbweicht ? fmtCHF(rundungPreisFn(preis)) : ''}</span><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="korrektur-feld" data-feld="preis" placeholder="Korr." value="${preisFeldWert}" ${geloescht ? 'disabled' : ''}></td>
+        <td class="cpreis">${fmtCHF(effPreis)}</td>
         <td class="cbetrag">${fmtCHF(effBetrag)} <button type="button" class="icobtn zeile-del" title="${geloescht ? 'Zeile wiederherstellen' : 'Zeile entfernen'}">${geloescht ? ICON.restore : ICON.trash}</button></td>`;
       $costbody.appendChild(tr);
-      tr.querySelectorAll('.korrektur-feld').forEach(inp => {
-        inp.addEventListener('change', e => {
-          const feld = e.target.dataset.feld === 'menge' ? 'menge_korrektur' : 'preis_korrektur';
-          const v = e.target.value.trim();
-          if(!zeilenKorrekturen[schluessel]) zeilenKorrekturen[schluessel] = { menge_korrektur:null, preis_korrektur:null, geloescht:false };
-          zeilenKorrekturen[schluessel][feld] = (v === '' || isNaN(parseFloat(v))) ? null : parseFloat(v);
-          recalc();
-        });
-      });
       tr.querySelector('.zeile-del').addEventListener('click', () => {
         if(!zeilenKorrekturen[schluessel]) zeilenKorrekturen[schluessel] = { menge_korrektur:null, preis_korrektur:null, geloescht:false };
         zeilenKorrekturen[schluessel].geloescht = !zeilenKorrekturen[schluessel].geloescht;
