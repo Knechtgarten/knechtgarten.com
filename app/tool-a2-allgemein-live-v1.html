@@ -159,6 +159,21 @@ main.wrap{padding-top:48px;padding-bottom:60px;}
 .opt{font-size:11px;font-weight:600;border:1px solid var(--line);background:#fff;color:var(--ink);
   border-radius:6px;padding:4px 9px;cursor:pointer;}
 .opt.on{background:var(--primary);color:#fff;border-color:var(--primary);}
+/* Lieferwagenfahrzeit-Karte (gleiches Muster wie tool-a-live-v1.html) -
+   Vorarbeiter/Gartenarbeiter bewusst dezenter als der Lieferwagen selbst,
+   aktiver Zustand bei allen drei einheitlich hellblau statt dunklem Navy. */
+[data-posten="vorarbeiter"] .opt, [data-posten="gartenarbeiter"] .opt{color:var(--muted);border-color:var(--line);}
+[data-posten="lieferwagen"] .opt.on, [data-posten="vorarbeiter"] .opt.on, [data-posten="gartenarbeiter"] .opt.on{background:var(--accent-blue);color:var(--primary);border-color:var(--accent-blue);}
+.lwmodesw{position:relative;display:inline-block;width:58px;height:24px;flex-shrink:0;vertical-align:middle;}
+.lwmodesw input{opacity:0;width:0;height:0;position:absolute;}
+.lwmodesw .trk{position:absolute;inset:0;background:var(--line);border-radius:12px;cursor:pointer;}
+.lwmodesw .thumb{position:absolute;top:2px;left:2px;width:32px;height:20px;border-radius:10px;display:flex;align-items:center;justify-content:center;
+  font-size:10px;font-weight:700;letter-spacing:.02em;background:var(--accent-lime);color:#5B6100;box-shadow:0 1px 2px rgba(0,0,0,.15);
+  transition:left .15s,background-color .15s,color .15s;}
+.lwmodesw input:checked ~ .trk .thumb{left:24px;background:var(--primary);color:#fff;}
+.lwmodesw.wide{width:84px;}
+.lwmodesw.wide .thumb{width:46px;font-size:9.5px;}
+.lwmodesw.wide input:checked ~ .trk .thumb{left:36px;}
 
 
 .kv-dropdown{display:none;position:absolute;left:0;right:0;top:100%;margin-top:4px;background:#fff;
@@ -182,10 +197,6 @@ table.cost thead th:nth-child(5){text-align:right;}
 tr.cgrouphead td{font-size:11px;font-weight:700;color:var(--primary);text-transform:uppercase;letter-spacing:.03em;
   padding:12px 0 5px;border-bottom:1px solid var(--line);}
 tr.crow td{padding:6px 8px 6px 0;border-bottom:1px solid var(--soft);vertical-align:middle;}
-tr.lwrow:hover td{background:var(--soft);}
-tr.lwrow.on td{background:var(--primary);color:#fff;}
-tr.lwrow.on td.cbetrag{color:#fff;}
-tr.lwrow.on td[style*="color:var(--muted)"]{color:#fff !important;}
 td.cbetrag{font-weight:700;text-align:right;white-space:nowrap;color:var(--ink);}
 tr.ctotalrow td{padding:12px 0 4px;font-size:15px;font-weight:800;color:var(--primary);border-top:2px solid var(--line);}
 tr.ctotalrow .ctotalval{text-align:right;white-space:nowrap;}
@@ -484,6 +495,7 @@ input[type=number]{-moz-appearance:textfield;}
         </div>
 
         <div id="offerteContentWrap">
+          <div class="card hidden" id="lwFrequenzKarte"><!-- per JS befuellt --></div>
           <div id="tagessatzInhalt"></div>
 
           <div class="costwrap" id="costwrap">
@@ -1014,18 +1026,43 @@ let tagessatzOffenIds = new Set();  // Arbeitsschritt-IDs, die gerade aufgeklapp
 // Quelle wie in tool-a-live-v1.html.
 // ---------------------------------------------------------------------------
 let lieferwagenKonfig = null;
-let lieferwagenModus = 'zeit';
+let lieferwagenModus = 'zeit'; // 'zeit' | 'distanz'
 let lieferwagenDistanzCache = {};
+// Frequenz-Zustand + Vorarbeiter-Typ (Pool/Normal) - gleiches Muster wie
+// tool-a-live-v1.html, siehe berechneLieferwagenfahrzeit().
+let lieferwagenFrequenz = 'taeglich';
+let vorarbeiterFrequenz = 'taeglich';
+// Pool vs. Normal gilt beim Tagesrechner NICHT nur fuer die Fahrzeit
+// (anders als bei Formel-Offerten, wo der Vorarbeiter-Artikel schon in der
+// Vorlage fix gewaehlt ist) - hier eine generische Vorlage fuer alle
+// Jobarten, darum wirkt der Umschalter offertenweit auf jede Personal-Zeile,
+// die den normalen Vorarbeiter-Artikel referenziert (siehe recalc()).
+let vorarbeiterTyp = 'normal';
+let gartenarbeiterFrequenz = 'taeglich';
 
 async function ladeLieferwagenKonfiguration(){
   const { data, error } = await sb.from('lieferwagen_konfiguration')
-    .select('herkunft_adresse, stundenansatz_artikel:stundenansatz_artikel_id(vp_knecht), km_ansatz_artikel:km_ansatz_artikel_id(vp_knecht)')
+    .select('herkunft_adresse, stunden_pro_arbeitstag, stundenansatz_artikel_id, km_ansatz_artikel_id, vorarbeiter_artikel_id, vorarbeiter_poolbau_artikel_id, gartenarbeiter_artikel_id, stundenansatz_artikel:stundenansatz_artikel_id(vp_knecht, bezeichnung), km_ansatz_artikel:km_ansatz_artikel_id(vp_knecht, bezeichnung), vorarbeiter_artikel:vorarbeiter_artikel_id(vp_knecht, bezeichnung), vorarbeiter_poolbau_artikel:vorarbeiter_poolbau_artikel_id(vp_knecht, bezeichnung), gartenarbeiter_artikel:gartenarbeiter_artikel_id(vp_knecht, bezeichnung)')
     .eq('id', true).single();
   if(error){ console.error(error); return; }
   lieferwagenKonfig = {
     herkunft_adresse: data.herkunft_adresse,
     stundenpreis: data.stundenansatz_artikel?.vp_knecht ?? null,
-    kmpreis: data.km_ansatz_artikel?.vp_knecht ?? null
+    kmpreis: data.km_ansatz_artikel?.vp_knecht ?? null,
+    vorarbeiterPreis: data.vorarbeiter_artikel?.vp_knecht ?? null,
+    vorarbeiterPoolbauPreis: data.vorarbeiter_poolbau_artikel?.vp_knecht ?? null,
+    gartenarbeiterPreis: data.gartenarbeiter_artikel?.vp_knecht ?? null,
+    stundenProArbeitstag: data.stunden_pro_arbeitstag ?? null,
+    stdArtikelId: data.stundenansatz_artikel_id,
+    stdArtikelBezeichnung: data.stundenansatz_artikel?.bezeichnung ?? null,
+    kmArtikelId: data.km_ansatz_artikel_id,
+    kmArtikelBezeichnung: data.km_ansatz_artikel?.bezeichnung ?? null,
+    vorarbeiterArtikelId: data.vorarbeiter_artikel_id,
+    vorarbeiterArtikelBezeichnung: data.vorarbeiter_artikel?.bezeichnung ?? null,
+    vorarbeiterPoolbauArtikelId: data.vorarbeiter_poolbau_artikel_id,
+    vorarbeiterPoolbauArtikelBezeichnung: data.vorarbeiter_poolbau_artikel?.bezeichnung ?? null,
+    gartenarbeiterArtikelId: data.gartenarbeiter_artikel_id,
+    gartenarbeiterArtikelBezeichnung: data.gartenarbeiter_artikel?.bezeichnung ?? null
   };
 }
 async function holeLieferwagenDistanz(plz){
@@ -1049,6 +1086,135 @@ async function holeLieferwagenDistanz(plz){
     lieferwagenDistanzCache[plz] = null;
     return null;
   }
+}
+
+// Beim Tagesrechner ist der Vorarbeiter-Artikel pro Ressourcenzeile fest in
+// der (einzigen, generischen) Vorlage hinterlegt - anders als bei Formel-
+// Offerten, wo jeder Offertentyp seine eigene Vorlage mit dem passenden
+// Vorarbeiter-Artikel hat. Der Pool/Normal-Umschalter wirkt darum hier
+// offertenweit: er ersetzt in JEDER Personal-Zeile, die den normalen
+// Vorarbeiter-Artikel referenziert, Artikel/Preis durch die Poolbau-Variante
+// (Menge/Stunden bleiben unveraendert, nur Bezeichnung/Preis/Betrag aendern
+// sich) - nicht nur bei der synthetischen Lieferwagenfahrzeit-Zeile.
+function wendeVorarbeiterTypAn(zeilen){
+  if(vorarbeiterTyp !== 'pool' || !lieferwagenKonfig?.vorarbeiterArtikelId || lieferwagenKonfig.vorarbeiterPoolbauArtikelId == null) return zeilen;
+  return zeilen.map(r => {
+    if(r.artikelId !== lieferwagenKonfig.vorarbeiterArtikelId) return r;
+    const preis = lieferwagenKonfig.vorarbeiterPoolbauPreis ?? r.preis;
+    return { ...r, artikelId: lieferwagenKonfig.vorarbeiterPoolbauArtikelId, bezeichnung: lieferwagenKonfig.vorarbeiterPoolbauArtikelBezeichnung || r.bezeichnung, preis, betrag: r.menge * preis };
+  });
+}
+
+// Lieferwagenfahrzeit (Lieferwagen/Vorarbeiter/Gartenarbeiter) wird NICHT als
+// eigener Kostenblock angezeigt, sondern als "virtuelle" Zeilen in
+// Personalaufwand/Logistik eingespeist - dort landet sie ueber die
+// bestehende Artikel-Identitaets-Gruppierung automatisch entweder in einer
+// bereits vorhandenen Zeile mit demselben Artikel (Mengen/Betraege werden
+// addiert) oder erzeugt eine neue Zeile. Gleiche Logik wie in
+// tool-a-live-v1.html - siehe dort fuer Details/Absprache.
+async function berechneLieferwagenfahrzeit(gesamtPersonalStundenWert){
+  const plzFuerFahrzeit = $('kundePlz').value.trim();
+  if(!(lieferwagenKonfig?.herkunft_adresse && lieferwagenKonfig.stundenpreis != null && lieferwagenKonfig.kmpreis != null && plzFuerFahrzeit)){
+    $('lwFrequenzKarte').classList.add('hidden');
+    return { personal: [], logistik: [] };
+  }
+  const distanz = await holeLieferwagenDistanz(plzFuerFahrzeit);
+  if(!distanz){
+    $('lwFrequenzKarte').classList.add('hidden');
+    return { personal: [], logistik: [] };
+  }
+  const stdGerundet = rundeMenge(distanz.stdHinRueck);
+  const kmGerundet = rundeMenge(distanz.kmHinRueck);
+  const stundenpreisGerundet = rundeCHF(lieferwagenKonfig.stundenpreis);
+  const kmpreisGerundet = rundeCHF(lieferwagenKonfig.kmpreis);
+
+  const anzahlArbeitstage = lieferwagenKonfig.stundenProArbeitstag > 0
+    ? Math.ceil(gesamtPersonalStundenWert / lieferwagenKonfig.stundenProArbeitstag)
+    : 0;
+  const fahrtenFuer = frequenz => frequenz === 'taeglich' ? anzahlArbeitstage
+    : frequenz === 'woechentlich' ? Math.ceil(anzahlArbeitstage / 5)
+    : 0;
+
+  // Vorarbeiter (normal) und Vorarbeiter Poolbau sind ein Entweder-Oder (nie
+  // beide gleichzeitig) - ein gemeinsamer Posten mit Pool/Normal-Umschalter
+  // statt zwei unabhaengiger Zeilen.
+  const lwPosten = [
+    { key: 'lieferwagen', label: 'Lieferwagen', aktuell: lieferwagenFrequenz, sichtbar: true, setFn: v => lieferwagenFrequenz = v },
+    { key: 'vorarbeiter', label: 'Vorarbeiter', aktuell: vorarbeiterFrequenz, sichtbar: lieferwagenKonfig.vorarbeiterPreis != null || lieferwagenKonfig.vorarbeiterPoolbauPreis != null, setFn: v => vorarbeiterFrequenz = v, preis: (vorarbeiterTyp === 'pool' ? lieferwagenKonfig.vorarbeiterPoolbauPreis : lieferwagenKonfig.vorarbeiterPreis) ?? 0, artikelId: vorarbeiterTyp === 'pool' ? lieferwagenKonfig.vorarbeiterPoolbauArtikelId : lieferwagenKonfig.vorarbeiterArtikelId, artikelBezeichnung: vorarbeiterTyp === 'pool' ? lieferwagenKonfig.vorarbeiterPoolbauArtikelBezeichnung : lieferwagenKonfig.vorarbeiterArtikelBezeichnung },
+    { key: 'gartenarbeiter', label: 'Gartenarbeiter', aktuell: gartenarbeiterFrequenz, sichtbar: lieferwagenKonfig.gartenarbeiterPreis != null, setFn: v => gartenarbeiterFrequenz = v, preis: lieferwagenKonfig.gartenarbeiterPreis, artikelId: lieferwagenKonfig.gartenarbeiterArtikelId, artikelBezeichnung: lieferwagenKonfig.gartenarbeiterArtikelBezeichnung }
+  ].filter(p => p.sichtbar);
+
+  const lwFahrten = fahrtenFuer(lieferwagenFrequenz);
+  const mengeStdGesamt = rundeMenge(stdGerundet * lwFahrten);
+  const mengeKmGesamt = rundeMenge(kmGerundet * lwFahrten);
+  const betragZeit = rundeCHF(mengeStdGesamt * stundenpreisGerundet);
+  const betragKm = rundeCHF(mengeKmGesamt * kmpreisGerundet);
+  lwPosten.forEach(p => {
+    if(p.key === 'lieferwagen'){
+      p.vorschauMenge = lieferwagenModus === 'distanz' ? mengeKmGesamt : mengeStdGesamt;
+      p.vorschauEinheit = lieferwagenModus === 'distanz' ? 'km' : 'Std';
+      p.vorschauBetrag = lieferwagenModus === 'distanz' ? betragKm : betragZeit;
+      p.artikelId = lieferwagenModus === 'distanz' ? lieferwagenKonfig.kmArtikelId : lieferwagenKonfig.stdArtikelId;
+      p.artikelBezeichnung = lieferwagenModus === 'distanz' ? lieferwagenKonfig.kmArtikelBezeichnung : lieferwagenKonfig.stdArtikelBezeichnung;
+      p.preis = lieferwagenModus === 'distanz' ? kmpreisGerundet : stundenpreisGerundet;
+    }else{
+      const fahrten = fahrtenFuer(p.aktuell);
+      p.vorschauMenge = rundeMenge(stdGerundet * fahrten);
+      p.vorschauEinheit = 'Std';
+      p.preis = rundeCHF(p.preis);
+      p.vorschauBetrag = rundeCHF(p.vorschauMenge * p.preis);
+    }
+  });
+
+  // --- Karte rendern (Toggle + dezente Vorschau) ---
+  const $lwFrequenzKarte = $('lwFrequenzKarte');
+  $lwFrequenzKarte.classList.remove('hidden');
+  const kmAktiv = lieferwagenModus === 'distanz';
+  const lwModusToggleHtml = `<label class="lwmodesw wide"><input type="checkbox" id="lwModusToggle"${kmAktiv ? ' checked' : ''}>
+      <span class="trk"><span class="thumb">${kmAktiv ? 'Km' : 'Std'}</span></span>
+    </label>`;
+  const poolAktiv = vorarbeiterTyp === 'pool';
+  const vorarbeiterTypToggleHtml = `<label class="lwmodesw wide"><input type="checkbox" id="vorarbeiterTypToggle"${poolAktiv ? ' checked' : ''}>
+      <span class="trk"><span class="thumb">${poolAktiv ? 'Pool' : 'Normal'}</span></span>
+    </label>`;
+  $lwFrequenzKarte.innerHTML = `<div style="font-weight:700;color:var(--ink);margin-bottom:6px;">Lieferwagenfahrzeit${anzahlArbeitstage ? ` <span style="font-weight:400;color:var(--muted);font-size:12px;">– ${anzahlArbeitstage} Arbeitstag${anzahlArbeitstage === 1 ? '' : 'e'} berechnet</span>` : ''}</div>` +
+    lwPosten.map(p => `<div data-posten="${p.key}" style="display:grid;grid-template-columns:120px 110px auto 130px;align-items:center;gap:8px;margin-top:6px;">
+      <span style="font-size:12.5px;color:var(--muted);">${p.label}</span>
+      <span style="display:flex;align-items:center;gap:6px;">${p.key === 'lieferwagen' ? lwModusToggleHtml : p.key === 'vorarbeiter' ? vorarbeiterTypToggleHtml : ''}</span>
+      <span style="display:flex;gap:6px;flex-wrap:wrap;">
+        <button type="button" class="opt${p.aktuell === 'aus' ? ' on' : ''}" data-freq="aus">Aus</button>
+        <button type="button" class="opt${p.aktuell === 'woechentlich' ? ' on' : ''}" data-freq="woechentlich">Wöchentlich</button>
+        <button type="button" class="opt${p.aktuell === 'taeglich' ? ' on' : ''}" data-freq="taeglich">Täglich</button>
+      </span>
+      <span style="font-size:10.5px;color:var(--muted);opacity:.7;text-align:right;white-space:nowrap;">${p.vorschauMenge} ${p.vorschauEinheit} · ${fmtCHF(p.vorschauBetrag)}</span>
+    </div>`).join('');
+  $('lwModusToggle').addEventListener('change', () => { lieferwagenModus = $('lwModusToggle').checked ? 'distanz' : 'zeit'; recalc(); });
+  $('vorarbeiterTypToggle')?.addEventListener('change', () => { vorarbeiterTyp = $('vorarbeiterTypToggle').checked ? 'pool' : 'normal'; recalc(); });
+  lwPosten.forEach(p => {
+    $lwFrequenzKarte.querySelectorAll(`[data-posten="${p.key}"] [data-freq]`).forEach(b => {
+      b.addEventListener('click', () => { p.setFn(b.dataset.freq); recalc(); });
+    });
+  });
+
+  // --- Synthetische Zeilen fuer Personalaufwand/Logistik ---
+  const personal = [];
+  const logistik = [];
+  lwPosten.forEach(p => {
+    if(p.aktuell === 'aus' || p.artikelId == null) return;
+    const row = {
+      kategorie: p.key === 'lieferwagen' ? 'logistik' : 'personal',
+      artikelId: p.artikelId,
+      artikelBezeichnung: p.artikelBezeichnung || p.label,
+      bezeichnung: p.artikelBezeichnung || p.label,
+      arbeitsschritt: 'Lieferwagenfahrzeit',
+      einheit: p.vorschauEinheit,
+      menge: p.vorschauMenge,
+      preis: p.preis,
+      betrag: p.vorschauBetrag
+    };
+    (row.kategorie === 'logistik' ? logistik : personal).push(row);
+  });
+  return { personal, logistik };
 }
 
 // ---------------------------------------------------------------------------
@@ -1403,10 +1569,14 @@ function setMode(neu){
 
 async function ladeBestehendeOfferte(offerteId){
   const { data: offerte, error: oErr } = await sb.from('offerte')
-    .select('id, titel, datum, status, notiz, offertentyp_id, lieferwagen_modus, beschreibung_block, beschreibung_manuell, optionen_text_liste, optionen_text_manuell, kosten_snapshot, offertnummer').eq('id', offerteId).single();
+    .select('id, titel, datum, status, notiz, offertentyp_id, lieferwagen_modus, lieferwagen_frequenz, vorarbeiter_frequenz, vorarbeiter_typ, gartenarbeiter_frequenz, beschreibung_block, beschreibung_manuell, optionen_text_liste, optionen_text_manuell, kosten_snapshot, offertnummer').eq('id', offerteId).single();
   if(oErr){ console.error(oErr); $saveStatus.textContent = 'Fehler beim Laden: ' + oErr.message; $saveStatus.className='status err'; return; }
 
   lieferwagenModus = offerte.lieferwagen_modus || 'zeit';
+  lieferwagenFrequenz = offerte.lieferwagen_frequenz || 'taeglich';
+  vorarbeiterFrequenz = offerte.vorarbeiter_frequenz || 'taeglich';
+  vorarbeiterTyp = offerte.vorarbeiter_typ || 'normal';
+  gartenarbeiterFrequenz = offerte.gartenarbeiter_frequenz || 'taeglich';
   zeigeBauteilCard();
   offertentypId = offerte.offertentyp_id;
   const ot = OFFERTENTYPEN.find(o => o.id === offertentypId);
@@ -1467,6 +1637,10 @@ async function starteNeueOfferte(otId){
   zeigeBauteilCard();
   setMode('new');
   lieferwagenModus = 'zeit';
+  lieferwagenFrequenz = 'taeglich';
+  vorarbeiterFrequenz = 'taeglich';
+  vorarbeiterTyp = 'normal';
+  gartenarbeiterFrequenz = 'taeglich';
   offertentypId = otId;
   const ot = OFFERTENTYPEN.find(o => o.id === otId);
   $bauteiltitel.textContent = ot ? ot.name : '';
@@ -1604,6 +1778,7 @@ async function speichereNeueOfferte(titelVal){
       kunde_id: kundeId, offertentyp_id: offertentypId, titel: titelVal,
       datum: $offerteDatum.value || heuteAlsDatumsstring(), status: offerteStatus, notiz: notizWert(),
       betrag_total: letzterGrandTotal, lieferwagen_modus: lieferwagenModus,
+      lieferwagen_frequenz: lieferwagenFrequenz, vorarbeiter_frequenz: vorarbeiterFrequenz, vorarbeiter_typ: vorarbeiterTyp, gartenarbeiter_frequenz: gartenarbeiterFrequenz,
       beschreibung_block: $beschreibungBlock.value.trim() || null, beschreibung_manuell: beschreibungManuellBearbeitet,
       optionen_text_liste: $optionenTextBlock.value.trim() || null, optionen_text_manuell: optionenTextManuellBearbeitet,
       kosten_snapshot: letzterKostenSnapshot, offertnummer
@@ -1639,6 +1814,7 @@ async function speichereAenderungen(titelVal){
     titel: titelVal, datum: $offerteDatum.value || heuteAlsDatumsstring(),
     status: offerteStatus, notiz: notizWert(),
     betrag_total: letzterGrandTotal, lieferwagen_modus: lieferwagenModus,
+    lieferwagen_frequenz: lieferwagenFrequenz, vorarbeiter_frequenz: vorarbeiterFrequenz, vorarbeiter_typ: vorarbeiterTyp, gartenarbeiter_frequenz: gartenarbeiterFrequenz,
     beschreibung_block: $beschreibungBlock.value.trim() || null, beschreibung_manuell: beschreibungManuellBearbeitet,
     optionen_text_liste: $optionenTextBlock.value.trim() || null, optionen_text_manuell: optionenTextManuellBearbeitet,
     kosten_snapshot: letzterKostenSnapshot
@@ -1884,6 +2060,15 @@ async function recalc(){
       });
     });
 
+    alleZeilen = wendeVorarbeiterTypAn(alleZeilen);
+    // Lieferwagenfahrzeit landet NICHT als eigener Block, sondern als
+    // zusaetzliche Personal-/Logistik-Zeilen, die sich unten in der
+    // KAT_ORDER-Gruppierung ganz normal mit gleichartikeligen Zeilen
+    // zusammenfassen (siehe berechneLieferwagenfahrzeit()).
+    const gesamtPersonalStunden = alleZeilen.filter(r => r.kategorie === 'personal').reduce((s, r) => s + r.menge, 0);
+    const lwZeilen = await berechneLieferwagenfahrzeit(gesamtPersonalStunden);
+    alleZeilen = alleZeilen.concat(lwZeilen.personal, lwZeilen.logistik);
+
     $costbody.innerHTML = '';
     let grandTotal = 0;
     function addRow(bezeichnung, menge, einheit, preis, betrag, schluessel, rundungMengeFn = rundeMenge, rundungPreisFn = rundeCHF){
@@ -2026,38 +2211,6 @@ async function recalc(){
 
       grandTotal += renderEigeneZeilenFuerKategorie(kat);
     });
-
-    const plzFuerFahrzeit = $('kundePlz').value.trim();
-    if(lieferwagenKonfig?.herkunft_adresse && lieferwagenKonfig.stundenpreis != null && lieferwagenKonfig.kmpreis != null && plzFuerFahrzeit){
-      const distanz = await holeLieferwagenDistanz(plzFuerFahrzeit);
-      if(distanz){
-        const stdGerundet = rundeMenge(distanz.stdHinRueck);
-        const kmGerundet = rundeMenge(distanz.kmHinRueck);
-        const stundenpreisGerundet = rundeCHF(lieferwagenKonfig.stundenpreis);
-        const kmpreisGerundet = rundeCHF(lieferwagenKonfig.kmpreis);
-        const betragZeit = rundeCHF(stdGerundet * stundenpreisGerundet);
-        const betragKm = rundeCHF(kmGerundet * kmpreisGerundet);
-        const trHead = document.createElement('tr');
-        trHead.className = 'cgrouphead';
-        trHead.innerHTML = `<td colspan="5">Lieferwagenfahrzeit</td>`;
-        $costbody.appendChild(trHead);
-        const addLwRow = (modus, bezeichnung, menge, einheit, preis, betrag) => {
-          const tr = document.createElement('tr');
-          tr.className = 'crow lwrow' + (lieferwagenModus === modus ? ' on' : '');
-          tr.style.cursor = 'pointer';
-          tr.innerHTML = `<td>${bezeichnung}</td><td style="text-align:right">${menge}</td>
-            <td style="color:var(--muted)">${einheit}</td><td style="text-align:right">${fmtCHF(preis)}</td>
-            <td class="cbetrag">${fmtCHF(betrag)}</td>`;
-          tr.addEventListener('click', () => { lieferwagenModus = modus; recalc(); });
-          $costbody.appendChild(tr);
-        };
-        addLwRow('zeit', 'Fahrzeit (Hin- und Rückfahrt)', stdGerundet, 'Std', stundenpreisGerundet, betragZeit);
-        addLwRow('distanz', 'Fahrstrecke (Hin- und Rückfahrt)', kmGerundet, 'km', kmpreisGerundet, betragKm);
-        grandTotal += (lieferwagenModus === 'distanz') ? betragKm : betragZeit;
-        snapshotZeile('Lieferwagenfahrzeit', { bezeichnung: 'Fahrzeit (Hin- und Rückfahrt)', menge: stdGerundet, einheit: 'Std', preis: stundenpreisGerundet, betrag: betragZeit, geloescht: false, aktiv: lieferwagenModus === 'zeit' });
-        snapshotZeile('Lieferwagenfahrzeit', { bezeichnung: 'Fahrstrecke (Hin- und Rückfahrt)', menge: kmGerundet, einheit: 'km', preis: kmpreisGerundet, betrag: betragKm, geloescht: false, aktiv: lieferwagenModus === 'distanz' });
-      }
-    }
 
     if(!beschreibungManuellBearbeitet) $beschreibungBlock.value = berechneBeschreibungsBlock();
     if(!optionenTextManuellBearbeitet) $optionenTextBlock.value = berechneOptionenTextListe();
