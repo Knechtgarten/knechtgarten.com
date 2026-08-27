@@ -1159,6 +1159,14 @@ const $tagessatzInhalt = document.getElementById('tagessatzInhalt');
 
 let offerteStatus = 'offen'; // 'offen' | 'bestaetigt' | 'abgelehnt'
 let letzterGrandTotal = 0;
+// Generation-Zaehler gegen sich ueberschneidende recalc()-Aufrufe (z.B.
+// schnelles Hin-und-Her-Klicken bei der Lieferwagenfahrzeit-Frequenz,
+// zumal jetzt auch Autosave zusaetzliche recalc()-Laeufe ausloest): jeder
+// recalc()-Aufruf merkt sich seine eigene Generation und bricht ab, bevor
+// er Ergebnisse schreibt, sobald inzwischen ein neuerer Aufruf gestartet
+// wurde - verhindert, dass eine langsame, veraltete Berechnung eine
+// bereits aktuellere ueberschreibt (siehe berechneLieferwagenfahrzeit()).
+let recalcGeneration = 0;
 
 function heuteAlsDatumsstring(){
   return new Date().toISOString().slice(0,10);
@@ -3607,6 +3615,7 @@ function versteckeOptionHinweis(){
 
 async function recalc(){
   if(!offertentypId) return;
+  const meineGeneration = ++recalcGeneration;
   snapshotGruppen = {};
   unvollstaendigeFreitextZeilen = [];
   try{
@@ -3985,6 +3994,11 @@ async function recalc(){
         return { personal: [], logistik: [] };
       }
       const distanz = await holeLieferwagenDistanz(plzFuerFahrzeit);
+      // Waehrend der Wartezeit oben kann laengst ein neuerer recalc()-Aufruf
+      // gestartet sein (z.B. schnelles Umklicken der Frequenz-Buttons) - dann
+      // hier abbrechen, statt mit veralteten Werten die Karte/Zeilen des
+      // neueren, evtl. schon fertigen Aufrufs zu ueberschreiben.
+      if(meineGeneration !== recalcGeneration) return { personal: [], logistik: [] };
       if(!distanz){
         $('lwFrequenzKarte').classList.add('hidden');
         return { personal: [], logistik: [] };
@@ -4121,6 +4135,7 @@ async function recalc(){
       });
       gesamtPersonalStunden = alleZeilen.filter(r => r.kategorie === 'personal').reduce((s, r) => s + r.menge, 0);
       const lwZeilen = await berechneLieferwagenfahrzeit(gesamtPersonalStunden);
+      if(meineGeneration !== recalcGeneration) return; // inzwischen ueberholt, siehe recalcGeneration oben
       alleZeilen = alleZeilen.concat(lwZeilen.personal, lwZeilen.logistik);
       grandTotal += renderKostenblock(alleZeilen, $costbody);
     }else{
@@ -4283,6 +4298,7 @@ async function recalc(){
 
       gesamtPersonalStunden = berechnet.filter(r => r.kategorie === 'personal').reduce((s, r) => s + r.menge, 0);
       const lwZeilen = await berechneLieferwagenfahrzeit(gesamtPersonalStunden);
+      if(meineGeneration !== recalcGeneration) return; // inzwischen ueberholt, siehe recalcGeneration oben
       const alleZeilenFormel = berechnet.concat(lwZeilen.personal, lwZeilen.logistik);
       grandTotal += renderKostenblock(alleZeilenFormel, $costbody);
 
@@ -4310,6 +4326,7 @@ async function recalc(){
       }
     }
 
+    if(meineGeneration !== recalcGeneration) return; // inzwischen ueberholt, siehe recalcGeneration oben
     if(!beschreibungManuellBearbeitet) $beschreibungBlock.value = berechneBeschreibungsBlock();
     if(!optionenTextManuellBearbeitet) $optionenTextBlock.value = berechneOptionenTextListe();
 
