@@ -1985,7 +1985,7 @@ async function ladeFormelDaten(otId){
       teilschritt ( id, name, beschreibung, ausgeblendet,
         anzeige_eingabefeld_id, anzeige_eingabefeld:eingabefeld!anzeige_eingabefeld_id ( einheit ),
         anzeige_term_id, anzeige_term:term!anzeige_term_id ( einheit, ausdruck ),
-        ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, artikel_id,
+        ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, artikel_id, ist_eigene_offertenposition,
           zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4, mindestmenge, verschnitt_prozent,
           artikel ( bezeichnung, einheit, vp_knecht ),
           staffelgruppe ( name, titel, staffelstufe ( menge_von, menge_bis, artikel ( vp_knecht ) ) ),
@@ -1994,7 +1994,7 @@ async function ladeFormelDaten(otId){
         option_freitext_vorlage ( id, kategorie, bezeichnung, einheit, notiz, menge_vorschlag, preis_vorschlag ),
         auswahlfeld ( id, name,
           auswahloption ( id, name, beschreibung, reihenfolge, ist_standard, mengenoption, mengenoption_einheit, mehrfachauswahl, ist_eigene_offertenposition, hinweistext, hinweisbild_url,
-            ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, artikel_id,
+            ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, artikel_id, ist_eigene_offertenposition,
               zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4, mindestmenge, verschnitt_prozent,
               artikel ( bezeichnung, einheit, vp_knecht ),
               staffelgruppe ( name, titel, staffelstufe ( menge_von, menge_bis, artikel ( vp_knecht ) ) ),
@@ -2025,6 +2025,11 @@ async function ladeFormelDaten(otId){
       // eingesetzt wird).
       artikelId: rz.artikel_id || rz.sonderposition_typ?.lieferwagen_std_artikel_id || null,
       artikelBezeichnung: rz.artikel?.bezeichnung || rz.sonderposition_typ?.lieferwagen_std_artikel?.bezeichnung || null,
+      // Eigene Offertenposition auf Artikel-Ebene (Stecknadel-Icon in Tool B) -
+      // zieht genau diese Ressourcenzeile aus dem Materialpaket/Logistikaufwand
+      // ihres Arbeitsschritts UND ihrer Option (falls diese auch "Eigene
+      // Offertenposition" ist) heraus, siehe renderKostenblock() unten.
+      istEigenePosition: !!rz.ist_eigene_offertenposition,
       bezeichnung: rz.bezeichnung_override || rz.artikel?.bezeichnung || rz.staffelgruppe?.titel || rz.staffelgruppe?.name || rz.zonengruppe?.titel || rz.zonengruppe?.name || rz.sonderposition_typ?.titel || rz.sonderposition_typ?.name || '(unbenannt)',
       einheit: rz.artikel?.einheit || '',
       preis: rz.preis_override ?? rz.artikel?.vp_knecht ?? 0,
@@ -3836,7 +3841,14 @@ async function recalc(){
               const logistikEinheit = logistikCfg ? logistikCfg.einheit : 'Budget';
               const logistikRundungMenge = logistikCfg ? (RUNDUNGSREGEL_FN[logistikCfg.rundung_menge] || rundeMenge) : rundeMenge;
               const logistikRundungPreis = logistikCfg ? (RUNDUNGSREGEL_FN[logistikCfg.rundung_preis] || rundeCHF) : rundeCHF;
-              let restZeilen = katZeilen;
+              // Zwei unabhaengige "Eigene Offertenposition"-Ebenen (Tool B),
+              // gleiches Prinzip wie beim Materialaufwand oben: Artikel-Ebene
+              // (Stecknadel-Icon) hat Vorrang vor Options-Ebene (Haekchen) -
+              // beide vor Sammelposition/Artikel-Gruppierung herausgeloest.
+              const artikelEigeneZeilenLog = katZeilen.filter(r => r.istEigenePosition);
+              const restOhneArtikelEigeneLog = katZeilen.filter(r => !r.istEigenePosition);
+              const optionEigeneZeilenLog = restOhneArtikelEigeneLog.filter(r => OPTION_INFO[r.optionId]?.istEigenePosition);
+              let restZeilen = restOhneArtikelEigeneLog.filter(r => !OPTION_INFO[r.optionId]?.istEigenePosition);
               if(logistikSammelpositionen.length){
                 logistikSammelpositionen.forEach(sp => {
                   const zugehoerig = restZeilen.filter(r => r.artikelId && sp.artikelIds.has(r.artikelId));
@@ -3873,6 +3885,51 @@ async function recalc(){
               const lwLogistikKeys = new Set([lieferwagenKonfig?.stdArtikelId, lieferwagenKonfig?.kmArtikelId].filter(Boolean));
               const byNameSortiert = Object.entries(byName).sort(([keyA], [keyB]) => (lwLogistikKeys.has(keyB) ? 1 : 0) - (lwLogistikKeys.has(keyA) ? 1 : 0));
               byNameSortiert.forEach(([, v]) => addRow(v.name, v.menge, v.einheit, v.preis, v.betrag, `logistik:artikel:${v.name}`, logistikRundungMenge, logistikRundungPreis));
+
+              // Herausgeloeste Optionen (Haekchen "Eigene Offertenposition"):
+              // eine Zeile pro Option ("Teilschritt – Option"), gleiches
+              // Muster wie beim Materialaufwand oben.
+              const proOptionLog = {};
+              optionEigeneZeilenLog.forEach(r => {
+                if(!proOptionLog[r.optionId]) proOptionLog[r.optionId] = { summe: 0, proArtikel: {} };
+                proOptionLog[r.optionId].summe += r.betrag;
+                const pa = proOptionLog[r.optionId].proArtikel;
+                if(!pa[r.bezeichnung]) pa[r.bezeichnung] = { menge: 0, einheit: r.einheit, preis: r.preis, betrag: 0 };
+                pa[r.bezeichnung].menge += r.menge;
+                pa[r.bezeichnung].betrag += r.betrag;
+              });
+              Object.entries(proOptionLog).forEach(([optionId, v]) => {
+                if(!v.summe) return;
+                const artikelEintraege = Object.entries(v.proArtikel);
+                if(artikelEintraege.length === 1){
+                  const [artikelName, a] = artikelEintraege[0];
+                  addRow(artikelName, a.menge, a.einheit, a.preis, a.betrag, `logistik:eigen:${optionId}`, logistikRundungMenge, logistikRundungPreis);
+                  return;
+                }
+                const info = OPTION_INFO[optionId];
+                const bezeichnung = `${info?.teilschritt || ''} – ${info?.name || ''}`;
+                const rechnungsweg = artikelEintraege.map(([artikel, a]) => ({
+                  label: artikel,
+                  menge: `${rundeMenge(a.menge)} ${a.einheit}`,
+                  preis: fmtCHF(rundeCHF(a.preis)),
+                  betrag: fmtCHF(rundeCHF(a.betrag))
+                }));
+                addRow(bezeichnung, 1, logistikEinheit, v.summe, v.summe, `logistik:eigen:${optionId}`, logistikRundungMenge, logistikRundungPreis, rechnungsweg);
+              });
+
+              // Herausgeloeste Artikel (Stecknadel-Icon): immer die echte
+              // Menge/Einheit/Preis zeigen, nach Artikel-Identitaet gruppiert.
+              const proArtikelEigenLog = {};
+              artikelEigeneZeilenLog.forEach(r => {
+                const key = r.artikelId || r.bezeichnung;
+                if(!proArtikelEigenLog[key]) proArtikelEigenLog[key] = { name: r.artikelBezeichnung || r.bezeichnung, menge: 0, betrag: 0, einheit: r.einheit, preis: r.preis };
+                proArtikelEigenLog[key].menge += r.menge;
+                proArtikelEigenLog[key].betrag += r.betrag;
+              });
+              Object.entries(proArtikelEigenLog).forEach(([key, v]) => {
+                if(v.menge > 0) v.preis = v.betrag / v.menge;
+                addRow(v.name, v.menge, v.einheit, v.preis, v.betrag, `logistik:eigenartikel:${key}`, logistikRundungMenge, logistikRundungPreis);
+              });
             }else{
               const proArbeitsschritt = {};
               katZeilen.forEach(r => {
@@ -3897,11 +3954,16 @@ async function recalc(){
             // Zehnerschritt sein), siehe Einstellungen > Rechenlogik.
             const materialRundungMenge = n => Math.ceil(n);
             const materialRundungPreis = materialCfg ? (RUNDUNGSREGEL_FN[materialCfg.rundung_preis] || rundeCHF) : rundeCHF;
-            // Optionen mit "Eigene Offertenposition" (Tool B, Option
-            // bearbeiten) fliessen nicht ins Materialpaket ihres
-            // Arbeitsschritts, sondern werden unten separat ausgewiesen.
-            const paketZeilen = katZeilen.filter(r => !OPTION_INFO[r.optionId]?.istEigenePosition);
-            const eigeneZeilen = katZeilen.filter(r => OPTION_INFO[r.optionId]?.istEigenePosition);
+            // Zwei unabhaengige "Eigene Offertenposition"-Ebenen (Tool B):
+            // pro Artikel (Stecknadel-Icon an der Ressourcenzeile) UND pro
+            // Option (Haekchen im Options-Fenster). Artikel-Ebene hat
+            // Vorrang - ein herausgeloester Artikel zaehlt weder zum
+            // Materialpaket des Arbeitsschritts noch zur Options-Position,
+            // auch wenn seine Option selbst ebenfalls "eigene Position" ist.
+            const artikelEigeneZeilen = katZeilen.filter(r => r.istEigenePosition);
+            const restOhneArtikelEigene = katZeilen.filter(r => !r.istEigenePosition);
+            const paketZeilen = restOhneArtikelEigene.filter(r => !OPTION_INFO[r.optionId]?.istEigenePosition);
+            const eigeneZeilen = restOhneArtikelEigene.filter(r => OPTION_INFO[r.optionId]?.istEigenePosition);
             const proArbeitsschritt = {};
             paketZeilen.forEach(r => {
               if(!proArbeitsschritt[r.arbeitsschritt]) proArbeitsschritt[r.arbeitsschritt] = { summe: 0, proArtikel: {} };
@@ -3966,6 +4028,22 @@ async function recalc(){
                 betrag: fmtCHF(rundeCHF(a.betrag))
               }));
               addRow(bezeichnung, 1, einheitLabel, v.summe, v.summe, `material:eigen:${optionId}`, materialRundungMenge, materialRundungPreis, rechnungsweg);
+            });
+            // Herausgeloeste Artikel (Stecknadel-Icon, siehe oben): jeweils
+            // schon von Natur aus ein einzelner Artikel, darum immer die
+            // echte Menge/Einheit/Preis zeigen statt eines Pakets - nach
+            // Artikel-Identitaet gruppiert, falls derselbe Artikel mehrfach
+            // markiert vorkommt (gleiches Muster wie Personal/Maschine).
+            const proArtikelEigen = {};
+            artikelEigeneZeilen.forEach(r => {
+              const key = r.artikelId || r.bezeichnung;
+              if(!proArtikelEigen[key]) proArtikelEigen[key] = { name: r.artikelBezeichnung || r.bezeichnung, menge: 0, betrag: 0, einheit: r.einheit, preis: r.preis };
+              proArtikelEigen[key].menge += r.menge;
+              proArtikelEigen[key].betrag += r.betrag;
+            });
+            Object.entries(proArtikelEigen).forEach(([key, v]) => {
+              if(v.menge > 0) v.preis = v.betrag / v.menge;
+              addRow(v.name, v.menge, v.einheit, v.preis, v.betrag, `material:eigenartikel:${key}`, materialRundungMenge, materialRundungPreis);
             });
           }
         }
