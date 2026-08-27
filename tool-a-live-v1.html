@@ -1991,7 +1991,7 @@ async function ladeFormelDaten(otId){
           staffelgruppe ( name, titel, staffelstufe ( menge_von, menge_bis, artikel ( vp_knecht ) ) ),
           zonengruppe ( name, titel, zone ( artikel ( vp_knecht ), zone_plz ( plz ) ) ),
           sonderposition_typ ( name, titel, einheit, mwst_satz_pct, lieferwagen_std_artikel_id, lieferwagen_km_artikel_id, lieferwagen_transport_ort, lieferwagen_std_artikel:artikel!lieferwagen_std_artikel_id ( vp_knecht, bezeichnung ), lieferwagen_km_artikel:artikel!lieferwagen_km_artikel_id ( vp_knecht, bezeichnung ) ) ),
-        option_freitext_vorlage ( id, kategorie, bezeichnung, einheit, notiz, menge_vorschlag, preis_vorschlag ),
+        option_freitext_vorlage ( id, kategorie, bezeichnung, einheit, notiz, menge_vorschlag, preis_vorschlag, ist_eigene_offertenposition ),
         auswahlfeld ( id, name,
           auswahloption ( id, name, beschreibung, reihenfolge, ist_standard, mengenoption, mengenoption_einheit, mehrfachauswahl, ist_eigene_offertenposition, hinweistext, hinweisbild_url,
             ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, artikel_id, ist_eigene_offertenposition,
@@ -2000,7 +2000,7 @@ async function ladeFormelDaten(otId){
               staffelgruppe ( name, titel, staffelstufe ( menge_von, menge_bis, artikel ( vp_knecht ) ) ),
               zonengruppe ( name, titel, zone ( artikel ( vp_knecht ), zone_plz ( plz ) ) ),
               sonderposition_typ ( name, titel, einheit, mwst_satz_pct, lieferwagen_std_artikel_id, lieferwagen_km_artikel_id, lieferwagen_transport_ort, lieferwagen_std_artikel:artikel!lieferwagen_std_artikel_id ( vp_knecht, bezeichnung ), lieferwagen_km_artikel:artikel!lieferwagen_km_artikel_id ( vp_knecht, bezeichnung ) ) ),
-            option_freitext_vorlage ( id, kategorie, bezeichnung, einheit, notiz, menge_vorschlag, preis_vorschlag ) ) ) )`)
+            option_freitext_vorlage ( id, kategorie, bezeichnung, einheit, notiz, menge_vorschlag, preis_vorschlag, ist_eigene_offertenposition ) ) ) )`)
     .eq('offertentyp_id', otId).eq('ausgeblendet', false).order('reihenfolge');
   if(asErr) throw asErr;
 
@@ -2043,10 +2043,11 @@ async function ladeFormelDaten(otId){
     });
   }
   freitextVorlagen = [];
-  function pushFreitextVorlagen(liste, optionId){
+  function pushFreitextVorlagen(liste, optionId, arbeitsschrittName){
     (liste || []).forEach(v => freitextVorlagen.push({
-      id: v.id, optionId, kategorie: v.kategorie, bezeichnung: v.bezeichnung,
-      einheit: v.einheit, notiz: v.notiz, mengeVorschlag: v.menge_vorschlag, preisVorschlag: v.preis_vorschlag
+      id: v.id, optionId, arbeitsschritt: arbeitsschrittName, kategorie: v.kategorie, bezeichnung: v.bezeichnung,
+      einheit: v.einheit, notiz: v.notiz, mengeVorschlag: v.menge_vorschlag, preisVorschlag: v.preis_vorschlag,
+      istEigenePosition: !!v.ist_eigene_offertenposition
     }));
   }
   (arbeitsschritte || []).forEach(as => {
@@ -2054,7 +2055,7 @@ async function ladeFormelDaten(otId){
       // Teilschritt ohne Auswahlfeld: seine Ressourcenzeilen gelten immer
       // (kein optionId, keine Buttons fuer den Mitarbeiter).
       (ts.ressourcenzeile || []).forEach(rz => pushRz(rz, null, as.name, ts.name));
-      pushFreitextVorlagen(ts.option_freitext_vorlage, null);
+      pushFreitextVorlagen(ts.option_freitext_vorlage, null, as.name);
 
       // Menge-Anzeige (Tool B: Ruler-Icon beim Teilschritt-Titel) - rein
       // informativ, siehe renderBereich()/recalc(). Hoechstens eines von
@@ -2081,7 +2082,7 @@ async function ladeFormelDaten(otId){
         });
         (af.auswahloption || []).forEach(opt => {
           (opt.ressourcenzeile || []).forEach(rz => pushRz(rz, opt.id, as.name, ts.name));
-          pushFreitextVorlagen(opt.option_freitext_vorlage, opt.id);
+          pushFreitextVorlagen(opt.option_freitext_vorlage, opt.id, as.name);
           // Teilschritt-Name (z.B. "Hecke Carpinus"), nicht Arbeitsschritt-
           // Name (z.B. "Hecken") - sonst waeren zwei Teilschritte im selben
           // Arbeitsschritt (z.B. "Hecke Carpinus" und "Hecke Taxus") in der
@@ -3419,8 +3420,12 @@ let eigeneZeileCounter = 0;
 // unvollstaendig sind.
 let unvollstaendigeFreitextZeilen = [];
 
-// Freitext-Position (Tool B: option_freitext_vorlage) - erzeugt automatisch
-// eine ganz normale "Eigene Position", sobald die zugehoerige Option (oder
+// Freitext-Position (Tool B: option_freitext_vorlage) - hat wie eine
+// Ressourcenzeile eine Stecknadel ("Eigene Offertenposition"). OHNE Pin
+// zaehlt sie ganz normal zum Materialpaket/Logistikaufwand ihres
+// Arbeitsschritts (bzw. ihrer Option, falls diese gepinnt ist) - siehe
+// freitextAggregatZeilen() unten. Erst MIT Pin wird sie zu einer echten
+// "Eigene Position" (eigeneZeilen), sobald die zugehoerige Option (oder
 // immer, bei optionId=null) aktiv ist - genau einmal pro Vorlage
 // (freitextVorlageId verhindert Duplikate bei jedem erneuten Aufruf).
 // Menge/Preis kommen als Vorschlag aus der Vorlage (0, falls keiner
@@ -3428,6 +3433,7 @@ let unvollstaendigeFreitextZeilen = [];
 // andere Eigene Position.
 function seedeFreitextZeilen(){
   freitextVorlagen.forEach(v => {
+    if(!v.istEigenePosition) return;
     if(v.optionId != null && !bereichSelectedOptions.has(v.optionId)) return;
     if(eigeneZeilen.some(z => z.freitextVorlageId === v.id)) return;
     eigeneZeileCounter++;
@@ -3437,6 +3443,20 @@ function seedeFreitextZeilen(){
       freitextVorlageId: v.id
     });
   });
+}
+
+// Nicht gepinnte Freitext-Positionen: als synthetische, berechnete Zeile
+// (gleiche Form wie ein Eintrag aus "berechnet", siehe recalc()) ins
+// Materialpaket/den Logistikaufwand ihres Arbeitsschritts einreihen -
+// renderKostenblock() gruppiert sie dort automatisch mit ein (nach
+// r.arbeitsschritt bzw. r.optionId, kein artikelId noetig).
+function freitextAggregatZeilen(){
+  return freitextVorlagen.filter(v => !v.istEigenePosition && (v.optionId == null || bereichSelectedOptions.has(v.optionId)))
+    .map(v => {
+      const menge = v.mengeVorschlag ?? 0;
+      const preis = v.preisVorschlag ?? 0;
+      return { kategorie: v.kategorie, arbeitsschritt: v.arbeitsschritt, optionId: v.optionId, artikelId: null, istEigenePosition: false, bezeichnung: v.bezeichnung, einheit: v.einheit || '', preis, menge, betrag: menge * preis };
+    });
 }
 
 // Korrektur einzelner berechneter Zeilen (Menge/Preis ueberschreiben, ohne den
@@ -4377,7 +4397,7 @@ async function recalc(){
       gesamtPersonalStunden = berechnet.filter(r => r.kategorie === 'personal').reduce((s, r) => s + r.menge, 0);
       const lwZeilen = await berechneLieferwagenfahrzeit(gesamtPersonalStunden);
       if(meineGeneration !== recalcGeneration) return; // inzwischen ueberholt, siehe recalcGeneration oben
-      const alleZeilenFormel = berechnet.concat(lwZeilen.personal, lwZeilen.logistik);
+      const alleZeilenFormel = berechnet.concat(lwZeilen.personal, lwZeilen.logistik, freitextAggregatZeilen());
       grandTotal += renderKostenblock(alleZeilenFormel, $costbody);
 
       // Menge-Anzeige (Tool B: Ruler-Icon beim Teilschritt-Titel) - rein
