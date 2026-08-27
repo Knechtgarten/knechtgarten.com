@@ -1147,6 +1147,14 @@ const $tagessatzInhalt = document.getElementById('tagessatzInhalt');
 
 let offerteStatus = 'offen'; // 'offen' | 'bestaetigt' | 'abgelehnt'
 let letzterGrandTotal = 0;
+// Generation-Zaehler gegen sich ueberschneidende recalc()-Aufrufe (z.B.
+// schnelles Hin-und-Her-Klicken bei der Lieferwagenfahrzeit-Frequenz,
+// zumal jetzt auch Autosave zusaetzliche recalc()-Laeufe ausloest): jeder
+// recalc()-Aufruf merkt sich seine eigene Generation und bricht ab, bevor
+// er Ergebnisse schreibt, sobald inzwischen ein neuerer Aufruf gestartet
+// wurde - verhindert, dass eine langsame, veraltete Berechnung eine
+// bereits aktuellere ueberschreibt (siehe berechneLieferwagenfahrzeit()).
+let recalcGeneration = 0;
 
 function heuteAlsDatumsstring(){ return new Date().toISOString().slice(0,10); }
 
@@ -1399,13 +1407,18 @@ function wendeVorarbeiterTypAn(zeilen){
 // bereits vorhandenen Zeile mit demselben Artikel (Mengen/Betraege werden
 // addiert) oder erzeugt eine neue Zeile. Gleiche Logik wie in
 // tool-a-live-v1.html - siehe dort fuer Details/Absprache.
-async function berechneLieferwagenfahrzeit(gesamtPersonalStundenWert, zusatzFahrten = 0){
+async function berechneLieferwagenfahrzeit(gesamtPersonalStundenWert, zusatzFahrten = 0, meineGeneration = recalcGeneration){
   const plzFuerFahrzeit = $('kundePlz').value.trim();
   if(!(lieferwagenKonfig?.herkunft_adresse && lieferwagenKonfig.stundenpreis != null && lieferwagenKonfig.kmpreis != null && plzFuerFahrzeit)){
     $('lwFrequenzKarte').classList.add('hidden');
     return { personal: [], logistik: [] };
   }
   const distanz = await holeLieferwagenDistanz(plzFuerFahrzeit);
+  // Waehrend der Wartezeit oben kann laengst ein neuerer recalc()-Aufruf
+  // gestartet sein (z.B. schnelles Umklicken der Frequenz-Buttons) - dann
+  // hier abbrechen, statt mit veralteten Werten die Karte/Zeilen des
+  // neueren, evtl. schon fertigen Aufrufs zu ueberschreiben.
+  if(meineGeneration !== recalcGeneration) return { personal: [], logistik: [] };
   if(!distanz){
     $('lwFrequenzKarte').classList.add('hidden');
     return { personal: [], logistik: [] };
@@ -2962,6 +2975,7 @@ function versteckeRechnungsweg(){
 
 async function recalc(){
   if(!offertentypId) return;
+  const meineGeneration = ++recalcGeneration;
   snapshotGruppen = {};
   try{
     let alleZeilen = [];
@@ -3020,7 +3034,8 @@ async function recalc(){
     // zusammenfassen (siehe berechneLieferwagenfahrzeit()). Jeder eigene
     // Teilschritt zaehlt zusaetzlich als ein separater Baustellenbesuch.
     const gesamtPersonalStunden = alleZeilen.filter(r => r.kategorie === 'personal').reduce((s, r) => s + r.menge, 0);
-    const lwZeilen = await berechneLieferwagenfahrzeit(gesamtPersonalStunden, eigeneTeilschritte.length);
+    const lwZeilen = await berechneLieferwagenfahrzeit(gesamtPersonalStunden, eigeneTeilschritte.length, meineGeneration);
+    if(meineGeneration !== recalcGeneration) return; // inzwischen ueberholt, siehe recalcGeneration oben
     alleZeilen = alleZeilen.concat(lwZeilen.personal, lwZeilen.logistik);
 
     $costbody.innerHTML = '';
