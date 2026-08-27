@@ -3648,9 +3648,15 @@ async function recalc(){
       let blockTotal = 0;
 
       function addRow(bezeichnung, menge, einheit, preis, betrag, schluessel, rundungMengeFn = rundeMenge, rundungPreisFn = rundeCHF, rechnungsweg = null){
+        // Preis ist NICHT mehr korrigierbar (nur noch Menge) - der Preis
+        // einer Sammelzeile (z.B. "Materialpaket X") ist eine Summe aus
+        // mehreren Artikeln mit je eigenem Preis aus dem Artikelstamm; ihn
+        // hier zu ueberschreiben war ein zu grobes Werkzeug. Eine
+        // kundenspezifische Preisanpassung geht neu ueber "Eigene Position"
+        // (bzw. eine Rabattzeile dort), siehe Absprache.
         const k = zeilenKorrekturen[schluessel] || {};
         const effMenge = rundungMengeFn(k.menge_korrektur != null ? k.menge_korrektur : menge);
-        const effPreis = rundungPreisFn(k.preis_korrektur != null ? k.preis_korrektur : preis);
+        const effPreis = rundungPreisFn(preis);
         const effBetrag = rundeCHF(effMenge * effPreis);
         const geloescht = !!k.geloescht;
         // Der urspruengliche Berechnungswert wird nur fein daneben angezeigt,
@@ -3658,19 +3664,14 @@ async function recalc(){
         // bleibt die Stelle leer (auch wenn ein Korrekturwert gespeichert ist,
         // der zufaellig wieder dem Berechnungswert entspricht).
         const mengeAbweicht = k.menge_korrektur != null && rundungMengeFn(k.menge_korrektur) !== rundungMengeFn(menge);
-        const preisAbweicht = k.preis_korrektur != null && rundungPreisFn(k.preis_korrektur) !== rundungPreisFn(preis);
         if(!geloescht) blockTotal += effBetrag;
         snapshotZeile(KAT_LABEL[schluessel.split(':')[0]] || schluessel, { bezeichnung, menge: effMenge, einheit, preis: effPreis, betrag: effBetrag, geloescht });
-        // Vorbefuellung der Korrektur-Felder mit dem berechneten Wert gilt
-        // bewusst NUR fuer Offerte-Typ "Formel" - fuer "Tagessatz" (Allgemein)
-        // ist das Verhalten noch nicht abgestimmt, deshalb dort unveraendert
-        // das alte Verhalten (leer ausser bei echter Korrektur).
+        // Vorbefuellung des Menge-Korrektur-Felds mit dem berechneten Wert
+        // gilt bewusst NUR fuer Offerte-Typ "Formel" - fuer "Tagessatz"
+        // (Allgemein) unveraendert das alte Verhalten (leer ausser bei
+        // echter Korrektur).
         const istFormel = currentBerechnungsmodell === 'formel';
         const mengeFeldWert = k.menge_korrektur != null ? k.menge_korrektur : (istFormel ? rundungMengeFn(menge) : '');
-        const preisFeldRoh = k.preis_korrektur != null ? k.preis_korrektur : (istFormel ? rundungPreisFn(preis) : '');
-        // Immer mit zwei Nachkommastellen zeigen (z.B. "102.00" statt "102") -
-        // sieht sonst nicht nach einem Preis aus.
-        const preisFeldWert = preisFeldRoh === '' ? '' : Number(preisFeldRoh).toFixed(2);
         const tr = document.createElement('tr');
         tr.className = 'crow' + (geloescht ? ' zgeloescht' : '');
         // Rechnungsweg-Tooltip: bei einer einfachen Zeile (kein Breakdown
@@ -3686,15 +3687,14 @@ async function recalc(){
         tr.innerHTML = `<td>${bezeichnung}</td>
           <td style="text-align:right"><span class="berechnet-val">${mengeAbweicht ? rundungMengeFn(menge) : ''}</span><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="korrektur-feld" data-feld="menge" placeholder="Korr." value="${mengeFeldWert}" ${geloescht ? 'disabled' : ''}></td>
           <td style="color:var(--muted)">${einheit}</td>
-          <td style="text-align:right"><span class="berechnet-val">${preisAbweicht ? fmtCHF(rundungPreisFn(preis)) : ''}</span><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="korrektur-feld" data-feld="preis" placeholder="Korr." value="${preisFeldWert}" ${geloescht ? 'disabled' : ''}></td>
+          <td style="text-align:right">${fmtCHF(effPreis)}</td>
           <td class="cbetrag">${fmtCHF(effBetrag)} <button type="button" class="icobtn zeile-del" title="${geloescht ? 'Zeile wiederherstellen' : 'Zeile entfernen'}">${geloescht ? ICON.restore : ICON.trash}</button></td>`;
         container.appendChild(tr);
         tr.querySelectorAll('.korrektur-feld').forEach(inp => {
           inp.addEventListener('change', e => {
-            const feld = e.target.dataset.feld === 'menge' ? 'menge_korrektur' : 'preis_korrektur';
             const v = e.target.value.trim();
             if(!zeilenKorrekturen[schluessel]) zeilenKorrekturen[schluessel] = { menge_korrektur:null, preis_korrektur:null, geloescht:false };
-            zeilenKorrekturen[schluessel][feld] = (v === '' || isNaN(parseFloat(v))) ? null : parseFloat(v);
+            zeilenKorrekturen[schluessel].menge_korrektur = (v === '' || isNaN(parseFloat(v))) ? null : parseFloat(v);
             recalc();
           });
         });
