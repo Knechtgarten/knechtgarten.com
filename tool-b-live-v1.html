@@ -1717,7 +1717,7 @@ function openEingabefeldTabelleModal(id){
 }
 function renderEfTabelleSpalteFormel(s){
   const wrap = $(`efTabelleFormelWrap_${s._key}`);
-  if(wrap) renderGliedstack(s.glieder, wrap, () => renderEfTabelleSpalteFormel(s), { tabelleKontextId: efTabelleId, excludeSpalteId: s.id });
+  if(wrap) renderGliedstack(s.glieder, wrap, () => renderEfTabelleSpalteFormel(s), { tabelleKontextId: efTabelleId, excludeSpalteId: s.id, offertentypScope: formelBibliothekKategorie });
 }
 function renderEfTabelleSpalten(){
   $('efTabelleSpaltenListe').innerHTML = efTabelleSpalten.map(s => `
@@ -3488,7 +3488,7 @@ function erzeugeCombofield(glied, glieder, renderFn, vpContext){
   box.appendChild(input);
   const btn = document.createElement('button');
   btn.type = 'button'; btn.innerHTML = ICON.chevronDown;
-  btn.addEventListener('click', () => openVarPicker(glieder, glieder.indexOf(glied), renderFn, vpContext?.tabelleKontextId, vpContext?.excludeSpalteId));
+  btn.addEventListener('click', () => openVarPicker(glieder, glieder.indexOf(glied), renderFn, vpContext?.tabelleKontextId, vpContext?.excludeSpalteId, vpContext?.offertentypScope));
   box.appendChild(btn);
   return box;
 }
@@ -3559,28 +3559,28 @@ function renderGliedstack(glieder, wrap, renderAgain, vpContext){
 let rzEditTermlineTarget = 'rzEditTermline';
 function renderRzEditTermline(targetId){
   if(targetId) rzEditTermlineTarget = targetId;
-  renderGliedstack(rzEditGlieder, $(rzEditTermlineTarget), () => renderRzEditTermline());
+  // offertentypScope: currentOffertentypId - der Offertentyp, dessen
+  // Arbeitsschritte gerade bearbeitet werden (NICHT formelBibliothekKategorie,
+  // die ist bewusst unabhaengig, siehe Kommentar bei renderVarPickerScopeTabs).
+  renderGliedstack(rzEditGlieder, $(rzEditTermlineTarget), () => renderRzEditTermline(), { offertentypScope: currentOffertentypId || 'allgemein' });
 }
 
 function renderTermEditTermline(){
-  renderGliedstack(termEditGlieder, $('termEditTermline'), renderTermEditTermline);
+  renderGliedstack(termEditGlieder, $('termEditTermline'), renderTermEditTermline, { offertentypScope: formelBibliothekKategorie });
 }
 
-// "Allgemein" (offertentyp_id null) startet ganz links, danach ein Tab pro
-// Offertentyp - die aktuelle Formel-Bibliothek-Kategorie (nicht der
-// Offertentyp-Selektor der Arbeitsschritte-Ansicht - die sind bewusst
-// unabhaengig, siehe Kommentar bei formelBibliothekKategorie) ist beim
-// Oeffnen vorausgewaehlt (blau), alle anderen grau. Alles bleibt ueber die
-// Tabs erreichbar, nur die Default-Ansicht ist nicht mehr eine ungefilterte
-// Grossliste von allen Offertentypen zusammen.
+// "Allgemein" (offertentyp_id null) plus GENAU der eine Offertentyp, zu dem
+// die aktuell bearbeitete Formel gehoert (offertentypScope, siehe
+// openVarPicker/renderGliedstack-Aufrufstellen) - bewusst NICHT mehr ein Tab
+// pro Offertentyp. Ein Wert eines ANDEREN Offertentyps liesse sich zwar
+// auswaehlen, wuerde aber beim Berechnen einer echten Offerte nie einen Wert
+// liefern (jede Offerte laedt nur Eingabefelder/Terme ihres EIGENEN
+// Offertentyps aus der DB) - so eine Referenz waere immer eine kaputte
+// Formel, ohne dass das beim Erfassen sichtbar waere.
 let varPickerScopeId = 'allgemein';
 function renderVarPickerScopeTabs(){
-  // Nur Formel-Offertentypen als Tab - Tagessatz-Offertentypen verwenden gar
-  // keine Menge-Formeln, wuerden hier also nur einen leeren/irrelevanten Tab
-  // ergeben (und koennten sich mit dem "Allgemein"-Tab im Namen ueberschneiden,
-  // falls ein Offertentyp zufaellig auch "Allgemein" heisst).
-  const formelTypen = OFFERTENTYPEN.filter(o => o.berechnungsmodell === 'formel' && !o.papierkorb_am);
-  const items = [{ id: 'allgemein', name: 'Allgemein' }, ...formelTypen];
+  const aktuellerOt = varPickerScopeId !== 'allgemein' ? OFFERTENTYPEN.find(o => o.id === varPickerScopeId) : null;
+  const items = [{ id: 'allgemein', name: 'Allgemein' }, ...(aktuellerOt ? [aktuellerOt] : [])];
   $('varPickerScopeRow').innerHTML = items.map(k =>
     `<button type="button" class="filterpill ${varPickerScopeId===k.id?'on':''}" onclick="waehleVarPickerScope('${k.id}')">${k.name}</button>`
   ).join('');
@@ -3639,12 +3639,12 @@ let vpEinzelwertCallback = null;
 // DERSELBEN Tabelle gewaehlt werden (als Zeilenwert), nicht andere Tabellen.
 let vpTabelleKontextId = null;
 let vpExcludeSpalteId = null;
-function openVarPicker(glieder, index, renderFn, tabelleKontextId, excludeSpalteId){
+function openVarPicker(glieder, index, renderFn, tabelleKontextId, excludeSpalteId, offertentypScope){
   vpGlieder = glieder; rzEditPickerIndex = index; vpRenderFn = renderFn;
   vpEinzelwertCallback = null;
   vpTabelleKontextId = tabelleKontextId || null;
   vpExcludeSpalteId = excludeSpalteId || null;
-  varPickerScopeId = formelBibliothekKategorie;
+  varPickerScopeId = offertentypScope || formelBibliothekKategorie;
   renderVarPickerScopeTabs();
   renderVarPickerListen();
   $('varPickerOverlay').classList.add('show');
@@ -3678,7 +3678,10 @@ function openMengeAnzeigenPicker(tsId){
   };
   vpTabelleKontextId = null;
   vpExcludeSpalteId = null;
-  varPickerScopeId = formelBibliothekKategorie;
+  // tsId gehoert zum aktuell bearbeiteten Offertentyp (Arbeitsschritte-
+  // Ansicht) - NICHT formelBibliothekKategorie, siehe Kommentar bei
+  // renderVarPickerScopeTabs.
+  varPickerScopeId = currentOffertentypId || 'allgemein';
   renderVarPickerScopeTabs();
   renderVarPickerListen();
   $('varPickerOverlay').classList.add('show');
