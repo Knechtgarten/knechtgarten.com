@@ -1323,6 +1323,113 @@ async function kopiereFormelStruktur(alterOtId, neuOtId){
   }
 }
 
+// Wie kopiereFormelStruktur, aber OHNE die Formel-Bibliothek (Eingabefelder/
+// Terme) der Quell-Vorlage - fuer den Fall, dass nur Arbeitsschritte/Artikel
+// als Ausgangspunkt fuer eine ganz neue Vorlage mit eigenen, andersartigen
+// Massen/Formeln dienen sollen (z.B. "Belaege, Hartflaechen" statt Pool-
+// Masse). Menge-Formeln liessen sich sonst nicht sauber uebernehmen (sie
+// verweisen per ID auf Eingabefelder/Terme, die es in der neuen Vorlage gar
+// nicht gibt) - jede Ressourcenzeile bekommt darum bewusst die blanke Zahl 0
+// als Menge-Formel statt einer kaputten Referenz. Das rote Warn-Icon in
+// Tool B (siehe rzMengeZelleHtml) macht automatisch sichtbar, wo noch eine
+// echte Formel fehlt. anzeige_eingabefeld_id/anzeige_term_id (Tool B: "Menge
+// anzeigen" beim Teilschritt-Titel) verweisen ebenfalls auf die alte
+// Formel-Bibliothek und werden aus demselben Grund geleert.
+async function kopiereFormelStrukturOhneFormeln(alterOtId, neuOtId){
+  const { data: schritte, error: asErr } = await sb.from('arbeitsschritt').select('*').eq('offertentyp_id', alterOtId);
+  if(asErr) throw asErr;
+  const arbeitsschrittIdMap = {};
+  schritte.forEach(as => arbeitsschrittIdMap[as.id] = crypto.randomUUID());
+  if(schritte.length){
+    const rows = schritte.map(as => {
+      const { id, offertentyp_id, erstellt_am, ...rest } = as;
+      return { ...rest, id: arbeitsschrittIdMap[as.id], offertentyp_id: neuOtId };
+    });
+    const { error } = await sb.from('arbeitsschritt').insert(rows);
+    if(error) throw error;
+  }
+
+  const alteAsIds = schritte.map(as => as.id);
+  let teilschritte = [];
+  if(alteAsIds.length){
+    const { data, error } = await sb.from('teilschritt').select('*').in('arbeitsschritt_id', alteAsIds);
+    if(error) throw error;
+    teilschritte = data;
+  }
+  const teilschrittIdMap = {};
+  teilschritte.forEach(ts => teilschrittIdMap[ts.id] = crypto.randomUUID());
+  if(teilschritte.length){
+    const rows = teilschritte.map(ts => {
+      const { id, arbeitsschritt_id, anzeige_eingabefeld_id, anzeige_term_id, ...rest } = ts;
+      return { ...rest, id: teilschrittIdMap[ts.id], arbeitsschritt_id: arbeitsschrittIdMap[arbeitsschritt_id], anzeige_eingabefeld_id: null, anzeige_term_id: null };
+    });
+    const { error } = await sb.from('teilschritt').insert(rows);
+    if(error) throw error;
+  }
+
+  const alteTsIds = teilschritte.map(ts => ts.id);
+  let auswahlfelder = [];
+  if(alteTsIds.length){
+    const { data, error } = await sb.from('auswahlfeld').select('*').in('teilschritt_id', alteTsIds);
+    if(error) throw error;
+    auswahlfelder = data;
+  }
+  const auswahlfeldIdMap = {};
+  auswahlfelder.forEach(af => auswahlfeldIdMap[af.id] = crypto.randomUUID());
+  if(auswahlfelder.length){
+    const rows = auswahlfelder.map(af => {
+      const { id, teilschritt_id, ...rest } = af;
+      return { ...rest, id: auswahlfeldIdMap[af.id], teilschritt_id: teilschrittIdMap[teilschritt_id] };
+    });
+    const { error } = await sb.from('auswahlfeld').insert(rows);
+    if(error) throw error;
+  }
+
+  const alteAfIds = auswahlfelder.map(af => af.id);
+  let optionen = [];
+  if(alteAfIds.length){
+    const { data, error } = await sb.from('auswahloption').select('*').in('auswahlfeld_id', alteAfIds);
+    if(error) throw error;
+    optionen = data;
+  }
+  const optionIdMap = {};
+  optionen.forEach(o => optionIdMap[o.id] = crypto.randomUUID());
+  if(optionen.length){
+    const rows = optionen.map(o => {
+      const { id, auswahlfeld_id, ...rest } = o;
+      return { ...rest, id: optionIdMap[o.id], auswahlfeld_id: auswahlfeldIdMap[auswahlfeld_id] };
+    });
+    const { error } = await sb.from('auswahloption').insert(rows);
+    if(error) throw error;
+  }
+
+  const alteOptIds = optionen.map(o => o.id);
+  let ressourcenzeilen = [];
+  if(alteOptIds.length){
+    const { data, error } = await sb.from('ressourcenzeile').select('*').in('option_id', alteOptIds);
+    if(error) throw error;
+    ressourcenzeilen = ressourcenzeilen.concat(data);
+  }
+  if(alteTsIds.length){
+    const { data, error } = await sb.from('ressourcenzeile').select('*').in('teilschritt_id', alteTsIds);
+    if(error) throw error;
+    ressourcenzeilen = ressourcenzeilen.concat(data);
+  }
+  if(ressourcenzeilen.length){
+    const rows = ressourcenzeilen.map(rz => {
+      const { id, option_id, teilschritt_id, menge_ausdruck, ...rest } = rz;
+      return {
+        ...rest,
+        option_id: option_id ? optionIdMap[option_id] : null,
+        teilschritt_id: teilschritt_id ? teilschrittIdMap[teilschritt_id] : null,
+        menge_ausdruck: menge_ausdruck ? { lit: 0 } : null
+      };
+    });
+    const { error } = await sb.from('ressourcenzeile').insert(rows);
+    if(error) throw error;
+  }
+}
+
 async function kopiereTagessatzStruktur(alterOtId, neuOtId){
   // Tagessatz nutzt seit der Umstellung dieselbe Struktur wie Formel
   // (arbeitsschritt > teilschritt > auswahlfeld > auswahloption >
@@ -1425,7 +1532,17 @@ async function kopiereTagessatzStruktur(alterOtId, neuOtId){
 async function kopiereOffertentyp(id){
   const ot = OFFERTENTYPEN.find(o => o.id === id);
   if(!ot) return;
-  if(!(await confirmDialog(`"${ot.name}" als neue Vorlage kopieren? Alle Felder/Formeln/Arbeitsschritte werden 1:1 übernommen.`))) return;
+  // Bei "Formel" zusaetzlich fragen, ob die Formel-Bibliothek (Eingabefelder/
+  // Terme) mitkopiert werden soll - bei "Tagessatz"/"Artikel" gibt es diese
+  // Bibliothek gar nicht (siehe kopiereTagessatzStruktur), also keine Frage
+  // noetig.
+  let formelnMitkopieren = true;
+  if(ot.berechnungsmodell === 'formel'){
+    if(!(await confirmDialog(`"${ot.name}" als neue Vorlage kopieren?`))) return;
+    formelnMitkopieren = await confirmDialog('Sollen auch die Formel-Vorlagen (Eingabefelder, Terme, Menge-Formeln) mitkopiert werden? Bei "Nein" werden Arbeitsschritte und Artikel trotzdem übernommen, aber ohne Menge-Formeln (Menge zeigt 0, mit rotem Warnhinweis in Tool B).');
+  }else{
+    if(!(await confirmDialog(`"${ot.name}" als neue Vorlage kopieren? Alle Felder/Formeln/Arbeitsschritte werden 1:1 übernommen.`))) return;
+  }
   try{
     const neuOtId = crypto.randomUUID();
     const { error: otErr } = await sb.from('offertentyp').insert({
@@ -1436,7 +1553,8 @@ async function kopiereOffertentyp(id){
     if(ot.berechnungsmodell === 'tagessatz'){
       await kopiereTagessatzStruktur(id, neuOtId);
     }else if(ot.berechnungsmodell === 'formel'){
-      await kopiereFormelStruktur(id, neuOtId);
+      if(formelnMitkopieren) await kopiereFormelStruktur(id, neuOtId);
+      else await kopiereFormelStrukturOhneFormeln(id, neuOtId);
     }
     // 'artikel' hat keine in Tool B konfigurierbare Struktur (die vier
     // Zwischentitel sind fix) - nur die Vorlagen-Zeile selbst wird geklont.
