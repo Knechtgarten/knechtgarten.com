@@ -313,12 +313,29 @@ async function modusNachbessern(body: any, modell: string) {
 }
 
 // ----------------------------------------------------------------------------
+// Reine Lese-Endpunkte fuer die Erweiterung (Chips/Buttons-Liste) - brauchen
+// keinen Mitarbeiter-Namen, da hier nichts protokolliert wird.
+// ----------------------------------------------------------------------------
+async function modusListeVerfassen() {
+  const { data } = await sb.from('mailassistent_vorlage').select('id,titel').eq('richtung', 'verfassen').order('reihenfolge');
+  return json({ vorlagen: data || [] });
+}
+async function modusListeNachbessern() {
+  const { data } = await sb.from('mailassistent_nachbessern_button').select('id,titel,anweisung').order('reihenfolge');
+  return json({ buttons: data || [] });
+}
+
+// ----------------------------------------------------------------------------
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
-  if (!anthropicKey) return json({ error: 'ANTHROPIC_API_KEY ist auf dem Server nicht konfiguriert.' }, 500);
 
   try {
     const body = await req.json().catch(() => ({}));
+
+    if (body.modus === 'liste-verfassen') return await modusListeVerfassen();
+    if (body.modus === 'liste-nachbessern') return await modusListeNachbessern();
+
+    if (!anthropicKey) return json({ error: 'ANTHROPIC_API_KEY ist auf dem Server nicht konfiguriert.' }, 500);
     if (!body.mitarbeiterEmail) return json({ error: 'mitarbeiterEmail ist erforderlich.' }, 400);
     const modell = await ladeModell();
 
