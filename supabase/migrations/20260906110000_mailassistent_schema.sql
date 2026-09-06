@@ -56,7 +56,7 @@ insert into modul_sichtbarkeit
 values
   ('tools', 'Tools', 'Tools', 'Tools',
    'Kleine Helfer fuer den Arbeitsalltag, unabhaengig vom Offertentool.',
-   'mail', 'grau_dunkel', true, false, false);
+   'mail', 'sandbeige', true, false, false);
 
 update modul_sichtbarkeit
   set name = 'Rechner', titel_mittel = 'Rechner', kurzname = 'Rechner'
