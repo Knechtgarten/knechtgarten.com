@@ -2881,7 +2881,10 @@ async function starteNeueOfferte(otId){
   lieferwagenModus = 'zeit';
   lieferwagenFrequenz = 'taeglich';
   vorarbeiterFrequenz = 'taeglich';
-  vorarbeiterTyp = 'normal';
+  // Startwert kommt aus der Vorlage (Tool B) statt immer hart "normal" zu
+  // sein - sonst muesste bei jeder neuen Offerte einer reinen Pool-Vorlage
+  // von Hand umgeschaltet werden, mit dem Risiko, das zu vergessen.
+  vorarbeiterTyp = OFFERTENTYPEN.find(o => o.id === otId)?.vorarbeiter_typ_standard || 'normal';
   gartenarbeiterFrequenz = 'taeglich';
   await ladeDatenFuerOffertentyp(otId);
   if(currentBerechnungsmodell === 'tagessatz'){
@@ -3304,7 +3307,7 @@ async function waehleKundeUndStarteOfferte(kundeId, offertentypId){
 async function init(){
   try{
     const { data: otList, error: otErr } = await sb
-      .from('offertentyp').select('id,name,berechnungsmodell')
+      .from('offertentyp').select('id,name,berechnungsmodell,vorarbeiter_typ_standard')
       .eq('ausgeblendet', false).is('papierkorb_am', null).order('reihenfolge');
     if(otErr) throw otErr;
     OFFERTENTYPEN = otList;
@@ -4415,6 +4418,29 @@ async function recalc(){
           }
           return { ...rz, menge, betrag: menge * rz.preis };
         }));
+
+      // Vorarbeiter Pool/Normal-Regler (Lieferwagenfahrzeit-Karte) wirkt nicht
+      // nur auf die dortige synthetische Zeile, sondern auf JEDE
+      // Ressourcenzeile der ganzen Offerte, die einen der beiden fest
+      // hinterlegten Vorarbeiter-Artikel referenziert - Menge (Stunden)
+      // bleibt unveraendert, nur Artikel/Preis wechseln auf die aktuell
+      // gewaehlte Variante. Kein Sonderposition-Typ noetig: die Zuordnung
+      // laeuft rein ueber die Artikel-Identitaet (id), nicht ueber Text.
+      if(lieferwagenKonfig?.vorarbeiterArtikelId && lieferwagenKonfig?.vorarbeiterPoolbauArtikelId){
+        const zielArtikelId = vorarbeiterTyp === 'pool' ? lieferwagenKonfig.vorarbeiterPoolbauArtikelId : lieferwagenKonfig.vorarbeiterArtikelId;
+        const zielPreis = vorarbeiterTyp === 'pool' ? lieferwagenKonfig.vorarbeiterPoolbauPreis : lieferwagenKonfig.vorarbeiterPreis;
+        const zielBezeichnung = vorarbeiterTyp === 'pool' ? lieferwagenKonfig.vorarbeiterPoolbauArtikelBezeichnung : lieferwagenKonfig.vorarbeiterArtikelBezeichnung;
+        if(zielPreis != null){
+          berechnet.forEach(r => {
+            if(r.artikelId !== lieferwagenKonfig.vorarbeiterArtikelId && r.artikelId !== lieferwagenKonfig.vorarbeiterPoolbauArtikelId) return;
+            if(r.artikelId === zielArtikelId) return;
+            r.artikelId = zielArtikelId;
+            r.artikelBezeichnung = zielBezeichnung;
+            r.preis = zielPreis;
+            r.betrag = r.menge * zielPreis;
+          });
+        }
+      }
 
       gesamtPersonalStunden = berechnet.filter(r => r.kategorie === 'personal').reduce((s, r) => s + r.menge, 0);
       const lwZeilen = await berechneLieferwagenfahrzeit(gesamtPersonalStunden);
