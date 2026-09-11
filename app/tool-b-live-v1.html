@@ -90,6 +90,14 @@ td{padding:6px 6px;border-bottom:1px solid var(--soft);vertical-align:top;}
   background:#fff;color:var(--ink);cursor:pointer;}
 .filterpill:hover{border-color:var(--primary);}
 .filterpill.on{background:var(--primary);color:#fff;border-color:var(--primary);}
+.formeltextfeld{width:100%;min-height:54px;font:inherit;font-size:12.5px;font-family:monospace;
+  border:1px solid var(--line);border-radius:6px;padding:8px;box-sizing:border-box;line-height:1.8;outline:none;}
+.formeltextfeld:focus{border-color:var(--primary);}
+.formeltextfeld:empty:before{content:attr(data-placeholder);color:var(--muted);}
+.formelchip{display:inline-block;background:var(--accent-blue);color:var(--primary);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;font-weight:700;
+  font-size:11.5px;border-radius:10px;padding:1px 9px;margin:0 1px;white-space:nowrap;}
+.formelchip.formelchip-fehlt{background:#FBEFEC;color:var(--danger);}
 .artikelpicker-tablewrap{max-height:460px;overflow-y:auto;}
 .apclickrow{cursor:pointer;}
 .apclickrow:hover{background:var(--soft);}
@@ -1089,6 +1097,15 @@ function refLabel(kind, id){
   const list = kind === 'eingabefeld' ? ALLE_EINGABEFELDER : ALLE_TERMS;
   const item = list.find(x => x.id === id);
   return item ? item.name : fehlenderBezugHtml(kind === 'eingabefeld' ? 'Eingabefeld' : 'Term');
+}
+// Fuer die Formel-Chips (Freie Formel) gebraucht, um vor dem Rendern zu
+// wissen, ob refLabel() den echten Namen oder das "?"-Fehlt-Badge liefert -
+// ein Name darf als reiner Text escaped werden, das Fehlt-Badge ist
+// bewusst schon fertiges HTML (siehe fehlenderBezugHtml).
+function refExists(kind, id){
+  if(kind === 'spalte') return !!ALLE_TABELLE_SPALTEN.find(s => s.id === id);
+  const list = kind === 'eingabefeld' ? ALLE_EINGABEFELDER : ALLE_TERMS;
+  return !!list.find(x => x.id === id);
 }
 
 // ---------------------------------------------------------------------------
@@ -3099,6 +3116,94 @@ function parseFormelText(text){
   }
 }
 
+function escapeHtml(s){
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+// Verweis-Chip fuer die Freie Formel: sieht aus wie ein Pill-Tag (statt des
+// rohen "{Name::art:id}"-Textes) und ist per contenteditable="false" ein
+// unteilbares Element - Backspace direkt dahinter loescht den ganzen Chip auf
+// einmal statt buchstabenweise. data-kind/data-id tragen die eigentlichen,
+// fuer die Berechnung massgeblichen Werte - der sichtbare Name ist rein
+// kosmetisch und wird bei jedem Rendern frisch nachgeschlagen (siehe
+// refLabel) - eine spaetere Umbenennung des Feldes/Terms/der Spalte wirkt
+// sich dadurch automatisch auf die Anzeige aus, OHNE die Formel neu speichern
+// zu muessen, und die Berechnung selbst haengt ohnehin nur an der id (siehe
+// parseFormelText: der Name-Teil vor "::" wird beim Auswerten ignoriert).
+function formelChipHtml(kind, id){
+  const ok = refExists(kind, id);
+  const label = ok ? escapeHtml(refLabel(kind, id)) : fehlenderBezugHtml(kind === 'eingabefeld' ? 'Eingabefeld' : kind === 'term' ? 'Term' : 'Tabellenspalte');
+  return `<span class="formelchip${ok ? '' : ' formelchip-fehlt'}" contenteditable="false" data-kind="${kind}" data-id="${id}">${label}</span>`;
+}
+// Gespeicherten/rohen Formeltext (mit "{Name::art:id}"-Verweisen) in die
+// HTML-Darstellung fuers contenteditable-Feld umwandeln - alles ausserhalb
+// eines Verweises wird als normaler Text escaped, jeder Verweis wird zum Chip.
+function formelTextToEditorHtml(text){
+  const roh = text || '';
+  const tokenRegex = /\{[^{}]*::(eingabefeld|term|spalte):[0-9a-fA-F-]+\}/g;
+  let html = '';
+  let letztesEnde = 0;
+  let treffer;
+  while((treffer = tokenRegex.exec(roh))){
+    html += escapeHtml(roh.slice(letztesEnde, treffer.index));
+    const inhalt = treffer[0].slice(1, -1);
+    const sepIdx = inhalt.lastIndexOf('::');
+    const artId = inhalt.slice(sepIdx + 2);
+    const doppelpunkt = artId.indexOf(':');
+    html += formelChipHtml(artId.slice(0, doppelpunkt), artId.slice(doppelpunkt + 1));
+    letztesEnde = tokenRegex.lastIndex;
+  }
+  html += escapeHtml(roh.slice(letztesEnde));
+  return html;
+}
+// Umgekehrte Richtung: das contenteditable-Feld (Text + Chip-Spans) wieder in
+// den rohen Formeltext zurueckverwandeln, den parseFormelText versteht.
+// Rekursiv, weil manche Browser bei Enter/Einfuegen zusaetzliche <div>/<p>-
+// Elemente einbauen koennen - deren Inhalt geht so trotzdem nicht verloren.
+function formelEditorHtmlToText(el){
+  let text = '';
+  el.childNodes.forEach(node => {
+    if(node.nodeType === Node.TEXT_NODE){ text += node.textContent; return; }
+    if(node.nodeType !== Node.ELEMENT_NODE) return;
+    if(node.classList && node.classList.contains('formelchip')){
+      text += refToken(node.dataset.kind, node.dataset.id, refExists(node.dataset.kind, node.dataset.id) ? refLabel(node.dataset.kind, node.dataset.id) : '?');
+      return;
+    }
+    if(node.tagName === 'BR') return;
+    text += formelEditorHtmlToText(node);
+  });
+  return text;
+}
+// Fuegt beim Klick auf "+ Wert einfuegen" einen Chip an der zuletzt im Feld
+// gemerkten Cursor-Position ein (range kommt vom Aufrufer, der ihn kurz vor
+// dem Oeffnen des Pickers sichert - sobald der Picker offen ist, aendert sich
+// die Selektion im Dokument ja weg vom Formelfeld). Ohne gemerkte Position
+// (oder falls sie nicht mehr zu diesem Feld gehoert) wird am Ende angehaengt.
+function formelChipEinfuegen(textEl, range, kind, id){
+  const ziel = (range && textEl.contains(range.startContainer)) ? range.cloneRange() : (() => {
+    const r = document.createRange();
+    r.selectNodeContents(textEl);
+    r.collapse(false);
+    return r;
+  })();
+  ziel.deleteContents();
+  const chip = document.createElement('span');
+  chip.className = 'formelchip';
+  chip.contentEditable = 'false';
+  chip.dataset.kind = kind;
+  chip.dataset.id = id;
+  chip.textContent = refLabel(kind, id);
+  ziel.insertNode(chip);
+  const leerzeichen = document.createTextNode(' ');
+  chip.after(leerzeichen);
+  textEl.focus();
+  const sel = window.getSelection();
+  const neueRange = document.createRange();
+  neueRange.setStartAfter(leerzeichen);
+  neueRange.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(neueRange);
+}
+
 // Baukasten/Text-Umschalter um eine bestehende Glied-Kette herum. containerId
 // ist der bisher leere Wrapper-Container (z.B. "rzEditTermline") - wird hier
 // mit zwei Unter-Containern befuellt: "<id>_bau" (normaler Baukasten,
@@ -3120,8 +3225,8 @@ function renderFormelFeld(containerId, state, renderGliedFn){
     </div>
     <div id="${containerId}_bau" class="${baukastenAktiv ? '' : 'hidden'}"></div>
     <div id="${containerId}_text" class="${baukastenAktiv ? 'hidden' : ''}">
-      <div class="hint" style="margin-bottom:6px;">Rechnet mit Zahlen, +, -, *, /, Klammern und AUFRUNDEN/ABRUNDEN/RUNDEN. Verweise auf Felder/Formeln nie von Hand eintippen - immer über "+ Wert einfügen" holen.</div>
-      <textarea id="${containerId}_textinput" rows="2" placeholder="z.B. AUFRUNDEN(4.8 / 2) * 0.2 - Werte ueber den Button unten einfuegen" style="width:100%;font:inherit;font-size:12.5px;font-family:monospace;border:1px solid var(--line);border-radius:6px;padding:8px;box-sizing:border-box;"></textarea>
+      <div class="hint" style="margin-bottom:6px;">Rechnet mit Zahlen, +, -, *, /, Klammern und AUFRUNDEN/ABRUNDEN/RUNDEN. Verweise auf Felder/Formeln nie von Hand eintippen - immer über "+ Wert einfügen" holen, sie erscheinen dann als Chip wie hier: <span class="formelchip" style="pointer-events:none;">Beispiel</span></div>
+      <div id="${containerId}_textinput" class="formeltextfeld" contenteditable="true" data-placeholder="z.B. AUFRUNDEN(4.8 / 2) * 0.2 - Werte ueber den Button unten einfuegen"></div>
       <div style="margin-top:6px;">
         <button type="button" class="btnlink" id="${containerId}_textref">+ Wert einfügen</button>
       </div>
@@ -3129,7 +3234,7 @@ function renderFormelFeld(containerId, state, renderGliedFn){
     </div>
   `;
   const textEl = $(`${containerId}_textinput`);
-  textEl.value = state.text || '';
+  textEl.innerHTML = formelTextToEditorHtml(state.text || '');
   if(baukastenAktiv) renderGliedFn();
   // Formeltool und Freie Formel sind zwei unabhaengige Formulare, kein
   // gegenseitiges Umwandeln beim Umschalten - jede haelt ihren eigenen
@@ -3146,21 +3251,38 @@ function renderFormelFeld(containerId, state, renderGliedFn){
     });
   });
   const refBtn = $(`${containerId}_textref`);
-  if(refBtn) refBtn.addEventListener('click', () => {
-    const start = textEl.selectionStart ?? textEl.value.length;
-    const end = textEl.selectionEnd ?? textEl.value.length;
-    openTextRefPicker(state.offertentypScope, state.tabelleKontextId, state.excludeSpalteId, (token) => {
-      const val = textEl.value;
-      textEl.value = val.slice(0, start) + token + val.slice(end);
-      state.text = textEl.value;
-      textEl.focus();
-      const pos = start + token.length;
-      textEl.setSelectionRange(pos, pos);
+  if(refBtn){
+    let gemerkteRange = null;
+    // preventDefault auf mousedown verhindert, dass der Button beim Klick den
+    // Fokus (und damit die Cursor-Position) aus dem Formelfeld reisst - siehe
+    // gaengiges Muster bei Rich-Text-Toolbars.
+    refBtn.addEventListener('mousedown', e => e.preventDefault());
+    refBtn.addEventListener('click', () => {
+      const sel = window.getSelection();
+      gemerkteRange = null;
+      if(sel && sel.rangeCount > 0){
+        const r = sel.getRangeAt(0);
+        if(textEl.contains(r.startContainer)) gemerkteRange = r.cloneRange();
+      }
+      openTextRefPicker(state.offertentypScope, state.tabelleKontextId, state.excludeSpalteId, (kind, id) => {
+        formelChipEinfuegen(textEl, gemerkteRange, kind, id);
+        state.text = formelEditorHtmlToText(textEl);
+        $(`${containerId}_texterr`)?.classList.add('hidden');
+      });
     });
-  });
+  }
   textEl.addEventListener('input', () => {
-    state.text = textEl.value;
+    state.text = formelEditorHtmlToText(textEl);
     $(`${containerId}_texterr`)?.classList.add('hidden');
+  });
+  // Formeln sind einzeilig - Enter wuerde im contenteditable sonst einen
+  // Zeilenumbruch/neuen Block einfuegen.
+  textEl.addEventListener('keydown', e => { if(e.key === 'Enter') e.preventDefault(); });
+  // Nur Reintext einfuegen (kein von aussen mitkopiertes HTML/Styling).
+  textEl.addEventListener('paste', e => {
+    e.preventDefault();
+    const text = (e.clipboardData || window.clipboardData).getData('text/plain');
+    document.execCommand('insertText', false, text);
   });
 }
 // Liefert den zu speichernden Ausdruck-Baum aus einem Formel-Feld-State -
@@ -3171,7 +3293,7 @@ function renderFormelFeld(containerId, state, renderGliedFn){
 function formelAusZustand(containerId, state){
   if(state.mode === 'text'){
     const textEl = $(`${containerId}_textinput`);
-    const ergebnis = parseFormelText(textEl ? textEl.value : state.text);
+    const ergebnis = parseFormelText(textEl ? formelEditorHtmlToText(textEl) : state.text);
     if(!ergebnis.ok){
       const errEl = $(`${containerId}_texterr`);
       if(errEl){ errEl.textContent = ergebnis.error; errEl.classList.remove('hidden'); }
@@ -3964,7 +4086,7 @@ function openVarPicker(glieder, index, renderFn, tabelleKontextId, excludeSpalte
 // Cursor-Position im Textfeld ein (siehe astToFormelText/parseFormelText).
 function openTextRefPicker(offertentypScope, tabelleKontextId, excludeSpalteId, insertCallback){
   vpGlieder = null; vpRenderFn = null;
-  vpEinzelwertCallback = (kind, id, name) => insertCallback(refToken(kind, id, name));
+  vpEinzelwertCallback = (kind, id) => insertCallback(kind, id);
   vpEinzelwertTabellenErlaubt = true;
   // Innerhalb einer Berechnungsspalte (tabelleKontextId gesetzt) nur die
   // anderen Spalten DERSELBEN Tabelle anbieten, wie im Baukasten auch -
