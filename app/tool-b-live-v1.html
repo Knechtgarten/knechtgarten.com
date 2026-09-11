@@ -1294,13 +1294,13 @@ async function loadFormelBibliothek(){
   TABELLE_SPALTEN = {};
   if(tabellenIds.length){
     const { data: spalten, error: spErr } = await sb.from('eingabefeld_tabelle_spalte')
-      .select('id,eingabefeld_id,name,einheit,reihenfolge,ist_berechnung,ausdruck,zusatztext_moeglich,flaechenformel_moeglich,vorschlagswert')
+      .select('id,eingabefeld_id,name,einheit,reihenfolge,ist_berechnung,ausdruck,zusatztext_moeglich,flaechenformel_moeglich,vorschlagswert,formel_modus,formel_text,formel_baukasten_ausdruck')
       .in('eingabefeld_id', tabellenIds).order('reihenfolge');
     if(spErr){ console.error(spErr); return; }
     (spalten || []).forEach(s => { (TABELLE_SPALTEN[s.eingabefeld_id] ||= []).push(s); });
   }
 
-  let termQuery = sb.from('term').select('id,name,typ,wert,ausdruck,einheit,offertentyp_id,systemwert_key,reihenfolge,notiz').order('reihenfolge');
+  let termQuery = sb.from('term').select('id,name,typ,wert,ausdruck,einheit,offertentyp_id,systemwert_key,reihenfolge,notiz,formel_modus,formel_text,formel_baukasten_ausdruck').order('reihenfolge');
   termQuery = istAllgemein ? termQuery.is('offertentyp_id', null) : termQuery.eq('offertentyp_id', formelBibliothekKategorie);
   const { data: terms, error: tErr } = await termQuery;
   if(tErr){ console.error(tErr); return; }
@@ -1726,10 +1726,6 @@ let efTabelleId = null;
 let efTabelleSpalten = [];
 let efTabelleSpalteCounter = 0;
 
-function gliederAusAusdruck(node){
-  const flat = flattenMengenAusdruck(node);
-  return (flat && flat.length) ? flat.map((f, i) => gliedAusNode(i === 0 ? null : f.op, f.node)) : null;
-}
 function neueEfTabelleSpalte(){
   return { id: null, name: '', einheit: '', ist_berechnung: false, zusatztext_moeglich: false, flaechenformel_moeglich: false, vorschlagswert: null, glieder: null, formelState: null, _key: ++efTabelleSpalteCounter };
 }
@@ -1749,18 +1745,14 @@ function openEingabefeldTabelleModal(id){
   $('efTabelleModalTitel').textContent = 'Tabelle bearbeiten';
   $('efTabelleName').value = ef.name;
   efTabelleSpalten = (TABELLE_SPALTEN[id] || []).map(s => {
-    const flatGlieder = s.ist_berechnung ? gliederAusAusdruck(s.ausdruck) : null;
-    // Formeltool bekommt IMMER eine gueltige (ggf. leere) Glied-Kette, siehe
-    // Kommentar bei rzEditGlieder in openRzEditModal.
-    const glieder = flatGlieder !== null ? flatGlieder : [{ op: null, mode: 'lit', refKind: null, refId: null, text: '' }];
+    const basis = s.ist_berechnung ? formelStateAusZeile(s, 'formel', s.ausdruck) : null;
     return {
       id: s.id, name: s.name, einheit: s.einheit, ist_berechnung: s.ist_berechnung,
       zusatztext_moeglich: s.zusatztext_moeglich, flaechenformel_moeglich: s.flaechenformel_moeglich,
       vorschlagswert: s.vorschlagswert,
-      glieder,
-      formelState: s.ist_berechnung ? {
-        mode: flatGlieder === null ? 'text' : 'baukasten', glieder,
-        text: flatGlieder === null ? astToFormelText(s.ausdruck) : '', offertentypScope: formelBibliothekKategorie,
+      glieder: basis ? basis.glieder : [{ op: null, mode: 'lit', refKind: null, refId: null, text: '' }],
+      formelState: basis ? {
+        mode: basis.mode, glieder: basis.glieder, text: basis.text, offertentypScope: formelBibliothekKategorie,
         tabelleKontextId: efTabelleId, excludeSpalteId: s.id
       } : null,
       _key: ++efTabelleSpalteCounter
@@ -1888,7 +1880,8 @@ $('efTabelleSave').addEventListener('click', async () => {
       ist_berechnung: s.ist_berechnung, ausdruck,
       zusatztext_moeglich: s.ist_berechnung ? false : s.zusatztext_moeglich,
       flaechenformel_moeglich: s.ist_berechnung ? false : s.flaechenformel_moeglich,
-      vorschlagswert: s.ist_berechnung ? null : s.vorschlagswert
+      vorschlagswert: s.ist_berechnung ? null : s.vorschlagswert,
+      ...(s.ist_berechnung ? formelSpaltenZumSpeichern('formel', s.formelState, s._parsedNode) : { formel_modus: 'baukasten', formel_text: null, formel_baukasten_ausdruck: null })
     };
     if(s.id){
       const { error } = await sb.from('eingabefeld_tabelle_spalte').update(payload).eq('id', s.id);
@@ -1931,6 +1924,7 @@ async function loadArbeitsschritte(){
         anzeige_term_id, anzeige_term:term!anzeige_term_id(name),
         ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, tagesleistung_menge, notiz, reihenfolge, ist_eigene_offertenposition,
           zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4, mindestmenge, verschnitt_prozent, zuschlag_prozent,
+          menge_formel_modus, menge_formel_text, menge_formel_baukasten_ausdruck,
           artikel_id, artikel(bezeichnung, einheit, artikelnummer_knecht),
           staffelgruppe_id, staffelgruppe(name, titel), zonengruppe_id, zonengruppe(name, titel),
           sonderposition_typ_id, sonderposition_typ(name, titel, hat_eigene_berechnung) ),
@@ -1939,6 +1933,7 @@ async function loadArbeitsschritte(){
           auswahloption ( id, name, beschreibung, hinweistext, hinweisbild_url, ist_standard, mengenoption, mengenoption_einheit, mengenoption_standardmenge, mehrfachauswahl, ist_eigene_offertenposition, reihenfolge,
             ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, tagesleistung_menge, notiz, reihenfolge, ist_eigene_offertenposition,
               zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4, mindestmenge, verschnitt_prozent, zuschlag_prozent,
+          menge_formel_modus, menge_formel_text, menge_formel_baukasten_ausdruck,
               artikel_id, artikel(bezeichnung, einheit, artikelnummer_knecht),
               staffelgruppe_id, staffelgruppe(name, titel), zonengruppe_id, zonengruppe(name, titel),
               sonderposition_typ_id, sonderposition_typ(name, titel, hat_eigene_berechnung) ),
@@ -2392,13 +2387,12 @@ function openEditTermModal(id){
   $('termEditName').value = t.name;
   $('termEditEinheit').innerHTML = einheitOptionsHtml(t.einheit || '', true);
   const node = t.typ === 'konstante' ? { lit: t.wert } : t.ausdruck;
-  const flat = flattenMengenAusdruck(node);
-  termEditGlieder = (flat && flat.length) ? flat.map((f, i) => gliedAusNode(i === 0 ? null : f.op, f.node)) : [{ op: null, mode: 'lit', refKind: null, refId: null, text: '' }];
-  const termEditIstText = flat === null || (flat && !flat.length);
+  const basis = formelStateAusZeile(t, 'formel', node);
+  termEditGlieder = basis.glieder;
   termEditFormelState = {
-    mode: termEditIstText ? 'text' : 'baukasten',
+    mode: basis.mode,
     glieder: termEditGlieder,
-    text: termEditIstText ? astToFormelText(node) : '',
+    text: basis.text,
     offertentypScope: formelBibliothekKategorie
   };
   renderFormelFeld('termEditTermline', termEditFormelState, renderTermEditTermline);
@@ -2432,7 +2426,8 @@ $('termEditSave').addEventListener('click', async () => {
     typ: istKonstante ? 'konstante' : 'formel',
     wert: istKonstante ? node.lit : null,
     ausdruck: istKonstante ? null : node,
-    notiz
+    notiz,
+    ...formelSpaltenZumSpeichern('formel', termEditFormelState, node)
   };
 
   if(termEditId){
@@ -2644,6 +2639,7 @@ async function duplicateRessourcenzeile(id){
   const payload = {
     teilschritt_id, option_id, kategorie: rz.kategorie, artikel_id: rz.artikel_id,
     bezeichnung_override: rz.bezeichnung_override, preis_override: rz.preis_override, menge_ausdruck: rz.menge_ausdruck,
+    menge_formel_modus: rz.menge_formel_modus, menge_formel_text: rz.menge_formel_text, menge_formel_baukasten_ausdruck: rz.menge_formel_baukasten_ausdruck,
     tagesleistung_menge: rz.tagesleistung_menge, notiz: rz.notiz,
     zugang_stufe1: rz.zugang_stufe1, zugang_stufe2: rz.zugang_stufe2, zugang_stufe3: rz.zugang_stufe3, zugang_stufe4: rz.zugang_stufe4,
     mindestmenge: rz.mindestmenge, verschnitt_prozent: rz.verschnitt_prozent, zuschlag_prozent: rz.zuschlag_prozent,
@@ -2742,6 +2738,7 @@ async function duplicateTeilschrittInto(asId, ts, reihenfolge){
       teilschritt_id: neuTs.id, kategorie: rz.kategorie, artikel_id: rz.artikel_id,
       staffelgruppe_id: rz.staffelgruppe_id, zonengruppe_id: rz.zonengruppe_id, sonderposition_typ_id: rz.sonderposition_typ_id,
       bezeichnung_override: rz.bezeichnung_override, preis_override: rz.preis_override, menge_ausdruck: rz.menge_ausdruck,
+      menge_formel_modus: rz.menge_formel_modus, menge_formel_text: rz.menge_formel_text, menge_formel_baukasten_ausdruck: rz.menge_formel_baukasten_ausdruck,
       tagesleistung_menge: rz.tagesleistung_menge,
       zugang_stufe1: rz.zugang_stufe1, zugang_stufe2: rz.zugang_stufe2, zugang_stufe3: rz.zugang_stufe3, zugang_stufe4: rz.zugang_stufe4,
       mindestmenge: rz.mindestmenge, verschnitt_prozent: rz.verschnitt_prozent, zuschlag_prozent: rz.zuschlag_prozent, notiz: rz.notiz
@@ -2762,6 +2759,7 @@ async function duplicateTeilschrittInto(asId, ts, reihenfolge){
           option_id: neuOpt.id, kategorie: rz.kategorie, artikel_id: rz.artikel_id,
           staffelgruppe_id: rz.staffelgruppe_id, zonengruppe_id: rz.zonengruppe_id, sonderposition_typ_id: rz.sonderposition_typ_id,
           bezeichnung_override: rz.bezeichnung_override, preis_override: rz.preis_override, menge_ausdruck: rz.menge_ausdruck,
+          menge_formel_modus: rz.menge_formel_modus, menge_formel_text: rz.menge_formel_text, menge_formel_baukasten_ausdruck: rz.menge_formel_baukasten_ausdruck,
           tagesleistung_menge: rz.tagesleistung_menge,
           zugang_stufe1: rz.zugang_stufe1, zugang_stufe2: rz.zugang_stufe2, zugang_stufe3: rz.zugang_stufe3, zugang_stufe4: rz.zugang_stufe4,
           mindestmenge: rz.mindestmenge, verschnitt_prozent: rz.verschnitt_prozent, zuschlag_prozent: rz.zuschlag_prozent, notiz: rz.notiz
@@ -3293,15 +3291,64 @@ function renderFormelFeld(containerId, state, renderGliedFn){
 function formelAusZustand(containerId, state){
   if(state.mode === 'text'){
     const textEl = $(`${containerId}_textinput`);
-    const ergebnis = parseFormelText(textEl ? formelEditorHtmlToText(textEl) : state.text);
+    const rohtext = textEl ? formelEditorHtmlToText(textEl) : (state.text || '');
+    const ergebnis = parseFormelText(rohtext);
     if(!ergebnis.ok){
       const errEl = $(`${containerId}_texterr`);
       if(errEl){ errEl.textContent = ergebnis.error; errEl.classList.remove('hidden'); }
       return null;
     }
+    // state.text auf den frisch gelesenen DOM-Stand bringen, damit
+    // formelSpaltenZumSpeichern() (siehe dort) beim anschliessenden Speichern
+    // garantiert den aktuellen Text sieht, auch wenn das 'input'-Event der
+    // letzten Aenderung aus irgendeinem Grund noch nicht durchgelaufen ist.
+    state.text = rohtext;
     return ergebnis.node;
   }
   return state.glieder ? buildMengenAusdruck(state.glieder) : null;
+}
+// Baut aus einer gespeicherten Zeile (Ressourcenzeile/Term/Tabellenspalte)
+// den vollstaendigen Formel-Feld-State (mode/glieder/text) - liest dafuer die
+// drei "Gedaechtnis"-Spalten <prefix>_modus/_text/_baukasten_ausdruck, die
+// unabhaengig von der aktiven Formel immer BEIDE Seiten (Formeltool UND
+// Freie Formel) festhalten (siehe formelSpaltenZumSpeichern). Zeilen von VOR
+// dieser Trennung (erkennbar daran, dass beide neuen Spalten leer sind)
+// werden weiterhin wie bisher per Heuristik aus der aktiven Formel
+// (ausdruckNode) interpretiert - sobald einmal neu gespeichert wird, sind sie
+// sauber getrennt.
+function formelStateAusZeile(zeile, prefix, ausdruckNode){
+  const modusFeld = zeile[`${prefix}_modus`];
+  const textFeld = zeile[`${prefix}_text`];
+  const bauFeld = zeile[`${prefix}_baukasten_ausdruck`];
+  const istLegacy = bauFeld == null && !textFeld;
+  let modus, baukastenNode, text;
+  if(istLegacy){
+    const flatLegacy = flattenMengenAusdruck(ausdruckNode);
+    modus = flatLegacy === null ? 'text' : 'baukasten';
+    baukastenNode = flatLegacy === null ? null : ausdruckNode;
+    text = flatLegacy === null ? astToFormelText(ausdruckNode) : '';
+  }else{
+    modus = modusFeld || 'baukasten';
+    baukastenNode = bauFeld;
+    text = textFeld || '';
+  }
+  const flatBau = baukastenNode ? flattenMengenAusdruck(baukastenNode) : null;
+  const glieder = (flatBau && flatBau.length) ? flatBau.map((f, i) => gliedAusNode(i === 0 ? null : f.op, f.node)) : [{ op: null, mode: 'lit', refKind: null, refId: null, text: '' }];
+  return { mode, glieder, text };
+}
+// Gegenstueck zum Speichern: baut die drei "Gedaechtnis"-Spalten aus dem
+// aktuellen Formel-Feld-State. node ist der bereits berechnete AKTIVE
+// Ausdruck (aus formelAusZustand) - fuer die inaktive Baukasten-Seite wird
+// bei Bedarf separat buildMengenAusdruck() aufgerufen, damit sie unabhaengig
+// von der aktiven Freien Formel erhalten bleibt (siehe formelStateAusZeile).
+function formelSpaltenZumSpeichern(prefix, state, node){
+  const istBaukastenLeer = state.glieder && state.glieder.length === 1 && state.glieder[0].mode === 'lit' && !state.glieder[0].text;
+  const baukastenAusdruck = state.mode === 'baukasten' ? node : (istBaukastenLeer ? null : buildMengenAusdruck(state.glieder));
+  return {
+    [`${prefix}_modus`]: state.mode,
+    [`${prefix}_text`]: state.text || null,
+    [`${prefix}_baukasten_ausdruck`]: baukastenAusdruck
+  };
 }
 
 // Mindestmenge/Menge-Formel-Ergebnis beziehen sich immer auf die Einheit des
@@ -3382,17 +3429,12 @@ async function openRzEditModal(rzId){
     rzEditGlieder = null;
     $('rzEditTagesleistung').value = ctx.rz.tagesleistung_menge ?? '';
   }else{
-    const flat = flattenMengenAusdruck(ctx.rz.menge_ausdruck);
-    // Formeltool bekommt IMMER eine gueltige (ggf. leere) Glied-Kette, auch
-    // wenn die gespeicherte Formel dort nicht darstellbar ist (z.B. wegen
-    // Aufrunden) - startet dann als leere Zeile statt in einer Sackgasse.
-    // Aktiver Reiter beim Oeffnen richtet sich trotzdem danach, ob die ECHTE
-    // gespeicherte Formel im Baukasten darstellbar ist oder nicht.
-    rzEditGlieder = (flat !== null && flat.length) ? flat.map((f, i) => gliedAusNode(i === 0 ? null : f.op, f.node)) : [{ op: null, mode: 'lit', refKind: null, refId: null, text: '' }];
+    const basis = formelStateAusZeile(ctx.rz, 'menge_formel', ctx.rz.menge_ausdruck);
+    rzEditGlieder = basis.glieder;
     rzEditFormelState = {
-      mode: flat === null ? 'text' : 'baukasten',
+      mode: basis.mode,
       glieder: rzEditGlieder,
-      text: flat === null ? astToFormelText(ctx.rz.menge_ausdruck) : '',
+      text: basis.text,
       offertentypScope: currentOffertentypId || 'allgemein'
     };
     renderFormelFeld('rzEditTermline', rzEditFormelState, () => renderRzEditTermline('rzEditTermline_bau'));
@@ -4181,7 +4223,7 @@ $('rzEditSave').addEventListener('click', async () => {
     }
     const zugWerte = {};
     document.querySelectorAll('#rzEditZugrid .zugval').forEach(inp => { zugWerte['zugang_stufe'+inp.dataset.n] = parseFloat(inp.value) || 1; });
-    mengeFelder = { menge_ausdruck: node, tagesleistung_menge: null, ...zugWerte };
+    mengeFelder = { menge_ausdruck: node, tagesleistung_menge: null, ...zugWerte, ...formelSpaltenZumSpeichern('menge_formel', rzEditFormelState, node) };
   }
 
   if(rzEditMode === 'add'){
@@ -4227,6 +4269,7 @@ async function duplicateOption(optId){
         option_id: neuOpt.id, kategorie: rz.kategorie, artikel_id: rz.artikel_id,
         staffelgruppe_id: rz.staffelgruppe_id, zonengruppe_id: rz.zonengruppe_id, sonderposition_typ_id: rz.sonderposition_typ_id,
         bezeichnung_override: rz.bezeichnung_override, preis_override: rz.preis_override, menge_ausdruck: rz.menge_ausdruck,
+        menge_formel_modus: rz.menge_formel_modus, menge_formel_text: rz.menge_formel_text, menge_formel_baukasten_ausdruck: rz.menge_formel_baukasten_ausdruck,
         tagesleistung_menge: rz.tagesleistung_menge,
         zugang_stufe1: rz.zugang_stufe1, zugang_stufe2: rz.zugang_stufe2, zugang_stufe3: rz.zugang_stufe3, zugang_stufe4: rz.zugang_stufe4,
         mindestmenge: rz.mindestmenge, verschnitt_prozent: rz.verschnitt_prozent, zuschlag_prozent: rz.zuschlag_prozent, notiz: rz.notiz,
