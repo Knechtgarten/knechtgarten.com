@@ -1732,14 +1732,17 @@ function openEingabefeldTabelleModal(id){
   $('efTabelleModalTitel').textContent = 'Tabelle bearbeiten';
   $('efTabelleName').value = ef.name;
   efTabelleSpalten = (TABELLE_SPALTEN[id] || []).map(s => {
-    const glieder = s.ist_berechnung ? gliederAusAusdruck(s.ausdruck) : null;
+    const flatGlieder = s.ist_berechnung ? gliederAusAusdruck(s.ausdruck) : null;
+    // Formeltool bekommt IMMER eine gueltige (ggf. leere) Glied-Kette, siehe
+    // Kommentar bei rzEditGlieder in openRzEditModal.
+    const glieder = flatGlieder !== null ? flatGlieder : [{ op: null, mode: 'lit', refKind: null, refId: null, text: '' }];
     return {
       id: s.id, name: s.name, einheit: s.einheit, ist_berechnung: s.ist_berechnung,
       zusatztext_moeglich: s.zusatztext_moeglich, flaechenformel_moeglich: s.flaechenformel_moeglich,
       vorschlagswert: s.vorschlagswert,
       glieder,
       formelState: s.ist_berechnung ? {
-        mode: glieder === null ? 'text' : 'baukasten', glieder,
+        mode: flatGlieder === null ? 'text' : 'baukasten', glieder,
         text: astToFormelText(s.ausdruck), offertentypScope: formelBibliothekKategorie,
         tabelleKontextId: efTabelleId, excludeSpalteId: s.id
       } : null,
@@ -1833,7 +1836,11 @@ $('efTabelleSave').addEventListener('click', async () => {
     if(!s.einheit) return fehler(`Bitte bei Spalte "${s.name}" eine Einheit waehlen.`);
     if(s.ist_berechnung){
       s._parsedNode = formelAusZustand(`efTabelleFormelWrap_${s._key}`, s.formelState);
-      if(!s._parsedNode) return fehler(`Bitte bei Spalte "${s.name}" eine gueltige Formel angeben.`);
+      if(!s._parsedNode){
+        const textFehler = $(`efTabelleFormelWrap_${s._key}_texterr`);
+        const msg = (s.formelState.mode === 'text' && textFehler) ? textFehler.textContent : `Bitte bei Spalte "${s.name}" eine gueltige Formel angeben.`;
+        return fehler(msg);
+      }
     }
   }
 
@@ -2369,7 +2376,7 @@ function openEditTermModal(id){
   $('termEditEinheit').innerHTML = einheitOptionsHtml(t.einheit || '', true);
   const node = t.typ === 'konstante' ? { lit: t.wert } : t.ausdruck;
   const flat = flattenMengenAusdruck(node);
-  termEditGlieder = (flat && flat.length) ? flat.map((f, i) => gliedAusNode(i === 0 ? null : f.op, f.node)) : null;
+  termEditGlieder = (flat && flat.length) ? flat.map((f, i) => gliedAusNode(i === 0 ? null : f.op, f.node)) : [{ op: null, mode: 'lit', refKind: null, refId: null, text: '' }];
   termEditFormelState = {
     mode: (flat === null || (flat && !flat.length)) ? 'text' : 'baukasten',
     glieder: termEditGlieder,
@@ -2394,7 +2401,8 @@ $('termEditSave').addEventListener('click', async () => {
   if(!name){ $('termEditStatus').textContent = 'Bitte Name ausfuellen.'; $('termEditStatus').className = 'status err'; return; }
   const node = formelAusZustand('termEditTermline', termEditFormelState);
   if(!node){
-    if(termEditFormelState.mode !== 'text'){ $('termEditStatus').textContent = 'Bitte mindestens ein Glied angeben.'; $('termEditStatus').className = 'status err'; }
+    const msg = termEditFormelState.mode === 'text' ? $('termEditTermline_texterr').textContent : 'Bitte mindestens ein Glied angeben.';
+    $('termEditStatus').textContent = msg; $('termEditStatus').className = 'status err';
     return;
   }
 
@@ -3112,7 +3120,8 @@ function renderFormelFeld(containerId, state, renderGliedFn){
     </div>
     <div id="${containerId}_bau" class="${baukastenAktiv ? '' : 'hidden'}"></div>
     <div id="${containerId}_text" class="${baukastenAktiv ? 'hidden' : ''}">
-      <textarea id="${containerId}_textinput" rows="2" placeholder="z.B. AUFRUNDEN({Länge} / 4.8) * 2 * {Breite} * 0.2" style="width:100%;font:inherit;font-size:12.5px;font-family:monospace;border:1px solid var(--line);border-radius:6px;padding:8px;box-sizing:border-box;"></textarea>
+      <div class="hint" style="margin-bottom:6px;">Rechnet mit Zahlen, +, -, *, /, Klammern und AUFRUNDEN/ABRUNDEN/RUNDEN. Verweise auf Felder/Formeln nie von Hand eintippen - immer über "+ Wert einfügen" holen.</div>
+      <textarea id="${containerId}_textinput" rows="2" placeholder="z.B. AUFRUNDEN(4.8 / 2) * 0.2 - Werte ueber den Button unten einfuegen" style="width:100%;font:inherit;font-size:12.5px;font-family:monospace;border:1px solid var(--line);border-radius:6px;padding:8px;box-sizing:border-box;"></textarea>
       <div style="margin-top:6px;">
         <button type="button" class="btnlink" id="${containerId}_textref">+ Wert einfügen</button>
       </div>
@@ -3122,43 +3131,18 @@ function renderFormelFeld(containerId, state, renderGliedFn){
   const textEl = $(`${containerId}_textinput`);
   textEl.value = state.text || '';
   if(baukastenAktiv) renderGliedFn();
+  // Formeltool und Freie Formel sind zwei unabhaengige Formulare, kein
+  // gegenseitiges Umwandeln beim Umschalten - jede haelt ihren eigenen
+  // Stand (state.glieder bzw. state.text), damit ein Klick zwischen den
+  // Reiten nie versehentlich etwas ueberschreibt. Massgeblich beim
+  // Speichern ist immer die gerade sichtbare/aktive Formel (state.mode),
+  // siehe formelAusZustand().
   container.querySelectorAll('.formelmodustab').forEach(tab => {
     tab.addEventListener('click', () => {
-      const ziel = tab.dataset.modus;
-      if((ziel === 'baukasten') === baukastenAktiv) return;
-      if(ziel === 'text'){
-        const node = state.glieder ? buildMengenAusdruck(state.glieder) : null;
-        if(node) state.text = astToFormelText(node);
-        state.mode = 'text';
-        renderFormelFeld(containerId, state, renderGliedFn);
-      }else{
-        // Leeres Textfeld ist beim Zurueckwechseln kein Fehler (z.B. wenn
-        // jemand nur kurz in den Text-Modus geschaut hat) - einfach mit
-        // einer leeren Baukasten-Zeile weitermachen statt zu blockieren.
-        if(textEl.value.trim() === ''){
-          state.text = '';
-          state.glieder = [{ op: null, mode: 'lit', refKind: null, refId: null, text: '' }];
-          state.mode = 'baukasten';
-          renderFormelFeld(containerId, state, renderGliedFn);
-          return;
-        }
-        const ergebnis = parseFormelText(textEl.value);
-        const errEl = $(`${containerId}_texterr`);
-        if(!ergebnis.ok){
-          errEl.textContent = ergebnis.error; errEl.classList.remove('hidden');
-          return;
-        }
-        const flat = flattenMengenAusdruck(ergebnis.node);
-        if(flat === null){
-          errEl.textContent = 'Diese Formel laesst sich im Formeltool nicht darstellen (z.B. wegen Aufrunden/Abrunden/Runden) - bitte als Freie Formel weiterbearbeiten.';
-          errEl.classList.remove('hidden');
-          return;
-        }
-        state.text = textEl.value;
-        state.glieder = flat.length ? flat.map((f, i) => gliedAusNode(i === 0 ? null : f.op, f.node)) : [{ op: null, mode: 'lit', refKind: null, refId: null, text: '' }];
-        state.mode = 'baukasten';
-        renderFormelFeld(containerId, state, renderGliedFn);
-      }
+      const ziel = tab.dataset.modus === 'text' ? 'text' : 'baukasten';
+      if(ziel === state.mode) return;
+      state.mode = ziel;
+      renderFormelFeld(containerId, state, renderGliedFn);
     });
   });
   const refBtn = $(`${containerId}_textref`);
@@ -3277,10 +3261,12 @@ async function openRzEditModal(rzId){
     $('rzEditTagesleistung').value = ctx.rz.tagesleistung_menge ?? '';
   }else{
     const flat = flattenMengenAusdruck(ctx.rz.menge_ausdruck);
-    // Zu komplex fuer den Baukasten (z.B. enthaelt schon Aufrunden) -
-    // startet direkt im Text-Modus statt in einer Sackgasse ("bitte
-    // melden"), die Formel bleibt dort ganz normal weiter editierbar.
-    rzEditGlieder = flat === null ? null : (flat.length ? flat.map((f, i) => gliedAusNode(i === 0 ? null : f.op, f.node)) : [{ op: null, mode: 'lit', refKind: null, refId: null, text: '' }]);
+    // Formeltool bekommt IMMER eine gueltige (ggf. leere) Glied-Kette, auch
+    // wenn die gespeicherte Formel dort nicht darstellbar ist (z.B. wegen
+    // Aufrunden) - startet dann als leere Zeile statt in einer Sackgasse.
+    // Aktiver Reiter beim Oeffnen richtet sich trotzdem danach, ob die ECHTE
+    // gespeicherte Formel im Baukasten darstellbar ist oder nicht.
+    rzEditGlieder = (flat !== null && flat.length) ? flat.map((f, i) => gliedAusNode(i === 0 ? null : f.op, f.node)) : [{ op: null, mode: 'lit', refKind: null, refId: null, text: '' }];
     rzEditFormelState = {
       mode: flat === null ? 'text' : 'baukasten',
       glieder: rzEditGlieder,
@@ -4067,7 +4053,8 @@ $('rzEditSave').addEventListener('click', async () => {
   }else{
     const node = formelAusZustand('rzEditTermline', rzEditFormelState);
     if(!node){
-      if(rzEditFormelState.mode !== 'text'){ $('rzEditStatus').textContent = 'Bitte eine gueltige Formel angeben.'; $('rzEditStatus').className='status err'; }
+      const msg = rzEditFormelState.mode === 'text' ? $('rzEditTermline_texterr').textContent : 'Bitte eine gueltige Formel angeben.';
+      $('rzEditStatus').textContent = msg; $('rzEditStatus').className='status err';
       return;
     }
     const zugWerte = {};
