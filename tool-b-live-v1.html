@@ -1714,7 +1714,7 @@ function gliederAusAusdruck(node){
   return (flat && flat.length) ? flat.map((f, i) => gliedAusNode(i === 0 ? null : f.op, f.node)) : null;
 }
 function neueEfTabelleSpalte(){
-  return { id: null, name: '', einheit: '', ist_berechnung: false, zusatztext_moeglich: false, flaechenformel_moeglich: false, vorschlagswert: null, glieder: null, _key: ++efTabelleSpalteCounter };
+  return { id: null, name: '', einheit: '', ist_berechnung: false, zusatztext_moeglich: false, flaechenformel_moeglich: false, vorschlagswert: null, glieder: null, formelState: null, _key: ++efTabelleSpalteCounter };
 }
 function openNeueEingabefeldTabelleModal(){
   efTabelleId = null;
@@ -1731,19 +1731,34 @@ function openEingabefeldTabelleModal(id){
   efTabelleId = id;
   $('efTabelleModalTitel').textContent = 'Tabelle bearbeiten';
   $('efTabelleName').value = ef.name;
-  efTabelleSpalten = (TABELLE_SPALTEN[id] || []).map(s => ({
-    id: s.id, name: s.name, einheit: s.einheit, ist_berechnung: s.ist_berechnung,
-    zusatztext_moeglich: s.zusatztext_moeglich, flaechenformel_moeglich: s.flaechenformel_moeglich,
-    vorschlagswert: s.vorschlagswert,
-    glieder: s.ist_berechnung ? gliederAusAusdruck(s.ausdruck) : null,
-    _key: ++efTabelleSpalteCounter
-  }));
+  efTabelleSpalten = (TABELLE_SPALTEN[id] || []).map(s => {
+    const glieder = s.ist_berechnung ? gliederAusAusdruck(s.ausdruck) : null;
+    return {
+      id: s.id, name: s.name, einheit: s.einheit, ist_berechnung: s.ist_berechnung,
+      zusatztext_moeglich: s.zusatztext_moeglich, flaechenformel_moeglich: s.flaechenformel_moeglich,
+      vorschlagswert: s.vorschlagswert,
+      glieder,
+      formelState: s.ist_berechnung ? {
+        mode: glieder === null ? 'text' : 'baukasten', glieder,
+        text: astToFormelText(s.ausdruck), offertentypScope: formelBibliothekKategorie,
+        tabelleKontextId: efTabelleId, excludeSpalteId: s.id
+      } : null,
+      _key: ++efTabelleSpalteCounter
+    };
+  });
   renderEfTabelleSpalten();
   $('efTabelleOverlay').classList.add('show');
 }
+function renderEfTabelleSpalteFormelBau(s){
+  const wrap = $(`efTabelleFormelWrap_${s._key}_bau`);
+  if(wrap) renderGliedstack(s.glieder, wrap, () => renderEfTabelleSpalteFormelBau(s), { tabelleKontextId: efTabelleId, excludeSpalteId: s.id, offertentypScope: formelBibliothekKategorie });
+}
 function renderEfTabelleSpalteFormel(s){
-  const wrap = $(`efTabelleFormelWrap_${s._key}`);
-  if(wrap) renderGliedstack(s.glieder, wrap, () => renderEfTabelleSpalteFormel(s), { tabelleKontextId: efTabelleId, excludeSpalteId: s.id, offertentypScope: formelBibliothekKategorie });
+  if(!s.formelState) s.formelState = { mode: 'baukasten', glieder: s.glieder, text: '', offertentypScope: formelBibliothekKategorie, tabelleKontextId: efTabelleId, excludeSpalteId: s.id };
+  renderFormelFeld(`efTabelleFormelWrap_${s._key}`, s.formelState, () => {
+    s.glieder = s.formelState.glieder;
+    renderEfTabelleSpalteFormelBau(s);
+  });
 }
 function renderEfTabelleSpalten(){
   $('efTabelleSpaltenListe').innerHTML = efTabelleSpalten.map(s => `
@@ -1780,7 +1795,10 @@ function renderEfTabelleSpalten(){
     card.querySelector('[data-k="einheit"]').addEventListener('change', e => { s.einheit = e.target.value; });
     card.querySelector('[data-k="typ"]').addEventListener('change', e => {
       s.ist_berechnung = e.target.value === 'berechnung';
-      if(s.ist_berechnung && !s.glieder) s.glieder = [{ op: null, mode: 'lit', refKind: null, refId: null, text: '' }];
+      if(s.ist_berechnung && !s.glieder){
+        s.glieder = [{ op: null, mode: 'lit', refKind: null, refId: null, text: '' }];
+        s.formelState = { mode: 'baukasten', glieder: s.glieder, text: '', offertentypScope: formelBibliothekKategorie, tabelleKontextId: efTabelleId, excludeSpalteId: s.id };
+      }
       renderEfTabelleSpalten();
     });
     card.querySelector('[data-k="zusatztext_moeglich"]')?.addEventListener('change', e => { s.zusatztext_moeglich = e.target.checked; });
@@ -1791,7 +1809,9 @@ function renderEfTabelleSpalten(){
       renderEfTabelleSpalten();
     });
     if(s.ist_berechnung){
-      if(!s.glieder) s.glieder = [{ op: null, mode: 'lit', refKind: null, refId: null, text: '' }];
+      if(!s.glieder && !s.formelState){
+        s.glieder = [{ op: null, mode: 'lit', refKind: null, refId: null, text: '' }];
+      }
       renderEfTabelleSpalteFormel(s);
     }
   });
@@ -1812,8 +1832,8 @@ $('efTabelleSave').addEventListener('click', async () => {
     if(!s.name.trim()) return fehler('Bitte bei jeder Spalte einen Namen eingeben.');
     if(!s.einheit) return fehler(`Bitte bei Spalte "${s.name}" eine Einheit waehlen.`);
     if(s.ist_berechnung){
-      if(!s.glieder) return fehler(`Formel bei Spalte "${s.name}" ist zu komplex fuer den einfachen Editor.`);
-      if(!buildMengenAusdruck(s.glieder)) return fehler(`Bitte bei Spalte "${s.name}" eine Formel angeben.`);
+      s._parsedNode = formelAusZustand(`efTabelleFormelWrap_${s._key}`, s.formelState);
+      if(!s._parsedNode) return fehler(`Bitte bei Spalte "${s.name}" eine gueltige Formel angeben.`);
     }
   }
 
@@ -1838,7 +1858,7 @@ $('efTabelleSave').addEventListener('click', async () => {
 
   for(let i = 0; i < efTabelleSpalten.length; i++){
     const s = efTabelleSpalten[i];
-    const ausdruck = s.ist_berechnung ? buildMengenAusdruck(s.glieder) : null;
+    const ausdruck = s.ist_berechnung ? s._parsedNode : null;
     const payload = {
       eingabefeld_id: tabelleId, name: s.name.trim(), einheit: s.einheit, reihenfolge: i + 1,
       ist_berechnung: s.ist_berechnung, ausdruck,
@@ -2330,7 +2350,8 @@ function openNewTermModal(){
   $('termEditName').value = '';
   $('termEditEinheit').innerHTML = einheitOptionsHtml('', true);
   termEditGlieder = [{ op: null, mode: 'lit', refKind: null, refId: null, text: '' }];
-  renderTermEditTermline();
+  termEditFormelState = { mode: 'baukasten', glieder: termEditGlieder, text: '', offertentypScope: formelBibliothekKategorie };
+  renderFormelFeld('termEditTermline', termEditFormelState, renderTermEditTermline);
   $('termEditNotizInput').value = '';
   $('termEditNotizBox').classList.remove('show');
   $('termEditNotizBtn').classList.remove('has');
@@ -2349,7 +2370,13 @@ function openEditTermModal(id){
   const node = t.typ === 'konstante' ? { lit: t.wert } : t.ausdruck;
   const flat = flattenMengenAusdruck(node);
   termEditGlieder = (flat && flat.length) ? flat.map((f, i) => gliedAusNode(i === 0 ? null : f.op, f.node)) : null;
-  renderTermEditTermline();
+  termEditFormelState = {
+    mode: (flat === null || (flat && !flat.length)) ? 'text' : 'baukasten',
+    glieder: termEditGlieder,
+    text: astToFormelText(node),
+    offertentypScope: formelBibliothekKategorie
+  };
+  renderFormelFeld('termEditTermline', termEditFormelState, renderTermEditTermline);
   $('termEditNotizInput').value = t.notiz || '';
   $('termEditNotizBox').classList.toggle('show', !!t.notiz);
   $('termEditNotizBtn').classList.toggle('has', !!t.notiz);
@@ -2365,9 +2392,11 @@ $('termEditSave').addEventListener('click', async () => {
   const name = $('termEditName').value.trim();
   const einheit = $('termEditEinheit').value.trim();
   if(!name){ $('termEditStatus').textContent = 'Bitte Name ausfuellen.'; $('termEditStatus').className = 'status err'; return; }
-  if(!termEditGlieder){ $('termEditStatus').textContent = 'Diese Formel ist zu komplex fuer den einfachen Editor - bitte bei Bedarf melden.'; $('termEditStatus').className = 'status err'; return; }
-  const node = buildMengenAusdruck(termEditGlieder);
-  if(!node){ $('termEditStatus').textContent = 'Bitte mindestens ein Glied angeben.'; $('termEditStatus').className = 'status err'; return; }
+  const node = formelAusZustand('termEditTermline', termEditFormelState);
+  if(!node){
+    if(termEditFormelState.mode !== 'text'){ $('termEditStatus').textContent = 'Bitte mindestens ein Glied angeben.'; $('termEditStatus').className = 'status err'; }
+    return;
+  }
 
   const offertentyp_id = formelBibliothekKategorie === 'allgemein' ? null : formelBibliothekKategorie;
   const istKonstante = node.lit !== undefined;
@@ -2946,6 +2975,219 @@ function gliedAusNode(op, node){
   return { op, mode: 'ref', refKind: node.ref, refId: node.id, text: labelFuerNode(node) };
 }
 
+// ---------------------------------------------------------------------------
+// Freitext-Formel-Modus: alternative Eingabe zum Baukasten (renderGliedstack)
+// fuer Faelle, die der Baukasten nicht abbilden kann (z.B. Rundung) oder wo
+// eine Formel als Text schneller getippt ist. Nutzt dieselbe interne
+// Baumstruktur wie ueberall sonst ({lit}/{ref}/{op,args}) - eval_ausdruck
+// (Postgres) wertet beides identisch aus. Verweise auf Eingabefelder/Terme/
+// Tabellenspalten stehen im Text als {Anzeigename::art:id} - der Anzeigename
+// ist nur fuers Lesen, massgeblich ist immer art:id dahinter (kollisionsfrei,
+// unabhaengig von Sonderzeichen/Leerzeichen im echten Namen). Wird ueber den
+// "+ Wert einfuegen"-Button erzeugt (siehe openTextRefPicker), nicht von Hand
+// getippt.
+// ---------------------------------------------------------------------------
+function refToken(kind, id, name){
+  return `{${name}::${kind}:${id}}`;
+}
+function astToFormelText(node){
+  if(!node) return '';
+  if(node.lit !== undefined) return String(node.lit);
+  if(node.ref) return refToken(node.ref, node.id, refLabel(node.ref, node.id));
+  if(node.op === '*' && node._umrechnung && Array.isArray(node.args)) return astToFormelText(node.args[0]);
+  if(node.op === 'ceil') return `AUFRUNDEN(${astToFormelText(node.args[0])})`;
+  if(node.op === 'floor') return `ABRUNDEN(${astToFormelText(node.args[0])})`;
+  if(node.op === 'round') return `RUNDEN(${astToFormelText(node.args[0])})`;
+  if(node.op && Array.isArray(node.args)){
+    const wrap = n => (n.op && ['+','-','*','/'].includes(n.op)) ? `(${astToFormelText(n)})` : astToFormelText(n);
+    return node.args.map(wrap).join(` ${node.op} `);
+  }
+  return '?';
+}
+
+// Rekursiver Abstieg: expression := term (('+'|'-') term)*, term := factor
+// (('*'|'/') factor)*, factor := Zahl | {Verweis} | '(' expression ')' |
+// FUNC '(' expression ')' | '-' factor. Wirft nie - liefert immer
+// {ok:true,node} oder {ok:false,error} mit Position, fuer eine klare
+// Fehlermeldung im UI statt eines Crashs bei Tippfehlern.
+function parseFormelText(text){
+  const s = (text || '').trim();
+  if(!s) return { ok: false, error: 'Formel ist leer.' };
+  let i = 0;
+  const FUNCS = { AUFRUNDEN: 'ceil', ABRUNDEN: 'floor', RUNDEN: 'round' };
+  function skipWs(){ while(i < s.length && /\s/.test(s[i])) i++; }
+  function fail(msg){ throw new Error(`${msg} (Position ${i + 1})`); }
+  function parseExpression(){
+    let node = parseTerm();
+    for(;;){
+      skipWs();
+      const c = s[i];
+      if(c === '+' || c === '-'){ i++; node = { op: c, args: [node, parseTerm()] }; }
+      else break;
+    }
+    return node;
+  }
+  function parseTerm(){
+    let node = parseFactor();
+    for(;;){
+      skipWs();
+      const c = s[i];
+      if(c === '*' || c === '/'){ i++; node = { op: c, args: [node, parseFactor()] }; }
+      else break;
+    }
+    return node;
+  }
+  function parseFactor(){
+    skipWs();
+    if(s[i] === '-'){ i++; return { op: '-', args: [{ lit: 0 }, parseFactor()] }; }
+    if(s[i] === '+'){ i++; return parseFactor(); }
+    if(s[i] === '('){
+      i++;
+      const node = parseExpression();
+      skipWs();
+      if(s[i] !== ')') fail('Schliessende Klammer ")" erwartet');
+      i++;
+      return node;
+    }
+    if(s[i] === '{'){
+      const ende = s.indexOf('}', i);
+      if(ende === -1) fail('Schliessende Klammer "}" bei einem Verweis erwartet');
+      const roh = s.slice(i + 1, ende);
+      i = ende + 1;
+      const sepIdx = roh.lastIndexOf('::');
+      if(sepIdx === -1) fail('Ungueltiger Verweis "' + roh + '" - bitte ueber "+ Wert einfuegen" erzeugen');
+      const artId = roh.slice(sepIdx + 2);
+      const doppelpunkt = artId.indexOf(':');
+      const art = artId.slice(0, doppelpunkt);
+      const id = artId.slice(doppelpunkt + 1);
+      if(!['eingabefeld','term','spalte'].includes(art) || !id) fail('Ungueltiger Verweis "' + roh + '"');
+      return { ref: art, id };
+    }
+    const funcMatch = /^[A-Za-zÄÖÜäöü]+/.exec(s.slice(i));
+    if(funcMatch){
+      const name = funcMatch[0].toUpperCase();
+      if(!FUNCS[name]) fail(`Unbekannte Funktion "${funcMatch[0]}" - erlaubt sind AUFRUNDEN, ABRUNDEN, RUNDEN`);
+      i += funcMatch[0].length;
+      skipWs();
+      if(s[i] !== '(') fail(`Nach ${name} wird eine Klammer "(" erwartet`);
+      i++;
+      const arg = parseExpression();
+      skipWs();
+      if(s[i] !== ')') fail('Schliessende Klammer ")" erwartet');
+      i++;
+      return { op: FUNCS[name], args: [arg] };
+    }
+    const numMatch = /^\d+(\.\d+)?/.exec(s.slice(i));
+    if(numMatch){ i += numMatch[0].length; return { lit: parseFloat(numMatch[0]) }; }
+    fail('Unerwartetes Zeichen "' + (s[i] || '') + '"');
+  }
+  try{
+    const node = parseExpression();
+    skipWs();
+    if(i < s.length) fail('Unerwartetes Zeichen "' + s[i] + '"');
+    return { ok: true, node };
+  }catch(e){
+    return { ok: false, error: e.message };
+  }
+}
+
+// Baukasten/Text-Umschalter um eine bestehende Glied-Kette herum. containerId
+// ist der bisher leere Wrapper-Container (z.B. "rzEditTermline") - wird hier
+// mit zwei Unter-Containern befuellt: "<id>_bau" (normaler Baukasten,
+// renderGliedFn zeichnet dort hinein) und "<id>_text" (Freitext-Feld). state
+// haelt {mode:'baukasten'|'text', glieder, text, offertentypScope} - vom
+// Aufrufer gehalten (Modul-Variable bei Ressourcenzeile/Term, am jeweiligen
+// Spalten-Objekt bei einer Tabelle), damit mehrere Formulare gleichzeitig
+// (z.B. alle Spalten einer Tabelle) unabhaengige Zustaende haben. renderGliedFn
+// wird ohne Argumente aufgerufen - ruft intern renderGliedstack() mit dem
+// (bereits auf "<id>_bau" umgebogenen) Ziel-Element auf, wie bisher auch.
+function renderFormelFeld(containerId, state, renderGliedFn){
+  const container = $(containerId);
+  if(!container) return;
+  const baukastenAktiv = state.mode !== 'text';
+  container.innerHTML = `
+    <div class="pillrow" style="margin-bottom:6px;">
+      <button type="button" class="filterpill formelmodustab ${baukastenAktiv ? 'on' : ''}" data-modus="baukasten">Baukasten</button>
+      <button type="button" class="filterpill formelmodustab ${!baukastenAktiv ? 'on' : ''}" data-modus="text">Text</button>
+    </div>
+    <div id="${containerId}_bau" class="${baukastenAktiv ? '' : 'hidden'}"></div>
+    <div id="${containerId}_text" class="${baukastenAktiv ? 'hidden' : ''}">
+      <textarea id="${containerId}_textinput" rows="2" placeholder="z.B. AUFRUNDEN({Länge} / 4.8) * 2 * {Breite} * 0.2" style="width:100%;font:inherit;font-size:12.5px;font-family:monospace;border:1px solid var(--line);border-radius:6px;padding:8px;box-sizing:border-box;"></textarea>
+      <div style="margin-top:6px;">
+        <button type="button" class="btnlink" id="${containerId}_textref">+ Wert einfügen</button>
+      </div>
+      <div class="status err hidden" id="${containerId}_texterr"></div>
+    </div>
+  `;
+  const textEl = $(`${containerId}_textinput`);
+  textEl.value = state.text || '';
+  if(baukastenAktiv) renderGliedFn();
+  container.querySelectorAll('.formelmodustab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      const ziel = tab.dataset.modus;
+      if((ziel === 'baukasten') === baukastenAktiv) return;
+      if(ziel === 'text'){
+        const node = state.glieder ? buildMengenAusdruck(state.glieder) : null;
+        if(node) state.text = astToFormelText(node);
+        state.mode = 'text';
+        renderFormelFeld(containerId, state, renderGliedFn);
+      }else{
+        const ergebnis = parseFormelText(textEl.value);
+        const errEl = $(`${containerId}_texterr`);
+        if(!ergebnis.ok){
+          errEl.textContent = ergebnis.error; errEl.classList.remove('hidden');
+          return;
+        }
+        const flat = flattenMengenAusdruck(ergebnis.node);
+        if(flat === null){
+          errEl.textContent = 'Diese Formel laesst sich im Baukasten nicht darstellen (z.B. wegen Aufrunden/Abrunden/Runden) - bitte im Text-Modus weiterbearbeiten.';
+          errEl.classList.remove('hidden');
+          return;
+        }
+        state.text = textEl.value;
+        state.glieder = flat.length ? flat.map((f, i) => gliedAusNode(i === 0 ? null : f.op, f.node)) : [{ op: null, mode: 'lit', refKind: null, refId: null, text: '' }];
+        state.mode = 'baukasten';
+        renderFormelFeld(containerId, state, renderGliedFn);
+      }
+    });
+  });
+  const refBtn = $(`${containerId}_textref`);
+  if(refBtn) refBtn.addEventListener('click', () => {
+    const start = textEl.selectionStart ?? textEl.value.length;
+    const end = textEl.selectionEnd ?? textEl.value.length;
+    openTextRefPicker(state.offertentypScope, state.tabelleKontextId, state.excludeSpalteId, (token) => {
+      const val = textEl.value;
+      textEl.value = val.slice(0, start) + token + val.slice(end);
+      state.text = textEl.value;
+      textEl.focus();
+      const pos = start + token.length;
+      textEl.setSelectionRange(pos, pos);
+    });
+  });
+  textEl.addEventListener('input', () => {
+    state.text = textEl.value;
+    $(`${containerId}_texterr`)?.classList.add('hidden');
+  });
+}
+// Liefert den zu speichernden Ausdruck-Baum aus einem Formel-Feld-State -
+// im Text-Modus per parseFormelText, sonst wie bisher per buildMengenAusdruck.
+// Gibt bei einem Parse-Fehler im Text-Modus null zurueck UND zeigt die
+// Fehlermeldung direkt im Feld an (containerId noetig, um das Fehler-Element
+// zu finden) - Aufrufer muss das Speichern dann abbrechen.
+function formelAusZustand(containerId, state){
+  if(state.mode === 'text'){
+    const textEl = $(`${containerId}_textinput`);
+    const ergebnis = parseFormelText(textEl ? textEl.value : state.text);
+    if(!ergebnis.ok){
+      const errEl = $(`${containerId}_texterr`);
+      if(errEl){ errEl.textContent = ergebnis.error; errEl.classList.remove('hidden'); }
+      return null;
+    }
+    return ergebnis.node;
+  }
+  return state.glieder ? buildMengenAusdruck(state.glieder) : null;
+}
+
 // Mindestmenge/Menge-Formel-Ergebnis beziehen sich immer auf die Einheit des
 // gewaehlten Artikels (Vergleichs-/Rechenbasis fuer den Preis) - Einheit
 // direkt neben dem Artikel-Feld anzeigen und in die Mindestmenge-Beschriftung
@@ -3025,13 +3267,17 @@ async function openRzEditModal(rzId){
     $('rzEditTagesleistung').value = ctx.rz.tagesleistung_menge ?? '';
   }else{
     const flat = flattenMengenAusdruck(ctx.rz.menge_ausdruck);
-    if(flat === null){
-      rzEditGlieder = null;
-      $('rzEditTermline').innerHTML = '<div class="hint">Diese Formel ist zu komplex fuer den einfachen Editor - bitte bei Bedarf melden.</div>';
-    }else{
-      rzEditGlieder = flat.length ? flat.map((f, i) => gliedAusNode(i === 0 ? null : f.op, f.node)) : [{ op: null, mode: 'lit', refKind: null, refId: null, text: '' }];
-      renderRzEditTermline('rzEditTermline');
-    }
+    // Zu komplex fuer den Baukasten (z.B. enthaelt schon Aufrunden) -
+    // startet direkt im Text-Modus statt in einer Sackgasse ("bitte
+    // melden"), die Formel bleibt dort ganz normal weiter editierbar.
+    rzEditGlieder = flat === null ? null : (flat.length ? flat.map((f, i) => gliedAusNode(i === 0 ? null : f.op, f.node)) : [{ op: null, mode: 'lit', refKind: null, refId: null, text: '' }]);
+    rzEditFormelState = {
+      mode: flat === null ? 'text' : 'baukasten',
+      glieder: rzEditGlieder,
+      text: astToFormelText(ctx.rz.menge_ausdruck),
+      offertentypScope: currentOffertentypId || 'allgemein'
+    };
+    renderFormelFeld('rzEditTermline', rzEditFormelState, () => renderRzEditTermline('rzEditTermline_bau'));
   }
 
   $('rzEditZugrid').innerHTML = [1,2,3,4].map(n => `
@@ -3081,7 +3327,10 @@ function openRzAddModal(kontextTyp, kontextId){
   $('rzEditTagesleistung').value = '';
 
   rzEditGlieder = istTagessatz ? null : [{ op: null, mode: 'lit', refKind: null, refId: null, text: '' }];
-  if(!istTagessatz) renderRzEditTermline('rzEditTermline');
+  if(!istTagessatz){
+    rzEditFormelState = { mode: 'baukasten', glieder: rzEditGlieder, text: '', offertentypScope: currentOffertentypId || 'allgemein' };
+    renderFormelFeld('rzEditTermline', rzEditFormelState, () => renderRzEditTermline('rzEditTermline_bau'));
+  }
 
   $('rzEditZugrid').innerHTML = [1,2,3,4].map(n => `
     <div class="zugcell">
@@ -3317,6 +3566,11 @@ function anwendenSonderpositionAuswahl(typ, id, name){
   rzSonderMengeRelevant = typ === 'staffelgruppe' || (typ === 'sonderposition_typ' && !!eintrag?.hat_eigene_berechnung);
   if(rzSonderMengeRelevant){
     rzEditGlieder = [{ op: null, mode: 'lit', refKind: null, refId: null, text: '' }];
+    // Nur Baukasten (kein Text-Modus-Umschalter) fuer diesen "Sonderposition
+    // hinzufuegen"-Assistenten - rzEditFormelState trotzdem mitpflegen, sonst
+    // ueberschreibt renderRzEditTermline() rzEditGlieder mit einem alten
+    // Stand aus einer zuvor geoeffneten normalen Ressourcenzeile.
+    rzEditFormelState = { mode: 'baukasten', glieder: rzEditGlieder, text: '', offertentypScope: currentOffertentypId || 'allgemein' };
     renderRzEditTermline('rzSonderTermline');
     $('rzSonderMengeFld').classList.remove('hidden');
     $('rzSonderMengeFldHinweis').textContent = typ === 'staffelgruppe' ? '(bestimmt die passende Staffelstufe)' : istKiesBetonTransport ? '(ergibt das Transportvolumen in m³)' : '(ergibt die Anzahl Fahrten)';
@@ -3599,17 +3853,28 @@ function renderGliedstack(glieder, wrap, renderAgain, vpContext){
   wrap.appendChild(addBtn);
 }
 
-let rzEditTermlineTarget = 'rzEditTermline';
+let rzEditTermlineTarget = 'rzEditTermline_bau';
+// Formel-Feld-Zustand (Baukasten/Text-Umschalter, siehe renderFormelFeld) -
+// modul-weit wie rzEditGlieder selbst, da immer nur eine Ressourcenzeile
+// gleichzeitig bearbeitet wird.
+let rzEditFormelState = { mode: 'baukasten', glieder: null, text: '', offertentypScope: 'allgemein' };
 function renderRzEditTermline(targetId){
   if(targetId) rzEditTermlineTarget = targetId;
+  // rzEditFormelState ist die Quelle der Wahrheit (nicht rzEditGlieder) -
+  // nach einem Text->Baukasten-Moduswechsel steht dort eine frisch geparste
+  // Glied-Kette, die hier uebernommen werden muss statt umgekehrt
+  // ueberschrieben zu werden.
+  rzEditGlieder = rzEditFormelState.glieder;
   // offertentypScope: currentOffertentypId - der Offertentyp, dessen
   // Arbeitsschritte gerade bearbeitet werden (NICHT formelBibliothekKategorie,
   // die ist bewusst unabhaengig, siehe Kommentar bei renderVarPickerScopeTabs).
   renderGliedstack(rzEditGlieder, $(rzEditTermlineTarget), () => renderRzEditTermline(), { offertentypScope: currentOffertentypId || 'allgemein' });
 }
 
+let termEditFormelState = { mode: 'baukasten', glieder: null, text: '', offertentypScope: 'allgemein' };
 function renderTermEditTermline(){
-  renderGliedstack(termEditGlieder, $('termEditTermline'), renderTermEditTermline, { offertentypScope: formelBibliothekKategorie });
+  termEditGlieder = termEditFormelState.glieder;
+  renderGliedstack(termEditGlieder, $('termEditTermline_bau'), renderTermEditTermline, { offertentypScope: formelBibliothekKategorie });
 }
 
 // "Allgemein" (offertentyp_id null) plus GENAU der eine Offertentyp, zu dem
@@ -3650,7 +3915,7 @@ function renderVarPickerListen(){
   // um die Doppeldeutigkeit Summe/Zeilenwert zu vermeiden. Im Einzelwert-Modus
   // (z.B. "Menge anzeigen") gar nicht anbieten - der kennt nur eingabefeld/term.
   let tabellenHtml = '';
-  if(vpEinzelwertCallback){
+  if(vpEinzelwertCallback && !vpEinzelwertTabellenErlaubt){
     // nichts anbieten
   }else if(vpTabelleKontextId){
     const spalten = ALLE_TABELLE_SPALTEN.filter(s => s.eingabefeld_id === vpTabelleKontextId && s.id !== vpExcludeSpalteId);
@@ -3677,6 +3942,11 @@ let vpGlieder = null, vpRenderFn = null;
 // Eingabefeld/Wert ausgewaehlt und direkt an einen Callback uebergeben (siehe
 // openMengeAnzeigenPicker). null = normaler Formel-Modus.
 let vpEinzelwertCallback = null;
+// true nur beim Freitext-Formel-Modus (siehe openTextRefPicker) - dort soll
+// der Einzelwert-Picker (anders als z.B. bei "Menge anzeigen") trotzdem
+// Tabellenspalten anbieten, da eine Formel sich durchaus auf eine
+// Tabellen-Summe beziehen kann.
+let vpEinzelwertTabellenErlaubt = false;
 // Nur gesetzt, wenn gerade die Formel EINER Berechnungsspalte bearbeitet wird
 // (siehe renderVarPickerListen) - dann duerfen nur die anderen Spalten
 // DERSELBEN Tabelle gewaehlt werden (als Zeilenwert), nicht andere Tabellen.
@@ -3685,6 +3955,7 @@ let vpExcludeSpalteId = null;
 function openVarPicker(glieder, index, renderFn, tabelleKontextId, excludeSpalteId, offertentypScope){
   vpGlieder = glieder; rzEditPickerIndex = index; vpRenderFn = renderFn;
   vpEinzelwertCallback = null;
+  vpEinzelwertTabellenErlaubt = false;
   vpTabelleKontextId = tabelleKontextId || null;
   vpExcludeSpalteId = excludeSpalteId || null;
   varPickerScopeId = offertentypScope || formelBibliothekKategorie;
@@ -3692,9 +3963,27 @@ function openVarPicker(glieder, index, renderFn, tabelleKontextId, excludeSpalte
   renderVarPickerListen();
   $('varPickerOverlay').classList.add('show');
 }
+// Freitext-Formel-Modus: derselbe Picker wie beim Baukasten, aber der Klick
+// fuegt statt eines Glieds direkt den Verweis-Platzhalter an der
+// Cursor-Position im Textfeld ein (siehe astToFormelText/parseFormelText).
+function openTextRefPicker(offertentypScope, tabelleKontextId, excludeSpalteId, insertCallback){
+  vpGlieder = null; vpRenderFn = null;
+  vpEinzelwertCallback = (kind, id, name) => insertCallback(refToken(kind, id, name));
+  vpEinzelwertTabellenErlaubt = true;
+  // Innerhalb einer Berechnungsspalte (tabelleKontextId gesetzt) nur die
+  // anderen Spalten DERSELBEN Tabelle anbieten, wie im Baukasten auch -
+  // sonst koennte man versehentlich eine fremde Tabellen-Summe statt des
+  // Zeilenwerts dieser Tabelle einfuegen.
+  vpTabelleKontextId = tabelleKontextId || null;
+  vpExcludeSpalteId = excludeSpalteId || null;
+  varPickerScopeId = offertentypScope || 'allgemein';
+  renderVarPickerScopeTabs();
+  renderVarPickerListen();
+  $('varPickerOverlay').classList.add('show');
+}
 function waehleVar(kind, id){
   if(vpEinzelwertCallback){
-    const name = kind === 'eingabefeld' ? ALLE_EINGABEFELDER.find(e=>e.id===id)?.name : ALLE_TERMS.find(t=>t.id===id)?.name;
+    const name = refLabel(kind, id);
     const cb = vpEinzelwertCallback;
     $('varPickerOverlay').classList.remove('show');
     cb(kind, id, name);
@@ -3719,6 +4008,7 @@ function openMengeAnzeigenPicker(tsId){
     if(error){ showToast(friendlyError(error), true); return; }
     await loadArbeitsschritte();
   };
+  vpEinzelwertTabellenErlaubt = false;
   vpTabelleKontextId = null;
   vpExcludeSpalteId = null;
   // tsId gehoert zum aktuell bearbeiteten Offertentyp (Arbeitsschritte-
@@ -3765,9 +4055,11 @@ $('rzEditSave').addEventListener('click', async () => {
     }
     mengeFelder = { menge_ausdruck: null, tagesleistung_menge };
   }else{
-    if(!rzEditGlieder){ $('rzEditOverlay').classList.remove('show'); return; }
-    const node = buildMengenAusdruck(rzEditGlieder);
-    if(!node){ $('rzEditStatus').textContent = 'Bitte eine gueltige Formel angeben.'; $('rzEditStatus').className='status err'; return; }
+    const node = formelAusZustand('rzEditTermline', rzEditFormelState);
+    if(!node){
+      if(rzEditFormelState.mode !== 'text'){ $('rzEditStatus').textContent = 'Bitte eine gueltige Formel angeben.'; $('rzEditStatus').className='status err'; }
+      return;
+    }
     const zugWerte = {};
     document.querySelectorAll('#rzEditZugrid .zugval').forEach(inp => { zugWerte['zugang_stufe'+inp.dataset.n] = parseFloat(inp.value) || 1; });
     mengeFelder = { menge_ausdruck: node, tagesleistung_menge: null, ...zugWerte };
