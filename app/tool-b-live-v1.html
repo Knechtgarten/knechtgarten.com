@@ -628,6 +628,7 @@ input[type=number]{-moz-appearance:textfield;}
       <div id="rzEditZugridWrap">
         <label style="font-size:11px;color:var(--muted);display:block;margin:18px 0 4px;">Zugänglichkeits-Faktor je Stufe (1.0 = kein Einfluss)</label>
         <div class="zugrid" id="rzEditZugrid"></div>
+        <div class="status err hidden" id="rzEditZugridStatus" style="margin-top:6px;"></div>
       </div>
     </div>
     <div class="modalbtns">
@@ -3430,6 +3431,31 @@ function wireRzZugridLock(){
     }
   });
 }
+// Stufe 1 (leichter zugaenglich als die Referenz Stufe 2) darf die 1 nicht
+// ueberschreiten, Stufe 3/4 (schwerer zugaenglich) duerfen sie nicht
+// unterschreiten - sonst waere z.B. Stufe 1 "teurer" als Stufe 2, was
+// keinen Sinn ergibt. Gibt bei Verletzung den Fehlertext zurueck, sonst null.
+function rzZugridFehler(){
+  const grid = $('rzEditZugrid');
+  const wert = n => parseFloat(grid?.querySelector(`.zugval[data-n="${n}"]`)?.value);
+  const s1 = wert(1), s3 = wert(3), s4 = wert(4);
+  if(!isNaN(s1) && s1 > 1) return 'Stufe 1 ist leichter zugänglich als die Referenz Stufe 2 - der Faktor darf höchstens 1 sein.';
+  if(!isNaN(s3) && s3 < 1) return 'Stufe 3 ist schwerer zugänglich als die Referenz Stufe 2 - der Faktor muss mindestens 1 sein.';
+  if(!isNaN(s4) && s4 < 1) return 'Stufe 4 ist schwerer zugänglich als die Referenz Stufe 2 - der Faktor muss mindestens 1 sein.';
+  return null;
+}
+function pruefeRzZugridLive(){
+  const statusEl = $('rzEditZugridStatus');
+  const fehler = rzZugridFehler();
+  statusEl.textContent = fehler || '';
+  statusEl.classList.toggle('hidden', !fehler);
+}
+function wireRzZugridValidierung(){
+  $('rzEditZugrid').querySelectorAll('.zugval:not(:disabled)').forEach(inp => {
+    inp.addEventListener('input', pruefeRzZugridLive);
+  });
+  pruefeRzZugridLive();
+}
 
 async function openRzEditModal(rzId){
   const ctx = findRessourcenzeileKontext(rzId);
@@ -3513,6 +3539,7 @@ async function openRzEditModal(rzId){
 
   $('rzEditZugrid').innerHTML = rzZugridHtml(ctx.rz);
   wireRzZugridLock();
+  wireRzZugridValidierung();
   $('rzEditStatus').textContent = '';
   $('rzEditStatus').className = 'status';
   $('rzEditArtikelSuggest').classList.remove('show');
@@ -3561,6 +3588,7 @@ function openRzAddModal(kontextTyp, kontextId){
 
   $('rzEditZugrid').innerHTML = rzZugridHtml(null);
   wireRzZugridLock();
+  wireRzZugridValidierung();
   $('rzEditStatus').textContent = '';
   $('rzEditStatus').className = 'status';
   $('rzEditArtikelSuggest').classList.remove('show');
@@ -4257,6 +4285,8 @@ $('rzEditSave').addEventListener('click', async () => {
   if((rzEditMode === 'add' || !rzEditOhneArtikel) && !rzEditArtikelId){
     $('rzEditStatus').textContent = 'Bitte einen Artikel waehlen.'; $('rzEditStatus').className = 'status err'; return;
   }
+  const zugridFehler = rzZugridFehler();
+  if(zugridFehler){ $('rzEditStatus').textContent = zugridFehler; $('rzEditStatus').className = 'status err'; return; }
   const istTagessatz = currentBerechnungsmodell === 'tagessatz';
   const notiz = $('rzEditNotizInput').value.trim() || null;
   const mmVal = $('rzEditMindestmenge').value.trim();
