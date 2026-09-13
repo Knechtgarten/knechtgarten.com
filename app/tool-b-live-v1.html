@@ -844,6 +844,10 @@ input[type=number]{-moz-appearance:textfield;}
           <option value="pool">Pool</option>
         </select>
       </div>
+      <label class="fld" style="display:flex;align-items:center;gap:6px;flex:0 0 auto;font-size:12.5px;color:var(--muted);cursor:pointer;" title="Bei manchen Vorlagen spielt die Zugaenglichkeit vor Ort praktisch nie eine Rolle - blendet dann den Regler in der Offerte UND das Zugaenglichkeitsfaktor-Feld bei jeder Ressourcenzeile dieser Vorlage aus.">
+        <input type="checkbox" id="offertentypZugaenglichkeitCheckbox" checked>
+        Zugänglichkeit verwenden
+      </label>
     </div>
     <div class="status" id="offertentypNameStatus"></div>
   </div>
@@ -949,6 +953,9 @@ const ROLLE_LABEL = { admin: 'Admin', buero_team: 'Büro-Team', mitarbeitende: '
 
 let currentOffertentypId = null;
 let currentBerechnungsmodell = 'formel';
+// Siehe zugaenglichkeitAktivFuerOffertentyp in tool-a-live-v1.html - blendet
+// hier zusaetzlich das Zugaenglichkeitsfaktor-Feld je Ressourcenzeile aus.
+let currentZugaenglichkeitAktiv = true;
 let OFFERTENTYPEN = [];
 let EINHEITEN = [];   // zentrale Einheiten-Liste (Einstellungen -> Berechnungsregeln), fuer alle Einheit-Auswahlfelder
 let EINGABEFELDER = [];   // nur fuer die Formel-Bibliothek-Ansicht, kategorie-gefiltert (Allgemein ODER ein Offertentyp)
@@ -1152,12 +1159,13 @@ function einheitOptionsHtml(selected, mitLeerOption){
   ).join('');
 }
 async function loadOffertentypen(){
-  const { data, error } = await sb.from('offertentyp').select('id,name,berechnungsmodell,papierkorb_am,vorarbeiter_typ_standard').order('reihenfolge');
+  const { data, error } = await sb.from('offertentyp').select('id,name,berechnungsmodell,papierkorb_am,vorarbeiter_typ_standard,zugaenglichkeit_aktiv').order('reihenfolge');
   if(error){ console.error(error); return; }
   OFFERTENTYPEN = data;
   if(!currentOffertentypId){
     currentOffertentypId = data[0]?.id || null;
     currentBerechnungsmodell = data[0]?.berechnungsmodell || 'formel';
+    currentZugaenglichkeitAktiv = data[0]?.zugaenglichkeit_aktiv ?? true;
   }
   aktualisierePathline();
   aktualisiereModellAnsicht();
@@ -1168,6 +1176,8 @@ function aktualisierePathline(){
   $('offertentypNameInput').value = ot ? ot.name : '';
   $('offertentypNameStatus').textContent = '';
   $('offertentypVorarbeiterStandardSelect').value = ot?.vorarbeiter_typ_standard || 'normal';
+  currentZugaenglichkeitAktiv = ot?.zugaenglichkeit_aktiv ?? true;
+  $('offertentypZugaenglichkeitCheckbox').checked = currentZugaenglichkeitAktiv;
   if(currentSeite !== 'formelbibliothek') $('seitentitel').textContent = ot ? ot.name : 'Offerten-Vorlage';
 }
 $('offertentypNameSaveBtn').addEventListener('click', async () => {
@@ -1193,6 +1203,19 @@ $('offertentypVorarbeiterStandardSelect').addEventListener('change', async () =>
   if(error){ showToast(friendlyError(error), true); return; }
   const ot = OFFERTENTYPEN.find(o => o.id === zielId);
   if(ot) ot.vorarbeiter_typ_standard = wert;
+  showToast('Gespeichert.');
+});
+// Zugaenglichkeit fuer diese Vorlage ein-/ausblenden - siehe Kommentar bei
+// zugaenglichkeitAktivFuerOffertentyp in tool-a-live-v1.html.
+$('offertentypZugaenglichkeitCheckbox').addEventListener('change', async () => {
+  if(!currentOffertentypId) return;
+  const zielId = currentOffertentypId;
+  const wert = $('offertentypZugaenglichkeitCheckbox').checked;
+  const { error } = await sb.from('offertentyp').update({ zugaenglichkeit_aktiv: wert }).eq('id', zielId);
+  if(error){ showToast(friendlyError(error), true); $('offertentypZugaenglichkeitCheckbox').checked = !wert; return; }
+  const ot = OFFERTENTYPEN.find(o => o.id === zielId);
+  if(ot) ot.zugaenglichkeit_aktiv = wert;
+  currentZugaenglichkeitAktiv = wert;
   showToast('Gespeichert.');
 });
 function aktualisiereModellAnsicht(){
@@ -3423,7 +3446,7 @@ async function openRzEditModal(rzId){
   // (Staffelstufen/Geometrie) - bei Tagessatz (schlichte Tagesleistungsmenge)
   // ohne Bedeutung, darum dort ausgeblendet.
   $('rzEditMindestmengeVerschnittRow').classList.toggle('hidden', istTagessatz);
-  $('rzEditZugridWrap').classList.toggle('hidden', istTagessatz || !istZugFaehigeKategorie(rzEditKategorie));
+  $('rzEditZugridWrap').classList.toggle('hidden', istTagessatz || !currentZugaenglichkeitAktiv || !istZugFaehigeKategorie(rzEditKategorie));
 
   if(istTagessatz){
     rzEditGlieder = null;
@@ -3483,7 +3506,7 @@ function openRzAddModal(kontextTyp, kontextId){
   $('rzEditTagesleistungFld').classList.toggle('hidden', !istTagessatz);
   aktualisiereRzEditTagesleistungLabel();
   $('rzEditMindestmengeVerschnittRow').classList.toggle('hidden', istTagessatz);
-  $('rzEditZugridWrap').classList.toggle('hidden', istTagessatz || !istZugFaehigeKategorie(rzEditKategorie));
+  $('rzEditZugridWrap').classList.toggle('hidden', istTagessatz || !currentZugaenglichkeitAktiv || !istZugFaehigeKategorie(rzEditKategorie));
   $('rzEditTagesleistung').value = '';
 
   rzEditGlieder = istTagessatz ? null : [{ op: null, mode: 'lit', refKind: null, refId: null, text: '' }];
@@ -3630,7 +3653,7 @@ async function waehleArtikel(id){
   $('rzEditArtikelInput').value = `${a.bezeichnung}${a.artikelnummer_knecht ? ' · ' + a.artikelnummer_knecht : ''}`;
   setzeRzArtikelEinheit(a.einheit);
   aktualisiereRzEditTagesleistungLabel();
-  $('rzEditZugridWrap').classList.toggle('hidden', currentBerechnungsmodell === 'tagessatz' || !istZugFaehigeKategorie(rzEditKategorie));
+  $('rzEditZugridWrap').classList.toggle('hidden', currentBerechnungsmodell === 'tagessatz' || !currentZugaenglichkeitAktiv || !istZugFaehigeKategorie(rzEditKategorie));
   $('artikelPickerOverlay').classList.remove('show');
   $('rzEditArtikelSuggest').classList.remove('show');
 }
