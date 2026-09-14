@@ -215,8 +215,8 @@ main.wrap{padding-top:48px;padding-bottom:60px;}
 .tabellenberechnet{width:100%;box-sizing:border-box;border:1px dashed var(--line);border-radius:6px;padding:6px 7px;font:inherit;font-size:12.5px;color:var(--muted);background:var(--soft);}
 .tabellenzeilendel{width:24px;flex:0 0 auto;color:var(--muted);cursor:pointer;display:flex;align-items:center;justify-content:center;padding-top:8px;}
 .tabellenzeilendel:hover{color:var(--danger);}
-.tabellefussspacer{width:100px;flex:0 0 auto;}
 .tabellenaddzeile{font-size:11.5px;font-weight:600;color:var(--primary);display:inline-flex;align-items:center;gap:4px;cursor:pointer;}
+.tabellensumme{width:100px;flex:0 0 auto;font-size:11.5px;font-weight:600;color:var(--muted);padding:6px 4px;box-sizing:border-box;}
 .dimstabellewrap.zu .tabellezeilen,.dimstabellewrap.zu .tabellefuss{display:none;}
 
 /* Konfiguration (Masse/Zugaenglichkeit/Optionen) - eigenes, unabhaengig
@@ -2639,8 +2639,9 @@ function renderTabelle(ef, container){
     </div>
     <div class="tabellezeilen"></div>
     <div class="tabellezeile tabellefuss">
-      <div class="tabellefussspacer"></div>
-      <span class="tabellenaddzeile">+ Zeile hinzufügen</span>
+      <div class="tabellezeilenname-wrap"><span class="tabellenaddzeile">+ Zeile hinzufügen</span></div>
+      ${spalten.map(s => `<div class="tabellensumme" data-tabelle="${ef.id}" data-spalte="${s.id}"></div>`).join('')}
+      <div class="tabellekopfspacer"></div>
     </div>`;
   container.appendChild(wrap);
   wrap.querySelector('.tabellentitelzelle').addEventListener('click', () => {
@@ -2680,6 +2681,20 @@ function renderTabelle(ef, container){
     recalc();
     planAutosave();
   });
+  // Direkt beim Rendern schon mit dem aktuellen Stand befuellen (nicht erst
+  // nach dem naechsten recalc()/berechneAlleTabellenwerte()) - sonst waere
+  // die Summenzeile beim ersten Anzeigen kurz leer.
+  spalten.forEach(s => aktualisiereTabellenSumme(ef.id, s.id, zeilen.reduce((sum, z) => sum + (z.werte[s.id]?.wert ?? 0), 0), zeilen.length));
+}
+// Summenzeile unter jeder Eingabefeld-Tabelle (ein Wert pro Spalte, ganz
+// kompakt in der Fusszeile neben "+ Zeile hinzufuegen" statt einer eigenen
+// Zeile, siehe Absprache "nicht zu viel Platz verlieren"). Wird sowohl direkt
+// beim Rendern (renderTabelle) als auch nach jeder Neuberechnung
+// (berechneAlleTabellenwerte, damit auch Berechnungsspalten-Summen live
+// nachziehen) aufgerufen.
+function aktualisiereTabellenSumme(efId, spalteId, summe, anzahlZeilen){
+  const el = $teilbereiche.querySelector(`.tabellensumme[data-tabelle="${efId}"][data-spalte="${spalteId}"]`);
+  if(el) el.textContent = anzahlZeilen ? `Σ ${summe.toLocaleString('de-CH', { maximumFractionDigits: 2 })}` : '';
 }
 
 // Wertet alle Berechnungsspalten aller Tabellen pro Zeile neu aus (schreibt
@@ -2714,7 +2729,9 @@ async function berechneAlleTabellenwerte(systemwerteMap){
       }
     }
     spalten.forEach(s => {
-      tabelleSummenMap[s.id] = zeilen.reduce((summe, z) => summe + (z.werte[s.id]?.wert ?? 0), 0);
+      const summe = zeilen.reduce((summe, z) => summe + (z.werte[s.id]?.wert ?? 0), 0);
+      tabelleSummenMap[s.id] = summe;
+      aktualisiereTabellenSumme(ef.id, s.id, summe, zeilen.length);
     });
   }
   return tabelleSummenMap;
