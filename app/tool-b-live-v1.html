@@ -2991,9 +2991,11 @@ const EINHEIT_FAKTOR = {
   l: 0.001, 'm³': 1
 };
 const EINHEIT_KANONISCH = { laenge: 'm', masse: 'kg', volumen: 'm³' };
-function nodeFromGliedMitUmrechnung(g){
-  const basis = nodeFromGlied(g);
-  const einheit = gliedEinheitLabel(g);
+// Gemeinsame Umrechnungs-Logik fuer JEDEN Verweis-Knoten, egal ob er aus dem
+// Formeltool (Glied) oder aus der Freien Formel ({Verweis}-Token) kommt -
+// siehe Kommentar oben bei EINHEIT_FAMILIE, warum das noetig ist. Nimmt den
+// fertigen Basis-Knoten und die Einheit des Verweisziels entgegen.
+function knotenMitUmrechnung(basis, einheit){
   const familie = einheit && EINHEIT_FAMILIE[einheit];
   if(!familie) return basis;
   const ziel = EINHEIT_KANONISCH[familie];
@@ -3004,6 +3006,20 @@ function nodeFromGliedMitUmrechnung(g){
   // ein einzelnes Glied, nicht wie eine echte Multiplikation. eval_ausdruck
   // ignoriert das zusaetzliche Feld einfach (kennt nur lit/ref/op/args).
   return { op: '*', args: [basis, { lit: faktor }], _umrechnung: true };
+}
+function nodeFromGliedMitUmrechnung(g){
+  return knotenMitUmrechnung(nodeFromGlied(g), gliedEinheitLabel(g));
+}
+// Liefert die Einheit eines Verweisziels (Eingabefeld/Term/Tabellenspalte) -
+// fuer dieselbe Umrechnungs-Logik wie im Formeltool, jetzt auch fuer Verweise
+// aus der Freien Formel (siehe parseFormelText). Existiert das Ziel nicht
+// (mehr), bleibt die Formel unveraendert (kein Umrechnungsfaktor) - der
+// fehlende Bezug wird ohnehin schon anderswo (fehlenderBezugHtml) angezeigt.
+function verweisEinheit(art, id){
+  if(art === 'eingabefeld') return ALLE_EINGABEFELDER.find(e => e.id === id)?.einheit;
+  if(art === 'term') return ALLE_TERMS.find(t => t.id === id)?.einheit;
+  if(art === 'spalte') return ALLE_TABELLE_SPALTEN.find(s => s.id === id)?.einheit;
+  return null;
 }
 
 function buildMengenAusdruck(glieder){
@@ -3115,7 +3131,7 @@ function parseFormelText(text){
       const art = artId.slice(0, doppelpunkt);
       const id = artId.slice(doppelpunkt + 1);
       if(!['eingabefeld','term','spalte'].includes(art) || !id) fail('Ungueltiger Verweis "' + roh + '"');
-      return { ref: art, id };
+      return knotenMitUmrechnung({ ref: art, id }, verweisEinheit(art, id));
     }
     const funcMatch = /^[A-Za-zÄÖÜäöü]+/.exec(s.slice(i));
     if(funcMatch){
