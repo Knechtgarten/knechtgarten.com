@@ -224,6 +224,8 @@ td{padding:6px 6px;border-bottom:1px solid var(--soft);vertical-align:top;}
 .opttab.addnew{color:var(--primary);opacity:.7;border:1px dashed var(--line);border-radius:7px 7px 0 0;padding:6px 9px;}
 .opttab-caret{font-size:8px;color:inherit;cursor:pointer;padding:6px 7px 6px 2px;background:none;border:none;display:inline-flex;align-items:center;justify-content:center;}
 .opttabwrap[draggable="true"]{cursor:grab;}
+.opttabwrap.konflikt{border-color:var(--danger);}
+.opttabwrap.konflikt .opttab{color:var(--danger);}
 .optmenu{display:none;position:absolute;left:0;top:100%;margin-top:2px;background:#fff;border:1px solid var(--line);
   border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.16);z-index:20;min-width:160px;overflow:hidden;}
 .optmenu.show{display:block;}
@@ -2100,6 +2102,25 @@ function renderTeilschritt(asId, ts, nummer){
     </div>`;
 }
 
+// Mengenoption multipliziert die Menge JEDER Ressourcenzeile dieser Option
+// nachtraeglich mit der vom Mitarbeiter eingegebenen Anzahl (z.B. "Poolskimmer
+// einbauen x2") - das passt nur, wenn die Formel selbst "Aufwand fuer 1 Stk"
+// berechnet. Verweist eine Formel dagegen schon auf eine Tabellenspalte (z.B.
+// eine geteilte Flaechen-Summe), wird die Menge doppelt gezaehlt (einmal durch
+// die Formel, einmal durch die Mengenoption) - siehe Vorfall "Splitt 604 statt
+// 5.5 m3" vom 14.9.2026. Unabhaengig davon, in welcher Reihenfolge Mengenoption
+// und Formel erfasst wurden, wird das hier bei jedem Rendern neu geprueft und
+// die betroffene Options-Tab rot markiert.
+function ausdruckReferenziertSpalte(node){
+  if(!node || typeof node !== 'object') return false;
+  if(node.ref === 'spalte') return true;
+  if(Array.isArray(node.args)) return node.args.some(ausdruckReferenziertSpalte);
+  return false;
+}
+function optionMengenoptionKonflikt(o){
+  if(!o.mengenoption) return false;
+  return (o.ressourcenzeile || []).some(rz => ausdruckReferenziertSpalte(rz.menge_ausdruck));
+}
 function renderAuswahlfeld(tsId, af){
   const optionen = af.auswahloption || [];
   if(!activeOptionByAf[af.id] && optionen[0]) activeOptionByAf[af.id] = optionen[0].id;
@@ -2109,8 +2130,11 @@ function renderAuswahlfeld(tsId, af){
       <div class="opttabsrow">
         <div class="opttabs">
           <button type="button" class="opttab addnew" onclick="openAddOptModal('${af.id}')">+ Option</button>
-          ${optionen.map(o => `
-            <div class="opttabwrap ${o.id===activeOpt?.id?'on':''}" data-opt="${o.id}">
+          ${optionen.map(o => {
+            const konflikt = optionMengenoptionKonflikt(o);
+            const konfliktTitel = 'Achtung: Mengenoption aktiv UND mindestens eine Ressourcenzeilen-Formel verweist auf eine Tabellenspalte (z.B. Flaeche) - die Menge wird dadurch doppelt gezaehlt (einmal durch die Formel, einmal durch die Mengenoption). Mengenoption eignet sich nur fuer stueckbasierte Formeln, nicht fuer Formeln die bereits eine geteilte Tabellen-Summe verwenden.';
+            return `
+            <div class="opttabwrap ${o.id===activeOpt?.id?'on':''}${konflikt ? ' konflikt' : ''}" data-opt="${o.id}"${konflikt ? ` title="${escAttr(konfliktTitel)}"` : ''}>
               <button class="opttab" onclick="waehleOption('${af.id}','${o.id}')">${o.name}</button>
               <button type="button" class="opttab-caret" onclick="event.stopPropagation(); toggleOptMenu('${o.id}')">${ICON.chevronDown}</button>
               <div class="optmenu" id="optmenu-${o.id}">
@@ -2118,7 +2142,8 @@ function renderAuswahlfeld(tsId, af){
                 <button onclick="duplicateOption('${o.id}')">${ICON.copy} Duplizieren</button>
                 <button class="danger" onclick="deleteOption('${o.id}')">${ICON.trash} Löschen</button>
               </div>
-            </div>`).join('')}
+            </div>`;
+          }).join('')}
         </div>
       </div>
       ${activeOpt ? renderOption(af.id, activeOpt) : '<div class="hint">Noch keine Option vorhanden.</div>'}
