@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
   try {
     const { offerte_id, modus } = await req.json().catch(() => ({}));
     if (!offerte_id) return json({ error: 'offerte_id fehlt.' }, 400);
-    if (!['neu', 'ueberschreiben'].includes(modus)) return json({ error: 'modus muss "neu" oder "ueberschreiben" sein.' }, 400);
+    if (!['neu', 'ueberschreiben', 'status'].includes(modus)) return json({ error: 'modus muss "neu", "ueberschreiben" oder "status" sein.' }, 400);
 
     const apiKey = Deno.env.get('EASYBILL_API_KEY');
     const email = Deno.env.get('EASYBILL_EMAIL');
@@ -72,13 +72,35 @@ Deno.serve(async (req) => {
     const { data: offerte, error: offErr } = await sb
       .from('offerte')
       .select(`
-        id, titel, offertnummer, kosten_snapshot, easybill_document_id,
+        id, titel, offertnummer, kosten_snapshot, easybill_document_id, easybill_document_number,
         beschreibung_block, optionen_text_liste,
         kunde:kunde_id ( easybill_id, name )
       `)
       .eq('id', offerte_id)
       .single();
     if (offErr || !offerte) return json({ error: 'Offerte nicht gefunden.' }, 404);
+
+    // "status": kein neuer Export, sondern nur nachfragen, ob Easybill dem
+    // beim letzten Export noch nummernlosen Entwurf inzwischen eine
+    // Angebotsnummer vergeben hat (das passiert bei Easybill nicht immer
+    // sofort bei der Erstellung, siehe Beobachtung vom 2026-09-15: PDF aus
+    // Easybill zeigte "26-18527", obwohl unser gespeichertes
+    // easybill_document_number nach dem Export noch leer war). Wird von
+    // Tool A automatisch im Hintergrund aufgerufen, wenn eine Offerte mit
+    // Easybill-Verknuepfung aber ohne lokal bekannte Nummer geladen wird.
+    if (modus === 'status') {
+      if (!offerte.easybill_document_id) return json({ error: 'Für diese Offerte gibt es noch kein Easybill-Angebot.' }, 400);
+      const res = await fetch(`${EASYBILL_BASE_URL}/documents/${offerte.easybill_document_id}`, {
+        headers: { Authorization: auth },
+      });
+      const ergebnis = await res.json().catch(() => null);
+      if (!res.ok) return json({ error: `Easybill-Abfrage fehlgeschlagen: ${JSON.stringify(ergebnis)}` }, res.status);
+      const neueNummer = ergebnis?.number ?? null;
+      if (neueNummer && neueNummer !== offerte.easybill_document_number) {
+        await sb.from('offerte').update({ easybill_document_number: neueNummer }).eq('id', offerte_id);
+      }
+      return json({ document_id: offerte.easybill_document_id, document_number: neueNummer });
+    }
 
     const kunde = offerte.kunde as any;
     if (!kunde?.easybill_id) {
