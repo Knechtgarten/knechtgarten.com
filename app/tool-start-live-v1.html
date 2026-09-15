@@ -269,13 +269,13 @@ tr.typ-artikel td:first-child{border-left:2px solid #6666ff;}
       <table>
         <thead>
           <tr>
+            <th>Easybill</th>
             <th data-sort="offertnummer">Offertnr.</th>
             <th data-sort="_kunde_sort">Kunde</th>
             <th data-sort="_typ_sort">Typ</th>
             <th data-sort="titel">Titel</th>
             <th data-sort="datum">Datum</th>
             <th data-sort="_status_sort">Status</th>
-            <th>Easybill</th>
             <th data-sort="betrag_total">Betrag</th>
             <th style="width:80px;"></th>
           </tr>
@@ -598,6 +598,23 @@ async function ladeOfferten(){
     };
   });
   renderOffertenTable();
+  aktualisiereFehlendeEasybillNummern();
+}
+
+// Offerten, die zwar mit Easybill verknuepft sind (easybill_document_id),
+// aber lokal noch keine echte Angebotsnummer haben (nur die interne ID als
+// Fallback angezeigt wird) - im Hintergrund bei Easybill nachfragen, analog
+// zu aktualisiereEasybillNummerFallsFehlend() in Tool A. Laeuft still, ohne
+// die Tabelle zu blockieren; aktualisierte Zeilen werden neu gerendert,
+// sobald eine Antwort da ist.
+async function aktualisiereFehlendeEasybillNummern(){
+  const offen = ALLE_OFFERTEN.filter(o => o.easybill_document_id && !o.easybill_document_number);
+  for(const o of offen){
+    const { data, error } = await sb.functions.invoke('easybill-offerte-export', { body: { offerte_id: o.id, modus: 'status' } });
+    if(error || data?.error || !data?.document_number) continue;
+    o.easybill_document_number = data.document_number;
+    renderOffertenTable();
+  }
 }
 
 function gefilterteOfferten(){
@@ -653,13 +670,13 @@ function renderOffertenTable(){
     const modell = o.offertentyp?.berechnungsmodell;
     const typKlasse = modell === 'formel' ? 'typ-formel' : (modell === 'tagessatz' ? 'typ-tagessatz' : (modell === 'artikel' ? 'typ-artikel' : ''));
     return `<tr class="${typKlasse}">
+      <td class="easybillnrzelle">${o.easybill_document_id ? (o.easybill_document_number || ('#' + o.easybill_document_id)) : '–'}</td>
       <td class="offnrzelle">${o.offertnummer || '–'}</td>
       <td>${o._kunde_name}</td>
       <td>${o._typ_sort}</td>
       <td>${o.titel}</td>
       <td style="white-space:nowrap;">${o.datum || ''}</td>
       <td><span class="statuspill ${statusKlasse}">${o._status_sort}</span></td>
-      <td class="easybillnrzelle">${o.easybill_document_id ? (o.easybill_document_number || ('#' + o.easybill_document_id)) : '–'}</td>
       <td style="white-space:nowrap;">${fmtCHF(o.betrag_total).replace(' CHF', '')}</td>
       <td style="white-space:nowrap;">
         <a class="btn" href="${ziel}?offerte=${o.id}" style="display:inline-block;padding:2px 6px;font-size:10px;line-height:1.6;text-decoration:none;">Öffnen</a>
