@@ -1525,7 +1525,7 @@ async function ladeLogistikSammelpositionen(){
 
 async function ladeLieferwagenKonfiguration(){
   const { data, error } = await sb.from('lieferwagen_konfiguration')
-    .select('herkunft_adresse, stunden_pro_arbeitstag, stundenansatz_artikel_id, km_ansatz_artikel_id, vorarbeiter_artikel_id, vorarbeiter_poolbau_artikel_id, gartenarbeiter_artikel_id, stundenansatz_artikel:stundenansatz_artikel_id(vp_knecht, bezeichnung), km_ansatz_artikel:km_ansatz_artikel_id(vp_knecht, bezeichnung), vorarbeiter_artikel:vorarbeiter_artikel_id(vp_knecht, bezeichnung), vorarbeiter_poolbau_artikel:vorarbeiter_poolbau_artikel_id(vp_knecht, bezeichnung), gartenarbeiter_artikel:gartenarbeiter_artikel_id(vp_knecht, bezeichnung)')
+    .select('herkunft_adresse, stunden_pro_arbeitstag, mindestfahrzeit_min, stundenansatz_artikel_id, km_ansatz_artikel_id, vorarbeiter_artikel_id, vorarbeiter_poolbau_artikel_id, gartenarbeiter_artikel_id, stundenansatz_artikel:stundenansatz_artikel_id(vp_knecht, bezeichnung), km_ansatz_artikel:km_ansatz_artikel_id(vp_knecht, bezeichnung), vorarbeiter_artikel:vorarbeiter_artikel_id(vp_knecht, bezeichnung), vorarbeiter_poolbau_artikel:vorarbeiter_poolbau_artikel_id(vp_knecht, bezeichnung), gartenarbeiter_artikel:gartenarbeiter_artikel_id(vp_knecht, bezeichnung)')
     .eq('id', true).single();
   if(error){ console.error(error); return; }
   lieferwagenKonfig = {
@@ -1536,6 +1536,7 @@ async function ladeLieferwagenKonfiguration(){
     vorarbeiterPoolbauPreis: data.vorarbeiter_poolbau_artikel?.vp_knecht ?? null,
     gartenarbeiterPreis: data.gartenarbeiter_artikel?.vp_knecht ?? null,
     stundenProArbeitstag: data.stunden_pro_arbeitstag ?? null,
+    mindestfahrzeitMin: data.mindestfahrzeit_min ?? null,
     // Artikel-Identitaet (id + Bezeichnung) - wird gebraucht, um die
     // Lieferwagenfahrzeit-Betraege in genau die Personalaufwand-/Logistik-
     // Zeile einzuspeisen, die denselben Artikel verwendet (siehe
@@ -4257,7 +4258,15 @@ async function recalc(){
         $('lwFrequenzKarte').classList.add('hidden');
         return { personal: [], logistik: [] };
       }
-      const stdGerundet = rundeMenge(distanz.stdHinRueck);
+      // Mindestfahrzeit gilt PRO FAHRT (Einzelstrecke) - erst danach auf
+      // Hin+Rueck verdoppeln, sonst wuerde bei sehr kurzen Strecken (z.B.
+      // Kunde im selben Dorf) die Fahrzeit auf 0 Std runden, obwohl real
+      // immer ein Mindestaufwand pro Fahrt anfaellt.
+      const mindestStdEinweg = (lieferwagenKonfig.mindestfahrzeitMin || 0) / 60;
+      const stdHinRueckMitMindest = mindestStdEinweg > 0
+        ? Math.max(distanz.stdHinRueck / 2, mindestStdEinweg) * 2
+        : distanz.stdHinRueck;
+      const stdGerundet = rundeMenge(stdHinRueckMitMindest);
       const kmGerundet = rundeMenge(distanz.kmHinRueck);
       const stundenpreisGerundet = rundeCHF(lieferwagenKonfig.stundenpreis);
       const kmpreisGerundet = rundeCHF(lieferwagenKonfig.kmpreis);
