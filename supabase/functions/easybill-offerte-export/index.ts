@@ -81,7 +81,15 @@ async function holeEndgueltigeNummer(documentId: number, auth: string): Promise<
   const bereitsVorhanden = await holeNummer();
   if (bereitsVorhanden) return bereitsVorhanden;
   try {
-    await fetch(`${EASYBILL_BASE_URL}/documents/${documentId}/done`, { method: 'POST', headers: { Authorization: auth } });
+    // Laut easybill-API-Referenz (documentsIdDonePut) ist das ein PUT, nicht
+    // POST - die Response enthaelt bereits das aktualisierte Dokument
+    // inklusive der neu vergebenen Nummer, darum hier direkt daraus lesen
+    // statt nochmal separat nachzufragen.
+    const doneRes = await fetch(`${EASYBILL_BASE_URL}/documents/${documentId}/done`, { method: 'PUT', headers: { Authorization: auth } });
+    if (doneRes.ok) {
+      const doneErgebnis = await doneRes.json().catch(() => null);
+      if (doneErgebnis?.number) return doneErgebnis.number;
+    }
   } catch (_e) {
     // Fertigstellen fehlgeschlagen (z.B. bereits fertiggestellt, oder
     // Easybill laesst es fuer diesen Dokumenttyp/Status nicht zu) - kein
