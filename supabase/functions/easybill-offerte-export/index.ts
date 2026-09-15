@@ -10,6 +10,17 @@
 // per Easybill-API ein neues Angebot an (POST /documents) oder ueberschreibt
 // ein bereits frueher exportiertes (PUT /documents/{id}).
 //
+// Layout-Feinschliff vom 2026-09-15 (Vorgabe: soll aehnlich formatiert sein
+// wie bisherige, manuell erfasste Knechtgarten-Offerten in Easybill):
+// - Offerten-Titel wird als "title" am Dokument selbst mitgegeben (erscheint
+//   in Easybill neben der Angebotsnummer).
+// - Kategorie-Zwischentitel (Personalaufwand usw.) werden mit <b>...</b> in
+//   der description umschlossen, damit sie fett erscheinen - Easybills
+//   eigener PDF-Renderer unterstuetzt das offenbar bei TEXT-Positionen (nicht
+//   offiziell dokumentiert, aber so beobachtet). Falls das bei einem
+//   naechsten Test stattdessen die Tags woertlich anzeigt, muss das wieder
+//   raus.
+//
 // Voraussetzung: der Kunde der Offerte muss eine easybill_id haben (also aus
 // Easybill importiert/verknuepft sein) - sonst gibt es keine gueltige
 // customer_id fuer Easybill.
@@ -127,7 +138,9 @@ Deno.serve(async (req) => {
     for (const gruppe of snapshot.gruppen) {
       const zeilen = (gruppe.zeilen || []).filter((z: any) => !z.geloescht);
       if (!zeilen.length) continue;
-      items.push({ type: 'TEXT', description: gruppe.label });
+      // Fett dargestellt, wie es Easybills eigener PDF-Renderer bei <b>...</b>
+      // in der description auch fuer manuell erfasste Zwischentitel tut.
+      items.push({ type: 'TEXT', description: `<b>${gruppe.label}</b>` });
       for (const z of zeilen) {
         items.push({
           type: 'PRODUCT',
@@ -145,6 +158,7 @@ Deno.serve(async (req) => {
 
     const payload = {
       type: 'OFFER',
+      title: offerte.titel || undefined,
       customer_id: kunde.easybill_id,
       currency: 'CHF',
       items,
