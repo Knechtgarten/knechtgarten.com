@@ -20,6 +20,12 @@
 //   offiziell dokumentiert, aber so beobachtet). Falls das bei einem
 //   naechsten Test stattdessen die Tags woertlich anzeigt, muss das wieder
 //   raus.
+// - Das neu angelegte/aktualisierte Angebot wird direkt danach automatisch
+//   "fertiggestellt" (POST /documents/{id}/done, siehe holeEndgueltigeNummer
+//   unten) - Easybill vergibt sonst laut API-Doku keine Angebotsnummer
+//   (Feld "number" bleibt bei Entwuerfen leer). Nutzerentscheid vom
+//   2026-09-15: lieber sofort mit echter Nummer, als dauerhaft nur die
+//   interne Easybill-ID anzuzeigen.
 //
 // Voraussetzung: der Kunde der Offerte muss eine easybill_id haben (also aus
 // Easybill importiert/verknuepft sein) - sonst gibt es keine gueltige
@@ -57,6 +63,31 @@ function json(body: unknown, status = 200) {
 // Darstellung um (150 = CHF 1.50).
 function chfZuRappen(chf: number): number {
   return Math.round((chf || 0) * 100);
+}
+
+// Easybill vergibt einem Dokument im Entwurfsstatus laut API-Doku keine
+// Beleg-/Angebotsnummer (Feld "number" bleibt leer) - erst POST
+// /documents/{id}/done "fertigstellt" das Dokument und loest die
+// Nummernvergabe aus. Nutzerentscheid vom 2026-09-15: automatisch sofort
+// fertigstellen (statt dauerhaft Entwurf), damit in Tool A sofort die echte
+// Nummer (z.B. "26-18527") statt der internen Easybill-ID erscheint.
+async function holeEndgueltigeNummer(documentId: number, auth: string): Promise<string | null> {
+  const holeNummer = async () => {
+    const res = await fetch(`${EASYBILL_BASE_URL}/documents/${documentId}`, { headers: { Authorization: auth } });
+    if (!res.ok) return null;
+    const ergebnis = await res.json().catch(() => null);
+    return ergebnis?.number ?? null;
+  };
+  const bereitsVorhanden = await holeNummer();
+  if (bereitsVorhanden) return bereitsVorhanden;
+  try {
+    await fetch(`${EASYBILL_BASE_URL}/documents/${documentId}/done`, { method: 'POST', headers: { Authorization: auth } });
+  } catch (_e) {
+    // Fertigstellen fehlgeschlagen (z.B. bereits fertiggestellt, oder
+    // Easybill laesst es fuer diesen Dokumenttyp/Status nicht zu) - kein
+    // harter Fehler, wir zeigen dann weiterhin die interne ID als Fallback.
+  }
+  return await holeNummer();
 }
 
 Deno.serve(async (req) => {
@@ -101,12 +132,7 @@ Deno.serve(async (req) => {
     // Easybill-Verknuepfung aber ohne lokal bekannte Nummer geladen wird.
     if (modus === 'status') {
       if (!offerte.easybill_document_id) return json({ error: 'Für diese Offerte gibt es noch kein Easybill-Angebot.' }, 400);
-      const res = await fetch(`${EASYBILL_BASE_URL}/documents/${offerte.easybill_document_id}`, {
-        headers: { Authorization: auth },
-      });
-      const ergebnis = await res.json().catch(() => null);
-      if (!res.ok) return json({ error: `Easybill-Abfrage fehlgeschlagen: ${JSON.stringify(ergebnis)}` }, res.status);
-      const neueNummer = ergebnis?.number ?? null;
+      const neueNummer = await holeEndgueltigeNummer(offerte.easybill_document_id, auth);
       if (neueNummer && neueNummer !== offerte.easybill_document_number) {
         await sb.from('offerte').update({ easybill_document_number: neueNummer }).eq('id', offerte_id);
       }
@@ -178,14 +204,16 @@ Deno.serve(async (req) => {
       return json({ error: `Easybill hat den Export abgelehnt: ${JSON.stringify(ergebnis)}` }, res.status);
     }
 
+    const easybillNummer = await holeEndgueltigeNummer(ergebnis.id, auth);
+
     const { error: updateErr } = await sb.from('offerte').update({
       easybill_document_id: ergebnis.id,
-      easybill_document_number: ergebnis.number ?? null,
+      easybill_document_number: easybillNummer,
       easybill_exported_at: new Date().toISOString(),
     }).eq('id', offerte_id);
     if (updateErr) return json({ error: friendlyDbError(updateErr) }, 500);
 
-    return json({ document_id: ergebnis.id, document_number: ergebnis.number ?? null });
+    return json({ document_id: ergebnis.id, document_number: easybillNummer });
   } catch (e) {
     return json({ error: String(e) }, 500);
   }
