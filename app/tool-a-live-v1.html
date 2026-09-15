@@ -292,6 +292,13 @@ main.wrap{padding-top:48px;padding-bottom:60px;}
 .offnrbadge{font-size:12.5px;font-weight:700;color:var(--primary);background:var(--soft);
   border-radius:7px;padding:9px 14px;letter-spacing:.02em;white-space:nowrap;}
 
+.easybillwrap{display:flex;align-items:center;gap:8px;}
+.easybillnr{font-size:11px;font-weight:700;color:var(--muted);white-space:nowrap;}
+.easybillbtn{font-size:12.5px;font-weight:700;color:var(--primary);background:#fff;
+  border:1px solid var(--line);border-radius:7px;padding:8px 14px;cursor:pointer;white-space:nowrap;}
+.easybillbtn:hover{border-color:var(--primary);}
+.easybillbtn[disabled]{cursor:not-allowed;opacity:.5;}
+
 .notizbtnwrap{display:flex;flex-direction:column;gap:3px;margin-left:auto;}
 .notizopenbtn{font-size:13px;font-weight:700;color:#fff;background:var(--primary);border:none;
   border-radius:7px;padding:9px 16px;cursor:pointer;}
@@ -626,6 +633,11 @@ input[type=number]{-moz-appearance:textfield;}
         <div class="topsavewrap">
           <span class="status inline" id="saveStatusTop"></span>
           <div class="offnrwrap hidden" id="offnrWrap"><span class="offnrbadge" id="offnrBadge"></span></div>
+          <div class="easybillwrap hidden" id="easybillWrap">
+            <span class="easybillnr hidden" id="easybillNrBadge"></span>
+            <button type="button" class="easybillbtn" id="easybillExportBtn">Ins Easybill übertragen</button>
+            <span class="status inline hidden" id="easybillStatus"></span>
+          </div>
           <div class="notizbtnwrap">
             <button type="button" class="notizopenbtn" id="notizOpenBtn">Notizen + Berechnungen</button>
           </div>
@@ -635,6 +647,12 @@ input[type=number]{-moz-appearance:textfield;}
           <span>Diese Offerte wirklich löschen? Das kann nicht rückgängig gemacht werden.</span>
           <button type="button" id="delconfirmCancel">Abbrechen</button>
           <button type="button" class="danger" id="delconfirmOk">Ja, löschen</button>
+        </div>
+
+        <div class="delconfirm" id="easybillConfirm">
+          <span id="easybillConfirmText"></span>
+          <button type="button" id="easybillConfirmCancel">Abbrechen</button>
+          <button type="button" class="danger" id="easybillConfirmOk">Ja, überschreiben</button>
         </div>
 
         <div id="offerteContentWrap">
@@ -1225,6 +1243,67 @@ function renderOffertnummerBadge(){
   if(currentOffertnummer){ wrap.classList.remove('hidden'); $('offnrBadge').textContent = currentOffertnummer; }
   else{ wrap.classList.add('hidden'); }
 }
+
+// Easybill-Export: verlinkt diese Offerte mit einem Easybill-Angebot (siehe
+// easybill-offerte-export Edge Function). Nur sinnvoll fuer eine bereits
+// gespeicherte Offerte (braucht kosten_snapshot + currentOfferteId) - vor dem
+// ersten Speichern bleibt der Button darum versteckt.
+let currentEasybillDocumentId = null;
+let currentEasybillDocumentNumber = null;
+function renderEasybillWrap(){
+  const wrap = $('easybillWrap');
+  if(!currentOfferteId){ wrap.classList.add('hidden'); return; }
+  wrap.classList.remove('hidden');
+  $('easybillStatus').classList.add('hidden');
+  const badge = $('easybillNrBadge');
+  if(currentEasybillDocumentNumber){
+    badge.textContent = 'Easybill ' + currentEasybillDocumentNumber;
+    badge.classList.remove('hidden');
+    $('easybillExportBtn').textContent = 'Easybill-Angebot aktualisieren';
+  }else{
+    badge.classList.add('hidden');
+    $('easybillExportBtn').textContent = 'Ins Easybill übertragen';
+  }
+}
+// Non-2xx-Antworten der Edge Function landen bei supabase-js als error mit
+// error.context (die rohe Response) - der eigentliche Fehlertext steht erst
+// im JSON-Body davon, siehe gleiches Muster bei easybill-kunden-suche.
+async function easybillFehlerText(error){
+  let msg = error?.message || String(error);
+  try{ const body = await error.context?.json(); if(body?.error) msg = body.error; }catch(_e){}
+  return msg;
+}
+async function starteEasybillExport(modus){
+  $('easybillExportBtn').disabled = true;
+  $('easybillStatus').classList.add('hidden');
+  const { data, error } = await sb.functions.invoke('easybill-offerte-export', { body: { offerte_id: currentOfferteId, modus } });
+  $('easybillExportBtn').disabled = false;
+  if(error || data?.error){
+    const msg = data?.error || await easybillFehlerText(error);
+    $('easybillStatus').textContent = msg; $('easybillStatus').className = 'status inline err';
+    $('easybillStatus').classList.remove('hidden');
+    return;
+  }
+  currentEasybillDocumentId = data.document_id;
+  currentEasybillDocumentNumber = data.document_number;
+  renderEasybillWrap();
+  $('easybillStatus').textContent = 'Erfolgreich übertragen.'; $('easybillStatus').className = 'status inline ok';
+  $('easybillStatus').classList.remove('hidden');
+}
+$('easybillExportBtn').addEventListener('click', () => {
+  if(!currentOfferteId) return;
+  if(currentEasybillDocumentId){
+    $('easybillConfirmText').textContent = `Für diese Offerte existiert bereits ein Easybill-Angebot (Nr. ${currentEasybillDocumentNumber || currentEasybillDocumentId}). Überschreiben?`;
+    $('easybillConfirm').classList.add('show');
+  }else{
+    starteEasybillExport('neu');
+  }
+});
+$('easybillConfirmCancel').addEventListener('click', () => { $('easybillConfirm').classList.remove('show'); });
+$('easybillConfirmOk').addEventListener('click', () => {
+  $('easybillConfirm').classList.remove('show');
+  starteEasybillExport('ueberschreiben');
+});
 async function vergibOffertnummer(modell){
   const jahr = new Date().getFullYear();
   const typcode = OFFERTNUMMER_TYPCODE[modell] || '01';
@@ -2792,7 +2871,7 @@ function setMode(neu){
 
 async function ladeBestehendeOfferte(offerteId){
   const { data: offerte, error: oErr } = await sb
-    .from('offerte').select('id, titel, datum, status, notiz, offertentyp_id, lieferwagen_modus, lieferwagen_frequenz, vorarbeiter_frequenz, vorarbeiter_typ, gartenarbeiter_frequenz, zugaenglichkeit_stufe, beschreibung_block, beschreibung_manuell, optionen_text_liste, optionen_text_manuell, kosten_snapshot, offertnummer').eq('id', offerteId).single();
+    .from('offerte').select('id, titel, datum, status, notiz, offertentyp_id, lieferwagen_modus, lieferwagen_frequenz, vorarbeiter_frequenz, vorarbeiter_typ, gartenarbeiter_frequenz, zugaenglichkeit_stufe, beschreibung_block, beschreibung_manuell, optionen_text_liste, optionen_text_manuell, kosten_snapshot, offertnummer, easybill_document_id, easybill_document_number').eq('id', offerteId).single();
   if(oErr){ console.error(oErr); $saveStatus.textContent = 'Fehler beim Laden: ' + oErr.message; $saveStatus.className='status err'; return; }
 
   lieferwagenModus = offerte.lieferwagen_modus || 'zeit';
@@ -2896,6 +2975,9 @@ async function ladeBestehendeOfferte(offerteId){
   currentOfferteId = offerte.id;
   currentOffertnummer = offerte.offertnummer || null;
   renderOffertnummerBadge();
+  currentEasybillDocumentId = offerte.easybill_document_id || null;
+  currentEasybillDocumentNumber = offerte.easybill_document_number || null;
+  renderEasybillWrap();
   setMode('edit');
   renderOfferteListe();
   await recalc();
@@ -2951,6 +3033,9 @@ async function starteNeueOfferte(otId){
   $optionenTextBlock.value = '';
   currentOffertnummer = null;
   renderOffertnummerBadge();
+  currentEasybillDocumentId = null;
+  currentEasybillDocumentNumber = null;
+  renderEasybillWrap();
   const ot = OFFERTENTYPEN.find(o => o.id === otId);
   $offerteTitel.value = (ot?.name || 'Offerte') + ' - Neubau';
   $offerteDatum.value = heuteAlsDatumsstring();
@@ -3102,6 +3187,9 @@ async function speichereNeueOfferte(titelVal){
   if(oErr) throw oErr;
   currentOffertnummer = offerte.offertnummer || null;
   renderOffertnummerBadge();
+  currentEasybillDocumentId = null;
+  currentEasybillDocumentNumber = null;
+  renderEasybillWrap();
 
   if(currentBerechnungsmodell === 'tagessatz'){
     const rows = Object.entries(teilschrittTage).filter(([,tage]) => tage > 0)
