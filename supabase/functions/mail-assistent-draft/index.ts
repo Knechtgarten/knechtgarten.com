@@ -38,6 +38,11 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 }
 
+// Die Erweiterung wandelt diese einfache Markdown-Teilmenge beim Einfuegen in
+// echte Gmail-Formatierung um (fett/kursiv/Listen) - darum darf/soll die KI
+// das gezielt einsetzen, wo es dem Text wirklich hilft.
+const KG_FORMAT_HINWEIS = ' Formatierung erlaubt und wird korrekt dargestellt: **fett**, *kursiv*, "- " am Zeilenanfang fuer Aufzaehlungen, "1. " fuer nummerierte Listen - sparsam einsetzen, nur wo es dem Text wirklich hilft.';
+
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
 const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
@@ -124,11 +129,11 @@ async function modusVerfassen(body: any, modell: string) {
   if (firmendaten?.immer_verfassen) teile.push('FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten));
   if (vorlage) teile.push(`VORLAGE "${vorlage.titel}" - GENAU DIESEN TEXT WORTGETREU UEBERNEHMEN. Nur Platzhalter wie [NAME]/[PROJEKT] mit den Stichworten sinnvoll ersetzen oder offen lassen. KEINEN eigenen Text erfinden, auch nicht wenn die Vorlage kurz oder unklar wirkt:\n${vorlage.inhalt}`);
   if (body.stichworte) teile.push('STICHWORTE VOM MITARBEITER:\n' + body.stichworte);
-  teile.push('Schreibe jetzt den fertigen Mailtext. Nur den Mailtext ausgeben, keine Erklärung, keine Anführungszeichen drumherum.');
+  teile.push('Schreibe jetzt den fertigen Mailtext. Nur den Mailtext ausgeben, keine Erklärung, keine Anführungszeichen drumherum.' + KG_FORMAT_HINWEIS);
 
   const { text, tokensInput, tokensOutput } = await rufeClaudeAuf(modell, 'Du hilfst einem Gartenbau-Unternehmen (Knechtgarten), professionelle Kunden-/Geschäftsmails zu verfassen.', teile.join('\n\n'), 1500);
   await protokolliereNutzung(body.mitarbeiterEmail, 'verfassen', vorlage?.id ?? null, tokensInput, tokensOutput);
-  return json({ aktion: 'entwurf', text: text.trim(), tokensInput, tokensOutput });
+  return json({ aktion: 'entwurf', text: text.trim(), betreff: vorlage?.betreff || null, tokensInput, tokensOutput });
 }
 
 // ----------------------------------------------------------------------------
@@ -143,7 +148,7 @@ async function modusAntwortenIntern(body: any, modell: string) {
   const system = `Du bist der Mail-Assistent von Knechtgarten. Diese Nachricht kommt von einer Kollegin/einem Kollegen (intern), keine Kundenmail.
 Antworte kurz und direkt - Stichworte reichen, keine ganzen Saetze noetig. Keine Anrede-Floskeln, ausser sie passen wirklich.
 ${schreibstil?.immer_antworten && schreibstil.inhalt ? '\nSCHREIBSTIL (soweit fuer interne Mails relevant):\n' + schreibstil.inhalt : ''}
-Schreibe direkt den Antworttext. Nur den Mailtext ausgeben, keine Erklaerung, keine Anfuehrungszeichen drumherum.`;
+Schreibe direkt den Antworttext. Nur den Mailtext ausgeben, keine Erklaerung, keine Anfuehrungszeichen drumherum.${KG_FORMAT_HINWEIS}`;
 
   const { text, tokensInput, tokensOutput } = await rufeClaudeAuf(modell, system, 'INTERNE NACHRICHT:\n' + body.mailInhalt, 400);
   await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', null, tokensInput, tokensOutput);
@@ -200,12 +205,13 @@ ${projekttypenMenu || '(keine erfasst)'}
 Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Objekt (kein Text davor/danach), in einer dieser drei Formen:
 1. Direkter Entwurf möglich (Sonderfall/einfache Vorlage/Auffangfall):
 {"aktion":"entwurf","text":"<fertiger Mailtext>"}
-   Trifft eine VORLAGE zu: deren Text WORTGETREU übernehmen, nur Platzhalter wie [Datum, Uhrzeit]/[X Minuten] sinnvoll ausfüllen oder offen lassen - keinen eigenen Text erfinden, auch nicht bei kurzen/unklar wirkenden Vorlagen.
+   Trifft eine VORLAGE zu: deren Text als starke Richtschnur nehmen (Kernaussage/Entscheidung und Aufbau bleiben, das ist nicht verhandelbar), aber natürlich personalisieren - Namen der Person ansprechen, wo sinnvoll kurz auf Details aus der eingehenden Mail eingehen, Platzhalter wie [Datum, Uhrzeit]/[X Minuten] sinnvoll ausfüllen. Nicht stur wortwörtlich abschreiben, aber auch nichts an der eigentlichen Entscheidung/Aussage ändern.
 2. Eine Vorlage mit Rückfrage trifft zu:
 {"aktion":"rueckfrage","vorlageTitel":"<exakter Titel der Vorlage>"}
 3. Distanzlogik trifft zu (Kontaktanfrage):
 {"aktion":"distanzlogik","projekttyp":"<exakter Titel des Projekttyps>","kundenAdresse":"<aus der Mail extrahierte Adresse/PLZ+Ort>"}
-Wenn bei Fall 3 keine Adresse erkennbar ist, nutze stattdessen den Sonderfall "Kein Ort erkennbar" (Fall 1).`;
+Wenn bei Fall 3 keine Adresse erkennbar ist, nutze stattdessen den Sonderfall "Kein Ort erkennbar" (Fall 1).
+${KG_FORMAT_HINWEIS}`;
 
   const { text, tokensInput, tokensOutput } = await rufeClaudeAuf(modell, system, 'EINGEHENDE MAIL:\n' + body.mailInhalt, 2000);
   let entscheidung;
@@ -286,7 +292,7 @@ async function fuehreDistanzlogikAus(body: any, modell: string, entscheidung: an
   teile.push(anweisung);
   teile.push('Berücksichtige die Fahrzeit von ca. ' + minuten + ' Minuten, falls das für den Text relevant ist.');
   teile.push('EINGEHENDE MAIL:\n' + body.mailInhalt);
-  teile.push('Schreibe jetzt den fertigen Mailtext. Nur den Mailtext ausgeben, keine Erklärung.');
+  teile.push('Schreibe jetzt den fertigen Mailtext. Nur den Mailtext ausgeben, keine Erklärung.' + KG_FORMAT_HINWEIS);
 
   const { text, tokensInput, tokensOutput } = await rufeClaudeAuf(modell, 'Du hilfst einem Gartenbau-Unternehmen (Knechtgarten), professionelle Kundenmails zu verfassen.', teile.join('\n\n'), 1500);
   await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', null, tokensInputBisher + tokensInput, tokensOutputBisher + tokensOutput);
@@ -309,9 +315,9 @@ async function modusRueckfrageAntwort(body: any, modell: string) {
   const teile = [];
   if (schreibstil?.immer_antworten && schreibstil.inhalt) teile.push('SCHREIBSTIL:\n' + schreibstil.inhalt);
   if (firmendaten?.immer_antworten) teile.push('FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten));
-  teile.push(`VORLAGE - GENAU DIESEN TEXT WORTGETREU UEBERNEHMEN, nur Platzhalter wie [Datum, Uhrzeit] sinnvoll ausfüllen oder offen lassen. KEINEN eigenen Text erfinden:\n${zweig.inhalt}`);
+  teile.push(`VORLAGE - als starke Richtschnur nehmen (Kernaussage/Entscheidung und Aufbau bleiben, das ist nicht verhandelbar), aber natürlich personalisieren: Namen der Person ansprechen, wo sinnvoll kurz auf Details aus der eingehenden Mail eingehen, Platzhalter wie [Datum, Uhrzeit] sinnvoll ausfüllen. Nicht stur wortwörtlich abschreiben, aber auch nichts an der eigentlichen Entscheidung/Aussage ändern:\n${zweig.inhalt}`);
   if (body.mailInhalt) teile.push('EINGEHENDE MAIL:\n' + body.mailInhalt);
-  teile.push('Schreibe jetzt den fertigen Mailtext. Nur den Mailtext ausgeben, keine Erklärung.');
+  teile.push('Schreibe jetzt den fertigen Mailtext. Nur den Mailtext ausgeben, keine Erklärung.' + KG_FORMAT_HINWEIS);
 
   const { text, tokensInput, tokensOutput } = await rufeClaudeAuf(modell, 'Du hilfst einem Gartenbau-Unternehmen (Knechtgarten), professionelle Mails zu verfassen.', teile.join('\n\n'), 1500);
   await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', body.vorlageId, tokensInput, tokensOutput);
@@ -327,7 +333,7 @@ async function modusNachbessern(body: any, modell: string) {
   if (schreibstil?.inhalt) teile.push('SCHREIBSTIL (weiterhin einhalten):\n' + schreibstil.inhalt);
   teile.push('BISHERIGER ENTWURF:\n' + body.aktuellerEntwurf);
   teile.push('ANWEISUNG ZUR ÜBERARBEITUNG:\n' + body.anweisung);
-  teile.push('Schreibe den überarbeiteten Mailtext. Nur den Mailtext ausgeben, keine Erklärung.');
+  teile.push('Schreibe den überarbeiteten Mailtext. Nur den Mailtext ausgeben, keine Erklärung.' + KG_FORMAT_HINWEIS);
 
   const { text, tokensInput, tokensOutput } = await rufeClaudeAuf(modell, 'Du überarbeitest einen Mail-Entwurf für Knechtgarten nach einer Anweisung.', teile.join('\n\n'), 1500);
   await protokolliereNutzung(body.mitarbeiterEmail, body.richtung || 'antworten', body.vorlageId ?? null, tokensInput, tokensOutput);
@@ -341,7 +347,7 @@ async function modusNachbessern(body: any, modell: string) {
 async function modusListeVerfassen() {
   // inhalt+typ werden mitgeliefert, damit die Erweiterung platzhalterfreie
   // einfache Vorlagen direkt einfuegen kann, ganz ohne KI-Aufruf (Express).
-  const { data } = await sb.from('mailassistent_vorlage').select('id,titel,typ,inhalt').eq('richtung', 'verfassen').order('reihenfolge');
+  const { data } = await sb.from('mailassistent_vorlage').select('id,titel,typ,inhalt,betreff').eq('richtung', 'verfassen').order('reihenfolge');
   return json({ vorlagen: data || [] });
 }
 async function modusListeNachbessern() {
