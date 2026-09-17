@@ -87,6 +87,11 @@ textarea.vorgaben:focus{outline:none;border-color:var(--primary);}
 .icobtn:hover{border-color:var(--primary);color:var(--primary);background:var(--soft);}
 .icobtn.danger:hover{border-color:var(--danger);color:var(--danger);background:#FBEFEC;}
 .addvorlagebtn{margin-top:12px;}
+.addvorlagebtns{display:flex;gap:10px;flex-wrap:wrap;}
+.vorlagenebene-kopf{display:flex;align-items:center;gap:10px;margin-bottom:12px;}
+.vorlagenebene-titel{font-size:13.5px;font-weight:700;color:var(--primary);}
+.vorlagerow-dropdown{cursor:pointer;}
+.vorlagerow-dropdown:hover .titel{text-decoration:underline;}
 
 .fld{margin-bottom:12px;}
 .fld label{display:block;font-size:11px;color:var(--muted);margin-bottom:3px;}
@@ -299,8 +304,15 @@ body.buero-rolle .admin-only{display:none !important;}
       <div class="panel" id="tab-verfassen">
         <h1 class="page">Mail-Vorlagen: Verfassen</h1>
         <div class="card">
+          <div class="vorlagenebene-kopf hidden" id="verfassenEbeneKopf">
+            <button class="btn btn-ghost" id="verfassenZurueckBtn">← Zurück</button>
+            <span class="vorlagenebene-titel" id="verfassenEbeneTitel"></span>
+          </div>
           <div id="vorlagenVerfassenListe"></div>
-          <button class="btn btn-primary addvorlagebtn" id="verfassenAddBtn">+ Neue Vorlage erstellen</button>
+          <div class="addvorlagebtns">
+            <button class="btn btn-primary addvorlagebtn" id="verfassenAddBtn">+ Neue Vorlage erstellen</button>
+            <button class="btn btn-ghost addvorlagebtn" id="verfassenAddDropdownBtn">+ Neue Dropdown-Vorlage erstellen</button>
+          </div>
         </div>
       </div>
 
@@ -759,6 +771,10 @@ async function loescheMitarbeiter(id){
 // Mail-Vorlagen (Verfassen + Antworten, inkl. Rueckfrage-Typ)
 // ---------------------------------------------------------------------------
 let vorlagenCache = { verfassen: [], antworten: [] };
+// Nur bei "Verfassen" relevant: null = oberste Ebene, sonst id der gerade
+// geoeffneten Dropdown-Gruppe (Ebene 2 sieht optisch genau gleich aus wie
+// Ebene 1, ist aber auf deren Kinder gefiltert).
+let voVerfassenElternId = null;
 async function ladeVorlagen(richtung){
   const { data, error } = await sb.from('mailassistent_vorlage')
     .select('*, mailassistent_vorlage_antwort(*)')
@@ -768,6 +784,20 @@ async function ladeVorlagen(richtung){
   renderVorlagenListe(richtung);
 }
 function vorlageRowHtml(v, richtung){
+  if(v.typ === 'dropdown'){
+    const anzahl = vorlagenCache[richtung].filter(x => x.parent_id === v.id).length;
+    return `
+      <div class="vorlagerow vorlagerow-dropdown" data-open-id="${v.id}">
+        <div class="txt">
+          <div class="titelrow"><span class="titel">${esc(v.titel)}</span><span class="badge-partner">Dropdown · ${anzahl} Vorlage${anzahl === 1 ? '' : 'n'}</span></div>
+          <div class="preview">Enthält mehrere Vorlagen – zum Öffnen klicken.</div>
+        </div>
+        <div class="rowactions">
+          <button class="icobtn vo-edit" data-id="${v.id}" data-richtung="${richtung}" title="Titel bearbeiten">${ICON.edit}</button>
+          <button class="icobtn danger vo-del" data-id="${v.id}" data-richtung="${richtung}" title="Löschen">${ICON.trash}</button>
+        </div>
+      </div>`;
+  }
   let preview;
   if(v.typ === 'rueckfrage'){
     const zweige = (v.mailassistent_vorlage_antwort || []).sort((a,b)=>a.reihenfolge-b.reihenfolge);
@@ -790,14 +820,33 @@ function vorlageRowHtml(v, richtung){
 }
 function renderVorlagenListe(richtung){
   const zielId = richtung === 'verfassen' ? 'vorlagenVerfassenListe' : 'vorlagenAntwortenListe';
-  const liste = vorlagenCache[richtung];
+  const elternId = richtung === 'verfassen' ? voVerfassenElternId : null;
+  const liste = vorlagenCache[richtung].filter(v => (v.parent_id || null) === elternId);
   $(zielId).innerHTML = liste.map(v => vorlageRowHtml(v, richtung)).join('') ||
     '<p style="font-size:12px;color:var(--muted);">Noch keine Vorlagen erfasst.</p>';
-  $(zielId).querySelectorAll('.vo-edit').forEach(b => b.addEventListener('click', () => oeffneVorlageModal(b.dataset.richtung, b.dataset.id)));
-  $(zielId).querySelectorAll('.vo-del').forEach(b => b.addEventListener('click', () => loescheVorlage(b.dataset.richtung, b.dataset.id)));
+  $(zielId).querySelectorAll('.vo-edit').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); oeffneVorlageModal(b.dataset.richtung, b.dataset.id); }));
+  $(zielId).querySelectorAll('.vo-del').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); loescheVorlage(b.dataset.richtung, b.dataset.id); }));
+  $(zielId).querySelectorAll('.vorlagerow-dropdown').forEach(row => row.addEventListener('click', () => {
+    voVerfassenElternId = row.dataset.openId;
+    voSyncVerfassenEbeneUi();
+    renderVorlagenListe('verfassen');
+  }));
+  if(richtung === 'verfassen') voSyncVerfassenEbeneUi();
 }
+function voSyncVerfassenEbeneUi(){
+  const gruppe = voVerfassenElternId ? vorlagenCache.verfassen.find(x => x.id === voVerfassenElternId) : null;
+  $('verfassenEbeneKopf').classList.toggle('hidden', !gruppe);
+  $('verfassenEbeneTitel').textContent = gruppe ? gruppe.titel : '';
+  $('verfassenAddDropdownBtn').classList.toggle('hidden', !!gruppe);
+}
+$('verfassenZurueckBtn').addEventListener('click', () => {
+  voVerfassenElternId = null;
+  voSyncVerfassenEbeneUi();
+  renderVorlagenListe('verfassen');
+});
 
 let voAktuelleId = null, voAktuelleRichtung = null, voAntwortZaehler = 0;
+let voAktuellerIstDropdown = false, voAktuellerParentId = null;
 function voAntwortBlockHtml(idx, label, inhalt){
   return `
     <div class="antwortblock" data-idx="${idx}">
@@ -816,10 +865,28 @@ function voAntwortBlockAnhaengen(label, inhalt){
   block.querySelector('.vo-antwort-del').addEventListener('click', () => block.remove());
   $('voAntwortenListe').appendChild(block);
 }
-function oeffneVorlageModal(richtung, id){
+function oeffneVorlageModal(richtung, id, opts = {}){
   voAktuelleId = id || null;
   voAktuelleRichtung = richtung;
   const v = id ? vorlagenCache[richtung].find(x => x.id === id) : null;
+  voAktuellerIstDropdown = v ? v.typ === 'dropdown' : !!opts.istDropdown;
+  voAktuellerParentId = v ? (v.parent_id || null) : (opts.parentId || null);
+
+  if(voAktuellerIstDropdown){
+    $('vorlageOvlTitel').textContent = 'Dropdown-Vorlage (Gruppen-Button)';
+    $('voTitelWrap').classList.remove('hidden');
+    $('voTitelWrap').querySelector('label').textContent = 'Titel für den Button';
+    $('voTitel').value = v?.titel || '';
+    $('voBetreffWrap').classList.add('hidden');
+    $('voWannTrifftWrap').classList.add('hidden');
+    $('voTypChips').classList.add('hidden');
+    $('voInhaltWrap').classList.add('hidden');
+    $('voRueckfrageWrap').classList.add('hidden');
+    $('vorlageOvl').classList.add('show');
+    return;
+  }
+  $('voTitelWrap').querySelector('label').textContent = 'Titel';
+
   $('vorlageOvlTitel').textContent = richtung === 'verfassen' ? 'Vorlage: Verfassen' : 'Vorlage: Antworten';
   $('voTitelWrap').classList.toggle('hidden', richtung === 'verfassen');
   $('voTitel').value = v?.titel || '';
@@ -860,10 +927,34 @@ $('voTypChips').querySelectorAll('.typchip').forEach(chip => {
   });
 });
 $('voAntwortAddBtn').addEventListener('click', () => voAntwortBlockAnhaengen('', ''));
-$('verfassenAddBtn').addEventListener('click', () => oeffneVorlageModal('verfassen', null));
+$('verfassenAddBtn').addEventListener('click', () => oeffneVorlageModal('verfassen', null, { parentId: voVerfassenElternId }));
+$('verfassenAddDropdownBtn').addEventListener('click', () => oeffneVorlageModal('verfassen', null, { istDropdown: true }));
 $('antwortenAddBtn').addEventListener('click', () => oeffneVorlageModal('antworten', null));
 $('voCancelBtn').addEventListener('click', () => $('vorlageOvl').classList.remove('show'));
 $('voSaveBtn').addEventListener('click', async () => {
+  if(voAktuellerIstDropdown){
+    const titel = $('voTitel').value.trim();
+    if(!titel){ showToast('Titel ist Pflicht.', true); return; }
+    const werte = {
+      richtung: 'verfassen', titel, typ: 'dropdown',
+      inhalt: null, betreff: null, frage: null, wann_trifft_zu: null, parent_id: null,
+      aktualisiert_am: new Date().toISOString()
+    };
+    let error;
+    if(voAktuelleId){
+      ({ error } = await sb.from('mailassistent_vorlage').update(werte).eq('id', voAktuelleId));
+    } else {
+      werte.reihenfolge = vorlagenCache.verfassen.filter(x => !x.parent_id).length;
+      const res = await sb.from('mailassistent_vorlage').insert(werte).select().single();
+      error = res.error;
+    }
+    if(error){ showToast(friendlyError(error), true); return; }
+    $('vorlageOvl').classList.remove('show');
+    showToast('Gespeichert.');
+    await ladeVorlagen('verfassen');
+    return;
+  }
+
   const istVerfassen = voAktuelleRichtung === 'verfassen';
   const betreffWert = $('voBetreff').value.trim();
   const titel = istVerfassen ? betreffWert : $('voTitel').value.trim();
@@ -875,6 +966,7 @@ $('voSaveBtn').addEventListener('click', async () => {
     betreff: istVerfassen ? betreffWert : null,
     frage: typ === 'rueckfrage' ? $('voFrage').value.trim() : null,
     wann_trifft_zu: voAktuelleRichtung === 'antworten' ? $('voWannTrifft').value.trim() : null,
+    parent_id: istVerfassen ? voAktuellerParentId : null,
     aktualisiert_am: new Date().toISOString()
   };
   let vorlageId = voAktuelleId;
@@ -882,7 +974,7 @@ $('voSaveBtn').addEventListener('click', async () => {
   if(vorlageId){
     ({ error } = await sb.from('mailassistent_vorlage').update(werte).eq('id', vorlageId));
   } else {
-    werte.reihenfolge = vorlagenCache[voAktuelleRichtung].length;
+    werte.reihenfolge = vorlagenCache[voAktuelleRichtung].filter(x => (x.parent_id || null) === (werte.parent_id || null)).length;
     const res = await sb.from('mailassistent_vorlage').insert(werte).select().single();
     error = res.error; vorlageId = res.data?.id;
   }

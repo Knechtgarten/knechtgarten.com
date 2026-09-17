@@ -359,7 +359,9 @@ async function modusNachbessern(body: any, modell: string) {
 async function modusListeVerfassen() {
   // inhalt+typ werden mitgeliefert, damit die Erweiterung platzhalterfreie
   // einfache Vorlagen direkt einfuegen kann, ganz ohne KI-Aufruf (Express).
-  const { data } = await sb.from('mailassistent_vorlage').select('id,titel,typ,inhalt,betreff').eq('richtung', 'verfassen').order('reihenfolge');
+  // parent_id gruppiert mehrere Vorlagen unter einem gemeinsamen
+  // Dropdown-Button (typ='dropdown' = die Gruppe selbst, ohne eigenen Inhalt).
+  const { data } = await sb.from('mailassistent_vorlage').select('id,titel,typ,inhalt,betreff,parent_id').eq('richtung', 'verfassen').order('reihenfolge');
   return json({ vorlagen: data || [] });
 }
 async function modusListeNachbessern() {
