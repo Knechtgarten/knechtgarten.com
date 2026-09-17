@@ -80,8 +80,15 @@ async function rufeClaudeAuf(modell: string, system: string, userText: string, m
 function extrahiereJson(text: string): any {
   const start = text.indexOf('{');
   const end = text.lastIndexOf('}');
-  if (start === -1 || end === -1) throw new Error('Keine JSON-Antwort erhalten: ' + text.slice(0, 200));
-  return JSON.parse(text.slice(start, end + 1));
+  if (start === -1) throw new Error('Keine JSON-Antwort erhalten: ' + text.slice(0, 200));
+  // Kein schliessendes "}" gefunden (oder vor dem "{") - die Antwort wurde
+  // vermutlich mitten im Satz abgeschnitten (Token-Limit erreicht).
+  if (end === -1 || end < start) throw new Error('ABGESCHNITTEN');
+  try {
+    return JSON.parse(text.slice(start, end + 1));
+  } catch (e) {
+    throw new Error('ABGESCHNITTEN');
+  }
 }
 
 async function protokolliereNutzung(mitarbeiterEmail: string, richtung: string, vorlageId: string | null, tokensInput: number, tokensOutput: number) {
@@ -131,7 +138,7 @@ async function modusVerfassen(body: any, modell: string) {
   if (body.stichworte) teile.push('STICHWORTE VOM MITARBEITER:\n' + body.stichworte);
   teile.push('Schreibe jetzt den fertigen Mailtext. Nur den Mailtext ausgeben, keine Erklärung, keine Anführungszeichen drumherum.' + KG_FORMAT_HINWEIS);
 
-  const { text, tokensInput, tokensOutput } = await rufeClaudeAuf(modell, 'Du hilfst einem Gartenbau-Unternehmen (Knechtgarten), professionelle Kunden-/Geschäftsmails zu verfassen.', teile.join('\n\n'), 1500);
+  const { text, tokensInput, tokensOutput } = await rufeClaudeAuf(modell, 'Du hilfst einem Gartenbau-Unternehmen (Knechtgarten), professionelle Kunden-/Geschäftsmails zu verfassen.', teile.join('\n\n'), 2500);
   await protokolliereNutzung(body.mitarbeiterEmail, 'verfassen', vorlage?.id ?? null, tokensInput, tokensOutput);
   return json({ aktion: 'entwurf', text: text.trim(), betreff: vorlage?.betreff || null, tokensInput, tokensOutput });
 }
@@ -213,10 +220,15 @@ Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Obje
 Wenn bei Fall 3 keine Adresse erkennbar ist, nutze stattdessen den Sonderfall "Kein Ort erkennbar" (Fall 1).
 ${KG_FORMAT_HINWEIS}`;
 
-  const { text, tokensInput, tokensOutput } = await rufeClaudeAuf(modell, system, 'EINGEHENDE MAIL:\n' + body.mailInhalt, 2000);
+  const { text, tokensInput, tokensOutput } = await rufeClaudeAuf(modell, system, 'EINGEHENDE MAIL:\n' + body.mailInhalt, 3500);
   let entscheidung;
   try { entscheidung = extrahiereJson(text); }
-  catch (e) { return json({ error: 'KI-Antwort konnte nicht gelesen werden: ' + String(e) }, 502); }
+  catch (e) {
+    const abgeschnitten = String(e).includes('ABGESCHNITTEN');
+    return json({ error: abgeschnitten
+      ? 'Die Antwort wurde beim Erstellen abgeschnitten (zu lang). Bitte nochmal versuchen.'
+      : 'KI-Antwort konnte nicht gelesen werden: ' + String(e) }, 502);
+  }
 
   if (entscheidung.aktion === 'entwurf') {
     await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', null, tokensInput, tokensOutput);
@@ -294,7 +306,7 @@ async function fuehreDistanzlogikAus(body: any, modell: string, entscheidung: an
   teile.push('EINGEHENDE MAIL:\n' + body.mailInhalt);
   teile.push('Schreibe jetzt den fertigen Mailtext. Nur den Mailtext ausgeben, keine Erklärung.' + KG_FORMAT_HINWEIS);
 
-  const { text, tokensInput, tokensOutput } = await rufeClaudeAuf(modell, 'Du hilfst einem Gartenbau-Unternehmen (Knechtgarten), professionelle Kundenmails zu verfassen.', teile.join('\n\n'), 1500);
+  const { text, tokensInput, tokensOutput } = await rufeClaudeAuf(modell, 'Du hilfst einem Gartenbau-Unternehmen (Knechtgarten), professionelle Kundenmails zu verfassen.', teile.join('\n\n'), 2500);
   await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', null, tokensInputBisher + tokensInput, tokensOutputBisher + tokensOutput);
   return json({ aktion: 'entwurf', text: text.trim(), tokensInput: tokensInputBisher + tokensInput, tokensOutput: tokensOutputBisher + tokensOutput });
 }
@@ -319,7 +331,7 @@ async function modusRueckfrageAntwort(body: any, modell: string) {
   if (body.mailInhalt) teile.push('EINGEHENDE MAIL:\n' + body.mailInhalt);
   teile.push('Schreibe jetzt den fertigen Mailtext. Nur den Mailtext ausgeben, keine Erklärung.' + KG_FORMAT_HINWEIS);
 
-  const { text, tokensInput, tokensOutput } = await rufeClaudeAuf(modell, 'Du hilfst einem Gartenbau-Unternehmen (Knechtgarten), professionelle Mails zu verfassen.', teile.join('\n\n'), 1500);
+  const { text, tokensInput, tokensOutput } = await rufeClaudeAuf(modell, 'Du hilfst einem Gartenbau-Unternehmen (Knechtgarten), professionelle Mails zu verfassen.', teile.join('\n\n'), 2500);
   await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', body.vorlageId, tokensInput, tokensOutput);
   return json({ aktion: 'entwurf', text: text.trim(), tokensInput, tokensOutput });
 }
@@ -335,7 +347,7 @@ async function modusNachbessern(body: any, modell: string) {
   teile.push('ANWEISUNG ZUR ÜBERARBEITUNG:\n' + body.anweisung);
   teile.push('Schreibe den überarbeiteten Mailtext. Nur den Mailtext ausgeben, keine Erklärung.' + KG_FORMAT_HINWEIS);
 
-  const { text, tokensInput, tokensOutput } = await rufeClaudeAuf(modell, 'Du überarbeitest einen Mail-Entwurf für Knechtgarten nach einer Anweisung.', teile.join('\n\n'), 1500);
+  const { text, tokensInput, tokensOutput } = await rufeClaudeAuf(modell, 'Du überarbeitest einen Mail-Entwurf für Knechtgarten nach einer Anweisung.', teile.join('\n\n'), 2500);
   await protokolliereNutzung(body.mitarbeiterEmail, body.richtung || 'antworten', body.vorlageId ?? null, tokensInput, tokensOutput);
   return json({ aktion: 'entwurf', text: text.trim(), tokensInput, tokensOutput });
 }
