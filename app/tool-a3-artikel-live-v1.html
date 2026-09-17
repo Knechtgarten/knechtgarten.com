@@ -243,9 +243,11 @@ tr.ezrow.dragover{box-shadow:inset 0 2px 0 var(--primary);}
   background:var(--soft);border:1px solid transparent;border-radius:7px;padding:9px 11px;resize:vertical;}
 .descblock:hover{border-color:var(--line);}
 .descblock:focus{outline:none;border-color:var(--primary);background:#fff;}
-.ctotalrow-flex{display:flex;justify-content:space-between;align-items:baseline;padding:12px 0 4px;
-  font-size:15px;font-weight:800;color:var(--primary);border-top:2px solid var(--line);}
+.ctotalrow-flex{display:flex;justify-content:space-between;align-items:baseline;padding:4px 0;
+  font-size:15px;font-weight:800;color:var(--primary);}
 .ctotalrow-flex .ctotalval{text-align:right;white-space:nowrap;}
+.ctotalrow-sub{font-size:12px;font-weight:600;color:var(--muted);padding:3px 0;}
+.ctotalrow-first{border-top:2px solid var(--line);padding-top:12px;margin-top:4px;}
 
 .status{font-size:11px;color:var(--muted);margin-top:8px;}
 .status.err{color:var(--danger);}
@@ -494,6 +496,14 @@ input[type=number]{-moz-appearance:textfield;}
 
           <div class="descwrap">
             <textarea class="descblock" id="beschreibungBlock" placeholder="Beschreibung …"></textarea>
+          </div>
+          <div class="ctotalrow-flex ctotalrow-sub ctotalrow-first">
+            <span>Nettobetrag</span>
+            <span id="totalNetto">–</span>
+          </div>
+          <div class="ctotalrow-flex ctotalrow-sub">
+            <span id="mwstLabel">MwSt</span>
+            <span id="totalMwst">–</span>
           </div>
           <div class="ctotalrow-flex">
             <span id="totalLabel">Total</span>
@@ -863,6 +873,11 @@ function renderArtikelZeilenFuerKategorie(kat, tbody){
 }
 
 let letzterGrandTotal = 0;
+// Rundung wie in tool-a-live-v1.html (naechste 10 Rappen).
+const rundeCHF = n => Math.round(n * 10) / 10;
+// Fester MwSt-Satz - siehe gleiche Konstante/Begruendung in tool-a-live-v1.html.
+const MWST_SATZ_STANDARD = 8.1;
+let letzterBruttoTotal = 0;
 function renderKategorieTabellen(){
   let grand = 0;
   KAT_ORDER.forEach(kat => {
@@ -870,8 +885,15 @@ function renderKategorieTabellen(){
     tbody.innerHTML = '';
     grand += renderArtikelZeilenFuerKategorie(kat, tbody);
   });
+  grand = rundeCHF(grand);
+  const mwstBetrag = rundeCHF(grand * MWST_SATZ_STANDARD / 100);
+  const bruttoTotal = rundeCHF(grand + mwstBetrag);
   letzterGrandTotal = grand;
-  $total.textContent = fmtCHF(grand);
+  letzterBruttoTotal = bruttoTotal;
+  $('totalNetto').textContent = fmtCHF(grand);
+  $('mwstLabel').textContent = `MwSt ${MWST_SATZ_STANDARD}%`;
+  $('totalMwst').textContent = fmtCHF(mwstBetrag);
+  $total.textContent = fmtCHF(bruttoTotal);
 }
 
 async function ladeArtikelZeilen(offerteId){
@@ -1544,7 +1566,7 @@ $('vorlageKopierenOk').addEventListener('click', async () => {
       kunde_id: zielKundeId, offertentyp_id: offertentypId,
       titel: (ot?.name || 'Offerte') + ' - Neu',
       datum: heuteAlsDatumsstring(), status: 'offen', notiz: null,
-      betrag_total: letzterGrandTotal, lieferwagen_modus: 'zeit',
+      betrag_total: letzterBruttoTotal, lieferwagen_modus: 'zeit',
       beschreibung_block: null, beschreibung_manuell: false, kosten_snapshot: null, offertnummer
     }).select().single();
     if(oErr) throw oErr;
@@ -1685,7 +1707,7 @@ async function speichereNeueOfferte(titelVal){
     .insert({
       kunde_id: kundeId, offertentyp_id: offertentypId, titel: titelVal,
       datum: $offerteDatum.value || heuteAlsDatumsstring(), status: offerteStatus, notiz: notizWert(),
-      betrag_total: letzterGrandTotal, lieferwagen_modus: 'zeit',
+      betrag_total: letzterBruttoTotal, lieferwagen_modus: 'zeit',
       beschreibung_block: $beschreibungBlock.value.trim() || null, beschreibung_manuell: false,
       kosten_snapshot: null, offertnummer
     }).select().single();
@@ -1705,7 +1727,7 @@ async function speichereNeueOfferte(titelVal){
 async function speichereAenderungen(titelVal){
   const { error: oErr } = await sb.from('offerte').update({
     titel: titelVal, datum: $offerteDatum.value || heuteAlsDatumsstring(),
-    status: offerteStatus, notiz: notizWert(), betrag_total: letzterGrandTotal,
+    status: offerteStatus, notiz: notizWert(), betrag_total: letzterBruttoTotal,
     beschreibung_block: $beschreibungBlock.value.trim() || null
   }).eq('id', currentOfferteId);
   if(oErr) throw oErr;

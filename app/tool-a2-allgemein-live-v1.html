@@ -323,9 +323,11 @@ tr.ctotalrow .ctotalval{text-align:right;white-space:nowrap;}
   background:var(--soft);border:1px solid transparent;border-radius:7px;padding:9px 11px;resize:vertical;}
 .descblock:hover{border-color:var(--line);}
 .descblock:focus{outline:none;border-color:var(--primary);background:#fff;}
-.ctotalrow-flex{display:flex;justify-content:space-between;align-items:baseline;padding:12px 0 4px;
-  font-size:15px;font-weight:800;color:var(--primary);border-top:2px solid var(--line);}
+.ctotalrow-flex{display:flex;justify-content:space-between;align-items:baseline;padding:4px 0;
+  font-size:15px;font-weight:800;color:var(--primary);}
 .ctotalrow-flex .ctotalval{text-align:right;white-space:nowrap;}
+.ctotalrow-sub{font-size:12px;font-weight:600;color:var(--muted);padding:3px 0;}
+.ctotalrow-first{border-top:2px solid var(--line);padding-top:12px;margin-top:4px;}
 tr.ezrow input{border:1px solid var(--line);border-radius:6px;padding:4px 6px;font:inherit;font-size:11.5px;background:#fff;}
 tr.ezrow .ez-bez{width:100%;min-width:80px;}
 tr.ezrow .ez-menge{width:50px;text-align:right;}
@@ -636,6 +638,14 @@ input[type=number]{-moz-appearance:textfield;}
             <div class="descwrap">
               <label style="font-size:10.5px;color:var(--muted);display:block;margin-bottom:3px;">Hinweise zu gewählten Optionen</label>
               <textarea class="descblock" id="optionenTextBlock" placeholder="Wird automatisch aus den Options-Texten zusammengestellt …"></textarea>
+            </div>
+            <div class="ctotalrow-flex ctotalrow-sub ctotalrow-first">
+              <span>Nettobetrag</span>
+              <span id="totalNetto">–</span>
+            </div>
+            <div class="ctotalrow-flex ctotalrow-sub">
+              <span id="mwstLabel">MwSt</span>
+              <span id="totalMwst">–</span>
             </div>
             <div class="ctotalrow-flex">
               <span id="totalLabel">Total</span>
@@ -1147,6 +1157,9 @@ const $tagessatzInhalt = document.getElementById('tagessatzInhalt');
 
 let offerteStatus = 'offen'; // 'offen' | 'bestaetigt' | 'abgelehnt'
 let letzterGrandTotal = 0;
+// Fester MwSt-Satz - siehe gleiche Konstante/Begruendung in tool-a-live-v1.html.
+const MWST_SATZ_STANDARD = 8.1;
+let letzterBruttoTotal = 0;
 // Generation-Zaehler gegen sich ueberschneidende recalc()-Aufrufe (z.B.
 // schnelles Hin-und-Her-Klicken bei der Lieferwagenfahrzeit-Frequenz,
 // zumal jetzt auch Autosave zusaetzliche recalc()-Laeufe ausloest): jeder
@@ -2573,7 +2586,7 @@ async function speichereNeueOfferte(titelVal){
     .insert({
       kunde_id: kundeId, offertentyp_id: offertentypId, titel: titelVal,
       datum: $offerteDatum.value || heuteAlsDatumsstring(), status: offerteStatus, notiz: notizWert(),
-      betrag_total: letzterGrandTotal, lieferwagen_modus: lieferwagenModus,
+      betrag_total: letzterBruttoTotal, lieferwagen_modus: lieferwagenModus,
       lieferwagen_frequenz: lieferwagenFrequenz, vorarbeiter_frequenz: vorarbeiterFrequenz, vorarbeiter_typ: vorarbeiterTyp, gartenarbeiter_frequenz: gartenarbeiterFrequenz,
       beschreibung_block: $beschreibungBlock.value.trim() || null, beschreibung_manuell: beschreibungManuellBearbeitet,
       optionen_text_liste: $optionenTextBlock.value.trim() || null, optionen_text_manuell: optionenTextManuellBearbeitet,
@@ -2610,7 +2623,7 @@ async function speichereAenderungen(titelVal){
   const { error: oErr } = await sb.from('offerte').update({
     titel: titelVal, datum: $offerteDatum.value || heuteAlsDatumsstring(),
     status: offerteStatus, notiz: notizWert(),
-    betrag_total: letzterGrandTotal, lieferwagen_modus: lieferwagenModus,
+    betrag_total: letzterBruttoTotal, lieferwagen_modus: lieferwagenModus,
     lieferwagen_frequenz: lieferwagenFrequenz, vorarbeiter_frequenz: vorarbeiterFrequenz, vorarbeiter_typ: vorarbeiterTyp, gartenarbeiter_frequenz: gartenarbeiterFrequenz,
     beschreibung_block: $beschreibungBlock.value.trim() || null, beschreibung_manuell: beschreibungManuellBearbeitet,
     optionen_text_liste: $optionenTextBlock.value.trim() || null, optionen_text_manuell: optionenTextManuellBearbeitet,
@@ -3232,8 +3245,14 @@ async function recalc(){
     if(!optionenTextManuellBearbeitet) $optionenTextBlock.value = berechneOptionenTextListe();
 
     grandTotal = rundeCHF(grandTotal);
-    $total.textContent = fmtCHF(grandTotal);
+    const mwstBetrag = rundeCHF(grandTotal * MWST_SATZ_STANDARD / 100);
+    const bruttoTotal = rundeCHF(grandTotal + mwstBetrag);
+    $('totalNetto').textContent = fmtCHF(grandTotal);
+    $('mwstLabel').textContent = `MwSt ${MWST_SATZ_STANDARD}%`;
+    $('totalMwst').textContent = fmtCHF(mwstBetrag);
+    $total.textContent = fmtCHF(bruttoTotal);
     letzterGrandTotal = grandTotal;
+    letzterBruttoTotal = bruttoTotal;
     letzterKostenSnapshot = {
       gruppen: Object.entries(snapshotGruppen).map(([label, zeilen]) => ({ label, zeilen })),
       grandTotal
