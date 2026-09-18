@@ -247,6 +247,7 @@ body.buero-rolle .admin-only{display:none !important;}
       <a data-tab="verfassen">Mail-Vorlagen: Verfassen</a>
       <a data-tab="antworten">Mail-Vorlagen: Antworten</a>
       <a data-tab="distanz">Mail-Vorlagen: Distanz</a>
+      <a data-tab="zusatzfenster">Zusatzfenster</a>
       <a data-tab="sonderfaelle">Sonderfälle</a>
       <a data-tab="einstellungen">Einstellungen</a>
       <a data-tab="installation">Installationshinweise</a>
@@ -386,6 +387,17 @@ body.buero-rolle .admin-only{display:none !important;}
         </div>
       </div>
 
+      <!-- ZUSATZFENSTER (wiederverwendbare Bibliothek, unabhaengig von
+           einzelnen Vorlagen - siehe zfListe/oeffneZusatzfensterModal) -->
+      <div class="panel" id="tab-zusatzfenster">
+        <h1 class="page">Zusatzfenster</h1>
+        <p style="font-size:12.5px;color:var(--muted);margin:-6px 0 14px;max-width:640px;">Strukturierte Eingabemasken (z.B. Bestell-Tabellen), die in Gmail vor dem Erstellen einer Mail erscheinen. Ein Zusatzfenster kann mehreren Vorlagen zugewiesen werden (unter "Bearbeiten" bei der jeweiligen Vorlage) und liefert dafuer einen Platzhalter, der ein- oder mehrmals im Vorlagen-Text eingefuegt werden kann.</p>
+        <div class="card">
+          <div id="zfListe"></div>
+          <button class="btn btn-primary addvorlagebtn" id="zfNeuBtn">+ Neues Zusatzfenster erstellen</button>
+        </div>
+      </div>
+
       <!-- SONDERFÄLLE -->
       <div class="panel" id="tab-sonderfaelle">
         <h1 class="page">Sonderfälle</h1>
@@ -480,8 +492,12 @@ body.buero-rolle .admin-only{display:none !important;}
     </div>
     <div class="fld" id="voInhaltWrap">
       <label>Inhalt</label>
-      <button class="btn btn-ghost hidden" type="button" id="voPlatzhalterBtn" style="margin-bottom:6px;"></button>
+      <div id="voPlatzhalterBtns" class="hidden" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;"></div>
       <textarea id="voInhalt" style="min-height:180px;"></textarea>
+    </div>
+    <div class="fld hidden" id="voZusatzfensterWrap">
+      <label>Zusatzfenster zuweisen (erscheinen in Gmail gemeinsam, bevor diese Vorlage erstellt wird)</label>
+      <div id="voZusatzfensterListe"></div>
     </div>
     <div class="hidden" id="voRueckfrageWrap">
       <div class="fld"><label>Frage an mich (erscheint im Chat)</label><input id="voFrage"></div>
@@ -495,17 +511,20 @@ body.buero-rolle .admin-only{display:none !important;}
   </div>
 </div>
 
-<!-- Modal: Zusatzfenster (Typ Tabelle) - strukturierte Eingabemaske, die in
-     Gmail vor dem Erstellen einer Vorlage mit Positionsliste erscheint
-     (z.B. Bestellungen). -->
+<!-- Modal: Zusatzfenster (Typ Tabelle) - eigenstaendige, wiederverwendbare
+     Eingabemaske, die einer oder mehreren Vorlagen zugewiesen werden kann
+     (Zuweisung passiert im Vorlagen-Editor, nicht hier). -->
 <div class="ovl" id="zfOvl">
   <div class="ovlbox">
-    <h3>Zusatzfenster: Tabelle <span id="zfVorlageName" style="color:var(--muted);font-weight:500;"></span></h3>
+    <h3>Zusatzfenster: Tabelle</h3>
     <div class="fld"><label>Titel im Fenster</label><input id="zfTitel" placeholder="z.B. Bestellung laut Angebot Nr."></div>
-    <!-- Platzhalter-Feld bleibt ausgeblendet - bekommt einen technischen
-         Default ([BESTELLLISTE]); einfuegen ins Vorlagen-Inhalt geht direkt
-         ueber den "Platzhalter einfuegen"-Button im Vorlagen-Editor. -->
-    <div class="fld hidden" id="zfPlatzhalterWrap"><label>Platzhalter in der Vorlage (wird durch die ausgefüllte Liste ersetzt)</label><input id="zfPlatzhalter" placeholder="[BESTELLLISTE]"></div>
+    <div class="fld" id="zfPlatzhalterWrap">
+      <label>Platzhalter - damit fügst du dieses Zusatzfenster in beliebige Vorlagen-Texte ein (auch mehrmals)</label>
+      <div style="display:flex;gap:6px;">
+        <input id="zfPlatzhalter" readonly style="background:var(--soft);flex:1;">
+        <button class="btn btn-ghost" type="button" id="zfPlatzhalterKopierenBtn" style="flex-shrink:0;">Kopieren</button>
+      </div>
+    </div>
     <div class="fld">
       <label>Zusätzliche Spalten (neben Anzahl) - "Spalte" ist ein Dropdown mit fest hinterlegten Optionen, "Mengenspalte" ein freies Zahlenfeld mit Einheit (z.B. Meter)</label>
       <div id="zfSpaltenListe"></div>
@@ -666,7 +685,7 @@ async function pruefeAnmeldung(){
   document.body.classList.toggle('buero-rolle', aktuelleRolle !== 'admin');
 
   await Promise.all([
-    ladeSchreibstil(), ladeFirmendaten(), ladeMitarbeiter(),
+    ladeSchreibstil(), ladeFirmendaten(), ladeMitarbeiter(), ladeZusatzfensterListe(),
     ladeVorlagen('verfassen'), ladeVorlagen('antworten'),
     ladeSonderfaelle(), ladeDistanzAlles(),
     ladeNachbessernButtons(), ladeEinstellungen(), ladeNutzung()
@@ -828,26 +847,22 @@ let voVerfassenElternId = null;
 async function ladeVorlagen(richtung){
   const { data, error } = await sb.from('mailassistent_vorlage')
     .select(`*, mailassistent_vorlage_antwort(*),
-      mailassistent_zusatzfenster(*,
-        mailassistent_zusatzfenster_spalte(*, mailassistent_zusatzfenster_spalte_option(*)),
-        mailassistent_zusatzfenster_position(*))`)
+      mailassistent_vorlage_zusatzfenster(zusatzfenster_id)`)
     .eq('richtung', richtung).order('reihenfolge');
   if(error){ console.error(error); return; }
   vorlagenCache[richtung] = data || [];
   renderVorlagenListe(richtung);
 }
-// Die eingebettete 1:1-Relation liefert PostgREST je nach Erkennung als
-// Objekt oder als Array mit einem Eintrag - hier vereinheitlicht.
-function zfVon(v){
-  const zf = v.mailassistent_zusatzfenster;
-  return Array.isArray(zf) ? (zf[0] || null) : (zf || null);
+// Ids der einer Vorlage zugewiesenen Zusatzfenster (ueber die
+// Zuordnungstabelle - eine Vorlage kann mehrere haben).
+function zfIdsVon(v){
+  return (v.mailassistent_vorlage_zusatzfenster || []).map(z => z.zusatzfenster_id);
 }
 function vorlageRowHtml(v, richtung){
   const istAktiv = v.aktiv !== false;
   const aktivBtn = `<button class="icobtn vo-toggle-aktiv" data-id="${v.id}" data-richtung="${richtung}" title="${istAktiv ? 'Ausblenden (in Gmail/KI nicht mehr verfügbar)' : 'Wieder einblenden'}">${istAktiv ? ICON.eye : ICON.eyeOff}</button>`;
-  const zfBtn = (richtung === 'verfassen' && v.typ === 'einfach')
-    ? `<button class="icobtn vo-zf" data-id="${v.id}" title="Zusatzfenster verwalten">${ICON.zusatzfenster}</button>` : '';
-  const zfBadge = (richtung === 'verfassen' && zfVon(v)) ? '<span class="badge-zf">Zusatzfenster</span>' : '';
+  const zfAnzahl = richtung === 'verfassen' ? zfIdsVon(v).length : 0;
+  const zfBadge = zfAnzahl ? `<span class="badge-zf">${zfAnzahl} Zusatzfenster</span>` : '';
   if(v.typ === 'dropdown'){
     const anzahl = vorlagenCache[richtung].filter(x => x.parent_id === v.id).length;
     return `
@@ -881,7 +896,6 @@ function vorlageRowHtml(v, richtung){
       </div>
       <div class="rowactions">
         ${aktivBtn}
-        ${zfBtn}
         <button class="icobtn vo-edit" data-id="${v.id}" data-richtung="${richtung}" title="Bearbeiten">${ICON.edit}</button>
         <button class="icobtn danger vo-del" data-id="${v.id}" data-richtung="${richtung}" title="Löschen">${ICON.trash}</button>
       </div>
@@ -896,7 +910,6 @@ function renderVorlagenListe(richtung){
   $(zielId).querySelectorAll('.vo-edit').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); oeffneVorlageModal(b.dataset.richtung, b.dataset.id); }));
   $(zielId).querySelectorAll('.vo-del').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); loescheVorlage(b.dataset.richtung, b.dataset.id); }));
   $(zielId).querySelectorAll('.vo-toggle-aktiv').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); voToggleAktiv(b.dataset.richtung, b.dataset.id); }));
-  $(zielId).querySelectorAll('.vo-zf').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); oeffneZusatzfensterModal(b.dataset.id); }));
   $(zielId).querySelectorAll('.vorlagerow-dropdown').forEach(row => row.addEventListener('click', () => {
     voVerfassenElternId = row.dataset.openId;
     voSyncVerfassenEbeneUi();
@@ -1010,6 +1023,7 @@ function oeffneVorlageModal(richtung, id, opts = {}){
     $('voWannTrifftWrap').classList.add('hidden');
     $('voTypChips').classList.add('hidden');
     $('voInhaltWrap').classList.add('hidden');
+    $('voZusatzfensterWrap').classList.add('hidden');
     $('voRueckfrageWrap').classList.add('hidden');
     $('vorlageOvl').classList.add('show');
     return;
@@ -1027,14 +1041,23 @@ function oeffneVorlageModal(richtung, id, opts = {}){
   const typ = richtung === 'antworten' ? (v?.typ || 'einfach') : 'einfach';
   $('voTypChips').querySelectorAll('.typchip').forEach(c => c.classList.toggle('on', c.dataset.typ === typ));
   $('voInhalt').value = v?.inhalt || '';
-  // Hat diese Vorlage ein Zusatzfenster, braucht es dessen Platzhalter im
-  // Text - Button fuegt ihn an der Cursor-Position ein, statt ihn von Hand
-  // abtippen zu muessen.
-  const zfFuerVorlage = (richtung === 'verfassen' && v) ? zfVon(v) : null;
-  $('voPlatzhalterBtn').classList.toggle('hidden', !zfFuerVorlage);
-  if(zfFuerVorlage){
-    $('voPlatzhalterBtn').textContent = `+ Platzhalter „${zfFuerVorlage.platzhalter}" einfügen`;
-    $('voPlatzhalterBtn').dataset.platzhalter = zfFuerVorlage.platzhalter;
+
+  // Zusatzfenster: nur bei Verfassen relevant. Checkliste zeigt die ganze
+  // Bibliothek, angehakt sind die aktuell zugewiesenen; pro angehaktem
+  // Zusatzfenster ein eigener "Platzhalter einfuegen"-Button (kann mehrere
+  // geben, seit Zusatzfenster nicht mehr fix an eine Vorlage gebunden sind).
+  $('voZusatzfensterWrap').classList.toggle('hidden', richtung !== 'verfassen');
+  if(richtung === 'verfassen'){
+    const zugewiesen = v ? zfIdsVon(v) : [];
+    $('voZusatzfensterListe').innerHTML = zusatzfensterCache.length
+      ? zusatzfensterCache.map(zf => `
+        <label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:12.5px;color:var(--ink);">
+          <input type="checkbox" class="vo-zf-checkbox" value="${zf.id}" style="width:auto;margin:0;" ${zugewiesen.includes(zf.id) ? 'checked' : ''}>
+          ${esc(zf.titel)}
+        </label>`).join('')
+      : '<p style="font-size:12px;color:var(--muted);">Noch keine Zusatzfenster erfasst - siehe Menüpunkt "Zusatzfenster".</p>';
+    voAktualisierePlatzhalterBtns();
+    $('voZusatzfensterListe').querySelectorAll('.vo-zf-checkbox').forEach(cb => cb.addEventListener('change', voAktualisierePlatzhalterBtns));
   }
   voSyncTypAnzeige(typ);
   $('voAntwortenListe').innerHTML = '';
@@ -1065,14 +1088,27 @@ $('voTypChips').querySelectorAll('.typchip').forEach(chip => {
   });
 });
 $('voAntwortAddBtn').addEventListener('click', () => voAntwortBlockAnhaengen('', ''));
-$('voPlatzhalterBtn').addEventListener('click', () => {
-  const text = $('voPlatzhalterBtn').dataset.platzhalter || '';
-  const ta = $('voInhalt');
-  const start = ta.selectionStart, end = ta.selectionEnd;
-  ta.value = ta.value.slice(0, start) + text + ta.value.slice(end);
-  ta.focus();
-  ta.selectionStart = ta.selectionEnd = start + text.length;
-});
+// Ein Zusatzfenster kann nicht mehr nur eines pro Vorlage sein - darum pro
+// angehaktem Zusatzfenster ein eigener Button, der dessen Platzhalter an
+// der Cursor-Position einfuegt.
+function voAktualisierePlatzhalterBtns(){
+  const angehaktIds = Array.from($('voZusatzfensterListe').querySelectorAll('.vo-zf-checkbox:checked')).map(cb => cb.value);
+  const zfListe = zusatzfensterCache.filter(zf => angehaktIds.includes(zf.id));
+  $('voPlatzhalterBtns').classList.toggle('hidden', !zfListe.length);
+  $('voPlatzhalterBtns').innerHTML = zfListe.map(zf =>
+    `<button class="btn btn-ghost vo-platzhalter-einfuegen" type="button" data-platzhalter="${esc(zf.platzhalter)}">+ Platzhalter „${esc(zf.titel)}" einfügen</button>`
+  ).join('');
+  $('voPlatzhalterBtns').querySelectorAll('.vo-platzhalter-einfuegen').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const text = btn.dataset.platzhalter;
+      const ta = $('voInhalt');
+      const start = ta.selectionStart, end = ta.selectionEnd;
+      ta.value = ta.value.slice(0, start) + text + ta.value.slice(end);
+      ta.focus();
+      ta.selectionStart = ta.selectionEnd = start + text.length;
+    });
+  });
+}
 $('verfassenAddBtn').addEventListener('click', () => oeffneVorlageModal('verfassen', null, { parentId: voVerfassenElternId }));
 $('verfassenAddDropdownBtn').addEventListener('click', () => oeffneVorlageModal('verfassen', null, { istDropdown: true }));
 $('antwortenAddBtn').addEventListener('click', () => oeffneVorlageModal('antworten', null));
@@ -1139,6 +1175,16 @@ $('voSaveBtn').addEventListener('click', async () => {
       if(e2){ showToast(friendlyError(e2), true); return; }
     }
   }
+  if(istVerfassen){
+    // Zusatzfenster-Zuweisung komplett ersetzen statt zu diffen.
+    await sb.from('mailassistent_vorlage_zusatzfenster').delete().eq('vorlage_id', vorlageId);
+    const zfIds = Array.from($('voZusatzfensterListe').querySelectorAll('.vo-zf-checkbox:checked')).map(cb => cb.value);
+    if(zfIds.length){
+      const { error: e3 } = await sb.from('mailassistent_vorlage_zusatzfenster')
+        .insert(zfIds.map(zusatzfenster_id => ({ vorlage_id: vorlageId, zusatzfenster_id })));
+      if(e3){ showToast(friendlyError(e3), true); return; }
+    }
+  }
   $('vorlageOvl').classList.remove('show');
   showToast('Gespeichert.');
   await ladeVorlagen(voAktuelleRichtung);
@@ -1161,9 +1207,69 @@ async function loescheVorlage(richtung, id){
 }
 
 // ---------------------------------------------------------------------------
-// Zusatzfenster (Typ Tabelle) - strukturierte Eingabemaske pro Vorlage
+// Zusatzfenster (Typ Tabelle) - eigenstaendige, wiederverwendbare Bibliothek
+// von strukturierten Eingabemasken. Die Zuweisung zu Vorlagen passiert im
+// Vorlagen-Editor (mailassistent_vorlage_zusatzfenster), nicht hier.
 // ---------------------------------------------------------------------------
-let zfVorlageId = null, zfBestehendeId = null;
+let zfBestehendeId = null;
+let zusatzfensterCache = [];
+async function ladeZusatzfensterListe(){
+  const { data, error } = await sb.from('mailassistent_zusatzfenster')
+    .select(`*, mailassistent_zusatzfenster_spalte(*, mailassistent_zusatzfenster_spalte_option(*)),
+      mailassistent_zusatzfenster_position(*)`)
+    .order('erstellt_am');
+  if(error){ console.error(error); return; }
+  zusatzfensterCache = data || [];
+  renderZusatzfensterListe();
+}
+function zfRowHtml(zf){
+  const anzahlSpalten = (zf.mailassistent_zusatzfenster_spalte || []).length;
+  return `
+    <div class="vorlagerow" data-id="${zf.id}">
+      <div class="txt">
+        <div class="titelrow"><span class="titel">${esc(zf.titel)}</span></div>
+        <div class="preview">Platzhalter: <code>${esc(zf.platzhalter)}</code> · ${anzahlSpalten} Spalte${anzahlSpalten === 1 ? '' : 'n'}</div>
+      </div>
+      <div class="rowactions">
+        <button class="icobtn zf-row-edit" data-id="${zf.id}" title="Bearbeiten">${ICON.edit}</button>
+        <button class="icobtn danger zf-row-del" data-id="${zf.id}" title="Löschen">${ICON.trash}</button>
+      </div>
+    </div>`;
+}
+function renderZusatzfensterListe(){
+  $('zfListe').innerHTML = zusatzfensterCache.map(zfRowHtml).join('') ||
+    '<p style="font-size:12px;color:var(--muted);">Noch keine Zusatzfenster erfasst.</p>';
+  $('zfListe').querySelectorAll('.zf-row-edit').forEach(b => b.addEventListener('click', () => oeffneZusatzfensterModal(b.dataset.id)));
+  $('zfListe').querySelectorAll('.zf-row-del').forEach(b => b.addEventListener('click', () => loescheZusatzfensterStandalone(b.dataset.id)));
+}
+async function loescheZusatzfensterStandalone(id){
+  const { error } = await sb.from('mailassistent_zusatzfenster').delete().eq('id', id);
+  if(error){ showToast(friendlyError(error), true); return; }
+  showToast('Gelöscht.');
+  await ladeZusatzfensterListe();
+  // Zuweisungen sind per FK mitgeloescht - Vorlagen-Cache (Badge-Zahl) neu laden.
+  await Promise.all([ladeVorlagen('verfassen'), ladeVorlagen('antworten')]);
+}
+$('zfNeuBtn').addEventListener('click', () => oeffneZusatzfensterModal(null));
+$('zfPlatzhalterKopierenBtn').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText($('zfPlatzhalter').value);
+    showToast('Platzhalter kopiert.');
+  } catch(e){
+    showToast('Kopieren nicht möglich - bitte Text manuell markieren.', true);
+  }
+});
+// Slug aus dem Titel + kurze Zufalls-ID, damit der Platzhalter garantiert
+// eindeutig ist. Wird nur EINMAL beim Erstellen generiert und bleibt danach
+// stabil, auch wenn der Titel spaeter geaendert wird - sonst wuerden
+// bereits eingefuegte Platzhalter in Vorlagen ploetzlich ins Leere laufen.
+function zfGeneriereePlatzhalter(titel){
+  const slug = (titel || 'tabelle').toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/(^-+|-+$)/g, '') || 'tabelle';
+  const kurzId = (window.crypto?.randomUUID ? crypto.randomUUID() : String(Math.random())).replace(/-/g, '').slice(0, 6);
+  return `[ZF:${slug}-${kurzId}]`;
+}
 function zfListItemHtml(cls, value){
   return `<div class="zf-listitem" style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
     <input class="${cls}" value="${esc(value || '')}" placeholder="z.B. Lampe Typ 1" style="flex:1;border:1px solid var(--line);border-radius:6px;padding:6px 9px;font:inherit;font-size:12.5px;color:var(--ink);">
@@ -1242,14 +1348,11 @@ function zfVerdrahteSpalteBlock(block){
 function zfSpalteTyp(block){
   return block.dataset.typ || 'dropdown';
 }
-function oeffneZusatzfensterModal(vorlageId){
-  zfVorlageId = vorlageId;
-  const v = vorlagenCache.verfassen.find(x => x.id === vorlageId);
-  const zf = v ? zfVon(v) : null;
-  zfBestehendeId = zf?.id || null;
-  $('zfVorlageName').textContent = v ? `– „${v.titel}"` : '';
+function oeffneZusatzfensterModal(id){
+  zfBestehendeId = id || null;
+  const zf = id ? zusatzfensterCache.find(x => x.id === id) : null;
   $('zfTitel').value = zf?.titel || '';
-  $('zfPlatzhalter').value = zf?.platzhalter || '[BESTELLLISTE]';
+  $('zfPlatzhalter').value = zf?.platzhalter || '(wird beim Speichern erzeugt)';
   $('zfEigeneEingabe').checked = zf ? !!zf.erlaubt_eigene_eingabe : true;
   $('zfSpaltenListe').innerHTML = '';
   $('zfPositionenListe').innerHTML = '';
@@ -1273,12 +1376,9 @@ $('zfPositionAddBtn').addEventListener('click', () => zfAnhaengen($('zfPositione
 $('zfCancelBtn').addEventListener('click', () => $('zfOvl').classList.remove('show'));
 $('zfSaveBtn').addEventListener('click', async () => {
   const titel = $('zfTitel').value.trim();
-  // Platzhalter-Feld ist vorerst ausgeblendet - technischer Default, bis
-  // dieser Schritt (Spalten) sauber funktioniert und wir weiterfahren.
-  const platzhalter = $('zfPlatzhalter').value.trim() || '[BESTELLLISTE]';
   if(!titel){ showToast('Titel ist Pflicht.', true); return; }
   const werte = {
-    vorlage_id: zfVorlageId, typ: 'tabelle', titel, platzhalter,
+    typ: 'tabelle', titel,
     erlaubt_eigene_eingabe: $('zfEigeneEingabe').checked,
     aktualisiert_am: new Date().toISOString()
   };
@@ -1287,6 +1387,9 @@ $('zfSaveBtn').addEventListener('click', async () => {
   if(zfId){
     ({ error } = await sb.from('mailassistent_zusatzfenster').update(werte).eq('id', zfId));
   } else {
+    // Platzhalter nur beim allerersten Speichern erzeugen - bleibt danach
+    // stabil, auch wenn der Titel spaeter geaendert wird.
+    werte.platzhalter = zfGeneriereePlatzhalter(titel);
     const res = await sb.from('mailassistent_zusatzfenster').insert(werte).select().single();
     error = res.error; zfId = res.data?.id;
   }
@@ -1334,15 +1437,12 @@ $('zfSaveBtn').addEventListener('click', async () => {
   }
   $('zfOvl').classList.remove('show');
   showToast('Gespeichert.');
-  await ladeVorlagen('verfassen');
+  await ladeZusatzfensterListe();
 });
 $('zfLoeschenBtn').addEventListener('click', async () => {
   if(!zfBestehendeId) return;
-  const { error } = await sb.from('mailassistent_zusatzfenster').delete().eq('id', zfBestehendeId);
-  if(error){ showToast(friendlyError(error), true); return; }
+  await loescheZusatzfensterStandalone(zfBestehendeId);
   $('zfOvl').classList.remove('show');
-  showToast('Zusatzfenster entfernt.');
-  await ladeVorlagen('verfassen');
 });
 
 // ---------------------------------------------------------------------------
