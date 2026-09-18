@@ -1409,6 +1409,13 @@ let bereichSelectedOptions = new Set();
 // gespeicherte Eigenschaft der Offerte, geht beim Laden einer bestehenden
 // Offerte bewusst auf null (siehe ladeBestehendeOfferte()).
 let aktiveVorauswahlId = null;
+// Merkt sich die zuletzt angewendete Vorauswahl auch dann noch, wenn danach
+// manuell etwas geaendert wurde (aktiveVorauswahlId wird dabei auf null
+// gesetzt, um den Button nicht mehr als "aktiv" zu zeigen) - zusammen mit
+// vorauswahlBearbeitet die Grundlage fuer die Warnung vor Datenverlust beim
+// Wechsel auf eine andere Vorauswahl.
+let letzteVorauswahlId = null;
+let vorauswahlBearbeitet = false;
 let bereichOptionAnzahl = {};
 let bereichZugaenglichkeitStufe = 2;
 let bereichKonfigEingeklappt = false;
@@ -2349,6 +2356,8 @@ function initBereich(){
   bereichSelectedOptions = new Set();
   bereichOptionAnzahl = {};
   aktiveVorauswahlId = null;
+  letzteVorauswahlId = null;
+  vorauswahlBearbeitet = false;
   bereichZugaenglichkeitStufe = 2;
   bereichKonfigEingeklappt = false;
   bereichAfOffenState = {};
@@ -2421,25 +2430,35 @@ function renderBereich(){
     btn.addEventListener('click', () => {
       const vw = VORAUSWAHLEN.find(v => v.id === btn.dataset.vw);
       if(!vw) return;
+      // Wurde seit der letzten Vorauswahl manuell etwas geaendert (Option
+      // oder Menge), wuerde ein Klick auf einen Vorauswahl-Button diese
+      // Aenderungen stillschweigend verwerfen - vorher nachfragen.
+      if(letzteVorauswahlId && vorauswahlBearbeitet){
+        const weiter = confirm('Du hast diese Vorauswahl bereits manuell angepasst (Optionen oder Mengen geändert). Diese Änderungen gehen verloren, wenn du jetzt eine Vorauswahl anwendest. Trotzdem fortfahren?');
+        if(!weiter) return;
+      }
       if(aktiveVorauswahlId === vw.id){
         // Erneutes Anklicken der bereits aktiven Vorauswahl waehlt genau ihre
         // Optionen wieder ab - macht einen eigenen "Zuruecksetzen"-Button
         // ueberfluessig.
         vw.optionIds.forEach(id => bereichSelectedOptions.delete(id));
         aktiveVorauswahlId = null;
+        letzteVorauswahlId = null;
       }else{
-        // Beim Wechsel zuerst genau die Optionen der bisher aktiven
-        // Vorauswahl wieder abwaehlen (nicht nur die Felder, die die NEUE
-        // Vorauswahl selbst erwaehnt - sonst bleiben Optionen einer Vorauswahl
-        // haengen, die die naechste gar nicht mehr betrifft), dann die
-        // Optionen der neuen Vorauswahl setzen. Manuelle Auswahlen, die zu
-        // keiner der beiden Vorauswahlen gehoeren, bleiben unberuehrt.
-        const vorherige = VORAUSWAHLEN.find(v => v.id === aktiveVorauswahlId);
+        // Zuerst genau die Optionen der zuletzt angewendeten Vorauswahl
+        // wieder abwaehlen (nicht nur die Felder, die die NEUE Vorauswahl
+        // selbst erwaehnt - sonst bleiben Optionen einer Vorauswahl haengen,
+        // die die naechste gar nicht mehr betrifft), dann die Optionen der
+        // neuen Vorauswahl setzen. Manuelle Auswahlen, die zu keiner der
+        // beiden Vorauswahlen gehoeren, bleiben unberuehrt.
+        const vorherige = VORAUSWAHLEN.find(v => v.id === letzteVorauswahlId);
         vorherige?.optionIds.forEach(id => bereichSelectedOptions.delete(id));
         vw.optionIds.forEach(id => bereichSelectedOptions.add(id));
         Object.assign(bereichOptionAnzahl, vw.mengen || {});
         aktiveVorauswahlId = vw.id;
+        letzteVorauswahlId = vw.id;
       }
+      vorauswahlBearbeitet = false;
       renderBereich();
       recalc();
       planAutosave();
@@ -2635,6 +2654,7 @@ function renderBereich(){
         // dann soll fuer diesen Teilschritt schlicht nichts gerechnet werden).
         toggleOption(bereichSelectedOptions, af, btn.dataset.opt);
         aktiveVorauswahlId = null;
+        if(letzteVorauswahlId) vorauswahlBearbeitet = true;
         renderBereich();
         recalc();
         planAutosave();
@@ -2652,6 +2672,7 @@ function renderBereich(){
         const val = parseFloat(inp.value);
         bereichOptionAnzahl[optId] = (isNaN(val) || val < 0) ? 0 : val;
         inp.value = bereichOptionAnzahl[optId];
+        if(letzteVorauswahlId) vorauswahlBearbeitet = true;
         recalc();
       });
     });
@@ -3047,6 +3068,8 @@ async function ladeBestehendeOfferte(offerteId){
     (efNotizen || []).forEach(n => { bereichNotizMap[n.eingabefeld_id] = n.notiz; });
     bereichSelectedOptions = new Set((auswahlRows || []).map(a => a.option_id));
     aktiveVorauswahlId = null;
+    letzteVorauswahlId = null;
+    vorauswahlBearbeitet = false;
     bereichOptionAnzahl = Object.fromEntries((auswahlRows || []).map(a => [a.option_id, a.anzahl ?? 1]));
     bereichZugaenglichkeitStufe = offerte.zugaenglichkeit_stufe ?? 2;
     bereichKonfigEingeklappt = false;
