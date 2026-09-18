@@ -76,6 +76,9 @@ textarea.vorgaben:focus{outline:none;border-color:var(--primary);}
 
 .vorlagerow{display:flex;align-items:flex-start;gap:12px;padding:14px 0;border-bottom:1px solid var(--soft);}
 .vorlagerow:last-child{border-bottom:none;}
+.vorlagerow.dragging{opacity:.4;}
+.draghandle{align-self:center;flex-shrink:0;color:var(--muted);cursor:grab;display:inline-flex;}
+.draghandle:active{cursor:grabbing;}
 .vorlagerow .txt{flex:1;min-width:0;}
 .vorlagerow .titelrow{display:flex;align-items:center;gap:8px;margin-bottom:3px;}
 .vorlagerow .titel{font-size:13.5px;font-weight:700;color:var(--primary);}
@@ -555,7 +558,8 @@ const ICON = {
   edit: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
   trash: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/></svg>',
   check: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>',
-  close: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>'
+  close: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  grip: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>'
 };
 function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function showToast(message, isErr){
@@ -787,7 +791,8 @@ function vorlageRowHtml(v, richtung){
   if(v.typ === 'dropdown'){
     const anzahl = vorlagenCache[richtung].filter(x => x.parent_id === v.id).length;
     return `
-      <div class="vorlagerow vorlagerow-dropdown" data-open-id="${v.id}">
+      <div class="vorlagerow vorlagerow-dropdown" data-id="${v.id}" data-open-id="${v.id}">
+        <span class="draghandle" title="Ziehen zum Verschieben">${ICON.grip}</span>
         <div class="txt">
           <div class="titelrow"><span class="titel">${esc(v.titel)}</span><span class="badge-partner">Dropdown · ${anzahl} Vorlage${anzahl === 1 ? '' : 'n'}</span></div>
           <div class="preview">Enthält mehrere Vorlagen – zum Öffnen klicken.</div>
@@ -806,7 +811,8 @@ function vorlageRowHtml(v, richtung){
     preview = esc((v.inhalt || '').replace(/\s+/g,' ').slice(0, 110)) + '…';
   }
   return `
-    <div class="vorlagerow">
+    <div class="vorlagerow" data-id="${v.id}">
+      <span class="draghandle" title="Ziehen zum Verschieben">${ICON.grip}</span>
       <div class="txt">
         <div class="titelrow"><span class="titel">${esc(v.titel)}</span>${v.typ === 'rueckfrage' ? '<span class="badge-partner">Mit Rückfrage</span>' : ''}</div>
         ${richtung === 'antworten' ? `<div class="wanntrifft">Wann trifft das zu? <i style="color:var(--ink);font-style:normal;">${esc(v.wann_trifft_zu || '–')}</i></div>` : ''}
@@ -831,7 +837,62 @@ function renderVorlagenListe(richtung){
     voSyncVerfassenEbeneUi();
     renderVorlagenListe('verfassen');
   }));
+  voAktiviereDragDrop($(zielId), richtung);
   if(richtung === 'verfassen') voSyncVerfassenEbeneUi();
+}
+
+// Reihenfolge per Drag & Drop verschieben - wirkt sich auf "reihenfolge" in
+// der DB aus und damit direkt auf die Position der Buttons/Chips in Gmail.
+// Nur Verschieben INNERHALB der gleichen Ebene (Ebene 1 <-> Ebene 2 bzw.
+// zwischen zwei Dropdown-Gruppen ist nicht vorgesehen).
+function voAktiviereDragDrop(container, richtung){
+  let dragEl = null;
+  container.querySelectorAll(':scope > .vorlagerow').forEach(row => {
+    const griff = row.querySelector('.draghandle');
+    if(!griff) return;
+    griff.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      row.draggable = true;
+      // Falls doch kein Drag beginnt (nur ein Klick auf den Griff), das
+      // "ziehbar"-Flag wieder entfernen - sonst bliebe die ganze Zeile
+      // danach dauerhaft ziehbar.
+      const aufraeumen = () => {
+        if(!row.classList.contains('dragging')) row.draggable = false;
+        document.removeEventListener('mouseup', aufraeumen);
+      };
+      document.addEventListener('mouseup', aufraeumen);
+    });
+    griff.addEventListener('click', (e) => e.stopPropagation());
+    row.addEventListener('dragstart', (e) => {
+      dragEl = row;
+      row.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    row.addEventListener('dragend', async () => {
+      row.classList.remove('dragging');
+      row.draggable = false;
+      if(dragEl){ dragEl = null; await voSpeichereReihenfolge(container, richtung); }
+    });
+    row.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      if(!dragEl || dragEl === row) return;
+      const rect = row.getBoundingClientRect();
+      const nachDanach = (e.clientY - rect.top) > rect.height / 2;
+      container.insertBefore(dragEl, nachDanach ? row.nextSibling : row);
+    });
+  });
+}
+async function voSpeichereReihenfolge(container, richtung){
+  const ids = Array.from(container.querySelectorAll(':scope > .vorlagerow')).map(r => r.dataset.id);
+  const { error } = await sb.from('mailassistent_vorlage').upsert(
+    ids.map((id, i) => ({ id, reihenfolge: i })),
+    { onConflict: 'id' }
+  );
+  if(error){ showToast(friendlyError(error), true); await ladeVorlagen(richtung); return; }
+  ids.forEach((id, i) => {
+    const item = vorlagenCache[richtung].find(v => v.id === id);
+    if(item) item.reihenfolge = i;
+  });
 }
 function voSyncVerfassenEbeneUi(){
   const gruppe = voVerfassenElternId ? vorlagenCache.verfassen.find(x => x.id === voVerfassenElternId) : null;
