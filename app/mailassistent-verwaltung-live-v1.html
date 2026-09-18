@@ -500,12 +500,12 @@ body.buero-rolle .admin-only{display:none !important;}
     <div class="fld"><label>Titel im Fenster</label><input id="zfTitel" placeholder="z.B. Bestellung laut Angebot Nr."></div>
     <div class="fld"><label>Platzhalter in der Vorlage (wird durch die ausgefüllte Liste ersetzt)</label><input id="zfPlatzhalter" placeholder="[BESTELLLISTE]"></div>
     <div class="fld">
-      <label>Zusätzliche Spalten (neben Anzahl)</label>
+      <label>Zusätzliche Spalten (neben Anzahl) - jede erscheint in Gmail als Dropdown mit den unten hinterlegten Optionen</label>
       <div id="zfSpaltenListe"></div>
       <button class="btn btn-ghost" type="button" id="zfSpalteAddBtn" style="margin-top:2px;">+ Spalte hinzufügen</button>
     </div>
     <div class="fld">
-      <label>Positionen (jede Zeile erscheint im Fenster als eigene Wahl-Zeile)</label>
+      <label>Positionen / Artikel - jede Zeile erscheint im Fenster als eigene wählbare Zeile mit Anzahl-Feld (z.B. "Lampe Typ 1")</label>
       <div id="zfPositionenListe"></div>
       <button class="btn btn-ghost" type="button" id="zfPositionAddBtn" style="margin-top:2px;">+ Position hinzufügen</button>
     </div>
@@ -821,7 +821,7 @@ async function ladeVorlagen(richtung){
   const { data, error } = await sb.from('mailassistent_vorlage')
     .select(`*, mailassistent_vorlage_antwort(*),
       mailassistent_zusatzfenster(*,
-        mailassistent_zusatzfenster_spalte(*),
+        mailassistent_zusatzfenster_spalte(*, mailassistent_zusatzfenster_spalte_option(*)),
         mailassistent_zusatzfenster_position(*))`)
     .eq('richtung', richtung).order('reihenfolge');
   if(error){ console.error(error); return; }
@@ -1141,7 +1141,7 @@ async function loescheVorlage(richtung, id){
 let zfVorlageId = null, zfBestehendeId = null;
 function zfListItemHtml(cls, value){
   return `<div class="zf-listitem" style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
-    <input class="${cls}" value="${esc(value || '')}" style="flex:1;border:1px solid var(--line);border-radius:6px;padding:6px 9px;font:inherit;font-size:12.5px;color:var(--ink);">
+    <input class="${cls}" value="${esc(value || '')}" placeholder="z.B. Lampe Typ 1" style="flex:1;border:1px solid var(--line);border-radius:6px;padding:6px 9px;font:inherit;font-size:12.5px;color:var(--ink);">
     <button class="icobtn danger zf-item-del" type="button">${ICON.trash}</button>
   </div>`;
 }
@@ -1151,6 +1151,46 @@ function zfAnhaengen(container, cls, value){
   const el = div.firstElementChild;
   el.querySelector('.zf-item-del').addEventListener('click', () => el.remove());
   container.appendChild(el);
+}
+
+// Spalten sind komplexer als Positionen: jede Spalte hat einen Titel UND
+// eine Liste fest hinterlegter Dropdown-Optionen (in Gmail wird die Spalte
+// immer per Dropdown abgefuellt, nie per Freitext).
+function zfOptionChipHtml(wert){
+  return `<span class="zf-option-chip" data-wert="${esc(wert)}" style="background:var(--accent-blue);color:var(--primary);border-radius:10px;padding:3px 6px 3px 10px;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:5px;">${esc(wert)}<span class="zf-option-del" style="cursor:pointer;">${ICON.close}</span></span>`;
+}
+function zfSpalteBlockHtml(titel, optionen){
+  return `<div class="zf-spalte-block" style="border:1px solid var(--line);border-radius:8px;padding:9px 10px;margin-bottom:8px;">
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:7px;">
+      <input class="zf-spalte-titel" value="${esc(titel || '')}" placeholder="Spaltenname, z.B. Farbe" style="flex:1;border:1px solid var(--line);border-radius:6px;padding:6px 9px;font:inherit;font-size:12.5px;color:var(--ink);">
+      <button class="icobtn danger zf-spalte-del" type="button" title="Spalte entfernen">${ICON.trash}</button>
+    </div>
+    <div style="font-size:10.5px;color:var(--muted);margin-bottom:5px;">Dropdown-Optionen (so werden sie in Gmail zur Auswahl angeboten)</div>
+    <div class="zf-spalte-optionen" style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px;">${(optionen || []).map(zfOptionChipHtml).join('')}</div>
+    <input class="zf-spalte-neue-option" placeholder="Option eingeben und Enter drücken" style="width:100%;border:1px solid var(--line);border-radius:6px;padding:5px 8px;font:inherit;font-size:12px;box-sizing:border-box;">
+  </div>`;
+}
+function zfSpalteAnhaengen(titel, optionen){
+  const div = document.createElement('div');
+  div.innerHTML = zfSpalteBlockHtml(titel, optionen);
+  const block = div.firstElementChild;
+  zfVerdrahteSpalteBlock(block);
+  $('zfSpaltenListe').appendChild(block);
+}
+function zfVerdrahteSpalteBlock(block){
+  block.querySelector('.zf-spalte-del').addEventListener('click', () => block.remove());
+  const eingabe = block.querySelector('.zf-spalte-neue-option');
+  eingabe.addEventListener('keydown', (e) => {
+    if(e.key === 'Enter' && eingabe.value.trim()){
+      e.preventDefault();
+      const chipDiv = document.createElement('div');
+      chipDiv.innerHTML = zfOptionChipHtml(eingabe.value.trim());
+      const chip = chipDiv.firstElementChild;
+      chip.querySelector('.zf-option-del').addEventListener('click', () => chip.remove());
+      block.querySelector('.zf-spalte-optionen').appendChild(chip);
+      eingabe.value = '';
+    }
+  });
 }
 function oeffneZusatzfensterModal(vorlageId){
   zfVorlageId = vorlageId;
@@ -1164,12 +1204,15 @@ function oeffneZusatzfensterModal(vorlageId){
   $('zfPositionenListe').innerHTML = '';
   const spalten = (zf?.mailassistent_zusatzfenster_spalte || []).sort((a,b) => a.reihenfolge - b.reihenfolge);
   const positionen = (zf?.mailassistent_zusatzfenster_position || []).sort((a,b) => a.reihenfolge - b.reihenfolge);
-  spalten.forEach(s => zfAnhaengen($('zfSpaltenListe'), 'zf-spalte-input', s.titel));
+  spalten.forEach(s => {
+    const optionen = (s.mailassistent_zusatzfenster_spalte_option || []).sort((a,b) => a.reihenfolge - b.reihenfolge).map(o => o.wert);
+    zfSpalteAnhaengen(s.titel, optionen);
+  });
   positionen.forEach(p => zfAnhaengen($('zfPositionenListe'), 'zf-position-input', p.titel));
   $('zfLoeschenBtn').classList.toggle('hidden', !zfBestehendeId);
   $('zfOvl').classList.add('show');
 }
-$('zfSpalteAddBtn').addEventListener('click', () => zfAnhaengen($('zfSpaltenListe'), 'zf-spalte-input', ''));
+$('zfSpalteAddBtn').addEventListener('click', () => zfSpalteAnhaengen('', []));
 $('zfPositionAddBtn').addEventListener('click', () => zfAnhaengen($('zfPositionenListe'), 'zf-position-input', ''));
 $('zfCancelBtn').addEventListener('click', () => $('zfOvl').classList.remove('show'));
 $('zfSaveBtn').addEventListener('click', async () => {
@@ -1191,18 +1234,37 @@ $('zfSaveBtn').addEventListener('click', async () => {
   }
   if(error){ showToast(friendlyError(error), true); return; }
 
-  // Spalten/Positionen komplett ersetzen statt zu diffen - deutlich
-  // einfacher und bei dieser Groessenordnung (wenige Zeilen) unproblematisch.
+  // Spalten (inkl. Optionen) und Positionen komplett ersetzen statt zu
+  // diffen - deutlich einfacher und bei dieser Groessenordnung (wenige
+  // Zeilen) unproblematisch. Optionen haengen per FK an der Spalte und
+  // werden beim Loeschen der Spalte automatisch mitgeloescht (on delete
+  // cascade).
   await sb.from('mailassistent_zusatzfenster_spalte').delete().eq('zusatzfenster_id', zfId);
   await sb.from('mailassistent_zusatzfenster_position').delete().eq('zusatzfenster_id', zfId);
-  const spaltenWerte = Array.from($('zfSpaltenListe').querySelectorAll('.zf-spalte-input'))
-    .map((el, i) => ({ zusatzfenster_id: zfId, titel: el.value.trim(), reihenfolge: i })).filter(s => s.titel);
+
+  const spaltenBloecke = Array.from($('zfSpaltenListe').querySelectorAll('.zf-spalte-block'));
+  const spaltenWerte = spaltenBloecke.map((block, i) => ({
+    titel: block.querySelector('.zf-spalte-titel').value.trim(),
+    optionen: Array.from(block.querySelectorAll('.zf-option-chip')).map(el => el.dataset.wert),
+    reihenfolge: i
+  })).filter(s => s.titel);
+  if(spaltenWerte.length){
+    const { data: neueSpalten, error: e1 } = await sb.from('mailassistent_zusatzfenster_spalte')
+      .insert(spaltenWerte.map(s => ({ zusatzfenster_id: zfId, titel: s.titel, reihenfolge: s.reihenfolge })))
+      .select();
+    if(e1){ showToast(friendlyError(e1), true); return; }
+    const optionenWerte = [];
+    neueSpalten.forEach((row, i) => {
+      spaltenWerte[i].optionen.forEach((wert, j) => optionenWerte.push({ spalte_id: row.id, wert, reihenfolge: j }));
+    });
+    if(optionenWerte.length){
+      const { error: e1b } = await sb.from('mailassistent_zusatzfenster_spalte_option').insert(optionenWerte);
+      if(e1b){ showToast(friendlyError(e1b), true); return; }
+    }
+  }
+
   const positionenWerte = Array.from($('zfPositionenListe').querySelectorAll('.zf-position-input'))
     .map((el, i) => ({ zusatzfenster_id: zfId, titel: el.value.trim(), reihenfolge: i })).filter(p => p.titel);
-  if(spaltenWerte.length){
-    const { error: e1 } = await sb.from('mailassistent_zusatzfenster_spalte').insert(spaltenWerte);
-    if(e1){ showToast(friendlyError(e1), true); return; }
-  }
   if(positionenWerte.length){
     const { error: e2 } = await sb.from('mailassistent_zusatzfenster_position').insert(positionenWerte);
     if(e2){ showToast(friendlyError(e2), true); return; }
