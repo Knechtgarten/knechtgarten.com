@@ -394,7 +394,10 @@ body.buero-rolle .admin-only{display:none !important;}
         <p style="font-size:12.5px;color:var(--muted);margin:-6px 0 14px;max-width:640px;">Strukturierte Eingabemasken (z.B. Bestell-Tabellen), die in Gmail vor dem Erstellen einer Mail erscheinen. Ein Zusatzfenster kann mehreren Vorlagen zugewiesen werden (unter "Bearbeiten" bei der jeweiligen Vorlage) und liefert dafuer einen Platzhalter, der ein- oder mehrmals im Vorlagen-Text eingefuegt werden kann.</p>
         <div class="card">
           <div id="zfListe"></div>
-          <button class="btn btn-primary addvorlagebtn" id="zfNeuBtn">+ Neues Zusatzfenster erstellen</button>
+          <div class="addvorlagebtns">
+            <button class="btn btn-primary addvorlagebtn" id="zfNeuTabelleBtn">+ Neue Tabelle mit Auswahlmenü</button>
+            <button class="btn btn-ghost addvorlagebtn" id="zfNeuTabelleFixBtn">+ Neue Tabelle mit fixen Zeilen</button>
+          </div>
         </div>
       </div>
 
@@ -516,7 +519,7 @@ body.buero-rolle .admin-only{display:none !important;}
      (Zuweisung passiert im Vorlagen-Editor, nicht hier). -->
 <div class="ovl" id="zfOvl">
   <div class="ovlbox">
-    <h3>Zusatzfenster: Tabelle</h3>
+    <h3 id="zfOvlTitel">Zusatzfenster: Tabelle</h3>
     <div class="fld"><label>Titel im Fenster</label><input id="zfTitel" placeholder="z.B. Bestellung laut Angebot Nr."></div>
     <div class="fld" id="zfPlatzhalterWrap">
       <label>Platzhalter - damit fügst du dieses Zusatzfenster in beliebige Vorlagen-Texte ein (auch mehrmals)</label>
@@ -525,16 +528,16 @@ body.buero-rolle .admin-only{display:none !important;}
         <button class="btn btn-ghost" type="button" id="zfPlatzhalterKopierenBtn" style="flex-shrink:0;">Kopieren</button>
       </div>
     </div>
+    <div class="fld" id="zfPositionenWrap">
+      <label>Feste Positionen (z.B. "Lampe Typ 1") - jede erscheint in Gmail als eigene Zeile mit Anzahl-Feld davor</label>
+      <div id="zfPositionenListe"></div>
+      <button class="btn btn-ghost" type="button" id="zfPositionAddBtn" style="margin-top:2px;">+ Position hinzufügen</button>
+    </div>
     <div class="fld">
-      <label>Zusätzliche Spalten (neben Anzahl) - "Spalte" ist ein Dropdown mit fest hinterlegten Optionen, "Mengenspalte" ein freies Zahlenfeld mit Einheit (z.B. Meter)</label>
+      <label id="zfSpaltenLabel">Zusätzliche Spalten (neben Anzahl) - "Spalte" ist ein Dropdown mit fest hinterlegten Optionen, "Mengenspalte" ein freies Zahlenfeld mit Einheit (z.B. Meter)</label>
       <div id="zfSpaltenListe"></div>
       <button class="btn btn-ghost" type="button" id="zfSpalteAddBtn" style="margin-top:2px;">+ Spalte hinzufügen</button>
       <button class="btn btn-ghost" type="button" id="zfMengenspalteAddBtn" style="margin-top:2px;margin-left:8px;">+ Mengenspalte hinzufügen</button>
-    </div>
-    <div class="fld" id="zfPositionenWrap">
-      <label>Optional: feste Positionen (z.B. "Lampe Typ 1") - nur nötig, wenn die Spalten allein die Zeile nicht eindeutig genug beschreiben. Ohne Positionen zeigt Gmail einfach eine beliebig wachsende Liste mit den Spalten oben (z.B. wenn "Artikel" die Zeile schon ausreichend beschreibt).</label>
-      <div id="zfPositionenListe"></div>
-      <button class="btn btn-ghost" type="button" id="zfPositionAddBtn" style="margin-top:2px;">+ Position hinzufügen</button>
     </div>
     <div id="zfEigeneEingabeWrap" style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
       <input type="checkbox" id="zfEigeneEingabe" style="width:auto;margin:0;">
@@ -1222,12 +1225,13 @@ async function ladeZusatzfensterListe(){
   zusatzfensterCache = data || [];
   renderZusatzfensterListe();
 }
+const ZF_TYP_LABEL = { tabelle: 'Tabelle mit Auswahlmenü', tabelle_fix: 'Tabelle mit fixen Zeilen', kalender: 'Kalender' };
 function zfRowHtml(zf){
   const anzahlSpalten = (zf.mailassistent_zusatzfenster_spalte || []).length;
   return `
     <div class="vorlagerow" data-id="${zf.id}">
       <div class="txt">
-        <div class="titelrow"><span class="titel">${esc(zf.titel)}</span></div>
+        <div class="titelrow"><span class="titel">${esc(zf.titel)}</span><span class="badge-partner">${esc(ZF_TYP_LABEL[zf.typ] || zf.typ)}</span></div>
         <div class="preview">Platzhalter: <code>${esc(zf.platzhalter)}</code> · ${anzahlSpalten} Spalte${anzahlSpalten === 1 ? '' : 'n'}</div>
       </div>
       <div class="rowactions">
@@ -1250,7 +1254,6 @@ async function loescheZusatzfensterStandalone(id){
   // Zuweisungen sind per FK mitgeloescht - Vorlagen-Cache (Badge-Zahl) neu laden.
   await Promise.all([ladeVorlagen('verfassen'), ladeVorlagen('antworten')]);
 }
-$('zfNeuBtn').addEventListener('click', () => oeffneZusatzfensterModal(null));
 $('zfPlatzhalterKopierenBtn').addEventListener('click', async () => {
   try {
     await navigator.clipboard.writeText($('zfPlatzhalter').value);
@@ -1276,11 +1279,11 @@ function zfListItemHtml(cls, value){
     <button class="icobtn danger zf-item-del" type="button">${ICON.trash}</button>
   </div>`;
 }
-function zfAnhaengen(container, cls, value){
+function zfAnhaengen(container, cls, value, onEntfernt){
   const div = document.createElement('div');
   div.innerHTML = zfListItemHtml(cls, value);
   const el = div.firstElementChild;
-  el.querySelector('.zf-item-del').addEventListener('click', () => el.remove());
+  el.querySelector('.zf-item-del').addEventListener('click', () => { el.remove(); if(onEntfernt) onEntfernt(); });
   container.appendChild(el);
 }
 
@@ -1348,9 +1351,18 @@ function zfVerdrahteSpalteBlock(block){
 function zfSpalteTyp(block){
   return block.dataset.typ || 'dropdown';
 }
-function oeffneZusatzfensterModal(id){
+let zfAktuellerTyp = 'tabelle';
+function oeffneZusatzfensterModal(id, opts = {}){
   zfBestehendeId = id || null;
   const zf = id ? zusatzfensterCache.find(x => x.id === id) : null;
+  zfAktuellerTyp = zf?.typ || opts.typ || 'tabelle';
+  const istFix = zfAktuellerTyp === 'tabelle_fix';
+  $('zfOvlTitel').textContent = `Zusatzfenster: ${ZF_TYP_LABEL[zfAktuellerTyp] || 'Tabelle'}`;
+  $('zfPositionenWrap').classList.toggle('hidden', !istFix);
+  $('zfEigeneEingabeWrap').classList.toggle('hidden', !istFix);
+  $('zfSpaltenLabel').textContent = istFix
+    ? 'Zusätzliche Spalten (neben Anzahl und Position) - optional'
+    : 'Zusätzliche Spalten (neben Anzahl) - "Spalte" ist ein Dropdown mit fest hinterlegten Optionen, "Mengenspalte" ein freies Zahlenfeld mit Einheit (z.B. Meter)';
   $('zfTitel').value = zf?.titel || '';
   $('zfPlatzhalter').value = zf?.platzhalter || '(wird beim Speichern erzeugt)';
   $('zfEigeneEingabe').checked = zf ? !!zf.erlaubt_eigene_eingabe : true;
@@ -1370,16 +1382,23 @@ function oeffneZusatzfensterModal(id){
   $('zfLoeschenBtn').classList.toggle('hidden', !zfBestehendeId);
   $('zfOvl').classList.add('show');
 }
+$('zfNeuTabelleBtn').addEventListener('click', () => oeffneZusatzfensterModal(null, { typ: 'tabelle' }));
+$('zfNeuTabelleFixBtn').addEventListener('click', () => oeffneZusatzfensterModal(null, { typ: 'tabelle_fix' }));
 $('zfSpalteAddBtn').addEventListener('click', () => zfSpalteAnhaengen('', [], 'dropdown'));
 $('zfMengenspalteAddBtn').addEventListener('click', () => zfSpalteAnhaengen('', '', 'zahl'));
-$('zfPositionAddBtn').addEventListener('click', () => zfAnhaengen($('zfPositionenListe'), 'zf-position-input', ''));
+$('zfPositionAddBtn').addEventListener('click', () => {
+  zfAnhaengen($('zfPositionenListe'), 'zf-position-input', '');
+});
 $('zfCancelBtn').addEventListener('click', () => $('zfOvl').classList.remove('show'));
 $('zfSaveBtn').addEventListener('click', async () => {
   const titel = $('zfTitel').value.trim();
   if(!titel){ showToast('Titel ist Pflicht.', true); return; }
+  if(zfAktuellerTyp === 'tabelle_fix' && !$('zfPositionenListe').querySelector('.zf-position-input')?.value.trim()){
+    showToast('Bitte mindestens eine Position erfassen.', true); return;
+  }
   const werte = {
-    typ: 'tabelle', titel,
-    erlaubt_eigene_eingabe: $('zfEigeneEingabe').checked,
+    typ: zfAktuellerTyp, titel,
+    erlaubt_eigene_eingabe: zfAktuellerTyp === 'tabelle_fix' ? $('zfEigeneEingabe').checked : false,
     aktualisiert_am: new Date().toISOString()
   };
   let zfId = zfBestehendeId;
@@ -1429,8 +1448,10 @@ $('zfSaveBtn').addEventListener('click', async () => {
     }
   }
 
-  const positionenWerte = Array.from($('zfPositionenListe').querySelectorAll('.zf-position-input'))
-    .map((el, i) => ({ zusatzfenster_id: zfId, titel: el.value.trim(), reihenfolge: i })).filter(p => p.titel);
+  const positionenWerte = zfAktuellerTyp === 'tabelle_fix'
+    ? Array.from($('zfPositionenListe').querySelectorAll('.zf-position-input'))
+        .map((el, i) => ({ zusatzfenster_id: zfId, titel: el.value.trim(), reihenfolge: i })).filter(p => p.titel)
+    : [];
   if(positionenWerte.length){
     const { error: e2 } = await sb.from('mailassistent_zusatzfenster_position').insert(positionenWerte);
     if(e2){ showToast(friendlyError(e2), true); return; }
