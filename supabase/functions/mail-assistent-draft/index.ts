@@ -366,7 +366,7 @@ async function modusListeVerfassen() {
   // der Erweiterung, dass vor dem Erstellen erst eine oder mehrere
   // strukturierte Eingabemasken (z.B. Bestell-Tabellen) gezeigt werden
   // muessen statt sofort einzufuegen.
-  const { data } = await sb.from('mailassistent_vorlage')
+  const { data, error } = await sb.from('mailassistent_vorlage')
     .select(`id,titel,typ,inhalt,betreff,parent_id,
       mailassistent_vorlage_zusatzfenster(
         mailassistent_zusatzfenster(id,typ,titel,platzhalter,erlaubt_eigene_eingabe,
@@ -374,6 +374,7 @@ async function modusListeVerfassen() {
             mailassistent_zusatzfenster_spalte_option(id,wert,reihenfolge)),
           mailassistent_zusatzfenster_position(id,titel,reihenfolge)))`)
     .eq('richtung', 'verfassen').eq('aktiv', true).order('reihenfolge');
+  if (error) return json({ error: 'Vorlagen konnten nicht geladen werden: ' + error.message }, 500);
   return json({ vorlagen: data || [] });
 }
 async function modusListeNachbessern() {
