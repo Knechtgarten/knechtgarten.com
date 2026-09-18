@@ -903,11 +903,11 @@ input[type=number]{-moz-appearance:textfield;}
       <div id="abschnitt-vorauswahlen" class="hidden">
         <div class="card">
           <div class="cardlabel">Vorauswahlen</div>
-          <div class="hint">Eine Vorauswahl setzt in Tool A mit einem Klick automatisch alle passenden Options-Buttons - z.B. "Vorauswahl Biopool" oder "Vorauswahl Chemiepool" bei Holzdeck. Gilt nur für Formel-Offertentypen. Genau eine Vorauswahl pro Offertentyp kann als Standard markiert werden - die wird automatisch übernommen, sobald jemand eine neue Offerte dieses Typs anlegt.</div>
+          <div class="hint">Eine Vorauswahl setzt in Tool A mit einem Klick automatisch alle passenden Options-Buttons - z.B. "Vorauswahl Biopool" oder "Vorauswahl Chemiepool" bei Holzdeck. Gilt nur für Formel-Offertentypen.</div>
           <div class="fld" style="max-width:320px;"><label>Offertentyp</label><select id="vwOtSelect"></select></div>
           <table style="table-layout:fixed;margin-top:10px;">
-            <colgroup><col><col style="width:130px;"><col style="width:220px;"></colgroup>
-            <thead><tr><th>Name</th><th>Standard</th><th></th></tr></thead>
+            <colgroup><col><col style="width:120px;"></colgroup>
+            <thead><tr><th>Name</th><th></th></tr></thead>
             <tbody id="vwListeBody"></tbody>
           </table>
           <button class="btnlink" id="vwNeueBtn" style="margin-top:12px;">+ Neue Vorauswahl</button>
@@ -1078,10 +1078,10 @@ async function ladeVorauswahlListe(){
   $('vwEditorCard').classList.add('hidden');
   if(!vwSelectedOtId){ $('vwListeBody').innerHTML = '<tr><td colspan="3" class="hint">Kein Formel-Offertentyp vorhanden.</td></tr>'; return; }
   const { data, error } = await sb.from('vorauswahl')
-    .select('id,name,ist_standard,vorauswahl_option(option_id,menge)')
+    .select('id,name,vorauswahl_option(option_id,menge)')
     .eq('offertentyp_id', vwSelectedOtId).order('name');
   if(error){ console.error(error); return; }
-  VORAUSWAHL_LISTE = (data || []).map(v => ({ id: v.id, name: v.name, istStandard: v.ist_standard, optionIds: (v.vorauswahl_option || []).map(o => o.option_id), mengen: Object.fromEntries((v.vorauswahl_option || []).filter(o => o.menge != null).map(o => [o.option_id, o.menge])) }));
+  VORAUSWAHL_LISTE = (data || []).map(v => ({ id: v.id, name: v.name, optionIds: (v.vorauswahl_option || []).map(o => o.option_id), mengen: Object.fromEntries((v.vorauswahl_option || []).filter(o => o.menge != null).map(o => [o.option_id, o.menge])) }));
   renderVorauswahlListe();
 }
 
@@ -1089,30 +1089,27 @@ function renderVorauswahlListe(){
   $('vwListeBody').innerHTML = VORAUSWAHL_LISTE.map(v => `
     <tr>
       <td>${v.name}</td>
-      <td><button type="button" class="btnlink vwStandardBtn" data-vw="${v.id}"${v.istStandard ? ' style="color:#5B6100;"' : ''}>${v.istStandard ? '★ Standard' : '☆ Als Standard'}</button></td>
       <td style="text-align:right;">
-        <button type="button" class="btnlink vwBearbeitenBtn" data-vw="${v.id}">Bearbeiten</button>
-        <button type="button" class="btnlink vwLoeschenBtn" data-vw="${v.id}" style="color:var(--danger);margin-left:16px;">Löschen</button>
+        <button class="icobtn vwBearbeitenBtn" data-vw="${v.id}" title="Bearbeiten">${ICON.edit}</button>
+        <button class="icobtn vwDuplizierenBtn" data-vw="${v.id}" title="Duplizieren">${ICON.copy}</button>
+        <button class="icobtn danger vwLoeschenBtn" data-vw="${v.id}" title="Löschen">${ICON.trash}</button>
       </td>
-    </tr>`).join('') || '<tr><td colspan="3" class="hint">Noch keine Vorauswahl für diesen Offertentyp.</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="2" class="hint">Noch keine Vorauswahl für diesen Offertentyp.</td></tr>';
 
-  $('vwListeBody').querySelectorAll('.vwStandardBtn').forEach(b => b.addEventListener('click', () => setzeVorauswahlStandard(b.dataset.vw)));
   $('vwListeBody').querySelectorAll('.vwBearbeitenBtn').forEach(b => b.addEventListener('click', () => oeffneVorauswahlEditor(b.dataset.vw)));
+  $('vwListeBody').querySelectorAll('.vwDuplizierenBtn').forEach(b => b.addEventListener('click', () => duplicateVorauswahl(b.dataset.vw)));
   $('vwListeBody').querySelectorAll('.vwLoeschenBtn').forEach(b => b.addEventListener('click', () => loescheVorauswahl(b.dataset.vw)));
 }
 
-async function setzeVorauswahlStandard(id){
-  const aktuell = VORAUSWAHL_LISTE.find(v => v.id === id);
-  const neuerWert = !aktuell?.istStandard;
-  // Erst alle Vorauswahlen dieses Offertentyps auf false, dann - falls
-  // gewuenscht - genau diese hier auf true setzen. So ist zu keinem
-  // Zeitpunkt mehr als eine gleichzeitig Standard (der Unique-Index in der DB
-  // wuerde das sonst ohnehin verhindern).
-  const { error: e1 } = await sb.from('vorauswahl').update({ ist_standard: false }).eq('offertentyp_id', vwSelectedOtId);
-  if(e1){ console.error(e1); return; }
-  if(neuerWert){
-    const { error: e2 } = await sb.from('vorauswahl').update({ ist_standard: true }).eq('id', id);
-    if(e2){ console.error(e2); return; }
+async function duplicateVorauswahl(id){
+  const vorlage = VORAUSWAHL_LISTE.find(v => v.id === id);
+  if(!vorlage) return;
+  const { data, error } = await sb.from('vorauswahl').insert({ offertentyp_id: vwSelectedOtId, name: vorlage.name + ' (Kopie)' }).select().single();
+  if(error){ showToast(friendlyError(error), true); return; }
+  if(vorlage.optionIds.length){
+    const rows = vorlage.optionIds.map(optId => ({ vorauswahl_id: data.id, option_id: optId, menge: vorlage.mengen[optId] ?? null }));
+    const { error: insErr } = await sb.from('vorauswahl_option').insert(rows);
+    if(insErr){ showToast(friendlyError(insErr), true); return; }
   }
   await ladeVorauswahlListe();
 }
