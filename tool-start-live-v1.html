@@ -539,7 +539,15 @@ let KUNDEN_MIT_OFFERTEN = [];
 let kpanelFilterId = null;
 
 async function ladeKundenPanel(){
-  const { data: offerten, error: oErr } = await sb.from('offerte').select('kunde_id, erstellt_am');
+  // .order() + explizite .range() - ohne beides kappt Supabase/PostgREST
+  // Antworten ab 1000 Zeilen, und ohne Sortierung waere unbestimmt, welche
+  // Offerten fehlen - mit Sortierung nach erstellt_am (neueste zuerst)
+  // bleiben im Zweifel wenigstens die aktuellsten erhalten. Siehe Fix in
+  // tool-c-live-v1.html fuer den Hintergrund dazu.
+  const { data: offerten, error: oErr } = await sb.from('offerte')
+    .select('kunde_id, erstellt_am')
+    .order('erstellt_am', { ascending: false })
+    .range(0, 9999);
   if(oErr){ $('kpanelStatus').textContent = 'Fehler: ' + oErr.message; $('kpanelStatus').className = 'status err'; return; }
   const letzteProKunde = {};
   (offerten || []).forEach(o => {
@@ -589,9 +597,14 @@ let offSortCol = 'datum';
 let offSortDir = -1;
 
 async function ladeOfferten(){
+  // Explizite .range() - ohne sie kappt Supabase/PostgREST Antworten ab 1000
+  // Zeilen; mit der schon bestehenden Sortierung (neueste zuerst) bleiben im
+  // Zweifel wenigstens die aktuellsten Offerten erhalten statt zufaellig
+  // irgendwelche zu verlieren. Siehe Fix in tool-c-live-v1.html.
   const { data, error } = await sb.from('offerte')
     .select('id, titel, datum, status, betrag_total, kunde_id, offertnummer, offertentyp(name, berechnungsmodell), easybill_document_id, easybill_document_number')
-    .order('datum', { ascending:false });
+    .order('datum', { ascending:false })
+    .range(0, 9999);
   if(error){ $('offertenStatus').textContent = 'Fehler beim Laden: ' + error.message; $('offertenStatus').className = 'status err'; return; }
 
   const kundeIds = [...new Set(data.map(o => o.kunde_id).filter(Boolean))];
@@ -736,7 +749,10 @@ let kwSortDir = 1;
 let kwSuchtext = '';
 
 async function ladeKwKunden(){
-  const { data, error } = await sb.from('kunde').select('id,name,firma,nachname,vorname,strasse,plz,ort').order('name');
+  // Explizite .range() - vorsorglich, analog zum Artikelstamm-Fix (siehe
+  // tool-c-live-v1.html): waechst die Kundenliste ueber 1000, wuerde
+  // Supabase/PostgREST sonst unbemerkt kappen.
+  const { data, error } = await sb.from('kunde').select('id,name,firma,nachname,vorname,strasse,plz,ort').order('name').range(0, 9999);
   if(error){ $('kwStatus').textContent = 'Fehler: ' + error.message; $('kwStatus').className = 'status err'; return; }
   KW_KUNDEN = data;
   KW_KUNDEN.forEach(k => { k._name_sort = anzeigename(k); });
