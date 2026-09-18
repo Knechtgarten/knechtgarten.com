@@ -329,6 +329,7 @@ async function modusRueckfrageAntwort(body: any, modell: string) {
   if (firmendaten?.immer_antworten) teile.push('FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten));
   teile.push(`VORLAGE - als starke Richtschnur nehmen (Kernaussage/Entscheidung und Aufbau bleiben, das ist nicht verhandelbar), aber natürlich personalisieren: Namen der Person ansprechen, wo sinnvoll kurz auf Details aus der eingehenden Mail eingehen, Platzhalter wie [Datum, Uhrzeit] sinnvoll ausfüllen. Nicht stur wortwörtlich abschreiben, aber auch nichts an der eigentlichen Entscheidung/Aussage ändern:\n${zweig.inhalt}`);
   if (body.mailInhalt) teile.push('EINGEHENDE MAIL:\n' + body.mailInhalt);
+  if (body.anweisung) teile.push('ZUSAETZLICHE ANWEISUNG: ' + body.anweisung);
   teile.push('Schreibe jetzt den fertigen Mailtext. Nur den Mailtext ausgeben, keine Erklärung.' + KG_FORMAT_HINWEIS);
 
   const { text, tokensInput, tokensOutput } = await rufeClaudeAuf(modell, 'Du hilfst einem Gartenbau-Unternehmen (Knechtgarten), professionelle Mails zu verfassen.', teile.join('\n\n'), 2500);
