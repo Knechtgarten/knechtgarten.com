@@ -419,32 +419,45 @@ function bestScore(felder, suchtext){
   return Math.min(...felder.map(f => feldScore(f, suchtext)));
 }
 
-async function loadKunden(){
-  // Explizite .range() bei beiden Abfragen - ohne sie kappt Supabase/
-  // PostgREST Antworten ab 1000 Zeilen; mit der schon bestehenden
-  // Sortierung bleiben im Zweifel die relevantesten Zeilen erhalten statt
-  // zufaellig irgendwelche zu verlieren. Siehe Fix in tool-c-live-v1.html.
+// Kunde-Liste und Offerten-pro-Kunde getrennt, statt wie frueher immer
+// zusammen als eine loadKunden(): ein Kunde speichern/loeschen/verknuepfen
+// aendert nie etwas an den Offerten selbst - dafuer die ganze offerte-
+// Tabelle jedesmal neu zu laden war unnoetig teuer. loadKunden() (unten)
+// bleibt fuer den Erststart bestehen, wo wirklich beides gebraucht wird.
+async function ladeOffertenProKunde(){
+  const { data: offerten, error } = await sb
+    .from('offerte')
+    .select('id, kunde_id, titel, datum, status, betrag_total, offertentyp(name, berechnungsmodell)')
+    .order('datum', { ascending:false })
+    .range(0, 9999);
+  if(error){ $('kundenStatus').textContent = 'Fehler beim Laden: ' + error.message; $('kundenStatus').className = 'status err'; return; }
+  OFFERTEN_PRO_KUNDE = {};
+  (offerten || []).forEach(o => {
+    (OFFERTEN_PRO_KUNDE[o.kunde_id] = OFFERTEN_PRO_KUNDE[o.kunde_id] || []).push(o);
+  });
+}
+
+async function ladeKundenListe(){
+  // Explizite .range() - ohne sie kappt Supabase/PostgREST Antworten ab
+  // 1000 Zeilen; mit der schon bestehenden Sortierung bleiben im Zweifel
+  // die relevantesten Zeilen erhalten statt zufaellig irgendwelche zu
+  // verlieren. Siehe Fix in tool-c-live-v1.html.
   const { data, error } = await sb.from('kunde')
     .select('id,name,plz,adresse,easybill_id,kundennummer,firma,anrede,vorname,nachname,zusatz1,zusatz2,strasse,ort,land,kontaktdaten,lieferanschrift')
     .order('name')
     .range(0, 9999);
   if(error){ $('kundenStatus').textContent = 'Fehler beim Laden: ' + error.message; $('kundenStatus').className = 'status err'; return; }
   KUNDEN = data;
-  KUNDEN.forEach(k => { k._name_sort = anzeigename(k); });
+  KUNDEN.forEach(k => { k._name_sort = anzeigename(k); k.offerten_count = (OFFERTEN_PRO_KUNDE[k.id] || []).length; });
+  renderKundenTable();
+}
 
-  const { data: offerten, error: oErr } = await sb
-    .from('offerte')
-    .select('id, kunde_id, titel, datum, status, betrag_total, offertentyp(name, berechnungsmodell)')
-    .order('datum', { ascending:false })
-    .range(0, 9999);
-  if(oErr){ $('kundenStatus').textContent = 'Fehler beim Laden: ' + oErr.message; $('kundenStatus').className = 'status err'; return; }
-
-  OFFERTEN_PRO_KUNDE = {};
-  (offerten || []).forEach(o => {
-    (OFFERTEN_PRO_KUNDE[o.kunde_id] = OFFERTEN_PRO_KUNDE[o.kunde_id] || []).push(o);
-  });
+// Fuer den Erststart: beides parallel, danach offerten_count nochmal
+// nachziehen (falls ladeKundenListe() vor ladeOffertenProKunde() fertig war
+// und deshalb noch mit dem alten - leeren - Stand gerechnet hat).
+async function loadKunden(){
+  await Promise.all([ladeKundenListe(), ladeOffertenProKunde()]);
   KUNDEN.forEach(k => { k.offerten_count = (OFFERTEN_PRO_KUNDE[k.id] || []).length; });
-
   renderKundenTable();
 }
 
@@ -567,7 +580,7 @@ async function loescheKunde(k){
   const { error } = await sb.from('kunde').delete().eq('id', k.id);
   if(error){ showToast(friendlyError(error), true); return; }
   showToast('Kunde gelöscht.');
-  await loadKunden();
+  await ladeKundenListe();
 }
 
 document.querySelectorAll('th[data-sort]').forEach(th => {
@@ -699,7 +712,7 @@ $('kmSave').addEventListener('click', async () => {
   if(error){ $('kmStatus').textContent = 'Fehler: ' + error.message; $('kmStatus').className = 'status err'; return; }
   $('kundeModalOvl').classList.remove('show');
   showToast(kmEditId ? 'Kunde gespeichert.' : 'Kunde angelegt.');
-  await loadKunden();
+  await ladeKundenListe();
 });
 
 // ---------------------------------------------------------------------------
@@ -780,7 +793,7 @@ async function uebernehmeEasybillKunde(kundeId, ek){
   if(error){ showToast(friendlyError(error), true); return; }
   $('kundeVerknuepfenOvl').classList.remove('show');
   showToast(kundeId ? 'Kunde mit Easybill verknüpft.' : 'Kunde importiert.');
-  await loadKunden();
+  await ladeKundenListe();
 }
 
 async function init(){
