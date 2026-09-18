@@ -80,6 +80,8 @@ textarea.vorgaben:focus{outline:none;border-color:var(--primary);}
 .vorlagerow-inaktiv{opacity:.5;}
 .badge-inaktiv{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.02em;
   background:var(--soft);color:var(--muted);border-radius:4px;padding:2px 7px;white-space:nowrap;}
+.badge-zf{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.02em;
+  background:#F5F8E8;color:#6b7a1a;border-radius:4px;padding:2px 7px;white-space:nowrap;}
 .draghandle{align-self:center;flex-shrink:0;color:var(--muted);cursor:grab;display:inline-flex;}
 .draghandle:active{cursor:grabbing;}
 .vorlagerow .txt{flex:1;min-width:0;}
@@ -489,6 +491,36 @@ body.buero-rolle .admin-only{display:none !important;}
   </div>
 </div>
 
+<!-- Modal: Zusatzfenster (Typ Tabelle) - strukturierte Eingabemaske, die in
+     Gmail vor dem Erstellen einer Vorlage mit Positionsliste erscheint
+     (z.B. Bestellungen). -->
+<div class="ovl" id="zfOvl">
+  <div class="ovlbox">
+    <h3>Zusatzfenster: Tabelle</h3>
+    <div class="fld"><label>Titel im Fenster</label><input id="zfTitel" placeholder="z.B. Bestellung laut Angebot Nr."></div>
+    <div class="fld"><label>Platzhalter in der Vorlage (wird durch die ausgefüllte Liste ersetzt)</label><input id="zfPlatzhalter" placeholder="[BESTELLLISTE]"></div>
+    <div class="fld">
+      <label>Zusätzliche Spalten (neben Anzahl)</label>
+      <div id="zfSpaltenListe"></div>
+      <button class="btn btn-ghost" type="button" id="zfSpalteAddBtn" style="margin-top:2px;">+ Spalte hinzufügen</button>
+    </div>
+    <div class="fld">
+      <label>Positionen (jede Zeile erscheint im Fenster als eigene Wahl-Zeile)</label>
+      <div id="zfPositionenListe"></div>
+      <button class="btn btn-ghost" type="button" id="zfPositionAddBtn" style="margin-top:2px;">+ Position hinzufügen</button>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+      <input type="checkbox" id="zfEigeneEingabe" style="width:auto;margin:0;">
+      <span style="font-size:12.5px;color:var(--ink);">Eigene Eingabe (freie Zeile mit gleichen Spalten) erlauben</span>
+    </div>
+    <div class="ovlbtns">
+      <button class="btn btn-ghost hidden" id="zfLoeschenBtn" style="margin-right:auto;color:var(--danger);">Zusatzfenster entfernen</button>
+      <button class="btn btn-ghost" id="zfCancelBtn">Abbrechen</button>
+      <button class="btn btn-primary" id="zfSaveBtn">Speichern</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal: Sonderfall -->
 <div class="ovl" id="sfOvl">
   <div class="ovlbox">
@@ -564,7 +596,8 @@ const ICON = {
   close: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   grip: '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>',
   eye: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>',
-  eyeOff: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/><path d="M3 3l18 18"/></svg>'
+  eyeOff: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/><path d="M3 3l18 18"/></svg>',
+  zusatzfenster: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 9v11"/></svg>'
 };
 function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function showToast(message, isErr){
@@ -786,15 +819,27 @@ let vorlagenCache = { verfassen: [], antworten: [] };
 let voVerfassenElternId = null;
 async function ladeVorlagen(richtung){
   const { data, error } = await sb.from('mailassistent_vorlage')
-    .select('*, mailassistent_vorlage_antwort(*)')
+    .select(`*, mailassistent_vorlage_antwort(*),
+      mailassistent_zusatzfenster(*,
+        mailassistent_zusatzfenster_spalte(*),
+        mailassistent_zusatzfenster_position(*))`)
     .eq('richtung', richtung).order('reihenfolge');
   if(error){ console.error(error); return; }
   vorlagenCache[richtung] = data || [];
   renderVorlagenListe(richtung);
 }
+// Die eingebettete 1:1-Relation liefert PostgREST je nach Erkennung als
+// Objekt oder als Array mit einem Eintrag - hier vereinheitlicht.
+function zfVon(v){
+  const zf = v.mailassistent_zusatzfenster;
+  return Array.isArray(zf) ? (zf[0] || null) : (zf || null);
+}
 function vorlageRowHtml(v, richtung){
   const istAktiv = v.aktiv !== false;
   const aktivBtn = `<button class="icobtn vo-toggle-aktiv" data-id="${v.id}" data-richtung="${richtung}" title="${istAktiv ? 'Ausblenden (in Gmail/KI nicht mehr verfügbar)' : 'Wieder einblenden'}">${istAktiv ? ICON.eye : ICON.eyeOff}</button>`;
+  const zfBtn = (richtung === 'verfassen' && v.typ === 'einfach')
+    ? `<button class="icobtn vo-zf" data-id="${v.id}" title="Zusatzfenster verwalten">${ICON.zusatzfenster}</button>` : '';
+  const zfBadge = (richtung === 'verfassen' && zfVon(v)) ? '<span class="badge-zf">Zusatzfenster</span>' : '';
   if(v.typ === 'dropdown'){
     const anzahl = vorlagenCache[richtung].filter(x => x.parent_id === v.id).length;
     return `
@@ -822,12 +867,13 @@ function vorlageRowHtml(v, richtung){
     <div class="vorlagerow${istAktiv ? '' : ' vorlagerow-inaktiv'}" data-id="${v.id}">
       <span class="draghandle" title="Ziehen zum Verschieben">${ICON.grip}</span>
       <div class="txt">
-        <div class="titelrow"><span class="titel">${esc(v.titel)}</span>${v.typ === 'rueckfrage' ? '<span class="badge-partner">Mit Rückfrage</span>' : ''}${istAktiv ? '' : '<span class="badge-inaktiv">Ausgeblendet</span>'}</div>
+        <div class="titelrow"><span class="titel">${esc(v.titel)}</span>${v.typ === 'rueckfrage' ? '<span class="badge-partner">Mit Rückfrage</span>' : ''}${zfBadge}${istAktiv ? '' : '<span class="badge-inaktiv">Ausgeblendet</span>'}</div>
         ${richtung === 'antworten' ? `<div class="wanntrifft">Wann trifft das zu? <i style="color:var(--ink);font-style:normal;">${esc(v.wann_trifft_zu || '–')}</i></div>` : ''}
         <div class="preview">${preview}</div>
       </div>
       <div class="rowactions">
         ${aktivBtn}
+        ${zfBtn}
         <button class="icobtn vo-edit" data-id="${v.id}" data-richtung="${richtung}" title="Bearbeiten">${ICON.edit}</button>
         <button class="icobtn danger vo-del" data-id="${v.id}" data-richtung="${richtung}" title="Löschen">${ICON.trash}</button>
       </div>
@@ -842,6 +888,7 @@ function renderVorlagenListe(richtung){
   $(zielId).querySelectorAll('.vo-edit').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); oeffneVorlageModal(b.dataset.richtung, b.dataset.id); }));
   $(zielId).querySelectorAll('.vo-del').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); loescheVorlage(b.dataset.richtung, b.dataset.id); }));
   $(zielId).querySelectorAll('.vo-toggle-aktiv').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); voToggleAktiv(b.dataset.richtung, b.dataset.id); }));
+  $(zielId).querySelectorAll('.vo-zf').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); oeffneZusatzfensterModal(b.dataset.id); }));
   $(zielId).querySelectorAll('.vorlagerow-dropdown').forEach(row => row.addEventListener('click', () => {
     voVerfassenElternId = row.dataset.openId;
     voSyncVerfassenEbeneUi();
@@ -1087,6 +1134,91 @@ async function loescheVorlage(richtung, id){
   showToast('Gelöscht.');
   await ladeVorlagen(richtung);
 }
+
+// ---------------------------------------------------------------------------
+// Zusatzfenster (Typ Tabelle) - strukturierte Eingabemaske pro Vorlage
+// ---------------------------------------------------------------------------
+let zfVorlageId = null, zfBestehendeId = null;
+function zfListItemHtml(cls, value){
+  return `<div class="zf-listitem" style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+    <input class="${cls}" value="${esc(value || '')}" style="flex:1;border:1px solid var(--line);border-radius:6px;padding:6px 9px;font:inherit;font-size:12.5px;color:var(--ink);">
+    <button class="icobtn danger zf-item-del" type="button">${ICON.trash}</button>
+  </div>`;
+}
+function zfAnhaengen(container, cls, value){
+  const div = document.createElement('div');
+  div.innerHTML = zfListItemHtml(cls, value);
+  const el = div.firstElementChild;
+  el.querySelector('.zf-item-del').addEventListener('click', () => el.remove());
+  container.appendChild(el);
+}
+function oeffneZusatzfensterModal(vorlageId){
+  zfVorlageId = vorlageId;
+  const v = vorlagenCache.verfassen.find(x => x.id === vorlageId);
+  const zf = v ? zfVon(v) : null;
+  zfBestehendeId = zf?.id || null;
+  $('zfTitel').value = zf?.titel || '';
+  $('zfPlatzhalter').value = zf?.platzhalter || '[BESTELLLISTE]';
+  $('zfEigeneEingabe').checked = zf ? !!zf.erlaubt_eigene_eingabe : true;
+  $('zfSpaltenListe').innerHTML = '';
+  $('zfPositionenListe').innerHTML = '';
+  const spalten = (zf?.mailassistent_zusatzfenster_spalte || []).sort((a,b) => a.reihenfolge - b.reihenfolge);
+  const positionen = (zf?.mailassistent_zusatzfenster_position || []).sort((a,b) => a.reihenfolge - b.reihenfolge);
+  spalten.forEach(s => zfAnhaengen($('zfSpaltenListe'), 'zf-spalte-input', s.titel));
+  positionen.forEach(p => zfAnhaengen($('zfPositionenListe'), 'zf-position-input', p.titel));
+  $('zfLoeschenBtn').classList.toggle('hidden', !zfBestehendeId);
+  $('zfOvl').classList.add('show');
+}
+$('zfSpalteAddBtn').addEventListener('click', () => zfAnhaengen($('zfSpaltenListe'), 'zf-spalte-input', ''));
+$('zfPositionAddBtn').addEventListener('click', () => zfAnhaengen($('zfPositionenListe'), 'zf-position-input', ''));
+$('zfCancelBtn').addEventListener('click', () => $('zfOvl').classList.remove('show'));
+$('zfSaveBtn').addEventListener('click', async () => {
+  const titel = $('zfTitel').value.trim();
+  const platzhalter = $('zfPlatzhalter').value.trim();
+  if(!titel || !platzhalter){ showToast('Titel und Platzhalter sind Pflicht.', true); return; }
+  const werte = {
+    vorlage_id: zfVorlageId, typ: 'tabelle', titel, platzhalter,
+    erlaubt_eigene_eingabe: $('zfEigeneEingabe').checked,
+    aktualisiert_am: new Date().toISOString()
+  };
+  let zfId = zfBestehendeId;
+  let error;
+  if(zfId){
+    ({ error } = await sb.from('mailassistent_zusatzfenster').update(werte).eq('id', zfId));
+  } else {
+    const res = await sb.from('mailassistent_zusatzfenster').insert(werte).select().single();
+    error = res.error; zfId = res.data?.id;
+  }
+  if(error){ showToast(friendlyError(error), true); return; }
+
+  // Spalten/Positionen komplett ersetzen statt zu diffen - deutlich
+  // einfacher und bei dieser Groessenordnung (wenige Zeilen) unproblematisch.
+  await sb.from('mailassistent_zusatzfenster_spalte').delete().eq('zusatzfenster_id', zfId);
+  await sb.from('mailassistent_zusatzfenster_position').delete().eq('zusatzfenster_id', zfId);
+  const spaltenWerte = Array.from($('zfSpaltenListe').querySelectorAll('.zf-spalte-input'))
+    .map((el, i) => ({ zusatzfenster_id: zfId, titel: el.value.trim(), reihenfolge: i })).filter(s => s.titel);
+  const positionenWerte = Array.from($('zfPositionenListe').querySelectorAll('.zf-position-input'))
+    .map((el, i) => ({ zusatzfenster_id: zfId, titel: el.value.trim(), reihenfolge: i })).filter(p => p.titel);
+  if(spaltenWerte.length){
+    const { error: e1 } = await sb.from('mailassistent_zusatzfenster_spalte').insert(spaltenWerte);
+    if(e1){ showToast(friendlyError(e1), true); return; }
+  }
+  if(positionenWerte.length){
+    const { error: e2 } = await sb.from('mailassistent_zusatzfenster_position').insert(positionenWerte);
+    if(e2){ showToast(friendlyError(e2), true); return; }
+  }
+  $('zfOvl').classList.remove('show');
+  showToast('Gespeichert.');
+  await ladeVorlagen('verfassen');
+});
+$('zfLoeschenBtn').addEventListener('click', async () => {
+  if(!zfBestehendeId) return;
+  const { error } = await sb.from('mailassistent_zusatzfenster').delete().eq('id', zfBestehendeId);
+  if(error){ showToast(friendlyError(error), true); return; }
+  $('zfOvl').classList.remove('show');
+  showToast('Zusatzfenster entfernt.');
+  await ladeVorlagen('verfassen');
+});
 
 // ---------------------------------------------------------------------------
 // Sonderfälle
