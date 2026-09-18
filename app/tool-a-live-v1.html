@@ -3489,22 +3489,26 @@ async function waehleKundeUndStarteOfferte(kundeId, offertentypId){
 
 async function init(){
   try{
-    const { data: otList, error: otErr } = await sb
-      .from('offertentyp').select('id,name,berechnungsmodell,vorarbeiter_typ_standard,zugaenglichkeit_aktiv')
-      .eq('ausgeblendet', false).is('papierkorb_am', null).order('reihenfolge');
-    if(otErr) throw otErr;
-    OFFERTENTYPEN = otList;
-
-    await ladeAlleKunden();
-    await ladeLieferwagenKonfiguration();
-    await ladeSystemwertTerms();
-    await ladeOffertenPositionEinstellungen();
-    await ladeMaschinenSammelpositionen();
-    await ladeLogistikSammelpositionen();
-    await ladeKieswerke();
-    await ladeDistanzAdresslisten();
-    await ladeMagazinAdressen();
-    await ladeArtikelAlle();
+    // Alle Init-Ladevorgaenge sind voneinander unabhaengig (jeder befuellt
+    // seine eigene globale Variable) - parallel statt nacheinander, das
+    // hat sich bei mehreren gleichzeitigen Nutzern als spuerbar langsam
+    // erwiesen (Latenzen summierten sich statt sich zu ueberlappen).
+    const [otRes] = await Promise.all([
+      sb.from('offertentyp').select('id,name,berechnungsmodell,vorarbeiter_typ_standard,zugaenglichkeit_aktiv')
+        .eq('ausgeblendet', false).is('papierkorb_am', null).order('reihenfolge'),
+      ladeAlleKunden(),
+      ladeLieferwagenKonfiguration(),
+      ladeSystemwertTerms(),
+      ladeOffertenPositionEinstellungen(),
+      ladeMaschinenSammelpositionen(),
+      ladeLogistikSammelpositionen(),
+      ladeKieswerke(),
+      ladeDistanzAdresslisten(),
+      ladeMagazinAdressen(),
+      ladeArtikelAlle()
+    ]);
+    if(otRes.error) throw otRes.error;
+    OFFERTENTYPEN = otRes.data;
 
     const params = new URLSearchParams(location.search);
     const deeplinkOfferteId = params.get('offerte');
