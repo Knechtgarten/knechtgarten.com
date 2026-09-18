@@ -107,6 +107,7 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
 .vwafblock{margin-top:8px;padding-top:8px;border-top:1px solid var(--line);}
 .vwaflabel{font-size:11.5px;font-weight:700;color:var(--ink);margin-bottom:6px;}
 .vwoptrow{display:flex;flex-wrap:wrap;gap:7px;}
+.vwEditorBar{font-size:17px;font-weight:700;color:var(--primary);background:var(--soft);border-left:4px solid var(--primary);border-radius:6px;padding:12px 16px;margin-bottom:14px;}
 .vwopt{font-size:11px;font-weight:600;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:20px;padding:7px 13px;cursor:pointer;}
 .vwopt.on{background:var(--primary);color:#fff;border-color:var(--primary);}
 .vwoptwrap{display:inline-flex;align-items:stretch;}
@@ -547,9 +548,9 @@ input[type=number]{-moz-appearance:textfield;}
       <a data-abschnitt="offertentyp">Offerten-Vorlagen</a>
       <a data-abschnitt="formelbibliothek">Offerten Formeln/Felder</a>
       <div id="formelKategorienSidebar" class="hidden"></div>
+      <a data-abschnitt="vorauswahlen">Offerten Vorauswahlen</a>
       <a data-abschnitt="rechenlogik">Berechnungsregeln</a>
       <a data-abschnitt="sonderpositionen">Sonderpositionen</a>
-      <a data-abschnitt="vorauswahlen">Vorauswahlen</a>
     </div>
 
     <div class="settingscontent">
@@ -914,7 +915,7 @@ input[type=number]{-moz-appearance:textfield;}
         </div>
 
         <div class="card hidden" id="vwEditorCard">
-          <div class="cardlabel" id="vwEditorTitel">Neue Vorauswahl</div>
+          <div class="vwEditorBar" id="vwEditorTitel">Neue Vorauswahl</div>
           <div class="fld" style="max-width:320px;"><label>Name</label><input autocomplete="off" data-lpignore="true" id="vwNameInput"></div>
           <div class="hint">Klick alle Optionen an, die zu dieser Vorauswahl gehören - genau wie in einer echten Offerte. Optionen, die hier nicht angeklickt sind, bleiben von dieser Vorauswahl unberührt.</div>
           <div id="vwBaumWrap"></div>
@@ -1091,27 +1092,12 @@ function renderVorauswahlListe(){
       <td>${v.name}</td>
       <td style="text-align:right;">
         <button class="icobtn vwBearbeitenBtn" data-vw="${v.id}" title="Bearbeiten">${ICON.edit}</button>
-        <button class="icobtn vwDuplizierenBtn" data-vw="${v.id}" title="Duplizieren">${ICON.copy}</button>
         <button class="icobtn danger vwLoeschenBtn" data-vw="${v.id}" title="Löschen">${ICON.trash}</button>
       </td>
     </tr>`).join('') || '<tr><td colspan="2" class="hint">Noch keine Vorauswahl für diesen Offertentyp.</td></tr>';
 
   $('vwListeBody').querySelectorAll('.vwBearbeitenBtn').forEach(b => b.addEventListener('click', () => oeffneVorauswahlEditor(b.dataset.vw)));
-  $('vwListeBody').querySelectorAll('.vwDuplizierenBtn').forEach(b => b.addEventListener('click', () => duplicateVorauswahl(b.dataset.vw)));
   $('vwListeBody').querySelectorAll('.vwLoeschenBtn').forEach(b => b.addEventListener('click', () => loescheVorauswahl(b.dataset.vw)));
-}
-
-async function duplicateVorauswahl(id){
-  const vorlage = VORAUSWAHL_LISTE.find(v => v.id === id);
-  if(!vorlage) return;
-  const { data, error } = await sb.from('vorauswahl').insert({ offertentyp_id: vwSelectedOtId, name: vorlage.name + ' (Kopie)' }).select().single();
-  if(error){ showToast(friendlyError(error), true); return; }
-  if(vorlage.optionIds.length){
-    const rows = vorlage.optionIds.map(optId => ({ vorauswahl_id: data.id, option_id: optId, menge: vorlage.mengen[optId] ?? null }));
-    const { error: insErr } = await sb.from('vorauswahl_option').insert(rows);
-    if(insErr){ showToast(friendlyError(insErr), true); return; }
-  }
-  await ladeVorauswahlListe();
 }
 
 async function loescheVorauswahl(id){
@@ -1178,13 +1164,20 @@ function renderVorauswahlBaum(){
   });
 }
 
+function aktualisiereVwEditorTitel(){
+  const name = $('vwNameInput').value.trim();
+  $('vwEditorTitel').textContent = vwEditingId
+    ? `Vorauswahl "${name || '…'}" bearbeiten`
+    : (name ? `Neue Vorauswahl "${name}"` : 'Neue Vorauswahl');
+}
+
 async function oeffneVorauswahlEditor(id){
   vwEditingId = id || null;
   const bestehend = id ? VORAUSWAHL_LISTE.find(v => v.id === id) : null;
   vwEditingOptionIds = new Set(bestehend?.optionIds || []);
   vwEditingMengen = { ...(bestehend?.mengen || {}) };
-  $('vwEditorTitel').textContent = bestehend ? 'Vorauswahl bearbeiten' : 'Neue Vorauswahl';
   $('vwNameInput').value = bestehend?.name || '';
+  aktualisiereVwEditorTitel();
   $('vwEditorStatus').textContent = '';
   await ladeVorauswahlBaum();
   renderVorauswahlBaum();
@@ -1192,6 +1185,7 @@ async function oeffneVorauswahlEditor(id){
   $('vwEditorCard').scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
+$('vwNameInput').addEventListener('input', aktualisiereVwEditorTitel);
 $('vwAbbrechenBtn').addEventListener('click', () => $('vwEditorCard').classList.add('hidden'));
 $('vwNeueBtn').addEventListener('click', () => oeffneVorauswahlEditor(null));
 $('vwOtSelect').addEventListener('change', () => { vwSelectedOtId = $('vwOtSelect').value; ladeVorauswahlListe(); });
