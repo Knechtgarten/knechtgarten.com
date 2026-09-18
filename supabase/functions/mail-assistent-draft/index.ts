@@ -176,7 +176,7 @@ async function modusAntworten(body: any, modell: string) {
     sb.from('mailassistent_schreibstil').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_firmendaten').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_sonderfall').select('*').eq('immer_antworten', true).order('reihenfolge'),
-    sb.from('mailassistent_vorlage').select('*, mailassistent_vorlage_antwort(*)').eq('richtung', 'antworten').order('reihenfolge'),
+    sb.from('mailassistent_vorlage').select('*, mailassistent_vorlage_antwort(*)').eq('richtung', 'antworten').eq('aktiv', true).order('reihenfolge'),
     sb.from('mailassistent_distanzlogik_meta').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_distanz_projekttyp').select('*').order('reihenfolge'),
   ]);
@@ -361,7 +361,7 @@ async function modusListeVerfassen() {
   // einfache Vorlagen direkt einfuegen kann, ganz ohne KI-Aufruf (Express).
   // parent_id gruppiert mehrere Vorlagen unter einem gemeinsamen
   // Dropdown-Button (typ='dropdown' = die Gruppe selbst, ohne eigenen Inhalt).
-  const { data } = await sb.from('mailassistent_vorlage').select('id,titel,typ,inhalt,betreff,parent_id').eq('richtung', 'verfassen').order('reihenfolge');
+  const { data } = await sb.from('mailassistent_vorlage').select('id,titel,typ,inhalt,betreff,parent_id').eq('richtung', 'verfassen').eq('aktiv', true).order('reihenfolge');
   return json({ vorlagen: data || [] });
 }
 async function modusListeNachbessern() {
