@@ -361,7 +361,15 @@ async function modusListeVerfassen() {
   // einfache Vorlagen direkt einfuegen kann, ganz ohne KI-Aufruf (Express).
   // parent_id gruppiert mehrere Vorlagen unter einem gemeinsamen
   // Dropdown-Button (typ='dropdown' = die Gruppe selbst, ohne eigenen Inhalt).
-  const { data } = await sb.from('mailassistent_vorlage').select('id,titel,typ,inhalt,betreff,parent_id').eq('richtung', 'verfassen').eq('aktiv', true).order('reihenfolge');
+  // zusatzfenster (falls vorhanden) sagt der Erweiterung, dass vor dem
+  // Erstellen erst eine strukturierte Eingabemaske (z.B. Bestell-Tabelle)
+  // gezeigt werden muss statt sofort einzufuegen.
+  const { data } = await sb.from('mailassistent_vorlage')
+    .select(`id,titel,typ,inhalt,betreff,parent_id,
+      mailassistent_zusatzfenster(id,typ,titel,platzhalter,erlaubt_eigene_eingabe,
+        mailassistent_zusatzfenster_spalte(id,titel,reihenfolge),
+        mailassistent_zusatzfenster_position(id,titel,reihenfolge))`)
+    .eq('richtung', 'verfassen').eq('aktiv', true).order('reihenfolge');
   return json({ vorlagen: data || [] });
 }
 async function modusListeNachbessern() {
