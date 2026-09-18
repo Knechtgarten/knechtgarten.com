@@ -1183,23 +1183,30 @@ function zfAnhaengen(container, cls, value){
 function zfOptionChipHtml(wert){
   return `<span class="zf-option-chip" data-wert="${esc(wert)}" style="background:var(--accent-blue);color:var(--primary);border-radius:10px;padding:3px 6px 3px 10px;font-size:11px;font-weight:600;display:inline-flex;align-items:center;gap:5px;">${esc(wert)}<span class="zf-option-del" style="cursor:pointer;">${ICON.close}</span></span>`;
 }
-function zfSpalteBlockHtml(titel, optionen){
+function zfSpalteBlockHtml(titel, optionen, typ){
+  typ = typ || 'dropdown';
   return `<div class="zf-spalte-block" style="border:1px solid var(--line);border-radius:8px;padding:9px 10px;margin-bottom:8px;">
     <div style="display:flex;gap:6px;align-items:center;margin-bottom:7px;">
       <input class="zf-spalte-titel" value="${esc(titel || '')}" placeholder="Spaltenname, z.B. Farbe" style="flex:1;border:1px solid var(--line);border-radius:6px;padding:6px 9px;font:inherit;font-size:12.5px;color:var(--ink);">
       <button class="icobtn danger zf-spalte-del" type="button" title="Spalte entfernen">${ICON.trash}</button>
     </div>
-    <div style="font-size:10.5px;color:var(--muted);margin-bottom:5px;">Dropdown-Optionen (so werden sie in Gmail zur Auswahl angeboten)</div>
-    <div class="zf-spalte-optionen" style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px;">${(optionen || []).map(zfOptionChipHtml).join('')}</div>
-    <div style="display:flex;gap:6px;">
-      <input class="zf-spalte-neue-option" placeholder="Option eingeben, dann Enter oder + drücken" style="flex:1;border:1px solid var(--line);border-radius:6px;padding:5px 8px;font:inherit;font-size:12px;box-sizing:border-box;">
-      <button class="btn btn-ghost zf-spalte-option-add" type="button" style="flex-shrink:0;padding:5px 10px;">+</button>
+    <div class="typchips zf-spalte-typ" style="margin-bottom:7px;">
+      <span class="typchip${typ === 'dropdown' ? ' on' : ''}" data-typ="dropdown">Dropdown (feste Auswahl)</span>
+      <span class="typchip${typ === 'zahl' ? ' on' : ''}" data-typ="zahl">Zahl (freies Eingabefeld)</span>
+    </div>
+    <div class="zf-optionen-bereich" style="${typ === 'zahl' ? 'display:none;' : ''}">
+      <div style="font-size:10.5px;color:var(--muted);margin-bottom:5px;">Dropdown-Optionen (so werden sie in Gmail zur Auswahl angeboten)</div>
+      <div class="zf-spalte-optionen" style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px;">${(optionen || []).map(zfOptionChipHtml).join('')}</div>
+      <div style="display:flex;gap:6px;">
+        <input class="zf-spalte-neue-option" placeholder="Option eingeben, dann Enter oder + drücken" style="flex:1;border:1px solid var(--line);border-radius:6px;padding:5px 8px;font:inherit;font-size:12px;box-sizing:border-box;">
+        <button class="btn btn-ghost zf-spalte-option-add" type="button" style="flex-shrink:0;padding:5px 10px;">+</button>
+      </div>
     </div>
   </div>`;
 }
-function zfSpalteAnhaengen(titel, optionen){
+function zfSpalteAnhaengen(titel, optionen, typ){
   const div = document.createElement('div');
-  div.innerHTML = zfSpalteBlockHtml(titel, optionen);
+  div.innerHTML = zfSpalteBlockHtml(titel, optionen, typ);
   const block = div.firstElementChild;
   zfVerdrahteSpalteBlock(block);
   $('zfSpaltenListe').appendChild(block);
@@ -1221,6 +1228,16 @@ function zfVerdrahteSpalteBlock(block){
   eingabe.addEventListener('keydown', (e) => {
     if(e.key === 'Enter'){ e.preventDefault(); hinzufuegen(); }
   });
+  block.querySelectorAll('.zf-spalte-typ .typchip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      block.querySelectorAll('.zf-spalte-typ .typchip').forEach(c => c.classList.remove('on'));
+      chip.classList.add('on');
+      block.querySelector('.zf-optionen-bereich').style.display = chip.dataset.typ === 'zahl' ? 'none' : '';
+    });
+  });
+}
+function zfSpalteTyp(block){
+  return block.querySelector('.zf-spalte-typ .typchip.on')?.dataset.typ || 'dropdown';
 }
 function oeffneZusatzfensterModal(vorlageId){
   zfVorlageId = vorlageId;
@@ -1237,7 +1254,7 @@ function oeffneZusatzfensterModal(vorlageId){
   const positionen = (zf?.mailassistent_zusatzfenster_position || []).sort((a,b) => a.reihenfolge - b.reihenfolge);
   spalten.forEach(s => {
     const optionen = (s.mailassistent_zusatzfenster_spalte_option || []).sort((a,b) => a.reihenfolge - b.reihenfolge).map(o => o.wert);
-    zfSpalteAnhaengen(s.titel, optionen);
+    zfSpalteAnhaengen(s.titel, optionen, s.typ);
   });
   positionen.forEach(p => zfAnhaengen($('zfPositionenListe'), 'zf-position-input', p.titel));
   $('zfLoeschenBtn').classList.toggle('hidden', !zfBestehendeId);
@@ -1278,12 +1295,13 @@ $('zfSaveBtn').addEventListener('click', async () => {
   const spaltenBloecke = Array.from($('zfSpaltenListe').querySelectorAll('.zf-spalte-block'));
   const spaltenWerte = spaltenBloecke.map((block, i) => ({
     titel: block.querySelector('.zf-spalte-titel').value.trim(),
-    optionen: Array.from(block.querySelectorAll('.zf-option-chip')).map(el => el.dataset.wert),
+    typ: zfSpalteTyp(block),
+    optionen: zfSpalteTyp(block) === 'zahl' ? [] : Array.from(block.querySelectorAll('.zf-option-chip')).map(el => el.dataset.wert),
     reihenfolge: i
   })).filter(s => s.titel);
   if(spaltenWerte.length){
     const { data: neueSpalten, error: e1 } = await sb.from('mailassistent_zusatzfenster_spalte')
-      .insert(spaltenWerte.map(s => ({ zusatzfenster_id: zfId, titel: s.titel, reihenfolge: s.reihenfolge })))
+      .insert(spaltenWerte.map(s => ({ zusatzfenster_id: zfId, titel: s.titel, typ: s.typ, reihenfolge: s.reihenfolge })))
       .select();
     if(e1){ showToast(friendlyError(e1), true); return; }
     const optionenWerte = [];
