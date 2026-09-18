@@ -731,7 +731,7 @@ function renderKategorieFilter(){
     filterKategorie = b.dataset.k || null;
     aktuelleSeite = 1;
     renderKategorieFilter();
-    renderArtikelTable();
+    loadArtikel();
   }));
 }
 renderKategorieFilter();
@@ -759,7 +759,7 @@ function renderGruppenFilter(){
     filterGruppeId = b.dataset.g || null;
     aktuelleSeite = 1;
     renderGruppenFilter();
-    renderArtikelTable();
+    loadArtikel();
   }));
 }
 function renderLieferantFilter(){
@@ -768,23 +768,19 @@ function renderLieferantFilter(){
   $('lieferantFilterSelect').onchange = () => {
     filterLieferantId = $('lieferantFilterSelect').value || null;
     aktuelleSeite = 1;
-    renderArtikelTable();
+    loadArtikel();
   };
 }
+// Kleine Verzoegerung, damit nicht bei jedem einzelnen Tastenanschlag sofort
+// eine Datenbank-Anfrage rausgeht (Suche ist jetzt serverseitig, siehe
+// loadArtikel - vorher reine Client-Filterung ohne Netzwerk-Kosten).
+let artSearchDebounce = null;
 $('artSearchInput').addEventListener('input', () => {
   searchQuery = $('artSearchInput').value.trim().toLowerCase();
   aktuelleSeite = 1;
-  renderArtikelTable();
+  clearTimeout(artSearchDebounce);
+  artSearchDebounce = setTimeout(loadArtikel, 300);
 });
-function gefilterteArtikel(){
-  return ARTIKEL.filter(a => {
-    if(filterKategorie && a.kategorie !== filterKategorie) return false;
-    if(filterGruppeId && a.artikelgruppe_id !== filterGruppeId) return false;
-    if(filterLieferantId && a.lieferant_id !== filterLieferantId) return false;
-    if(searchQuery && !`${a.bezeichnung} ${a.artikelnummer_knecht||''} ${a.anmerkung||''}`.toLowerCase().includes(searchQuery)) return false;
-    return true;
-  });
-}
 
 async function loadArtikelgruppen(){
   const { data, error } = await sb.from('artikelgruppe').select('id,name').order('name');
@@ -816,8 +812,15 @@ $('artikelgruppenOvlClose').addEventListener('click', () => $('artikelgruppenOvl
 // Suche), in der aktuell eingestellten Sortierung - nicht den ganzen
 // Artikelstamm, damit der Export zu dem passt, was gerade auf dem Bildschirm
 // sichtbar ist. Laeuft komplett im Browser (SheetJS/xlsx), kein Server-Aufruf.
-function exportArtikelAlsExcel(){
-  const zeilen = gefilterteArtikel().map(a => ({
+async function exportArtikelAlsExcel(){
+  // Eigener Request statt der schon geladenen ARTIKEL (die enthaelt seit der
+  // serverseitigen Paginierung nur noch die aktuelle Seite) - Export soll
+  // weiterhin ALLE zum Filter passenden Artikel enthalten, nicht nur die
+  // gerade sichtbare Seite. Range explizit gesetzt, sonst greift wieder
+  // Supabase's Standard-1000-Zeilen-Limit bei einem grossen Artikelstamm.
+  const { data, error } = await baueArtikelFilterQuery().range(0, 9999);
+  if(error){ showToast(friendlyError(error), true); return; }
+  const zeilen = data.map(a => ({
     'Artikelnummer': a.artikelnummer_knecht || '',
     'Bezeichnung': a.bezeichnung || '',
     'Kategorie': a.kategorie || '',
@@ -839,31 +842,59 @@ function exportArtikelAlsExcel(){
 }
 $('exportExcelBtn').addEventListener('click', exportArtikelAlsExcel);
 
-async function loadArtikel(){
-  const { data, error } = await sb.from('artikel')
+// Filter (Kategorie/Gruppe/Lieferant/Suche), Sortierung UND Seitenwechsel
+// laufen alle als echte Datenbank-Abfrage (nicht mehr: alles laden, dann im
+// Browser filtern/sortieren/schneiden) - der Artikelstamm ist inzwischen zu
+// gross (1000+ Zeilen), damit hat Supabase's Standard-Zeilenlimit pro
+// Anfrage (1000) faktisch zufaellig Artikel "verschwinden" lassen, je
+// nachdem welche 1000 von allen zufaellig in der unsortierten Antwort
+// landeten. Mit expliziter Datenbank-seitiger Filterung/Range bleibt das
+// aus, unabhaengig davon, wie gross der Artikelstamm noch wird.
+// Baut die Artikel-Abfrage mit den aktuell gesetzten Filtern/Suche/
+// Sortierung, aber OHNE Range - loadArtikel() haengt fuer die Anzeige noch
+// eine Seiten-Range an, der Excel-Export (siehe exportArtikelAlsExcel)
+// haengt stattdessen eine grosse, aber explizite Range an (statt gar keine -
+// sonst greift wieder Supabase's Standard-1000-Zeilen-Limit).
+function baueArtikelFilterQuery(){
+  let query = sb.from('artikel')
     .select(`id, artikelnummer_lieferant, artikelnummer_knecht, bezeichnung, einheit, kategorie,
       ep_lieferant, vp_lieferant, waehrung, wechselkurs, vp_knecht, preis_gesperrt, mwst_satz_pct,
       anmerkung, foto_url, zusatzfoto1_url, zusatzfoto2_url, zusatzfoto3_url, zusatzwert, zusatzeinheit, sync_offertentool, sync_webtool, sync_easybill, haendischer_abgleich,
       notiz, referenzpreise, zusammenzaehl_tool,
-      lieferant_id, artikelgruppe_id, lieferant(name,kuerzel,archiviert_am), artikelgruppe(name)`);
+      lieferant_id, artikelgruppe_id, lieferant(name,kuerzel,archiviert_am), artikelgruppe(name)`, { count: 'exact' });
+  if(filterKategorie) query = query.eq('kategorie', filterKategorie);
+  if(filterGruppeId) query = query.eq('artikelgruppe_id', filterGruppeId);
+  if(filterLieferantId) query = query.eq('lieferant_id', filterLieferantId);
+  if(searchQuery){
+    const q = searchQuery.replace(/[%,()]/g, '');
+    query = query.or(`bezeichnung.ilike.%${q}%,artikelnummer_knecht.ilike.%${q}%,anmerkung.ilike.%${q}%`);
+  }
+  return sortCol === 'lieferant_name'
+    ? query.order('name', { foreignTable: 'lieferant', ascending: sortDir === 1 })
+    : query.order(sortCol, { ascending: sortDir === 1 });
+}
+
+let ARTIKEL_TOTAL = 0;
+async function loadArtikel(){
+  const pageSize = seitenGroesse === Infinity ? 10000 : seitenGroesse;
+  const von = (aktuelleSeite-1)*pageSize;
+  const query = baueArtikelFilterQuery().range(von, von + pageSize - 1);
+
+  const { data, error, count } = await query;
   if(error){ console.error(error); return; }
+  const total = count ?? data.length;
+  const maxSeite = Math.max(1, seitenGroesse === Infinity ? 1 : Math.ceil(total / pageSize));
+  if(aktuelleSeite > maxSeite){
+    aktuelleSeite = maxSeite;
+    return loadArtikel(); // einmalig mit korrigierter Seite neu laden
+  }
   ARTIKEL = data.map(a => ({ ...a, lieferant_name: a.lieferant?.name || '',
     sync_count: (a.sync_offertentool?1:0) + (a.sync_webtool?1:0) + (a.sync_easybill?1:0) }));
+  ARTIKEL_TOTAL = total;
   renderArtikelTable();
 }
 
-function sortiereArtikel(){
-  ARTIKEL.sort((a,b) => {
-    const av = a[sortCol] ?? '';
-    const bv = b[sortCol] ?? '';
-    if(typeof av === 'boolean' || typeof bv === 'boolean') return ((av?1:0) - (bv?1:0)) * sortDir;
-    if(typeof av === 'number' || typeof bv === 'number') return (av-bv) * sortDir;
-    return String(av).localeCompare(String(bv)) * sortDir;
-  });
-}
-
 function renderArtikelTable(){
-  sortiereArtikel();
   document.querySelectorAll('th[data-sort]').forEach(th => {
     let arrow = th.querySelector('.arrow');
     if(!arrow){
@@ -877,12 +908,10 @@ function renderArtikelTable(){
     arrow.querySelector('.ad').classList.toggle('active', aktiv && sortDir === -1);
   });
 
-  const gefiltert = gefilterteArtikel();
-  const maxSeite = Math.max(1, Math.ceil(gefiltert.length / seitenGroesse));
-  if(aktuelleSeite > maxSeite) aktuelleSeite = maxSeite;
-  const sichtbar = seitenGroesse === Infinity ? gefiltert : gefiltert.slice((aktuelleSeite-1)*seitenGroesse, aktuelleSeite*seitenGroesse);
-  renderArtikelPagination(gefiltert.length, maxSeite);
-  $('artikelBody').innerHTML = sichtbar.map(a => `
+  const pageSize = seitenGroesse === Infinity ? Math.max(ARTIKEL_TOTAL, 1) : seitenGroesse;
+  const maxSeite = Math.max(1, Math.ceil(ARTIKEL_TOTAL / pageSize));
+  renderArtikelPagination(ARTIKEL_TOTAL, maxSeite);
+  $('artikelBody').innerHTML = ARTIKEL.map(a => `
     <tr>
       <td><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="checkbox" class="rowcheck" data-id="${a.id}" ${selected.has(a.id)?'checked':''}></td>
       <td>${a.artikelnummer_knecht || ''}</td>
@@ -941,10 +970,10 @@ function renderArtikelPagination(gesamtAnzahl, maxSeite){
     const wert = $('seitenGroesseSelect').value;
     seitenGroesse = wert === 'alle' ? Infinity : parseInt(wert);
     aktuelleSeite = 1;
-    renderArtikelTable();
+    loadArtikel();
   });
-  $('seiteZurueckBtn')?.addEventListener('click', () => { aktuelleSeite--; renderArtikelTable(); });
-  $('seiteVorBtn')?.addEventListener('click', () => { aktuelleSeite++; renderArtikelTable(); });
+  $('seiteZurueckBtn')?.addEventListener('click', () => { aktuelleSeite--; loadArtikel(); });
+  $('seiteVorBtn')?.addEventListener('click', () => { aktuelleSeite++; loadArtikel(); });
 }
 
 // ---------------------------------------------------------------------------
@@ -1414,12 +1443,14 @@ function renderBulkbar(){
   $('bulkLieferantSelect').disabled = n === 0;
   $('bulkSyncSelect').disabled = n === 0;
   $('bulkDeleteBtn').disabled = n === 0;
-  const sichtbar = gefilterteArtikel();
-  $('selectAll').checked = n > 0 && n === sichtbar.length;
+  $('selectAll').checked = n > 0 && n === ARTIKEL.length;
 }
 
+// Waehlt nur die aktuell angezeigte Seite aus (nicht mehr alle Treffer ueber
+// alle Seiten - Artikel/Filter/Suche laufen jetzt serverseitig, siehe
+// loadArtikel, "alle Treffer" wuerde einen eigenen Request brauchen).
 $('selectAll').addEventListener('change', e => {
-  selected = new Set(e.target.checked ? gefilterteArtikel().map(a => a.id) : []);
+  selected = new Set(e.target.checked ? ARTIKEL.map(a => a.id) : []);
   renderArtikelTable();
 });
 
@@ -1427,7 +1458,7 @@ document.querySelectorAll('th[data-sort]').forEach(th => {
   th.addEventListener('click', () => {
     const col = th.dataset.sort;
     if(sortCol === col) sortDir *= -1; else { sortCol = col; sortDir = 1; }
-    renderArtikelTable();
+    loadArtikel();
   });
 });
 
