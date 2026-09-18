@@ -240,6 +240,13 @@ main.wrap{padding-top:48px;padding-bottom:60px;}
 .zugstop{font-size:10.5px;color:var(--muted);cursor:pointer;padding:1px 5px;}
 .zugstop.on{color:var(--primary);font-weight:700;}
 
+.vorauswahlRow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:18px;padding:10px 12px;background:var(--soft);border:1px solid var(--accent-blue);border-radius:9px;}
+.vwlabel{font-size:10.5px;font-weight:700;color:var(--muted);letter-spacing:.03em;margin-right:2px;}
+.vwbtn{font-size:11.5px;font-weight:700;border:1.5px solid var(--primary);background:#fff;color:var(--primary);border-radius:20px;padding:6px 13px;cursor:pointer;}
+.vwbtn:hover{background:var(--primary-l);color:#fff;border-color:var(--primary-l);}
+.vwbtn.active{background:var(--primary);color:#fff;}
+.vwbtn.reset{border-color:var(--line);color:var(--muted);background:transparent;}
+.vwbtn.reset:hover{border-color:var(--danger);color:var(--danger);background:transparent;}
 .afBulkRow{display:flex;justify-content:flex-end;gap:6px;margin-top:18px;margin-bottom:8px;flex-wrap:wrap;}
 .afBulkBtn{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:var(--ink);
   border:1px solid var(--line);background:#fff;border-radius:6px;padding:4px 10px;cursor:pointer;}
@@ -1401,6 +1408,10 @@ let tagessatzOffenIds = new Set();  // Arbeitsschritt-IDs, die gerade aufgeklapp
 let bereichWerteMap = {};
 let bereichNotizMap = {};
 let bereichSelectedOptions = new Set();
+// Nur fuer die Hervorhebung des zuletzt geklickten Vorauswahl-Buttons - keine
+// gespeicherte Eigenschaft der Offerte, geht beim Laden einer bestehenden
+// Offerte bewusst auf null (siehe ladeBestehendeOfferte()).
+let aktiveVorauswahlId = null;
 let bereichOptionAnzahl = {};
 let bereichZugaenglichkeitStufe = 2;
 let bereichKonfigEingeklappt = false;
@@ -2141,7 +2152,7 @@ async function ladeFormelDaten(otId){
           sonderposition_typ ( name, titel, einheit, mwst_satz_pct, lieferwagen_std_artikel_id, lieferwagen_km_artikel_id, lieferwagen_transport_ort, lieferwagen_std_artikel:artikel!lieferwagen_std_artikel_id ( vp_knecht, bezeichnung ), lieferwagen_km_artikel:artikel!lieferwagen_km_artikel_id ( vp_knecht, bezeichnung ) ) ),
         option_freitext_vorlage ( id, kategorie, bezeichnung, einheit, notiz, menge_vorschlag, preis_vorschlag, ist_eigene_offertenposition ),
         auswahlfeld ( id, name,
-          auswahloption ( id, name, beschreibung, reihenfolge, ist_standard, mengenoption, mengenoption_einheit, mengenoption_standardmenge, mehrfachauswahl, ist_eigene_offertenposition, hinweistext, hinweisbild_url,
+          auswahloption ( id, name, beschreibung, reihenfolge, mengenoption, mengenoption_einheit, mengenoption_standardmenge, mehrfachauswahl, ist_eigene_offertenposition, hinweistext, hinweisbild_url,
             ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, artikel_id, ist_eigene_offertenposition,
               zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4, mindestmenge, verschnitt_prozent, zuschlag_prozent,
               artikel ( bezeichnung, einheit, vp_knecht ),
@@ -2227,7 +2238,7 @@ async function ladeFormelDaten(otId){
           // Reihenfolge wie in Tool B (drag & drop) - Supabase liefert
           // eingebettete auswahloption sonst in unspezifizierter Reihenfolge,
           // die nicht zwingend der vom Admin konfigurierten entspricht.
-          optionen: (af.auswahloption || []).slice().sort((a, b) => (a.reihenfolge || 0) - (b.reihenfolge || 0)).map(o => ({ id: o.id, name: o.name, beschreibung: o.beschreibung, istStandard: o.ist_standard, mengenoption: o.mengenoption, mengenoptionEinheit: o.mengenoption_einheit, mengenoptionStandardmenge: o.mengenoption_standardmenge, mehrfachauswahl: o.mehrfachauswahl, hinweistext: o.hinweistext, hinweisbildUrl: o.hinweisbild_url }))
+          optionen: (af.auswahloption || []).slice().sort((a, b) => (a.reihenfolge || 0) - (b.reihenfolge || 0)).map(o => ({ id: o.id, name: o.name, beschreibung: o.beschreibung, mengenoption: o.mengenoption, mengenoptionEinheit: o.mengenoption_einheit, mengenoptionStandardmenge: o.mengenoption_standardmenge, mehrfachauswahl: o.mehrfachauswahl, hinweistext: o.hinweistext, hinweisbildUrl: o.hinweisbild_url }))
         });
         (af.auswahloption || []).forEach(opt => {
           (opt.ressourcenzeile || []).forEach(rz => pushRz(rz, opt.id, as.name, ts.name));
@@ -2244,6 +2255,20 @@ async function ladeFormelDaten(otId){
       }
     });
   });
+  await ladeVorauswahlen(otId);
+}
+
+// Vorauswahlen: benannte Buendel von Options-Klicks fuer Formel-Offertentypen
+// (siehe Einstellungen -> Vorauswahlen), ersetzen das frueher pro Option
+// gesetzte "Standard"-Haekchen. Genau eine je Offertentyp kann Standard sein -
+// die wird in initBereich() automatisch uebernommen.
+let VORAUSWAHLEN = [];
+async function ladeVorauswahlen(otId){
+  const { data, error } = await sb.from('vorauswahl')
+    .select('id,name,ist_standard,vorauswahl_option(option_id)')
+    .eq('offertentyp_id', otId).order('name');
+  if(error){ console.error(error); VORAUSWAHLEN = []; return; }
+  VORAUSWAHLEN = (data || []).map(v => ({ id: v.id, name: v.name, istStandard: v.ist_standard, optionIds: (v.vorauswahl_option || []).map(o => o.option_id) }));
 }
 
 async function ladeTagessatzDaten(otId){
@@ -2258,7 +2283,7 @@ async function ladeTagessatzDaten(otId){
         ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, tagesleistung_menge,
           artikel ( bezeichnung, einheit, vp_knecht ) ),
         auswahlfeld ( id, name,
-          auswahloption ( id, name, beschreibung, reihenfolge, ist_standard, mehrfachauswahl,
+          auswahloption ( id, name, beschreibung, reihenfolge, mehrfachauswahl,
             ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, tagesleistung_menge,
               artikel ( bezeichnung, einheit, vp_knecht ) ) ) ) )`)
     .eq('offertentyp_id', otId).eq('ausgeblendet', false).order('reihenfolge');
@@ -2287,7 +2312,7 @@ async function ladeTagessatzDaten(otId){
         const af = ts.auswahlfeld;
         tagessatzAuswahlfelder.push({
           id: af.id, teilschrittId: ts.id, arbeitsschrittId: as.id, name: af.name,
-          optionen: (af.auswahloption || []).slice().sort((a, b) => (a.reihenfolge || 0) - (b.reihenfolge || 0)).map(o => ({ id: o.id, name: o.name, beschreibung: o.beschreibung, istStandard: o.ist_standard, mehrfachauswahl: o.mehrfachauswahl }))
+          optionen: (af.auswahloption || []).slice().sort((a, b) => (a.reihenfolge || 0) - (b.reihenfolge || 0)).map(o => ({ id: o.id, name: o.name, beschreibung: o.beschreibung, mehrfachauswahl: o.mehrfachauswahl }))
         });
         (af.auswahloption || []).forEach(opt => {
           (opt.ressourcenzeile || []).forEach(rz => pushRz(rz, opt.id, ts.id, as.id, as.name));
@@ -2321,12 +2346,14 @@ function initBereich(){
   bereichWerteMap = {};
   eingabefelder.forEach(ef => { bereichWerteMap[ef.id] = (ef.typ === 'zahl' && ef.fixer_wert != null) ? ef.fixer_wert : (START_WERTE[ef.name] ?? 0); });
   bereichNotizMap = {};
-  // Standardmaessig ausgewaehlt ist, was in Tool B als "Standard" markiert
-  // wurde (Haekchen bei der Option) - ist bei keiner Option eines
-  // Auswahlfelds ein Haekchen gesetzt, startet dieses Auswahlfeld bewusst
-  // ohne Auswahl (statt wie frueher immer die erste Option zu waehlen).
+  // Standardmaessig ausgewaehlt ist, was die als "Standard" markierte
+  // Vorauswahl dieses Offertentyps enthaelt (siehe Einstellungen ->
+  // Vorauswahlen) - gibt es keine Standard-Vorauswahl, startet die Offerte
+  // bewusst ohne Auswahl.
   bereichSelectedOptions = new Set();
-  auswahlfelder.forEach(af => { af.optionen.filter(o => o.istStandard).forEach(o => bereichSelectedOptions.add(o.id)); });
+  const standardVorauswahl = VORAUSWAHLEN.find(v => v.istStandard);
+  standardVorauswahl?.optionIds.forEach(id => bereichSelectedOptions.add(id));
+  aktiveVorauswahlId = standardVorauswahl?.id || null;
   bereichOptionAnzahl = {};
   bereichZugaenglichkeitStufe = 2;
   bereichKonfigEingeklappt = false;
@@ -2380,6 +2407,11 @@ function renderBereich(){
             </div>
           </div>
         </div>` : ''}
+        ${VORAUSWAHLEN.length ? `<div class="vorauswahlRow">
+          <span class="vwlabel">VORAUSWAHL</span>
+          ${VORAUSWAHLEN.map(v => `<button type="button" class="vwbtn${aktiveVorauswahlId === v.id ? ' active' : ''}" data-vw="${v.id}">${v.name}${v.istStandard ? ' ★' : ''}</button>`).join('')}
+          <button type="button" class="vwbtn reset" id="vwResetBtn">Zurücksetzen</button>
+        </div>` : ''}
         ${auswahlfelder.length ? `<div class="afBulkRow">
           <button type="button" class="afBulkBtn" data-mode="gewaehlt">${ICON.chevronDown}Gewählte öffnen</button>
           <button type="button" class="afBulkBtn" data-mode="alle">${ICON.chevronDown}Alle öffnen</button>
@@ -2392,6 +2424,33 @@ function renderBereich(){
   $teilbereiche.querySelector('.konfighead')?.addEventListener('click', () => {
     bereichKonfigEingeklappt = !bereichKonfigEingeklappt;
     $teilbereiche.querySelector('.konfigblock').classList.toggle('collapsed', bereichKonfigEingeklappt);
+  });
+  $teilbereiche.querySelectorAll('.vwbtn[data-vw]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const vw = VORAUSWAHLEN.find(v => v.id === btn.dataset.vw);
+      if(!vw) return;
+      // Pro betroffenem Auswahlfeld nur die Optionen dieser Vorauswahl setzen,
+      // alles andere in diesem Feld abwaehlen - Felder, die die Vorauswahl gar
+      // nicht erwaehnt, bleiben unberuehrt (gleiche Regel wie in initBereich()).
+      auswahlfelder.forEach(af => {
+        const afOptionIds = af.optionen.map(o => o.id);
+        const betroffene = afOptionIds.filter(id => vw.optionIds.includes(id));
+        if(!betroffene.length) return;
+        afOptionIds.forEach(id => bereichSelectedOptions.delete(id));
+        betroffene.forEach(id => bereichSelectedOptions.add(id));
+      });
+      aktiveVorauswahlId = vw.id;
+      renderBereich();
+      recalc();
+      planAutosave();
+    });
+  });
+  $teilbereiche.querySelector('#vwResetBtn')?.addEventListener('click', () => {
+    bereichSelectedOptions = new Set();
+    aktiveVorauswahlId = null;
+    renderBereich();
+    recalc();
+    planAutosave();
   });
   $teilbereiche.querySelectorAll('.afBulkBtn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -2582,6 +2641,7 @@ function renderBereich(){
         // ist (z.B. "Aushub Abtransport": Kunde behaelt das Material selbst,
         // dann soll fuer diesen Teilschritt schlicht nichts gerechnet werden).
         toggleOption(bereichSelectedOptions, af, btn.dataset.opt);
+        aktiveVorauswahlId = null;
         renderBereich();
         recalc();
         planAutosave();
@@ -2993,16 +3053,7 @@ async function ladeBestehendeOfferte(offerteId){
     bereichNotizMap = {};
     (efNotizen || []).forEach(n => { bereichNotizMap[n.eingabefeld_id] = n.notiz; });
     bereichSelectedOptions = new Set((auswahlRows || []).map(a => a.option_id));
-    // Nachtraeglich in Tool B als "Standard" markierte Optionen fuer ein
-    // Auswahlfeld, das bei dieser (bereits gespeicherten) Offerte noch
-    // komplett ohne Auswahl dasteht (z.B. weil das Auswahlfeld erst nach
-    // dem Erstellen dieser Offerte hinzugefuegt wurde) - Faelle mit
-    // bereits getroffener Wahl bleiben unangetastet, auch wenn das nicht
-    // die Standard-Option ist (gleiche Regel wie bei initBereich()).
-    auswahlfelder.forEach(af => {
-      if(af.optionen.some(o => bereichSelectedOptions.has(o.id))) return;
-      af.optionen.filter(o => o.istStandard).forEach(o => bereichSelectedOptions.add(o.id));
-    });
+    aktiveVorauswahlId = null;
     bereichOptionAnzahl = Object.fromEntries((auswahlRows || []).map(a => [a.option_id, a.anzahl ?? 1]));
     bereichZugaenglichkeitStufe = offerte.zugaenglichkeit_stufe ?? 2;
     bereichKonfigEingeklappt = false;
@@ -3065,15 +3116,11 @@ async function starteNeueOfferte(otId){
   gartenarbeiterFrequenz = 'taeglich';
   await ladeDatenFuerOffertentyp(otId);
   if(currentBerechnungsmodell === 'tagessatz'){
+    // Tagessatz-Offerten starten immer bei null, ohne jede Default-Auswahl
+    // (kein "Standard-Option"-Haekchen, keine Vorauswahl - siehe Memory).
     teilschrittTage = {};
     tagessatzAuswahl = {};
     tagessatzOffenIds = new Set();
-    tagessatzAuswahlfelder.forEach(af => {
-      const standards = af.optionen.filter(o => o.istStandard);
-      if(!standards.length) return;
-      if(!tagessatzAuswahl[af.teilschrittId]) tagessatzAuswahl[af.teilschrittId] = new Set();
-      standards.forEach(o => tagessatzAuswahl[af.teilschrittId].add(o.id));
-    });
     renderTagessatzInhalt();
   }else{
     initBereich();

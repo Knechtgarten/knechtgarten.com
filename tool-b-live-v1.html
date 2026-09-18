@@ -457,10 +457,6 @@ input[type=number]{-moz-appearance:textfield;}
     <div class="modalhead"><div class="sub" id="addOptModalTitle">Neue Option</div></div>
     <div class="fld"><label>Name</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" id="addOptInput"></div>
     <div class="fld" style="display:flex;flex-direction:row;align-items:center;gap:6px;">
-      <input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="checkbox" id="addOptStandardInput" style="width:auto;flex:0 0 auto;">
-      <label for="addOptStandardInput" style="font-size:12.5px;margin:0;white-space:nowrap;" title="Wenn dieses Häckchen angewählt ist, wird beim Erstellen einer Offerte der Button von dieser Option standardmässig angewählt sein.">Standard-Option</label>
-    </div>
-    <div class="fld" style="display:flex;flex-direction:row;align-items:center;gap:6px;">
       <input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="checkbox" id="addOptMehrfachauswahlInput" style="width:auto;flex:0 0 auto;">
       <label for="addOptMehrfachauswahlInput" style="font-size:12.5px;margin:0;white-space:nowrap;" title="Wenn dieses Häckchen angewählt ist, kann diese Option zusammen mit jeder anderen Option angewählt werden. Optionen OHNE dieses Häckchen schliessen sich untereinander gegenseitig aus (wie ein klassisches Einzelauswahlfeld).">Mehrfachauswahl</label>
     </div>
@@ -2030,7 +2026,7 @@ async function loadArbeitsschritte(){
           sonderposition_typ_id, sonderposition_typ(name, titel, hat_eigene_berechnung) ),
         option_freitext_vorlage ( id, kategorie, bezeichnung, einheit, notiz, menge_vorschlag, preis_vorschlag, reihenfolge, ist_eigene_offertenposition ),
         auswahlfeld ( id, name, reihenfolge,
-          auswahloption ( id, name, beschreibung, hinweistext, hinweisbild_url, ist_standard, mengenoption, mengenoption_einheit, mengenoption_standardmenge, mehrfachauswahl, ist_eigene_offertenposition, reihenfolge,
+          auswahloption ( id, name, beschreibung, hinweistext, hinweisbild_url, mengenoption, mengenoption_einheit, mengenoption_standardmenge, mehrfachauswahl, ist_eigene_offertenposition, reihenfolge,
             ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, tagesleistung_menge, notiz, reihenfolge, ist_eigene_offertenposition,
               zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4, mindestmenge, verschnitt_prozent, zuschlag_prozent,
           menge_formel_modus, menge_formel_text, menge_formel_baukasten_ausdruck,
@@ -2628,26 +2624,9 @@ async function deleteTeilschritt(id){
   await loadArbeitsschritte();
 }
 
-// Innerhalb einer Gruppe exklusiver Optionen (kein eigener Mehrfachauswahl-
-// Haken, siehe toggleOption() in Tool A) darf immer nur eine gleichzeitig den
-// Standard-Haken tragen (sonst waere unklar, welche davon bei einer neuen
-// Offerte vorausgewaehlt werden soll) - Optionen MIT Mehrfachauswahl-Haken
-// duerfen dagegen beliebig viele gleichzeitig Standard sein, da sie ohnehin
-// frei miteinander kombinierbar sind.
-async function erzwingeEinzigenStandard(afId, keepOptId){
-  const af = ARBEITSSCHRITTE.flatMap(a => a.teilschritt || []).map(t => t.auswahlfeld).find(a => a?.id === afId);
-  const keepOpt = af?.auswahloption?.find(o => o.id === keepOptId);
-  if(keepOpt?.mehrfachauswahl) return;
-  const exklusiveIds = (af?.auswahloption || []).filter(o => !o.mehrfachauswahl && o.id !== keepOptId).map(o => o.id);
-  if(!exklusiveIds.length) return;
-  const { error } = await sb.from('auswahloption').update({ ist_standard: false }).in('id', exklusiveIds);
-  if(error) console.error(error);
-}
-
-async function addOption(afId, name, istStandard, mengenoption, mengenoptionEinheit, mehrfachauswahl, eigenePosition, mengenoptionStandardmenge){
-  const { data, error } = await sb.from('auswahloption').insert({ auswahlfeld_id: afId, name, reihenfolge: 1, ist_standard: !!istStandard, mengenoption: !!mengenoption, mengenoption_einheit: mengenoptionEinheit || 'Stk.', mengenoption_standardmenge: mengenoptionStandardmenge ?? null, mehrfachauswahl: !!mehrfachauswahl, ist_eigene_offertenposition: !!eigenePosition }).select().single();
+async function addOption(afId, name, mengenoption, mengenoptionEinheit, mehrfachauswahl, eigenePosition, mengenoptionStandardmenge){
+  const { data, error } = await sb.from('auswahloption').insert({ auswahlfeld_id: afId, name, reihenfolge: 1, mengenoption: !!mengenoption, mengenoption_einheit: mengenoptionEinheit || 'Stk.', mengenoption_standardmenge: mengenoptionStandardmenge ?? null, mehrfachauswahl: !!mehrfachauswahl, ist_eigene_offertenposition: !!eigenePosition }).select().single();
   if(error){ showToast(friendlyError(error), true); return false; }
-  if(istStandard) await erzwingeEinzigenStandard(afId, data.id);
   await loadArbeitsschritte();
   return true;
 }
@@ -2692,7 +2671,6 @@ function openAddOptModal(afId, existingOpt){
   $('addOptHinweistextWrap').classList.toggle('hidden', !existingOpt);
   $('addOptHinweisbildWrap').classList.toggle('hidden', !existingOpt);
   $('addOptHinweistextInput').value = existingOpt?.hinweistext || '';
-  $('addOptStandardInput').checked = !!existingOpt?.ist_standard;
   $('addOptMehrfachauswahlInput').checked = !!existingOpt?.mehrfachauswahl;
   $('addOptMengenoptionInput').checked = !!existingOpt?.mengenoption;
   $('addOptMengenoptionEinheitSelect').innerHTML = einheitOptionsHtml(existingOpt?.mengenoption_einheit || 'Stk.');
@@ -2720,7 +2698,6 @@ $('addOptCancel').addEventListener('click', () => $('addOptOverlay').classList.r
 $('addOptConfirm').addEventListener('click', async () => {
   const name = $('addOptInput').value.trim();
   if(!name) return;
-  const istStandard = $('addOptStandardInput').checked;
   const mehrfachauswahl = $('addOptMehrfachauswahlInput').checked;
   const mengenoption = $('addOptMengenoptionInput').checked;
   const mengenoptionEinheit = $('addOptMengenoptionEinheitSelect').value || 'Stk.';
@@ -2730,7 +2707,6 @@ $('addOptConfirm').addEventListener('click', async () => {
   if(addOptEditingId){
     const payload = {
       name,
-      ist_standard: istStandard,
       mehrfachauswahl,
       mengenoption,
       mengenoption_einheit: mengenoptionEinheit,
@@ -2741,11 +2717,10 @@ $('addOptConfirm').addEventListener('click', async () => {
     };
     const { error } = await sb.from('auswahloption').update(payload).eq('id', addOptEditingId);
     if(error){ showToast(friendlyError(error), true); return; }
-    if(istStandard) await erzwingeEinzigenStandard(addOptContext, addOptEditingId);
     $('addOptOverlay').classList.remove('show');
     await loadArbeitsschritte();
   }else{
-    if(await addOption(addOptContext, name, istStandard, mengenoption, mengenoptionEinheit, mehrfachauswahl, eigenePosition, mengenoptionStandardmenge)) $('addOptOverlay').classList.remove('show');
+    if(await addOption(addOptContext, name, mengenoption, mengenoptionEinheit, mehrfachauswahl, eigenePosition, mengenoptionStandardmenge)) $('addOptOverlay').classList.remove('show');
   }
 });
 $('addOptInput').addEventListener('keydown', e => { if(e.key === 'Enter') $('addOptConfirm').click(); });

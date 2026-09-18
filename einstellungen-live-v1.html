@@ -103,6 +103,12 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
   background:#fff;color:var(--ink);cursor:pointer;}
 .filterpill:hover{border-color:var(--primary);}
 .filterpill.on{background:var(--primary);color:#fff;border-color:var(--primary);}
+.vwasheader{font-size:13px;font-weight:700;color:var(--ink);margin:18px 0 4px;}
+.vwafblock{margin-top:8px;padding-top:8px;border-top:1px solid var(--line);}
+.vwaflabel{font-size:11.5px;font-weight:700;color:var(--ink);margin-bottom:6px;}
+.vwoptrow{display:flex;flex-wrap:wrap;gap:7px;}
+.vwopt{font-size:11px;font-weight:600;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:20px;padding:7px 13px;cursor:pointer;}
+.vwopt.on{background:var(--primary);color:#fff;border-color:var(--primary);}
 .artikelpicker-tablewrap{max-height:460px;overflow-y:auto;margin-top:10px;}
 .apclickrow{cursor:pointer;}
 .apclickrow:hover{background:var(--soft);}
@@ -540,6 +546,7 @@ input[type=number]{-moz-appearance:textfield;}
       <div id="formelKategorienSidebar" class="hidden"></div>
       <a data-abschnitt="rechenlogik">Berechnungsregeln</a>
       <a data-abschnitt="sonderpositionen">Sonderpositionen</a>
+      <a data-abschnitt="vorauswahlen">Vorauswahlen</a>
     </div>
 
     <div class="settingscontent">
@@ -889,6 +896,33 @@ input[type=number]{-moz-appearance:textfield;}
         </div>
       </div>
 
+      <!-- ================= Vorauswahlen ================= -->
+      <div id="abschnitt-vorauswahlen" class="hidden">
+        <div class="card">
+          <div class="cardlabel">Vorauswahlen</div>
+          <div class="hint">Eine Vorauswahl setzt in Tool A mit einem Klick automatisch alle passenden Options-Buttons - z.B. "Vorauswahl Biopool" oder "Vorauswahl Chemiepool" bei Holzdeck. Gilt nur für Formel-Offertentypen. Genau eine Vorauswahl pro Offertentyp kann als Standard markiert werden - die wird automatisch übernommen, sobald jemand eine neue Offerte dieses Typs anlegt.</div>
+          <div class="fld" style="max-width:320px;"><label>Offertentyp</label><select id="vwOtSelect"></select></div>
+          <table style="table-layout:fixed;margin-top:10px;">
+            <colgroup><col><col style="width:130px;"><col style="width:220px;"></colgroup>
+            <thead><tr><th>Name</th><th>Standard</th><th></th></tr></thead>
+            <tbody id="vwListeBody"></tbody>
+          </table>
+          <button class="btnlink" id="vwNeueBtn" style="margin-top:12px;">+ Neue Vorauswahl</button>
+        </div>
+
+        <div class="card hidden" id="vwEditorCard">
+          <div class="cardlabel" id="vwEditorTitel">Neue Vorauswahl</div>
+          <div class="fld" style="max-width:320px;"><label>Name</label><input autocomplete="off" data-lpignore="true" id="vwNameInput"></div>
+          <div class="hint">Klick alle Optionen an, die zu dieser Vorauswahl gehören - genau wie in einer echten Offerte. Optionen, die hier nicht angeklickt sind, bleiben von dieser Vorauswahl unberührt.</div>
+          <div id="vwBaumWrap"></div>
+          <div class="status" id="vwEditorStatus"></div>
+          <div style="display:flex;gap:16px;margin-top:12px;align-items:center;">
+            <button class="btn" id="vwSpeichernBtn">Speichern</button>
+            <button class="btnlink" id="vwAbbrechenBtn">Abbrechen</button>
+          </div>
+        </div>
+      </div>
+
     </div>
   </div>
 </main>
@@ -988,7 +1022,7 @@ function naechsteReihenfolge(liste){
 // ---------------------------------------------------------------------------
 function zeigeAbschnitt(name){
   document.querySelectorAll('#settingsnav a').forEach(a => a.classList.toggle('on', a.dataset.abschnitt === name));
-  ['offertentyp','formelbibliothek','datenabgleich','rechenlogik','sonderpositionen'].forEach(n => {
+  ['offertentyp','formelbibliothek','datenabgleich','rechenlogik','sonderpositionen','vorauswahlen'].forEach(n => {
     $(`abschnitt-${n}`).classList.toggle('hidden', n !== name);
   });
   $('formelKategorienSidebar').classList.toggle('hidden', name !== 'formelbibliothek');
@@ -1013,8 +1047,154 @@ function zeigeAbschnitt(name){
     ladeLwDirektEinzelfahrt();
   }
   if(name === 'benutzer'){ loadBenutzer(); loadModulSichtbarkeit(); }
+  if(name === 'vorauswahlen') ladeVorauswahlAbschnitt();
 }
 document.querySelectorAll('#settingsnav a').forEach(a => a.addEventListener('click', () => zeigeAbschnitt(a.dataset.abschnitt)));
+
+// ---------------------------------------------------------------------------
+// Vorauswahlen (nur Formel-Offertentypen) - benannte Buendel von Options-
+// Klicks, die in Tool A mit einem Klick uebernommen werden koennen. Ersetzt
+// das frueher pro Option gesetzte "Standard"-Haekchen (siehe Memory).
+// ---------------------------------------------------------------------------
+let vwSelectedOtId = null;
+let VORAUSWAHL_LISTE = [];
+let VW_BAUM = [];
+let vwEditingId = null;
+let vwEditingOptionIds = new Set();
+
+async function ladeVorauswahlAbschnitt(){
+  await loadOffertentypen();
+  const formelTypen = OFFERTENTYPEN.filter(o => o.berechnungsmodell === 'formel' && !o.papierkorb_am);
+  if(!vwSelectedOtId || !formelTypen.some(o => o.id === vwSelectedOtId)) vwSelectedOtId = formelTypen[0]?.id || null;
+  $('vwOtSelect').innerHTML = formelTypen.map(o => `<option value="${o.id}" ${o.id === vwSelectedOtId ? 'selected' : ''}>${o.name}</option>`).join('');
+  await ladeVorauswahlListe();
+}
+
+async function ladeVorauswahlListe(){
+  $('vwEditorCard').classList.add('hidden');
+  if(!vwSelectedOtId){ $('vwListeBody').innerHTML = '<tr><td colspan="3" class="hint">Kein Formel-Offertentyp vorhanden.</td></tr>'; return; }
+  const { data, error } = await sb.from('vorauswahl')
+    .select('id,name,ist_standard,vorauswahl_option(option_id)')
+    .eq('offertentyp_id', vwSelectedOtId).order('name');
+  if(error){ console.error(error); return; }
+  VORAUSWAHL_LISTE = (data || []).map(v => ({ id: v.id, name: v.name, istStandard: v.ist_standard, optionIds: (v.vorauswahl_option || []).map(o => o.option_id) }));
+  renderVorauswahlListe();
+}
+
+function renderVorauswahlListe(){
+  $('vwListeBody').innerHTML = VORAUSWAHL_LISTE.map(v => `
+    <tr>
+      <td>${v.name}</td>
+      <td><button type="button" class="btnlink vwStandardBtn" data-vw="${v.id}"${v.istStandard ? ' style="color:#5B6100;"' : ''}>${v.istStandard ? '★ Standard' : '☆ Als Standard'}</button></td>
+      <td style="text-align:right;">
+        <button type="button" class="btnlink vwBearbeitenBtn" data-vw="${v.id}">Bearbeiten</button>
+        <button type="button" class="btnlink vwLoeschenBtn" data-vw="${v.id}" style="color:var(--danger);margin-left:16px;">Löschen</button>
+      </td>
+    </tr>`).join('') || '<tr><td colspan="3" class="hint">Noch keine Vorauswahl für diesen Offertentyp.</td></tr>';
+
+  $('vwListeBody').querySelectorAll('.vwStandardBtn').forEach(b => b.addEventListener('click', () => setzeVorauswahlStandard(b.dataset.vw)));
+  $('vwListeBody').querySelectorAll('.vwBearbeitenBtn').forEach(b => b.addEventListener('click', () => oeffneVorauswahlEditor(b.dataset.vw)));
+  $('vwListeBody').querySelectorAll('.vwLoeschenBtn').forEach(b => b.addEventListener('click', () => loescheVorauswahl(b.dataset.vw)));
+}
+
+async function setzeVorauswahlStandard(id){
+  const aktuell = VORAUSWAHL_LISTE.find(v => v.id === id);
+  const neuerWert = !aktuell?.istStandard;
+  // Erst alle Vorauswahlen dieses Offertentyps auf false, dann - falls
+  // gewuenscht - genau diese hier auf true setzen. So ist zu keinem
+  // Zeitpunkt mehr als eine gleichzeitig Standard (der Unique-Index in der DB
+  // wuerde das sonst ohnehin verhindern).
+  const { error: e1 } = await sb.from('vorauswahl').update({ ist_standard: false }).eq('offertentyp_id', vwSelectedOtId);
+  if(e1){ console.error(e1); return; }
+  if(neuerWert){
+    const { error: e2 } = await sb.from('vorauswahl').update({ ist_standard: true }).eq('id', id);
+    if(e2){ console.error(e2); return; }
+  }
+  await ladeVorauswahlListe();
+}
+
+async function loescheVorauswahl(id){
+  if(!(await confirmDialog('Vorauswahl wirklich löschen?'))) return;
+  const { error } = await sb.from('vorauswahl').delete().eq('id', id);
+  if(error){ showToast(friendlyError(error), true); return; }
+  await ladeVorauswahlListe();
+}
+
+async function ladeVorauswahlBaum(){
+  const { data, error } = await sb.from('arbeitsschritt')
+    .select('id,name,reihenfolge,teilschritt(id,name,reihenfolge,auswahlfeld(id,name,auswahloption(id,name,reihenfolge)))')
+    .eq('offertentyp_id', vwSelectedOtId).order('reihenfolge');
+  if(error){ console.error(error); VW_BAUM = []; return; }
+  VW_BAUM = (data || []).map(as => ({
+    id: as.id, name: as.name,
+    teilschritte: (as.teilschritt || []).slice().sort((a, b) => (a.reihenfolge || 0) - (b.reihenfolge || 0)).filter(ts => ts.auswahlfeld).map(ts => ({
+      id: ts.id, name: ts.name,
+      auswahlfeld: { id: ts.auswahlfeld.id, name: ts.auswahlfeld.name,
+        optionen: (ts.auswahlfeld.auswahloption || []).slice().sort((a, b) => (a.reihenfolge || 0) - (b.reihenfolge || 0)) }
+    }))
+  })).filter(as => as.teilschritte.length);
+}
+
+function renderVorauswahlBaum(){
+  $('vwBaumWrap').innerHTML = VW_BAUM.map(as => `
+    <div class="vwasheader">${as.name}</div>
+    ${as.teilschritte.map(ts => `
+      <div class="vwafblock">
+        <div class="vwaflabel">${ts.auswahlfeld.name}</div>
+        <div class="vwoptrow">
+          ${ts.auswahlfeld.optionen.map(o => `<button type="button" class="vwopt ${vwEditingOptionIds.has(o.id) ? 'on' : ''}" data-opt="${o.id}">${o.name}</button>`).join('')}
+        </div>
+      </div>`).join('')}
+  `).join('') || '<div class="hint">Dieser Offertentyp hat noch keine Auswahlfelder in Tool B.</div>';
+
+  $('vwBaumWrap').querySelectorAll('.vwopt').forEach(b => b.addEventListener('click', () => {
+    const id = b.dataset.opt;
+    if(vwEditingOptionIds.has(id)) vwEditingOptionIds.delete(id); else vwEditingOptionIds.add(id);
+    b.classList.toggle('on');
+  }));
+}
+
+async function oeffneVorauswahlEditor(id){
+  vwEditingId = id || null;
+  const bestehend = id ? VORAUSWAHL_LISTE.find(v => v.id === id) : null;
+  vwEditingOptionIds = new Set(bestehend?.optionIds || []);
+  $('vwEditorTitel').textContent = bestehend ? 'Vorauswahl bearbeiten' : 'Neue Vorauswahl';
+  $('vwNameInput').value = bestehend?.name || '';
+  $('vwEditorStatus').textContent = '';
+  await ladeVorauswahlBaum();
+  renderVorauswahlBaum();
+  $('vwEditorCard').classList.remove('hidden');
+  $('vwEditorCard').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+$('vwAbbrechenBtn').addEventListener('click', () => $('vwEditorCard').classList.add('hidden'));
+$('vwNeueBtn').addEventListener('click', () => oeffneVorauswahlEditor(null));
+$('vwOtSelect').addEventListener('change', () => { vwSelectedOtId = $('vwOtSelect').value; ladeVorauswahlListe(); });
+
+$('vwSpeichernBtn').addEventListener('click', async () => {
+  const name = $('vwNameInput').value.trim();
+  if(!name){ $('vwEditorStatus').textContent = 'Bitte einen Namen eingeben.'; $('vwEditorStatus').className = 'status err'; return; }
+  let id = vwEditingId;
+  if(id){
+    const { error } = await sb.from('vorauswahl').update({ name }).eq('id', id);
+    if(error){ $('vwEditorStatus').textContent = friendlyError(error); $('vwEditorStatus').className = 'status err'; return; }
+  }else{
+    const { data, error } = await sb.from('vorauswahl').insert({ offertentyp_id: vwSelectedOtId, name }).select().single();
+    if(error){ $('vwEditorStatus').textContent = friendlyError(error); $('vwEditorStatus').className = 'status err'; return; }
+    id = data.id;
+  }
+  // Optionen einfach komplett neu setzen (loeschen+einfuegen) - gleiches
+  // Muster wie bei offerte_auswahl/teilflaeche_auswahl anderswo im Tool.
+  const { error: delErr } = await sb.from('vorauswahl_option').delete().eq('vorauswahl_id', id);
+  if(delErr) console.error(delErr);
+  if(vwEditingOptionIds.size){
+    const rows = [...vwEditingOptionIds].map(optId => ({ vorauswahl_id: id, option_id: optId }));
+    const { error: insErr } = await sb.from('vorauswahl_option').insert(rows);
+    if(insErr){ $('vwEditorStatus').textContent = friendlyError(insErr); $('vwEditorStatus').className = 'status err'; return; }
+  }
+  $('vwEditorCard').classList.add('hidden');
+  await ladeVorauswahlListe();
+});
 
 // ---------------------------------------------------------------------------
 // Offertentyp-Verwaltung
