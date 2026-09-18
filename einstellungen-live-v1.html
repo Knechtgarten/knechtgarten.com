@@ -109,6 +109,9 @@ td{padding:7px 6px;border-bottom:1px solid var(--soft);vertical-align:middle;}
 .vwoptrow{display:flex;flex-wrap:wrap;gap:7px;}
 .vwopt{font-size:11px;font-weight:600;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:20px;padding:7px 13px;cursor:pointer;}
 .vwopt.on{background:var(--primary);color:#fff;border-color:var(--primary);}
+.vwoptwrap{display:inline-flex;align-items:stretch;}
+.vwoptMenge{width:38px;font-size:11px;padding:3px 2px;text-align:center;border:1px solid var(--line);border-left:none;border-radius:0;}
+.vwoptMengeUnit{display:flex;align-items:center;font-size:10px;color:var(--muted);border:1px solid var(--line);border-left:none;border-top-right-radius:6px;border-bottom-right-radius:6px;padding:3px 6px 3px 2px;background:#fff;}
 .artikelpicker-tablewrap{max-height:460px;overflow-y:auto;margin-top:10px;}
 .apclickrow{cursor:pointer;}
 .apclickrow:hover{background:var(--soft);}
@@ -1061,6 +1064,7 @@ let VORAUSWAHL_LISTE = [];
 let VW_BAUM = [];
 let vwEditingId = null;
 let vwEditingOptionIds = new Set();
+let vwEditingMengen = {};
 
 async function ladeVorauswahlAbschnitt(){
   await loadOffertentypen();
@@ -1074,10 +1078,10 @@ async function ladeVorauswahlListe(){
   $('vwEditorCard').classList.add('hidden');
   if(!vwSelectedOtId){ $('vwListeBody').innerHTML = '<tr><td colspan="3" class="hint">Kein Formel-Offertentyp vorhanden.</td></tr>'; return; }
   const { data, error } = await sb.from('vorauswahl')
-    .select('id,name,ist_standard,vorauswahl_option(option_id)')
+    .select('id,name,ist_standard,vorauswahl_option(option_id,menge)')
     .eq('offertentyp_id', vwSelectedOtId).order('name');
   if(error){ console.error(error); return; }
-  VORAUSWAHL_LISTE = (data || []).map(v => ({ id: v.id, name: v.name, istStandard: v.ist_standard, optionIds: (v.vorauswahl_option || []).map(o => o.option_id) }));
+  VORAUSWAHL_LISTE = (data || []).map(v => ({ id: v.id, name: v.name, istStandard: v.ist_standard, optionIds: (v.vorauswahl_option || []).map(o => o.option_id), mengen: Object.fromEntries((v.vorauswahl_option || []).filter(o => o.menge != null).map(o => [o.option_id, o.menge])) }));
   renderVorauswahlListe();
 }
 
@@ -1122,7 +1126,7 @@ async function loescheVorauswahl(id){
 
 async function ladeVorauswahlBaum(){
   const { data, error } = await sb.from('arbeitsschritt')
-    .select('id,name,reihenfolge,teilschritt(id,name,reihenfolge,auswahlfeld(id,name,auswahloption(id,name,reihenfolge)))')
+    .select('id,name,reihenfolge,teilschritt(id,name,reihenfolge,auswahlfeld(id,name,auswahloption(id,name,reihenfolge,mengenoption,mengenoption_einheit,mengenoption_standardmenge)))')
     .eq('offertentyp_id', vwSelectedOtId).order('reihenfolge');
   if(error){ console.error(error); VW_BAUM = []; return; }
   VW_BAUM = (data || []).map(as => ({
@@ -1142,22 +1146,46 @@ function renderVorauswahlBaum(){
       <div class="vwafblock">
         <div class="vwaflabel">${ts.auswahlfeld.name}</div>
         <div class="vwoptrow">
-          ${ts.auswahlfeld.optionen.map(o => `<button type="button" class="vwopt ${vwEditingOptionIds.has(o.id) ? 'on' : ''}" data-opt="${o.id}">${o.name}</button>`).join('')}
+          ${ts.auswahlfeld.optionen.map(o => {
+            const aktiv = vwEditingOptionIds.has(o.id);
+            const zeigeMenge = o.mengenoption && aktiv;
+            const menge = vwEditingMengen[o.id] ?? o.mengenoption_standardmenge ?? 0;
+            const mengeHtml = zeigeMenge
+              ? `<input type="number" min="0" step="any" class="vwoptMenge" data-opt="${o.id}" value="${menge}" title="Anzahl"><span class="vwoptMengeUnit">${o.mengenoption_einheit || 'Stk.'}</span>`
+              : '';
+            return `<span class="vwoptwrap">
+              <button type="button" class="vwopt ${aktiv ? 'on' : ''}" data-opt="${o.id}" data-mengenoption="${!!o.mengenoption}" data-standardmenge="${o.mengenoption_standardmenge ?? 0}">${o.name}</button>${mengeHtml}
+            </span>`;
+          }).join('')}
         </div>
       </div>`).join('')}
   `).join('') || '<div class="hint">Dieser Offertentyp hat noch keine Auswahlfelder in Tool B.</div>';
 
   $('vwBaumWrap').querySelectorAll('.vwopt').forEach(b => b.addEventListener('click', () => {
     const id = b.dataset.opt;
-    if(vwEditingOptionIds.has(id)) vwEditingOptionIds.delete(id); else vwEditingOptionIds.add(id);
-    b.classList.toggle('on');
+    if(vwEditingOptionIds.has(id)){
+      vwEditingOptionIds.delete(id);
+    }else{
+      vwEditingOptionIds.add(id);
+      if(b.dataset.mengenoption === 'true' && vwEditingMengen[id] == null) vwEditingMengen[id] = parseFloat(b.dataset.standardmenge) || 0;
+    }
+    renderVorauswahlBaum();
   }));
+  $('vwBaumWrap').querySelectorAll('.vwoptMenge').forEach(inp => {
+    inp.addEventListener('click', e => e.stopPropagation());
+    inp.addEventListener('change', () => {
+      const val = parseFloat(inp.value);
+      vwEditingMengen[inp.dataset.opt] = (isNaN(val) || val < 0) ? 0 : val;
+      inp.value = vwEditingMengen[inp.dataset.opt];
+    });
+  });
 }
 
 async function oeffneVorauswahlEditor(id){
   vwEditingId = id || null;
   const bestehend = id ? VORAUSWAHL_LISTE.find(v => v.id === id) : null;
   vwEditingOptionIds = new Set(bestehend?.optionIds || []);
+  vwEditingMengen = { ...(bestehend?.mengen || {}) };
   $('vwEditorTitel').textContent = bestehend ? 'Vorauswahl bearbeiten' : 'Neue Vorauswahl';
   $('vwNameInput').value = bestehend?.name || '';
   $('vwEditorStatus').textContent = '';
@@ -1188,7 +1216,7 @@ $('vwSpeichernBtn').addEventListener('click', async () => {
   const { error: delErr } = await sb.from('vorauswahl_option').delete().eq('vorauswahl_id', id);
   if(delErr) console.error(delErr);
   if(vwEditingOptionIds.size){
-    const rows = [...vwEditingOptionIds].map(optId => ({ vorauswahl_id: id, option_id: optId }));
+    const rows = [...vwEditingOptionIds].map(optId => ({ vorauswahl_id: id, option_id: optId, menge: vwEditingMengen[optId] ?? null }));
     const { error: insErr } = await sb.from('vorauswahl_option').insert(rows);
     if(insErr){ $('vwEditorStatus').textContent = friendlyError(insErr); $('vwEditorStatus').className = 'status err'; return; }
   }
