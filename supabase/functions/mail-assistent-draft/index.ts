@@ -367,7 +367,7 @@ async function modusListeVerfassen() {
   const { data } = await sb.from('mailassistent_vorlage')
     .select(`id,titel,typ,inhalt,betreff,parent_id,
       mailassistent_zusatzfenster(id,typ,titel,platzhalter,erlaubt_eigene_eingabe,
-        mailassistent_zusatzfenster_spalte(id,titel,typ,reihenfolge,
+        mailassistent_zusatzfenster_spalte(id,titel,typ,einheit,reihenfolge,
           mailassistent_zusatzfenster_spalte_option(id,wert,reihenfolge)),
         mailassistent_zusatzfenster_position(id,titel,reihenfolge))`)
     .eq('richtung', 'verfassen').eq('aktiv', true).order('reihenfolge');
