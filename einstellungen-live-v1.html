@@ -788,6 +788,11 @@ input[type=number]{-moz-appearance:textfield;}
         <div id="staffelgruppenListe"></div>
         <button class="btnlink admin-only" id="neueStaffelgruppeBtn" style="margin-bottom:16px;">+ Neue Staffelung hinzufügen</button>
 
+        <div class="subhead" style="margin-top:28px;">Kalkulationsstaffelung</div>
+        <div class="hint" style="margin-bottom:10px;">Bestimmt anhand einer Summe (z.B. Gesamt-Watt aller gewählten Leuchten in der Offerte) den passenden Artikel (z.B. Netzteil) - im Gegensatz zur normalen Staffelung oben zählt hier keine eigene Formel, sondern die Summe über andere aktive Positionen.</div>
+        <div id="kalkulationsstaffelungListe"></div>
+        <button class="btnlink admin-only" id="neueKalkulationsstaffelungBtn" style="margin-bottom:16px;">+ Neue Kalkulationsstaffelung hinzufügen</button>
+
         <div class="subhead" style="margin-top:28px;">Auswahlgruppen</div>
         <div class="hint" style="margin-bottom:10px;">Für Optionen mit Farb-/Varianten-Dropdown (z.B. "Poolabdeckungsfarben") - in Tool B bei "Option bearbeiten" als Auswahlgruppe zuweisbar.</div>
         <div id="auswahlgruppenListe"></div>
@@ -2149,8 +2154,14 @@ function artikelDetailText(id){
   return `${a.artikelnummer_knecht ? a.artikelnummer_knecht + ' · ' : ''}${a.bezeichnung} · ${a.einheit || '–'} · CHF ${fmtNum(a.vp_knecht)}`;
 }
 
-function renderStaffelgruppen(){
-  $('staffelgruppenListe').innerHTML = STAFFELGRUPPEN.map(sg => {
+// Zwei optisch getrennte Kategorien in der Uebersicht (normale Staffelung
+// vs. Kalkulationsstaffelung/Summenmodus), obwohl beide dieselbe
+// staffelgruppe/staffelstufe-Tabelle und dieselbe Stufen-Von/Bis/Artikel-
+// Logik verwenden - die Unterscheidung ist rein ueber summen_zusatzeinheit
+// (gesetzt = Kalkulationsstaffelung) und rein visuell, keine eigene DB-
+// Struktur noetig.
+function renderStaffelgruppenListe(containerId, gruppen){
+  $(containerId).innerHTML = gruppen.map(sg => {
     const expanded = !!staffelExpanded[sg.id];
     return `<div class="card">
       <div class="cardheader" data-sgid="${sg.id}">
@@ -2162,12 +2173,18 @@ function renderStaffelgruppen(){
     </div>`;
   }).join('');
 
-  $('staffelgruppenListe').querySelectorAll('.cardheader').forEach(h => {
+  $(containerId).querySelectorAll('.cardheader').forEach(h => {
     h.addEventListener('click', () => {
       staffelExpanded[h.dataset.sgid] = !staffelExpanded[h.dataset.sgid];
       renderStaffelgruppen();
     });
   });
+}
+function renderStaffelgruppen(){
+  const normale = STAFFELGRUPPEN.filter(sg => !sg.summen_zusatzeinheit);
+  const summen = STAFFELGRUPPEN.filter(sg => sg.summen_zusatzeinheit);
+  renderStaffelgruppenListe('staffelgruppenListe', normale);
+  renderStaffelgruppenListe('kalkulationsstaffelungListe', summen);
   attachSgBodyHandlers();
 }
 
@@ -2180,22 +2197,18 @@ function renderSgBody(sg){
       <div class="fld" style="max-width:360px;white-space:nowrap;"><label style="white-space:nowrap;">Titel (frei änderbar, wird in der Offerte angezeigt)</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="text" class="sgTitelInput" value="${sg.titel || ''}" placeholder="${sg.name}"></div>
       <div class="fld" style="max-width:160px;"><label>Kategorie</label>${kategorieSelectHtml(sg.kategorie, 'sgKategorieSelect')}</div>
     </div>
-    <div class="row" style="margin-top:10px;align-items:center;">
-      <div class="fld" style="display:flex;align-items:center;gap:6px;flex:0 0 auto;">
-        <input autocomplete="off" type="checkbox" class="sgSummenmodusCheckbox" ${sg.summen_zusatzeinheit ? 'checked' : ''}>
-        <label style="white-space:nowrap;font-size:12.5px;" title="Statt der Menge-Formel EINER Ressourcenzeile wird die Summe eines Zusatzwerts (z.B. Watt) ueber alle aktiven Artikel im gewaehlten Bereich verglichen - z.B. Gesamt-Watt aller gewaehlten Leuchten → passendes Netzteil.">Summenmodus (z.B. Watt-Summe → Netzteil)</label>
-      </div>
-      <div class="fld sgSummenFeld ${sg.summen_zusatzeinheit ? '' : 'hidden'}" style="max-width:180px;"><label>Zusatzeinheit</label><select class="sgZusatzeinheitSelect">${einheitOptionsHtml(sg.summen_zusatzeinheit, true)}</select></div>
-      <div class="fld sgSummenFeld ${sg.summen_zusatzeinheit ? '' : 'hidden'}" style="max-width:180px;"><label>Bereich</label>
+    ${sg.summen_zusatzeinheit ? `<div class="row" style="margin-top:10px;align-items:center;">
+      <div class="fld" style="max-width:180px;"><label>Zusatzeinheit</label><select class="sgZusatzeinheitSelect">${einheitOptionsHtml(sg.summen_zusatzeinheit, true)}</select></div>
+      <div class="fld" style="max-width:180px;"><label>Bereich</label>
         <select class="sgScopeSelect">
           <option value="offerte" ${sg.summen_scope !== 'arbeitsschritt' ? 'selected' : ''}>Ganze Offerte</option>
           <option value="arbeitsschritt" ${sg.summen_scope === 'arbeitsschritt' ? 'selected' : ''}>Pro Arbeitsschritt</option>
         </select>
       </div>
-      <div class="fld sgSummenFeld ${sg.summen_zusatzeinheit ? '' : 'hidden'}" style="max-width:140px;"><label title="Wird auf die Summe aufgeschlagen, bevor die passende Stufe gesucht wird - z.B. für Verschnitt/Reserve.">Reserve %</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="number" step="1" min="0" class="sgReserveInput" value="${sg.summen_reserve_prozent ?? 0}"></div>
-    </div>
+      <div class="fld" style="max-width:140px;"><label title="Wird auf die Summe aufgeschlagen, bevor die passende Stufe gesucht wird - z.B. für Verschnitt/Reserve.">Reserve %</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="number" step="1" min="0" class="sgReserveInput" value="${sg.summen_reserve_prozent ?? 0}"></div>
+    </div>` : ''}
     <div class="hint" style="margin-bottom:12px;">${sg.summen_zusatzeinheit
-      ? 'Im Summenmodus wird die Summe aus Zusatzwert × Menge aller aktiven Artikel mit der oben gewählten Zusatzeinheit (im gewählten Bereich) mit den Von/Bis-Bereichen unten verglichen. Die Menge-Formel der eigenen Ressourcenzeile in Tool B wird dabei ignoriert.'
+      ? 'Die Summe aus Zusatzwert × Menge aller aktiven Artikel mit der oben gewählten Zusatzeinheit (im gewählten Bereich) wird mit den Von/Bis-Bereichen unten verglichen. Die Menge-Formel der eigenen Ressourcenzeile in Tool B wird dabei ignoriert.'
       : 'Die berechnete Menge (z.B. m³) wird mit den Von/Bis-Bereichen unten verglichen - der erste passende Bereich bestimmt, welcher Artikel (und damit welcher Pauschalpreis) in der Offerte verrechnet wird.'} Die letzte Zeile ist immer leer zum Erfassen - sobald Von und Artikel ausgefüllt sind, wird automatisch gespeichert und eine neue leere Zeile erscheint.</div>
     <table class="sgtable">
       <thead><tr><th style="width:150px;">Von</th><th style="width:150px;">Bis</th><th style="width:320px;">Artikel</th><th style="width:40px;"></th></tr></thead>
@@ -2221,7 +2234,7 @@ function renderSgBody(sg){
 }
 
 function attachSgBodyHandlers(){
-  $('staffelgruppenListe').querySelectorAll('.cardbody[data-sgbody]').forEach(body => {
+  document.querySelectorAll('#staffelgruppenListe .cardbody[data-sgbody], #kalkulationsstaffelungListe .cardbody[data-sgbody]').forEach(body => {
     const sgId = body.dataset.sgbody;
     body.querySelector('.sgTitelInput').addEventListener('change', async e => {
       const titel = e.target.value.trim() || null;
@@ -2236,22 +2249,6 @@ function attachSgBodyHandlers(){
       const statusEl = body.querySelector('.sgStatus');
       if(error){ statusEl.textContent = friendlyError(error); statusEl.className = 'status sgStatus err'; return; }
       statusEl.textContent = 'Kategorie gespeichert.'; statusEl.className = 'status sgStatus ok';
-      await loadStaffelgruppen();
-    });
-    body.querySelector('.sgSummenmodusCheckbox').addEventListener('change', async e => {
-      const statusEl = body.querySelector('.sgStatus');
-      if(!e.target.checked){
-        const { error } = await sb.from('staffelgruppe').update({ summen_zusatzeinheit: null, summen_scope: null }).eq('id', sgId);
-        if(error){ statusEl.textContent = friendlyError(error); statusEl.className = 'status sgStatus err'; return; }
-        await loadStaffelgruppen();
-        return;
-      }
-      // Beim Anhaken direkt die aktuelle Einheit-Auswahl (Standard: erste
-      // Einheit der Liste) + Bereich "Ganze Offerte" speichern, damit die
-      // Gruppe sofort gueltig im Summenmodus ist statt mit leerer Einheit.
-      const einheit = body.querySelector('.sgZusatzeinheitSelect').value || EINHEITEN[0]?.code || null;
-      const { error } = await sb.from('staffelgruppe').update({ summen_zusatzeinheit: einheit, summen_scope: 'offerte' }).eq('id', sgId);
-      if(error){ statusEl.textContent = friendlyError(error); statusEl.className = 'status sgStatus err'; return; }
       await loadStaffelgruppen();
     });
     body.querySelector('.sgZusatzeinheitSelect')?.addEventListener('change', async e => {
@@ -2306,13 +2303,27 @@ function attachSgBodyHandlers(){
 // braucht dafuer keine Anpassung, da sie schon generisch ueber
 // ressourcenzeile.staffelgruppe_id arbeitet.
 $('neueStaffelgruppeBtn').addEventListener('click', async () => {
-  const name = `Neue Staffelung ${STAFFELGRUPPEN.length + 1}`;
+  const name = `Neue Staffelung ${STAFFELGRUPPEN.filter(sg => !sg.summen_zusatzeinheit).length + 1}`;
   const { data: neu, error } = await sb.from('staffelgruppe').insert({ name, kategorie: 'logistik' }).select().single();
   if(error){ showToast(friendlyError(error), true); return; }
   await loadStaffelgruppen();
   staffelExpanded[neu.id] = true;
   renderStaffelgruppen();
   showToast('Neue Staffelung angelegt - Titel und Stufen jetzt ergänzen.');
+});
+// Wie oben, aber mit gleich gesetztem summen_zusatzeinheit/summen_scope -
+// dadurch landet die neue Gruppe direkt in der Kalkulationsstaffelung-Liste
+// (siehe renderStaffelgruppen() - reine Ansichtstrennung anhand desselben
+// Felds, keine eigene Tabelle).
+$('neueKalkulationsstaffelungBtn').addEventListener('click', async () => {
+  const name = `Neue Kalkulationsstaffelung ${STAFFELGRUPPEN.filter(sg => sg.summen_zusatzeinheit).length + 1}`;
+  const einheit = EINHEITEN[0]?.code || null;
+  const { data: neu, error } = await sb.from('staffelgruppe').insert({ name, kategorie: 'material', summen_zusatzeinheit: einheit, summen_scope: 'offerte', summen_reserve_prozent: 0 }).select().single();
+  if(error){ showToast(friendlyError(error), true); return; }
+  await loadStaffelgruppen();
+  staffelExpanded[neu.id] = true;
+  renderStaffelgruppen();
+  showToast('Neue Kalkulationsstaffelung angelegt - Titel, Zusatzeinheit und Stufen jetzt ergänzen.');
 });
 async function aktualisiereStufe(id, statusEl){
   const row = document.querySelector(`.sgStufeRow[data-stufe="${id}"]`);
