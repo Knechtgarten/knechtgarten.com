@@ -2117,7 +2117,7 @@ function kategorieSelectHtml(aktuelleKategorie, cssClass){
 }
 
 async function loadStaffelgruppen(){
-  const { data: gruppen, error } = await sb.from('staffelgruppe').select('id,name,kategorie,titel').order('name');
+  const { data: gruppen, error } = await sb.from('staffelgruppe').select('id,name,kategorie,titel,summen_zusatzeinheit,summen_scope').order('name');
   if(error){ console.error(error); return; }
   STAFFELGRUPPEN = gruppen;
   // Ueber die Anzahl pruefen, nicht ueber den Namen - sonst wuerde ein
@@ -2180,7 +2180,22 @@ function renderSgBody(sg){
       <div class="fld" style="max-width:360px;white-space:nowrap;"><label style="white-space:nowrap;">Titel (frei änderbar, wird in der Offerte angezeigt)</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="text" class="sgTitelInput" value="${sg.titel || ''}" placeholder="${sg.name}"></div>
       <div class="fld" style="max-width:160px;"><label>Kategorie</label>${kategorieSelectHtml(sg.kategorie, 'sgKategorieSelect')}</div>
     </div>
-    <div class="hint" style="margin-bottom:12px;">Die berechnete Menge (z.B. m³) wird mit den Von/Bis-Bereichen unten verglichen - der erste passende Bereich bestimmt, welcher Artikel (und damit welcher Pauschalpreis) in der Offerte verrechnet wird. Die letzte Zeile ist immer leer zum Erfassen - sobald Von und Artikel ausgefüllt sind, wird automatisch gespeichert und eine neue leere Zeile erscheint.</div>
+    <div class="row" style="margin-top:10px;align-items:center;">
+      <div class="fld" style="display:flex;align-items:center;gap:6px;flex:0 0 auto;">
+        <input autocomplete="off" type="checkbox" class="sgSummenmodusCheckbox" ${sg.summen_zusatzeinheit ? 'checked' : ''}>
+        <label style="white-space:nowrap;font-size:12.5px;" title="Statt der Menge-Formel EINER Ressourcenzeile wird die Summe eines Zusatzwerts (z.B. Watt) ueber alle aktiven Artikel im gewaehlten Bereich verglichen - z.B. Gesamt-Watt aller gewaehlten Leuchten → passendes Netzteil.">Summenmodus (z.B. Watt-Summe → Netzteil)</label>
+      </div>
+      <div class="fld sgSummenFeld ${sg.summen_zusatzeinheit ? '' : 'hidden'}" style="max-width:180px;"><label>Zusatzeinheit</label><select class="sgZusatzeinheitSelect">${einheitOptionsHtml(sg.summen_zusatzeinheit, true)}</select></div>
+      <div class="fld sgSummenFeld ${sg.summen_zusatzeinheit ? '' : 'hidden'}" style="max-width:180px;"><label>Bereich</label>
+        <select class="sgScopeSelect">
+          <option value="offerte" ${sg.summen_scope !== 'arbeitsschritt' ? 'selected' : ''}>Ganze Offerte</option>
+          <option value="arbeitsschritt" ${sg.summen_scope === 'arbeitsschritt' ? 'selected' : ''}>Pro Arbeitsschritt</option>
+        </select>
+      </div>
+    </div>
+    <div class="hint" style="margin-bottom:12px;">${sg.summen_zusatzeinheit
+      ? 'Im Summenmodus wird die Summe aus Zusatzwert × Menge aller aktiven Artikel mit der oben gewählten Zusatzeinheit (im gewählten Bereich) mit den Von/Bis-Bereichen unten verglichen. Die Menge-Formel der eigenen Ressourcenzeile in Tool B wird dabei ignoriert.'
+      : 'Die berechnete Menge (z.B. m³) wird mit den Von/Bis-Bereichen unten verglichen - der erste passende Bereich bestimmt, welcher Artikel (und damit welcher Pauschalpreis) in der Offerte verrechnet wird.'} Die letzte Zeile ist immer leer zum Erfassen - sobald Von und Artikel ausgefüllt sind, wird automatisch gespeichert und eine neue leere Zeile erscheint.</div>
     <table class="sgtable">
       <thead><tr><th style="width:150px;">Von</th><th style="width:150px;">Bis</th><th style="width:320px;">Artikel</th><th style="width:40px;"></th></tr></thead>
       <tbody>
@@ -2220,6 +2235,36 @@ function attachSgBodyHandlers(){
       const statusEl = body.querySelector('.sgStatus');
       if(error){ statusEl.textContent = friendlyError(error); statusEl.className = 'status sgStatus err'; return; }
       statusEl.textContent = 'Kategorie gespeichert.'; statusEl.className = 'status sgStatus ok';
+      await loadStaffelgruppen();
+    });
+    body.querySelector('.sgSummenmodusCheckbox').addEventListener('change', async e => {
+      const statusEl = body.querySelector('.sgStatus');
+      if(!e.target.checked){
+        const { error } = await sb.from('staffelgruppe').update({ summen_zusatzeinheit: null, summen_scope: null }).eq('id', sgId);
+        if(error){ statusEl.textContent = friendlyError(error); statusEl.className = 'status sgStatus err'; return; }
+        await loadStaffelgruppen();
+        return;
+      }
+      // Beim Anhaken direkt die aktuelle Einheit-Auswahl (Standard: erste
+      // Einheit der Liste) + Bereich "Ganze Offerte" speichern, damit die
+      // Gruppe sofort gueltig im Summenmodus ist statt mit leerer Einheit.
+      const einheit = body.querySelector('.sgZusatzeinheitSelect').value || EINHEITEN[0]?.code || null;
+      const { error } = await sb.from('staffelgruppe').update({ summen_zusatzeinheit: einheit, summen_scope: 'offerte' }).eq('id', sgId);
+      if(error){ statusEl.textContent = friendlyError(error); statusEl.className = 'status sgStatus err'; return; }
+      await loadStaffelgruppen();
+    });
+    body.querySelector('.sgZusatzeinheitSelect')?.addEventListener('change', async e => {
+      const { error } = await sb.from('staffelgruppe').update({ summen_zusatzeinheit: e.target.value }).eq('id', sgId);
+      const statusEl = body.querySelector('.sgStatus');
+      if(error){ statusEl.textContent = friendlyError(error); statusEl.className = 'status sgStatus err'; return; }
+      statusEl.textContent = 'Gespeichert.'; statusEl.className = 'status sgStatus ok';
+      await loadStaffelgruppen();
+    });
+    body.querySelector('.sgScopeSelect')?.addEventListener('change', async e => {
+      const { error } = await sb.from('staffelgruppe').update({ summen_scope: e.target.value }).eq('id', sgId);
+      const statusEl = body.querySelector('.sgStatus');
+      if(error){ statusEl.textContent = friendlyError(error); statusEl.className = 'status sgStatus err'; return; }
+      statusEl.textContent = 'Gespeichert.'; statusEl.className = 'status sgStatus ok';
       await loadStaffelgruppen();
     });
     body.querySelectorAll('.sgStufeRow').forEach(row => {
