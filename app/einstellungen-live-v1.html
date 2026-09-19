@@ -785,6 +785,11 @@ input[type=number]{-moz-appearance:textfield;}
         <div id="staffelgruppenListe"></div>
         <button class="btnlink admin-only" id="neueStaffelgruppeBtn" style="margin-bottom:16px;">+ Neue Staffelung hinzufügen</button>
 
+        <div class="subhead" style="margin-top:28px;">Auswahlgruppen</div>
+        <div class="hint" style="margin-bottom:10px;">Für Optionen mit Farb-/Varianten-Dropdown (z.B. "Poolabdeckungsfarben") - in Tool B bei "Option bearbeiten" als Auswahlgruppe zuweisbar.</div>
+        <div id="auswahlgruppenListe"></div>
+        <button class="btnlink admin-only" id="neueAuswahlgruppeBtn" style="margin-bottom:16px;">+ Neue Auswahlgruppe hinzufügen</button>
+
         <div class="subhead" style="margin-top:28px;">Transportberechnungen</div>
         <div class="card">
           <div class="cardheader" onclick="toggleCard(this)"><span class="cardchevron">&#9656;</span><div class="cardlabel" id="kiesTransportTitelLabel">Kies-Transport</div></div>
@@ -1043,6 +1048,7 @@ function zeigeAbschnitt(name){
   }
   if(name === 'sonderpositionen'){
     loadStaffelgruppen();
+    loadAuswahlgruppenListe();
     Promise.all([loadKieswerkListe('kieswerk_kies','kiesTransportBody'), loadKieswerkListe('kieswerk_beton','betonTransportBody')]).then(renderLwKieswerkListe);
     ladeEinfacheAdressliste('deponie_distanz', 'lwDeponieTransportBody');
     ladeEinfacheAdressliste('magazin_adressen', 'magazinTransportBody');
@@ -2252,6 +2258,167 @@ async function deleteStaffelstufe(id){
   const { error } = await sb.from('staffelstufe').delete().eq('id', id);
   if(error){ showToast(friendlyError(error), true); return; }
   await loadStaffelgruppen();
+}
+
+// ---------------------------------------------------------------------------
+// Auswahlgruppen (Label -> Artikel, z.B. Farben) - gleiches Bedienmuster wie
+// Staffelgruppen oben, nur ohne Von/Bis-Mengenbereich: jede Stufe hat einen
+// frei benennbaren Text (z.B. "Grau") statt einer Zahlenspanne. In Tool B bei
+// "Option bearbeiten" als Auswahlgruppe zuweisbar (siehe dortige
+// syncAuswahlgruppenZeile()).
+// ---------------------------------------------------------------------------
+let AUSWAHLGRUPPEN = [];
+let AUSWAHLGRUPPEN_OPTIONEN = [];
+let agExpanded = {};
+let agDraftArtikel = {};
+let agSpeichertGerade = {};
+
+async function loadAuswahlgruppenListe(){
+  const { data: gruppen, error } = await sb.from('auswahlgruppe').select('id,name,titel,kategorie').order('name');
+  if(error){ console.error(error); return; }
+  AUSWAHLGRUPPEN = gruppen;
+  const { data: optionen, error: optErr } = await sb.from('auswahlgruppe_option')
+    .select('id,auswahlgruppe_id,label,artikel_id,reihenfolge').order('reihenfolge');
+  if(optErr){ console.error(optErr); return; }
+  AUSWAHLGRUPPEN_OPTIONEN = optionen;
+  renderAuswahlgruppen();
+}
+
+function renderAuswahlgruppen(){
+  $('auswahlgruppenListe').innerHTML = AUSWAHLGRUPPEN.map(g => {
+    const expanded = !!agExpanded[g.id];
+    return `<div class="card">
+      <div class="cardheader" data-agid="${g.id}">
+        <span class="cardchevron" style="${expanded ? 'transform:rotate(90deg);' : ''}">&#9656;</span>
+        <div class="cardlabel">${g.titel || g.name}</div>
+      </div>
+      <div class="hint">Auswahlgruppe für ${g.titel || g.name}:</div>
+      ${expanded ? renderAgBody(g) : ''}
+    </div>`;
+  }).join('') || '<div class="hint">Noch keine Auswahlgruppe angelegt.</div>';
+
+  $('auswahlgruppenListe').querySelectorAll('.cardheader').forEach(h => {
+    h.addEventListener('click', () => {
+      agExpanded[h.dataset.agid] = !agExpanded[h.dataset.agid];
+      renderAuswahlgruppen();
+    });
+  });
+  attachAgBodyHandlers();
+}
+
+function renderAgBody(g){
+  const optionen = AUSWAHLGRUPPEN_OPTIONEN.filter(o => o.auswahlgruppe_id === g.id);
+  const nurLesen = aktuelleRolle !== 'admin' ? 'readonly' : '';
+  const draftArtikel = agDraftArtikel[g.id];
+  return `<div class="cardbody" data-agbody="${g.id}">
+    <div class="row">
+      <div class="fld" style="max-width:360px;white-space:nowrap;"><label style="white-space:nowrap;">Titel (frei änderbar, wird in der Offerte angezeigt)</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="text" class="agTitelInput" value="${g.titel || ''}" placeholder="${g.name}"></div>
+      <div class="fld" style="max-width:160px;"><label>Kategorie</label>${kategorieSelectHtml(g.kategorie, 'agKategorieSelect')}</div>
+    </div>
+    <div class="hint" style="margin-bottom:12px;">Jede Zeile ist eine Wahlmöglichkeit im Dropdown (z.B. "Grau") mit dem dazugehörigen Artikel. Die letzte Zeile ist immer leer zum Erfassen - sobald Label und Artikel ausgefüllt sind, wird automatisch gespeichert und eine neue leere Zeile erscheint.</div>
+    <table class="sgtable">
+      <thead><tr><th style="width:200px;">Label</th><th style="width:320px;">Artikel</th><th style="width:40px;"></th></tr></thead>
+      <tbody>
+        ${optionen.map(o => {
+          return `<tr class="agOptionRow" data-option="${o.id}">
+            <td><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="text" class="agLabelEdit" value="${o.label}" ${nurLesen}></td>
+            <td>${artikelDetailText(o.artikel_id)}</td>
+            <td><button class="icobtn danger admin-only agDeleteBtn" data-option="${o.id}" title="Zeile löschen">${ICON.trash}</button></td>
+          </tr>`;
+        }).join('')}
+        <tr class="agDraftRow admin-only" data-agid="${g.id}">
+          <td><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="text" class="agEditLabel" placeholder="z.B. Grau"></td>
+          <td><button type="button" class="btn agArtikelBtn">${draftArtikel ? artikelDetailText(draftArtikel.id) : 'Artikel wählen…'}</button></td>
+          <td><button class="icobtn agClearBtn" title="Zeile zurücksetzen">${ICON.trash}</button></td>
+        </tr>
+      </tbody>
+    </table>
+    <div class="status agStatus"></div>
+  </div>`;
+}
+
+function attachAgBodyHandlers(){
+  $('auswahlgruppenListe').querySelectorAll('.cardbody[data-agbody]').forEach(body => {
+    const agId = body.dataset.agbody;
+    body.querySelector('.agTitelInput').addEventListener('change', async e => {
+      const titel = e.target.value.trim() || null;
+      const { error } = await sb.from('auswahlgruppe').update({ titel }).eq('id', agId);
+      const statusEl = body.querySelector('.agStatus');
+      if(error){ statusEl.textContent = friendlyError(error); statusEl.className = 'status agStatus err'; return; }
+      statusEl.textContent = 'Titel gespeichert.'; statusEl.className = 'status agStatus ok';
+      await loadAuswahlgruppenListe();
+    });
+    body.querySelector('.agKategorieSelect').addEventListener('change', async e => {
+      const { error } = await sb.from('auswahlgruppe').update({ kategorie: e.target.value }).eq('id', agId);
+      const statusEl = body.querySelector('.agStatus');
+      if(error){ statusEl.textContent = friendlyError(error); statusEl.className = 'status agStatus err'; return; }
+      statusEl.textContent = 'Kategorie gespeichert.'; statusEl.className = 'status agStatus ok';
+      await loadAuswahlgruppenListe();
+    });
+    body.querySelectorAll('.agOptionRow').forEach(row => {
+      row.querySelector('.agLabelEdit').addEventListener('focusout', () => aktualisiereAuswahlgruppenOption(row.dataset.option, body.querySelector('.agStatus')));
+    });
+    body.querySelectorAll('.agDeleteBtn').forEach(btn => {
+      btn.addEventListener('click', () => deleteAuswahlgruppenOption(btn.dataset.option));
+    });
+    const draftRow = body.querySelector('.agDraftRow');
+    draftRow.addEventListener('focusout', (e) => {
+      if(!e.currentTarget.contains(e.relatedTarget)) versucheAutoSaveAuswahlgruppenOption(agId);
+    });
+    body.querySelector('.agArtikelBtn').addEventListener('click', () => {
+      openArtikelPicker(a => { agDraftArtikel[agId] = a; renderAuswahlgruppen(); versucheAutoSaveAuswahlgruppenOption(agId); });
+    });
+    body.querySelector('.agClearBtn').addEventListener('click', () => {
+      agDraftArtikel[agId] = null;
+      renderAuswahlgruppen();
+    });
+  });
+}
+
+$('neueAuswahlgruppeBtn').addEventListener('click', async () => {
+  const name = `Neue Auswahlgruppe ${AUSWAHLGRUPPEN.length + 1}`;
+  const { data: neu, error } = await sb.from('auswahlgruppe').insert({ name, kategorie: 'material' }).select().single();
+  if(error){ showToast(friendlyError(error), true); return; }
+  await loadAuswahlgruppenListe();
+  agExpanded[neu.id] = true;
+  renderAuswahlgruppen();
+  showToast('Neue Auswahlgruppe angelegt - Titel und Optionen jetzt ergänzen.');
+});
+
+async function aktualisiereAuswahlgruppenOption(id, statusEl){
+  const row = document.querySelector(`.agOptionRow[data-option="${id}"]`);
+  const label = row.querySelector('.agLabelEdit').value.trim();
+  if(!label) return;
+  const { error } = await sb.from('auswahlgruppe_option').update({ label }).eq('id', id);
+  if(error){ if(statusEl){ statusEl.textContent = friendlyError(error); statusEl.className = 'status agStatus err'; } return; }
+  if(statusEl){ statusEl.textContent = 'Aktualisiert.'; statusEl.className = 'status agStatus ok'; }
+  await loadAuswahlgruppenListe();
+}
+async function versucheAutoSaveAuswahlgruppenOption(agId){
+  if(agSpeichertGerade[agId]) return;
+  const body = document.querySelector(`.cardbody[data-agbody="${agId}"]`);
+  if(!body) return;
+  const draftRow = body.querySelector('.agDraftRow');
+  const label = draftRow.querySelector('.agEditLabel').value.trim();
+  const artikel = agDraftArtikel[agId];
+  if(!label || !artikel) return;
+  agSpeichertGerade[agId] = true;
+  const { error } = await sb.from('auswahlgruppe_option').insert({
+    auswahlgruppe_id: agId, label, artikel_id: artikel.id,
+    reihenfolge: naechsteReihenfolge(AUSWAHLGRUPPEN_OPTIONEN.filter(o => o.auswahlgruppe_id === agId))
+  });
+  const statusEl = body.querySelector('.agStatus');
+  if(error){ statusEl.textContent = friendlyError(error); statusEl.className = 'status agStatus err'; agSpeichertGerade[agId] = false; return; }
+  agDraftArtikel[agId] = null;
+  statusEl.textContent = 'Gespeichert.'; statusEl.className = 'status agStatus ok';
+  await loadAuswahlgruppenListe();
+  agSpeichertGerade[agId] = false;
+}
+async function deleteAuswahlgruppenOption(id){
+  if(!(await confirmDialog('Zeile wirklich löschen?'))) return;
+  const { error } = await sb.from('auswahlgruppe_option').delete().eq('id', id);
+  if(error){ showToast(friendlyError(error), true); return; }
+  await loadAuswahlgruppenListe();
 }
 // ---------------------------------------------------------------------------
 // Preisfindung: Kies-Transport und Beton-Transport als zwei komplett
