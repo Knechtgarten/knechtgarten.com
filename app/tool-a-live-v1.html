@@ -2167,7 +2167,7 @@ async function ladeFormelDaten(otId){
 
   const { data: arbeitsschritte, error: asErr } = await sb
     .from('arbeitsschritt')
-    .select(`id, name, reihenfolge, ausgeblendet,
+    .select(`id, name, reihenfolge, ausgeblendet, titel_offerte,
       teilschritt ( id, name, beschreibung, ausgeblendet,
         anzeige_eingabefeld_id, anzeige_eingabefeld:eingabefeld!anzeige_eingabefeld_id ( einheit ),
         anzeige_term_id, anzeige_term:term!anzeige_term_id ( einheit, ausdruck ),
@@ -2179,7 +2179,7 @@ async function ladeFormelDaten(otId){
           sonderposition_typ ( name, titel, einheit, mwst_satz_pct, lieferwagen_std_artikel_id, lieferwagen_km_artikel_id, lieferwagen_transport_ort, lieferwagen_std_artikel:artikel!lieferwagen_std_artikel_id ( vp_knecht, bezeichnung ), lieferwagen_km_artikel:artikel!lieferwagen_km_artikel_id ( vp_knecht, bezeichnung ) ) ),
         option_freitext_vorlage ( id, kategorie, bezeichnung, einheit, notiz, menge_vorschlag, preis_vorschlag, ist_eigene_offertenposition ),
         auswahlfeld ( id, name,
-          auswahloption ( id, name, beschreibung, reihenfolge, mengenoption, mengenoption_einheit, mengenoption_standardmenge, mehrfachauswahl, ist_eigene_offertenposition, hinweistext, hinweisbild_url,
+          auswahloption ( id, name, beschreibung, reihenfolge, mengenoption, mengenoption_einheit, mengenoption_standardmenge, mehrfachauswahl, ist_eigene_offertenposition, eigene_position_titel, hinweistext, hinweisbild_url,
             ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, artikel_id, ist_eigene_offertenposition,
               zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4, mindestmenge, verschnitt_prozent, zuschlag_prozent,
               artikel ( bezeichnung, einheit, vp_knecht, zusatzwert, zusatzeinheit ),
@@ -2195,10 +2195,15 @@ async function ladeFormelDaten(otId){
   auswahlfelder = [];
   teilschritte = [];
   OPTION_INFO = {};
-  function pushRz(rz, optionId, arbeitsschrittName, teilschrittName){
+  function pushRz(rz, optionId, arbeitsschrittName, teilschrittName, arbeitsschrittTitel){
     ressourcenzeilen.push({
       optionId,
       arbeitsschritt: arbeitsschrittName,
+      // Alternativer Titel fuer die Materialauflistung (Tool B: Icon am
+      // Arbeitsschritt) - "arbeitsschritt" oben bleibt der interne Name und
+      // MUSS unveraendert bleiben, weil er auch fuer den Summenmodus-Scope-
+      // Vergleich ("pro Arbeitsschritt") verwendet wird (siehe recalc()).
+      arbeitsschrittTitel: arbeitsschrittTitel || arbeitsschrittName,
       teilschritt: teilschrittName,
       kategorie: rz.kategorie,
       // Bei Sonderpositionen mit eigener Berechnung (Lieferwagentransport-
@@ -2250,7 +2255,7 @@ async function ladeFormelDaten(otId){
     (as.teilschritt || []).filter(ts => !ts.ausgeblendet).forEach(ts => {
       // Teilschritt ohne Auswahlfeld: seine Ressourcenzeilen gelten immer
       // (kein optionId, keine Buttons fuer den Mitarbeiter).
-      (ts.ressourcenzeile || []).forEach(rz => pushRz(rz, null, as.name, ts.name));
+      (ts.ressourcenzeile || []).forEach(rz => pushRz(rz, null, as.name, ts.name, as.titel_offerte));
       pushFreitextVorlagen(ts.option_freitext_vorlage, null, as.name);
 
       // Menge-Anzeige (Tool B: Ruler-Icon beim Teilschritt-Titel) - rein
@@ -2284,13 +2289,13 @@ async function ladeFormelDaten(otId){
             auswahlgruppeOptionen: (o.ressourcenzeile || []).find(rz => rz.auswahlgruppe)?.auswahlgruppe?.auswahlgruppe_option?.slice().sort((a, b) => a.label.localeCompare(b.label)) || null }))
         });
         (af.auswahloption || []).forEach(opt => {
-          (opt.ressourcenzeile || []).forEach(rz => pushRz(rz, opt.id, as.name, ts.name));
+          (opt.ressourcenzeile || []).forEach(rz => pushRz(rz, opt.id, as.name, ts.name, as.titel_offerte));
           pushFreitextVorlagen(opt.option_freitext_vorlage, opt.id, as.name);
           // Teilschritt-Name (z.B. "Hecke Carpinus"), nicht Arbeitsschritt-
           // Name (z.B. "Hecken") - sonst waeren zwei Teilschritte im selben
           // Arbeitsschritt (z.B. "Hecke Carpinus" und "Hecke Taxus") in der
           // eigenen Zeile nicht mehr unterscheidbar.
-          OPTION_INFO[opt.id] = { name: opt.name, teilschritt: ts.name, istEigenePosition: !!opt.ist_eigene_offertenposition };
+          OPTION_INFO[opt.id] = { name: opt.name, teilschritt: ts.name, istEigenePosition: !!opt.ist_eigene_offertenposition, eigenePositionTitel: opt.eigene_position_titel || null };
         });
         teilschritte.push({ id: ts.id, beschreibung: ts.beschreibung, optionIds: (af.auswahloption || []).map(o => o.id), anzeigeEingabefeldId, anzeigeEingabefeldEinheit, anzeigeTermId, anzeigeTermEinheit, anzeigeTermAusdruck });
       }else{
@@ -4272,13 +4277,14 @@ async function recalc(){
               Object.entries(proOptionLog).forEach(([optionId, v]) => {
                 if(!v.summe) return;
                 const artikelEintraege = Object.entries(v.proArtikel);
-                if(artikelEintraege.length === 1){
+                const infoLog = OPTION_INFO[optionId];
+                if(artikelEintraege.length === 1 && !infoLog?.eigenePositionTitel){
                   const [artikelName, a] = artikelEintraege[0];
                   addRow(artikelName, a.menge, a.einheit, a.preis, a.betrag, `logistik:eigen:${optionId}`, logistikRundungMenge, logistikRundungPreis);
                   return;
                 }
-                const info = OPTION_INFO[optionId];
-                const bezeichnung = `${info?.teilschritt || ''} – ${info?.name || ''}`;
+                const info = infoLog;
+                const bezeichnung = info?.eigenePositionTitel || `${info?.teilschritt || ''} – ${info?.name || ''}`;
                 const rechnungsweg = artikelEintraege.map(([artikel, a]) => ({
                   label: artikel,
                   menge: `${rundeMenge(a.menge)} ${a.einheit}`,
@@ -4337,7 +4343,7 @@ async function recalc(){
             const eigeneZeilen = restOhneArtikelEigene.filter(r => OPTION_INFO[r.optionId]?.istEigenePosition);
             const proArbeitsschritt = {};
             paketZeilen.forEach(r => {
-              if(!proArbeitsschritt[r.arbeitsschritt]) proArbeitsschritt[r.arbeitsschritt] = { summe: 0, proArtikel: {} };
+              if(!proArbeitsschritt[r.arbeitsschritt]) proArbeitsschritt[r.arbeitsschritt] = { summe: 0, proArtikel: {}, titel: r.arbeitsschrittTitel || r.arbeitsschritt };
               proArbeitsschritt[r.arbeitsschritt].summe += r.betrag;
               const pa = proArbeitsschritt[r.arbeitsschritt].proArtikel;
               if(!pa[r.bezeichnung]) pa[r.bezeichnung] = { menge: 0, einheit: r.einheit, preis: r.preis, betrag: 0 };
@@ -4347,8 +4353,11 @@ async function recalc(){
             // "Materialpaket "-Praefix gilt bewusst NUR fuer Offerte-Typ "Formel" -
             // fuer "Tagessatz" (Allgemein) ist das Verhalten noch nicht
             // abgestimmt, deshalb dort unveraendert nur der Arbeitsschritt-Titel.
+            // v.titel ist der evtl. in Tool B hinterlegte alternative Titel
+            // (arbeitsschritt.titel_offerte) - "as" selbst bleibt der interne
+            // Name und dient nur als Row-Key/Gruppierung.
             Object.entries(proArbeitsschritt).forEach(([as, v]) => {
-              const bezeichnung = currentBerechnungsmodell === 'formel' ? `Material ${as}` : as;
+              const bezeichnung = currentBerechnungsmodell === 'formel' ? `Material ${v.titel}` : v.titel;
               const rechnungsweg = Object.entries(v.proArtikel).map(([artikel, a]) => ({
                 label: artikel,
                 menge: `${rundeMenge(a.menge)} ${a.einheit}`,
@@ -4385,13 +4394,13 @@ async function recalc(){
               // verschiedener Artikel in dieser Offerte haengt, passt sich das
               // automatisch an, wenn in Tool B Material hinzugefuegt/entfernt
               // wird.
-              if(artikelEintraege.length === 1){
+              const info = OPTION_INFO[optionId];
+              if(artikelEintraege.length === 1 && !info?.eigenePositionTitel){
                 const [artikelName, a] = artikelEintraege[0];
                 addRow(artikelName, a.menge, a.einheit, a.preis, a.betrag, `material:eigen:${optionId}`, materialRundungMenge, materialRundungPreis);
                 return;
               }
-              const info = OPTION_INFO[optionId];
-              const bezeichnung = `${info?.teilschritt || ''} – ${info?.name || ''}`;
+              const bezeichnung = info?.eigenePositionTitel || `${info?.teilschritt || ''} – ${info?.name || ''}`;
               const rechnungsweg = artikelEintraege.map(([artikel, a]) => ({
                 label: artikel,
                 menge: `${rundeMenge(a.menge)} ${a.einheit}`,
