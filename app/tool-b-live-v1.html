@@ -846,6 +846,11 @@ input[type=number]{-moz-appearance:textfield;}
         <button type="button" id="offertentypIconBtn" title="Icon für diese Vorlage ändern" style="width:40px;height:40px;border-radius:8px;border:1px solid var(--line);background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;"></button>
         <div id="offertentypIconPopover" class="hidden" style="position:absolute;top:46px;left:0;z-index:20;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(30,40,50,.18);padding:12px;display:grid;grid-template-columns:repeat(4,1fr);gap:10px;width:236px;"></div>
       </div>
+      <div class="fld" style="display:flex;align-items:center;gap:6px;flex:0 0 auto;position:relative;">
+        <span style="font-size:12.5px;color:var(--muted);white-space:nowrap;">Farbe</span>
+        <button type="button" id="offertentypFarbeBtn" title="Hintergrundfarbe dieser Vorlage im 'Neue Offerte'-Fenster ändern" style="width:40px;height:40px;border-radius:8px;border:1px solid var(--line);background:var(--primary);cursor:pointer;padding:0;"></button>
+        <div id="offertentypFarbePopover" class="hidden" style="position:absolute;top:46px;left:0;z-index:20;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(30,40,50,.18);padding:12px;display:grid;grid-template-columns:repeat(3,1fr);gap:10px;width:180px;"></div>
+      </div>
       <div class="fld" style="display:flex;align-items:center;gap:6px;flex:0 0 auto;">
         <span style="font-size:12.5px;color:var(--muted);white-space:nowrap;" title="Startwert des Vorarbeiter-Reglers (Lieferwagenfahrzeit-Karte), wenn mit dieser Vorlage eine neue Offerte erstellt wird - bleibt dort weiterhin frei umschaltbar.">Vorarbeiter-Regler Standard</span>
         <select id="offertentypVorarbeiterStandardSelect" style="width:110px;">
@@ -981,8 +986,24 @@ function offertentypIconSvg(key, groesse){
   return `<svg width="${groesse}" height="${groesse}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${icon.svg}</svg>`;
 }
 
+// Hintergrundfarbe der Offertentyp-Buttons im "Neue Offerte"-Fenster (Tool A/
+// Start) - feste, kleine Auswahl aus den bestehenden Tool-Farben statt einem
+// freien Farbwaehler, damit alle Buttons zueinander passen. Kein Eintrag
+// (farbe_key = null) faellt auf die bisherige Standardfarbe (dunkelblau)
+// zurueck - unveraendertes Verhalten fuer alle noch nicht umgestellten
+// Vorlagen.
+const OFFERTENTYP_FARBEN = {
+  dunkelblau: { label: 'Dunkelblau', hex: '#323E4E', hell: false },
+  blau: { label: 'Blau', hex: '#4C5C70', hell: false },
+  hellblau: { label: 'Hellblau', hex: '#D6E7F4', hell: true },
+  gruen: { label: 'Grün', hex: '#D1DB5F', hell: true },
+  hellgrau: { label: 'Hellgrau', hex: '#EEF3F7', hell: true },
+  grau: { label: 'Grau', hex: '#8B9097', hell: false }
+};
+
 let currentOffertentypId = null;
 let currentIconKey = null;
+let currentFarbeKey = null;
 let currentBerechnungsmodell = 'formel';
 // Siehe zugaenglichkeitAktivFuerOffertentyp in tool-a-live-v1.html - blendet
 // hier zusaetzlich das Zugaenglichkeitsfaktor-Feld je Ressourcenzeile aus.
@@ -1192,7 +1213,7 @@ function einheitOptionsHtml(selected, mitLeerOption){
   ).join('');
 }
 async function loadOffertentypen(){
-  const { data, error } = await sb.from('offertentyp').select('id,name,berechnungsmodell,papierkorb_am,vorarbeiter_typ_standard,zugaenglichkeit_aktiv,icon_key').order('reihenfolge');
+  const { data, error } = await sb.from('offertentyp').select('id,name,berechnungsmodell,papierkorb_am,vorarbeiter_typ_standard,zugaenglichkeit_aktiv,icon_key,farbe_key').order('reihenfolge');
   if(error){ console.error(error); return; }
   OFFERTENTYPEN = data;
   if(!currentOffertentypId){
@@ -1213,6 +1234,8 @@ function aktualisierePathline(){
   $('offertentypZugaenglichkeitCheckbox').checked = currentZugaenglichkeitAktiv;
   currentIconKey = ot?.icon_key || null;
   $('offertentypIconBtn').innerHTML = offertentypIconSvg(currentIconKey, 20) || '<span style="font-size:10px;opacity:.6;">—</span>';
+  currentFarbeKey = ot?.farbe_key || null;
+  $('offertentypFarbeBtn').style.background = OFFERTENTYP_FARBEN[currentFarbeKey]?.hex || 'var(--primary)';
   if(currentSeite !== 'formelbibliothek') $('seitentitel').textContent = ot ? ot.name : 'Offerten-Vorlage';
 }
 // Icon-Popover: eigene, kleine Auswahl statt Dropdown - besser sichtbar bei
@@ -1248,6 +1271,37 @@ $('offertentypIconBtn').addEventListener('click', (e) => {
 document.addEventListener('click', (e) => {
   const pop = $('offertentypIconPopover');
   if(!pop.classList.contains('hidden') && !pop.contains(e.target) && e.target !== $('offertentypIconBtn')) pop.classList.add('hidden');
+});
+// Farbe-Popover: gleiches Muster wie das Icon-Popover oben (Instant-
+// Speicherung, kein separater Speichern-Klick).
+$('offertentypFarbeBtn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const pop = $('offertentypFarbePopover');
+  if(!pop.classList.contains('hidden')){ pop.classList.add('hidden'); return; }
+  pop.innerHTML = Object.entries(OFFERTENTYP_FARBEN).map(([key, f]) => `
+    <button type="button" class="offertentypFarbeWahl" data-farbe="${key}" title="${f.label}"
+      style="width:100%;aspect-ratio:1;border-radius:8px;border:${key===currentFarbeKey?'2px solid var(--primary)':'1px solid var(--line)'};background:${f.hex};cursor:pointer;padding:0;"></button>`).join('')
+    + `<button type="button" data-farbe="" title="Standard (Dunkelblau)" style="width:100%;aspect-ratio:1;border-radius:8px;border:${!currentFarbeKey?'2px solid var(--primary)':'1px solid var(--line)'};background:var(--primary);color:#fff;font-size:9px;cursor:pointer;padding:0;">Std.</button>`;
+  pop.classList.remove('hidden');
+  pop.querySelectorAll('button').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if(!currentOffertentypId) return;
+      const zielId = currentOffertentypId;
+      const wert = btn.dataset.farbe || null;
+      pop.classList.add('hidden');
+      const { error } = await sb.from('offertentyp').update({ farbe_key: wert }).eq('id', zielId);
+      if(error){ showToast(friendlyError(error), true); return; }
+      const ot = OFFERTENTYPEN.find(o => o.id === zielId);
+      if(ot) ot.farbe_key = wert;
+      currentFarbeKey = wert;
+      $('offertentypFarbeBtn').style.background = OFFERTENTYP_FARBEN[wert]?.hex || 'var(--primary)';
+      showToast('Gespeichert.');
+    });
+  });
+});
+document.addEventListener('click', (e) => {
+  const pop = $('offertentypFarbePopover');
+  if(!pop.classList.contains('hidden') && !pop.contains(e.target) && e.target !== $('offertentypFarbeBtn')) pop.classList.add('hidden');
 });
 $('offertentypNameSaveBtn').addEventListener('click', async () => {
   const name = $('offertentypNameInput').value.trim();
