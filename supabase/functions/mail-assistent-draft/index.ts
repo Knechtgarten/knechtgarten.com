@@ -220,7 +220,9 @@ Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Obje
 Wenn bei Fall 3 keine Adresse erkennbar ist, nutze stattdessen den Sonderfall "Kein Ort erkennbar" (Fall 1).
 ${KG_FORMAT_HINWEIS}`;
 
-  const { text, tokensInput, tokensOutput } = await rufeClaudeAuf(modell, system, 'EINGEHENDE MAIL:\n' + body.mailInhalt, 3500);
+  let userText = 'EINGEHENDE MAIL:\n' + body.mailInhalt;
+  if (body.stichworte) userText += '\n\nZUSAETZLICHE STICHWORTE/ANWEISUNG VOM MITARBEITER - unbedingt beruecksichtigen: ' + body.stichworte;
+  const { text, tokensInput, tokensOutput } = await rufeClaudeAuf(modell, system, userText, 3500);
   let entscheidung;
   try { entscheidung = extrahiereJson(text); }
   catch (e) {
