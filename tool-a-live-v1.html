@@ -286,6 +286,7 @@ main.wrap{padding-top:48px;padding-bottom:60px;}
 .optwrap.hasanzahl .opt{border-top-right-radius:0;border-bottom-right-radius:0;}
 .optAnzahl{width:34px;font-size:11px;padding:3px 2px;text-align:center;border:1px solid var(--line);border-left:none;border-radius:0;}
 .optAnzahlUnit{display:flex;align-items:center;font-size:10px;color:var(--muted);border:1px solid var(--line);border-left:none;border-top-right-radius:6px;border-bottom-right-radius:6px;padding:3px 6px 3px 2px;background:#fff;}
+.optAuswahlgruppe{font-size:11px;padding:3px 4px;border:1px solid var(--line);border-left:none;border-radius:0 6px 6px 0;background:#fff;color:var(--ink);}
 
 .icobtn{width:24px;height:24px;border-radius:50%;border:1px solid var(--line);background:#fff;color:var(--muted);
   font-size:12px;cursor:pointer;padding:0;flex-shrink:0;display:flex;align-items:center;justify-content:center;}
@@ -1424,6 +1425,10 @@ let bereichSelectedOptions = new Set();
 let aktiveVorauswahlId = null;
 let vorauswahlBearbeitet = false;
 let bereichOptionAnzahl = {};
+// Gewaehlte Auswahlgruppen-Option (z.B. Farbe) je Options-ID - bestimmt in
+// recalc(), welcher Artikel fuer die automatisch erzeugte Ressourcenzeile
+// dieser Option gilt (siehe Tool B "Option bearbeiten" -> Auswahlgruppe).
+let bereichAuswahlgruppenWahl = {};
 let bereichZugaenglichkeitStufe = 2;
 let bereichKonfigEingeklappt = false;
 let bereichAfOffenState = {};
@@ -2169,6 +2174,7 @@ async function ladeFormelDaten(otId){
               artikel ( bezeichnung, einheit, vp_knecht ),
               staffelgruppe ( name, titel, staffelstufe ( menge_von, menge_bis, artikel ( vp_knecht ) ) ),
               zonengruppe ( name, titel, zone ( artikel ( vp_knecht ), zone_plz ( plz ) ) ),
+              auswahlgruppe ( name, titel, auswahlgruppe_option ( id, label, artikel ( bezeichnung, einheit, vp_knecht ) ) ),
               sonderposition_typ ( name, titel, einheit, mwst_satz_pct, lieferwagen_std_artikel_id, lieferwagen_km_artikel_id, lieferwagen_transport_ort, lieferwagen_std_artikel:artikel!lieferwagen_std_artikel_id ( vp_knecht, bezeichnung ), lieferwagen_km_artikel:artikel!lieferwagen_km_artikel_id ( vp_knecht, bezeichnung ) ) ),
             option_freitext_vorlage ( id, kategorie, bezeichnung, einheit, notiz, menge_vorschlag, preis_vorschlag, ist_eigene_offertenposition ) ) ) )`)
     .eq('offertentyp_id', otId).eq('ausgeblendet', false).order('reihenfolge');
@@ -2200,7 +2206,8 @@ async function ladeFormelDaten(otId){
       // ihres Arbeitsschritts UND ihrer Option (falls diese auch "Eigene
       // Offertenposition" ist) heraus, siehe renderKostenblock() unten.
       istEigenePosition: !!rz.ist_eigene_offertenposition,
-      bezeichnung: rz.bezeichnung_override || rz.artikel?.bezeichnung || rz.staffelgruppe?.titel || rz.staffelgruppe?.name || rz.zonengruppe?.titel || rz.zonengruppe?.name || rz.sonderposition_typ?.titel || rz.sonderposition_typ?.name || '(unbenannt)',
+      bezeichnungOverride: rz.bezeichnung_override || null,
+      bezeichnung: rz.bezeichnung_override || rz.artikel?.bezeichnung || rz.staffelgruppe?.titel || rz.staffelgruppe?.name || rz.zonengruppe?.titel || rz.zonengruppe?.name || rz.auswahlgruppe?.titel || rz.auswahlgruppe?.name || rz.sonderposition_typ?.titel || rz.sonderposition_typ?.name || '(unbenannt)',
       einheit: rz.artikel?.einheit || '',
       preis: rz.preis_override ?? rz.artikel?.vp_knecht ?? 0,
       menge_ausdruck: rz.menge_ausdruck,
@@ -2210,6 +2217,7 @@ async function ladeFormelDaten(otId){
       zuschlagProzent: rz.zuschlag_prozent,
       staffelgruppe: rz.staffelgruppe,
       zonengruppe: rz.zonengruppe,
+      auswahlgruppe: rz.auswahlgruppe,
       sonderpositionTyp: rz.sonderposition_typ
     });
   }
@@ -2249,7 +2257,11 @@ async function ladeFormelDaten(otId){
           // Reihenfolge wie in Tool B (drag & drop) - Supabase liefert
           // eingebettete auswahloption sonst in unspezifizierter Reihenfolge,
           // die nicht zwingend der vom Admin konfigurierten entspricht.
-          optionen: (af.auswahloption || []).slice().sort((a, b) => (a.reihenfolge || 0) - (b.reihenfolge || 0)).map(o => ({ id: o.id, name: o.name, beschreibung: o.beschreibung, mengenoption: o.mengenoption, mengenoptionEinheit: o.mengenoption_einheit, mengenoptionStandardmenge: o.mengenoption_standardmenge, mehrfachauswahl: o.mehrfachauswahl, hinweistext: o.hinweistext, hinweisbildUrl: o.hinweisbild_url }))
+          optionen: (af.auswahloption || []).slice().sort((a, b) => (a.reihenfolge || 0) - (b.reihenfolge || 0)).map(o => ({ id: o.id, name: o.name, beschreibung: o.beschreibung, mengenoption: o.mengenoption, mengenoptionEinheit: o.mengenoption_einheit, mengenoptionStandardmenge: o.mengenoption_standardmenge, mehrfachauswahl: o.mehrfachauswahl, hinweistext: o.hinweistext, hinweisbildUrl: o.hinweisbild_url,
+            // Auswahlgruppe (z.B. Farbe): die Wahlmoeglichkeiten selbst stehen
+            // an der automatisch erzeugten Ressourcenzeile dieser Option (siehe
+            // Tool B syncAuswahlgruppenZeile()) - hoechstens eine pro Option.
+            auswahlgruppeOptionen: (o.ressourcenzeile || []).find(rz => rz.auswahlgruppe)?.auswahlgruppe?.auswahlgruppe_option || null }))
         });
         (af.auswahloption || []).forEach(opt => {
           (opt.ressourcenzeile || []).forEach(rz => pushRz(rz, opt.id, as.name, ts.name));
@@ -2362,6 +2374,7 @@ function initBereich(){
   // angeklickt werden.
   bereichSelectedOptions = new Set();
   bereichOptionAnzahl = {};
+  bereichAuswahlgruppenWahl = {};
   aktiveVorauswahlId = null;
   vorauswahlBearbeitet = false;
   bereichZugaenglichkeitStufe = 2;
@@ -2638,8 +2651,17 @@ function renderBereich(){
       const anzahlHtml = zeigeAnzahl
         ? `<input type="number" min="0" step="1" class="optAnzahl" data-opt="${o.id}" value="${bereichOptionAnzahl[o.id]}" title="Anzahl"><span class="optAnzahlUnit">${o.mengenoptionEinheit || 'Stk.'}</span>`
         : '';
-      return `<span class="optwrap ${zeigeAnzahl?'hasanzahl':''}">
-        <button type="button" class="opt ${aktiv?'on':''}" data-opt="${o.id}">${o.name}</button>${anzahlHtml}
+      // Auswahlgruppe (z.B. Farbe, siehe Tool B "Option bearbeiten") - steht
+      // zwischen Button und Mengenoption: erst WAS (Farbe), dann WIE VIEL.
+      const zeigeAuswahl = o.auswahlgruppeOptionen && aktiv;
+      const auswahlHtml = zeigeAuswahl
+        ? `<select class="optAuswahlgruppe" data-opt="${o.id}">
+            <option value="">− wählen −</option>
+            ${o.auswahlgruppeOptionen.map(ag => `<option value="${ag.id}" ${bereichAuswahlgruppenWahl[o.id] === ag.id ? 'selected' : ''}>${ag.label}</option>`).join('')}
+          </select>`
+        : '';
+      return `<span class="optwrap ${(zeigeAnzahl || zeigeAuswahl) ? 'hasanzahl' : ''}">
+        <button type="button" class="opt ${aktiv?'on':''}" data-opt="${o.id}">${o.name}</button>${auswahlHtml}${anzahlHtml}
       </span>`;
     }).join('');
     div.innerHTML = `<label class="flabel"><button type="button" class="afToggle${hatAktiveOption ? ' aktiv' : ''}" title="${offen ? 'Optionen ausblenden' : 'Optionen anzeigen'}">${ICON.chevronDown}</button>${af.name}${hatAnzeige ? `<span class="tsanzeigewert" data-ts="${zugehoerigerTs.id}"></span>` : ''}</label>
@@ -2677,6 +2699,16 @@ function renderBereich(){
         inp.value = bereichOptionAnzahl[optId];
         if(aktiveVorauswahlId) vorauswahlBearbeitet = true;
         recalc();
+      });
+    });
+    div.querySelectorAll('.optAuswahlgruppe').forEach(sel => {
+      sel.addEventListener('click', e => e.stopPropagation());
+      sel.addEventListener('change', () => {
+        const optId = sel.dataset.opt;
+        bereichAuswahlgruppenWahl[optId] = sel.value || null;
+        if(aktiveVorauswahlId) vorauswahlBearbeitet = true;
+        recalc();
+        planAutosave();
       });
     });
   });
@@ -3048,7 +3080,7 @@ async function ladeBestehendeOfferte(offerteId){
       .from('offerte_eingabefeld_wert').select('eingabefeld_id, wert').eq('offerte_id', offerteId);
     if(efErr){ console.error(efErr); $saveStatus.textContent = 'Fehler beim Laden: ' + efErr.message; $saveStatus.className='status err'; return; }
     const { data: auswahlRows, error: auswahlErr2 } = await sb
-      .from('offerte_auswahl').select('option_id, anzahl').eq('offerte_id', offerteId);
+      .from('offerte_auswahl').select('option_id, anzahl, auswahlgruppe_option_id').eq('offerte_id', offerteId);
     if(auswahlErr2){ console.error(auswahlErr2); $saveStatus.textContent = 'Fehler beim Laden: ' + auswahlErr2.message; $saveStatus.className='status err'; return; }
     const { data: efNotizen, error: notizErr } = await sb
       .from('offerte_eingabefeld_notiz').select('eingabefeld_id, notiz').eq('offerte_id', offerteId);
@@ -3073,6 +3105,7 @@ async function ladeBestehendeOfferte(offerteId){
     aktiveVorauswahlId = offerte.vorauswahl_id || null;
     vorauswahlBearbeitet = false;
     bereichOptionAnzahl = Object.fromEntries((auswahlRows || []).map(a => [a.option_id, a.anzahl ?? 1]));
+    bereichAuswahlgruppenWahl = Object.fromEntries((auswahlRows || []).filter(a => a.auswahlgruppe_option_id).map(a => [a.option_id, a.auswahlgruppe_option_id]));
     bereichZugaenglichkeitStufe = offerte.zugaenglichkeit_stufe ?? 2;
     bereichKonfigEingeklappt = false;
     bereichAfOffenState = {};
@@ -3339,7 +3372,7 @@ async function speichereNeueOfferte(titelVal){
     }
     if(bereichSelectedOptions.size){
       const { error: aErr } = await sb.from('offerte_auswahl')
-        .insert([...bereichSelectedOptions].map(oid => ({ offerte_id: offerte.id, option_id: oid, anzahl: bereichOptionAnzahl?.[oid] ?? 1 })));
+        .insert([...bereichSelectedOptions].map(oid => ({ offerte_id: offerte.id, option_id: oid, anzahl: bereichOptionAnzahl?.[oid] ?? 1, auswahlgruppe_option_id: bereichAuswahlgruppenWahl?.[oid] ?? null })));
       if(aErr) throw aErr;
     }
     const notizRows = eingabefelder.filter(ef => ef.zusatztext_moeglich && bereichNotizMap[ef.id]?.trim())
@@ -3403,7 +3436,7 @@ async function speichereAenderungen(titelVal){
     if(delAuswahlErr) throw delAuswahlErr;
     if(bereichSelectedOptions.size){
       const { error: aErr } = await sb.from('offerte_auswahl')
-        .insert([...bereichSelectedOptions].map(oid => ({ offerte_id: currentOfferteId, option_id: oid, anzahl: bereichOptionAnzahl?.[oid] ?? 1 })));
+        .insert([...bereichSelectedOptions].map(oid => ({ offerte_id: currentOfferteId, option_id: oid, anzahl: bereichOptionAnzahl?.[oid] ?? 1, auswahlgruppe_option_id: bereichAuswahlgruppenWahl?.[oid] ?? null })));
       if(aErr) throw aErr;
     }
 
@@ -4695,6 +4728,22 @@ async function recalc(){
             const preis = stufe?.artikel?.vp_knecht ?? 0;
             const bezeichnung = stufe ? rz.bezeichnung : rz.bezeichnung + ' (keine Stufe gefunden)';
             return { ...rz, bezeichnung, einheit: 'Pauschale', menge: 1, preis, betrag: preis };
+          }
+          if(rz.auswahlgruppe){
+            // Anders als bei der Staffelgruppe ist "menge" hier bereits die
+            // ECHTE, ganz normale Menge (Formel + Verschnitt/Zuschlag/
+            // Zugangsfaktor/Mindestmenge/Mengenoption oben) - nur welcher
+            // Artikel/Preis gilt, kommt aus der in der Offerte getroffenen
+            // Auswahl (z.B. Farbe) statt aus einem festen Artikel-Bezug.
+            const gewaehlteId = bereichAuswahlgruppenWahl[rz.optionId];
+            const gewaehlt = (rz.auswahlgruppe.auswahlgruppe_option || []).find(o => o.id === gewaehlteId);
+            if(!gewaehlt){
+              return { ...rz, bezeichnung: rz.bezeichnung + ' (keine Auswahl getroffen)', einheit: '', menge: 0, preis: 0, betrag: 0 };
+            }
+            const bezeichnung = rz.bezeichnungOverride || gewaehlt.artikel?.bezeichnung || gewaehlt.label;
+            const einheit = gewaehlt.artikel?.einheit || '';
+            const preis = gewaehlt.artikel?.vp_knecht ?? 0;
+            return { ...rz, bezeichnung, einheit, menge, preis, betrag: menge * preis };
           }
           return { ...rz, menge, betrag: menge * rz.preis };
         }));
