@@ -502,7 +502,7 @@ body.buero-rolle .admin-only{display:none !important;}
       <textarea id="voInhalt" style="min-height:180px;"></textarea>
     </div>
     <div class="fld hidden" id="voZusatzfensterWrap">
-      <label>Zusatzfenster zuweisen (erscheinen in Gmail gemeinsam, bevor diese Vorlage erstellt wird)</label>
+      <label>Zusatzfenster zuweisen (Platzhalter im Text oben einfügen - bei Verfassen vor dem Erstellen, bei Antworten nach dem automatischen Entwurf)</label>
       <div id="voZusatzfensterListe"></div>
     </div>
     <div class="hidden" id="voRueckfrageWrap">
@@ -871,7 +871,7 @@ function zfIdsVon(v){
 function vorlageRowHtml(v, richtung){
   const istAktiv = v.aktiv !== false;
   const aktivBtn = `<button class="icobtn vo-toggle-aktiv" data-id="${v.id}" data-richtung="${richtung}" title="${istAktiv ? 'Ausblenden (in Gmail/KI nicht mehr verfügbar)' : 'Wieder einblenden'}">${istAktiv ? ICON.eye : ICON.eyeOff}</button>`;
-  const zfAnzahl = richtung === 'verfassen' ? zfIdsVon(v).length : 0;
+  const zfAnzahl = zfIdsVon(v).length;
   const zfBadge = zfAnzahl ? `<span class="badge-zf">${zfAnzahl} Zusatzfenster</span>` : '';
   if(v.typ === 'dropdown'){
     const anzahl = vorlagenCache[richtung].filter(x => x.parent_id === v.id).length;
@@ -1098,23 +1098,23 @@ function oeffneVorlageModal(richtung, id, opts = {}){
   $('voTypChips').querySelectorAll('.typchip').forEach(c => c.classList.toggle('on', c.dataset.typ === typ));
   $('voInhalt').value = v?.inhalt || '';
 
-  // Zusatzfenster: nur bei Verfassen relevant. Checkliste zeigt die ganze
-  // Bibliothek, angehakt sind die aktuell zugewiesenen; pro angehaktem
-  // Zusatzfenster ein eigener "Platzhalter einfuegen"-Button (kann mehrere
-  // geben, seit Zusatzfenster nicht mehr fix an eine Vorlage gebunden sind).
-  $('voZusatzfensterWrap').classList.toggle('hidden', richtung !== 'verfassen');
-  if(richtung === 'verfassen'){
-    const zugewiesen = v ? zfIdsVon(v) : [];
-    $('voZusatzfensterListe').innerHTML = zusatzfensterCache.length
-      ? zusatzfensterCache.map(zf => `
-        <label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:12.5px;color:var(--ink);">
-          <input type="checkbox" class="vo-zf-checkbox" value="${zf.id}" style="width:auto;margin:0;" ${zugewiesen.includes(zf.id) ? 'checked' : ''}>
-          ${esc(zf.titel)}
-        </label>`).join('')
-      : '<p style="font-size:12px;color:var(--muted);">Noch keine Zusatzfenster erfasst - siehe Menüpunkt "Zusatzfenster".</p>';
-    voAktualisierePlatzhalterBtns();
-    $('voZusatzfensterListe').querySelectorAll('.vo-zf-checkbox').forEach(cb => cb.addEventListener('change', voAktualisierePlatzhalterBtns));
-  }
+  // Zusatzfenster: bei Verfassen UND Antworten relevant (z.B. Kalender-
+  // Baustein bei einer Antworten-Vorlage mit Terminvorschlag), nur nicht bei
+  // Rueckfrage-Vorlagen (kein einzelner Inhalt-Text zum Einsetzen). Checkliste
+  // zeigt die ganze Bibliothek, angehakt sind die aktuell zugewiesenen; pro
+  // angehaktem Zusatzfenster ein eigener "Platzhalter einfuegen"-Button (kann
+  // mehrere geben, seit Zusatzfenster nicht mehr fix an eine Vorlage gebunden
+  // sind).
+  const zugewiesen = v ? zfIdsVon(v) : [];
+  $('voZusatzfensterListe').innerHTML = zusatzfensterCache.length
+    ? zusatzfensterCache.map(zf => `
+      <label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:12.5px;color:var(--ink);">
+        <input type="checkbox" class="vo-zf-checkbox" value="${zf.id}" style="width:auto;margin:0;" ${zugewiesen.includes(zf.id) ? 'checked' : ''}>
+        ${esc(zf.titel)}
+      </label>`).join('')
+    : '<p style="font-size:12px;color:var(--muted);">Noch keine Zusatzfenster erfasst - siehe Menüpunkt "Zusatzfenster".</p>';
+  voAktualisierePlatzhalterBtns();
+  $('voZusatzfensterListe').querySelectorAll('.vo-zf-checkbox').forEach(cb => cb.addEventListener('change', voAktualisierePlatzhalterBtns));
   voSyncTypAnzeige(typ);
   $('voAntwortenListe').innerHTML = '';
   voAntwortZaehler = 0;
@@ -1132,6 +1132,7 @@ function oeffneVorlageModal(richtung, id, opts = {}){
 function voSyncTypAnzeige(typ){
   $('voInhaltWrap').classList.toggle('hidden', typ === 'rueckfrage');
   $('voRueckfrageWrap').classList.toggle('hidden', typ !== 'rueckfrage');
+  $('voZusatzfensterWrap').classList.toggle('hidden', typ === 'rueckfrage');
 }
 $('voTypChips').querySelectorAll('.typchip').forEach(chip => {
   chip.addEventListener('click', () => {
@@ -1233,8 +1234,10 @@ $('voSaveBtn').addEventListener('click', async () => {
       if(e2){ showToast(friendlyError(e2), true); return; }
     }
   }
-  if(istVerfassen){
-    // Zusatzfenster-Zuweisung komplett ersetzen statt zu diffen.
+  if(typ === 'einfach'){
+    // Zusatzfenster-Zuweisung komplett ersetzen statt zu diffen. Bei
+    // Verfassen UND Antworten moeglich (z.B. Kalender-Baustein bei einer
+    // Antworten-Vorlage) - nur nicht bei Rueckfrage-Vorlagen.
     await sb.from('mailassistent_vorlage_zusatzfenster').delete().eq('vorlage_id', vorlageId);
     const zfIds = Array.from($('voZusatzfensterListe').querySelectorAll('.vo-zf-checkbox:checked')).map(cb => cb.value);
     if(zfIds.length){
