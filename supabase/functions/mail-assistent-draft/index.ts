@@ -331,12 +331,13 @@ ${KG_FORMAT_HINWEIS}`;
     const topf = (kundenanfrageToepfe || []).find((t: any) => t.titel === entscheidung.topfTitel);
     if (!topf) return json({ error: 'Kundenanfragen-Topf "' + entscheidung.topfTitel + '" nicht gefunden.' }, 502);
     const distanz = entscheidung.kundenAdresse ? await berechneDistanzInfo(entscheidung.kundenAdresse, firmendaten) : null;
+    const { data: meta } = await sb.from('mailassistent_distanzlogik_meta').select('partner_hinweistext').limit(1).maybeSingle();
     await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', topf.id, tokensInput, tokensOutput);
     return json({
       aktion: 'kundenanfrage', vorlageId: topf.id, titel: topf.titel,
       antworten: (topf.mailassistent_vorlage_antwort || []).sort((a: any, b: any) => a.reihenfolge - b.reihenfolge)
         .map((z: any) => ({ label: z.label })),
-      distanz, hinweistext: topf.info_hinweistext || null,
+      distanz, hinweistext: meta?.partner_hinweistext || null,
       tokensInput, tokensOutput,
     });
   }
