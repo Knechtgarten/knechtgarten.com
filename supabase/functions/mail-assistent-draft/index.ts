@@ -272,7 +272,7 @@ DISTANZLOGIK - nur relevant wenn: ${distanzMeta?.wann_anwenden || '(nicht konfig
 Falls die Mail eine Kontaktanfrage in diesem Sinn ist, gibt es dafür keine fixe Vorlage - stattdessen muss die Fahrdistanz zum Kunden berechnet werden. Projekttypen zur Einordnung:
 ${projekttypenMenu || '(keine erfasst)'}
 
-Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Objekt (kein Text davor/danach), in einer dieser drei Formen:
+Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Objekt (kein Text davor/danach), in einer dieser vier Formen:
 1. Direkter Entwurf möglich (Sonderfall/einfache Vorlage/Auffangfall):
 {"aktion":"entwurf","text":"<fertiger Mailtext>","vorlageTitel":"<exakter Titel der verwendeten VORLAGE, sonst null>"}
    Trifft eine VORLAGE zu: deren Text als starke Richtschnur nehmen (Kernaussage/Entscheidung und Aufbau bleiben, das ist nicht verhandelbar), aber natürlich personalisieren - Namen der Person ansprechen, wo sinnvoll kurz auf Details aus der eingehenden Mail eingehen. Nicht stur wortwörtlich abschreiben, aber auch nichts an der eigentlichen Entscheidung/Aussage ändern.
@@ -286,6 +286,9 @@ Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Obje
 3. Distanzlogik trifft zu (Kontaktanfrage):
 {"aktion":"distanzlogik","projekttyp":"<exakter Titel des Projekttyps>","kundenAdresse":"<aus der Mail extrahierte Adresse/PLZ+Ort>"}
 Wenn bei Fall 3 keine Adresse erkennbar ist, nutze stattdessen den Sonderfall "Kein Ort erkennbar" (Fall 1).
+4. AUSNAHMEFALL - zwei (normalerweise nicht mehr) einfache VORLAGEN passen ungefähr GLEICH GUT, sagen inhaltlich aber unterschiedliche Dinge aus, und es ist fuer die Antwort wirklich wichtig, welche davon stimmt:
+{"aktion":"auswahl","frage":"<kurze, konkrete Frage an den Mitarbeiter, z.B. 'Geht es eher um X oder um Y?'>","vorlagenTitel":["<exakter Titel Vorlage A>","<exakter Titel Vorlage B>"]}
+   Nutze Fall 4 NUR SELTEN, bei echter und relevanter Unsicherheit. Der Normalfall bleibt Fall 1 mit der naheliegendsten Vorlage - im Zweifel IMMER Fall 1 waehlen, nicht Fall 4.
 ${KG_FORMAT_HINWEIS}`;
 
   let userText = 'EINGEHENDE MAIL:\n' + body.mailInhalt;
@@ -327,6 +330,20 @@ ${KG_FORMAT_HINWEIS}`;
 
   if (entscheidung.aktion === 'distanzlogik') {
     return await fuehreDistanzlogikAus(body, modell, entscheidung, schreibstil, firmendaten, projekttypen, tokensInput, tokensOutput);
+  }
+
+  if (entscheidung.aktion === 'auswahl' && Array.isArray(entscheidung.vorlagenTitel)) {
+    const kandidaten = entscheidung.vorlagenTitel
+      .map((t: string) => (vorlagen || []).find((v: any) => v.titel === t))
+      .filter(Boolean);
+    if (kandidaten.length >= 2) {
+      await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', null, tokensInput, tokensOutput);
+      return json({
+        aktion: 'auswahl', frage: entscheidung.frage || 'Welche Vorlage passt besser?',
+        antworten: kandidaten.map((v: any) => ({ label: v.titel })),
+        tokensInput, tokensOutput,
+      });
+    }
   }
 
   return json({ error: 'Unbekannte KI-Entscheidung: ' + JSON.stringify(entscheidung) }, 502);
@@ -445,6 +462,55 @@ VORLAGE:\n${zweig.inhalt}`);
 }
 
 // ----------------------------------------------------------------------------
+// Modus: auswahl-antwort - Fortsetzung nach Fall 4 (zwei Vorlagen kamen in
+// Frage, Mitarbeiter hat eine gewaehlt). Anders als bei rueckfrage-antwort
+// gibt es keine vordefinierten Zweige - es wird direkt der Vorlagentext der
+// gewaehlten Vorlage verwendet, genau wie beim normalen direkten Entwurf.
+// ----------------------------------------------------------------------------
+async function modusAuswahlAntwort(body: any, modell: string) {
+  const [{ data: schreibstil }, { data: firmendaten }, { data: vorlage }] = await Promise.all([
+    sb.from('mailassistent_schreibstil').select('*').limit(1).maybeSingle(),
+    sb.from('mailassistent_firmendaten').select('*').limit(1).maybeSingle(),
+    sb.from('mailassistent_vorlage').select('*').eq('richtung', 'antworten').eq('titel', body.vorlageTitel).maybeSingle().then(r => r),
+  ]);
+  if (!vorlage) return json({ error: 'Vorlage "' + body.vorlageTitel + '" nicht gefunden.' }, 502);
+
+  const teile = [];
+  if (schreibstil?.immer_antworten && schreibstil.inhalt) teile.push('SCHREIBSTIL:\n' + schreibstil.inhalt);
+  if (firmendaten?.immer_antworten) teile.push('FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten));
+  teile.push(`VORLAGE - als starke Richtschnur nehmen (Kernaussage/Entscheidung und Aufbau bleiben, das ist nicht verhandelbar), aber natürlich personalisieren: Namen der Person ansprechen, wo sinnvoll kurz auf Details aus der eingehenden Mail eingehen. Nicht stur wortwörtlich abschreiben, aber auch nichts an der eigentlichen Entscheidung/Aussage ändern.
+Platzhalter in eckigen Klammern (z.B. [Bauteil], [X Minuten]) werden so behandelt:
+- Einen Platzhalter der Form [ZF:...] IMMER exakt unveraendert stehen lassen - der wird danach automatisch ersetzt.
+- JEDEN Platzhalter, der das Wort "Datum" enthaelt (z.B. [Datum], [Datum, Uhrzeit]), IMMER exakt unveraendert stehen lassen - der wird separat behandelt.
+- Jeden ANDEREN Platzhalter: kannst du aus der eingehenden Mail/dem Kontext einen konkreten, sinnvollen Wert ableiten, ersetze ihn durch diesen Wert in DOPPELTEN eckigen Klammern, z.B. wird aus [Bauteil] -> [[Ablaufventil]]. Bist du dir nicht sicher, lass ihn stattdessen unveraendert in einfachen eckigen Klammern stehen. Erfinde NIE einen Wert, den du nicht wirklich aus dem Kontext hast.
+VORLAGE:\n${vorlage.inhalt}`);
+  if (body.mailInhalt) teile.push('EINGEHENDE MAIL:\n' + body.mailInhalt);
+  if (body.anweisung) teile.push('ZUSAETZLICHE ANWEISUNG: ' + body.anweisung);
+  teile.push('Schreibe jetzt den fertigen Mailtext. Nur den Mailtext ausgeben, keine Erklärung.' + KG_FORMAT_HINWEIS);
+
+  // Gleiches Streaming-Muster wie rueckfrage-antwort - auch hier ist die
+  // Vorlage ja schon feststehend, nur noch leicht anzupassen.
+  const system = 'Du hilfst einem Gartenbau-Unternehmen (Knechtgarten), professionelle Mails zu verfassen.';
+  const userText = teile.join('\n\n');
+  const stream = new ReadableStream({
+    async start(controller) {
+      const encoder = new TextEncoder();
+      try {
+        const { tokensInput, tokensOutput } = await rufeClaudeAufStreamend(modell, system, userText, 2500, (chunk) => {
+          controller.enqueue(encoder.encode(chunk));
+        });
+        await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', vorlage.id, tokensInput, tokensOutput);
+      } catch (e) {
+        controller.enqueue(encoder.encode('\u0000FEHLER:' + String((e as any)?.message || e)));
+      } finally {
+        controller.close();
+      }
+    },
+  });
+  return new Response(stream, { headers: { ...corsHeaders, 'Content-Type': 'text/plain; charset=utf-8' } });
+}
+
+// ----------------------------------------------------------------------------
 // Modus: nachbessern
 // ----------------------------------------------------------------------------
 async function modusNachbessern(body: any, modell: string) {
@@ -508,6 +574,7 @@ Deno.serve(async (req) => {
       case 'verfassen': return await modusVerfassen(body, modell);
       case 'antworten': return await modusAntworten(body, modell);
       case 'rueckfrage-antwort': return await modusRueckfrageAntwort(body, modell);
+      case 'auswahl-antwort': return await modusAuswahlAntwort(body, modell);
       case 'nachbessern': return await modusNachbessern(body, modell);
       default: return json({ error: 'Unbekannter modus: ' + body.modus }, 400);
     }
