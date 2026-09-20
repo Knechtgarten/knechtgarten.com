@@ -176,7 +176,13 @@ async function modusAntworten(body: any, modell: string) {
     sb.from('mailassistent_schreibstil').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_firmendaten').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_sonderfall').select('*').eq('immer_antworten', true).order('reihenfolge'),
-    sb.from('mailassistent_vorlage').select('*, mailassistent_vorlage_antwort(*)').eq('richtung', 'antworten').eq('aktiv', true).order('reihenfolge'),
+    sb.from('mailassistent_vorlage').select(`*, mailassistent_vorlage_antwort(*),
+      mailassistent_vorlage_zusatzfenster(
+        mailassistent_zusatzfenster(id,typ,titel,platzhalter,erlaubt_eigene_eingabe,
+          mailassistent_zusatzfenster_spalte(id,titel,typ,einheit,reihenfolge,
+            mailassistent_zusatzfenster_spalte_option(id,wert,reihenfolge)),
+          mailassistent_zusatzfenster_position(id,titel,reihenfolge)))`)
+      .eq('richtung', 'antworten').eq('aktiv', true).order('reihenfolge'),
     sb.from('mailassistent_distanzlogik_meta').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_distanz_projekttyp').select('*').order('reihenfolge'),
   ]);
@@ -211,8 +217,10 @@ ${projekttypenMenu || '(keine erfasst)'}
 
 Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Objekt (kein Text davor/danach), in einer dieser drei Formen:
 1. Direkter Entwurf möglich (Sonderfall/einfache Vorlage/Auffangfall):
-{"aktion":"entwurf","text":"<fertiger Mailtext>"}
+{"aktion":"entwurf","text":"<fertiger Mailtext>","vorlageTitel":"<exakter Titel der verwendeten VORLAGE, sonst null>"}
    Trifft eine VORLAGE zu: deren Text als starke Richtschnur nehmen (Kernaussage/Entscheidung und Aufbau bleiben, das ist nicht verhandelbar), aber natürlich personalisieren - Namen der Person ansprechen, wo sinnvoll kurz auf Details aus der eingehenden Mail eingehen, Platzhalter wie [Datum, Uhrzeit]/[X Minuten] sinnvoll ausfüllen. Nicht stur wortwörtlich abschreiben, aber auch nichts an der eigentlichen Entscheidung/Aussage ändern.
+   AUSNAHME: einen Platzhalter der Form [ZF:...] IMMER unveraendert stehen lassen (nicht ausfuellen, nicht entfernen, nicht uebersetzen) - der wird danach automatisch durch echte Daten ersetzt.
+   "vorlageTitel" ist der exakte Titel der VORLAGE, deren Text du als Grundlage genommen hast - null, falls du dir den Text selbst ueberlegt hast (Sonderfall/Auffangfall ohne passende VORLAGE).
 2. Eine Vorlage mit Rückfrage trifft zu:
 {"aktion":"rueckfrage","vorlageTitel":"<exakter Titel der Vorlage>"}
 3. Distanzlogik trifft zu (Kontaktanfrage):
@@ -233,8 +241,17 @@ ${KG_FORMAT_HINWEIS}`;
   }
 
   if (entscheidung.aktion === 'entwurf') {
-    await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', null, tokensInput, tokensOutput);
-    return json({ aktion: 'entwurf', text: (entscheidung.text || '').trim(), tokensInput, tokensOutput });
+    const vorlage = entscheidung.vorlageTitel
+      ? (vorlagen || []).find((v: any) => v.titel === entscheidung.vorlageTitel)
+      : null;
+    const zusatzfenster = (vorlage?.mailassistent_vorlage_zusatzfenster || [])
+      .map((e: any) => e.mailassistent_zusatzfenster).filter(Boolean);
+    await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', vorlage?.id ?? null, tokensInput, tokensOutput);
+    return json({
+      aktion: 'entwurf', text: (entscheidung.text || '').trim(), vorlageId: vorlage?.id ?? null,
+      zusatzfenster: zusatzfenster.length ? zusatzfenster : undefined,
+      tokensInput, tokensOutput,
+    });
   }
 
   if (entscheidung.aktion === 'rueckfrage') {
