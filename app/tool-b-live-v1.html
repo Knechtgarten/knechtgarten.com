@@ -1413,6 +1413,8 @@ window.addEventListener('message', e => {
   if(e?.data?.type === 'formelKategorieWechsel') waehleFormelKategorie(e.data.kategorie);
 });
 
+let artikelGeladen = false;
+let artikelLadenPromise = null;
 async function loadArtikel(){
   // .order() + explizite .range() - ohne beides kappt Supabase/PostgREST
   // Antworten ab 1000 Zeilen (der Artikelstamm hat das laengst ueberschritten)
@@ -1424,6 +1426,16 @@ async function loadArtikel(){
     .range(0, 9999);
   if(error){ console.error(error); return; }
   ARTIKEL = data.filter(a => !a.lieferant?.archiviert_am);
+  artikelGeladen = true;
+}
+// Wird vor dem ersten Oeffnen des Artikel-Pickers/der Direkt-Eintipp-Vorschau
+// aufgerufen, statt den ganzen Artikelstamm schon beim Start von Tool B zu
+// laden - viele Sitzungen bearbeiten nur Formeln/Texte, ohne je einen Artikel
+// zu suchen.
+function sicherstelleArtikelGeladen(){
+  if(artikelGeladen) return Promise.resolve();
+  if(!artikelLadenPromise) artikelLadenPromise = loadArtikel();
+  return artikelLadenPromise;
 }
 
 async function loadArtikelgruppen(){
@@ -3897,10 +3909,15 @@ function openArtikelPickerDirekt(kontextTyp, kontextId){
   openArtikelPicker();
 }
 
-function openArtikelPicker(){
+async function openArtikelPicker(){
   $('artikelPickerSearch').value = '';
   apFilterKategorie = null; apFilterGruppeId = null; apFilterLieferantId = null;
   apSortCol = 'bezeichnung'; apSortDir = 1;
+  if(!artikelGeladen){
+    $('artikelPickerList').innerHTML = '<tr><td colspan="5" class="hint">Lädt Artikelstamm …</td></tr>';
+    $('artikelPickerOverlay').classList.add('show');
+    await sicherstelleArtikelGeladen();
+  }
   apRenderKategorieFilter();
   apRenderGruppeFilter();
   apRenderLieferantFilter();
@@ -4039,10 +4056,16 @@ function rzArtikelSuggestRender(treffer){
   });
   box.classList.add('show');
 }
-$('rzEditArtikelInput').addEventListener('input', () => {
+$('rzEditArtikelInput').addEventListener('input', async () => {
   rzEditArtikelId = null;
   const q = $('rzEditArtikelInput').value.trim().toLowerCase();
   if(!q){ $('rzEditArtikelSuggest').classList.remove('show'); return; }
+  if(!artikelGeladen){
+    $('rzEditArtikelSuggest').innerHTML = '<div class="artikelSuggest-empty">Lädt Artikelstamm …</div>';
+    $('rzEditArtikelSuggest').classList.add('show');
+    await sicherstelleArtikelGeladen();
+    if($('rzEditArtikelInput').value.trim().toLowerCase() !== q) return; // Eingabe hat sich inzwischen geaendert
+  }
   rzArtikelSuggestRender(ARTIKEL.filter(a => `${a.bezeichnung} ${a.artikelnummer_knecht||''}`.toLowerCase().includes(q)).slice(0, 8));
 });
 $('rzEditArtikelInput').addEventListener('keydown', e => {
@@ -4688,7 +4711,6 @@ async function init(){
   await Promise.all([
     loadOffertentypen(),
     ladeEinheiten(),
-    loadArtikel(),
     loadArtikelgruppen(),
     loadLieferantenListe(),
     ladeAuswahlgruppen()

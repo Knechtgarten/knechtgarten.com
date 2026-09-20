@@ -1048,22 +1048,34 @@ function zeigeAbschnitt(name){
   if(name === 'formelbibliothek') loadOffertentypen().then(renderFormelKategorienSidebar);
   if(name === 'datenabgleich'){ loadWechselkurse(); loadWarnstufen(); loadDatenabgleich(); loadArtikelgruppen(); }
   if(name === 'rechenlogik'){
-    Promise.all([ladeOffertenPositionEinstellungen(), ladeSammelpositionen('maschinenaufwand'), ladeSammelpositionen('logistikaufwand'), ladeSammelpositionen('maschinenaufwand_tagessatz'), ladeSammelpositionen('logistikaufwand_tagessatz')]).then(() => {
-      renderTeilflaechenlogik(TEILFLAECHENLOGIK_KATALOG, 'tflBody');
-      renderTeilflaechenlogik(TEILFLAECHENLOGIK_KATALOG_TAGESSATZ, 'tflBodyTagessatz');
+    // Diese Sektion zeigt an mehreren Stellen bereits gewaehlte Artikel an
+    // (Lieferwagen-Konfiguration, Sammelpositionen) - der Artikelstamm muss
+    // darum VOR dem Rendern geladen sein, wird aber erst hier (statt beim
+    // Login fuer jede Sektion) angefragt. Nach dem ersten Mal ist die Zusage
+    // sofort erfuellt (siehe sicherstelleArtikelGeladen()).
+    sicherstelleArtikelGeladen().then(() => {
+      Promise.all([ladeOffertenPositionEinstellungen(), ladeSammelpositionen('maschinenaufwand'), ladeSammelpositionen('logistikaufwand'), ladeSammelpositionen('maschinenaufwand_tagessatz'), ladeSammelpositionen('logistikaufwand_tagessatz')]).then(() => {
+        renderTeilflaechenlogik(TEILFLAECHENLOGIK_KATALOG, 'tflBody');
+        renderTeilflaechenlogik(TEILFLAECHENLOGIK_KATALOG_TAGESSATZ, 'tflBodyTagessatz');
+      });
+      loadLieferwagenKonfiguration();
     });
-    loadLieferwagenKonfiguration();
     ladeEinheiten().then(renderEinheitenListe);
   }
   if(name === 'sonderpositionen'){
-    loadStaffelgruppen();
-    loadAuswahlgruppenListe();
-    Promise.all([loadKieswerkListe('kieswerk_kies','kiesTransportBody'), loadKieswerkListe('kieswerk_beton','betonTransportBody')]).then(renderLwKieswerkListe);
-    ladeEinfacheAdressliste('deponie_distanz', 'lwDeponieTransportBody');
-    ladeEinfacheAdressliste('magazin_adressen', 'magazinTransportBody');
-    ladeEinheiten().then(ladeSonderpositionTypKategorien);
-    ladeLwtZeilen();
-    ladeLwDirektEinzelfahrt();
+    // Gleicher Grund wie bei "rechenlogik" oben - praktisch jede Karte hier
+    // (Staffelungen/Auswahlgruppen/Transportberechnungen) zeigt sofort beim
+    // Aufklappen bereits gewaehlte Artikel an.
+    sicherstelleArtikelGeladen().then(() => {
+      loadStaffelgruppen();
+      loadAuswahlgruppenListe();
+      Promise.all([loadKieswerkListe('kieswerk_kies','kiesTransportBody'), loadKieswerkListe('kieswerk_beton','betonTransportBody')]).then(renderLwKieswerkListe);
+      ladeEinfacheAdressliste('deponie_distanz', 'lwDeponieTransportBody');
+      ladeEinfacheAdressliste('magazin_adressen', 'magazinTransportBody');
+      ladeEinheiten().then(ladeSonderpositionTypKategorien);
+      ladeLwtZeilen();
+      ladeLwDirektEinzelfahrt();
+    });
   }
   if(name === 'benutzer'){ loadBenutzer(); loadModulSichtbarkeit(); }
   if(name === 'vorauswahlen') ladeVorauswahlAbschnitt();
@@ -1976,6 +1988,8 @@ $('delOtConfirm').addEventListener('click', async () => {
 // Karten. Gleiche Optik/Logik wie der Artikel-Picker in Tool B (Mengenfenster).
 // ---------------------------------------------------------------------------
 let ARTIKEL = [];
+let artikelGeladen = false;
+let artikelLadenPromise = null;
 async function loadArtikel(){
   // .order() + explizite .range() - ohne beides kappt Supabase/PostgREST
   // Antworten ab 1000 Zeilen (der Artikelstamm hat das laengst ueberschritten)
@@ -1987,6 +2001,15 @@ async function loadArtikel(){
     .range(0, 9999);
   if(error){ console.error(error); return; }
   ARTIKEL = data.filter(a => !a.lieferant?.archiviert_am);
+  artikelGeladen = true;
+}
+// Wird vor dem ersten Oeffnen des Artikel-Pickers aufgerufen statt den ganzen
+// Artikelstamm schon beim Login zu laden - die meisten Einstellungen-Besuche
+// (Formeln/Regeln anpassen) brauchen den Picker gar nicht.
+function sicherstelleArtikelGeladen(){
+  if(artikelGeladen) return Promise.resolve();
+  if(!artikelLadenPromise) artikelLadenPromise = loadArtikel();
+  return artikelLadenPromise;
 }
 
 const AP_KATEGORIEN = ['material','personal','maschine','logistik'];
@@ -1997,11 +2020,16 @@ let apFilterKategorie = null;
 let apFilterGruppeId = null;
 let apFilterLieferantId = null;
 
-function openArtikelPicker(onSelect, vorfilterKategorie = null){
+async function openArtikelPicker(onSelect, vorfilterKategorie = null){
   apOnSelect = onSelect;
   $('artikelPickerSearch').value = '';
   apFilterKategorie = vorfilterKategorie; apFilterGruppeId = null; apFilterLieferantId = null;
   apSortCol = 'bezeichnung'; apSortDir = 1;
+  if(!artikelGeladen){
+    $('artikelPickerList').innerHTML = '<tr><td colspan="5" class="hint">Lädt Artikelstamm …</td></tr>';
+    $('artikelPickerOvl').classList.add('show');
+    await sicherstelleArtikelGeladen();
+  }
   apRenderKategorieFilter();
   apRenderGruppeFilter();
   apRenderLieferantFilter();
@@ -4641,7 +4669,7 @@ async function pruefeAnmeldung(){
   $keinZugriff.classList.add('hidden');
   $appMain.classList.remove('hidden');
   document.body.classList.toggle('mitarbeiter-rolle', aktuelleRolle !== 'admin');
-  const ladeAufgaben = [loadArtikel(), loadArtikelgruppen()];
+  const ladeAufgaben = [loadArtikelgruppen()];
   if(aktuelleRolle === 'admin') ladeAufgaben.push(loadDatenabgleich());
   await Promise.all(ladeAufgaben);
   return true;
