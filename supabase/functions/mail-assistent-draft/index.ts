@@ -435,7 +435,7 @@ VORLAGE:\n${zweig.inhalt}`);
         // normale Fehler-Antwort mit Statuscode umwandeln - stattdessen einen
         // erkennbaren Marker in den Text schreiben, den die Erweiterung als
         // Fehler statt als Entwurf behandelt.
-        controller.enqueue(encoder.encode(' FEHLER:' + String((e as any)?.message || e)));
+        controller.enqueue(encoder.encode('\u0000FEHLER:' + String((e as any)?.message || e)));
       } finally {
         controller.close();
       }
