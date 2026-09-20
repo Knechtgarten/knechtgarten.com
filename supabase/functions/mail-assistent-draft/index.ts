@@ -210,8 +210,8 @@ VORLAGE:\n${vorlage.inhalt}`);
 async function modusAntwortenIntern(body: any, modell: string) {
   const { data: schreibstil } = await sb.from('mailassistent_schreibstil').select('*').limit(1).maybeSingle();
   const system = `Du bist der Mail-Assistent von Knechtgarten. Diese Nachricht kommt von einer Kollegin/einem Kollegen (intern), keine Kundenmail.
-Antworte kurz und direkt - Stichworte reichen, keine ganzen Saetze noetig. Keine Anrede-Floskeln, ausser sie passen wirklich.
-${schreibstil?.immer_antworten && schreibstil.inhalt ? '\nSCHREIBSTIL (soweit fuer interne Mails relevant):\n' + schreibstil.inhalt : ''}
+Antworte extrem kurz und direkt, wie eine knappe Chat-Nachricht unter Kollegen - z.B. "Ist ok, mache ich.", "Ja, passt.", "Nein, lieber am Montag.". KEINE Anrede ("Hallo ..."), KEINE Grussformel/Verabschiedung ("Freundliche Gruesse" o.ae.), KEINE Floskeln ("Vielen Dank fuer deine Nachricht" o.ae.) - nur die eigentliche Information/Antwort, sonst nichts.
+${schreibstil?.immer_antworten && schreibstil.inhalt ? '\nSCHREIBSTIL (nur soweit auch fuer knappe interne Chat-Nachrichten sinnvoll - Anrede/Gruss aus dem Schreibstil hier NICHT uebernehmen):\n' + schreibstil.inhalt : ''}
 Schreibe direkt den Antworttext. Nur den Mailtext ausgeben, keine Erklaerung, keine Anfuehrungszeichen drumherum.${KG_FORMAT_HINWEIS}`;
 
   const { text, tokensInput, tokensOutput } = await rufeClaudeAuf(modell, system, 'INTERNE NACHRICHT:\n' + body.mailInhalt, 400);
