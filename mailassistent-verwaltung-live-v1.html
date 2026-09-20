@@ -398,8 +398,8 @@ body.buero-rolle .admin-only{display:none !important;}
           <div id="zfListe"></div>
           <div class="addvorlagebtns">
             <button class="btn btn-primary addvorlagebtn" id="zfNeuTabelleBtn">+ Neue Tabelle mit Auswahlmenü</button>
-            <button class="btn btn-ghost addvorlagebtn" id="zfNeuTabelleFixBtn">+ Neue Tabelle mit fixen Zeilen</button>
             <button class="btn btn-ghost addvorlagebtn" id="zfNeuKalenderBtn">+ Neuer Termin-Kalender</button>
+            <button class="btn btn-ghost addvorlagebtn" id="zfNeuEingabeBtn">+ Neues Eingabe-Popup</button>
           </div>
         </div>
       </div>
@@ -538,10 +538,16 @@ body.buero-rolle .admin-only{display:none !important;}
       <button class="btn btn-ghost" type="button" id="zfPositionAddBtn" style="margin-top:2px;">+ Position hinzufügen</button>
     </div>
     <div class="fld" id="zfSpaltenWrap">
-      <label id="zfSpaltenLabel">Zusätzliche Spalten (neben Anzahl) - "Spalte" ist ein Dropdown mit fest hinterlegten Optionen, "Mengenspalte" ein freies Zahlenfeld mit Einheit (z.B. Meter)</label>
+      <label id="zfSpaltenLabel">Zusätzliche Spalten (neben Anzahl) - "Spalte" ist ein Dropdown mit fest hinterlegten Optionen, "Mengenspalte" ein freies Zahlenfeld mit Einheit (z.B. Meter), "Textspalte" ein freies Textfeld ohne Vorgaben</label>
       <div id="zfSpaltenListe"></div>
       <button class="btn btn-ghost" type="button" id="zfSpalteAddBtn" style="margin-top:2px;">+ Spalte hinzufügen</button>
       <button class="btn btn-ghost" type="button" id="zfMengenspalteAddBtn" style="margin-top:2px;margin-left:8px;">+ Mengenspalte hinzufügen</button>
+      <button class="btn btn-ghost" type="button" id="zfTextspalteAddBtn" style="margin-top:2px;margin-left:8px;">+ Textspalte hinzufügen</button>
+    </div>
+    <div class="fld" id="zfFelderWrap">
+      <label>Felder - jedes Feld erscheint als eigenes Textfeld im Popup und bekommt einen eigenen Platzhalter, den du in Betreff UND Inhalt einfügen kannst</label>
+      <div id="zfFelderListe"></div>
+      <button class="btn btn-ghost" type="button" id="zfFeldAddBtn" style="margin-top:2px;">+ Feld hinzufügen</button>
     </div>
     <div id="zfEigeneEingabeWrap" style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
       <input type="checkbox" id="zfEigeneEingabe" style="width:auto;margin:0;">
@@ -1149,6 +1155,12 @@ $('voTypChips').querySelectorAll('.typchip').forEach(chip => {
 $('voAntwortAddBtn').addEventListener('click', () => voAntwortBlockAnhaengen('', ''));
 voFuelleFormatierungsleiste($('voFormatLeiste'), $('voInhalt'));
 
+// Merkt sich, welches der beiden Textfelder zuletzt aktiv war, damit
+// "+ Platzhalter einfuegen" dort einfuegt statt immer nur im Inhalt.
+let voLetztesFokusfeld = null;
+$('voInhalt').addEventListener('focus', () => { voLetztesFokusfeld = $('voInhalt'); });
+$('voBetreff').addEventListener('focus', () => { voLetztesFokusfeld = $('voBetreff'); });
+
 // "Wann trifft das zu?" waechst automatisch mit dem Text mit statt manuell
 // per Ziehgriff vergroessert werden zu muessen.
 function voAutoWachsen(textarea){
@@ -1159,17 +1171,33 @@ $('voWannTrifft').addEventListener('input', () => voAutoWachsen($('voWannTrifft'
 // Ein Zusatzfenster kann nicht mehr nur eines pro Vorlage sein - darum pro
 // angehaktem Zusatzfenster ein eigener Button, der dessen Platzhalter an
 // der Cursor-Position einfuegt.
+// Bei "eingabe"-Zusatzfenstern (Eingabe-Popup) hat jedes Feld seinen EIGENEN
+// Platzhalter statt einem gemeinsamen fuer das ganze Zusatzfenster - darum
+// hier zu einer flachen Liste von Buttons aufloesen.
 function voAktualisierePlatzhalterBtns(){
   const angehaktIds = Array.from($('voZusatzfensterListe').querySelectorAll('.vo-zf-checkbox:checked')).map(cb => cb.value);
   const zfListe = zusatzfensterCache.filter(zf => angehaktIds.includes(zf.id));
-  $('voPlatzhalterBtns').classList.toggle('hidden', !zfListe.length);
-  $('voPlatzhalterBtns').innerHTML = zfListe.map(zf =>
-    `<button class="btn btn-ghost vo-platzhalter-einfuegen" type="button" data-platzhalter="${esc(zf.platzhalter)}">+ Platzhalter „${esc(zf.titel)}" einfügen</button>`
+  const buttons = [];
+  zfListe.forEach(zf => {
+    if(zf.typ === 'eingabe'){
+      (zf.mailassistent_zusatzfenster_spalte || []).forEach(feld => {
+        if(feld.platzhalter) buttons.push({ label: `${zf.titel}: ${feld.titel}`, platzhalter: feld.platzhalter });
+      });
+    } else {
+      buttons.push({ label: zf.titel, platzhalter: zf.platzhalter });
+    }
+  });
+  $('voPlatzhalterBtns').classList.toggle('hidden', !buttons.length);
+  $('voPlatzhalterBtns').innerHTML = buttons.map(b =>
+    `<button class="btn btn-ghost vo-platzhalter-einfuegen" type="button" data-platzhalter="${esc(b.platzhalter)}">+ Platzhalter „${esc(b.label)}" einfügen</button>`
   ).join('');
   $('voPlatzhalterBtns').querySelectorAll('.vo-platzhalter-einfuegen').forEach(btn => {
     btn.addEventListener('click', () => {
       const text = btn.dataset.platzhalter;
-      const ta = $('voInhalt');
+      // In das zuletzt fokussierte Feld einfuegen (Inhalt ODER Betreff) -
+      // Platzhalter aus Eingabe-Popups sollen ja in beiden Feldern nutzbar
+      // sein, nicht nur im Inhalt.
+      const ta = voLetztesFokusfeld || $('voInhalt');
       const start = ta.selectionStart, end = ta.selectionEnd;
       ta.value = ta.value.slice(0, start) + text + ta.value.slice(end);
       ta.focus();
@@ -1293,14 +1321,17 @@ async function ladeZusatzfensterListe(){
   zusatzfensterCache = data || [];
   renderZusatzfensterListe();
 }
-const ZF_TYP_LABEL = { tabelle: 'Tabelle mit Auswahlmenü', tabelle_fix: 'Tabelle mit fixen Zeilen', kalender: 'Kalender' };
+const ZF_TYP_LABEL = { tabelle: 'Tabelle mit Auswahlmenü', tabelle_fix: 'Tabelle mit fixen Zeilen', kalender: 'Kalender', eingabe: 'Eingabe-Popup' };
 function zfRowHtml(zf){
   const anzahlSpalten = (zf.mailassistent_zusatzfenster_spalte || []).length;
+  const preview = zf.typ === 'eingabe'
+    ? `${anzahlSpalten} Feld${anzahlSpalten === 1 ? '' : 'er'}`
+    : `Platzhalter: <code>${esc(zf.platzhalter)}</code> · ${anzahlSpalten} Spalte${anzahlSpalten === 1 ? '' : 'n'}`;
   return `
     <div class="vorlagerow" data-id="${zf.id}">
       <div class="txt">
         <div class="titelrow"><span class="titel">${esc(zf.titel)}</span><span class="badge-partner">${esc(ZF_TYP_LABEL[zf.typ] || zf.typ)}</span></div>
-        <div class="preview">Platzhalter: <code>${esc(zf.platzhalter)}</code> · ${anzahlSpalten} Spalte${anzahlSpalten === 1 ? '' : 'n'}</div>
+        <div class="preview">${preview}</div>
       </div>
       <div class="rowactions">
         <button class="icobtn zf-row-edit" data-id="${zf.id}" title="Bearbeiten">${ICON.edit}</button>
@@ -1381,6 +1412,15 @@ function zfSpalteBlockHtml(titel, optionen, typ){
       <input class="zf-spalte-einheit" value="${esc(optionen && optionen.einheit || '')}" placeholder="z.B. Meter, Stück" style="width:100%;border:1px solid var(--line);border-radius:6px;padding:6px 9px;font:inherit;font-size:12.5px;box-sizing:border-box;">
     </div>`;
   }
+  if(typ === 'text'){
+    return `<div class="zf-spalte-block" data-typ="text" style="border:1px solid var(--line);border-radius:8px;padding:9px 10px;margin-bottom:8px;">
+      <div style="display:flex;gap:6px;align-items:center;">
+        <input class="zf-spalte-titel" value="${esc(titel || '')}" placeholder="Spaltenname, z.B. Holzart" style="flex:1;border:1px solid var(--line);border-radius:6px;padding:6px 9px;font:inherit;font-size:12.5px;color:var(--ink);">
+        <button class="icobtn danger zf-spalte-del" type="button" title="Spalte entfernen">${ICON.trash}</button>
+      </div>
+      <div style="font-size:10.5px;color:var(--muted);margin-top:5px;">Freies Textfeld in Gmail, ohne Vorgaben.</div>
+    </div>`;
+  }
   return `<div class="zf-spalte-block" data-typ="dropdown" style="border:1px solid var(--line);border-radius:8px;padding:9px 10px;margin-bottom:8px;">
     <div style="display:flex;gap:6px;align-items:center;margin-bottom:7px;">
       <input class="zf-spalte-titel" value="${esc(titel || '')}" placeholder="Spaltenname, z.B. Farbe" style="flex:1;border:1px solid var(--line);border-radius:6px;padding:6px 9px;font:inherit;font-size:12.5px;color:var(--ink);">
@@ -1423,6 +1463,29 @@ function zfVerdrahteSpalteBlock(block){
 function zfSpalteTyp(block){
   return block.dataset.typ || 'dropdown';
 }
+// Felder eines Eingabe-Popups: jedes bekommt sein EIGENES, gleich beim
+// Hinzufuegen generiertes Platzhalter (client-seitig, kein Server-Rundgang
+// noetig - derselbe Mechanismus wie beim Zusatzfenster-Platzhalter selbst).
+function zfFeldBlockHtml(titel, platzhalter){
+  return `<div class="zf-feld-block" data-platzhalter="${esc(platzhalter)}" style="display:flex;gap:6px;align-items:center;margin-bottom:8px;">
+    <input class="zf-feld-titel" value="${esc(titel || '')}" placeholder="z.B. Objekt" style="flex:1;border:1px solid var(--line);border-radius:6px;padding:6px 9px;font:inherit;font-size:12.5px;color:var(--ink);">
+    <input class="zf-feld-platzhalter" value="${esc(platzhalter)}" readonly style="flex:1;background:var(--soft);border:1px solid var(--line);border-radius:6px;padding:6px 9px;font:inherit;font-size:11.5px;color:var(--muted);">
+    <button class="btn btn-ghost zf-feld-kopieren" type="button" style="flex-shrink:0;">Kopieren</button>
+    <button class="icobtn danger zf-feld-del" type="button" title="Feld entfernen">${ICON.trash}</button>
+  </div>`;
+}
+function zfFeldAnhaengen(titel, platzhalter){
+  const echterPlatzhalter = platzhalter || zfGeneriereePlatzhalter(titel || 'feld');
+  const div = document.createElement('div');
+  div.innerHTML = zfFeldBlockHtml(titel, echterPlatzhalter);
+  const block = div.firstElementChild;
+  block.querySelector('.zf-feld-del').addEventListener('click', () => block.remove());
+  block.querySelector('.zf-feld-kopieren').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(echterPlatzhalter); showToast('Platzhalter kopiert.'); }
+    catch(e){ showToast('Kopieren nicht möglich - bitte Text manuell markieren.', true); }
+  });
+  $('zfFelderListe').appendChild(block);
+}
 let zfAktuellerTyp = 'tabelle';
 function oeffneZusatzfensterModal(id, opts = {}){
   zfBestehendeId = id || null;
@@ -1430,37 +1493,49 @@ function oeffneZusatzfensterModal(id, opts = {}){
   zfAktuellerTyp = zf?.typ || opts.typ || 'tabelle';
   const istFix = zfAktuellerTyp === 'tabelle_fix';
   const istKalender = zfAktuellerTyp === 'kalender';
+  const istEingabe = zfAktuellerTyp === 'eingabe';
   $('zfOvlTitel').textContent = `Zusatzfenster: ${ZF_TYP_LABEL[zfAktuellerTyp] || 'Tabelle'}`;
   $('zfPositionenWrap').classList.toggle('hidden', !istFix);
   $('zfEigeneEingabeWrap').classList.toggle('hidden', !istFix);
-  $('zfSpaltenWrap').classList.toggle('hidden', istKalender);
+  $('zfSpaltenWrap').classList.toggle('hidden', istKalender || istEingabe);
+  $('zfPlatzhalterWrap').classList.toggle('hidden', istEingabe);
+  $('zfFelderWrap').classList.toggle('hidden', !istEingabe);
   $('zfSpaltenLabel').textContent = istFix
     ? 'Zusätzliche Spalten (neben Anzahl und Position) - optional'
-    : 'Zusätzliche Spalten (neben Anzahl) - "Spalte" ist ein Dropdown mit fest hinterlegten Optionen, "Mengenspalte" ein freies Zahlenfeld mit Einheit (z.B. Meter)';
+    : 'Zusätzliche Spalten (neben Anzahl) - "Spalte" ist ein Dropdown mit fest hinterlegten Optionen, "Mengenspalte" ein freies Zahlenfeld mit Einheit (z.B. Meter), "Textspalte" ein freies Textfeld ohne Vorgaben';
   $('zfTitel').value = zf?.titel || '';
   $('zfPlatzhalter').value = zf?.platzhalter || '(wird beim Speichern erzeugt)';
   $('zfEigeneEingabe').checked = zf ? !!zf.erlaubt_eigene_eingabe : true;
   $('zfSpaltenListe').innerHTML = '';
   $('zfPositionenListe').innerHTML = '';
+  $('zfFelderListe').innerHTML = '';
   const spalten = (zf?.mailassistent_zusatzfenster_spalte || []).sort((a,b) => a.reihenfolge - b.reihenfolge);
   const positionen = (zf?.mailassistent_zusatzfenster_position || []).sort((a,b) => a.reihenfolge - b.reihenfolge);
-  spalten.forEach(s => {
-    if(s.typ === 'zahl'){
-      zfSpalteAnhaengen(s.titel, s.einheit || '', 'zahl');
-    } else {
-      const optionen = (s.mailassistent_zusatzfenster_spalte_option || []).sort((a,b) => a.reihenfolge - b.reihenfolge).map(o => o.wert);
-      zfSpalteAnhaengen(s.titel, optionen, 'dropdown');
-    }
-  });
+  if(istEingabe){
+    spalten.forEach(f => zfFeldAnhaengen(f.titel, f.platzhalter));
+  } else {
+    spalten.forEach(s => {
+      if(s.typ === 'zahl'){
+        zfSpalteAnhaengen(s.titel, s.einheit || '', 'zahl');
+      } else if(s.typ === 'text'){
+        zfSpalteAnhaengen(s.titel, [], 'text');
+      } else {
+        const optionen = (s.mailassistent_zusatzfenster_spalte_option || []).sort((a,b) => a.reihenfolge - b.reihenfolge).map(o => o.wert);
+        zfSpalteAnhaengen(s.titel, optionen, 'dropdown');
+      }
+    });
+  }
   positionen.forEach(p => zfAnhaengen($('zfPositionenListe'), 'zf-position-input', p.titel));
   $('zfLoeschenBtn').classList.toggle('hidden', !zfBestehendeId);
   $('zfOvl').classList.add('show');
 }
 $('zfNeuTabelleBtn').addEventListener('click', () => oeffneZusatzfensterModal(null, { typ: 'tabelle' }));
-$('zfNeuTabelleFixBtn').addEventListener('click', () => oeffneZusatzfensterModal(null, { typ: 'tabelle_fix' }));
 $('zfNeuKalenderBtn').addEventListener('click', () => oeffneZusatzfensterModal(null, { typ: 'kalender' }));
+$('zfNeuEingabeBtn').addEventListener('click', () => oeffneZusatzfensterModal(null, { typ: 'eingabe' }));
 $('zfSpalteAddBtn').addEventListener('click', () => zfSpalteAnhaengen('', [], 'dropdown'));
 $('zfMengenspalteAddBtn').addEventListener('click', () => zfSpalteAnhaengen('', '', 'zahl'));
+$('zfTextspalteAddBtn').addEventListener('click', () => zfSpalteAnhaengen('', [], 'text'));
+$('zfFeldAddBtn').addEventListener('click', () => zfFeldAnhaengen('', null));
 $('zfPositionAddBtn').addEventListener('click', () => {
   zfAnhaengen($('zfPositionenListe'), 'zf-position-input', '');
 });
@@ -1470,6 +1545,9 @@ $('zfSaveBtn').addEventListener('click', async () => {
   if(!titel){ showToast('Titel ist Pflicht.', true); return; }
   if(zfAktuellerTyp === 'tabelle_fix' && !$('zfPositionenListe').querySelector('.zf-position-input')?.value.trim()){
     showToast('Bitte mindestens eine Position erfassen.', true); return;
+  }
+  if(zfAktuellerTyp === 'eingabe' && !$('zfFelderListe').querySelector('.zf-feld-titel')?.value.trim()){
+    showToast('Bitte mindestens ein Feld erfassen.', true); return;
   }
   const werte = {
     typ: zfAktuellerTyp, titel,
@@ -1497,29 +1575,44 @@ $('zfSaveBtn').addEventListener('click', async () => {
   await sb.from('mailassistent_zusatzfenster_spalte').delete().eq('zusatzfenster_id', zfId);
   await sb.from('mailassistent_zusatzfenster_position').delete().eq('zusatzfenster_id', zfId);
 
-  const spaltenBloecke = Array.from($('zfSpaltenListe').querySelectorAll('.zf-spalte-block'));
-  const spaltenWerte = spaltenBloecke.map((block, i) => {
-    const typ = zfSpalteTyp(block);
-    return {
-      titel: block.querySelector('.zf-spalte-titel').value.trim(),
-      typ,
-      einheit: typ === 'zahl' ? (block.querySelector('.zf-spalte-einheit')?.value.trim() || null) : null,
-      optionen: typ === 'zahl' ? [] : Array.from(block.querySelectorAll('.zf-option-chip')).map(el => el.dataset.wert),
-      reihenfolge: i
-    };
-  }).filter(s => s.titel);
-  if(spaltenWerte.length){
-    const { data: neueSpalten, error: e1 } = await sb.from('mailassistent_zusatzfenster_spalte')
-      .insert(spaltenWerte.map(s => ({ zusatzfenster_id: zfId, titel: s.titel, typ: s.typ, einheit: s.einheit, reihenfolge: s.reihenfolge })))
-      .select();
-    if(e1){ showToast(friendlyError(e1), true); return; }
-    const optionenWerte = [];
-    neueSpalten.forEach((row, i) => {
-      spaltenWerte[i].optionen.forEach((wert, j) => optionenWerte.push({ spalte_id: row.id, wert, reihenfolge: j }));
-    });
-    if(optionenWerte.length){
-      const { error: e1b } = await sb.from('mailassistent_zusatzfenster_spalte_option').insert(optionenWerte);
-      if(e1b){ showToast(friendlyError(e1b), true); return; }
+  if(zfAktuellerTyp === 'eingabe'){
+    const feldBloecke = Array.from($('zfFelderListe').querySelectorAll('.zf-feld-block'));
+    const feldWerte = feldBloecke.map((block, i) => ({
+      zusatzfenster_id: zfId,
+      titel: block.querySelector('.zf-feld-titel').value.trim(),
+      typ: 'text',
+      platzhalter: block.dataset.platzhalter,
+      reihenfolge: i,
+    })).filter(f => f.titel);
+    if(feldWerte.length){
+      const { error: e1 } = await sb.from('mailassistent_zusatzfenster_spalte').insert(feldWerte);
+      if(e1){ showToast(friendlyError(e1), true); return; }
+    }
+  } else {
+    const spaltenBloecke = Array.from($('zfSpaltenListe').querySelectorAll('.zf-spalte-block'));
+    const spaltenWerte = spaltenBloecke.map((block, i) => {
+      const typ = zfSpalteTyp(block);
+      return {
+        titel: block.querySelector('.zf-spalte-titel').value.trim(),
+        typ,
+        einheit: typ === 'zahl' ? (block.querySelector('.zf-spalte-einheit')?.value.trim() || null) : null,
+        optionen: typ === 'dropdown' ? Array.from(block.querySelectorAll('.zf-option-chip')).map(el => el.dataset.wert) : [],
+        reihenfolge: i
+      };
+    }).filter(s => s.titel);
+    if(spaltenWerte.length){
+      const { data: neueSpalten, error: e1 } = await sb.from('mailassistent_zusatzfenster_spalte')
+        .insert(spaltenWerte.map(s => ({ zusatzfenster_id: zfId, titel: s.titel, typ: s.typ, einheit: s.einheit, reihenfolge: s.reihenfolge })))
+        .select();
+      if(e1){ showToast(friendlyError(e1), true); return; }
+      const optionenWerte = [];
+      neueSpalten.forEach((row, i) => {
+        spaltenWerte[i].optionen.forEach((wert, j) => optionenWerte.push({ spalte_id: row.id, wert, reihenfolge: j }));
+      });
+      if(optionenWerte.length){
+        const { error: e1b } = await sb.from('mailassistent_zusatzfenster_spalte_option').insert(optionenWerte);
+        if(e1b){ showToast(friendlyError(e1b), true); return; }
+      }
     }
   }
 
