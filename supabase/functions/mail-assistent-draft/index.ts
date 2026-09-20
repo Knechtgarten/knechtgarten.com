@@ -218,8 +218,8 @@ ${projekttypenMenu || '(keine erfasst)'}
 Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Objekt (kein Text davor/danach), in einer dieser drei Formen:
 1. Direkter Entwurf möglich (Sonderfall/einfache Vorlage/Auffangfall):
 {"aktion":"entwurf","text":"<fertiger Mailtext>","vorlageTitel":"<exakter Titel der verwendeten VORLAGE, sonst null>"}
-   Trifft eine VORLAGE zu: deren Text als starke Richtschnur nehmen (Kernaussage/Entscheidung und Aufbau bleiben, das ist nicht verhandelbar), aber natürlich personalisieren - Namen der Person ansprechen, wo sinnvoll kurz auf Details aus der eingehenden Mail eingehen, Platzhalter wie [Datum, Uhrzeit]/[X Minuten] sinnvoll ausfüllen. Nicht stur wortwörtlich abschreiben, aber auch nichts an der eigentlichen Entscheidung/Aussage ändern.
-   AUSNAHME: einen Platzhalter der Form [ZF:...] IMMER unveraendert stehen lassen (nicht ausfuellen, nicht entfernen, nicht uebersetzen) - der wird danach automatisch durch echte Daten ersetzt.
+   Trifft eine VORLAGE zu: deren Text als starke Richtschnur nehmen (Kernaussage/Entscheidung und Aufbau bleiben, das ist nicht verhandelbar), aber natürlich personalisieren - Namen der Person ansprechen, wo sinnvoll kurz auf Details aus der eingehenden Mail eingehen, Platzhalter wie [X Minuten] sinnvoll ausfüllen. Nicht stur wortwörtlich abschreiben, aber auch nichts an der eigentlichen Entscheidung/Aussage ändern.
+   AUSNAHME: einen Platzhalter der Form [ZF:...] sowie JEDEN Platzhalter, der das Wort "Datum" enthaelt (z.B. [Datum], [Datum, Uhrzeit]), IMMER unveraendert stehen lassen (nicht ausfuellen, nicht erfinden, nicht entfernen, nicht uebersetzen) - die werden danach automatisch ersetzt bzw. vom Mitarbeiter von Hand eingetragen.
    "vorlageTitel" ist der exakte Titel der VORLAGE, deren Text du als Grundlage genommen hast - null, falls du dir den Text selbst ueberlegt hast (Sonderfall/Auffangfall ohne passende VORLAGE).
 2. Eine Vorlage mit Rückfrage trifft zu:
 {"aktion":"rueckfrage","vorlageTitel":"<exakter Titel der Vorlage>"}
@@ -346,7 +346,7 @@ async function modusRueckfrageAntwort(body: any, modell: string) {
   const teile = [];
   if (schreibstil?.immer_antworten && schreibstil.inhalt) teile.push('SCHREIBSTIL:\n' + schreibstil.inhalt);
   if (firmendaten?.immer_antworten) teile.push('FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten));
-  teile.push(`VORLAGE - als starke Richtschnur nehmen (Kernaussage/Entscheidung und Aufbau bleiben, das ist nicht verhandelbar), aber natürlich personalisieren: Namen der Person ansprechen, wo sinnvoll kurz auf Details aus der eingehenden Mail eingehen, Platzhalter wie [Datum, Uhrzeit] sinnvoll ausfüllen. Nicht stur wortwörtlich abschreiben, aber auch nichts an der eigentlichen Entscheidung/Aussage ändern:\n${zweig.inhalt}`);
+  teile.push(`VORLAGE - als starke Richtschnur nehmen (Kernaussage/Entscheidung und Aufbau bleiben, das ist nicht verhandelbar), aber natürlich personalisieren: Namen der Person ansprechen, wo sinnvoll kurz auf Details aus der eingehenden Mail eingehen. AUSNAHME: einen Platzhalter der Form [ZF:...] sowie JEDEN Platzhalter, der das Wort "Datum" enthaelt (z.B. [Datum], [Datum, Uhrzeit]), IMMER unveraendert stehen lassen (nicht ausfuellen, nicht erfinden, nicht entfernen) - die werden danach automatisch ersetzt bzw. vom Mitarbeiter von Hand eingetragen. Andere Platzhalter (z.B. [X Minuten]) sinnvoll ausfuellen. Nicht stur wortwörtlich abschreiben, aber auch nichts an der eigentlichen Entscheidung/Aussage ändern:\n${zweig.inhalt}`);
   if (body.mailInhalt) teile.push('EINGEHENDE MAIL:\n' + body.mailInhalt);
   if (body.anweisung) teile.push('ZUSAETZLICHE ANWEISUNG: ' + body.anweisung);
   teile.push('Schreibe jetzt den fertigen Mailtext. Nur den Mailtext ausgeben, keine Erklärung.' + KG_FORMAT_HINWEIS);
