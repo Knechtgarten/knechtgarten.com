@@ -266,7 +266,9 @@ async function modusAntworten(body: any, modell: string) {
 
   const system = `Du bist der Mail-Assistent von Knechtgarten (Gartenbau-Unternehmen, Heimenschwand/BE). Du liest eine eingehende Mail und entscheidest, wie sie beantwortet werden soll.
 
-${schreibstil?.immer_antworten && schreibstil.inhalt ? 'SCHREIBSTIL:\n' + schreibstil.inhalt + '\n\n' : ''}${firmendaten?.immer_antworten ? 'FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten) + '\n\n' : ''}SONDERFÄLLE (prüfe zuerst, ob einer eindeutig zutrifft - Ausnahmen gehen der Hauptregel vor):
+${schreibstil?.immer_antworten && schreibstil.inhalt ? 'SCHREIBSTIL:\n' + schreibstil.inhalt + '\n\n' : ''}${firmendaten?.immer_antworten ? 'FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten) + '\n\n' : ''}Pruefe die folgenden drei Bereiche mit GLEICHER Prioritaet (keiner geht den anderen automatisch vor) - SONDERFÄLLE und MAIL-VORLAGEN sind fuer spezifische, bekannte Faelle, KUNDENANFRAGEN ist der Auffangbereich fuer echte Neukunden-/Projektanfragen, die keine dieser spezifischen Vorlagen treffen:
+
+SONDERFÄLLE (Ausnahmen gehen der Hauptregel vor):
 ${sonderfaelleMenu || '(keine erfasst)'}
 
 MAIL-VORLAGEN:
@@ -277,7 +279,7 @@ KUNDENANFRAGEN - dafür gibt es KEINE feste Vorlage, der Mitarbeiter wählt selb
 Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Objekt (kein Text davor/danach), in einer dieser vier Formen:
 1. Direkter Entwurf möglich (Sonderfall/einfache Vorlage/Auffangfall):
 {"aktion":"entwurf","text":"<fertiger Mailtext>","vorlageTitel":"<exakter Titel der verwendeten VORLAGE, sonst null>"}
-   Trifft eine VORLAGE zu: deren Text als starke Richtschnur nehmen (Kernaussage/Entscheidung und Aufbau bleiben, das ist nicht verhandelbar), aber natürlich personalisieren - Namen der Person ansprechen, wo sinnvoll kurz auf Details aus der eingehenden Mail eingehen. Nicht stur wortwörtlich abschreiben, aber auch nichts an der eigentlichen Entscheidung/Aussage ändern.
+   Trifft eine VORLAGE zu: deren Text als starke Richtschnur nehmen (Kernaussage/Entscheidung und Aufbau bleiben, das ist nicht verhandelbar), aber natürlich personalisieren - Namen der Person ansprechen, wo sinnvoll kurz auf Details aus der eingehenden Mail eingehen. Nicht stur wortwörtlich abschreiben, aber auch nichts an der eigentlichen Entscheidung/Aussage ändern. WICHTIG: Waehle eine VORLAGE fuer Fall 1 nur, wenn sie auch wirklich einen "Text:" hat. Hat die naheliegendste VORLAGE (noch) keinen Text hinterlegt, ist sie fuer Fall 1 nicht nutzbar - pruefe stattdessen, ob KUNDENANFRAGEN (Fall 3) zutrifft, oder schreibe selbst einen passenden, kurzen Text (wie bei einem Auffangfall). Erzeuge NIE einen leeren oder nur aus Platzhaltern bestehenden Text.
    Platzhalter in eckigen Klammern (z.B. [Bauteil], [X Minuten]) werden so behandelt:
    - Einen Platzhalter der Form [ZF:...] IMMER exakt unveraendert stehen lassen (nicht ausfuellen, nicht entfernen, nicht uebersetzen) - der wird danach automatisch ersetzt.
    - JEDEN Platzhalter, der das Wort "Datum" enthaelt (z.B. [Datum], [Datum, Uhrzeit]), IMMER exakt unveraendert stehen lassen - der wird separat behandelt.
@@ -294,7 +296,7 @@ Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Obje
 Nimm exakt das, was in der Mail steht (keine eigene Umformung/Ergänzung, nichts dazu erfinden). Triff dazu KEINE eigene Einschätzung oder Entscheidung - das macht der Mitarbeiter selbst anhand der angezeigten Distanz. Nur wenn wirklich gar kein Hinweis auf einen Standort vorhanden ist, setze null.
 4. AUSNAHMEFALL - zwei (normalerweise nicht mehr) einfache VORLAGEN passen ungefähr GLEICH GUT, sagen inhaltlich aber unterschiedliche Dinge aus, und es ist fuer die Antwort wirklich wichtig, welche davon stimmt:
 {"aktion":"auswahl","frage":"<kurze, konkrete Frage an den Mitarbeiter, z.B. 'Geht es eher um X oder um Y?'>","vorlagenTitel":["<exakter Titel Vorlage A>","<exakter Titel Vorlage B>"]}
-   Nutze Fall 4 NUR SELTEN, bei echter und relevanter Unsicherheit. Der Normalfall bleibt Fall 1 mit der naheliegendsten Vorlage - im Zweifel IMMER Fall 1 waehlen, nicht Fall 4.
+   Nutze Fall 4 NUR SELTEN, bei echter und relevanter Unsicherheit zwischen zwei VORLAGEN. Beim Abwaegen NUR zwischen Fall 1 und Fall 4 im Zweifel Fall 1 waehlen (diese Regel gilt nicht fuer die Wahl zwischen Fall 1 und Fall 3 - dort entscheidet allein, ob die KUNDENANFRAGEN-Bedingung zutrifft und eine passende VORLAGE mit Text existiert).
 ${KG_FORMAT_HINWEIS}`;
 
   let userText = 'EINGEHENDE MAIL:\n' + body.mailInhalt;
@@ -310,6 +312,9 @@ ${KG_FORMAT_HINWEIS}`;
   }
 
   if (entscheidung.aktion === 'entwurf') {
+    if (!(entscheidung.text || '').trim()) {
+      return json({ error: 'Die KI hat einen leeren Entwurf geliefert - vermutlich hat die gewaehlte Vorlage ("' + (entscheidung.vorlageTitel || '–') + '") noch keinen Text hinterlegt. Bitte Vorlage ergaenzen oder nochmal versuchen.' }, 502);
+    }
     const vorlage = entscheidung.vorlageTitel
       ? (vorlagen || []).find((v: any) => v.titel === entscheidung.vorlageTitel)
       : null;
