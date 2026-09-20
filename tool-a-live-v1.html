@@ -1692,6 +1692,7 @@ async function ladeMagazinAdressen(){
 // Gruppe/Lieferant flach abgelegt statt verschachtelt, braucht der Katalog
 // fuer seine Filter, ohne dafuer extra Tabellen laden zu muessen.
 let ARTIKEL_ALLE = [];
+let artikelAlleGeladen = false;
 async function ladeArtikelAlle(){
   // Explizite .range() - der Artikelstamm hat Supabase/PostgREST's
   // Standard-Zeilenlimit von 1000 pro Anfrage laengst ueberschritten, sonst
@@ -1708,6 +1709,7 @@ async function ladeArtikelAlle(){
     artikelgruppeId: a.artikelgruppe_id, artikelgruppeName: a.artikelgruppe?.name || null,
     lieferantId: a.lieferant_id, lieferantName: a.lieferant?.name || null
   }));
+  artikelAlleGeladen = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -1728,12 +1730,22 @@ function apListeAusArtikeln(idFeld, nameFeld){
   ARTIKEL_ALLE.forEach(a => { if(a[idFeld] && !gesehen.has(a[idFeld])) gesehen.set(a[idFeld], a[nameFeld]); });
   return [...gesehen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
 }
-function openArtikelstammPicker(presetKategorie, onSelect){
+async function openArtikelstammPicker(presetKategorie, onSelect){
   apOnSelect = onSelect;
   apKategorie = presetKategorie || null;
   apGruppeId = null;
   apLieferantId = null;
   $('apSuche').value = '';
+  if(!artikelAlleGeladen){
+    // Der komplette Artikelstamm wird erst beim ersten Oeffnen dieses
+    // Katalogs geladen (nicht mehr beim Start von Tool A) - die meisten
+    // Offerten kommen ohne "Position aus Artikelstamm" aus, ein Voll-Laden
+    // bei jedem Offerte-oeffnen war unnoetig. Einmal geladen, bleibt es fuer
+    // den Rest der Sitzung im Speicher (artikelAlleGeladen).
+    $('apBody').innerHTML = '<tr><td colspan="5" style="color:var(--muted);cursor:default;">Lädt Artikelstamm …</td></tr>';
+    $('artikelstammPickerOvl').classList.add('show');
+    await ladeArtikelAlle();
+  }
   $('apKategorien').innerHTML = AP_KATEGORIEN.map(k =>
     `<button type="button" class="opt" data-kat="${k.key || ''}">${k.label}</button>`).join('');
   $('apKategorien').querySelectorAll('button').forEach(btn => {
@@ -3648,8 +3660,7 @@ async function init(){
       ladeLogistikSammelpositionen(),
       ladeKieswerke(),
       ladeDistanzAdresslisten(),
-      ladeMagazinAdressen(),
-      ladeArtikelAlle()
+      ladeMagazinAdressen()
     ]);
     if(otRes.error) throw otRes.error;
     OFFERTENTYPEN = otRes.data;
@@ -3886,8 +3897,8 @@ function renderEigeneZeilenFuerKategorie(kat, container){
     </td>`;
   container.appendChild(trLinks);
   trLinks.querySelector('[data-art="eigen"]').addEventListener('click', () => openEigenePositionModal(kat));
-  trLinks.querySelector('[data-art="artikelstamm"]').addEventListener('click', () => {
-    openArtikelstammPicker(kat, a => {
+  trLinks.querySelector('[data-art="artikelstamm"]').addEventListener('click', async () => {
+    await openArtikelstammPicker(kat, a => {
       eigeneZeileCounter++;
       eigeneZeilen.push({ clientKey: 'ez' + eigeneZeileCounter, dbId: null, kategorie: kat, bezeichnung: a.bezeichnung, menge: 1, einheit: a.einheit, preis: a.vp_knecht ?? 0 });
       recalc();

@@ -667,6 +667,8 @@ function heuteAlsDatumsstring(){ return new Date().toISOString().slice(0,10); }
 // ---------------------------------------------------------------------------
 const AP_KATEGORIEN = ['material','personal','maschine','logistik'];
 let ARTIKEL = [];
+let artikelGeladen = false;
+let artikelLadenPromise = null;
 async function ladeArtikel(){
   // Explizite .range() - der Artikelstamm hat Supabase/PostgREST's
   // Standard-Zeilenlimit von 1000 pro Anfrage laengst ueberschritten, sonst
@@ -675,6 +677,15 @@ async function ladeArtikel(){
   const { data, error } = await sb.from('artikel').select('id,artikelnummer_knecht,bezeichnung,kategorie,einheit,vp_knecht,artikelgruppe_id,lieferant_id,lieferant(archiviert_am)').order('bezeichnung').range(0, 9999);
   if(error){ console.error(error); return; }
   ARTIKEL = data.filter(a => !a.lieferant?.archiviert_am);
+  artikelGeladen = true;
+}
+// Wird vor dem ersten Oeffnen des Artikel-Pickers aufgerufen statt den
+// ganzen Artikelstamm schon beim Start von Tool A3 zu laden - eine bestehende
+// Offerte ansehen/anpassen braucht den Picker oft gar nicht.
+function sicherstelleArtikelGeladen(){
+  if(artikelGeladen) return Promise.resolve();
+  if(!artikelLadenPromise) artikelLadenPromise = ladeArtikel();
+  return artikelLadenPromise;
 }
 let ARTIKELGRUPPEN = [];
 async function ladeArtikelgruppen(){
@@ -696,12 +707,17 @@ let apFilterLieferantId = null;
 let apSortCol = 'bezeichnung';
 let apSortDir = 1;
 
-function openArtikelPicker(kat){
+async function openArtikelPicker(kat){
   apAktivKat = kat;
   apFilterKategorie = kat; apFilterGruppeId = null; apFilterLieferantId = null;
   apSortCol = 'bezeichnung'; apSortDir = 1;
   $('artikelPickerTitel').textContent = 'Artikel wählen – ' + KAT_LABEL[kat];
   $('artikelPickerSearch').value = '';
+  if(!artikelGeladen){
+    $('artikelPickerList').innerHTML = '<tr><td colspan="5" class="hint">Lädt Artikelstamm …</td></tr>';
+    $('artikelPickerOvl').classList.add('show');
+    await sicherstelleArtikelGeladen();
+  }
   apRenderKategorieFilter();
   apRenderGruppeFilter();
   apRenderLieferantFilter();
@@ -870,7 +886,7 @@ function renderArtikelZeilenFuerKategorie(kat, tbody){
   const trAdd = document.createElement('tr');
   trAdd.className = 'addartrow';
   trAdd.innerHTML = `<td colspan="6"><button type="button" class="btnlink">+ Artikel hinzufügen</button></td>`;
-  trAdd.querySelector('button').addEventListener('click', () => openArtikelPicker(kat));
+  trAdd.querySelector('button').addEventListener('click', async () => await openArtikelPicker(kat));
   tbody.appendChild(trAdd);
 
   return summe;
@@ -1880,7 +1896,6 @@ async function init(){
     await Promise.all([
       ladeOffertentypen(),
       ladeAlleKunden(),
-      ladeArtikel(),
       ladeArtikelgruppen(),
       ladeLieferanten()
     ]);

@@ -1271,6 +1271,8 @@ async function ladeLogistikSammelpositionenTagessatz(){
 // (gleiches Muster wie die Kunden-Vorschlagsliste, .kv-dropdown/.kv-item).
 // ---------------------------------------------------------------------------
 let ARTIKEL_ALLE = [];
+let artikelAlleGeladen = false;
+let artikelAlleLadenPromise = null;
 async function ladeArtikelAlle(){
   // Explizite .range() - der Artikelstamm hat Supabase/PostgREST's
   // Standard-Zeilenlimit von 1000 pro Anfrage laengst ueberschritten, sonst
@@ -1290,6 +1292,18 @@ async function ladeArtikelAlle(){
     artikelgruppeId: a.artikelgruppe_id, artikelgruppeName: a.artikelgruppe?.name || null,
     lieferantId: a.lieferant_id, lieferantName: a.lieferant?.name || null
   }));
+  artikelAlleGeladen = true;
+}
+// Wird von der Inline-Suche UND vom grossen Katalog-Fenster vor der ersten
+// Benutzung aufgerufen (statt den ganzen Artikelstamm schon beim Start von
+// Tool A2 zu laden) - die meisten Tagessatz-Offerten kommen ohne
+// Artikelsuche aus. Ueber die gemeinsame Promise laeuft bei mehreren
+// gleichzeitigen Ausloesern (z.B. zwei Zeilen gleichzeitig angeklickt) nur
+// EIN Request statt mehrerer.
+function sicherstelleArtikelAlleGeladen(){
+  if(artikelAlleGeladen) return Promise.resolve();
+  if(!artikelAlleLadenPromise) artikelAlleLadenPromise = ladeArtikelAlle();
+  return artikelAlleLadenPromise;
 }
 let eigeneTeilschritte = []; // [{id, arbeitsschrittId, name, beschreibung, personalTage, personalIndividuell, zeilen:[{id,artikelId,menge,bezeichnung,einheit,kategorie,preis}]}]
 
@@ -2112,9 +2126,15 @@ function wireEtsZeile(tr){
   const key = tr.dataset.key;
   const artikelInput = tr.querySelector('.ets-artikel-input');
   const dropdown = tr.querySelector('.kv-dropdown');
-  artikelInput.addEventListener('input', () => {
+  artikelInput.addEventListener('input', async () => {
     const q = artikelInput.value.trim().toLowerCase();
     if(!q){ dropdown.classList.remove('show'); return; }
+    if(!artikelAlleGeladen){
+      dropdown.innerHTML = '<div class="kv-item" style="cursor:default;color:var(--muted);">Lädt Artikelstamm …</div>';
+      dropdown.classList.add('show');
+      await sicherstelleArtikelAlleGeladen();
+      if(artikelInput.value.trim().toLowerCase() !== q) return; // Eingabe hat sich inzwischen geaendert
+    }
     // Kategorie "Personal" ist im Team-Modus (Standard) ausgeblendet - dafuer
     // gibt es das Personal/Team-Tage-Feld oben, siehe etsPersonalIndividuell.
     const treffer = ARTIKEL_ALLE.filter(a => (etsPersonalIndividuell || a.kategorie !== 'personal') && (a.bezeichnung.toLowerCase().includes(q) || (a.artikelnummer_knecht || '').toLowerCase().includes(q))).slice(0, 30);
@@ -2127,7 +2147,7 @@ function wireEtsZeile(tr){
     });
   });
   artikelInput.addEventListener('blur', () => setTimeout(() => dropdown.classList.remove('show'), 150));
-  tr.querySelector('.ets-artikel-picker-btn').addEventListener('click', () => openEtsArtikelPicker(key, { erlaubtPersonal: etsPersonalIndividuell }));
+  tr.querySelector('.ets-artikel-picker-btn').addEventListener('click', async () => await openEtsArtikelPicker(key, { erlaubtPersonal: etsPersonalIndividuell }));
   const mengeInput = tr.querySelector('.ets-menge-input');
   if(mengeInput && !mengeInput.disabled){
     mengeInput.addEventListener('input', () => {
@@ -2178,7 +2198,7 @@ function etsPickerListeAusArtikeln(idFeld, nameFeld){
   ARTIKEL_ALLE.forEach(a => { if(a[idFeld] && !gesehen.has(a[idFeld])) gesehen.set(a[idFeld], a[nameFeld]); });
   return [...gesehen.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
 }
-function openEtsArtikelPicker(key, opts){
+async function openEtsArtikelPicker(key, opts){
   opts = opts || {};
   etsPickerZielKey = key;
   etsPickerOnSelect = opts.onSelect || null;
@@ -2187,6 +2207,11 @@ function openEtsArtikelPicker(key, opts){
   etsPickerGruppeId = null;
   etsPickerLieferantId = null;
   $('etsPickerSuche').value = '';
+  if(!artikelAlleGeladen){
+    $('etsPickerBody').innerHTML = '<tr><td colspan="5" style="color:var(--muted);cursor:default;">Lädt Artikelstamm …</td></tr>';
+    $('etsArtikelPickerOvl').classList.add('show');
+    await sicherstelleArtikelAlleGeladen();
+  }
   const pickerKategorien = etsPickerErlaubtPersonal ? ETS_PICKER_KATEGORIEN : ETS_PICKER_KATEGORIEN.filter(k => k.key !== 'personal');
   $('etsPickerKategorien').innerHTML = pickerKategorien.map(k =>
     `<button type="button" class="opt" data-kat="${k.key || ''}">${k.label}</button>`).join('');
@@ -2885,8 +2910,8 @@ function renderEigeneZeilenFuerKategorie(kat){
     </td>`;
   $costbody.appendChild(trLinks);
   trLinks.querySelector('[data-art="eigen"]').addEventListener('click', () => openEigenePositionModal(kat));
-  trLinks.querySelector('[data-art="artikelstamm"]').addEventListener('click', () => {
-    openEtsArtikelPicker(null, {
+  trLinks.querySelector('[data-art="artikelstamm"]').addEventListener('click', async () => {
+    await openEtsArtikelPicker(null, {
       presetKategorie: kat, erlaubtPersonal: true,
       onSelect: a => {
         eigeneZeileCounter++;
@@ -3367,8 +3392,7 @@ async function init(){
       ladeLieferwagenKonfiguration(),
       ladeOffertenPositionEinstellungen(),
       ladeMaschinenSammelpositionenTagessatz(),
-      ladeLogistikSammelpositionenTagessatz(),
-      ladeArtikelAlle()
+      ladeLogistikSammelpositionenTagessatz()
     ]);
 
     const deeplinkOfferteId = new URLSearchParams(location.search).get('offerte');
