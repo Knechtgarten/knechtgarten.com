@@ -74,6 +74,59 @@ async function rufeClaudeAuf(modell: string, system: string, userText: string, m
   return { text, tokensInput: data.usage?.input_tokens ?? 0, tokensOutput: data.usage?.output_tokens ?? 0 };
 }
 
+// Streamende Variante fuer Schritte, bei denen die KI im Wesentlichen eine
+// schon feststehende Vorlage nur noch leicht anpasst (z.B. rueckfrage-
+// antwort) - der fertige Text erscheint dadurch beim Mitarbeiter Wort fuer
+// Wort, statt dass er auf den kompletten Block warten muss. Nutzt Anthropics
+// SSE-Streaming (stream:true), reicht jeden Text-Chunk sofort per onChunk
+// weiter und gibt am Ende die Token-Zahlen fuers Protokoll zurueck.
+async function rufeClaudeAufStreamend(modell: string, system: string, userText: string, maxTokens: number, onChunk: (text: string) => void) {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': anthropicKey ?? '',
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: modell,
+      max_tokens: maxTokens,
+      system,
+      messages: [{ role: 'user', content: userText }],
+      stream: true,
+    }),
+  });
+  if (!res.ok || !res.body) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data?.error?.message || `Anthropic-Fehler (${res.status})`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let puffer = '';
+  let tokensInput = 0, tokensOutput = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    puffer += decoder.decode(value, { stream: true });
+    const ereignisse = puffer.split('\n\n');
+    puffer = ereignisse.pop() ?? '';
+    for (const ereignis of ereignisse) {
+      const datenzeile = ereignis.split('\n').find((z) => z.startsWith('data:'));
+      if (!datenzeile) continue;
+      let event: any;
+      try { event = JSON.parse(datenzeile.slice(5).trim()); } catch { continue; }
+      if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+        onChunk(event.delta.text);
+      } else if (event.type === 'message_start') {
+        tokensInput = event.message?.usage?.input_tokens ?? 0;
+      } else if (event.type === 'message_delta') {
+        tokensOutput = event.usage?.output_tokens ?? tokensOutput;
+      }
+    }
+  }
+  return { tokensInput, tokensOutput };
+}
+
 // Extrahiert das erste vollstaendige {...}-JSON-Objekt aus einer Antwort -
 // robust gegen den Fall, dass Claude trotz Anweisung noch ein Wort davor/
 // danach schreibt.
@@ -363,9 +416,32 @@ VORLAGE:\n${zweig.inhalt}`);
   if (body.anweisung) teile.push('ZUSAETZLICHE ANWEISUNG: ' + body.anweisung);
   teile.push('Schreibe jetzt den fertigen Mailtext. Nur den Mailtext ausgeben, keine Erklärung.' + KG_FORMAT_HINWEIS);
 
-  const { text, tokensInput, tokensOutput } = await rufeClaudeAuf(modell, 'Du hilfst einem Gartenbau-Unternehmen (Knechtgarten), professionelle Mails zu verfassen.', teile.join('\n\n'), 2500);
-  await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', body.vorlageId, tokensInput, tokensOutput);
-  return json({ aktion: 'entwurf', text: text.trim(), tokensInput, tokensOutput });
+  // Gestreamt statt am Stueck: dieser Schritt uebernimmt im Wesentlichen eine
+  // schon feststehende Vorlage (nur Anrede/Name/Platzhalter werden noch
+  // angepasst) - der Mitarbeiter sieht den Text darum schon waehrend des
+  // Schreibens statt erst am Schluss auf den kompletten Block zu warten.
+  const system = 'Du hilfst einem Gartenbau-Unternehmen (Knechtgarten), professionelle Mails zu verfassen.';
+  const userText = teile.join('\n\n');
+  const stream = new ReadableStream({
+    async start(controller) {
+      const encoder = new TextEncoder();
+      try {
+        const { tokensInput, tokensOutput } = await rufeClaudeAufStreamend(modell, system, userText, 2500, (chunk) => {
+          controller.enqueue(encoder.encode(chunk));
+        });
+        await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', body.vorlageId, tokensInput, tokensOutput);
+      } catch (e) {
+        // Ein einmal gestartetes Streaming laesst sich nicht mehr in eine
+        // normale Fehler-Antwort mit Statuscode umwandeln - stattdessen einen
+        // erkennbaren Marker in den Text schreiben, den die Erweiterung als
+        // Fehler statt als Entwurf behandelt.
+        controller.enqueue(encoder.encode(' FEHLER:' + String((e as any)?.message || e)));
+      } finally {
+        controller.close();
+      }
+    },
+  });
+  return new Response(stream, { headers: { ...corsHeaders, 'Content-Type': 'text/plain; charset=utf-8' } });
 }
 
 // ----------------------------------------------------------------------------
