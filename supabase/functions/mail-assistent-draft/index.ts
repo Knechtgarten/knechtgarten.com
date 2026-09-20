@@ -286,8 +286,12 @@ Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Obje
 2. Eine Vorlage mit Rückfrage trifft zu:
 {"aktion":"rueckfrage","vorlageTitel":"<exakter Titel der Vorlage>"}
 3. Es ist eine KUNDENANFRAGE (siehe Bedingung oben):
-{"aktion":"kundenanfrage","kundenAdresse":"<aus der Mail extrahierte Adresse/PLZ+Ort, sonst null>"}
-"kundenAdresse" ist nur eine Zusatz-Info für den Mitarbeiter (Distanzberechnung) - extrahiere sie wenn irgendwie erkennbar (auch wenn du dir nicht ganz sicher bist, eine überflüssige Distanz-Anzeige stört nicht), aber erfinde nichts. Wenn nichts erkennbar ist, setze null.
+{"aktion":"kundenanfrage","kundenAdresse":"<Standort des Kunden, sonst null>"}
+"kundenAdresse" wird nur für die Distanzberechnung als Zusatz-Info für den Mitarbeiter gebraucht - suche aktiv danach im GANZEN Mailtext UND in einer eventuellen Signatur (Adresszeile, Firmenname mit Ort, o.ä.). Es reicht jede Form von Standortangabe, so genau wie vorhanden:
+- Volle Adresse, z.B. "Bernstrasse 12, 3672 Oberdiessbach"
+- Nur PLZ+Ort, z.B. "3600 Thun"
+- Nur ein Ortsname im Fliesstext, z.B. "wir wohnen in Interlaken" oder "unser Grundstück in Steffisburg" -> "Interlaken" bzw. "Steffisburg"
+Nimm exakt das, was in der Mail steht (keine eigene Umformung/Ergänzung, nichts dazu erfinden). Triff dazu KEINE eigene Einschätzung oder Entscheidung - das macht der Mitarbeiter selbst anhand der angezeigten Distanz. Nur wenn wirklich gar kein Hinweis auf einen Standort vorhanden ist, setze null.
 4. AUSNAHMEFALL - zwei (normalerweise nicht mehr) einfache VORLAGEN passen ungefähr GLEICH GUT, sagen inhaltlich aber unterschiedliche Dinge aus, und es ist fuer die Antwort wirklich wichtig, welche davon stimmt:
 {"aktion":"auswahl","frage":"<kurze, konkrete Frage an den Mitarbeiter, z.B. 'Geht es eher um X oder um Y?'>","vorlagenTitel":["<exakter Titel Vorlage A>","<exakter Titel Vorlage B>"]}
    Nutze Fall 4 NUR SELTEN, bei echter und relevanter Unsicherheit. Der Normalfall bleibt Fall 1 mit der naheliegendsten Vorlage - im Zweifel IMMER Fall 1 waehlen, nicht Fall 4.
