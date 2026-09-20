@@ -350,6 +350,7 @@ ${KG_FORMAT_HINWEIS}`;
       })),
       distanz, kundenStandort: distanz?.aufgeloesterStandort || entscheidung.kundenAdresse || null,
       distanzErklaerung: distanzMeta?.distanz_erklaerung || null, hinweistext: distanzMeta?.partner_hinweistext || null,
+      eigeneAbsageText: distanzMeta?.absage_text || null,
       tokensInput, tokensOutput,
     });
   }
@@ -491,6 +492,9 @@ async function modusAuswahlAntwort(body: any, modell: string) {
     const { data: partner } = await sb.from('mailassistent_partnerbetrieb').select('*').eq('id', body.partnerbetriebId).maybeSingle();
     if (!partner) return json({ error: 'Partnerbetrieb nicht gefunden.' }, 502);
     titel = partner.name; inhalt = partner.weiterleitung_text || ''; logVorlageId = null;
+  } else if (body.eigeneAbsage) {
+    const { data: meta } = await sb.from('mailassistent_distanzlogik_meta').select('absage_text').limit(1).maybeSingle();
+    titel = 'Absage (zu weit entfernt)'; inhalt = meta?.absage_text || ''; logVorlageId = null;
   } else {
     const vorlagePromise = body.vorlageId
       ? sb.from('mailassistent_vorlage').select('*').eq('id', body.vorlageId).maybeSingle()
