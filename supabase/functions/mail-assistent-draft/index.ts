@@ -348,7 +348,7 @@ ${KG_FORMAT_HINWEIS}`;
         id: v.id, label: v.titel,
         zusatzfenster: (v.mailassistent_vorlage_zusatzfenster || []).map((e: any) => e.mailassistent_zusatzfenster).filter(Boolean),
       })),
-      distanz, kundenStandort: entscheidung.kundenAdresse || null,
+      distanz, kundenStandort: distanz?.aufgeloesterStandort || entscheidung.kundenAdresse || null,
       distanzErklaerung: distanzMeta?.distanz_erklaerung || null, hinweistext: distanzMeta?.partner_hinweistext || null,
       tokensInput, tokensOutput,
     });
@@ -376,7 +376,7 @@ ${KG_FORMAT_HINWEIS}`;
 // zu allen Partnerbetrieben berechnen, als reine Entscheidungshilfe fuer den
 // Mitarbeiter - keine automatische Vorlagen-Auswahl mehr.
 // ----------------------------------------------------------------------------
-async function berechneDistanz(origin: string, destination: string): Promise<{ minuten: number; km: number } | null> {
+async function berechneDistanz(origin: string, destination: string): Promise<{ minuten: number; km: number; aufgeloesteAdresse: string | null } | null> {
   const apiKey = Deno.env.get('GOOGLE_MAPS_API_KEY');
   if (!apiKey) return null;
   const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${encodeURIComponent(origin)}&destinations=${encodeURIComponent(destination)}&key=${apiKey}`;
@@ -384,22 +384,33 @@ async function berechneDistanz(origin: string, destination: string): Promise<{ m
   const data = await res.json();
   const el = data?.rows?.[0]?.elements?.[0];
   if (el?.status !== 'OK') return null;
-  return { minuten: Math.round(el.duration.value / 60), km: Math.round(el.distance.value / 1000) };
+  // destination_addresses liefert die von Google AUFGELOESTE Adresse (z.B.
+  // aus einer blossen PLZ wird "8636 Wald ZH") - praktisch, um dem
+  // Mitarbeiter mehr als nur die rohe KI-Erkennung zu zeigen, ganz ohne
+  // zusaetzlichen API-Aufruf (steckt schon in dieser Antwort mit drin).
+  const rohAdresse = data?.destination_addresses?.[0] || null;
+  const aufgeloesteAdresse = rohAdresse ? String(rohAdresse).replace(/,\s*(Schweiz|Switzerland)\s*$/i, '') : null;
+  return { minuten: Math.round(el.duration.value / 60), km: Math.round(el.distance.value / 1000), aufgeloesteAdresse };
 }
 
 async function berechneDistanzInfo(kundenAdresse: string, firmendaten: any) {
   const ergebnis: any = {};
+  let aufgeloesterStandort: string | null = null;
   if (firmendaten?.adresse) {
     const eigene = await berechneDistanz(firmendaten.adresse, kundenAdresse);
-    if (eigene) ergebnis.eigene = eigene;
+    if (eigene) { ergebnis.eigene = { minuten: eigene.minuten, km: eigene.km }; aufgeloesterStandort = eigene.aufgeloesteAdresse; }
   }
   const { data: partnerbetriebe } = await sb.from('mailassistent_partnerbetrieb').select('*').order('reihenfolge');
   const partner = [];
   for (const p of partnerbetriebe || []) {
     const d = await berechneDistanz(p.adresse, kundenAdresse);
-    if (d) partner.push({ id: p.id, name: p.name, weiterleitungText: p.weiterleitung_text || null, ...d });
+    if (d) {
+      partner.push({ id: p.id, name: p.name, weiterleitungText: p.weiterleitung_text || null, minuten: d.minuten, km: d.km });
+      if (!aufgeloesterStandort) aufgeloesterStandort = d.aufgeloesteAdresse;
+    }
   }
   ergebnis.partner = partner;
+  ergebnis.aufgeloesterStandort = aufgeloesterStandort;
   return ergebnis;
 }
 
