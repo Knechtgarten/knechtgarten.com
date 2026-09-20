@@ -348,7 +348,8 @@ ${KG_FORMAT_HINWEIS}`;
         id: v.id, label: v.titel,
         zusatzfenster: (v.mailassistent_vorlage_zusatzfenster || []).map((e: any) => e.mailassistent_zusatzfenster).filter(Boolean),
       })),
-      distanz, kundenStandort: entscheidung.kundenAdresse || null, hinweistext: distanzMeta?.partner_hinweistext || null,
+      distanz, kundenStandort: entscheidung.kundenAdresse || null,
+      distanzErklaerung: distanzMeta?.distanz_erklaerung || null, hinweistext: distanzMeta?.partner_hinweistext || null,
       tokensInput, tokensOutput,
     });
   }
