@@ -419,22 +419,41 @@ function bestScore(felder, suchtext){
   return Math.min(...felder.map(f => feldScore(f, suchtext)));
 }
 
-// Kunde-Liste und Offerten-pro-Kunde getrennt, statt wie frueher immer
-// zusammen als eine loadKunden(): ein Kunde speichern/loeschen/verknuepfen
-// aendert nie etwas an den Offerten selbst - dafuer die ganze offerte-
-// Tabelle jedesmal neu zu laden war unnoetig teuer. loadKunden() (unten)
-// bleibt fuer den Erststart bestehen, wo wirklich beides gebraucht wird.
-async function ladeOffertenProKunde(){
+// Kunde-Liste, Offerten-ANZAHL-pro-Kunde und die eigentlichen Offerten-Listen
+// pro Kunde sind bewusst drei getrennte Dinge:
+// - OFFERTEN_COUNT_PRO_KUNDE: nur fuer die Zaehlspalte/Loeschsperre - dafuer
+//   genuegt ein einziges schlankes Feld (kunde_id) ueber alle Offerten, statt
+//   wie frueher die ganze Offerte (Titel/Datum/Status/Betrag/Typ-Join) nur
+//   um am Ende bloss zu zaehlen.
+// - OFFERTEN_PRO_KUNDE: die echten Offerten-Details fuer die aufklappbare
+//   Zeile - wird NICHT mehr beim Seitenstart fuer alle Kunden auf einmal
+//   geholt, sondern erst on-demand beim Aufklappen einer einzelnen Kunden-
+//   zeile (siehe ladeOffertenFuerKunde()) und dann gecacht.
+let OFFERTEN_COUNT_PRO_KUNDE = {};
+
+async function ladeOffertenAnzahlProKunde(){
   const { data: offerten, error } = await sb
     .from('offerte')
-    .select('id, kunde_id, titel, datum, status, betrag_total, offertentyp(name, berechnungsmodell)')
-    .order('datum', { ascending:false })
+    .select('kunde_id')
     .range(0, 9999);
   if(error){ $('kundenStatus').textContent = 'Fehler beim Laden: ' + error.message; $('kundenStatus').className = 'status err'; return; }
-  OFFERTEN_PRO_KUNDE = {};
+  OFFERTEN_COUNT_PRO_KUNDE = {};
   (offerten || []).forEach(o => {
-    (OFFERTEN_PRO_KUNDE[o.kunde_id] = OFFERTEN_PRO_KUNDE[o.kunde_id] || []).push(o);
+    OFFERTEN_COUNT_PRO_KUNDE[o.kunde_id] = (OFFERTEN_COUNT_PRO_KUNDE[o.kunde_id] || 0) + 1;
   });
+}
+
+// Wird beim Aufklappen einer Kundenzeile aufgerufen (siehe renderKundenTable())
+// - laedt die Offerten dieses EINEN Kunden nach, falls noch nicht gecacht.
+async function ladeOffertenFuerKunde(kundeId){
+  if(OFFERTEN_PRO_KUNDE[kundeId]) return; // schon gecacht
+  const { data, error } = await sb
+    .from('offerte')
+    .select('id, kunde_id, titel, datum, status, betrag_total, offertentyp(name, berechnungsmodell)')
+    .eq('kunde_id', kundeId)
+    .order('datum', { ascending:false });
+  if(error){ showToast(friendlyError(error), true); return; }
+  OFFERTEN_PRO_KUNDE[kundeId] = data || [];
 }
 
 async function ladeKundenListe(){
@@ -448,16 +467,16 @@ async function ladeKundenListe(){
     .range(0, 9999);
   if(error){ $('kundenStatus').textContent = 'Fehler beim Laden: ' + error.message; $('kundenStatus').className = 'status err'; return; }
   KUNDEN = data;
-  KUNDEN.forEach(k => { k._name_sort = anzeigename(k); k.offerten_count = (OFFERTEN_PRO_KUNDE[k.id] || []).length; });
+  KUNDEN.forEach(k => { k._name_sort = anzeigename(k); k.offerten_count = OFFERTEN_COUNT_PRO_KUNDE[k.id] || 0; });
   renderKundenTable();
 }
 
 // Fuer den Erststart: beides parallel, danach offerten_count nochmal
-// nachziehen (falls ladeKundenListe() vor ladeOffertenProKunde() fertig war
-// und deshalb noch mit dem alten - leeren - Stand gerechnet hat).
+// nachziehen (falls ladeKundenListe() vor ladeOffertenAnzahlProKunde() fertig
+// war und deshalb noch mit dem alten - leeren - Stand gerechnet hat).
 async function loadKunden(){
-  await Promise.all([ladeKundenListe(), ladeOffertenProKunde()]);
-  KUNDEN.forEach(k => { k.offerten_count = (OFFERTEN_PRO_KUNDE[k.id] || []).length; });
+  await Promise.all([ladeKundenListe(), ladeOffertenAnzahlProKunde()]);
+  KUNDEN.forEach(k => { k.offerten_count = OFFERTEN_COUNT_PRO_KUNDE[k.id] || 0; });
   renderKundenTable();
 }
 
@@ -484,7 +503,8 @@ function sortiereKunden(liste){
 }
 
 function renderOffertenTabelle(kundeId){
-  const liste = OFFERTEN_PRO_KUNDE[kundeId] || [];
+  if(!OFFERTEN_PRO_KUNDE[kundeId]) return `<div class="leer">Lädt …</div>`;
+  const liste = OFFERTEN_PRO_KUNDE[kundeId];
   if(!liste.length) return `<div class="leer">Noch keine Offerten für diesen Kunden.</div>`;
   return `<table>
     <tbody>
@@ -543,10 +563,14 @@ function renderKundenTable(){
   `).join('') || '<tr><td colspan="9" class="leer" style="padding:14px;color:var(--muted);">Keine Kunden gefunden.</td></tr>';
 
   document.querySelectorAll('tr.kundenrow').forEach(tr => {
-    tr.addEventListener('click', () => {
+    tr.addEventListener('click', async () => {
       const id = tr.dataset.id;
       geoeffneterKunde = (geoeffneterKunde === id) ? null : id;
       renderKundenTable();
+      if(geoeffneterKunde === id && !OFFERTEN_PRO_KUNDE[id]){
+        await ladeOffertenFuerKunde(id);
+        if(geoeffneterKunde === id) renderKundenTable();
+      }
     });
   });
   document.querySelectorAll('.km-edit').forEach(btn => {
