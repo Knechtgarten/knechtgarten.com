@@ -396,7 +396,7 @@ async function berechneDistanzInfo(kundenAdresse: string, firmendaten: any) {
   const partner = [];
   for (const p of partnerbetriebe || []) {
     const d = await berechneDistanz(p.adresse, kundenAdresse);
-    if (d) partner.push({ name: p.name, ...d });
+    if (d) partner.push({ id: p.id, name: p.name, weiterleitungText: p.weiterleitung_text || null, ...d });
   }
   ergebnis.partner = partner;
   return ergebnis;
@@ -463,18 +463,31 @@ VORLAGE:\n${zweig.inhalt}`);
 // gewaehlten Vorlage verwendet, genau wie beim normalen direkten Entwurf.
 // Wird auch fuer Kundenanfragen-Antwort-Vorlagen genutzt (dort per vorlageId
 // statt vorlageTitel, da es keine KI-Auswahl gibt, der Mitarbeiter waehlt
-// direkt eine konkrete Vorlage aus der Liste).
+// direkt eine konkrete Vorlage aus der Liste), UND fuer die kompakten
+// "Weiterleiten"-Buttons je Partnerbetrieb (body.partnerbetriebId) - deren
+// Weiterleitungstext liegt direkt auf mailassistent_partnerbetrieb statt in
+// einer eigenen Vorlage (1:1 an den Partnerbetrieb gebunden).
 // ----------------------------------------------------------------------------
 async function modusAuswahlAntwort(body: any, modell: string) {
-  const vorlagePromise = body.vorlageId
-    ? sb.from('mailassistent_vorlage').select('*').eq('id', body.vorlageId).maybeSingle()
-    : sb.from('mailassistent_vorlage').select('*').eq('richtung', 'antworten').eq('titel', body.vorlageTitel).maybeSingle();
-  const [{ data: schreibstil }, { data: firmendaten }, { data: vorlage }] = await Promise.all([
+  const [{ data: schreibstil }, { data: firmendaten }] = await Promise.all([
     sb.from('mailassistent_schreibstil').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_firmendaten').select('*').limit(1).maybeSingle(),
-    vorlagePromise,
   ]);
-  if (!vorlage) return json({ error: 'Vorlage "' + (body.vorlageTitel || body.vorlageId) + '" nicht gefunden.' }, 502);
+
+  let titel: string, inhalt: string, logVorlageId: string | null;
+  if (body.partnerbetriebId) {
+    const { data: partner } = await sb.from('mailassistent_partnerbetrieb').select('*').eq('id', body.partnerbetriebId).maybeSingle();
+    if (!partner) return json({ error: 'Partnerbetrieb nicht gefunden.' }, 502);
+    titel = partner.name; inhalt = partner.weiterleitung_text || ''; logVorlageId = null;
+  } else {
+    const vorlagePromise = body.vorlageId
+      ? sb.from('mailassistent_vorlage').select('*').eq('id', body.vorlageId).maybeSingle()
+      : sb.from('mailassistent_vorlage').select('*').eq('richtung', 'antworten').eq('titel', body.vorlageTitel).maybeSingle();
+    const { data: vorlage } = await vorlagePromise;
+    if (!vorlage) return json({ error: 'Vorlage "' + (body.vorlageTitel || body.vorlageId) + '" nicht gefunden.' }, 502);
+    titel = vorlage.titel; inhalt = vorlage.inhalt; logVorlageId = vorlage.id;
+  }
+  if (!inhalt.trim()) return json({ error: 'Für "' + titel + '" ist noch kein Text hinterlegt.' }, 502);
 
   const teile = [];
   if (schreibstil?.immer_antworten && schreibstil.inhalt) teile.push('SCHREIBSTIL:\n' + schreibstil.inhalt);
@@ -484,7 +497,7 @@ Platzhalter in eckigen Klammern (z.B. [Bauteil], [X Minuten]) werden so behandel
 - Einen Platzhalter der Form [ZF:...] IMMER exakt unveraendert stehen lassen - der wird danach automatisch ersetzt.
 - JEDEN Platzhalter, der das Wort "Datum" enthaelt (z.B. [Datum], [Datum, Uhrzeit]), IMMER exakt unveraendert stehen lassen - der wird separat behandelt.
 - Jeden ANDEREN Platzhalter: kannst du aus der eingehenden Mail/dem Kontext einen konkreten, sinnvollen Wert ableiten, ersetze ihn durch diesen Wert in DOPPELTEN eckigen Klammern, z.B. wird aus [Bauteil] -> [[Ablaufventil]]. Bist du dir nicht sicher, lass ihn stattdessen unveraendert in einfachen eckigen Klammern stehen. Erfinde NIE einen Wert, den du nicht wirklich aus dem Kontext hast.
-VORLAGE:\n${vorlage.inhalt}`);
+VORLAGE:\n${inhalt}`);
   if (body.mailInhalt) teile.push('EINGEHENDE MAIL:\n' + body.mailInhalt);
   if (body.anweisung) teile.push('ZUSAETZLICHE ANWEISUNG: ' + body.anweisung);
   teile.push('Schreibe jetzt den fertigen Mailtext. Nur den Mailtext ausgeben, keine Erklärung.' + KG_FORMAT_HINWEIS);
@@ -500,7 +513,7 @@ VORLAGE:\n${vorlage.inhalt}`);
         const { tokensInput, tokensOutput } = await rufeClaudeAufStreamend(modell, system, userText, 2500, (chunk) => {
           controller.enqueue(encoder.encode(chunk));
         });
-        await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', vorlage.id, tokensInput, tokensOutput);
+        await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', logVorlageId, tokensInput, tokensOutput);
       } catch (e) {
         controller.enqueue(encoder.encode('\u0000FEHLER:' + String((e as any)?.message || e)));
       } finally {
