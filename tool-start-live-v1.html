@@ -279,6 +279,7 @@ tr.typ-artikel td:first-child{border-left:2px solid #6666ff;}
         </thead>
         <tbody id="offertenBody"></tbody>
       </table>
+      <div class="status" id="offertenLadeMehr" style="display:flex;align-items:center;gap:10px;"></div>
       <div class="status" id="offertenStatus"></div>
     </div>
   </div>
@@ -551,15 +552,15 @@ let KUNDEN_MIT_OFFERTEN = [];
 let kpanelFilterId = null;
 
 async function ladeKundenPanel(){
-  // .order() + explizite .range() - ohne beides kappt Supabase/PostgREST
-  // Antworten ab 1000 Zeilen, und ohne Sortierung waere unbestimmt, welche
-  // Offerten fehlen - mit Sortierung nach erstellt_am (neueste zuerst)
-  // bleiben im Zweifel wenigstens die aktuellsten erhalten. Siehe Fix in
-  // tool-c-live-v1.html fuer den Hintergrund dazu.
+  // Fuer "10 zuletzt aktive Kunden" reichen die neuesten paar hundert
+  // Offerten voellig - die letzten 10 EINDEUTIGEN Kunden stehen praktisch
+  // immer weit innerhalb der letzten 300 (nach Datum) - ein Voll-Scan der
+  // ganzen, mit der Zeit immer groesser werdenden offerte-Tabelle nur fuer
+  // dieses Panel war unnoetig teuer. .limit() statt .range(0,9999).
   const { data: offerten, error: oErr } = await sb.from('offerte')
     .select('kunde_id, erstellt_am')
     .order('erstellt_am', { ascending: false })
-    .range(0, 9999);
+    .limit(300);
   if(oErr){ $('kpanelStatus').textContent = 'Fehler: ' + oErr.message; $('kpanelStatus').className = 'status err'; return; }
   const letzteProKunde = {};
   (offerten || []).forEach(o => {
@@ -607,28 +608,36 @@ $('kpanelReset').addEventListener('click', () => { kpanelFilterId = null; render
 let ALLE_OFFERTEN = [];
 let offSortCol = 'datum';
 let offSortDir = -1;
+// Seitenweise statt alles auf einmal: die Offerten-Tabelle waechst mit jeder
+// neuen Offerte immer weiter, ein Voll-Laden beim Start wurde daher spuerbar
+// langsamer, je mehr Offerten es gibt. Standard: die neuesten 100 (passend
+// zur Standard-Sortierung "Datum, neueste zuerst"), Rest per "Weitere laden"-
+// Button nachladen. offertenKundenMap sammelt bereits nachgeschlagene Kunden
+// ueber alle geladenen Seiten hinweg, damit "Weitere laden" nicht erneut
+// Kunden abfragt, die schon von einer frueheren Seite bekannt sind.
+const OFFERTEN_SEITENGROESSE = 100;
+let offertenGesamtAnzahl = 0;
+let offertenKundenMap = {};
 
-async function ladeOfferten(){
-  // Explizite .range() - ohne sie kappt Supabase/PostgREST Antworten ab 1000
-  // Zeilen; mit der schon bestehenden Sortierung (neueste zuerst) bleiben im
-  // Zweifel wenigstens die aktuellsten Offerten erhalten statt zufaellig
-  // irgendwelche zu verlieren. Siehe Fix in tool-c-live-v1.html.
-  const { data, error } = await sb.from('offerte')
-    .select('id, titel, datum, status, betrag_total, kunde_id, offertnummer, offertentyp(name, berechnungsmodell), easybill_document_id, easybill_document_number')
+async function ladeOffertenSeite(anhaengen){
+  const von = anhaengen ? ALLE_OFFERTEN.length : 0;
+  const bis = von + OFFERTEN_SEITENGROESSE - 1;
+  const { data, error, count } = await sb.from('offerte')
+    .select('id, titel, datum, status, betrag_total, kunde_id, offertnummer, offertentyp(name, berechnungsmodell), easybill_document_id, easybill_document_number', { count: 'exact' })
     .order('datum', { ascending:false })
-    .range(0, 9999);
+    .range(von, bis);
   if(error){ $('offertenStatus').textContent = 'Fehler beim Laden: ' + error.message; $('offertenStatus').className = 'status err'; return; }
+  offertenGesamtAnzahl = count ?? data.length;
 
-  const kundeIds = [...new Set(data.map(o => o.kunde_id).filter(Boolean))];
-  let kundenMap = {};
-  if(kundeIds.length){
-    const { data: kunden, error: kErr } = await sb.from('kunde').select('id,name,firma,nachname').in('id', kundeIds);
+  const neueKundeIds = [...new Set(data.map(o => o.kunde_id).filter(id => id && !offertenKundenMap[id]))];
+  if(neueKundeIds.length){
+    const { data: kunden, error: kErr } = await sb.from('kunde').select('id,name,firma,nachname').in('id', neueKundeIds);
     if(kErr){ $('offertenStatus').textContent = 'Fehler beim Laden: ' + kErr.message; $('offertenStatus').className = 'status err'; return; }
-    kunden.forEach(k => { kundenMap[k.id] = k; });
+    kunden.forEach(k => { offertenKundenMap[k.id] = k; });
   }
 
-  ALLE_OFFERTEN = data.map(o => {
-    const kunde = kundenMap[o.kunde_id];
+  const gemappt = data.map(o => {
+    const kunde = offertenKundenMap[o.kunde_id];
     return {
       ...o,
       _kunde_name: kunde ? anzeigename(kunde) : '',
@@ -636,8 +645,18 @@ async function ladeOfferten(){
       _typ_sort: o.offertentyp?.name || '',
     };
   });
+  ALLE_OFFERTEN = anhaengen ? ALLE_OFFERTEN.concat(gemappt) : gemappt;
   renderOffertenTable();
   aktualisiereFehlendeEasybillNummern();
+}
+
+async function ladeOfferten(){
+  offertenKundenMap = {};
+  await ladeOffertenSeite(false);
+}
+
+async function ladeWeitereOfferten(){
+  await ladeOffertenSeite(true);
 }
 
 // Offerten, die zwar mit Easybill verknuepft sind (easybill_document_id),
@@ -729,6 +748,21 @@ function renderOffertenTable(){
   $('offertenBody').querySelectorAll('.offerte-loeschen-btn').forEach(btn => {
     btn.addEventListener('click', () => loescheOfferte(btn.dataset.id, btn.dataset.titel));
   });
+
+  // "Weitere laden": nur die geladene Seite ist im Browser - Suche/Sortierung
+  // wirken nur auf das bereits Geladene, darum bei aktiver Suche zusaetzlich
+  // ein Hinweis, falls noch nicht alles geladen ist.
+  const nochNichtGeladen = offertenGesamtAnzahl - ALLE_OFFERTEN.length;
+  const suchtAktiv = !!$('offSearchInput').value.trim();
+  if(nochNichtGeladen > 0){
+    $('offertenLadeMehr').innerHTML = `<span>${ALLE_OFFERTEN.length} von ${offertenGesamtAnzahl} Offerten geladen${suchtAktiv ? ' – Suche wirkt nur auf die geladenen' : ''}.</span>
+      <button type="button" class="btnlink" id="offertenMehrBtn">Weitere ${Math.min(OFFERTEN_SEITENGROESSE, nochNichtGeladen)} laden</button>
+      <button type="button" class="btnlink" id="offertenAlleBtn">Alle laden</button>`;
+    $('offertenMehrBtn').addEventListener('click', ladeWeitereOfferten);
+    $('offertenAlleBtn').addEventListener('click', async () => { while(offertenGesamtAnzahl - ALLE_OFFERTEN.length > 0) await ladeWeitereOfferten(); });
+  }else{
+    $('offertenLadeMehr').innerHTML = '';
+  }
 }
 
 async function loescheOfferte(offerteId, titel){
