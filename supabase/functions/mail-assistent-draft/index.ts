@@ -191,6 +191,7 @@ async function modusVerfassen(body: any, modell: string) {
 Platzhalter in eckigen Klammern (z.B. [NAME], [PROJEKT]):
 - Einen Platzhalter der Form [ZF:...] sowie JEDEN Platzhalter mit dem Wort "Datum" darin IMMER exakt unveraendert stehen lassen.
 - Jeden ANDEREN Platzhalter: kannst du ihn aus den Stichworten des Mitarbeiters sinnvoll ersetzen, tu das in DOPPELTEN eckigen Klammern, z.B. wird aus [NAME] -> [[Herr Müller]] (macht sichtbar, wo du etwas eingesetzt hast, der Mitarbeiter kann es noch per Klick anpassen). Sonst lass ihn unveraendert in einfachen eckigen Klammern stehen.
+- Text OHNE Klammern in der VORLAGE (z.B. schon konkrete Namen, Adressen, Telefonnummern, E-Mail-Adressen) bleibt IMMER exakt unveraendert stehen - erstelle NIEMALS neue eckige Klammern um bereits konkrete Angaben.
 VORLAGE:\n${vorlage.inhalt}`);
   if (body.stichworte) teile.push('STICHWORTE VOM MITARBEITER:\n' + body.stichworte);
   teile.push('Schreibe jetzt den fertigen Mailtext. Nur den Mailtext ausgeben, keine Erklärung, keine Anführungszeichen drumherum.' + KG_FORMAT_HINWEIS);
@@ -284,6 +285,7 @@ Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Obje
    - Einen Platzhalter der Form [ZF:...] IMMER exakt unveraendert stehen lassen (nicht ausfuellen, nicht entfernen, nicht uebersetzen) - der wird danach automatisch ersetzt.
    - JEDEN Platzhalter, der das Wort "Datum" enthaelt (z.B. [Datum], [Datum, Uhrzeit]), IMMER exakt unveraendert stehen lassen - der wird separat behandelt.
    - Jeden ANDEREN Platzhalter: kannst du aus der eingehenden Mail/dem Kontext einen konkreten, sinnvollen Wert ableiten, ersetze ihn durch diesen Wert in DOPPELTEN eckigen Klammern, z.B. wird aus [Bauteil] -> [[Ablaufventil]] (macht sichtbar, wo du etwas eingesetzt hast, der Mitarbeiter kann es noch per Klick anpassen). Bist du dir nicht sicher oder fehlt die Information, lass ihn stattdessen unveraendert in einfachen eckigen Klammern stehen, z.B. [Bauteil]. Erfinde NIE einen Wert, den du nicht wirklich aus dem Kontext hast.
+   - Text OHNE Klammern in der VORLAGE (z.B. schon konkrete Namen, Adressen, Telefonnummern, E-Mail-Adressen) bleibt IMMER exakt unveraendert stehen - erstelle NIEMALS neue eckige Klammern um bereits konkrete Angaben.
    "vorlageTitel" ist der exakte Titel der VORLAGE, deren Text du als Grundlage genommen hast - null, falls du dir den Text selbst ueberlegt hast (Sonderfall/Auffangfall ohne passende VORLAGE).
 2. Eine Vorlage mit Rückfrage trifft zu:
 {"aktion":"rueckfrage","vorlageTitel":"<exakter Titel der Vorlage>"}
@@ -436,6 +438,7 @@ Platzhalter in eckigen Klammern (z.B. [Bauteil], [X Minuten]) werden so behandel
 - Einen Platzhalter der Form [ZF:...] IMMER exakt unveraendert stehen lassen - der wird danach automatisch ersetzt.
 - JEDEN Platzhalter, der das Wort "Datum" enthaelt (z.B. [Datum], [Datum, Uhrzeit]), IMMER exakt unveraendert stehen lassen - der wird separat behandelt.
 - Jeden ANDEREN Platzhalter: kannst du aus der eingehenden Mail/dem Kontext einen konkreten, sinnvollen Wert ableiten, ersetze ihn durch diesen Wert in DOPPELTEN eckigen Klammern, z.B. wird aus [Bauteil] -> [[Ablaufventil]]. Bist du dir nicht sicher, lass ihn stattdessen unveraendert in einfachen eckigen Klammern stehen. Erfinde NIE einen Wert, den du nicht wirklich aus dem Kontext hast.
+- Text OHNE Klammern in der VORLAGE (z.B. schon konkrete Namen, Adressen, Telefonnummern, E-Mail-Adressen) bleibt IMMER exakt unveraendert stehen - erstelle NIEMALS neue eckige Klammern um bereits konkrete Angaben, auch nicht um sie "generischer" oder "vorlagenhafter" wirken zu lassen.
 VORLAGE:\n${zweig.inhalt}`);
   if (body.mailInhalt) teile.push('EINGEHENDE MAIL:\n' + body.mailInhalt);
   if (body.anweisung) teile.push('ZUSAETZLICHE ANWEISUNG: ' + body.anweisung);
@@ -513,6 +516,7 @@ Platzhalter in eckigen Klammern (z.B. [Bauteil], [X Minuten]) werden so behandel
 - Einen Platzhalter der Form [ZF:...] IMMER exakt unveraendert stehen lassen - der wird danach automatisch ersetzt.
 - JEDEN Platzhalter, der das Wort "Datum" enthaelt (z.B. [Datum], [Datum, Uhrzeit]), IMMER exakt unveraendert stehen lassen - der wird separat behandelt.
 - Jeden ANDEREN Platzhalter: kannst du aus der eingehenden Mail/dem Kontext einen konkreten, sinnvollen Wert ableiten, ersetze ihn durch diesen Wert in DOPPELTEN eckigen Klammern, z.B. wird aus [Bauteil] -> [[Ablaufventil]]. Bist du dir nicht sicher, lass ihn stattdessen unveraendert in einfachen eckigen Klammern stehen. Erfinde NIE einen Wert, den du nicht wirklich aus dem Kontext hast.
+- Text OHNE Klammern in der VORLAGE (z.B. schon konkrete Namen, Adressen, Telefonnummern, E-Mail-Adressen) bleibt IMMER exakt unveraendert stehen - erstelle NIEMALS neue eckige Klammern um bereits konkrete Angaben, auch nicht um sie "generischer" oder "vorlagenhafter" wirken zu lassen.
 VORLAGE:\n${inhalt}`);
   if (body.mailInhalt) teile.push('EINGEHENDE MAIL:\n' + body.mailInhalt);
   if (body.anweisung) teile.push('ZUSAETZLICHE ANWEISUNG: ' + body.anweisung);
