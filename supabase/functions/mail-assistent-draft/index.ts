@@ -228,7 +228,7 @@ async function modusAntworten(body: any, modell: string) {
 
   const [
     { data: schreibstil }, { data: firmendaten }, { data: sonderfaelle },
-    { data: vorlagen }, { data: kundenanfrageToepfe },
+    { data: vorlagen }, { data: kundenanfrageVorlagen }, { data: distanzMeta },
   ] = await Promise.all([
     sb.from('mailassistent_schreibstil').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_firmendaten').select('*').limit(1).maybeSingle(),
@@ -240,8 +240,14 @@ async function modusAntworten(body: any, modell: string) {
             mailassistent_zusatzfenster_spalte_option(id,wert,reihenfolge)),
           mailassistent_zusatzfenster_position(id,titel,reihenfolge)))`)
       .eq('richtung', 'antworten').eq('aktiv', true).order('reihenfolge'),
-    sb.from('mailassistent_vorlage').select('*, mailassistent_vorlage_antwort(*)')
+    sb.from('mailassistent_vorlage').select(`*,
+      mailassistent_vorlage_zusatzfenster(
+        mailassistent_zusatzfenster(id,typ,titel,platzhalter,erlaubt_eigene_eingabe,
+          mailassistent_zusatzfenster_spalte(id,titel,typ,einheit,platzhalter,breite,reihenfolge,
+            mailassistent_zusatzfenster_spalte_option(id,wert,reihenfolge)),
+          mailassistent_zusatzfenster_position(id,titel,reihenfolge)))`)
       .eq('richtung', 'kundenanfrage').eq('aktiv', true).order('reihenfolge'),
+    sb.from('mailassistent_distanzlogik_meta').select('*').limit(1).maybeSingle(),
   ]);
 
   const sonderfaelleMenu = (sonderfaelle || []).map((sf: any) => {
@@ -258,8 +264,6 @@ async function modusAntworten(body: any, modell: string) {
     return `- VORLAGE "${v.titel}" – trifft zu wenn: ${v.wann_trifft_zu || '–'}\n  Text:\n${v.inhalt}`;
   }).join('\n\n');
 
-  const kundenanfrageMenu = (kundenanfrageToepfe || []).map((t: any) => `- TOPF "${t.titel}" – trifft zu wenn: ${t.wann_trifft_zu || '–'}`).join('\n');
-
   const system = `Du bist der Mail-Assistent von Knechtgarten (Gartenbau-Unternehmen, Heimenschwand/BE). Du liest eine eingehende Mail und entscheidest, wie sie beantwortet werden soll.
 
 ${schreibstil?.immer_antworten && schreibstil.inhalt ? 'SCHREIBSTIL:\n' + schreibstil.inhalt + '\n\n' : ''}${firmendaten?.immer_antworten ? 'FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten) + '\n\n' : ''}SONDERFÄLLE (prüfe zuerst, ob einer eindeutig zutrifft - Ausnahmen gehen der Hauptregel vor):
@@ -268,8 +272,7 @@ ${sonderfaelleMenu || '(keine erfasst)'}
 MAIL-VORLAGEN:
 ${vorlagenMenu || '(keine erfasst)'}
 
-KUNDENANFRAGEN-TÖPFE (für diese trifft KEINE feste Vorlage zu - der Mitarbeiter wählt selbst manuell die passende Antwort aus einer Liste, du lieferst nur die Einordnung + falls möglich die Kundenadresse):
-${kundenanfrageMenu || '(keine erfasst)'}
+KUNDENANFRAGEN - dafür gibt es KEINE feste Vorlage, der Mitarbeiter wählt selbst manuell die passende Antwort aus einer Liste, du lieferst nur die Einordnung + falls möglich die Kundenadresse. Nur relevant wenn: ${distanzMeta?.wann_anwenden || '(nicht konfiguriert)'}
 
 Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Objekt (kein Text davor/danach), in einer dieser vier Formen:
 1. Direkter Entwurf möglich (Sonderfall/einfache Vorlage/Auffangfall):
@@ -282,8 +285,8 @@ Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Obje
    "vorlageTitel" ist der exakte Titel der VORLAGE, deren Text du als Grundlage genommen hast - null, falls du dir den Text selbst ueberlegt hast (Sonderfall/Auffangfall ohne passende VORLAGE).
 2. Eine Vorlage mit Rückfrage trifft zu:
 {"aktion":"rueckfrage","vorlageTitel":"<exakter Titel der Vorlage>"}
-3. Ein KUNDENANFRAGEN-TOPF trifft zu:
-{"aktion":"kundenanfrage","topfTitel":"<exakter Titel des Topfs>","kundenAdresse":"<aus der Mail extrahierte Adresse/PLZ+Ort, sonst null>"}
+3. Es ist eine KUNDENANFRAGE (siehe Bedingung oben):
+{"aktion":"kundenanfrage","kundenAdresse":"<aus der Mail extrahierte Adresse/PLZ+Ort, sonst null>"}
 "kundenAdresse" ist nur eine Zusatz-Info für den Mitarbeiter (Distanzberechnung) - extrahiere sie wenn irgendwie erkennbar (auch wenn du dir nicht ganz sicher bist, eine überflüssige Distanz-Anzeige stört nicht), aber erfinde nichts. Wenn nichts erkennbar ist, setze null.
 4. AUSNAHMEFALL - zwei (normalerweise nicht mehr) einfache VORLAGEN passen ungefähr GLEICH GUT, sagen inhaltlich aber unterschiedliche Dinge aus, und es ist fuer die Antwort wirklich wichtig, welche davon stimmt:
 {"aktion":"auswahl","frage":"<kurze, konkrete Frage an den Mitarbeiter, z.B. 'Geht es eher um X oder um Y?'>","vorlagenTitel":["<exakter Titel Vorlage A>","<exakter Titel Vorlage B>"]}
@@ -328,16 +331,15 @@ ${KG_FORMAT_HINWEIS}`;
   }
 
   if (entscheidung.aktion === 'kundenanfrage') {
-    const topf = (kundenanfrageToepfe || []).find((t: any) => t.titel === entscheidung.topfTitel);
-    if (!topf) return json({ error: 'Kundenanfragen-Topf "' + entscheidung.topfTitel + '" nicht gefunden.' }, 502);
     const distanz = entscheidung.kundenAdresse ? await berechneDistanzInfo(entscheidung.kundenAdresse, firmendaten) : null;
-    const { data: meta } = await sb.from('mailassistent_distanzlogik_meta').select('partner_hinweistext').limit(1).maybeSingle();
-    await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', topf.id, tokensInput, tokensOutput);
+    await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', null, tokensInput, tokensOutput);
     return json({
-      aktion: 'kundenanfrage', vorlageId: topf.id, titel: topf.titel,
-      antworten: (topf.mailassistent_vorlage_antwort || []).sort((a: any, b: any) => a.reihenfolge - b.reihenfolge)
-        .map((z: any) => ({ label: z.label })),
-      distanz, hinweistext: meta?.partner_hinweistext || null,
+      aktion: 'kundenanfrage',
+      antworten: (kundenanfrageVorlagen || []).map((v: any) => ({
+        id: v.id, label: v.titel,
+        zusatzfenster: (v.mailassistent_vorlage_zusatzfenster || []).map((e: any) => e.mailassistent_zusatzfenster).filter(Boolean),
+      })),
+      distanz, hinweistext: distanzMeta?.partner_hinweistext || null,
       tokensInput, tokensOutput,
     });
   }
@@ -450,14 +452,20 @@ VORLAGE:\n${zweig.inhalt}`);
 // Frage, Mitarbeiter hat eine gewaehlt). Anders als bei rueckfrage-antwort
 // gibt es keine vordefinierten Zweige - es wird direkt der Vorlagentext der
 // gewaehlten Vorlage verwendet, genau wie beim normalen direkten Entwurf.
+// Wird auch fuer Kundenanfragen-Antwort-Vorlagen genutzt (dort per vorlageId
+// statt vorlageTitel, da es keine KI-Auswahl gibt, der Mitarbeiter waehlt
+// direkt eine konkrete Vorlage aus der Liste).
 // ----------------------------------------------------------------------------
 async function modusAuswahlAntwort(body: any, modell: string) {
+  const vorlagePromise = body.vorlageId
+    ? sb.from('mailassistent_vorlage').select('*').eq('id', body.vorlageId).maybeSingle()
+    : sb.from('mailassistent_vorlage').select('*').eq('richtung', 'antworten').eq('titel', body.vorlageTitel).maybeSingle();
   const [{ data: schreibstil }, { data: firmendaten }, { data: vorlage }] = await Promise.all([
     sb.from('mailassistent_schreibstil').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_firmendaten').select('*').limit(1).maybeSingle(),
-    sb.from('mailassistent_vorlage').select('*').eq('richtung', 'antworten').eq('titel', body.vorlageTitel).maybeSingle().then(r => r),
+    vorlagePromise,
   ]);
-  if (!vorlage) return json({ error: 'Vorlage "' + body.vorlageTitel + '" nicht gefunden.' }, 502);
+  if (!vorlage) return json({ error: 'Vorlage "' + (body.vorlageTitel || body.vorlageId) + '" nicht gefunden.' }, 502);
 
   const teile = [];
   if (schreibstil?.immer_antworten && schreibstil.inhalt) teile.push('SCHREIBSTIL:\n' + schreibstil.inhalt);
