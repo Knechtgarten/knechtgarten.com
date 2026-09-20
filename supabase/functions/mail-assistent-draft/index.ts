@@ -228,7 +228,7 @@ async function modusAntworten(body: any, modell: string) {
 
   const [
     { data: schreibstil }, { data: firmendaten }, { data: sonderfaelle },
-    { data: vorlagen }, { data: distanzMeta }, { data: projekttypen },
+    { data: vorlagen }, { data: kundenanfrageToepfe },
   ] = await Promise.all([
     sb.from('mailassistent_schreibstil').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_firmendaten').select('*').limit(1).maybeSingle(),
@@ -240,8 +240,8 @@ async function modusAntworten(body: any, modell: string) {
             mailassistent_zusatzfenster_spalte_option(id,wert,reihenfolge)),
           mailassistent_zusatzfenster_position(id,titel,reihenfolge)))`)
       .eq('richtung', 'antworten').eq('aktiv', true).order('reihenfolge'),
-    sb.from('mailassistent_distanzlogik_meta').select('*').limit(1).maybeSingle(),
-    sb.from('mailassistent_distanz_projekttyp').select('*').order('reihenfolge'),
+    sb.from('mailassistent_vorlage').select('*, mailassistent_vorlage_antwort(*)')
+      .eq('richtung', 'kundenanfrage').eq('aktiv', true).order('reihenfolge'),
   ]);
 
   const sonderfaelleMenu = (sonderfaelle || []).map((sf: any) => {
@@ -258,7 +258,7 @@ async function modusAntworten(body: any, modell: string) {
     return `- VORLAGE "${v.titel}" – trifft zu wenn: ${v.wann_trifft_zu || '–'}\n  Text:\n${v.inhalt}`;
   }).join('\n\n');
 
-  const projekttypenMenu = (projekttypen || []).map((t: any) => `- "${t.titel}": ${t.beschreibung || '–'}`).join('\n');
+  const kundenanfrageMenu = (kundenanfrageToepfe || []).map((t: any) => `- TOPF "${t.titel}" – trifft zu wenn: ${t.wann_trifft_zu || '–'}`).join('\n');
 
   const system = `Du bist der Mail-Assistent von Knechtgarten (Gartenbau-Unternehmen, Heimenschwand/BE). Du liest eine eingehende Mail und entscheidest, wie sie beantwortet werden soll.
 
@@ -268,9 +268,8 @@ ${sonderfaelleMenu || '(keine erfasst)'}
 MAIL-VORLAGEN:
 ${vorlagenMenu || '(keine erfasst)'}
 
-DISTANZLOGIK - nur relevant wenn: ${distanzMeta?.wann_anwenden || '(nicht konfiguriert)'}
-Falls die Mail eine Kontaktanfrage in diesem Sinn ist, gibt es dafür keine fixe Vorlage - stattdessen muss die Fahrdistanz zum Kunden berechnet werden. Projekttypen zur Einordnung:
-${projekttypenMenu || '(keine erfasst)'}
+KUNDENANFRAGEN-TÖPFE (für diese trifft KEINE feste Vorlage zu - der Mitarbeiter wählt selbst manuell die passende Antwort aus einer Liste, du lieferst nur die Einordnung + falls möglich die Kundenadresse):
+${kundenanfrageMenu || '(keine erfasst)'}
 
 Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Objekt (kein Text davor/danach), in einer dieser vier Formen:
 1. Direkter Entwurf möglich (Sonderfall/einfache Vorlage/Auffangfall):
@@ -283,9 +282,9 @@ Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Obje
    "vorlageTitel" ist der exakte Titel der VORLAGE, deren Text du als Grundlage genommen hast - null, falls du dir den Text selbst ueberlegt hast (Sonderfall/Auffangfall ohne passende VORLAGE).
 2. Eine Vorlage mit Rückfrage trifft zu:
 {"aktion":"rueckfrage","vorlageTitel":"<exakter Titel der Vorlage>"}
-3. Distanzlogik trifft zu (Kontaktanfrage):
-{"aktion":"distanzlogik","projekttyp":"<exakter Titel des Projekttyps>","kundenAdresse":"<aus der Mail extrahierte Adresse/PLZ+Ort>"}
-Wenn bei Fall 3 keine Adresse erkennbar ist, nutze stattdessen den Sonderfall "Kein Ort erkennbar" (Fall 1).
+3. Ein KUNDENANFRAGEN-TOPF trifft zu:
+{"aktion":"kundenanfrage","topfTitel":"<exakter Titel des Topfs>","kundenAdresse":"<aus der Mail extrahierte Adresse/PLZ+Ort, sonst null>"}
+"kundenAdresse" ist nur eine Zusatz-Info für den Mitarbeiter (Distanzberechnung) - extrahiere sie wenn irgendwie erkennbar (auch wenn du dir nicht ganz sicher bist, eine überflüssige Distanz-Anzeige stört nicht), aber erfinde nichts. Wenn nichts erkennbar ist, setze null.
 4. AUSNAHMEFALL - zwei (normalerweise nicht mehr) einfache VORLAGEN passen ungefähr GLEICH GUT, sagen inhaltlich aber unterschiedliche Dinge aus, und es ist fuer die Antwort wirklich wichtig, welche davon stimmt:
 {"aktion":"auswahl","frage":"<kurze, konkrete Frage an den Mitarbeiter, z.B. 'Geht es eher um X oder um Y?'>","vorlagenTitel":["<exakter Titel Vorlage A>","<exakter Titel Vorlage B>"]}
    Nutze Fall 4 NUR SELTEN, bei echter und relevanter Unsicherheit. Der Normalfall bleibt Fall 1 mit der naheliegendsten Vorlage - im Zweifel IMMER Fall 1 waehlen, nicht Fall 4.
@@ -328,8 +327,18 @@ ${KG_FORMAT_HINWEIS}`;
     });
   }
 
-  if (entscheidung.aktion === 'distanzlogik') {
-    return await fuehreDistanzlogikAus(body, modell, entscheidung, schreibstil, firmendaten, projekttypen, tokensInput, tokensOutput);
+  if (entscheidung.aktion === 'kundenanfrage') {
+    const topf = (kundenanfrageToepfe || []).find((t: any) => t.titel === entscheidung.topfTitel);
+    if (!topf) return json({ error: 'Kundenanfragen-Topf "' + entscheidung.topfTitel + '" nicht gefunden.' }, 502);
+    const distanz = entscheidung.kundenAdresse ? await berechneDistanzInfo(entscheidung.kundenAdresse, firmendaten) : null;
+    await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', topf.id, tokensInput, tokensOutput);
+    return json({
+      aktion: 'kundenanfrage', vorlageId: topf.id, titel: topf.titel,
+      antworten: (topf.mailassistent_vorlage_antwort || []).sort((a: any, b: any) => a.reihenfolge - b.reihenfolge)
+        .map((z: any) => ({ label: z.label })),
+      distanz, hinweistext: topf.info_hinweistext || null,
+      tokensInput, tokensOutput,
+    });
   }
 
   if (entscheidung.aktion === 'auswahl' && Array.isArray(entscheidung.vorlagenTitel)) {
@@ -350,10 +359,11 @@ ${KG_FORMAT_HINWEIS}`;
 }
 
 // ----------------------------------------------------------------------------
-// Distanzlogik-Unterablauf: Google-Maps-Distanz -> passende Stufe ->
-// ggf. Partner-Empfehlung -> finaler Entwurf.
+// Distanz-Infos fuer Kundenanfragen: nur Fahrzeit/Distanz zu Knechtgarten und
+// zu allen Partnerbetrieben berechnen, als reine Entscheidungshilfe fuer den
+// Mitarbeiter - keine automatische Vorlagen-Auswahl mehr.
 // ----------------------------------------------------------------------------
-async function berechneFahrzeitMinuten(origin: string, destination: string): Promise<number | null> {
+async function berechneDistanz(origin: string, destination: string): Promise<{ minuten: number; km: number } | null> {
   const apiKey = Deno.env.get('GOOGLE_MAPS_API_KEY');
   if (!apiKey) return null;
   const url = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${encodeURIComponent(origin)}&destinations=${encodeURIComponent(destination)}&key=${apiKey}`;
@@ -361,50 +371,23 @@ async function berechneFahrzeitMinuten(origin: string, destination: string): Pro
   const data = await res.json();
   const el = data?.rows?.[0]?.elements?.[0];
   if (el?.status !== 'OK') return null;
-  return Math.round(el.duration.value / 60);
+  return { minuten: Math.round(el.duration.value / 60), km: Math.round(el.distance.value / 1000) };
 }
 
-async function fuehreDistanzlogikAus(body: any, modell: string, entscheidung: any, schreibstil: any, firmendaten: any, projekttypen: any[], tokensInputBisher: number, tokensOutputBisher: number) {
-  const projekttyp = (projekttypen || []).find((t: any) => t.titel === entscheidung.projekttyp) || projekttypen?.[0];
-  if (!projekttyp || !firmendaten?.adresse) {
-    return json({ error: 'Distanzlogik nicht möglich (Projekttyp oder Firmenadresse fehlt).' }, 502);
+async function berechneDistanzInfo(kundenAdresse: string, firmendaten: any) {
+  const ergebnis: any = {};
+  if (firmendaten?.adresse) {
+    const eigene = await berechneDistanz(firmendaten.adresse, kundenAdresse);
+    if (eigene) ergebnis.eigene = eigene;
   }
-  const minuten = await berechneFahrzeitMinuten(firmendaten.adresse, entscheidung.kundenAdresse);
-  if (minuten === null) {
-    return json({ error: 'Distanz zu "' + entscheidung.kundenAdresse + '" konnte nicht berechnet werden.' }, 502);
+  const { data: partnerbetriebe } = await sb.from('mailassistent_partnerbetrieb').select('*').order('reihenfolge');
+  const partner = [];
+  for (const p of partnerbetriebe || []) {
+    const d = await berechneDistanz(p.adresse, kundenAdresse);
+    if (d) partner.push({ name: p.name, ...d });
   }
-
-  const { data: stufen } = await sb.from('mailassistent_distanz_stufe').select('*').eq('projekttyp_id', projekttyp.id).order('reihenfolge');
-  let stufe = (stufen || []).find((s: any) => s.bis_minuten !== null && minuten <= s.bis_minuten);
-  if (!stufe) stufe = (stufen || []).find((s: any) => s.bis_minuten === null) || (stufen || [])[(stufen || []).length - 1];
-  if (!stufe) return json({ error: 'Für "' + projekttyp.titel + '" sind keine Stufen erfasst.' }, 502);
-
-  let anweisung = `Verfasse den Entwurf nach folgender Vorgabe: ${stufe.vorlage_text}`;
-  if (stufe.ist_partner_logik) {
-    const { data: meta } = await sb.from('mailassistent_distanzlogik_meta').select('partner_umkreis_minuten').limit(1).maybeSingle();
-    const umkreis = meta?.partner_umkreis_minuten ?? 35;
-    const { data: partner } = await sb.from('mailassistent_partnerbetrieb').select('*').order('reihenfolge');
-    let naechster: { name: string; adresse: string; minuten: number } | null = null;
-    for (const p of partner || []) {
-      const m = await berechneFahrzeitMinuten(p.adresse, entscheidung.kundenAdresse);
-      if (m !== null && m <= umkreis && (!naechster || m < naechster.minuten)) naechster = { name: p.name, adresse: p.adresse, minuten: m };
-    }
-    anweisung = naechster
-      ? `Der Kunde liegt zu weit weg für ein eigenes Angebot (${minuten} Min. Fahrzeit). Sage höflich ab und empfehle stattdessen den Partnerbetrieb "${naechster.name}" (${naechster.adresse}).`
-      : `Der Kunde liegt zu weit weg für ein eigenes Angebot (${minuten} Min. Fahrzeit) und es gibt keinen Partnerbetrieb in der Nähe. Sage höflich ab, ohne einen Partnerbetrieb zu empfehlen.`;
-  }
-
-  const teile = [];
-  if (schreibstil?.immer_antworten && schreibstil.inhalt) teile.push('SCHREIBSTIL:\n' + schreibstil.inhalt);
-  teile.push('FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten));
-  teile.push(anweisung);
-  teile.push('Berücksichtige die Fahrzeit von ca. ' + minuten + ' Minuten, falls das für den Text relevant ist.');
-  teile.push('EINGEHENDE MAIL:\n' + body.mailInhalt);
-  teile.push('Schreibe jetzt den fertigen Mailtext. Nur den Mailtext ausgeben, keine Erklärung.' + KG_FORMAT_HINWEIS);
-
-  const { text, tokensInput, tokensOutput } = await rufeClaudeAuf(modell, 'Du hilfst einem Gartenbau-Unternehmen (Knechtgarten), professionelle Kundenmails zu verfassen.', teile.join('\n\n'), 2500);
-  await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', null, tokensInputBisher + tokensInput, tokensOutputBisher + tokensOutput);
-  return json({ aktion: 'entwurf', text: text.trim(), tokensInput: tokensInputBisher + tokensInput, tokensOutput: tokensOutputBisher + tokensOutput });
+  ergebnis.partner = partner;
+  return ergebnis;
 }
 
 // ----------------------------------------------------------------------------
