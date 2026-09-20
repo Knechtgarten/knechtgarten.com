@@ -342,7 +342,9 @@ ${KG_FORMAT_HINWEIS}`;
   }
 
   if (entscheidung.aktion === 'kundenanfrage') {
-    const distanz = entscheidung.kundenAdresse ? await berechneDistanzInfo(entscheidung.kundenAdresse, firmendaten) : null;
+    const distanz = entscheidung.kundenAdresse
+      ? await berechneDistanzInfo(entscheidung.kundenAdresse, firmendaten, distanzMeta?.partner_umkreis_minuten ?? 35)
+      : null;
     await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', null, tokensInput, tokensOutput);
     return json({
       aktion: 'kundenanfrage',
@@ -396,7 +398,7 @@ async function berechneDistanz(origin: string, destination: string): Promise<{ m
   return { minuten: Math.round(el.duration.value / 60), km: Math.round(el.distance.value / 1000), aufgeloesteAdresse };
 }
 
-async function berechneDistanzInfo(kundenAdresse: string, firmendaten: any) {
+async function berechneDistanzInfo(kundenAdresse: string, firmendaten: any, partnerUmkreisMinuten: number) {
   const ergebnis: any = {};
   let aufgeloesterStandort: string | null = null;
   if (firmendaten?.adresse) {
@@ -412,7 +414,15 @@ async function berechneDistanzInfo(kundenAdresse: string, firmendaten: any) {
       if (!aufgeloesterStandort) aufgeloesterStandort = d.aufgeloesteAdresse;
     }
   }
+  // Der naechstgelegene Partnerbetrieb wird nur hervorgehoben, wenn er auch
+  // wirklich "in der Naehe" ist (Schwellenwert) - sonst wirkt der naheste
+  // von drei weit entfernten Partnerbetrieben wie eine gute Option, obwohl
+  // keiner davon tatsaechlich nah ist. Liegt keiner innerhalb der Schwelle,
+  // wird gar keiner hervorgehoben.
+  const inDerNaehe = partner.filter(p => p.minuten <= partnerUmkreisMinuten);
+  const naechster = inDerNaehe.length ? inDerNaehe.reduce((a, b) => (a.minuten <= b.minuten ? a : b)) : null;
   ergebnis.partner = partner;
+  ergebnis.naechsterPartnerId = naechster?.id || null;
   ergebnis.aufgeloesterStandort = aufgeloesterStandort;
   return ergebnis;
 }
