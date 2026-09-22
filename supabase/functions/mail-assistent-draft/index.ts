@@ -233,6 +233,7 @@ async function modusAntworten(body: any, modell: string) {
   const [
     { data: schreibstil }, { data: firmendaten }, { data: sonderfaelle },
     { data: vorlagen }, { data: kundenanfrageVorlagen }, { data: distanzMeta }, { data: faelle },
+    { data: mitarbeitende },
   ] = await Promise.all([
     sb.from('mailassistent_schreibstil').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_firmendaten').select('*').limit(1).maybeSingle(),
@@ -253,7 +254,12 @@ async function modusAntworten(body: any, modell: string) {
       .eq('richtung', 'kundenanfrage').eq('aktiv', true).order('reihenfolge'),
     sb.from('mailassistent_distanzlogik_meta').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_faelle_meta').select('*').limit(1).maybeSingle(),
+    sb.from('mailassistent_mitarbeiter').select('name,email,funktion').order('reihenfolge'),
   ]);
+
+  const mitarbeitendeListe = (mitarbeitende || [])
+    .map((m: any) => `${m.name}${m.email ? ' <' + m.email + '>' : ''}${m.funktion ? ' - ' + m.funktion : ''}`)
+    .join('\n');
 
   const sonderfaelleMenu = (sonderfaelle || []).map((sf: any) => {
     const ausnahmen = (sonderfaelle || []).filter((x: any) => x.ist_ausnahme_von === sf.id);
@@ -271,7 +277,7 @@ async function modusAntworten(body: any, modell: string) {
 
   const system = `Du bist der Mail-Assistent von Knechtgarten (Gartenbau-Unternehmen, Heimenschwand/BE). Du liest eine eingehende Mail und entscheidest, wie sie beantwortet werden soll.
 
-${schreibstil?.immer_antworten && schreibstil.inhalt ? 'SCHREIBSTIL:\n' + schreibstil.inhalt + '\n\n' : ''}${firmendaten?.immer_antworten ? 'FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten) + '\n\n' : ''}${faelle?.tabu_liste ? 'TABU-LISTE (nie schreiben):\n' + faelle.tabu_liste + '\n\n' : ''}${faelle?.terminvorschlaege ? 'TERMINVORSCHLAEGE:\n' + faelle.terminvorschlaege + '\n\n' : ''}Pruefe die folgenden drei Bereiche mit GLEICHER Prioritaet (keiner geht den anderen automatisch vor) - SONDERFÄLLE und MAIL-VORLAGEN sind fuer spezifische, bekannte Faelle, KUNDENANFRAGEN ist der Auffangbereich fuer echte Neukunden-/Projektanfragen, die keine dieser spezifischen Vorlagen treffen:
+${schreibstil?.immer_antworten && schreibstil.inhalt ? 'SCHREIBSTIL:\n' + schreibstil.inhalt + '\n\n' : ''}${firmendaten?.immer_antworten ? 'FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten) + '\n\n' : ''}${mitarbeitendeListe ? 'MITARBEITENDE (unser eigenes Team - gehoert zu "uns", nicht zur Gegenseite):\n' + mitarbeitendeListe + '\n\n' : ''}${faelle?.tabu_liste ? 'TABU-LISTE (nie schreiben):\n' + faelle.tabu_liste + '\n\n' : ''}${faelle?.terminvorschlaege ? 'TERMINVORSCHLAEGE:\n' + faelle.terminvorschlaege + '\n\n' : ''}Pruefe die folgenden drei Bereiche mit GLEICHER Prioritaet (keiner geht den anderen automatisch vor) - SONDERFÄLLE und MAIL-VORLAGEN sind fuer spezifische, bekannte Faelle, KUNDENANFRAGEN ist der Auffangbereich fuer echte Neukunden-/Projektanfragen, die keine dieser spezifischen Vorlagen treffen:
 
 SONDERFÄLLE (Ausnahmen gehen der Hauptregel vor):
 ${sonderfaelleMenu || '(keine erfasst)'}
