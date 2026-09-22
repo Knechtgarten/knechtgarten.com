@@ -861,7 +861,7 @@ input[type=number]{-moz-appearance:textfield;}
       <tbody id="ezRechnerBody"></tbody>
     </table>
     <button type="button" class="btnlink" id="ezRechnerAddBtn" style="margin:2px 0 10px;">+ Position hinzufügen</button>
-    <div class="ezr-sumrow"><span>Zwischentotal<span id="ezRechnerKursHinweis"></span></span><span id="ezRechnerZwischentotal">0.00 CHF</span></div>
+    <div id="ezRechnerZwischentotalWrap"></div>
     <div class="ezr-factorrow">
       <div class="fld">
         <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;" title="In welcher Waehrung die Preise oben erfasst sind">Preise erfasst in</label>
@@ -1391,6 +1391,7 @@ const START_WERTE = { 'Poollaenge': 8, 'Poolbreite': 4, 'Beckentiefe': 1.5 };
 const ZUGANG_LABELS = ['Direkt 0–10 m', 'Mittel 10–25 m', 'Weit 25–75 m', 'Komplex, Terrasse'];
 
 const fmtCHF = n => n.toLocaleString('de-CH', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' CHF';
+const fmtEUR = n => n.toLocaleString('de-CH', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' EUR';
 // Rundungsregel fuers ganze Tool: Mengen auf ganze Zahl, Finanzwerte auf 0.1 CHF.
 const rundeMenge = n => Math.round(n);
 const rundeTage = n => Math.round(n * 2) / 2; // Tage werden in 0.5er-Schritten erfasst
@@ -2020,6 +2021,14 @@ async function oeffneEzRechner(clientKey){
 function ezRechnerSchliessen(){
   $('ezRechnerOvl').classList.remove('show');
 }
+// Formatierung der Eingabe-Zeilen (Betrag-Spalte) richtet sich nach der
+// gewaehlten Waehrung oben ("Preise erfasst in") - vorher stand dort immer
+// "CHF" dran, obwohl bei EUR-Eingabe eigentlich noch gar keine Umrechnung
+// stattgefunden hat (die passiert erst weiter unten bei Zwischentotal/
+// Endpreis). Das fuehrte zu falsch beschrifteten Betraegen.
+function ezRechnerFmtEingabe(n){
+  return $('ezRechnerWaehrung').value === 'EUR' ? fmtEUR(n) : fmtCHF(n);
+}
 function renderEzRechnerTabelle(){
   $('ezRechnerBody').innerHTML = ezRechnerZeilen.map(r => {
     const betrag = (r.menge || 0) * (r.preis || 0);
@@ -2027,16 +2036,16 @@ function renderEzRechnerTabelle(){
       <td class="ezr-menge"><input type="number" step="0.01" value="${r.menge}"></td>
       <td><input type="text" value="${(r.bezeichnung || '').replace(/"/g,'&quot;')}" placeholder="Bezeichnung"></td>
       <td class="ezr-preis"><input type="number" step="0.01" value="${r.preis}"></td>
-      <td class="ezr-betrag">${fmtCHF(betrag)}</td>
+      <td class="ezr-betrag">${ezRechnerFmtEingabe(betrag)}</td>
       <td><button type="button" class="icobtn ez-del" title="Position entfernen">${ICON.trash}</button></td>
     </tr>`;
   }).join('');
   $('ezRechnerBody').querySelectorAll('tr').forEach(tr => {
     const key = tr.dataset.key;
     const r = ezRechnerZeilen.find(x => x.clientKey === key);
-    tr.querySelectorAll('input')[0].addEventListener('change', e => { r.menge = parseFloat(e.target.value) || 0; ezRechnerAktualisiereSummen(); tr.querySelector('.ezr-betrag').textContent = fmtCHF((r.menge||0)*(r.preis||0)); });
+    tr.querySelectorAll('input')[0].addEventListener('change', e => { r.menge = parseFloat(e.target.value) || 0; ezRechnerAktualisiereSummen(); tr.querySelector('.ezr-betrag').textContent = ezRechnerFmtEingabe((r.menge||0)*(r.preis||0)); });
     tr.querySelectorAll('input')[1].addEventListener('change', e => { r.bezeichnung = e.target.value; });
-    tr.querySelectorAll('input')[2].addEventListener('change', e => { r.preis = parseFloat(e.target.value) || 0; ezRechnerAktualisiereSummen(); tr.querySelector('.ezr-betrag').textContent = fmtCHF((r.menge||0)*(r.preis||0)); });
+    tr.querySelectorAll('input')[2].addEventListener('change', e => { r.preis = parseFloat(e.target.value) || 0; ezRechnerAktualisiereSummen(); tr.querySelector('.ezr-betrag').textContent = ezRechnerFmtEingabe((r.menge||0)*(r.preis||0)); });
     tr.querySelector('.ez-del').addEventListener('click', () => {
       ezRechnerZeilen = ezRechnerZeilen.filter(x => x.clientKey !== key);
       renderEzRechnerTabelle();
@@ -2044,11 +2053,22 @@ function renderEzRechnerTabelle(){
   });
   ezRechnerAktualisiereSummen();
 }
+// Bei EUR-Eingabe zwei Zeilen statt einer: zuerst das Zwischentotal in der
+// eingegebenen Fremdwaehrung (unveraendert, wie eingetippt), dann separat
+// die Umrechnung in CHF mit dem verwendeten Kurs - vorher stand faelschlich
+// nur eine einzige, mit "CHF" beschriftete Zeile, obwohl die Zahl noch die
+// rohe EUR-Summe war.
 function ezRechnerAktualisiereSummen(){
-  $('ezRechnerZwischentotal').textContent = fmtCHF(ezRechnerZwischentotal());
-  $('ezRechnerEndpreis').textContent = fmtCHF(ezRechnerEndpreis());
   const istEur = $('ezRechnerWaehrung').value === 'EUR';
-  $('ezRechnerKursHinweis').textContent = (istEur && ezRechnerEurKurs != null) ? ` (Kurs 1 EUR = ${ezRechnerEurKurs} CHF)` : '';
+  const rohSumme = ezRechnerZeilen.reduce((s, r) => s + (r.menge || 0) * (r.preis || 0), 0);
+  if(istEur){
+    $('ezRechnerZwischentotalWrap').innerHTML = `
+      <div class="ezr-sumrow"><span>Zwischentotal (EUR)</span><span>${fmtEUR(rohSumme)}</span></div>
+      <div class="ezr-sumrow"><span>→ umgerechnet in CHF${ezRechnerEurKurs != null ? ` (Kurs 1 EUR = ${ezRechnerEurKurs} CHF)` : ''}</span><span>${fmtCHF(ezRechnerZwischentotal())}</span></div>`;
+  }else{
+    $('ezRechnerZwischentotalWrap').innerHTML = `<div class="ezr-sumrow"><span>Zwischentotal</span><span>${fmtCHF(ezRechnerZwischentotal())}</span></div>`;
+  }
+  $('ezRechnerEndpreis').textContent = fmtCHF(ezRechnerEndpreis());
 }
 $('ezRechnerAddBtn').addEventListener('click', () => {
   ezRechnerZeilenCounter++;
