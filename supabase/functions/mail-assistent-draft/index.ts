@@ -10,10 +10,9 @@
 //  - 'verfassen': neue Mail, optional per Vorlage (body.vorlageId) oder frei
 //    per Stichworte (body.stichworte).
 //  - 'antworten': Antwort auf eine eingehende Mail (body.mailInhalt). Liest
-//    Sonderfaelle + Mail-Vorlagen:Antworten + Distanzlogik-Trigger, laesst
+//    Mail-Vorlagen:Antworten + Unterkategorien + Distanzlogik-Trigger, laesst
 //    Claude in einem Schritt entscheiden, was zutrifft:
-//      a) direkter Entwurf (matcht eine einfache Vorlage/einen Sonderfall/
-//         Auffangfall)
+//      a) direkter Entwurf (matcht eine einfache Vorlage/Auffangfall)
 //      b) Rueckfrage noetig (Vorlage vom Typ 'rueckfrage')
 //      c) Distanzlogik noetig (Kontaktanfrage-artig) - dann zweiter Schritt:
 //         Google-Maps-Distanz -> passende Stufe -> ggf. Partner-Empfehlung
@@ -210,7 +209,7 @@ VORLAGE:\n${vorlage.inhalt}`);
 
 // ----------------------------------------------------------------------------
 // Modus: antworten (intern) - Express-Pfad fuer Mails von @knechtgarten.ch-
-// Kollegen: kein Sonderfaelle/Vorlagen/Distanzlogik-Menu noetig, nur ein
+// Kollegen: kein Vorlagen/Distanzlogik-Menu noetig, nur ein
 // kurzer Antworttext (Stichworte reichen, siehe Schreibstil). Kleinerer
 // Prompt + weniger Output-Tokens = spuerbar schneller und guenstiger als der
 // volle Klassifizierungs-Prompt unten.
@@ -235,13 +234,12 @@ async function modusAntworten(body: any, modell: string) {
   if (body.intern) return await modusAntwortenIntern(body, modell);
 
   const [
-    { data: schreibstil }, { data: firmendaten }, { data: sonderfaelle },
+    { data: schreibstil }, { data: firmendaten },
     { data: vorlagen }, { data: kundenanfrageVorlagen }, { data: distanzMeta }, { data: faelle },
     { data: mitarbeitende }, { data: externeKontakte }, { data: unterkategorien },
   ] = await Promise.all([
     sb.from('mailassistent_schreibstil').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_firmendaten').select('*').limit(1).maybeSingle(),
-    sb.from('mailassistent_sonderfall').select('*').eq('immer_antworten', true).order('reihenfolge'),
     sb.from('mailassistent_vorlage').select(`*, mailassistent_vorlage_antwort(*),
       mailassistent_vorlage_zusatzfenster(
         mailassistent_zusatzfenster(id,typ,titel,platzhalter,erlaubt_eigene_eingabe,zeigt_anzahl,
@@ -274,12 +272,6 @@ async function modusAntworten(body: any, modell: string) {
     .map((a: any) => `${a.titel}:\n${a.inhalt}`)
     .join('\n\n');
 
-  const sonderfaelleMenu = (sonderfaelle || []).map((sf: any) => {
-    const ausnahmen = (sonderfaelle || []).filter((x: any) => x.ist_ausnahme_von === sf.id);
-    return `- "${sf.titel}"${sf.ist_auffangfall ? ' [AUFFANGFALL - nur wenn wirklich nichts anderes passt]' : ''}\n  Stichwörter: ${sf.stichwoerter || '–'}\n  Verhalten: ${sf.verhalten || '–'}` +
-      (ausnahmen.length ? ausnahmen.map((a: any) => `\n  AUSNAHME "${a.titel}" (${a.stichwoerter || '–'}): ${a.verhalten}`).join('') : '');
-  }).join('\n');
-
   const vorlagenMenu = (vorlagen || []).map((v: any) => {
     if (v.unterkategorie_id) return null; // gehoert zu einer UNTERKATEGORIE unten, nicht einzeln listen
     if (v.typ === 'rueckfrage') {
@@ -297,10 +289,7 @@ async function modusAntworten(body: any, modell: string) {
 
   const system = `Du bist der Mail-Assistent von Knechtgarten (Gartenbau-Unternehmen, Heimenschwand/BE). Du liest eine eingehende Mail und entscheidest, wie sie beantwortet werden soll.
 
-${schreibstil?.immer_antworten && schreibstil.inhalt ? 'SCHREIBSTIL:\n' + schreibstil.inhalt + '\n\n' : ''}${firmendaten?.immer_antworten ? 'FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten) + '\n\n' : ''}${mitarbeitendeListe ? 'MITARBEITENDE (unser eigenes Team - gehoert zu "uns", nicht zur Gegenseite):\n' + mitarbeitendeListe + '\n\n' : ''}${externeKontakteListe ? 'BEKANNTE EXTERNE FIRMEN (anhand der Domain im Mailkopf zuordenbar - gehoeren NICHT zu uns):\n' + externeKontakteListe + '\n\n' : ''}${faelleText ? 'FÄLLE (situative Regeln, gelten immer):\n' + faelleText + '\n\n' : ''}Pruefe die folgenden vier Bereiche mit GLEICHER Prioritaet (keiner geht den anderen automatisch vor) - SONDERFÄLLE, MAIL-VORLAGEN und UNTERKATEGORIEN sind fuer spezifische, bekannte Faelle, KUNDENANFRAGEN ist der Auffangbereich fuer echte Neukunden-/Projektanfragen, die keine dieser spezifischen Vorlagen treffen:
-
-SONDERFÄLLE (Ausnahmen gehen der Hauptregel vor):
-${sonderfaelleMenu || '(keine erfasst)'}
+${schreibstil?.immer_antworten && schreibstil.inhalt ? 'SCHREIBSTIL:\n' + schreibstil.inhalt + '\n\n' : ''}${firmendaten?.immer_antworten ? 'FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten) + '\n\n' : ''}${mitarbeitendeListe ? 'MITARBEITENDE (unser eigenes Team - gehoert zu "uns", nicht zur Gegenseite):\n' + mitarbeitendeListe + '\n\n' : ''}${externeKontakteListe ? 'BEKANNTE EXTERNE FIRMEN (anhand der Domain im Mailkopf zuordenbar - gehoeren NICHT zu uns):\n' + externeKontakteListe + '\n\n' : ''}${faelleText ? 'FÄLLE (situative Regeln, gelten immer):\n' + faelleText + '\n\n' : ''}Pruefe die folgenden drei Bereiche mit GLEICHER Prioritaet (keiner geht den anderen automatisch vor) - MAIL-VORLAGEN und UNTERKATEGORIEN sind fuer spezifische, bekannte Faelle, KUNDENANFRAGEN ist der Auffangbereich fuer echte Neukunden-/Projektanfragen, die keine dieser spezifischen Vorlagen treffen:
 
 MAIL-VORLAGEN:
 ${vorlagenMenu || '(keine erfasst)'}
@@ -311,7 +300,7 @@ ${unterkategorienMenu || '(keine erfasst)'}
 KUNDENANFRAGEN - dafür gibt es KEINE feste Vorlage, der Mitarbeiter wählt selbst manuell die passende Antwort aus einer Liste, du lieferst nur die Einordnung + falls möglich die Kundenadresse. Nur relevant wenn: ${distanzMeta?.wann_anwenden || '(nicht konfiguriert)'}
 
 Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Objekt (kein Text davor/danach), in einer dieser fünf Formen:
-1. Direkter Entwurf möglich (Sonderfall/einfache Vorlage/Auffangfall):
+1. Direkter Entwurf möglich (einfache Vorlage/Auffangfall):
 {"aktion":"entwurf","text":"<fertiger Mailtext>","vorlageTitel":"<exakter Titel der verwendeten VORLAGE, sonst null>"}
    Trifft eine VORLAGE zu: deren Text als starke Richtschnur nehmen (Kernaussage/Entscheidung und Aufbau bleiben, das ist nicht verhandelbar), aber natürlich personalisieren - Namen der Person ansprechen, wo sinnvoll kurz auf Details aus der eingehenden Mail eingehen. Nicht stur wortwörtlich abschreiben, aber auch nichts an der eigentlichen Entscheidung/Aussage ändern. WICHTIG: Waehle eine VORLAGE fuer Fall 1 nur, wenn sie auch wirklich einen "Text:" hat. Hat die naheliegendste VORLAGE (noch) keinen Text hinterlegt, ist sie fuer Fall 1 nicht nutzbar - pruefe stattdessen, ob KUNDENANFRAGEN (Fall 3) zutrifft, oder schreibe selbst einen passenden, kurzen Text (wie bei einem Auffangfall). Erzeuge NIE einen leeren oder nur aus Platzhaltern bestehenden Text.
    Platzhalter in eckigen Klammern (z.B. [Bauteil], [X Minuten]) werden so behandelt:
@@ -319,7 +308,7 @@ Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Obje
    - JEDEN Platzhalter, der das Wort "Datum" enthaelt (z.B. [Datum], [Datum, Uhrzeit]), IMMER exakt unveraendert stehen lassen - der wird separat behandelt.
    - Jeden ANDEREN Platzhalter: kannst du aus der eingehenden Mail/dem Kontext einen konkreten, sinnvollen Wert ableiten, ersetze ihn durch diesen Wert in DOPPELTEN eckigen Klammern, z.B. wird aus [Bauteil] -> [[Ablaufventil]] (macht sichtbar, wo du etwas eingesetzt hast, der Mitarbeiter kann es noch per Klick anpassen). Bist du dir nicht sicher oder fehlt die Information, lass ihn stattdessen unveraendert in einfachen eckigen Klammern stehen, z.B. [Bauteil]. Erfinde NIE einen Wert, den du nicht wirklich aus dem Kontext hast.
    - Text OHNE Klammern in der VORLAGE (z.B. schon konkrete Namen, Adressen, Telefonnummern, E-Mail-Adressen) bleibt IMMER exakt unveraendert stehen - erstelle NIEMALS neue eckige Klammern um bereits konkrete Angaben.
-   "vorlageTitel" ist der exakte Titel der VORLAGE, deren Text du als Grundlage genommen hast - null, falls du dir den Text selbst ueberlegt hast (Sonderfall/Auffangfall ohne passende VORLAGE).
+   "vorlageTitel" ist der exakte Titel der VORLAGE, deren Text du als Grundlage genommen hast - null, falls du dir den Text selbst ueberlegt hast (Auffangfall ohne passende VORLAGE).
    Schreibst du den Text selbst (kein VORLAGE-Text als Basis, z.B. Auffangfall oder eine noch nicht erfasste Situation):
    - Beachte dabei insbesondere die oben unter FÄLLE aufgefuehrten Regeln zu Vollstaendigkeit, Personen-Rollen und Danke-Regel.
    - Wird eine konkrete Sachfrage gestellt, die NUR das Team selbst beantworten kann (z.B. "Habt ihr noch X im Einsatz?", "Wie viele Y?", ein internes Detail, das nicht aus der eingehenden Mail hervorgeht) - erfinde NIEMALS eine Antwort darauf. Setze stattdessen einen Platzhalter in eckigen Klammern ein, der kurz beschreibt, was einzusetzen ist, z.B. [Antwort: eigene Space 2.0-Einheiten im Einsatz?] - der Mitarbeiter kann per Klick draufantworten, bevor die Mail rausgeht.
