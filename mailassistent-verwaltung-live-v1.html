@@ -260,13 +260,10 @@ body.buero-rolle .admin-only{display:none !important;}
       <!-- GRUNDLOGIK (reine Referenz, wird nicht an die KI mitgeschickt) -->
       <div class="panel" id="tab-grundlogik">
         <h1 class="page">Grundlogik</h1>
-        <p style="font-size:12.5px;color:var(--muted);margin:-6px 0 14px;max-width:640px;">Übergeordnete Betriebsanleitung - wie sich die KI zwischen Schreibstil, Fällen, Mailkategorien, Nachschlagewerk und Aktionstyp bewegt. Reine Referenz für dich, wird nicht direkt an die KI mitgeschickt (die Reihenfolge steckt im Programm-Ablauf selbst).</p>
+        <p style="font-size:12.5px;color:var(--muted);margin:-6px 0 14px;max-width:640px;">Übergeordnete Betriebsanleitung - wie sich die KI zwischen Schreibstil, Fällen, Mailkategorien, Nachschlagewerk und Aktionstyp bewegt. Reine Referenz für dich, wird nicht direkt an die KI mitgeschickt (die Reihenfolge steckt im Programm-Ablauf selbst). Frei in eigene Abschnitte gliederbar.</p>
         <div class="card">
-          <textarea class="vorgaben" id="glInhalt" placeholder="Weiche, Bewegungsreihenfolge …"></textarea>
-          <div class="metarow">
-            <span class="metatext" id="glMeta"></span>
-            <button class="btn btn-primary" id="glSaveBtn">Speichern</button>
-          </div>
+          <div id="grundlogikListe"></div>
+          <button class="btn btn-primary addvorlagebtn" id="grundlogikAddBtn">+ Neuen Abschnitt hinzufügen</button>
         </div>
       </div>
 
@@ -362,6 +359,13 @@ body.buero-rolle .admin-only{display:none !important;}
           <div class="cardlabel">Mitarbeiter</div>
           <div id="mitarbeiterListe"></div>
           <button class="btn btn-primary addvorlagebtn" id="mitarbeiterAddBtn">+ Mitarbeiter hinzufügen</button>
+        </div>
+
+        <div class="card">
+          <div class="cardlabel">Externe Kontakte &amp; Firmen</div>
+          <div class="cardnote">Bekannte Lieferanten-/Architekten-/Partnerfirmen mit Domain(s) - damit die KI eine Mailadresse direkt einer Firma zuordnen kann, statt zu raten.</div>
+          <div id="externeKontakteListe"></div>
+          <button class="btn btn-primary addvorlagebtn" id="externerKontaktAddBtn">+ Firma hinzufügen</button>
         </div>
       </div>
 
@@ -654,6 +658,34 @@ body.buero-rolle .admin-only{display:none !important;}
   </div>
 </div>
 
+<!-- Modal: Grundlogik-Abschnitt -->
+<div class="ovl" id="glOvl">
+  <div class="ovlbox">
+    <h3>Abschnitt</h3>
+    <div class="fld"><label>Titel</label><input id="glTitel"></div>
+    <div class="fld"><label>Inhalt</label><textarea id="glInhaltFeld" rows="6"></textarea></div>
+    <div class="ovlbtns">
+      <button class="btn btn-ghost" id="glCancelBtn">Abbrechen</button>
+      <button class="btn btn-primary" id="glSaveBtn">Speichern</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Externer Kontakt -->
+<div class="ovl" id="ekOvl">
+  <div class="ovlbox">
+    <h3>Externe Firma</h3>
+    <div class="fld"><label>Firma</label><input id="ekFirma"></div>
+    <div class="fld"><label>Domain(s) - bei mehreren mit Komma trennen</label><input id="ekDomains" placeholder="z.B. drydenaqua.com, aquasolar.ch"></div>
+    <div class="fld"><label>Rolle</label><input id="ekRolle" placeholder="z.B. Lieferant, Architekt, Partnerbetrieb"></div>
+    <div class="fld"><label>Notiz (optional)</label><input id="ekNotiz"></div>
+    <div class="ovlbtns">
+      <button class="btn btn-ghost" id="ekCancelBtn">Abbrechen</button>
+      <button class="btn btn-primary" id="ekSaveBtn">Speichern</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal: Nachbessern-Button -->
 <div class="ovl" id="nbOvl">
   <div class="ovlbox">
@@ -782,7 +814,7 @@ async function pruefeAnmeldung(){
   document.body.classList.toggle('buero-rolle', aktuelleRolle !== 'admin');
 
   await Promise.all([
-    ladeGrundlogik(), ladeSchreibstil(), ladeFaelle(), ladeFirmendaten(), ladeMitarbeiter(), ladeZusatzfensterListe(), ladeErweiterung(),
+    ladeGrundlogik(), ladeSchreibstil(), ladeFaelle(), ladeFirmendaten(), ladeMitarbeiter(), ladeExterneKontakte(), ladeZusatzfensterListe(), ladeErweiterung(),
     ladeVorlagen('verfassen'), ladeVorlagen('antworten'), ladeVorlagen('kundenanfrage'),
     ladeSonderfaelle(), ladeDistanzAlles(),
     ladeNachbessernButtons(), ladeEinstellungen(), ladeNutzung()
@@ -818,28 +850,58 @@ document.querySelectorAll('.settingsnav a').forEach(a=>{
 // ---------------------------------------------------------------------------
 // Grundlogik (reine Referenz, nicht an die KI mitgeschickt)
 // ---------------------------------------------------------------------------
-let grundlogikRow = null;
+let grundlogikListe = [];
 async function ladeGrundlogik(){
-  const { data, error } = await sb.from('mailassistent_grundlogik_meta').select('*').limit(1).maybeSingle();
+  const { data, error } = await sb.from('mailassistent_grundlogik_abschnitt').select('*').order('reihenfolge');
   if(error){ console.error(error); return; }
-  grundlogikRow = data;
-  if(!data) return;
-  $('glInhalt').value = data.inhalt || '';
-  $('glMeta').textContent = `Version ${data.version} · zuletzt bearbeitet` + (data.aktualisiert_von ? ` von ${data.aktualisiert_von}` : '') +
-    (data.aktualisiert_am ? ` am ${new Date(data.aktualisiert_am).toLocaleDateString('de-CH')}` : '');
+  grundlogikListe = data || [];
+  $('grundlogikListe').innerHTML = grundlogikListe.map(a => `
+    <div class="vorlagerow">
+      <div class="txt">
+        <div class="titelrow"><span class="titel">${esc(a.titel)}</span></div>
+        <div class="preview">${esc(a.inhalt || '')}</div>
+      </div>
+      <div class="rowactions">
+        <button class="icobtn gl-edit" data-id="${a.id}" title="Bearbeiten">${ICON.edit}</button>
+        <button class="icobtn danger gl-del" data-id="${a.id}" title="Löschen">${ICON.trash}</button>
+      </div>
+    </div>`).join('') || '<p style="font-size:12px;color:var(--muted);">Noch keine Abschnitte erfasst.</p>';
+  $('grundlogikListe').querySelectorAll('.gl-edit').forEach(b => b.addEventListener('click', () => oeffneGrundlogikModal(b.dataset.id)));
+  $('grundlogikListe').querySelectorAll('.gl-del').forEach(b => b.addEventListener('click', () => loescheGrundlogikAbschnitt(b.dataset.id)));
 }
+let glAktuelleId = null;
+function oeffneGrundlogikModal(id){
+  glAktuelleId = id || null;
+  const a = grundlogikListe.find(x => x.id === id);
+  $('glTitel').value = a?.titel || '';
+  $('glInhaltFeld').value = a?.inhalt || '';
+  $('glOvl').classList.add('show');
+}
+$('grundlogikAddBtn').addEventListener('click', () => oeffneGrundlogikModal(null));
+$('glCancelBtn').addEventListener('click', () => $('glOvl').classList.remove('show'));
 $('glSaveBtn').addEventListener('click', async () => {
-  if(!grundlogikRow) return;
-  const { error } = await sb.from('mailassistent_grundlogik_meta').update({
-    inhalt: $('glInhalt').value,
-    version: (grundlogikRow.version || 1) + 1,
-    aktualisiert_am: new Date().toISOString(),
-    aktualisiert_von: aktuellerEmail
-  }).eq('id', grundlogikRow.id);
+  const titel = $('glTitel').value.trim();
+  const inhalt = $('glInhaltFeld').value.trim();
+  if(!titel){ showToast('Titel ist Pflicht.', true); return; }
+  let error;
+  if(glAktuelleId){
+    ({ error } = await sb.from('mailassistent_grundlogik_abschnitt').update({ titel, inhalt }).eq('id', glAktuelleId));
+  } else {
+    ({ error } = await sb.from('mailassistent_grundlogik_abschnitt').insert({ titel, inhalt, reihenfolge: grundlogikListe.length }));
+  }
   if(error){ showToast(friendlyError(error), true); return; }
+  $('glOvl').classList.remove('show');
   showToast('Gespeichert.');
   await ladeGrundlogik();
 });
+async function loescheGrundlogikAbschnitt(id){
+  const item = grundlogikListe.find(a => a.id === id);
+  if(!await kgBestaetigen(`"${item?.titel || 'Diesen Abschnitt'}" wirklich löschen?`)) return;
+  const { error } = await sb.from('mailassistent_grundlogik_abschnitt').delete().eq('id', id);
+  if(error){ showToast(friendlyError(error), true); return; }
+  showToast('Gelöscht.');
+  await ladeGrundlogik();
+}
 
 // ---------------------------------------------------------------------------
 // Schreibstil
@@ -994,6 +1056,58 @@ async function loescheMitarbeiter(id){
   if(error){ showToast(friendlyError(error), true); return; }
   showToast('Gelöscht.');
   await ladeMitarbeiter();
+}
+
+let externeKontakteListe = [];
+async function ladeExterneKontakte(){
+  const { data, error } = await sb.from('mailassistent_externe_kontakte').select('*').order('reihenfolge');
+  if(error){ console.error(error); return; }
+  externeKontakteListe = data || [];
+  $('externeKontakteListe').innerHTML = externeKontakteListe.map(k => `
+    <div class="mitarbeiterrow">
+      <span class="mname">${esc(k.firma)}</span><span class="mmail">${esc(k.domains)}</span><span class="mfunk">${esc(k.rolle || '')}</span>
+      <div class="rowactions">
+        <button class="icobtn ek-edit" data-id="${k.id}" title="Bearbeiten">${ICON.edit}</button>
+        <button class="icobtn danger ek-del" data-id="${k.id}" title="Löschen">${ICON.trash}</button>
+      </div>
+    </div>`).join('') || '<p style="font-size:12px;color:var(--muted);">Noch keine externen Firmen erfasst.</p>';
+  $('externeKontakteListe').querySelectorAll('.ek-edit').forEach(b => b.addEventListener('click', () => oeffneExternerKontaktModal(b.dataset.id)));
+  $('externeKontakteListe').querySelectorAll('.ek-del').forEach(b => b.addEventListener('click', () => loescheExternerKontakt(b.dataset.id)));
+}
+let ekAktuelleId = null;
+function oeffneExternerKontaktModal(id){
+  ekAktuelleId = id || null;
+  const k = externeKontakteListe.find(x => x.id === id);
+  $('ekFirma').value = k?.firma || '';
+  $('ekDomains').value = k?.domains || '';
+  $('ekRolle').value = k?.rolle || '';
+  $('ekNotiz').value = k?.notiz || '';
+  $('ekOvl').classList.add('show');
+}
+$('externerKontaktAddBtn').addEventListener('click', () => oeffneExternerKontaktModal(null));
+$('ekCancelBtn').addEventListener('click', () => $('ekOvl').classList.remove('show'));
+$('ekSaveBtn').addEventListener('click', async () => {
+  const werte = { firma: $('ekFirma').value.trim(), domains: $('ekDomains').value.trim(), rolle: $('ekRolle').value.trim(), notiz: $('ekNotiz').value.trim() || null };
+  if(!werte.firma || !werte.domains){ showToast('Firma und Domain(s) sind Pflicht.', true); return; }
+  let error;
+  if(ekAktuelleId){
+    ({ error } = await sb.from('mailassistent_externe_kontakte').update(werte).eq('id', ekAktuelleId));
+  } else {
+    werte.reihenfolge = externeKontakteListe.length;
+    ({ error } = await sb.from('mailassistent_externe_kontakte').insert(werte));
+  }
+  if(error){ showToast(friendlyError(error), true); return; }
+  $('ekOvl').classList.remove('show');
+  showToast('Gespeichert.');
+  await ladeExterneKontakte();
+});
+async function loescheExternerKontakt(id){
+  const item = externeKontakteListe.find(k => k.id === id);
+  if(!await kgBestaetigen(`"${item?.firma || 'Diese Firma'}" wirklich löschen?`)) return;
+  const { error } = await sb.from('mailassistent_externe_kontakte').delete().eq('id', id);
+  if(error){ showToast(friendlyError(error), true); return; }
+  showToast('Gelöscht.');
+  await ladeExterneKontakte();
 }
 
 // ---------------------------------------------------------------------------
