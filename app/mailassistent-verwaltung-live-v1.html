@@ -507,6 +507,18 @@ body.buero-rolle .admin-only{display:none !important;}
           <div id="nachbessernListe"></div>
           <button class="btn btn-primary addvorlagebtn" id="nachbessernAddBtn">+ Neuen Button erstellen</button>
         </div>
+
+        <div class="card">
+          <div class="cardlabel">Browser-Erweiterung</div>
+          <div class="cardnote">ZIP-Datei hier ablegen, sobald eine neue Version bereit ist. Zum Veröffentlichen danach manuell im Chrome Web Store Developer Dashboard hochladen.</div>
+          <div id="erwInfo" style="font-size:12.5px;color:var(--muted);margin-bottom:12px;">Noch keine Version hochgeladen.</div>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+            <input id="erwVersion" placeholder="Version (z.B. 2.3.2)" style="width:170px;border:1px solid var(--line);border-radius:6px;padding:7px 10px;font:inherit;font-size:12.5px;">
+            <input type="file" id="erwUploadInput" accept=".zip" class="hidden">
+            <button class="btn btn-primary" id="erwUploadBtn">Neue Version hochladen</button>
+            <a class="btn btn-ghost hidden" id="erwDownloadBtn" target="_blank">Herunterladen</a>
+          </div>
+        </div>
       </div>
 
     </div>
@@ -756,7 +768,7 @@ async function pruefeAnmeldung(){
   document.body.classList.toggle('buero-rolle', aktuelleRolle !== 'admin');
 
   await Promise.all([
-    ladeSchreibstil(), ladeFaelle(), ladeFirmendaten(), ladeMitarbeiter(), ladeZusatzfensterListe(),
+    ladeSchreibstil(), ladeFaelle(), ladeFirmendaten(), ladeMitarbeiter(), ladeZusatzfensterListe(), ladeErweiterung(),
     ladeVorlagen('verfassen'), ladeVorlagen('antworten'), ladeVorlagen('kundenanfrage'),
     ladeSonderfaelle(), ladeDistanzAlles(),
     ladeNachbessernButtons(), ladeEinstellungen(), ladeNutzung()
@@ -2125,6 +2137,38 @@ async function loescheNachbessernButton(id){
   showToast('Gelöscht.');
   await ladeNachbessernButtons();
 }
+
+// ---------------------------------------------------------------------------
+// Browser-Erweiterung (ZIP-Ablage, damit Stefan nicht ueber Google Drive gehen
+// muss - Download hier, danach von Hand im Chrome Web Store hochladen)
+// ---------------------------------------------------------------------------
+let erweiterungRow = null;
+const ERW_DATEINAME = 'knechtgarten-mail-assistent.zip';
+async function ladeErweiterung(){
+  const { data, error } = await sb.from('mailassistent_erweiterung_meta').select('*').limit(1).maybeSingle();
+  if(error){ console.error(error); return; }
+  erweiterungRow = data;
+  if(!data || !data.url) return;
+  $('erwInfo').textContent = `Version ${data.version || '–'} · hochgeladen am ${new Date(data.hochgeladen_am).toLocaleDateString('de-CH')}` + (data.hochgeladen_von ? ` von ${data.hochgeladen_von}` : '');
+  $('erwDownloadBtn').href = data.url;
+  $('erwDownloadBtn').classList.remove('hidden');
+}
+$('erwUploadBtn').addEventListener('click', () => $('erwUploadInput').click());
+$('erwUploadInput').addEventListener('change', async () => {
+  const file = $('erwUploadInput').files[0];
+  if(!file) return;
+  const { error: upErr } = await sb.storage.from('mail-assistent-erweiterung').upload(ERW_DATEINAME, file, { upsert: true });
+  if(upErr){ showToast(friendlyError(upErr), true); $('erwUploadInput').value=''; return; }
+  const url = sb.storage.from('mail-assistent-erweiterung').getPublicUrl(ERW_DATEINAME).data.publicUrl;
+  const payload = { version: $('erwVersion').value.trim() || null, dateiname: file.name, url, hochgeladen_am: new Date().toISOString(), hochgeladen_von: aktuellerEmail };
+  const { error } = erweiterungRow
+    ? await sb.from('mailassistent_erweiterung_meta').update(payload).eq('id', erweiterungRow.id)
+    : await sb.from('mailassistent_erweiterung_meta').insert(payload);
+  if(error){ showToast(friendlyError(error), true); return; }
+  showToast('Hochgeladen.');
+  $('erwUploadInput').value = '';
+  await ladeErweiterung();
+});
 
 // ---------------------------------------------------------------------------
 // Einstellungen (Modell) + Nutzung
