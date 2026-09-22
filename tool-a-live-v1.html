@@ -846,8 +846,15 @@ input[type=number]{-moz-appearance:textfield;}
       <tbody id="ezRechnerBody"></tbody>
     </table>
     <button type="button" class="btnlink" id="ezRechnerAddBtn" style="margin:2px 0 10px;">+ Position hinzufügen</button>
-    <div class="ezr-sumrow"><span>Zwischentotal</span><span id="ezRechnerZwischentotal">0.00 CHF</span></div>
+    <div class="ezr-sumrow"><span>Zwischentotal<span id="ezRechnerKursHinweis"></span></span><span id="ezRechnerZwischentotal">0.00 CHF</span></div>
     <div class="ezr-factorrow">
+      <div class="fld">
+        <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;" title="In welcher Waehrung die Preise oben erfasst sind">Preise erfasst in</label>
+        <select id="ezRechnerWaehrung" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;color:var(--ink);">
+          <option value="CHF">CHF</option>
+          <option value="EUR">EUR (wird in CHF umgerechnet)</option>
+        </select>
+      </div>
       <div class="fld">
         <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px;" title="Aufschlag/Verschnitt auf das Zwischentotal">Verschnitt / Zuschlag %</label>
         <input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="number" step="0.1" id="ezRechnerVerschnitt" value="0" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:13px;color:var(--ink);text-align:right;">
@@ -860,7 +867,6 @@ input[type=number]{-moz-appearance:textfield;}
     <div class="ezr-dropzone" id="ezRechnerDropzone">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="10.5" r="1.6"/><path d="M21 16l-5.5-5.5L7 19"/></svg>
       <span id="ezRechnerDropzoneText">Fremdofferte/Preisliste einfügen (Strg+V) oder hineinziehen – Positionen werden automatisch erkannt</span>
-      <input type="file" id="ezRechnerDateiInput" accept="image/*" class="hidden">
     </div>
     <div class="status" id="ezRechnerStatus"></div>
     <div class="geomodalfoot" style="align-items:center;justify-content:space-between;">
@@ -1920,10 +1926,21 @@ $('eigenePositionSpeichernBtn').addEventListener('click', eigenePositionSpeicher
 let ezRechnerZielKey = null;
 let ezRechnerZeilen = [];
 let ezRechnerZeilenCounter = 0;
-let ezRechnerZeilenState = {}; // { [clientKey]: { zeilen, verschnitt, marge } }
-
+let ezRechnerZeilenState = {}; // { [clientKey]: { zeilen, verschnitt, marge, waehrung } }
+// EUR->CHF-Kurs aus Einstellungen -> Datenabgleich (Tabelle wechselkurs,
+// gleiche Quelle wie beim Artikelstamm) - einmal pro Sitzung geladen.
+let ezRechnerEurKurs = null;
+async function ezRechnerLadeEurKurs(){
+  if(ezRechnerEurKurs != null) return;
+  const { data } = await sb.from('wechselkurs').select('kurs_zu_chf').eq('waehrung', 'EUR').maybeSingle();
+  ezRechnerEurKurs = data?.kurs_zu_chf ?? 1;
+}
+function ezRechnerWaehrungsFaktor(){
+  return $('ezRechnerWaehrung').value === 'EUR' ? (ezRechnerEurKurs ?? 1) : 1;
+}
 function ezRechnerZwischentotal(){
-  return ezRechnerZeilen.reduce((s, r) => s + (r.menge || 0) * (r.preis || 0), 0);
+  const roh = ezRechnerZeilen.reduce((s, r) => s + (r.menge || 0) * (r.preis || 0), 0);
+  return roh * ezRechnerWaehrungsFaktor();
 }
 function ezRechnerEndpreis(){
   const verschnitt = parseFloat($('ezRechnerVerschnitt').value) || 0;
@@ -1931,7 +1948,7 @@ function ezRechnerEndpreis(){
   return ezRechnerZwischentotal() * (1 + verschnitt / 100) * (1 + marge / 100);
 }
 
-function oeffneEzRechner(clientKey){
+async function oeffneEzRechner(clientKey){
   const z = eigeneZeilen.find(x => x.clientKey === clientKey);
   if(!z) return;
   ezRechnerZielKey = clientKey;
@@ -1940,6 +1957,7 @@ function oeffneEzRechner(clientKey){
     ezRechnerZeilen = gespeichert.zeilen.map(r => ({ ...r }));
     $('ezRechnerVerschnitt').value = gespeichert.verschnitt;
     $('ezRechnerMarge').value = gespeichert.marge;
+    $('ezRechnerWaehrung').value = gespeichert.waehrung || 'CHF';
   }else{
     // Erstes Oeffnen: die bisherige Bezeichnung/Menge/Preis der Zeile schon
     // als erste Position vorschlagen, statt komplett leer zu starten - so
@@ -1948,11 +1966,14 @@ function oeffneEzRechner(clientKey){
     ezRechnerZeilen = [{ clientKey: 'ezr' + ezRechnerZeilenCounter, menge: z.menge || 1, bezeichnung: z.bezeichnung || '', preis: z.preis || 0 }];
     $('ezRechnerVerschnitt').value = 0;
     $('ezRechnerMarge').value = 0;
+    $('ezRechnerWaehrung').value = 'CHF';
   }
   $('ezRechnerSub').textContent = z.bezeichnung ? `Für: ${z.bezeichnung}` : 'Neue Position';
   $('ezRechnerStatus').textContent = ''; $('ezRechnerStatus').className = 'status';
   renderEzRechnerTabelle();
   $('ezRechnerOvl').classList.add('show');
+  await ezRechnerLadeEurKurs();
+  ezRechnerAktualisiereSummen();
 }
 function ezRechnerSchliessen(){
   $('ezRechnerOvl').classList.remove('show');
@@ -1984,11 +2005,17 @@ function renderEzRechnerTabelle(){
 function ezRechnerAktualisiereSummen(){
   $('ezRechnerZwischentotal').textContent = fmtCHF(ezRechnerZwischentotal());
   $('ezRechnerEndpreis').textContent = fmtCHF(ezRechnerEndpreis());
+  const istEur = $('ezRechnerWaehrung').value === 'EUR';
+  $('ezRechnerKursHinweis').textContent = (istEur && ezRechnerEurKurs != null) ? ` (Kurs 1 EUR = ${ezRechnerEurKurs} CHF)` : '';
 }
 $('ezRechnerAddBtn').addEventListener('click', () => {
   ezRechnerZeilenCounter++;
   ezRechnerZeilen.push({ clientKey: 'ezr' + ezRechnerZeilenCounter, menge: 1, bezeichnung: '', preis: 0 });
   renderEzRechnerTabelle();
+});
+$('ezRechnerWaehrung').addEventListener('change', async () => {
+  await ezRechnerLadeEurKurs();
+  ezRechnerAktualisiereSummen();
 });
 $('ezRechnerVerschnitt').addEventListener('input', ezRechnerAktualisiereSummen);
 $('ezRechnerMarge').addEventListener('input', ezRechnerAktualisiereSummen);
@@ -2000,7 +2027,8 @@ $('ezRechnerUebernehmenBtn').addEventListener('click', () => {
   ezRechnerZeilenState[ezRechnerZielKey] = {
     zeilen: ezRechnerZeilen.map(r => ({ ...r })),
     verschnitt: parseFloat($('ezRechnerVerschnitt').value) || 0,
-    marge: parseFloat($('ezRechnerMarge').value) || 0
+    marge: parseFloat($('ezRechnerMarge').value) || 0,
+    waehrung: $('ezRechnerWaehrung').value
   };
   // Nur der Endpreis zaehlt in der Offerte (siehe Absprache) - Menge bleibt
   // bewusst 1, die Einzelpositionen hier werden nicht separat ausgewiesen.
@@ -2049,12 +2077,8 @@ async function ezRechnerVerarbeiteBild(file){
   $('ezRechnerStatus').textContent = `${positionen.length} Position${positionen.length>1?'en':''} erkannt.`;
   $('ezRechnerStatus').className = 'status';
 }
-$('ezRechnerDropzone').addEventListener('click', () => $('ezRechnerDateiInput').click());
-$('ezRechnerDateiInput').addEventListener('change', () => {
-  const file = $('ezRechnerDateiInput').files[0];
-  $('ezRechnerDateiInput').value = '';
-  if(file) ezRechnerVerarbeiteBild(file);
-});
+// Bewusst KEIN Klick-zum-Datei-oeffnen-Dialog (siehe Absprache) - nur
+// Einfuegen (Strg+V) und Hineinziehen sollen ein Bild auswaehlen.
 $('ezRechnerDropzone').addEventListener('dragover', (e) => { e.preventDefault(); $('ezRechnerDropzone').classList.add('active'); });
 $('ezRechnerDropzone').addEventListener('dragleave', () => $('ezRechnerDropzone').classList.remove('active'));
 $('ezRechnerDropzone').addEventListener('drop', (e) => {
