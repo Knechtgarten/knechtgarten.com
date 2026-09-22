@@ -278,13 +278,16 @@ async function modusAntworten(body: any, modell: string) {
       const zweige = (v.mailassistent_vorlage_antwort || []).map((z: any) => z.label).join(' / ');
       return `- VORLAGE "${v.titel}" [MIT RÜCKFRAGE] – trifft zu wenn: ${v.wann_trifft_zu || '–'}\n  Frage an den Mitarbeiter: "${v.frage}"\n  Mögliche Antworten: ${zweige}`;
     }
-    return `- VORLAGE "${v.titel}" – trifft zu wenn: ${v.wann_trifft_zu || '–'}\n  Text:\n${v.inhalt}`;
+    return `- VORLAGE "${v.titel}" – trifft zu wenn: ${v.wann_trifft_zu || '–'}${v.nicht_anwenden_bei ? `\n  NICHT anwenden bei: ${v.nicht_anwenden_bei}` : ''}\n  Text:\n${v.inhalt}`;
   }).filter(Boolean).join('\n\n');
 
   const unterkategorienMenu = (unterkategorien || []).map((u: any) => {
     const zugehoerig = (vorlagen || []).filter((v: any) => v.unterkategorie_id === u.id);
     const optionen = zugehoerig.map((v: any) => v.titel).join(' / ');
-    return `- UNTERKATEGORIE "${u.titel}" (Kategorie: ${u.mailassistent_kategorie?.titel || '–'}) – zutreffend, wenn die Mail zu diesem Fall gehoert und mehrere gleichwertige Antworten in Frage kommen: ${optionen || '(keine Vorlagen erfasst)'}`;
+    return `- UNTERKATEGORIE "${u.titel}" (Kategorie: ${u.mailassistent_kategorie?.titel || '–'}) – zutreffend, wenn die Mail zu diesem Fall gehoert und mehrere gleichwertige Antworten in Frage kommen.` +
+      (u.anwenden_bei ? `\n  Anwenden bei: ${u.anwenden_bei}` : '') +
+      (u.nicht_anwenden_bei ? `\n  NICHT anwenden bei: ${u.nicht_anwenden_bei}` : '') +
+      `\n  Mögliche Antworten: ${optionen || '(keine Vorlagen erfasst)'}`;
   }).join('\n');
 
   const system = `Du bist der Mail-Assistent von Knechtgarten (Gartenbau-Unternehmen, Heimenschwand/BE). Du liest eine eingehende Mail und entscheidest, wie sie beantwortet werden soll.
