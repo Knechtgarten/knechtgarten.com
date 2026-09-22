@@ -96,6 +96,19 @@ textarea.abschnitt-text:focus{outline:none;border-color:var(--primary);}
 .badge-zf{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.02em;
   background:#F5F8E8;color:#6b7a1a;border-radius:4px;padding:2px 7px;white-space:nowrap;}
 .draghandle{align-self:center;flex-shrink:0;color:var(--muted);cursor:grab;display:inline-flex;}
+
+.mk-kategorie{border-bottom:1px solid var(--soft);}
+.mk-kategorie:last-of-type{border-bottom:none;}
+.mk-kategorie > summary{list-style:none;cursor:pointer;padding:12px 0;display:flex;align-items:center;gap:10px;font-size:14.5px;font-weight:700;color:var(--primary);}
+.mk-kategorie > summary::-webkit-details-marker{display:none;}
+.mk-kategorie > summary::before{content:"▸";font-size:12px;color:var(--muted);transition:transform .15s;flex-shrink:0;}
+.mk-kategorie[open] > summary::before{transform:rotate(90deg);}
+.mk-kategorie-body{padding:0 0 10px 24px;}
+.mk-unterkategorie-titel{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);margin:16px 0 2px;display:flex;align-items:center;gap:8px;}
+.mk-unterkategorie-titel:first-child{margin-top:2px;}
+.aktionstyp-badge{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.02em;padding:2px 8px;border-radius:10px;background:var(--soft);color:var(--muted);white-space:nowrap;}
+.aktionstyp-badge.kundenanfrage{background:#EAF3D6;color:#4A6B1F;}
+.aktionstyp-badge.rueckfrage{background:var(--accent-blue);color:var(--primary);}
 .draghandle:active{cursor:grabbing;}
 .vorlagerow .txt{flex:1;min-width:0;}
 .vorlagerow .titelrow{display:flex;align-items:center;gap:8px;margin-bottom:3px;}
@@ -804,6 +817,7 @@ async function pruefeAnmeldung(){
   $('appMain').classList.remove('hidden');
   document.body.classList.toggle('buero-rolle', aktuelleRolle !== 'admin');
 
+  await ladeKategorien();
   await Promise.all([
     ladeGrundlogik(), ladeSchreibstil(), ladeSchreibstilAbschnitte(), ladeFaelle(), ladeFirmendaten(), ladeMitarbeiter(), ladeExterneKontakte(), ladeZusatzfensterListe(), ladeErweiterung(),
     ladeVorlagen('verfassen'), ladeVorlagen('antworten'), ladeVorlagen('kundenanfrage'),
@@ -1112,6 +1126,22 @@ async function loescheExternerKontakt(id){
 // Mail-Vorlagen (Verfassen + Antworten, inkl. Rueckfrage-Typ)
 // ---------------------------------------------------------------------------
 let vorlagenCache = { verfassen: [], antworten: [], kundenanfrage: [] };
+let kategorienCache = [];
+let unterkategorienCache = [];
+async function ladeKategorien(){
+  const [{ data: k, error: ek }, { data: u, error: eu }] = await Promise.all([
+    sb.from('mailassistent_kategorie').select('*').order('reihenfolge'),
+    sb.from('mailassistent_unterkategorie').select('*').order('reihenfolge'),
+  ]);
+  if(ek) console.error(ek);
+  if(eu) console.error(eu);
+  kategorienCache = k || [];
+  unterkategorienCache = u || [];
+}
+function aktionstypBadgeHtml(typ){
+  const labels = { entwurf: 'Direkter Entwurf', rueckfrage: 'Rückfrage-Fenster', kundenanfrage: 'Kundenanfrage-Fenster' };
+  return `<span class="aktionstyp-badge ${esc(typ)}">${esc(labels[typ] || typ)}</span>`;
+}
 // Nur bei "Verfassen" relevant: null = oberste Ebene, sonst id der gerade
 // geoeffneten Dropdown-Gruppe (Ebene 2 sieht optisch genau gleich aus wie
 // Ebene 1, ist aber auf deren Kinder gefiltert).
@@ -1219,8 +1249,15 @@ function renderVorlagenListe(richtung){
   const zielId = richtung === 'verfassen' ? 'vorlagenVerfassenListe' : 'vorlagenAntwortenListe';
   const elternId = richtung === 'verfassen' ? voVerfassenElternId : null;
   const liste = vorlagenCache[richtung].filter(v => (v.parent_id || null) === elternId);
-  $(zielId).innerHTML = liste.map(v => vorlageRowHtml(v, richtung)).join('') ||
-    '<p style="font-size:12px;color:var(--muted);">Noch keine Vorlagen erfasst.</p>';
+
+  if(richtung === 'antworten'){
+    renderVorlagenGruppiert(zielId, liste, richtung);
+  } else {
+    $(zielId).innerHTML = liste.map(v => vorlageRowHtml(v, richtung)).join('') ||
+      '<p style="font-size:12px;color:var(--muted);">Noch keine Vorlagen erfasst.</p>';
+    voAktiviereDragDrop($(zielId), richtung);
+  }
+
   $(zielId).querySelectorAll('.vo-edit').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); oeffneVorlageModal(b.dataset.richtung, b.dataset.id); }));
   $(zielId).querySelectorAll('.vo-del').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); loescheVorlage(b.dataset.richtung, b.dataset.id); }));
   $(zielId).querySelectorAll('.vo-toggle-aktiv').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); voToggleAktiv(b.dataset.richtung, b.dataset.id); }));
@@ -1229,8 +1266,45 @@ function renderVorlagenListe(richtung){
     voSyncVerfassenEbeneUi();
     renderVorlagenListe('verfassen');
   }));
-  voAktiviereDragDrop($(zielId), richtung);
   if(richtung === 'verfassen') voSyncVerfassenEbeneUi();
+}
+// Gruppiert die "Antworten"-Vorlagen nach Kategorie -> Unterkategorie (Schritt
+// 3b des Mailkategorien-Umbaus). Noch nicht zugeordnete Vorlagen (aktuell die
+// "mit Rueckfrage"-Faelle, siehe Schritt 3c) landen sichtbar in einer eigenen
+// Gruppe, statt zu verschwinden. Die einzelnen Zeilen (vorlageRowHtml) und
+// ihre Bearbeiten/Loeschen-Handler bleiben unveraendert - nur die Anordnung
+// drumherum ist neu.
+function renderVorlagenGruppiert(zielId, liste, richtung){
+  const ohneKategorie = liste.filter(v => !v.kategorie_id);
+  const gruppenHtml = kategorienCache.map(k => {
+    const direkt = liste.filter(v => v.kategorie_id === k.id && !v.unterkategorie_id);
+    const unterGruppen = unterkategorienCache.filter(u => u.kategorie_id === k.id).map(u => {
+      const rows = liste.filter(v => v.unterkategorie_id === u.id);
+      if(!rows.length) return '';
+      return `
+        <div class="mk-unterkategorie-titel">${esc(u.titel)} ${aktionstypBadgeHtml(u.aktionstyp)}</div>
+        <div class="mk-rows" data-gruppe="unter-${u.id}">${rows.map(v => vorlageRowHtml(v, richtung)).join('')}</div>`;
+    }).join('');
+    if(!direkt.length && !unterGruppen) return '';
+    return `
+      <details class="mk-kategorie" open>
+        <summary>${esc(k.titel)} ${aktionstypBadgeHtml(k.aktionstyp)}</summary>
+        <div class="mk-kategorie-body">
+          ${direkt.length ? `<div class="mk-rows" data-gruppe="direkt-${k.id}">${direkt.map(v => vorlageRowHtml(v, richtung)).join('')}</div>` : ''}
+          ${unterGruppen}
+        </div>
+      </details>`;
+  }).join('');
+  const ohneKategorieHtml = ohneKategorie.length ? `
+    <details class="mk-kategorie" open>
+      <summary>Noch nicht zugeordnet</summary>
+      <div class="mk-kategorie-body">
+        <div class="mk-rows" data-gruppe="ohne-kategorie">${ohneKategorie.map(v => vorlageRowHtml(v, richtung)).join('')}</div>
+      </div>
+    </details>` : '';
+  $(zielId).innerHTML = gruppenHtml + ohneKategorieHtml ||
+    '<p style="font-size:12px;color:var(--muted);">Noch keine Vorlagen erfasst.</p>';
+  $(zielId).querySelectorAll('.mk-rows').forEach(row => voAktiviereDragDrop(row, richtung));
 }
 
 // Reihenfolge per Drag & Drop verschieben - wirkt sich auf "reihenfolge" in
