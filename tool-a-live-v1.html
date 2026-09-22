@@ -2025,7 +2025,11 @@ async function oeffneEzRechner(clientKey){
     ezRechnerZeilenCounter++;
     ezRechnerZeilen = [{ clientKey: 'ezr' + ezRechnerZeilenCounter, menge: z.menge || 1, bezeichnung: z.bezeichnung || '', preis: z.preis || 0 }];
     $('ezRechnerVerschnitt').value = 0;
-    $('ezRechnerMarge').value = 0;
+    // Margen-Vorschlag der Freitext-Vorlage (Tool B) uebernehmen, falls dort
+    // hinterlegt - erspart das Vergessen einer Marge bei Fremdleistungen ohne
+    // eigenen Artikel. Bleibt hier trotzdem frei aenderbar.
+    const vorlage = z.freitextVorlageId ? freitextVorlagen.find(v => v.id === z.freitextVorlageId) : null;
+    $('ezRechnerMarge').value = vorlage?.margenVorschlagProzent ?? 0;
     $('ezRechnerWaehrung').value = 'CHF';
   }
   $('ezRechnerTitel').textContent = z.bezeichnung || 'Neue Position';
@@ -2107,9 +2111,17 @@ $('ezRechnerVerschnitt').addEventListener('input', ezRechnerAktualisiereSummen);
 $('ezRechnerMarge').addEventListener('input', ezRechnerAktualisiereSummen);
 $('ezRechnerCloseX').addEventListener('click', ezRechnerSchliessen);
 $('ezRechnerAbbrechenBtn').addEventListener('click', ezRechnerSchliessen);
-$('ezRechnerUebernehmenBtn').addEventListener('click', () => {
+$('ezRechnerUebernehmenBtn').addEventListener('click', async () => {
   const z = eigeneZeilen.find(x => x.clientKey === ezRechnerZielKey);
   if(!z){ ezRechnerSchliessen(); return; }
+  // Fremdleistungsposition ohne eigenen Artikel: keine Marge einzutragen
+  // hiesse, sie 1:1 (ohne Verdienst) weiterzugeben - vor dem Uebernehmen
+  // deshalb nochmal nachfragen statt es stillschweigend durchzulassen.
+  const margeWert = parseFloat($('ezRechnerMarge').value) || 0;
+  if(margeWert === 0){
+    const weiter = await confirmDialog('Für diese Position wurde keine Marge eingetragen - sie würde 1:1 ohne Aufschlag weitergegeben. Trotzdem übernehmen?', 'Trotzdem übernehmen');
+    if(!weiter) return;
+  }
   ezRechnerZeilenState[ezRechnerZielKey] = {
     zeilen: ezRechnerZeilen.map(r => ({ ...r })),
     verschnitt: parseFloat($('ezRechnerVerschnitt').value) || 0,
@@ -2612,7 +2624,7 @@ async function ladeFormelDaten(otId){
           staffelgruppe ( name, titel, summen_zusatzeinheit, summen_scope, summen_reserve_prozent, staffelstufe ( menge_von, menge_bis, artikel_id, artikel ( vp_knecht, zusatzwert, zusatzeinheit ) ) ),
           zonengruppe ( name, titel, zone ( artikel ( vp_knecht ), zone_plz ( plz ) ) ),
           sonderposition_typ ( name, titel, einheit, mwst_satz_pct, lieferwagen_std_artikel_id, lieferwagen_km_artikel_id, lieferwagen_transport_ort, lieferwagen_std_artikel:artikel!lieferwagen_std_artikel_id ( vp_knecht, bezeichnung ), lieferwagen_km_artikel:artikel!lieferwagen_km_artikel_id ( vp_knecht, bezeichnung ) ) ),
-        option_freitext_vorlage ( id, kategorie, bezeichnung, einheit, notiz, menge_vorschlag, preis_vorschlag, ist_eigene_offertenposition ),
+        option_freitext_vorlage ( id, kategorie, bezeichnung, einheit, notiz, menge_vorschlag, preis_vorschlag, margen_vorschlag_prozent, ist_eigene_offertenposition ),
         auswahlfeld ( id, name,
           auswahloption ( id, name, beschreibung, reihenfolge, mengenoption, mengenoption_einheit, mengenoption_standardmenge, mehrfachauswahl, ist_eigene_offertenposition, eigene_position_titel, hinweistext, hinweisbild_url,
             ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, artikel_id, ist_eigene_offertenposition, mengenoption_ausgenommen,
@@ -2622,7 +2634,7 @@ async function ladeFormelDaten(otId){
               zonengruppe ( name, titel, zone ( artikel ( vp_knecht ), zone_plz ( plz ) ) ),
               auswahlgruppe ( name, titel, auswahlgruppe_option ( id, label, artikel_id, artikel ( bezeichnung, einheit, vp_knecht, zusatzwert, zusatzeinheit ) ) ),
               sonderposition_typ ( name, titel, einheit, mwst_satz_pct, lieferwagen_std_artikel_id, lieferwagen_km_artikel_id, lieferwagen_transport_ort, lieferwagen_std_artikel:artikel!lieferwagen_std_artikel_id ( vp_knecht, bezeichnung ), lieferwagen_km_artikel:artikel!lieferwagen_km_artikel_id ( vp_knecht, bezeichnung ) ) ),
-            option_freitext_vorlage ( id, kategorie, bezeichnung, einheit, notiz, menge_vorschlag, preis_vorschlag, ist_eigene_offertenposition ) ) ) )`)
+            option_freitext_vorlage ( id, kategorie, bezeichnung, einheit, notiz, menge_vorschlag, preis_vorschlag, margen_vorschlag_prozent, ist_eigene_offertenposition ) ) ) )`)
     .eq('offertentyp_id', otId).eq('ausgeblendet', false).order('reihenfolge');
   if(asErr) throw asErr;
 
@@ -2688,6 +2700,7 @@ async function ladeFormelDaten(otId){
     (liste || []).forEach(v => freitextVorlagen.push({
       id: v.id, optionId, arbeitsschritt: arbeitsschrittName, kategorie: v.kategorie, bezeichnung: v.bezeichnung,
       einheit: v.einheit, notiz: v.notiz, mengeVorschlag: v.menge_vorschlag, preisVorschlag: v.preis_vorschlag,
+      margenVorschlagProzent: v.margen_vorschlag_prozent,
       istEigenePosition: !!v.ist_eigene_offertenposition
     }));
   }
