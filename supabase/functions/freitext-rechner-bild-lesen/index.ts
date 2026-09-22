@@ -39,12 +39,12 @@ function parseZahl(text: unknown): number | null {
 
 // Gemini antwortet manchmal trotz Anweisung mit umgebendem Markdown
 // (```json ... ```) oder erklaerendem Text davor/danach - robust nur den
-// eigentlichen JSON-Array-Teil herausschneiden statt direkt JSON.parse() auf
+// eigentlichen JSON-Objekt-Teil herausschneiden statt direkt JSON.parse() auf
 // die komplette Antwort loszulassen.
-function extrahiereJsonArray(text: string): unknown[] {
-  const start = text.indexOf('[');
-  const ende = text.lastIndexOf(']');
-  if (start === -1 || ende === -1 || ende < start) throw new Error('Kein JSON-Array in der Antwort gefunden.');
+function extrahiereJsonObjekt(text: string): Record<string, unknown> {
+  const start = text.indexOf('{');
+  const ende = text.lastIndexOf('}');
+  if (start === -1 || ende === -1 || ende < start) throw new Error('Kein JSON-Objekt in der Antwort gefunden.');
   return JSON.parse(text.slice(start, ende + 1));
 }
 
@@ -71,10 +71,11 @@ Deno.serve(async (req) => {
     }
 
     const prompt = `Auf diesem Bild ist eine Fremdofferte, Preisliste oder Rechnung eines externen Lieferanten zu sehen (nicht der eigene Artikelstamm).
-Erkenne fuer JEDE einzelne Position: die Menge, die Bezeichnung/Beschreibung und den Preis. Der Preis ist der EINZELPREIS pro Stueck/Einheit, falls sowohl Einzel- als auch Gesamtpreis pro Zeile sichtbar sind - nimm im Zweifel den Einzelpreis. Fehlt eine Mengenangabe, nimm 1 an.
-Antworte AUSSCHLIESSLICH mit einem JSON-Array, keine Erklaerung, kein Markdown-Codeblock. Jedes Element als Objekt mit genau diesen Feldern:
-{"menge": number, "bezeichnung": string, "preis": number}
-Zahlen als reine Zahl ohne Waehrungszeichen (z.B. 620.5, nicht "CHF 620.50"). Summen-/Total-Zeilen NICHT als eigene Position aufnehmen. Wenn keine Position erkennbar ist, gib ein leeres Array [] zurueck.`;
+Erkenne zuerst die verwendete Waehrung (am Waehrungszeichen/-code wie "CHF", "€"/"EUR", "$"/"USD" etc. erkennbar - meist bei allen Preisen gleich). Falls nicht eindeutig erkennbar, gib null zurueck.
+Erkenne dann fuer JEDE einzelne Position: die Menge, die Bezeichnung/Beschreibung und den Preis. Der Preis ist der EINZELPREIS pro Stueck/Einheit, falls sowohl Einzel- als auch Gesamtpreis pro Zeile sichtbar sind - nimm im Zweifel den Einzelpreis. Fehlt eine Mengenangabe, nimm 1 an.
+Antworte AUSSCHLIESSLICH mit einem einzigen JSON-Objekt, keine Erklaerung, kein Markdown-Codeblock, genau diese Form:
+{"waehrung": "CHF" | "EUR" | "USD" | string | null, "positionen": [{"menge": number, "bezeichnung": string, "preis": number}, ...]}
+Zahlen als reine Zahl ohne Waehrungszeichen (z.B. 620.5, nicht "CHF 620.50"). Summen-/Total-Zeilen NICHT als eigene Position aufnehmen. Wenn keine Position erkennbar ist, gib ein leeres Array bei "positionen" zurueck.`;
 
     // Google benennt/entfernt Gemini-Modelle immer wieder ohne Vorwarnung -
     // mehrere bekannte Kandidaten nacheinander durchprobieren, siehe gleiches
@@ -112,20 +113,24 @@ Zahlen als reine Zahl ohne Waehrungszeichen (z.B. 620.5, nicht "CHF 620.50"). Su
       return json({ error: 'Gemini hat keine verwertbare Antwort geliefert.' }, 400);
     }
 
-    let rohePositionen: any[];
+    let rohesObjekt: Record<string, unknown>;
     try {
-      rohePositionen = extrahiereJsonArray(antwortText);
+      rohesObjekt = extrahiereJsonObjekt(antwortText);
     } catch (_e) {
       return json({ error: 'Antwort von Gemini konnte nicht als Positionsliste gelesen werden.' }, 400);
     }
 
+    const rohePositionen = Array.isArray(rohesObjekt?.positionen) ? rohesObjekt.positionen as any[] : [];
     const positionen = rohePositionen.map((p) => ({
       menge: parseZahl(p?.menge) ?? 1,
       bezeichnung: String(p?.bezeichnung ?? '').trim(),
       preis: parseZahl(p?.preis) ?? 0,
     })).filter((p) => p.bezeichnung);
 
-    return json({ positionen });
+    const waehrungRoh = rohesObjekt?.waehrung;
+    const waehrung = typeof waehrungRoh === 'string' && waehrungRoh.trim() ? waehrungRoh.trim().toUpperCase() : null;
+
+    return json({ positionen, waehrung });
   } catch (e) {
     return json({ error: String(e) }, 500);
   }
