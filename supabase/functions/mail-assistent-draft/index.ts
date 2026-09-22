@@ -173,9 +173,10 @@ function formatiereFirmendaten(fd: any): string {
 // Modus: verfassen
 // ----------------------------------------------------------------------------
 async function modusVerfassen(body: any, modell: string) {
-  const [{ data: schreibstil }, { data: firmendaten }] = await Promise.all([
+  const [{ data: schreibstil }, { data: firmendaten }, { data: faelle }] = await Promise.all([
     sb.from('mailassistent_schreibstil').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_firmendaten').select('*').limit(1).maybeSingle(),
+    sb.from('mailassistent_faelle_meta').select('*').limit(1).maybeSingle(),
   ]);
 
   let vorlage = null;
@@ -187,6 +188,8 @@ async function modusVerfassen(body: any, modell: string) {
   const teile = [];
   if (schreibstil?.immer_verfassen && schreibstil.inhalt) teile.push('SCHREIBSTIL:\n' + schreibstil.inhalt);
   if (firmendaten?.immer_verfassen) teile.push('FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten));
+  if (faelle?.tabu_liste) teile.push('TABU-LISTE (nie schreiben):\n' + faelle.tabu_liste);
+  if (faelle?.terminvorschlaege) teile.push('TERMINVORSCHLAEGE:\n' + faelle.terminvorschlaege);
   if (vorlage) teile.push(`VORLAGE "${vorlage.titel}" - GENAU DIESEN TEXT WORTGETREU UEBERNEHMEN, nur die Platzhalter behandeln. KEINEN eigenen Text erfinden, auch nicht wenn die Vorlage kurz oder unklar wirkt.
 Platzhalter in eckigen Klammern (z.B. [NAME], [PROJEKT]):
 - Einen Platzhalter der Form [ZF:...] sowie JEDEN Platzhalter mit dem Wort "Datum" darin IMMER exakt unveraendert stehen lassen.
@@ -229,7 +232,7 @@ async function modusAntworten(body: any, modell: string) {
 
   const [
     { data: schreibstil }, { data: firmendaten }, { data: sonderfaelle },
-    { data: vorlagen }, { data: kundenanfrageVorlagen }, { data: distanzMeta },
+    { data: vorlagen }, { data: kundenanfrageVorlagen }, { data: distanzMeta }, { data: faelle },
   ] = await Promise.all([
     sb.from('mailassistent_schreibstil').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_firmendaten').select('*').limit(1).maybeSingle(),
@@ -249,6 +252,7 @@ async function modusAntworten(body: any, modell: string) {
           mailassistent_zusatzfenster_position(id,titel,reihenfolge)))`)
       .eq('richtung', 'kundenanfrage').eq('aktiv', true).order('reihenfolge'),
     sb.from('mailassistent_distanzlogik_meta').select('*').limit(1).maybeSingle(),
+    sb.from('mailassistent_faelle_meta').select('*').limit(1).maybeSingle(),
   ]);
 
   const sonderfaelleMenu = (sonderfaelle || []).map((sf: any) => {
@@ -267,7 +271,7 @@ async function modusAntworten(body: any, modell: string) {
 
   const system = `Du bist der Mail-Assistent von Knechtgarten (Gartenbau-Unternehmen, Heimenschwand/BE). Du liest eine eingehende Mail und entscheidest, wie sie beantwortet werden soll.
 
-${schreibstil?.immer_antworten && schreibstil.inhalt ? 'SCHREIBSTIL:\n' + schreibstil.inhalt + '\n\n' : ''}${firmendaten?.immer_antworten ? 'FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten) + '\n\n' : ''}Pruefe die folgenden drei Bereiche mit GLEICHER Prioritaet (keiner geht den anderen automatisch vor) - SONDERFÄLLE und MAIL-VORLAGEN sind fuer spezifische, bekannte Faelle, KUNDENANFRAGEN ist der Auffangbereich fuer echte Neukunden-/Projektanfragen, die keine dieser spezifischen Vorlagen treffen:
+${schreibstil?.immer_antworten && schreibstil.inhalt ? 'SCHREIBSTIL:\n' + schreibstil.inhalt + '\n\n' : ''}${firmendaten?.immer_antworten ? 'FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten) + '\n\n' : ''}${faelle?.tabu_liste ? 'TABU-LISTE (nie schreiben):\n' + faelle.tabu_liste + '\n\n' : ''}${faelle?.terminvorschlaege ? 'TERMINVORSCHLAEGE:\n' + faelle.terminvorschlaege + '\n\n' : ''}Pruefe die folgenden drei Bereiche mit GLEICHER Prioritaet (keiner geht den anderen automatisch vor) - SONDERFÄLLE und MAIL-VORLAGEN sind fuer spezifische, bekannte Faelle, KUNDENANFRAGEN ist der Auffangbereich fuer echte Neukunden-/Projektanfragen, die keine dieser spezifischen Vorlagen treffen:
 
 SONDERFÄLLE (Ausnahmen gehen der Hauptregel vor):
 ${sonderfaelleMenu || '(keine erfasst)'}
@@ -288,14 +292,9 @@ Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Obje
    - Text OHNE Klammern in der VORLAGE (z.B. schon konkrete Namen, Adressen, Telefonnummern, E-Mail-Adressen) bleibt IMMER exakt unveraendert stehen - erstelle NIEMALS neue eckige Klammern um bereits konkrete Angaben.
    "vorlageTitel" ist der exakte Titel der VORLAGE, deren Text du als Grundlage genommen hast - null, falls du dir den Text selbst ueberlegt hast (Sonderfall/Auffangfall ohne passende VORLAGE).
    Schreibst du den Text selbst (kein VORLAGE-Text als Basis, z.B. Auffangfall oder eine noch nicht erfasste Situation):
-   - WICHTIG - Vollstaendigkeit und Aufmerksamkeit haben Vorrang vor Kuerze. Gehe VOR dem Schreiben die eingehende Mail Satz fuer Satz durch und achte dabei auf VIER Arten von Punkten, nicht nur auf offensichtliche Fragen:
-     1. Jede Sachfrage/Bitte - beantworten oder mit Platzhalter markieren (siehe unten).
-     2. Jede persoenliche/nebensaechliche Bemerkung (z.B. Erwaehnung von Ferien, einem Ereignis) - kurz und herzlich darauf eingehen, z.B. "Schoene Zeit noch in/an [Ort]!" bei einer Ferien-Erwaehnung. NIE einfach ignorieren.
-     3. Uebernimmt der Absender von sich aus Aufwand, Organisation oder eine Leistung fuer uns/unseren Kunden (z.B. Beschaffung erledigen, einen Wechsel/Besuch vor Ort selbst durchfuehren, Support anbieten, eine Kulanz/einen guenstigeren Preis gewaehren) - AUCH WENN das nicht woertlich als "kostenlos"/"gratis"/"Gefallen" benannt ist, sich aber aus dem Zusammenhang erschliessen laesst - dafuer ausdruecklich bedanken (z.B. "Danke, dass ihr euch um die Beschaffung/den Wechsel kuemmert").
-     4. Alles andere inhaltlich Wichtige.
-     Nichts davon darf stillschweigend fehlen. Bei mehreren Punkten entsprechend mehrere kurze Abschnitte schreiben statt alles auf 1-2 Saetze zusammenzustreichen - lieber einen Satz zu viel als zu wenig. Eine inhaltsreiche, persoenliche Mail verdient eine entsprechend ausfuehrliche, warme Antwort, keine stichwortartige Kurzabfertigung. Kurz bleibt dabei die Formulierung jedes einzelnen Punkts, aber keiner wird weggelassen.
-   - ACHTUNG - nicht jeder Satz ist an DICH gerichtet: Ist ein Satz erkennbar eine Anweisung/Notiz des Absenders an eine ANDERE, namentlich genannte Person (z.B. "Andrin: bitte diese 2 SIMs wechseln gehen" - eine Weisung des Absenders an dessen eigenen Kollegen, nicht an uns), betrifft das NICHT deine Antwort. Nicht kommentieren, nicht paraphrasieren und NIE behaupten, "wir"/du haettet diese Person informiert oder sie werde bei uns etwas tun. Ein im Mailtext genannter Name gehoert nur dann zu unserem eigenen Team, wenn er als Knechtgarten-Mitarbeitende bekannt ist - sonst ist es jemand auf der Absender-/Partner-Seite, ueber dessen interne Ablaeufe du nichts weisst und nichts erfindest.
-   - Klaere IMMER zuerst die Personenverhaeltnisse, bevor du schreibst: Steht am Anfang der eingehenden Mail eine Zeile "Beteiligte Personen laut Mailkopf (Von/An/Cc): ...", nutze sie, um zu bestimmen, wer zu welcher Seite gehoert - jede Adresse mit @knechtgarten.ch ist unser eigenes Team, jede andere Adresse gehoert zur Gegenseite (Absender selbst, dessen Kollegen, oder je nach Kontext auch Kunde/Architekt/Handwerker/weitere Partei). Nutze zusaetzlich Signatur und Mailtext, um bei mehreren externen Parteien (z.B. Architekt UND Handwerker UND Kunde im selben Verlauf) zu erkennen, wer welche Rolle hat. Bei Unklarheit ueber eine Rolle lieber neutral/vorsichtig formulieren statt eine Rolle zu erfinden. Diese "Beteiligte Personen"-Zeile ist nur Kontext, NIE Teil des eigentlichen Mailtextes - nicht in der Antwort erwaehnen oder zitieren.
+   - WICHTIG - Vollstaendigkeit und Aufmerksamkeit haben Vorrang vor Kuerze: ${faelle?.vollstaendigkeit || '(nicht konfiguriert)'}
+   - ${faelle?.personen_rollen || '(Personen-Rollen-Regel nicht konfiguriert)'} Diese "Beteiligte Personen"-Zeile am Anfang der eingehenden Mail ist nur Kontext, NIE Teil des eigentlichen Mailtextes - nicht in der Antwort erwaehnen oder zitieren.
+   - Danke-Regel: ${faelle?.dankes_regel || '(nicht konfiguriert)'}
    - Wird eine konkrete Sachfrage gestellt, die NUR das Team selbst beantworten kann (z.B. "Habt ihr noch X im Einsatz?", "Wie viele Y?", ein internes Detail, das nicht aus der eingehenden Mail hervorgeht) - erfinde NIEMALS eine Antwort darauf. Setze stattdessen einen Platzhalter in eckigen Klammern ein, der kurz beschreibt, was einzusetzen ist, z.B. [Antwort: eigene Space 2.0-Einheiten im Einsatz?] - der Mitarbeiter kann per Klick draufantworten, bevor die Mail rausgeht.
 2. Eine Vorlage mit Rückfrage trifft zu:
 {"aktion":"rueckfrage","vorlageTitel":"<exakter Titel der Vorlage>"}

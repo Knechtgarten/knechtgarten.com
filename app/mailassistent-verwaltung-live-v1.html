@@ -244,6 +244,7 @@ body.buero-rolle .admin-only{display:none !important;}
   <div class="settingslayout">
     <div class="settingsnav">
       <a class="on" data-tab="schreibstil">Schreibstil</a>
+      <a data-tab="faelle">Fälle</a>
       <a data-tab="firmendaten">Firmendaten</a>
       <a data-tab="verfassen">Mail-Vorlagen: Verfassen</a>
       <a data-tab="antworten">Mail-Vorlagen: Antworten</a>
@@ -271,6 +272,47 @@ body.buero-rolle .admin-only{display:none !important;}
             <span class="metatext" id="ssMeta"></span>
             <button class="btn btn-primary" id="ssSaveBtn">Speichern</button>
           </div>
+        </div>
+      </div>
+
+      <!-- FÄLLE (situative Regeln, gelten global bei Verfassen+Antworten) -->
+      <div class="panel" id="tab-faelle">
+        <h1 class="page">Fälle</h1>
+        <p style="font-size:12.5px;color:var(--muted);margin:-6px 0 14px;max-width:640px;">Situative Regeln - was tun, wenn ... - gelten global für Verfassen und Antworten. Abweichungen für eine bestimmte Kategorie werden künftig direkt bei der jeweiligen Kategorie hinterlegt, nicht hier.</p>
+
+        <div class="card">
+          <div class="cardlabel">Tabu-Liste</div>
+          <div class="cardnote">Was unter keinen Umständen geschrieben werden darf (z.B. verbindliche Preiszusagen, rechtlich bindende Aussagen).</div>
+          <div class="vo-format-leiste" id="faTabuFormatLeiste"></div>
+          <textarea id="faTabuListe" rows="3" placeholder="noch leer - Inhalt ggf. aus Schreibstil hierher verschieben" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:6px;padding:8px 10px;font:inherit;font-size:12.5px;color:var(--ink);resize:vertical;"></textarea>
+        </div>
+
+        <div class="card">
+          <div class="cardlabel">Dankes-Regel</div>
+          <div class="cardnote">Wann bedanken, wann nicht.</div>
+          <div class="vo-format-leiste" id="faDankeFormatLeiste"></div>
+          <textarea id="faDankesRegel" rows="3" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:6px;padding:8px 10px;font:inherit;font-size:12.5px;color:var(--ink);resize:vertical;"></textarea>
+        </div>
+
+        <div class="card">
+          <div class="cardlabel">Terminvorschläge</div>
+          <div class="cardnote">Format und Ablauf bei Terminvorschlägen.</div>
+          <div class="vo-format-leiste" id="faTerminFormatLeiste"></div>
+          <textarea id="faTerminvorschlaege" rows="3" placeholder="noch leer - Inhalt ggf. aus Schreibstil hierher verschieben" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:6px;padding:8px 10px;font:inherit;font-size:12.5px;color:var(--ink);resize:vertical;"></textarea>
+        </div>
+
+        <div class="card">
+          <div class="cardlabel">Personen-Rollen-Erkennung</div>
+          <div class="cardnote">Wie Von/An/Cc genutzt werden, um zu bestimmen, wer zu unserem Team gehört und wer zur Gegenseite.</div>
+          <div class="vo-format-leiste" id="faPersonenFormatLeiste"></div>
+          <textarea id="faPersonenRollen" rows="5" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:6px;padding:8px 10px;font:inherit;font-size:12.5px;color:var(--ink);resize:vertical;"></textarea>
+        </div>
+
+        <div class="card">
+          <div class="cardlabel">Vollständigkeit</div>
+          <div class="cardnote">Wie sichergestellt wird, dass beim freien Verfassen kein Punkt der eingehenden Mail übergangen wird.</div>
+          <div class="vo-format-leiste" id="faVollstaendigFormatLeiste"></div>
+          <textarea id="faVollstaendigkeit" rows="5" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:6px;padding:8px 10px;font:inherit;font-size:12.5px;color:var(--ink);resize:vertical;"></textarea>
         </div>
       </div>
 
@@ -739,7 +781,7 @@ async function pruefeAnmeldung(){
   document.body.classList.toggle('buero-rolle', aktuelleRolle !== 'admin');
 
   await Promise.all([
-    ladeSchreibstil(), ladeFirmendaten(), ladeMitarbeiter(), ladeZusatzfensterListe(),
+    ladeSchreibstil(), ladeFaelle(), ladeFirmendaten(), ladeMitarbeiter(), ladeZusatzfensterListe(),
     ladeVorlagen('verfassen'), ladeVorlagen('antworten'), ladeVorlagen('kundenanfrage'),
     ladeSonderfaelle(), ladeDistanzAlles(),
     ladeNachbessernButtons(), ladeEinstellungen(), ladeNutzung()
@@ -801,6 +843,41 @@ $('ssSaveBtn').addEventListener('click', async () => {
   showToast('Gespeichert.');
   await ladeSchreibstil();
 });
+
+// ---------------------------------------------------------------------------
+// Fälle (situative Regeln, global bei Verfassen+Antworten)
+// ---------------------------------------------------------------------------
+let faelleRow = null;
+async function ladeFaelle(){
+  const { data, error } = await sb.from('mailassistent_faelle_meta').select('*').limit(1).maybeSingle();
+  if(error){ console.error(error); return; }
+  faelleRow = data;
+  if(!data) return;
+  $('faTabuListe').value = data.tabu_liste || '';
+  $('faDankesRegel').value = data.dankes_regel || '';
+  $('faTerminvorschlaege').value = data.terminvorschlaege || '';
+  $('faPersonenRollen').value = data.personen_rollen || '';
+  $('faVollstaendigkeit').value = data.vollstaendigkeit || '';
+  [$('faTabuListe'),$('faDankesRegel'),$('faTerminvorschlaege'),$('faPersonenRollen'),$('faVollstaendigkeit')].forEach(voAutoWachsen);
+}
+function faelleSpeichern(feld, spalte){
+  return async () => {
+    if(!faelleRow) return;
+    const { error } = await sb.from('mailassistent_faelle_meta').update({ [spalte]: $(feld).value.trim() || null, updated_at: new Date().toISOString() }).eq('id', faelleRow.id);
+    if(error){ showToast(friendlyError(error), true); return; }
+    showToast('Gespeichert.');
+  };
+}
+$('faTabuListe').addEventListener('change', faelleSpeichern('faTabuListe', 'tabu_liste'));
+$('faDankesRegel').addEventListener('change', faelleSpeichern('faDankesRegel', 'dankes_regel'));
+$('faTerminvorschlaege').addEventListener('change', faelleSpeichern('faTerminvorschlaege', 'terminvorschlaege'));
+$('faPersonenRollen').addEventListener('change', faelleSpeichern('faPersonenRollen', 'personen_rollen'));
+$('faVollstaendigkeit').addEventListener('change', faelleSpeichern('faVollstaendigkeit', 'vollstaendigkeit'));
+voFuelleFormatierungsleiste($('faTabuFormatLeiste'), $('faTabuListe'));
+voFuelleFormatierungsleiste($('faDankeFormatLeiste'), $('faDankesRegel'));
+voFuelleFormatierungsleiste($('faTerminFormatLeiste'), $('faTerminvorschlaege'));
+voFuelleFormatierungsleiste($('faPersonenFormatLeiste'), $('faPersonenRollen'));
+voFuelleFormatierungsleiste($('faVollstaendigFormatLeiste'), $('faVollstaendigkeit'));
 
 // ---------------------------------------------------------------------------
 // Firmendaten + Mitarbeiter
