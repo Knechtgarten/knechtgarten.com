@@ -243,6 +243,7 @@ body.buero-rolle .admin-only{display:none !important;}
 
   <div class="settingslayout">
     <div class="settingsnav">
+      <a data-tab="grundlogik">Grundlogik</a>
       <a class="on" data-tab="schreibstil">Schreibstil</a>
       <a data-tab="faelle">Fälle</a>
       <a data-tab="firmendaten">Firmendaten</a>
@@ -255,6 +256,19 @@ body.buero-rolle .admin-only{display:none !important;}
     </div>
 
     <div class="settingscontent">
+
+      <!-- GRUNDLOGIK (reine Referenz, wird nicht an die KI mitgeschickt) -->
+      <div class="panel" id="tab-grundlogik">
+        <h1 class="page">Grundlogik</h1>
+        <p style="font-size:12.5px;color:var(--muted);margin:-6px 0 14px;max-width:640px;">Übergeordnete Betriebsanleitung - wie sich die KI zwischen Schreibstil, Fällen, Mailkategorien, Nachschlagewerk und Aktionstyp bewegt. Reine Referenz für dich, wird nicht direkt an die KI mitgeschickt (die Reihenfolge steckt im Programm-Ablauf selbst).</p>
+        <div class="card">
+          <textarea class="vorgaben" id="glInhalt" placeholder="Weiche, Bewegungsreihenfolge …"></textarea>
+          <div class="metarow">
+            <span class="metatext" id="glMeta"></span>
+            <button class="btn btn-primary" id="glSaveBtn">Speichern</button>
+          </div>
+        </div>
+      </div>
 
       <!-- SCHREIBSTIL -->
       <div class="panel on" id="tab-schreibstil">
@@ -768,7 +782,7 @@ async function pruefeAnmeldung(){
   document.body.classList.toggle('buero-rolle', aktuelleRolle !== 'admin');
 
   await Promise.all([
-    ladeSchreibstil(), ladeFaelle(), ladeFirmendaten(), ladeMitarbeiter(), ladeZusatzfensterListe(), ladeErweiterung(),
+    ladeGrundlogik(), ladeSchreibstil(), ladeFaelle(), ladeFirmendaten(), ladeMitarbeiter(), ladeZusatzfensterListe(), ladeErweiterung(),
     ladeVorlagen('verfassen'), ladeVorlagen('antworten'), ladeVorlagen('kundenanfrage'),
     ladeSonderfaelle(), ladeDistanzAlles(),
     ladeNachbessernButtons(), ladeEinstellungen(), ladeNutzung()
@@ -799,6 +813,32 @@ document.querySelectorAll('.settingsnav a').forEach(a=>{
     $('tab-'+a.dataset.tab).classList.add('on');
     $('crumbNow').textContent = a.textContent.replace('Mail-Vorlagen: ','');
   });
+});
+
+// ---------------------------------------------------------------------------
+// Grundlogik (reine Referenz, nicht an die KI mitgeschickt)
+// ---------------------------------------------------------------------------
+let grundlogikRow = null;
+async function ladeGrundlogik(){
+  const { data, error } = await sb.from('mailassistent_grundlogik_meta').select('*').limit(1).maybeSingle();
+  if(error){ console.error(error); return; }
+  grundlogikRow = data;
+  if(!data) return;
+  $('glInhalt').value = data.inhalt || '';
+  $('glMeta').textContent = `Version ${data.version} · zuletzt bearbeitet` + (data.aktualisiert_von ? ` von ${data.aktualisiert_von}` : '') +
+    (data.aktualisiert_am ? ` am ${new Date(data.aktualisiert_am).toLocaleDateString('de-CH')}` : '');
+}
+$('glSaveBtn').addEventListener('click', async () => {
+  if(!grundlogikRow) return;
+  const { error } = await sb.from('mailassistent_grundlogik_meta').update({
+    inhalt: $('glInhalt').value,
+    version: (grundlogikRow.version || 1) + 1,
+    aktualisiert_am: new Date().toISOString(),
+    aktualisiert_von: aktuellerEmail
+  }).eq('id', grundlogikRow.id);
+  if(error){ showToast(friendlyError(error), true); return; }
+  showToast('Gespeichert.');
+  await ladeGrundlogik();
 });
 
 // ---------------------------------------------------------------------------
