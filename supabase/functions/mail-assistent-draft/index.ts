@@ -176,7 +176,7 @@ async function modusVerfassen(body: any, modell: string) {
   const [{ data: schreibstil }, { data: firmendaten }, { data: faelle }] = await Promise.all([
     sb.from('mailassistent_schreibstil').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_firmendaten').select('*').limit(1).maybeSingle(),
-    sb.from('mailassistent_faelle_meta').select('*').limit(1).maybeSingle(),
+    sb.from('mailassistent_faelle_abschnitt').select('titel,inhalt').order('reihenfolge'),
   ]);
 
   let vorlage = null;
@@ -185,11 +185,15 @@ async function modusVerfassen(body: any, modell: string) {
     vorlage = data;
   }
 
+  const faelleText = (faelle || [])
+    .filter((a: any) => a.inhalt && a.inhalt.trim())
+    .map((a: any) => `${a.titel}:\n${a.inhalt}`)
+    .join('\n\n');
+
   const teile = [];
   if (schreibstil?.immer_verfassen && schreibstil.inhalt) teile.push('SCHREIBSTIL:\n' + schreibstil.inhalt);
   if (firmendaten?.immer_verfassen) teile.push('FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten));
-  if (faelle?.tabu_liste) teile.push('TABU-LISTE (nie schreiben):\n' + faelle.tabu_liste);
-  if (faelle?.terminvorschlaege) teile.push('TERMINVORSCHLAEGE:\n' + faelle.terminvorschlaege);
+  if (faelleText) teile.push('FÄLLE (situative Regeln, gelten immer):\n' + faelleText);
   if (vorlage) teile.push(`VORLAGE "${vorlage.titel}" - GENAU DIESEN TEXT WORTGETREU UEBERNEHMEN, nur die Platzhalter behandeln. KEINEN eigenen Text erfinden, auch nicht wenn die Vorlage kurz oder unklar wirkt.
 Platzhalter in eckigen Klammern (z.B. [NAME], [PROJEKT]):
 - Einen Platzhalter der Form [ZF:...] sowie JEDEN Platzhalter mit dem Wort "Datum" darin IMMER exakt unveraendert stehen lassen.
@@ -253,7 +257,7 @@ async function modusAntworten(body: any, modell: string) {
           mailassistent_zusatzfenster_position(id,titel,reihenfolge)))`)
       .eq('richtung', 'kundenanfrage').eq('aktiv', true).order('reihenfolge'),
     sb.from('mailassistent_distanzlogik_meta').select('*').limit(1).maybeSingle(),
-    sb.from('mailassistent_faelle_meta').select('*').limit(1).maybeSingle(),
+    sb.from('mailassistent_faelle_abschnitt').select('titel,inhalt').order('reihenfolge'),
     sb.from('mailassistent_mitarbeiter').select('name,email,funktion').order('reihenfolge'),
     sb.from('mailassistent_externe_kontakte').select('firma,domains,rolle,notiz').order('reihenfolge'),
   ]);
@@ -264,6 +268,10 @@ async function modusAntworten(body: any, modell: string) {
   const externeKontakteListe = (externeKontakte || [])
     .map((k: any) => `${k.firma} (${k.domains})${k.rolle ? ' - ' + k.rolle : ''}${k.notiz ? ' - ' + k.notiz : ''}`)
     .join('\n');
+  const faelleText = (faelle || [])
+    .filter((a: any) => a.inhalt && a.inhalt.trim())
+    .map((a: any) => `${a.titel}:\n${a.inhalt}`)
+    .join('\n\n');
 
   const sonderfaelleMenu = (sonderfaelle || []).map((sf: any) => {
     const ausnahmen = (sonderfaelle || []).filter((x: any) => x.ist_ausnahme_von === sf.id);
@@ -281,7 +289,7 @@ async function modusAntworten(body: any, modell: string) {
 
   const system = `Du bist der Mail-Assistent von Knechtgarten (Gartenbau-Unternehmen, Heimenschwand/BE). Du liest eine eingehende Mail und entscheidest, wie sie beantwortet werden soll.
 
-${schreibstil?.immer_antworten && schreibstil.inhalt ? 'SCHREIBSTIL:\n' + schreibstil.inhalt + '\n\n' : ''}${firmendaten?.immer_antworten ? 'FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten) + '\n\n' : ''}${mitarbeitendeListe ? 'MITARBEITENDE (unser eigenes Team - gehoert zu "uns", nicht zur Gegenseite):\n' + mitarbeitendeListe + '\n\n' : ''}${externeKontakteListe ? 'BEKANNTE EXTERNE FIRMEN (anhand der Domain im Mailkopf zuordenbar - gehoeren NICHT zu uns):\n' + externeKontakteListe + '\n\n' : ''}${faelle?.tabu_liste ? 'TABU-LISTE (nie schreiben):\n' + faelle.tabu_liste + '\n\n' : ''}${faelle?.terminvorschlaege ? 'TERMINVORSCHLAEGE:\n' + faelle.terminvorschlaege + '\n\n' : ''}Pruefe die folgenden drei Bereiche mit GLEICHER Prioritaet (keiner geht den anderen automatisch vor) - SONDERFÄLLE und MAIL-VORLAGEN sind fuer spezifische, bekannte Faelle, KUNDENANFRAGEN ist der Auffangbereich fuer echte Neukunden-/Projektanfragen, die keine dieser spezifischen Vorlagen treffen:
+${schreibstil?.immer_antworten && schreibstil.inhalt ? 'SCHREIBSTIL:\n' + schreibstil.inhalt + '\n\n' : ''}${firmendaten?.immer_antworten ? 'FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten) + '\n\n' : ''}${mitarbeitendeListe ? 'MITARBEITENDE (unser eigenes Team - gehoert zu "uns", nicht zur Gegenseite):\n' + mitarbeitendeListe + '\n\n' : ''}${externeKontakteListe ? 'BEKANNTE EXTERNE FIRMEN (anhand der Domain im Mailkopf zuordenbar - gehoeren NICHT zu uns):\n' + externeKontakteListe + '\n\n' : ''}${faelleText ? 'FÄLLE (situative Regeln, gelten immer):\n' + faelleText + '\n\n' : ''}Pruefe die folgenden drei Bereiche mit GLEICHER Prioritaet (keiner geht den anderen automatisch vor) - SONDERFÄLLE und MAIL-VORLAGEN sind fuer spezifische, bekannte Faelle, KUNDENANFRAGEN ist der Auffangbereich fuer echte Neukunden-/Projektanfragen, die keine dieser spezifischen Vorlagen treffen:
 
 SONDERFÄLLE (Ausnahmen gehen der Hauptregel vor):
 ${sonderfaelleMenu || '(keine erfasst)'}
@@ -302,9 +310,7 @@ Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Obje
    - Text OHNE Klammern in der VORLAGE (z.B. schon konkrete Namen, Adressen, Telefonnummern, E-Mail-Adressen) bleibt IMMER exakt unveraendert stehen - erstelle NIEMALS neue eckige Klammern um bereits konkrete Angaben.
    "vorlageTitel" ist der exakte Titel der VORLAGE, deren Text du als Grundlage genommen hast - null, falls du dir den Text selbst ueberlegt hast (Sonderfall/Auffangfall ohne passende VORLAGE).
    Schreibst du den Text selbst (kein VORLAGE-Text als Basis, z.B. Auffangfall oder eine noch nicht erfasste Situation):
-   - WICHTIG - Vollstaendigkeit und Aufmerksamkeit haben Vorrang vor Kuerze: ${faelle?.vollstaendigkeit || '(nicht konfiguriert)'}
-   - ${faelle?.personen_rollen || '(Personen-Rollen-Regel nicht konfiguriert)'} Diese "Beteiligte Personen"-Zeile am Anfang der eingehenden Mail ist nur Kontext, NIE Teil des eigentlichen Mailtextes - nicht in der Antwort erwaehnen oder zitieren.
-   - Danke-Regel: ${faelle?.dankes_regel || '(nicht konfiguriert)'}
+   - Beachte dabei insbesondere die oben unter FÄLLE aufgefuehrten Regeln zu Vollstaendigkeit, Personen-Rollen und Danke-Regel.
    - Wird eine konkrete Sachfrage gestellt, die NUR das Team selbst beantworten kann (z.B. "Habt ihr noch X im Einsatz?", "Wie viele Y?", ein internes Detail, das nicht aus der eingehenden Mail hervorgeht) - erfinde NIEMALS eine Antwort darauf. Setze stattdessen einen Platzhalter in eckigen Klammern ein, der kurz beschreibt, was einzusetzen ist, z.B. [Antwort: eigene Space 2.0-Einheiten im Einsatz?] - der Mitarbeiter kann per Klick draufantworten, bevor die Mail rausgeht.
 2. Eine Vorlage mit Rückfrage trifft zu:
 {"aktion":"rueckfrage","vorlageTitel":"<exakter Titel der Vorlage>"}
