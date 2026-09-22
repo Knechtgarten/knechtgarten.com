@@ -3827,7 +3827,7 @@ function freitextAggregatZeilen(){
     .map(v => {
       const menge = v.mengeVorschlag ?? 0;
       const preis = v.preisVorschlag ?? 0;
-      return { kategorie: v.kategorie, arbeitsschritt: v.arbeitsschritt, optionId: v.optionId, artikelId: null, istEigenePosition: false, bezeichnung: v.bezeichnung, einheit: v.einheit || '', preis, menge, betrag: menge * preis };
+      return { kategorie: v.kategorie, arbeitsschritt: v.arbeitsschritt, optionId: v.optionId, artikelId: null, istEigenePosition: false, istFreitext: true, bezeichnung: v.bezeichnung, einheit: v.einheit || '', preis, menge, betrag: menge * preis };
     });
 }
 
@@ -4039,16 +4039,18 @@ async function recalc(){
       container.innerHTML = '';
       let blockTotal = 0;
 
-      function addRow(bezeichnung, menge, einheit, preis, betrag, schluessel, rundungMengeFn = rundeMenge, rundungPreisFn = rundeCHF, rechnungsweg = null){
-        // Preis ist NICHT mehr korrigierbar (nur noch Menge) - der Preis
-        // einer Sammelzeile (z.B. "Materialpaket X") ist eine Summe aus
-        // mehreren Artikeln mit je eigenem Preis aus dem Artikelstamm; ihn
-        // hier zu ueberschreiben war ein zu grobes Werkzeug. Eine
-        // kundenspezifische Preisanpassung geht neu ueber "Eigene Position"
-        // (bzw. eine Rabattzeile dort), siehe Absprache.
+      function addRow(bezeichnung, menge, einheit, preis, betrag, schluessel, rundungMengeFn = rundeMenge, rundungPreisFn = rundeCHF, rechnungsweg = null, preisKorrigierbar = false){
+        // Preis ist bei normalen berechneten Zeilen NICHT korrigierbar (nur
+        // die Menge) - der Preis einer Sammelzeile (z.B. "Materialpaket X")
+        // ist eine Summe aus mehreren Artikeln mit je eigenem Preis aus dem
+        // Artikelstamm; ihn hier zu ueberschreiben war ein zu grobes Werkzeug.
+        // Ausnahme: Zeilen, die (ausschliesslich) aus einer Freitext-Position
+        // stammen (siehe freitextAggregatZeilen()) - dort gibt es gar keinen
+        // echten Artikel-Preis im Hintergrund, der Vorschlagspreis aus Tool B
+        // ist nur ein Startwert und muss pro Offerte änderbar sein.
         const k = zeilenKorrekturen[schluessel] || {};
         const effMenge = rundungMengeFn(k.menge_korrektur != null ? k.menge_korrektur : menge);
-        const effPreis = rundungPreisFn(preis);
+        const effPreis = rundungPreisFn(k.preis_korrektur != null ? k.preis_korrektur : preis);
         const effBetrag = rundeCHF(effMenge * effPreis);
         const geloescht = !!k.geloescht;
         // Der urspruengliche Berechnungswert wird nur fein daneben angezeigt,
@@ -4056,14 +4058,16 @@ async function recalc(){
         // bleibt die Stelle leer (auch wenn ein Korrekturwert gespeichert ist,
         // der zufaellig wieder dem Berechnungswert entspricht).
         const mengeAbweicht = k.menge_korrektur != null && rundungMengeFn(k.menge_korrektur) !== rundungMengeFn(menge);
+        const preisAbweicht = k.preis_korrektur != null && rundungPreisFn(k.preis_korrektur) !== rundungPreisFn(preis);
         if(!geloescht) blockTotal += effBetrag;
         snapshotZeile(KAT_LABEL[schluessel.split(':')[0]] || schluessel, { bezeichnung, menge: effMenge, einheit, preis: effPreis, betrag: effBetrag, geloescht });
-        // Vorbefuellung des Menge-Korrektur-Felds mit dem berechneten Wert
-        // gilt bewusst NUR fuer Offerte-Typ "Formel" - fuer "Tagessatz"
+        // Vorbefuellung des Menge-/Preis-Korrektur-Felds mit dem berechneten
+        // Wert gilt bewusst NUR fuer Offerte-Typ "Formel" - fuer "Tagessatz"
         // (Allgemein) unveraendert das alte Verhalten (leer ausser bei
         // echter Korrektur).
         const istFormel = currentBerechnungsmodell === 'formel';
         const mengeFeldWert = k.menge_korrektur != null ? k.menge_korrektur : (istFormel ? rundungMengeFn(menge) : '');
+        const preisFeldWert = k.preis_korrektur != null ? k.preis_korrektur : (istFormel ? rundungPreisFn(preis) : '');
         const tr = document.createElement('tr');
         tr.className = 'crow' + (geloescht ? ' zgeloescht' : (effBetrag === 0 ? ' betragnull' : ''));
         // Rechnungsweg-Tooltip: bei einer einfachen Zeile (kein Breakdown
@@ -4076,17 +4080,21 @@ async function recalc(){
         const rechnungswegSimple = `${effMenge} ${einheit} × ${fmtCHF(effPreis)} = ${fmtCHF(effBetrag)}`;
         tr.addEventListener('mouseenter', () => zeigeRechnungsweg(tr, rechnungsweg, rechnungswegSimple));
         tr.addEventListener('mouseleave', versteckeRechnungsweg);
+        const preisZelle = preisKorrigierbar
+          ? `<span class="berechnet-val">${preisAbweicht ? fmtCHF(rundungPreisFn(preis)) : ''}</span><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="korrektur-feld" data-feld="preis" placeholder="Korr." value="${preisFeldWert}" ${geloescht ? 'disabled' : ''} title="Freitext-Position: Preis frei erfassbar, kein Artikel hinterlegt">`
+          : fmtCHF(effPreis);
         tr.innerHTML = `<td>${bezeichnung}</td>
           <td style="text-align:right"><span class="berechnet-val">${mengeAbweicht ? rundungMengeFn(menge) : ''}</span><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="korrektur-feld" data-feld="menge" placeholder="Korr." value="${mengeFeldWert}" ${geloescht ? 'disabled' : ''}></td>
           <td style="color:var(--muted)">${einheit}</td>
-          <td style="text-align:right">${fmtCHF(effPreis)}</td>
+          <td style="text-align:right">${preisZelle}</td>
           <td class="cbetrag">${fmtCHF(effBetrag)} <button type="button" class="icobtn zeile-del" title="${geloescht ? 'Zeile wiederherstellen' : 'Zeile entfernen'}">${geloescht ? ICON.restore : ICON.trash}</button></td>`;
         container.appendChild(tr);
         tr.querySelectorAll('.korrektur-feld').forEach(inp => {
           inp.addEventListener('change', e => {
             const v = e.target.value.trim();
+            const feld = e.target.dataset.feld === 'preis' ? 'preis_korrektur' : 'menge_korrektur';
             if(!zeilenKorrekturen[schluessel]) zeilenKorrekturen[schluessel] = { menge_korrektur:null, preis_korrektur:null, geloescht:false };
-            zeilenKorrekturen[schluessel].menge_korrektur = (v === '' || isNaN(parseFloat(v))) ? null : parseFloat(v);
+            zeilenKorrekturen[schluessel][feld] = (v === '' || isNaN(parseFloat(v))) ? null : parseFloat(v);
             recalc();
           });
         });
@@ -4286,9 +4294,10 @@ async function recalc(){
                 if(!proOptionLog[r.optionId]) proOptionLog[r.optionId] = { summe: 0, proArtikel: {} };
                 proOptionLog[r.optionId].summe += r.betrag;
                 const pa = proOptionLog[r.optionId].proArtikel;
-                if(!pa[r.bezeichnung]) pa[r.bezeichnung] = { menge: 0, einheit: r.einheit, preis: r.preis, betrag: 0 };
+                if(!pa[r.bezeichnung]) pa[r.bezeichnung] = { menge: 0, einheit: r.einheit, preis: r.preis, betrag: 0, istFreitext: true };
                 pa[r.bezeichnung].menge += r.menge;
                 pa[r.bezeichnung].betrag += r.betrag;
+                pa[r.bezeichnung].istFreitext = pa[r.bezeichnung].istFreitext && !!r.istFreitext;
               });
               Object.entries(proOptionLog).forEach(([optionId, v]) => {
                 if(!v.summe) return;
@@ -4296,7 +4305,7 @@ async function recalc(){
                 const infoLog = OPTION_INFO[optionId];
                 if(artikelEintraege.length === 1 && !infoLog?.eigenePositionTitel){
                   const [artikelName, a] = artikelEintraege[0];
-                  addRow(artikelName, a.menge, a.einheit, a.preis, a.betrag, `logistik:eigen:${optionId}`, logistikRundungMenge, logistikRundungPreis);
+                  addRow(artikelName, a.menge, a.einheit, a.preis, a.betrag, `logistik:eigen:${optionId}`, logistikRundungMenge, logistikRundungPreis, null, a.istFreitext);
                   return;
                 }
                 const info = infoLog;
@@ -4307,7 +4316,8 @@ async function recalc(){
                   preis: fmtCHF(rundeCHF(a.preis)),
                   betrag: fmtCHF(rundeCHF(a.betrag))
                 }));
-                addRow(bezeichnung, 1, logistikEinheit, v.summe, v.summe, `logistik:eigen:${optionId}`, logistikRundungMenge, logistikRundungPreis, rechnungsweg);
+                const alleFreitextLog = artikelEintraege.every(([, a]) => a.istFreitext);
+                addRow(bezeichnung, 1, logistikEinheit, v.summe, v.summe, `logistik:eigen:${optionId}`, logistikRundungMenge, logistikRundungPreis, rechnungsweg, alleFreitextLog);
               });
 
               // Herausgeloeste Artikel (Stecknadel-Icon): immer die echte
@@ -4394,9 +4404,10 @@ async function recalc(){
               if(!proOption[r.optionId]) proOption[r.optionId] = { summe: 0, proArtikel: {} };
               proOption[r.optionId].summe += r.betrag;
               const pa = proOption[r.optionId].proArtikel;
-              if(!pa[r.bezeichnung]) pa[r.bezeichnung] = { menge: 0, einheit: r.einheit, preis: r.preis, betrag: 0 };
+              if(!pa[r.bezeichnung]) pa[r.bezeichnung] = { menge: 0, einheit: r.einheit, preis: r.preis, betrag: 0, istFreitext: true };
               pa[r.bezeichnung].menge += r.menge;
               pa[r.bezeichnung].betrag += r.betrag;
+              pa[r.bezeichnung].istFreitext = pa[r.bezeichnung].istFreitext && !!r.istFreitext;
             });
             Object.entries(proOption).forEach(([optionId, v]) => {
               if(!v.summe) return;
@@ -4413,7 +4424,9 @@ async function recalc(){
               const info = OPTION_INFO[optionId];
               if(artikelEintraege.length === 1 && !info?.eigenePositionTitel){
                 const [artikelName, a] = artikelEintraege[0];
-                addRow(artikelName, a.menge, a.einheit, a.preis, a.betrag, `material:eigen:${optionId}`, materialRundungMenge, materialRundungPreis);
+                // Freitext-Positionen haben keinen echten Artikel-Preis dahinter -
+                // der Preis muss hier direkt korrigierbar sein (siehe addRow()).
+                addRow(artikelName, a.menge, a.einheit, a.preis, a.betrag, `material:eigen:${optionId}`, materialRundungMenge, materialRundungPreis, null, a.istFreitext);
                 return;
               }
               const bezeichnung = info?.eigenePositionTitel || `${info?.teilschritt || ''} – ${info?.name || ''}`;
@@ -4423,7 +4436,8 @@ async function recalc(){
                 preis: fmtCHF(rundeCHF(a.preis)),
                 betrag: fmtCHF(rundeCHF(a.betrag))
               }));
-              addRow(bezeichnung, 1, einheitLabel, v.summe, v.summe, `material:eigen:${optionId}`, materialRundungMenge, materialRundungPreis, rechnungsweg);
+              const alleFreitext = artikelEintraege.every(([, a]) => a.istFreitext);
+              addRow(bezeichnung, 1, einheitLabel, v.summe, v.summe, `material:eigen:${optionId}`, materialRundungMenge, materialRundungPreis, rechnungsweg, alleFreitext);
             });
             // Herausgeloeste Artikel (Stecknadel-Icon, siehe oben): jeweils
             // schon von Natur aus ein einzelner Artikel, darum immer die
