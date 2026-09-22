@@ -237,7 +237,7 @@ async function modusAntworten(body: any, modell: string) {
   const [
     { data: schreibstil }, { data: firmendaten }, { data: sonderfaelle },
     { data: vorlagen }, { data: kundenanfrageVorlagen }, { data: distanzMeta }, { data: faelle },
-    { data: mitarbeitende }, { data: externeKontakte },
+    { data: mitarbeitende }, { data: externeKontakte }, { data: unterkategorien },
   ] = await Promise.all([
     sb.from('mailassistent_schreibstil').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_firmendaten').select('*').limit(1).maybeSingle(),
@@ -260,6 +260,7 @@ async function modusAntworten(body: any, modell: string) {
     sb.from('mailassistent_faelle_abschnitt').select('titel,inhalt').order('reihenfolge'),
     sb.from('mailassistent_mitarbeiter').select('name,email,funktion').order('reihenfolge'),
     sb.from('mailassistent_externe_kontakte').select('firma,domains,rolle,notiz').order('reihenfolge'),
+    sb.from('mailassistent_unterkategorie').select('*, mailassistent_kategorie(titel)').eq('aktionstyp', 'rueckfrage'),
   ]);
 
   const mitarbeitendeListe = (mitarbeitende || [])
@@ -280,16 +281,23 @@ async function modusAntworten(body: any, modell: string) {
   }).join('\n');
 
   const vorlagenMenu = (vorlagen || []).map((v: any) => {
+    if (v.unterkategorie_id) return null; // gehoert zu einer UNTERKATEGORIE unten, nicht einzeln listen
     if (v.typ === 'rueckfrage') {
       const zweige = (v.mailassistent_vorlage_antwort || []).map((z: any) => z.label).join(' / ');
       return `- VORLAGE "${v.titel}" [MIT RÜCKFRAGE] – trifft zu wenn: ${v.wann_trifft_zu || '–'}\n  Frage an den Mitarbeiter: "${v.frage}"\n  Mögliche Antworten: ${zweige}`;
     }
     return `- VORLAGE "${v.titel}" – trifft zu wenn: ${v.wann_trifft_zu || '–'}\n  Text:\n${v.inhalt}`;
-  }).join('\n\n');
+  }).filter(Boolean).join('\n\n');
+
+  const unterkategorienMenu = (unterkategorien || []).map((u: any) => {
+    const zugehoerig = (vorlagen || []).filter((v: any) => v.unterkategorie_id === u.id);
+    const optionen = zugehoerig.map((v: any) => v.titel).join(' / ');
+    return `- UNTERKATEGORIE "${u.titel}" (Kategorie: ${u.mailassistent_kategorie?.titel || '–'}) – zutreffend, wenn die Mail zu diesem Fall gehoert und mehrere gleichwertige Antworten in Frage kommen: ${optionen || '(keine Vorlagen erfasst)'}`;
+  }).join('\n');
 
   const system = `Du bist der Mail-Assistent von Knechtgarten (Gartenbau-Unternehmen, Heimenschwand/BE). Du liest eine eingehende Mail und entscheidest, wie sie beantwortet werden soll.
 
-${schreibstil?.immer_antworten && schreibstil.inhalt ? 'SCHREIBSTIL:\n' + schreibstil.inhalt + '\n\n' : ''}${firmendaten?.immer_antworten ? 'FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten) + '\n\n' : ''}${mitarbeitendeListe ? 'MITARBEITENDE (unser eigenes Team - gehoert zu "uns", nicht zur Gegenseite):\n' + mitarbeitendeListe + '\n\n' : ''}${externeKontakteListe ? 'BEKANNTE EXTERNE FIRMEN (anhand der Domain im Mailkopf zuordenbar - gehoeren NICHT zu uns):\n' + externeKontakteListe + '\n\n' : ''}${faelleText ? 'FÄLLE (situative Regeln, gelten immer):\n' + faelleText + '\n\n' : ''}Pruefe die folgenden drei Bereiche mit GLEICHER Prioritaet (keiner geht den anderen automatisch vor) - SONDERFÄLLE und MAIL-VORLAGEN sind fuer spezifische, bekannte Faelle, KUNDENANFRAGEN ist der Auffangbereich fuer echte Neukunden-/Projektanfragen, die keine dieser spezifischen Vorlagen treffen:
+${schreibstil?.immer_antworten && schreibstil.inhalt ? 'SCHREIBSTIL:\n' + schreibstil.inhalt + '\n\n' : ''}${firmendaten?.immer_antworten ? 'FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten) + '\n\n' : ''}${mitarbeitendeListe ? 'MITARBEITENDE (unser eigenes Team - gehoert zu "uns", nicht zur Gegenseite):\n' + mitarbeitendeListe + '\n\n' : ''}${externeKontakteListe ? 'BEKANNTE EXTERNE FIRMEN (anhand der Domain im Mailkopf zuordenbar - gehoeren NICHT zu uns):\n' + externeKontakteListe + '\n\n' : ''}${faelleText ? 'FÄLLE (situative Regeln, gelten immer):\n' + faelleText + '\n\n' : ''}Pruefe die folgenden vier Bereiche mit GLEICHER Prioritaet (keiner geht den anderen automatisch vor) - SONDERFÄLLE, MAIL-VORLAGEN und UNTERKATEGORIEN sind fuer spezifische, bekannte Faelle, KUNDENANFRAGEN ist der Auffangbereich fuer echte Neukunden-/Projektanfragen, die keine dieser spezifischen Vorlagen treffen:
 
 SONDERFÄLLE (Ausnahmen gehen der Hauptregel vor):
 ${sonderfaelleMenu || '(keine erfasst)'}
@@ -297,9 +305,12 @@ ${sonderfaelleMenu || '(keine erfasst)'}
 MAIL-VORLAGEN:
 ${vorlagenMenu || '(keine erfasst)'}
 
+UNTERKATEGORIEN MIT MEHREREN GLEICHWERTIGEN ANTWORTEN - hier gibt es KEINE feste Vorlage, der Mitarbeiter waehlt selbst manuell die passende Antwort aus der Liste der Unterkategorie:
+${unterkategorienMenu || '(keine erfasst)'}
+
 KUNDENANFRAGEN - dafür gibt es KEINE feste Vorlage, der Mitarbeiter wählt selbst manuell die passende Antwort aus einer Liste, du lieferst nur die Einordnung + falls möglich die Kundenadresse. Nur relevant wenn: ${distanzMeta?.wann_anwenden || '(nicht konfiguriert)'}
 
-Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Objekt (kein Text davor/danach), in einer dieser vier Formen:
+Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Objekt (kein Text davor/danach), in einer dieser fünf Formen:
 1. Direkter Entwurf möglich (Sonderfall/einfache Vorlage/Auffangfall):
 {"aktion":"entwurf","text":"<fertiger Mailtext>","vorlageTitel":"<exakter Titel der verwendeten VORLAGE, sonst null>"}
    Trifft eine VORLAGE zu: deren Text als starke Richtschnur nehmen (Kernaussage/Entscheidung und Aufbau bleiben, das ist nicht verhandelbar), aber natürlich personalisieren - Namen der Person ansprechen, wo sinnvoll kurz auf Details aus der eingehenden Mail eingehen. Nicht stur wortwörtlich abschreiben, aber auch nichts an der eigentlichen Entscheidung/Aussage ändern. WICHTIG: Waehle eine VORLAGE fuer Fall 1 nur, wenn sie auch wirklich einen "Text:" hat. Hat die naheliegendste VORLAGE (noch) keinen Text hinterlegt, ist sie fuer Fall 1 nicht nutzbar - pruefe stattdessen, ob KUNDENANFRAGEN (Fall 3) zutrifft, oder schreibe selbst einen passenden, kurzen Text (wie bei einem Auffangfall). Erzeuge NIE einen leeren oder nur aus Platzhaltern bestehenden Text.
@@ -324,6 +335,9 @@ Nimm exakt das, was in der Mail steht (keine eigene Umformung/Ergänzung, nichts
 4. AUSNAHMEFALL - zwei (normalerweise nicht mehr) einfache VORLAGEN passen ungefähr GLEICH GUT, sagen inhaltlich aber unterschiedliche Dinge aus, und es ist fuer die Antwort wirklich wichtig, welche davon stimmt:
 {"aktion":"auswahl","frage":"<kurze, konkrete Frage an den Mitarbeiter, z.B. 'Geht es eher um X oder um Y?'>","vorlagenTitel":["<exakter Titel Vorlage A>","<exakter Titel Vorlage B>"]}
    Nutze Fall 4 NUR SELTEN, bei echter und relevanter Unsicherheit zwischen zwei VORLAGEN. Beim Abwaegen NUR zwischen Fall 1 und Fall 4 im Zweifel Fall 1 waehlen (diese Regel gilt nicht fuer die Wahl zwischen Fall 1 und Fall 3 - dort entscheidet allein, ob die KUNDENANFRAGEN-Bedingung zutrifft und eine passende VORLAGE mit Text existiert).
+5. Eine UNTERKATEGORIE MIT MEHREREN GLEICHWERTIGEN ANTWORTEN trifft zu (siehe oben):
+{"aktion":"unterkategorie","unterkategorieTitel":"<exakter Titel der Unterkategorie>"}
+   Nutze das NUR, wenn wirklich eine der oben gelisteten UNTERKATEGORIEN zutrifft - nicht fuer normale einfache VORLAGEN (dafuer Fall 1) und nicht fuer KUNDENANFRAGEN (dafuer Fall 3).
 ${KG_FORMAT_HINWEIS}`;
 
   let userText = 'EINGEHENDE MAIL:\n' + body.mailInhalt;
@@ -402,6 +416,21 @@ ${KG_FORMAT_HINWEIS}`;
         tokensInput, tokensOutput,
       });
     }
+  }
+
+  if (entscheidung.aktion === 'unterkategorie') {
+    const unterkategorie = (unterkategorien || []).find((u: any) => u.titel === entscheidung.unterkategorieTitel);
+    if (!unterkategorie) return json({ error: 'Unterkategorie "' + entscheidung.unterkategorieTitel + '" nicht gefunden.' }, 502);
+    const kandidaten = (vorlagen || []).filter((v: any) => v.unterkategorie_id === unterkategorie.id);
+    await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', null, tokensInput, tokensOutput);
+    return json({
+      aktion: 'unterkategorie', titel: unterkategorie.titel,
+      antworten: kandidaten.map((v: any) => ({
+        id: v.id, label: v.titel,
+        zusatzfenster: (v.mailassistent_vorlage_zusatzfenster || []).map((e: any) => e.mailassistent_zusatzfenster).filter(Boolean),
+      })),
+      tokensInput, tokensOutput,
+    });
   }
 
   return json({ error: 'Unbekannte KI-Entscheidung: ' + JSON.stringify(entscheidung) }, 502);
