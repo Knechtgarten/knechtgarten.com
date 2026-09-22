@@ -258,7 +258,7 @@ async function modusAntworten(body: any, modell: string) {
     sb.from('mailassistent_faelle_abschnitt').select('titel,inhalt').order('reihenfolge'),
     sb.from('mailassistent_mitarbeiter').select('name,email,funktion').order('reihenfolge'),
     sb.from('mailassistent_externe_kontakte').select('firma,domains,rolle,notiz').order('reihenfolge'),
-    sb.from('mailassistent_unterkategorie').select('*, mailassistent_kategorie(titel)').eq('aktionstyp', 'rueckfrage'),
+    sb.from('mailassistent_unterkategorie').select('*, mailassistent_kategorie(titel)'),
   ]);
 
   const mitarbeitendeListe = (mitarbeitende || [])
@@ -272,8 +272,16 @@ async function modusAntworten(body: any, modell: string) {
     .map((a: any) => `${a.titel}:\n${a.inhalt}`)
     .join('\n\n');
 
+  // Eine Unterkategorie ist nur dann eine eigene "Rueckfrage"-Gruppe (siehe
+  // unterkategorienMenu unten), wenn ihr Aktionstyp das auch sagt. Bei
+  // Aktionstyp "Direkter Entwurf" (oder "Kundenanfrage-Fenster", das rein
+  // dokumentarisch ist) ist die Unterkategorie nur ein Ordner fuers
+  // Verwaltungstool - ihre Vorlagen muessen ganz normal wie jede andere
+  // VORLAGE im vorlagenMenu erscheinen, sonst sieht die KI sie nie.
+  const rueckfrageUnterkategorieIds = new Set((unterkategorien || []).filter((u: any) => u.aktionstyp === 'rueckfrage').map((u: any) => u.id));
+
   const vorlagenMenu = (vorlagen || []).map((v: any) => {
-    if (v.unterkategorie_id) return null; // gehoert zu einer UNTERKATEGORIE unten, nicht einzeln listen
+    if (v.unterkategorie_id && rueckfrageUnterkategorieIds.has(v.unterkategorie_id)) return null; // wird stattdessen unten in UNTERKATEGORIEN gelistet
     if (v.typ === 'rueckfrage') {
       const zweige = (v.mailassistent_vorlage_antwort || []).map((z: any) => z.label).join(' / ');
       return `- VORLAGE "${v.titel}" [MIT RÜCKFRAGE] – trifft zu wenn: ${v.wann_trifft_zu || '–'}\n  Frage an den Mitarbeiter: "${v.frage}"\n  Mögliche Antworten: ${zweige}`;
@@ -281,7 +289,7 @@ async function modusAntworten(body: any, modell: string) {
     return `- VORLAGE "${v.titel}" – trifft zu wenn: ${v.wann_trifft_zu || '–'}${v.nicht_anwenden_bei ? `\n  NICHT anwenden bei: ${v.nicht_anwenden_bei}` : ''}\n  Text:\n${v.inhalt}`;
   }).filter(Boolean).join('\n\n');
 
-  const unterkategorienMenu = (unterkategorien || []).map((u: any) => {
+  const unterkategorienMenu = (unterkategorien || []).filter((u: any) => u.aktionstyp === 'rueckfrage').map((u: any) => {
     const zugehoerig = (vorlagen || []).filter((v: any) => v.unterkategorie_id === u.id);
     const optionen = zugehoerig.map((v: any) => v.titel).join(' / ');
     return `- UNTERKATEGORIE "${u.titel}" (Kategorie: ${u.mailassistent_kategorie?.titel || '–'}) – zutreffend, wenn die Mail zu diesem Fall gehoert und mehrere gleichwertige Antworten in Frage kommen.` +
@@ -411,7 +419,7 @@ ${KG_FORMAT_HINWEIS}`;
   }
 
   if (entscheidung.aktion === 'unterkategorie') {
-    const unterkategorie = (unterkategorien || []).find((u: any) => u.titel === entscheidung.unterkategorieTitel);
+    const unterkategorie = (unterkategorien || []).find((u: any) => u.titel === entscheidung.unterkategorieTitel && u.aktionstyp === 'rueckfrage');
     if (!unterkategorie) return json({ error: 'Unterkategorie "' + entscheidung.unterkategorieTitel + '" nicht gefunden.' }, 502);
     const kandidaten = (vorlagen || []).filter((v: any) => v.unterkategorie_id === unterkategorie.id);
     await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', null, tokensInput, tokensOutput);
