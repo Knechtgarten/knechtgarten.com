@@ -327,9 +327,15 @@ ${KG_FORMAT_HINWEIS}`;
     if (!(entscheidung.text || '').trim()) {
       return json({ error: 'Die KI hat einen leeren Entwurf geliefert - vermutlich hat die gewaehlte Vorlage ("' + (entscheidung.vorlageTitel || '–') + '") noch keinen Text hinterlegt. Bitte Vorlage ergaenzen oder nochmal versuchen.' }, 502);
     }
-    const vorlage = entscheidung.vorlageTitel
-      ? (vorlagen || []).find((v: any) => v.titel === entscheidung.vorlageTitel)
-      : null;
+    let vorlage = null;
+    if (entscheidung.vorlageTitel) {
+      const gesucht = String(entscheidung.vorlageTitel).trim().toLowerCase();
+      vorlage = (vorlagen || []).find((v: any) => v.titel === entscheidung.vorlageTitel)
+        || (vorlagen || []).find((v: any) => (v.titel || '').trim().toLowerCase() === gesucht);
+      if (!vorlage) {
+        return json({ error: 'Vorlage "' + entscheidung.vorlageTitel + '" wurde nicht gefunden (Titel stimmt nicht exakt mit der Verwaltung ueberein) - dadurch waere z.B. ein zugehoeriges Zusatzfenster verloren gegangen. Bitte nochmal versuchen oder den Vorlagen-Titel in der Verwaltung pruefen.' }, 502);
+      }
+    }
     const zusatzfenster = (vorlage?.mailassistent_vorlage_zusatzfenster || [])
       .map((e: any) => e.mailassistent_zusatzfenster).filter(Boolean);
     await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', vorlage?.id ?? null, tokensInput, tokensOutput);
