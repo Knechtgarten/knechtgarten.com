@@ -11,21 +11,32 @@
 //    per Stichworte (body.stichworte).
 //  - 'antworten': Antwort auf eine eingehende Mail (body.mailInhalt). Liest
 //    Mail-Vorlagen:Antworten + Ast/Zweig-Einordnung, laesst Claude in einem
-//    Schritt entscheiden, was zutrifft:
-//      a) direkter Entwurf (matcht eine einfache Vorlage/Auffangfall)
+//    (kleinen, nicht gestreamten) Schritt NUR entscheiden, was zutrifft -
+//    schreibt dabei noch KEINEN Mailtext:
+//      a) direkter Entwurf moeglich (matcht eine einfache Vorlage, oder
+//         vorlageId:null als Auffangfall) - liefert nur die Einordnung
+//         zurueck (aktion:'entwurf', vorlageId), die Erweiterung ruft danach
+//         SOFORT 'auswahl-antwort' auf (siehe unten), um den eigentlichen
+//         Text gestreamt zu erzeugen - Wort fuer Wort statt Warten auf den
+//         kompletten Block.
 //      b) Rueckfrage noetig (Vorlage vom Typ 'rueckfrage')
 //      c) ein Zweig mit mehreren Antworten trifft zu (Mitarbeiter waehlt
 //         manuell) - traegt der Zweig-Ast eine ast_funktion vom Typ
 //         'distanzlogik' (z.B. Kundenanfragen), zusaetzlich Google-Maps-
 //         Distanz zu Knechtgarten + den Partnerbetrieben dieses Asts.
 //  - 'rueckfrage-antwort': Fortsetzung nach b) - body.vorlageId + body.
-//    antwortLabel (gewaehlter Zweig) -> Entwurf mit dem hinterlegten Text
-//    dieses Zweigs als Vorlage.
+//    antwortLabel (gewaehlter Zweig) -> gestreamter Entwurf mit dem
+//    hinterlegten Text dieses Zweigs als Vorlage.
+//  - 'auswahl-antwort': gestreamter Entwurf-Text fuer eine schon feststehende
+//    Quelle - body.vorlageId/vorlageTitel (Vorlage), body.partnerbetriebId
+//    (Weiterleitungstext), body.eigeneAbsage (Absagetext der Ast-Funktion),
+//    oder KEINS davon (Auffangfall - Claude schreibt frei, ohne Vorlage).
 //  - 'nachbessern': body.aktuellerEntwurf + body.anweisung -> ueberarbeiteter
 //    Entwurf, Schreibstil bleibt Leitplanke.
 //
-// Antwort: { aktion: 'entwurf', text, tokensInput, tokensOutput }
+// Antwort 'antworten' Fall a): { aktion: 'entwurf', vorlageId, zusatzfenster?, tokensInput, tokensOutput }
 //       ODER { aktion: 'rueckfrage', vorlageId, frage, antworten: [{label}], tokensInput, tokensOutput }
+// Antwort 'auswahl-antwort'/'rueckfrage-antwort': gestreamter Klartext (kein JSON)
 // ============================================================================
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
@@ -338,18 +349,10 @@ ZWEIGE MIT MEHREREN ANTWORTEN, MITARBEITER ENTSCHEIDET SELBST - hier gibt es KEI
 ${zweigeMenu || '(keine erfasst)'}
 ${faelleText ? '\nREGELN (gelten IMMER fuer den fertigen Text - im Hinterkopf behalten und den Text danach ausrichten. WICHTIG: beeinflussen NICHT, welche VORLAGE/welcher ZWEIG zutrifft, das entscheidet sich rein anhand von "Anwenden bei"/"NICHT anwenden bei" oben - Regeln wirken erst danach, auf den fertigen Text):\n' + faelleText + '\n' : ''}
 Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Objekt (kein Text davor/danach), in einer dieser vier Formen:
-1. Direkter Entwurf möglich (einfache Vorlage/Auffangfall):
-{"aktion":"entwurf","text":"<fertiger Mailtext>","vorlageTitel":"<exakter Titel der verwendeten VORLAGE, sonst null>"}
-   Trifft eine VORLAGE zu: deren Text als starke Richtschnur nehmen (Kernaussage/Entscheidung und Aufbau bleiben, das ist nicht verhandelbar), aber natürlich personalisieren - Namen der Person ansprechen, wo sinnvoll kurz auf Details aus der eingehenden Mail eingehen. Nicht stur wortwörtlich abschreiben, aber auch nichts an der eigentlichen Entscheidung/Aussage ändern. WICHTIG: Waehle eine VORLAGE fuer Fall 1 nur, wenn sie auch wirklich einen "Text:" hat. Hat die naheliegendste VORLAGE (noch) keinen Text hinterlegt, ist sie fuer Fall 1 nicht nutzbar - pruefe stattdessen, ob ein ZWEIG (Fall 4) zutrifft, oder schreibe selbst einen passenden, kurzen Text (wie bei einem Auffangfall). Erzeuge NIE einen leeren oder nur aus Platzhaltern bestehenden Text.
-   Platzhalter in eckigen Klammern (z.B. [Bauteil], [X Minuten]) werden so behandelt:
-   - Einen Platzhalter der Form [ZF:...] IMMER exakt unveraendert stehen lassen (nicht ausfuellen, nicht entfernen, nicht uebersetzen) - der wird danach automatisch ersetzt.
-   - JEDEN Platzhalter, der das Wort "Datum" enthaelt (z.B. [Datum], [Datum, Uhrzeit]), IMMER exakt unveraendert stehen lassen - der wird separat behandelt.
-   - Jeden ANDEREN Platzhalter: kannst du aus der eingehenden Mail/dem Kontext einen konkreten, sinnvollen Wert ableiten, ersetze ihn durch diesen Wert in DOPPELTEN eckigen Klammern, z.B. wird aus [Bauteil] -> [[Ablaufventil]] (macht sichtbar, wo du etwas eingesetzt hast, der Mitarbeiter kann es noch per Klick anpassen). Bist du dir nicht sicher oder fehlt die Information, lass ihn stattdessen unveraendert in einfachen eckigen Klammern stehen, z.B. [Bauteil]. Erfinde NIE einen Wert, den du nicht wirklich aus dem Kontext hast.
-   - Text OHNE Klammern in der VORLAGE (z.B. schon konkrete Namen, Adressen, Telefonnummern, E-Mail-Adressen) bleibt IMMER exakt unveraendert stehen - erstelle NIEMALS neue eckige Klammern um bereits konkrete Angaben.
-   "vorlageTitel" ist der exakte Titel der VORLAGE, deren Text du als Grundlage genommen hast - null, falls du dir den Text selbst ueberlegt hast (Auffangfall ohne passende VORLAGE).
-   Schreibst du den Text selbst (kein VORLAGE-Text als Basis, z.B. Auffangfall oder eine noch nicht erfasste Situation):
-   - Beachte dabei insbesondere die oben unter FÄLLE aufgefuehrten Regeln zu Vollstaendigkeit, Personen-Rollen und Danke-Regel.
-   - Wird eine konkrete Sachfrage gestellt, die NUR das Team selbst beantworten kann (z.B. "Habt ihr noch X im Einsatz?", "Wie viele Y?", ein internes Detail, das nicht aus der eingehenden Mail hervorgeht) - erfinde NIEMALS eine Antwort darauf. Setze stattdessen einen Platzhalter in eckigen Klammern ein, der kurz beschreibt, was einzusetzen ist, z.B. [Antwort: eigene Space 2.0-Einheiten im Einsatz?] - der Mitarbeiter kann per Klick draufantworten, bevor die Mail rausgeht.
+1. Direkter Entwurf möglich (einfache Vorlage/Auffangfall) - hier NUR entscheiden, WELCHE Vorlage passt (oder keine), noch NICHT den Text schreiben - das passiert danach in einem zweiten Schritt:
+{"aktion":"entwurf","vorlageTitel":"<exakter Titel der passenden VORLAGE, sonst null>"}
+   WICHTIG: Waehle eine VORLAGE fuer Fall 1 nur, wenn sie auch wirklich einen "Text:" hat. Hat die naheliegendste VORLAGE (noch) keinen Text hinterlegt, ist sie fuer Fall 1 nicht nutzbar - pruefe stattdessen, ob ein ZWEIG (Fall 4) zutrifft, oder waehle Fall 1 mit vorlageTitel:null (Auffangfall, der Text wird dann im zweiten Schritt frei geschrieben).
+   "vorlageTitel" ist der exakte Titel der VORLAGE, deren Text als Grundlage dienen soll - null, wenn keine passt (Auffangfall, Text wird danach frei geschrieben).
 2. Eine Vorlage mit Rückfrage trifft zu:
 {"aktion":"rueckfrage","vorlageTitel":"<exakter Titel der Vorlage>"}
 3. AUSNAHMEFALL - zwei (normalerweise nicht mehr) einfache VORLAGEN passen ungefähr GLEICH GUT, sagen inhaltlich aber unterschiedliche Dinge aus, und es ist fuer die Antwort wirklich wichtig, welche davon stimmt:
@@ -362,12 +365,16 @@ Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Obje
    - Volle Adresse, z.B. "Bernstrasse 12, 3672 Oberdiessbach"
    - Nur PLZ+Ort, z.B. "3600 Thun"
    - Nur ein Ortsname im Fliesstext, z.B. "wir wohnen in Interlaken" oder "unser Grundstück in Steffisburg" -> "Interlaken" bzw. "Steffisburg"
-   Nimm exakt das, was in der Mail steht (keine eigene Umformung/Ergänzung, nichts dazu erfinden). Nur wenn wirklich gar kein Hinweis auf einen Standort vorhanden ist, setze null.
-${KG_FORMAT_HINWEIS}`;
+   Nimm exakt das, was in der Mail steht (keine eigene Umformung/Ergänzung, nichts dazu erfinden). Nur wenn wirklich gar kein Hinweis auf einen Standort vorhanden ist, setze null.`;
 
   let userText = 'EINGEHENDE MAIL:\n' + body.mailInhalt;
   if (body.stichworte) userText += '\n\nZUSAETZLICHE STICHWORTE/ANWEISUNG VOM MITARBEITER - unbedingt beruecksichtigen: ' + body.stichworte;
-  const { text, tokensInput, tokensOutput } = await rufeClaudeAuf(modell, system, userText, 3500, true);
+  // Kleineres max_tokens als frueher: dieser Aufruf entscheidet nur noch, WAS
+  // zutrifft (Vorlage/Zweig/Rueckfrage), schreibt den Mailtext nicht mehr
+  // selbst - das passiert bei Fall 1 in einem zweiten, gestreamten Aufruf
+  // (modus 'auswahl-antwort'), damit der Mitarbeiter den Text Wort fuer Wort
+  // erscheinen sieht statt auf den kompletten Block warten zu muessen.
+  const { text, tokensInput, tokensOutput } = await rufeClaudeAuf(modell, system, userText, 1000, true);
   let entscheidung;
   try { entscheidung = extrahiereJson(text); }
   catch (e) {
@@ -378,9 +385,9 @@ ${KG_FORMAT_HINWEIS}`;
   }
 
   if (entscheidung.aktion === 'entwurf') {
-    if (!(entscheidung.text || '').trim()) {
-      return json({ error: 'Die KI hat einen leeren Entwurf geliefert - vermutlich hat die gewaehlte Vorlage ("' + (entscheidung.vorlageTitel || '–') + '") noch keinen Text hinterlegt. Bitte Vorlage ergaenzen oder nochmal versuchen.' }, 502);
-    }
+    // Schreibt den Text NICHT mehr selbst - liefert nur die Einordnung, die
+    // Erweiterung ruft danach 'auswahl-antwort' auf (gestreamt), siehe
+    // kgZeigeErgaenzungImPopup in content.js.
     let vorlage = null;
     if (entscheidung.vorlageTitel) {
       const gesucht = String(entscheidung.vorlageTitel).trim().toLowerCase();
@@ -394,7 +401,7 @@ ${KG_FORMAT_HINWEIS}`;
       .map((e: any) => e.mailassistent_zusatzfenster).filter(Boolean);
     await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', vorlage?.id ?? null, tokensInput, tokensOutput);
     return json({
-      aktion: 'entwurf', text: (entscheidung.text || '').trim(), vorlageId: vorlage?.id ?? null,
+      aktion: 'entwurf', vorlageId: vorlage?.id ?? null,
       zusatzfenster: zusatzfenster.length ? zusatzfenster : undefined,
       tokensInput, tokensOutput,
     });
@@ -588,10 +595,16 @@ VORLAGE:\n${zweig.inhalt}`);
 // gewaehlten Vorlage verwendet, genau wie beim normalen direkten Entwurf.
 // Wird auch fuer Kundenanfragen-Antwort-Vorlagen genutzt (dort per vorlageId
 // statt vorlageTitel, da es keine KI-Auswahl gibt, der Mitarbeiter waehlt
-// direkt eine konkrete Vorlage aus der Liste), UND fuer die kompakten
+// direkt eine konkrete Vorlage aus der Liste), fuer die kompakten
 // "Weiterleiten"-Buttons je Partnerbetrieb (body.partnerbetriebId) - deren
 // Weiterleitungstext liegt direkt auf mailassistent_partnerbetrieb statt in
-// einer eigenen Vorlage (1:1 an den Partnerbetrieb gebunden).
+// einer eigenen Vorlage (1:1 an den Partnerbetrieb gebunden) - UND fuer den
+// normalen direkten Entwurf aus modusAntworten (Fall 1): dort entscheidet die
+// KI nur noch, OB und WELCHE Vorlage passt (kein vorlageId/vorlageTitel/
+// partnerbetriebId/eigeneAbsage im Body = Auffangfall, keine Vorlage), den
+// eigentlichen Text schreibt/personalisiert IMMER dieser gestreamte zweite
+// Aufruf hier - dadurch erscheint der Entwurf ueberall Wort fuer Wort statt
+// dass man auf den kompletten Block warten muss.
 // ----------------------------------------------------------------------------
 async function modusAuswahlAntwort(body: any, modell: string) {
   const [{ data: grundlogik }, { data: schreibstil }, { data: firmendaten }, { data: wissen }, { data: faelle }] = await Promise.all([
@@ -607,7 +620,10 @@ async function modusAuswahlAntwort(body: any, modell: string) {
   const faelleText = formatiereAbschnitte(faelle);
 
   let titel: string, inhalt: string, logVorlageId: string | null;
-  if (body.partnerbetriebId) {
+  const istAuffangfall = !body.partnerbetriebId && !body.eigeneAbsage && !body.vorlageId && !body.vorlageTitel;
+  if (istAuffangfall) {
+    titel = 'Auffangfall'; inhalt = ''; logVorlageId = null;
+  } else if (body.partnerbetriebId) {
     const { data: partner } = await sb.from('mailassistent_partnerbetrieb').select('*').eq('id', body.partnerbetriebId).maybeSingle();
     if (!partner) return json({ error: 'Partnerbetrieb nicht gefunden.' }, 502);
     titel = partner.name; inhalt = partner.weiterleitung_text || ''; logVorlageId = null;
@@ -624,20 +640,25 @@ async function modusAuswahlAntwort(body: any, modell: string) {
     if (!vorlage) return json({ error: 'Vorlage "' + (body.vorlageTitel || body.vorlageId) + '" nicht gefunden.' }, 502);
     titel = vorlage.titel; inhalt = vorlage.inhalt; logVorlageId = vorlage.id;
   }
-  if (!inhalt.trim()) return json({ error: 'Für "' + titel + '" ist noch kein Text hinterlegt.' }, 502);
+  if (!istAuffangfall && !inhalt.trim()) return json({ error: 'Für "' + titel + '" ist noch kein Text hinterlegt.' }, 502);
 
   const teile = [];
   if (grundlogikText) teile.push('GRUNDLOGIK (wie du als Mail-Assistent grundsaetzlich vorgehst):\n' + grundlogikText);
   if (schreibstilText) teile.push('SCHREIBSTIL:\n' + schreibstilText);
   if (firmendaten) teile.push('FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten));
   if (wissenText) teile.push('NACHSCHLAGEWERK (weiteres Wissen - nutze das bei Bedarf):\n' + wissenText);
-  teile.push(`VORLAGE - als starke Richtschnur nehmen (Kernaussage/Entscheidung und Aufbau bleiben, das ist nicht verhandelbar), aber natürlich personalisieren: Namen der Person ansprechen, wo sinnvoll kurz auf Details aus der eingehenden Mail eingehen. Nicht stur wortwörtlich abschreiben, aber auch nichts an der eigentlichen Entscheidung/Aussage ändern.
+  if (istAuffangfall) {
+    teile.push(`Es gibt keine passende Vorlage fuer diese Mail (Auffangfall). Schreibe selbst einen passenden, kurzen Antworttext.
+Wird eine konkrete Sachfrage gestellt, die NUR das Team selbst beantworten kann (z.B. ein internes Detail, das nicht aus der eingehenden Mail hervorgeht) - erfinde NIEMALS eine Antwort darauf. Setze stattdessen einen Platzhalter in eckigen Klammern ein, der kurz beschreibt, was einzusetzen ist, z.B. [Antwort: eigene Space 2.0-Einheiten im Einsatz?] - der Mitarbeiter kann per Klick draufantworten, bevor die Mail rausgeht.`);
+  } else {
+    teile.push(`VORLAGE - als starke Richtschnur nehmen (Kernaussage/Entscheidung und Aufbau bleiben, das ist nicht verhandelbar), aber natürlich personalisieren: Namen der Person ansprechen, wo sinnvoll kurz auf Details aus der eingehenden Mail eingehen. Nicht stur wortwörtlich abschreiben, aber auch nichts an der eigentlichen Entscheidung/Aussage ändern.
 Platzhalter in eckigen Klammern (z.B. [Bauteil], [X Minuten]) werden so behandelt:
 - Einen Platzhalter der Form [ZF:...] IMMER exakt unveraendert stehen lassen - der wird danach automatisch ersetzt.
 - JEDEN Platzhalter, der das Wort "Datum" enthaelt (z.B. [Datum], [Datum, Uhrzeit]), IMMER exakt unveraendert stehen lassen - der wird separat behandelt.
 - Jeden ANDEREN Platzhalter: kannst du aus der eingehenden Mail/dem Kontext einen konkreten, sinnvollen Wert ableiten, ersetze ihn durch diesen Wert in DOPPELTEN eckigen Klammern, z.B. wird aus [Bauteil] -> [[Ablaufventil]]. Bist du dir nicht sicher, lass ihn stattdessen unveraendert in einfachen eckigen Klammern stehen. Erfinde NIE einen Wert, den du nicht wirklich aus dem Kontext hast.
 - Text OHNE Klammern in der VORLAGE (z.B. schon konkrete Namen, Adressen, Telefonnummern, E-Mail-Adressen) bleibt IMMER exakt unveraendert stehen - erstelle NIEMALS neue eckige Klammern um bereits konkrete Angaben, auch nicht um sie "generischer" oder "vorlagenhafter" wirken zu lassen.
 VORLAGE:\n${inhalt}`);
+  }
   if (faelleText) teile.push('REGELN (gelten IMMER fuer den fertigen Text - im Hinterkopf behalten und den Text danach ausrichten):\n' + faelleText);
   if (body.mailInhalt) teile.push('EINGEHENDE MAIL:\n' + body.mailInhalt);
   if (body.anweisung) teile.push('ZUSAETZLICHE ANWEISUNG: ' + body.anweisung);
