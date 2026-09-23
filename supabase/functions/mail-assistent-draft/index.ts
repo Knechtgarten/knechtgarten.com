@@ -191,8 +191,8 @@ async function modusVerfassen(body: any, modell: string) {
     .join('\n\n');
 
   const teile = [];
-  if (schreibstil?.immer_verfassen && schreibstil.inhalt) teile.push('SCHREIBSTIL:\n' + schreibstil.inhalt);
-  if (firmendaten?.immer_verfassen) teile.push('FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten));
+  if (schreibstil?.inhalt) teile.push('SCHREIBSTIL:\n' + schreibstil.inhalt);
+  if (firmendaten) teile.push('FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten));
   if (faelleText) teile.push('FÄLLE (situative Regeln, gelten immer):\n' + faelleText);
   if (vorlage) teile.push(`VORLAGE "${vorlage.titel}" - GENAU DIESEN TEXT WORTGETREU UEBERNEHMEN, nur die Platzhalter behandeln. KEINEN eigenen Text erfinden, auch nicht wenn die Vorlage kurz oder unklar wirkt.
 Platzhalter in eckigen Klammern (z.B. [NAME], [PROJEKT]):
@@ -219,7 +219,7 @@ async function modusAntwortenIntern(body: any, modell: string) {
   const { data: schreibstil } = await sb.from('mailassistent_schreibstil').select('*').limit(1).maybeSingle();
   const system = `Du bist der Mail-Assistent von Knechtgarten. Diese Nachricht kommt von einer Kollegin/einem Kollegen (intern), keine Kundenmail.
 Antworte extrem kurz und direkt, wie eine knappe Chat-Nachricht unter Kollegen - z.B. "Ist ok, mache ich.", "Ja, passt.", "Nein, lieber am Montag.". KEINE Anrede ("Hallo ..."), KEINE Grussformel/Verabschiedung ("Freundliche Gruesse" o.ae.), KEINE Floskeln ("Vielen Dank fuer deine Nachricht" o.ae.) - nur die eigentliche Information/Antwort, sonst nichts.
-${schreibstil?.immer_antworten && schreibstil.inhalt ? '\nSCHREIBSTIL (nur soweit auch fuer knappe interne Chat-Nachrichten sinnvoll - Anrede/Gruss aus dem Schreibstil hier NICHT uebernehmen):\n' + schreibstil.inhalt : ''}
+${schreibstil?.inhalt ? '\nSCHREIBSTIL (nur soweit auch fuer knappe interne Chat-Nachrichten sinnvoll - Anrede/Gruss aus dem Schreibstil hier NICHT uebernehmen):\n' + schreibstil.inhalt : ''}
 Schreibe direkt den Antworttext. Nur den Mailtext ausgeben, keine Erklaerung, keine Anfuehrungszeichen drumherum.${KG_FORMAT_HINWEIS}`;
 
   const { text, tokensInput, tokensOutput } = await rufeClaudeAuf(modell, system, 'INTERNE NACHRICHT:\n' + body.mailInhalt, 400);
@@ -304,7 +304,7 @@ async function modusAntworten(body: any, modell: string) {
 
   const system = `Du bist der Mail-Assistent von Knechtgarten (Gartenbau-Unternehmen, Heimenschwand/BE). Du liest eine eingehende Mail und entscheidest, wie sie beantwortet werden soll.
 
-${schreibstil?.immer_antworten && schreibstil.inhalt ? 'SCHREIBSTIL:\n' + schreibstil.inhalt + '\n\n' : ''}${firmendaten?.immer_antworten ? 'FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten) + '\n\n' : ''}${mitarbeitendeListe ? 'MITARBEITENDE (unser eigenes Team - gehoert zu "uns", nicht zur Gegenseite):\n' + mitarbeitendeListe + '\n\n' : ''}${externeKontakteListe ? 'BEKANNTE EXTERNE FIRMEN (anhand der Domain im Mailkopf zuordenbar - gehoeren NICHT zu uns):\n' + externeKontakteListe + '\n\n' : ''}${faelleText ? 'FÄLLE (situative Regeln, gelten immer):\n' + faelleText + '\n\n' : ''}Pruefe die folgenden zwei Bereiche mit GLEICHER Prioritaet (keiner geht dem anderen automatisch vor) - MAIL-VORLAGEN und ZWEIGE sind fuer spezifische, bekannte Faelle (jede VORLAGE ist ueber einen Ast/Zweig eingeordnet - Ast und Zweig sind reine Einordnung, kein eigener Inhalt):
+${schreibstil?.inhalt ? 'SCHREIBSTIL:\n' + schreibstil.inhalt + '\n\n' : ''}${firmendaten ? 'FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten) + '\n\n' : ''}${mitarbeitendeListe ? 'MITARBEITENDE (unser eigenes Team - gehoert zu "uns", nicht zur Gegenseite):\n' + mitarbeitendeListe + '\n\n' : ''}${externeKontakteListe ? 'BEKANNTE EXTERNE FIRMEN (anhand der Domain im Mailkopf zuordenbar - gehoeren NICHT zu uns):\n' + externeKontakteListe + '\n\n' : ''}${faelleText ? 'FÄLLE (situative Regeln, gelten immer):\n' + faelleText + '\n\n' : ''}Pruefe die folgenden zwei Bereiche mit GLEICHER Prioritaet (keiner geht dem anderen automatisch vor) - MAIL-VORLAGEN und ZWEIGE sind fuer spezifische, bekannte Faelle (jede VORLAGE ist ueber einen Ast/Zweig eingeordnet - Ast und Zweig sind reine Einordnung, kein eigener Inhalt):
 
 MAIL-VORLAGEN:
 ${vorlagenMenu || '(keine erfasst)'}
@@ -505,8 +505,8 @@ async function modusRueckfrageAntwort(body: any, modell: string) {
   if (!zweig) return json({ error: 'Antwort "' + body.antwortLabel + '" nicht gefunden.' }, 502);
 
   const teile = [];
-  if (schreibstil?.immer_antworten && schreibstil.inhalt) teile.push('SCHREIBSTIL:\n' + schreibstil.inhalt);
-  if (firmendaten?.immer_antworten) teile.push('FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten));
+  if (schreibstil?.inhalt) teile.push('SCHREIBSTIL:\n' + schreibstil.inhalt);
+  if (firmendaten) teile.push('FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten));
   teile.push(`VORLAGE - als starke Richtschnur nehmen (Kernaussage/Entscheidung und Aufbau bleiben, das ist nicht verhandelbar), aber natürlich personalisieren: Namen der Person ansprechen, wo sinnvoll kurz auf Details aus der eingehenden Mail eingehen. Nicht stur wortwörtlich abschreiben, aber auch nichts an der eigentlichen Entscheidung/Aussage ändern.
 Platzhalter in eckigen Klammern (z.B. [Bauteil], [X Minuten]) werden so behandelt:
 - Einen Platzhalter der Form [ZF:...] IMMER exakt unveraendert stehen lassen - der wird danach automatisch ersetzt.
@@ -583,8 +583,8 @@ async function modusAuswahlAntwort(body: any, modell: string) {
   if (!inhalt.trim()) return json({ error: 'Für "' + titel + '" ist noch kein Text hinterlegt.' }, 502);
 
   const teile = [];
-  if (schreibstil?.immer_antworten && schreibstil.inhalt) teile.push('SCHREIBSTIL:\n' + schreibstil.inhalt);
-  if (firmendaten?.immer_antworten) teile.push('FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten));
+  if (schreibstil?.inhalt) teile.push('SCHREIBSTIL:\n' + schreibstil.inhalt);
+  if (firmendaten) teile.push('FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten));
   teile.push(`VORLAGE - als starke Richtschnur nehmen (Kernaussage/Entscheidung und Aufbau bleiben, das ist nicht verhandelbar), aber natürlich personalisieren: Namen der Person ansprechen, wo sinnvoll kurz auf Details aus der eingehenden Mail eingehen. Nicht stur wortwörtlich abschreiben, aber auch nichts an der eigentlichen Entscheidung/Aussage ändern.
 Platzhalter in eckigen Klammern (z.B. [Bauteil], [X Minuten]) werden so behandelt:
 - Einen Platzhalter der Form [ZF:...] IMMER exakt unveraendert stehen lassen - der wird danach automatisch ersetzt.
