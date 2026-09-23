@@ -3083,7 +3083,20 @@ async function recalc(){
     // KAT_ORDER-Gruppierung ganz normal mit gleichartikeligen Zeilen
     // zusammenfassen (siehe berechneLieferwagenfahrzeit()). Jeder eigene
     // Teilschritt zaehlt zusaetzlich als ein separater Baustellenbesuch.
-    const gesamtPersonalStunden = alleZeilen.filter(r => r.kategorie === 'personal').reduce((s, r) => s + r.menge, 0);
+    // Fuer die Lieferwagenfahrzeit zaehlen nur die Stunden des Vorarbeiters
+    // (das Team faehrt gemeinsam zur Baustelle, nicht jeder einzeln - siehe
+    // Absprache/tool-a-live-v1.html) - nicht die Summe ALLER Personalrollen,
+    // sonst wuerden bei mehreren gleichzeitig arbeitenden Rollen (z.B.
+    // Vorarbeiter + Gartenarbeiter) doppelt so viele Arbeitstage berechnet
+    // wie real vor Ort gearbeitet wird. Vorarbeiter-Zeilen sind durch
+    // wendeVorarbeiterTypAn() oben bereits auf den aktuell gewaehlten
+    // Pool/Normal-Artikel vereinheitlicht. Ist gar kein Vorarbeiter-Artikel
+    // hinterlegt, auf die Summe aller Personalrollen zurueckfallen statt die
+    // Fahrzeit auf 0 einbrechen zu lassen.
+    const vorarbeiterArtikelIds = [lieferwagenKonfig?.vorarbeiterArtikelId, lieferwagenKonfig?.vorarbeiterPoolbauArtikelId].filter(Boolean);
+    const personalZeilen = alleZeilen.filter(r => r.kategorie === 'personal');
+    const gesamtPersonalStunden = (vorarbeiterArtikelIds.length ? personalZeilen.filter(r => vorarbeiterArtikelIds.includes(r.artikelId)) : personalZeilen)
+      .reduce((s, r) => s + r.menge, 0);
     const lwZeilen = await berechneLieferwagenfahrzeit(gesamtPersonalStunden, eigeneTeilschritte.length, meineGeneration);
     if(meineGeneration !== recalcGeneration) return; // inzwischen ueberholt, siehe recalcGeneration oben
     alleZeilen = alleZeilen.concat(lwZeilen.personal, lwZeilen.logistik);
