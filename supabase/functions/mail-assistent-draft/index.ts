@@ -10,13 +10,14 @@
 //  - 'verfassen': neue Mail, optional per Vorlage (body.vorlageId) oder frei
 //    per Stichworte (body.stichworte).
 //  - 'antworten': Antwort auf eine eingehende Mail (body.mailInhalt). Liest
-//    Mail-Vorlagen:Antworten + Unterkategorien + Distanzlogik-Trigger, laesst
-//    Claude in einem Schritt entscheiden, was zutrifft:
+//    Mail-Vorlagen:Antworten + Ast/Zweig-Einordnung, laesst Claude in einem
+//    Schritt entscheiden, was zutrifft:
 //      a) direkter Entwurf (matcht eine einfache Vorlage/Auffangfall)
 //      b) Rueckfrage noetig (Vorlage vom Typ 'rueckfrage')
-//      c) Distanzlogik noetig (Kontaktanfrage-artig) - dann zweiter Schritt:
-//         Google-Maps-Distanz -> passende Stufe -> ggf. Partner-Empfehlung
-//         -> finaler Entwurf.
+//      c) ein Zweig mit mehreren Antworten trifft zu (Mitarbeiter waehlt
+//         manuell) - traegt der Zweig-Ast eine ast_funktion vom Typ
+//         'distanzlogik' (z.B. Kundenanfragen), zusaetzlich Google-Maps-
+//         Distanz zu Knechtgarten + den Partnerbetrieben dieses Asts.
 //  - 'rueckfrage-antwort': Fortsetzung nach b) - body.vorlageId + body.
 //    antwortLabel (gewaehlter Zweig) -> Entwurf mit dem hinterlegten Text
 //    dieses Zweigs als Vorlage.
@@ -235,7 +236,7 @@ async function modusAntworten(body: any, modell: string) {
 
   const [
     { data: schreibstil }, { data: firmendaten },
-    { data: vorlagen }, { data: kundenanfrageVorlagen }, { data: distanzMeta }, { data: faelle },
+    { data: vorlagen }, { data: faelle },
     { data: mitarbeitende }, { data: externeKontakte }, { data: zweige },
   ] = await Promise.all([
     sb.from('mailassistent_schreibstil').select('*').limit(1).maybeSingle(),
@@ -247,18 +248,10 @@ async function modusAntworten(body: any, modell: string) {
             mailassistent_zusatzfenster_spalte_option(id,wert,reihenfolge)),
           mailassistent_zusatzfenster_position(id,titel,reihenfolge)))`)
       .eq('richtung', 'antworten').eq('aktiv', true).order('reihenfolge'),
-    sb.from('mailassistent_vorlage').select(`*,
-      mailassistent_vorlage_zusatzfenster(
-        mailassistent_zusatzfenster(id,typ,titel,platzhalter,erlaubt_eigene_eingabe,zeigt_anzahl,
-          mailassistent_zusatzfenster_spalte(id,titel,typ,einheit,platzhalter,breite,reihenfolge,
-            mailassistent_zusatzfenster_spalte_option(id,wert,reihenfolge)),
-          mailassistent_zusatzfenster_position(id,titel,reihenfolge)))`)
-      .eq('richtung', 'kundenanfrage').eq('aktiv', true).order('reihenfolge'),
-    sb.from('mailassistent_distanzlogik_meta').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_faelle_abschnitt').select('titel,inhalt').order('reihenfolge'),
     sb.from('mailassistent_mitarbeiter').select('name,email,funktion').order('reihenfolge'),
     sb.from('mailassistent_externe_kontakte').select('firma,domains,rolle,notiz').order('reihenfolge'),
-    sb.from('mailassistent_zweig').select('*, mailassistent_ast(titel)'),
+    sb.from('mailassistent_zweig').select('*, mailassistent_ast(titel,ast_funktion)'),
   ]);
 
   const mitarbeitendeListe = (mitarbeitende || [])
@@ -311,7 +304,7 @@ async function modusAntworten(body: any, modell: string) {
 
   const system = `Du bist der Mail-Assistent von Knechtgarten (Gartenbau-Unternehmen, Heimenschwand/BE). Du liest eine eingehende Mail und entscheidest, wie sie beantwortet werden soll.
 
-${schreibstil?.immer_antworten && schreibstil.inhalt ? 'SCHREIBSTIL:\n' + schreibstil.inhalt + '\n\n' : ''}${firmendaten?.immer_antworten ? 'FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten) + '\n\n' : ''}${mitarbeitendeListe ? 'MITARBEITENDE (unser eigenes Team - gehoert zu "uns", nicht zur Gegenseite):\n' + mitarbeitendeListe + '\n\n' : ''}${externeKontakteListe ? 'BEKANNTE EXTERNE FIRMEN (anhand der Domain im Mailkopf zuordenbar - gehoeren NICHT zu uns):\n' + externeKontakteListe + '\n\n' : ''}${faelleText ? 'FÄLLE (situative Regeln, gelten immer):\n' + faelleText + '\n\n' : ''}Pruefe die folgenden drei Bereiche mit GLEICHER Prioritaet (keiner geht den anderen automatisch vor) - MAIL-VORLAGEN und ZWEIGE sind fuer spezifische, bekannte Faelle (jede VORLAGE ist ueber einen Ast/Zweig eingeordnet - Ast und Zweig sind reine Einordnung, kein eigener Inhalt), KUNDENANFRAGEN ist der Auffangbereich fuer echte Neukunden-/Projektanfragen, die keine dieser spezifischen Vorlagen treffen:
+${schreibstil?.immer_antworten && schreibstil.inhalt ? 'SCHREIBSTIL:\n' + schreibstil.inhalt + '\n\n' : ''}${firmendaten?.immer_antworten ? 'FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten) + '\n\n' : ''}${mitarbeitendeListe ? 'MITARBEITENDE (unser eigenes Team - gehoert zu "uns", nicht zur Gegenseite):\n' + mitarbeitendeListe + '\n\n' : ''}${externeKontakteListe ? 'BEKANNTE EXTERNE FIRMEN (anhand der Domain im Mailkopf zuordenbar - gehoeren NICHT zu uns):\n' + externeKontakteListe + '\n\n' : ''}${faelleText ? 'FÄLLE (situative Regeln, gelten immer):\n' + faelleText + '\n\n' : ''}Pruefe die folgenden zwei Bereiche mit GLEICHER Prioritaet (keiner geht dem anderen automatisch vor) - MAIL-VORLAGEN und ZWEIGE sind fuer spezifische, bekannte Faelle (jede VORLAGE ist ueber einen Ast/Zweig eingeordnet - Ast und Zweig sind reine Einordnung, kein eigener Inhalt):
 
 MAIL-VORLAGEN:
 ${vorlagenMenu || '(keine erfasst)'}
@@ -319,12 +312,10 @@ ${vorlagenMenu || '(keine erfasst)'}
 ZWEIGE MIT MEHREREN ANTWORTEN, MITARBEITER ENTSCHEIDET SELBST - hier gibt es KEINE feste Vorlage, der Mitarbeiter waehlt selbst manuell die passende Antwort aus der Liste des Zweigs:
 ${zweigeMenu || '(keine erfasst)'}
 
-KUNDENANFRAGEN - dafür gibt es KEINE feste Vorlage, der Mitarbeiter wählt selbst manuell die passende Antwort aus einer Liste, du lieferst nur die Einordnung + falls möglich die Kundenadresse. Nur relevant wenn: ${distanzMeta?.wann_anwenden || '(nicht konfiguriert)'}
-
-Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Objekt (kein Text davor/danach), in einer dieser fünf Formen:
+Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Objekt (kein Text davor/danach), in einer dieser vier Formen:
 1. Direkter Entwurf möglich (einfache Vorlage/Auffangfall):
 {"aktion":"entwurf","text":"<fertiger Mailtext>","vorlageTitel":"<exakter Titel der verwendeten VORLAGE, sonst null>"}
-   Trifft eine VORLAGE zu: deren Text als starke Richtschnur nehmen (Kernaussage/Entscheidung und Aufbau bleiben, das ist nicht verhandelbar), aber natürlich personalisieren - Namen der Person ansprechen, wo sinnvoll kurz auf Details aus der eingehenden Mail eingehen. Nicht stur wortwörtlich abschreiben, aber auch nichts an der eigentlichen Entscheidung/Aussage ändern. WICHTIG: Waehle eine VORLAGE fuer Fall 1 nur, wenn sie auch wirklich einen "Text:" hat. Hat die naheliegendste VORLAGE (noch) keinen Text hinterlegt, ist sie fuer Fall 1 nicht nutzbar - pruefe stattdessen, ob KUNDENANFRAGEN (Fall 3) zutrifft, oder schreibe selbst einen passenden, kurzen Text (wie bei einem Auffangfall). Erzeuge NIE einen leeren oder nur aus Platzhaltern bestehenden Text.
+   Trifft eine VORLAGE zu: deren Text als starke Richtschnur nehmen (Kernaussage/Entscheidung und Aufbau bleiben, das ist nicht verhandelbar), aber natürlich personalisieren - Namen der Person ansprechen, wo sinnvoll kurz auf Details aus der eingehenden Mail eingehen. Nicht stur wortwörtlich abschreiben, aber auch nichts an der eigentlichen Entscheidung/Aussage ändern. WICHTIG: Waehle eine VORLAGE fuer Fall 1 nur, wenn sie auch wirklich einen "Text:" hat. Hat die naheliegendste VORLAGE (noch) keinen Text hinterlegt, ist sie fuer Fall 1 nicht nutzbar - pruefe stattdessen, ob ein ZWEIG (Fall 4) zutrifft, oder schreibe selbst einen passenden, kurzen Text (wie bei einem Auffangfall). Erzeuge NIE einen leeren oder nur aus Platzhaltern bestehenden Text.
    Platzhalter in eckigen Klammern (z.B. [Bauteil], [X Minuten]) werden so behandelt:
    - Einen Platzhalter der Form [ZF:...] IMMER exakt unveraendert stehen lassen (nicht ausfuellen, nicht entfernen, nicht uebersetzen) - der wird danach automatisch ersetzt.
    - JEDEN Platzhalter, der das Wort "Datum" enthaelt (z.B. [Datum], [Datum, Uhrzeit]), IMMER exakt unveraendert stehen lassen - der wird separat behandelt.
@@ -336,19 +327,17 @@ Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Obje
    - Wird eine konkrete Sachfrage gestellt, die NUR das Team selbst beantworten kann (z.B. "Habt ihr noch X im Einsatz?", "Wie viele Y?", ein internes Detail, das nicht aus der eingehenden Mail hervorgeht) - erfinde NIEMALS eine Antwort darauf. Setze stattdessen einen Platzhalter in eckigen Klammern ein, der kurz beschreibt, was einzusetzen ist, z.B. [Antwort: eigene Space 2.0-Einheiten im Einsatz?] - der Mitarbeiter kann per Klick draufantworten, bevor die Mail rausgeht.
 2. Eine Vorlage mit Rückfrage trifft zu:
 {"aktion":"rueckfrage","vorlageTitel":"<exakter Titel der Vorlage>"}
-3. Es ist eine KUNDENANFRAGE (siehe Bedingung oben):
-{"aktion":"kundenanfrage","kundenAdresse":"<Standort des Kunden, sonst null>"}
-"kundenAdresse" wird nur für die Distanzberechnung als Zusatz-Info für den Mitarbeiter gebraucht - suche aktiv danach im GANZEN Mailtext UND in einer eventuellen Signatur (Adresszeile, Firmenname mit Ort, o.ä.). Es reicht jede Form von Standortangabe, so genau wie vorhanden:
-- Volle Adresse, z.B. "Bernstrasse 12, 3672 Oberdiessbach"
-- Nur PLZ+Ort, z.B. "3600 Thun"
-- Nur ein Ortsname im Fliesstext, z.B. "wir wohnen in Interlaken" oder "unser Grundstück in Steffisburg" -> "Interlaken" bzw. "Steffisburg"
-Nimm exakt das, was in der Mail steht (keine eigene Umformung/Ergänzung, nichts dazu erfinden). Triff dazu KEINE eigene Einschätzung oder Entscheidung - das macht der Mitarbeiter selbst anhand der angezeigten Distanz. Nur wenn wirklich gar kein Hinweis auf einen Standort vorhanden ist, setze null.
-4. AUSNAHMEFALL - zwei (normalerweise nicht mehr) einfache VORLAGEN passen ungefähr GLEICH GUT, sagen inhaltlich aber unterschiedliche Dinge aus, und es ist fuer die Antwort wirklich wichtig, welche davon stimmt:
+3. AUSNAHMEFALL - zwei (normalerweise nicht mehr) einfache VORLAGEN passen ungefähr GLEICH GUT, sagen inhaltlich aber unterschiedliche Dinge aus, und es ist fuer die Antwort wirklich wichtig, welche davon stimmt:
 {"aktion":"auswahl","frage":"<kurze, konkrete Frage an den Mitarbeiter, z.B. 'Geht es eher um X oder um Y?'>","vorlagenTitel":["<exakter Titel Vorlage A>","<exakter Titel Vorlage B>"]}
-   Nutze Fall 4 NUR SELTEN, bei echter und relevanter Unsicherheit zwischen zwei VORLAGEN. Beim Abwaegen NUR zwischen Fall 1 und Fall 4 im Zweifel Fall 1 waehlen (diese Regel gilt nicht fuer die Wahl zwischen Fall 1 und Fall 3 - dort entscheidet allein, ob die KUNDENANFRAGEN-Bedingung zutrifft und eine passende VORLAGE mit Text existiert).
-5. Ein ZWEIG MIT MEHREREN ANTWORTEN trifft zu (siehe oben, Mitarbeiter entscheidet selbst):
-{"aktion":"zweig","zweigTitel":"<exakter Titel des Zweigs>"}
-   Nutze das NUR, wenn wirklich einer der oben gelisteten ZWEIGE zutrifft - nicht fuer normale einfache VORLAGEN (dafuer Fall 1) und nicht fuer KUNDENANFRAGEN (dafuer Fall 3).
+   Nutze Fall 3 NUR SELTEN, bei echter und relevanter Unsicherheit zwischen zwei VORLAGEN. Beim Abwaegen NUR zwischen Fall 1 und Fall 3 im Zweifel Fall 1 waehlen.
+4. Ein ZWEIG MIT MEHREREN ANTWORTEN trifft zu (siehe oben, Mitarbeiter entscheidet selbst):
+{"aktion":"zweig","zweigTitel":"<exakter Titel des Zweigs>","kundenAdresse":"<Standort des Kunden falls erkennbar, sonst null>"}
+   Nutze das NUR, wenn wirklich einer der oben gelisteten ZWEIGE zutrifft - nicht fuer normale einfache VORLAGEN (dafuer Fall 1).
+   "kundenAdresse" nur ausfuellen, falls der Zweig etwas mit einer Distanz-/Standortberechnung zu tun haben koennte (z.B. Kundenanfragen mit Standortbezug) - schadet aber nicht, es bei jedem ZWEIG zu versuchen. Suche aktiv danach im GANZEN Mailtext UND in einer eventuellen Signatur (Adresszeile, Firmenname mit Ort, o.ä.). Es reicht jede Form von Standortangabe, so genau wie vorhanden:
+   - Volle Adresse, z.B. "Bernstrasse 12, 3672 Oberdiessbach"
+   - Nur PLZ+Ort, z.B. "3600 Thun"
+   - Nur ein Ortsname im Fliesstext, z.B. "wir wohnen in Interlaken" oder "unser Grundstück in Steffisburg" -> "Interlaken" bzw. "Steffisburg"
+   Nimm exakt das, was in der Mail steht (keine eigene Umformung/Ergänzung, nichts dazu erfinden). Nur wenn wirklich gar kein Hinweis auf einen Standort vorhanden ist, setze null.
 ${KG_FORMAT_HINWEIS}`;
 
   let userText = 'EINGEHENDE MAIL:\n' + body.mailInhalt;
@@ -397,24 +386,6 @@ ${KG_FORMAT_HINWEIS}`;
     });
   }
 
-  if (entscheidung.aktion === 'kundenanfrage') {
-    const distanz = entscheidung.kundenAdresse
-      ? await berechneDistanzInfo(entscheidung.kundenAdresse, firmendaten, distanzMeta?.partner_umkreis_minuten ?? 35)
-      : null;
-    await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', null, tokensInput, tokensOutput);
-    return json({
-      aktion: 'kundenanfrage',
-      antworten: (kundenanfrageVorlagen || []).map((v: any) => ({
-        id: v.id, label: v.titel,
-        zusatzfenster: (v.mailassistent_vorlage_zusatzfenster || []).map((e: any) => e.mailassistent_zusatzfenster).filter(Boolean),
-      })),
-      distanz, kundenStandort: distanz?.aufgeloesterStandort || entscheidung.kundenAdresse || null,
-      distanzErklaerung: distanzMeta?.distanz_erklaerung || null, hinweistext: distanzMeta?.partner_hinweistext || null,
-      eigeneAbsageText: distanzMeta?.absage_text || null,
-      tokensInput, tokensOutput,
-    });
-  }
-
   if (entscheidung.aktion === 'auswahl' && Array.isArray(entscheidung.vorlagenTitel)) {
     const kandidaten = entscheidung.vorlagenTitel
       .map((t: string) => (vorlagen || []).find((v: any) => v.titel === t))
@@ -433,6 +404,25 @@ ${KG_FORMAT_HINWEIS}`;
     const zweig = (zweige || []).find((z: any) => z.titel === entscheidung.zweigTitel && z.entscheidung === 'mitarbeiter');
     if (!zweig) return json({ error: 'Zweig "' + entscheidung.zweigTitel + '" nicht gefunden.' }, 502);
     const kandidaten = (vorlagen || []).filter((v: any) => v.zweig_id === zweig.id);
+
+    // Ein Zweig kann eine Ast-Funktion "distanzlogik" tragen (z.B. der
+    // migrierte Kundenanfragen-Ast) - dann zusaetzlich zur Antworten-Liste
+    // die Fahrzeit zu Knechtgarten + allen Partnerbetrieben dieses Asts
+    // berechnen, als reine Entscheidungshilfe fuer den Mitarbeiter.
+    const astFunktion = zweig.mailassistent_ast?.ast_funktion;
+    let distanzFelder: any = {};
+    if (astFunktion?.typ === 'distanzlogik') {
+      const distanz = entscheidung.kundenAdresse
+        ? await berechneDistanzInfo(entscheidung.kundenAdresse, firmendaten, astFunktion.umkreis_minuten ?? 35, zweig.ast_id)
+        : null;
+      distanzFelder = {
+        hatDistanzlogik: true,
+        distanz, kundenStandort: distanz?.aufgeloesterStandort || entscheidung.kundenAdresse || null,
+        distanzErklaerung: astFunktion.erklaerung || null, hinweistext: astFunktion.hinweistext || null,
+        eigeneAbsageText: astFunktion.absagetext || null,
+      };
+    }
+
     await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', null, tokensInput, tokensOutput);
     return json({
       aktion: 'zweig', titel: zweig.titel, frage: zweig.frage_mitarbeiter || null,
@@ -440,6 +430,7 @@ ${KG_FORMAT_HINWEIS}`;
         id: v.id, label: v.titel,
         zusatzfenster: (v.mailassistent_vorlage_zusatzfenster || []).map((e: any) => e.mailassistent_zusatzfenster).filter(Boolean),
       })),
+      ...distanzFelder,
       tokensInput, tokensOutput,
     });
   }
@@ -469,14 +460,16 @@ async function berechneDistanz(origin: string, destination: string): Promise<{ m
   return { minuten: Math.round(el.duration.value / 60), km: Math.round(el.distance.value / 1000), aufgeloesteAdresse };
 }
 
-async function berechneDistanzInfo(kundenAdresse: string, firmendaten: any, partnerUmkreisMinuten: number) {
+async function berechneDistanzInfo(kundenAdresse: string, firmendaten: any, partnerUmkreisMinuten: number, astId?: string) {
   const ergebnis: any = {};
   let aufgeloesterStandort: string | null = null;
   if (firmendaten?.adresse) {
     const eigene = await berechneDistanz(firmendaten.adresse, kundenAdresse);
     if (eigene) { ergebnis.eigene = { minuten: eigene.minuten, km: eigene.km }; aufgeloesterStandort = eigene.aufgeloesteAdresse; }
   }
-  const { data: partnerbetriebe } = await sb.from('mailassistent_partnerbetrieb').select('*').order('reihenfolge');
+  let partnerQuery = sb.from('mailassistent_partnerbetrieb').select('*').order('reihenfolge');
+  if (astId) partnerQuery = partnerQuery.eq('ast_id', astId);
+  const { data: partnerbetriebe } = await partnerQuery;
   const partner = [];
   for (const p of partnerbetriebe || []) {
     const d = await berechneDistanz(p.adresse, kundenAdresse);
