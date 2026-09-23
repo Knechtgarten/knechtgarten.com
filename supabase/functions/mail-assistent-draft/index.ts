@@ -267,7 +267,7 @@ async function modusAntworten(body: any, modell: string) {
     sb.from('mailassistent_faelle_abschnitt').select('titel,inhalt').order('reihenfolge'),
     sb.from('mailassistent_wissen_abschnitt').select('titel,inhalt').order('reihenfolge'),
     sb.from('mailassistent_mitarbeiter').select('name,email,funktion').order('reihenfolge'),
-    sb.from('mailassistent_externe_kontakte').select('firma,domains,rolle,notiz').order('reihenfolge'),
+    sb.from('mailassistent_externe_kontakte').select('firma,domains,rolle,notiz,anrede').order('reihenfolge'),
     sb.from('mailassistent_zweig').select('*, mailassistent_ast(titel,ast_funktion)'),
   ]);
 
@@ -277,7 +277,7 @@ async function modusAntworten(body: any, modell: string) {
     .map((m: any) => `${m.name}${m.email ? ' <' + m.email + '>' : ''}${m.funktion ? ' - ' + m.funktion : ''}`)
     .join('\n');
   const externeKontakteListe = (externeKontakte || [])
-    .map((k: any) => `${k.firma} (${k.domains})${k.rolle ? ' - ' + k.rolle : ''}${k.notiz ? ' - ' + k.notiz : ''}`)
+    .map((k: any) => `${k.firma} (${k.domains})${k.rolle ? ' - ' + k.rolle : ''}${k.anrede ? ' - IMMER PER ' + k.anrede.toUpperCase() + ' (unabhaengig vom generellen Schreibstil-Standard)' : ''}${k.notiz ? ' - ' + k.notiz : ''}`)
     .join('\n');
   const faelleText = formatiereAbschnitte(faelle);
   const wissenText = formatiereAbschnitte(wissen);
@@ -321,7 +321,7 @@ async function modusAntworten(body: any, modell: string) {
 
   const system = `Du bist der Mail-Assistent von Knechtgarten (Gartenbau-Unternehmen, Heimenschwand/BE). Du liest eine eingehende Mail und entscheidest, wie sie beantwortet werden soll.
 
-${grundlogikText ? 'GRUNDLOGIK (wie du als Mail-Assistent grundsaetzlich vorgehst):\n' + grundlogikText + '\n\n' : ''}${schreibstilText ? 'SCHREIBSTIL:\n' + schreibstilText + '\n\n' : ''}${firmendaten ? 'FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten) + '\n\n' : ''}${wissenText ? 'NACHSCHLAGEWERK (weiteres Wissen - nutze das bei Bedarf, z.B. wenn eine Vorlage eine konkrete Angabe braucht):\n' + wissenText + '\n\n' : ''}${mitarbeitendeListe ? 'MITARBEITENDE (unser eigenes Team - gehoert zu "uns", nicht zur Gegenseite):\n' + mitarbeitendeListe + '\n\n' : ''}${externeKontakteListe ? 'BEKANNTE EXTERNE FIRMEN (anhand der Domain im Mailkopf zuordenbar - gehoeren NICHT zu uns):\n' + externeKontakteListe + '\n\n' : ''}Pruefe die folgenden zwei Bereiche mit GLEICHER Prioritaet (keiner geht dem anderen automatisch vor) - MAIL-VORLAGEN und ZWEIGE sind fuer spezifische, bekannte Faelle (jede VORLAGE ist ueber einen Ast/Zweig eingeordnet - Ast und Zweig sind reine Einordnung, kein eigener Inhalt):
+${grundlogikText ? 'GRUNDLOGIK (wie du als Mail-Assistent grundsaetzlich vorgehst):\n' + grundlogikText + '\n\n' : ''}${schreibstilText ? 'SCHREIBSTIL:\n' + schreibstilText + '\n\n' : ''}${firmendaten ? 'FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten) + '\n\n' : ''}${wissenText ? 'NACHSCHLAGEWERK (weiteres Wissen - nutze das bei Bedarf, z.B. wenn eine Vorlage eine konkrete Angabe braucht):\n' + wissenText + '\n\n' : ''}${mitarbeitendeListe ? 'MITARBEITENDE (unser eigenes Team - gehoert zu "uns", nicht zur Gegenseite):\n' + mitarbeitendeListe + '\n\n' : ''}${externeKontakteListe ? 'BEKANNTE EXTERNE FIRMEN (anhand der Domain im Mailkopf zuordenbar - gehoeren NICHT zu uns; wo eine Anrede hinterlegt ist, gilt DIESE statt dem generellen Schreibstil-Standard):\n' + externeKontakteListe + '\n\n' : ''}Pruefe die folgenden zwei Bereiche mit GLEICHER Prioritaet (keiner geht dem anderen automatisch vor) - MAIL-VORLAGEN und ZWEIGE sind fuer spezifische, bekannte Faelle (jede VORLAGE ist ueber einen Ast/Zweig eingeordnet - Ast und Zweig sind reine Einordnung, kein eigener Inhalt):
 
 MAIL-VORLAGEN:
 ${vorlagenMenu || '(keine erfasst)'}
