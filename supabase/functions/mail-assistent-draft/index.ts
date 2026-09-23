@@ -173,7 +173,8 @@ function formatiereFirmendaten(fd: any): string {
 // Modus: verfassen
 // ----------------------------------------------------------------------------
 async function modusVerfassen(body: any, modell: string) {
-  const [{ data: schreibstil }, { data: firmendaten }, { data: faelle }, { data: wissen }] = await Promise.all([
+  const [{ data: grundlogik }, { data: schreibstil }, { data: firmendaten }, { data: faelle }, { data: wissen }] = await Promise.all([
+    sb.from('mailassistent_grundlogik_abschnitt').select('titel,inhalt').order('reihenfolge'),
     sb.from('mailassistent_schreibstil').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_firmendaten').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_faelle_abschnitt').select('titel,inhalt').order('reihenfolge'),
@@ -186,6 +187,10 @@ async function modusVerfassen(body: any, modell: string) {
     vorlage = data;
   }
 
+  const grundlogikText = (grundlogik || [])
+    .filter((a: any) => a.inhalt && a.inhalt.trim())
+    .map((a: any) => `${a.titel}:\n${a.inhalt}`)
+    .join('\n\n');
   const faelleText = (faelle || [])
     .filter((a: any) => a.inhalt && a.inhalt.trim())
     .map((a: any) => `${a.titel}:\n${a.inhalt}`)
@@ -196,10 +201,10 @@ async function modusVerfassen(body: any, modell: string) {
     .join('\n\n');
 
   const teile = [];
+  if (grundlogikText) teile.push('GRUNDLOGIK (wie du als Mail-Assistent grundsaetzlich vorgehst):\n' + grundlogikText);
   if (schreibstil?.inhalt) teile.push('SCHREIBSTIL:\n' + schreibstil.inhalt);
   if (firmendaten) teile.push('FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten));
-  if (wissenText) teile.push('NACHSCHLAGEWERK (weiteres Wissen):\n' + wissenText);
-  if (faelleText) teile.push('FÄLLE (situative Regeln, gelten immer):\n' + faelleText);
+  if (wissenText) teile.push('NACHSCHLAGEWERK (weiteres Wissen - nutze das bei Bedarf, z.B. wenn du eine konkrete Angabe brauchst):\n' + wissenText);
   if (vorlage) teile.push(`VORLAGE "${vorlage.titel}" - GENAU DIESEN TEXT WORTGETREU UEBERNEHMEN, nur die Platzhalter behandeln. KEINEN eigenen Text erfinden, auch nicht wenn die Vorlage kurz oder unklar wirkt.
 Platzhalter in eckigen Klammern (z.B. [NAME], [PROJEKT]):
 - Einen Platzhalter der Form [ZF:...] sowie JEDEN Platzhalter mit dem Wort "Datum" darin IMMER exakt unveraendert stehen lassen.
@@ -207,6 +212,7 @@ Platzhalter in eckigen Klammern (z.B. [NAME], [PROJEKT]):
 - Text OHNE Klammern in der VORLAGE (z.B. schon konkrete Namen, Adressen, Telefonnummern, E-Mail-Adressen) bleibt IMMER exakt unveraendert stehen - erstelle NIEMALS neue eckige Klammern um bereits konkrete Angaben.
 VORLAGE:\n${vorlage.inhalt}`);
   if (body.stichworte) teile.push('STICHWORTE VOM MITARBEITER:\n' + body.stichworte);
+  if (faelleText) teile.push('REGELN (gelten IMMER fuer den fertigen Text - im Hinterkopf behalten und den Text danach ausrichten):\n' + faelleText);
   teile.push('Schreibe jetzt den fertigen Mailtext. Nur den Mailtext ausgeben, keine Erklärung, keine Anführungszeichen drumherum.' + KG_FORMAT_HINWEIS);
 
   const { text, tokensInput, tokensOutput } = await rufeClaudeAuf(modell, 'Du hilfst einem Gartenbau-Unternehmen (Knechtgarten), professionelle Kunden-/Geschäftsmails zu verfassen.', teile.join('\n\n'), 2500);
@@ -241,10 +247,11 @@ async function modusAntworten(body: any, modell: string) {
   if (body.intern) return await modusAntwortenIntern(body, modell);
 
   const [
-    { data: schreibstil }, { data: firmendaten },
+    { data: grundlogik }, { data: schreibstil }, { data: firmendaten },
     { data: vorlagen }, { data: faelle }, { data: wissen },
     { data: mitarbeitende }, { data: externeKontakte }, { data: zweige },
   ] = await Promise.all([
+    sb.from('mailassistent_grundlogik_abschnitt').select('titel,inhalt').order('reihenfolge'),
     sb.from('mailassistent_schreibstil').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_firmendaten').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_vorlage').select(`*, mailassistent_vorlage_antwort(*),
@@ -261,6 +268,10 @@ async function modusAntworten(body: any, modell: string) {
     sb.from('mailassistent_zweig').select('*, mailassistent_ast(titel,ast_funktion)'),
   ]);
 
+  const grundlogikText = (grundlogik || [])
+    .filter((a: any) => a.inhalt && a.inhalt.trim())
+    .map((a: any) => `${a.titel}:\n${a.inhalt}`)
+    .join('\n\n');
   const mitarbeitendeListe = (mitarbeitende || [])
     .map((m: any) => `${m.name}${m.email ? ' <' + m.email + '>' : ''}${m.funktion ? ' - ' + m.funktion : ''}`)
     .join('\n');
@@ -315,14 +326,14 @@ async function modusAntworten(body: any, modell: string) {
 
   const system = `Du bist der Mail-Assistent von Knechtgarten (Gartenbau-Unternehmen, Heimenschwand/BE). Du liest eine eingehende Mail und entscheidest, wie sie beantwortet werden soll.
 
-${schreibstil?.inhalt ? 'SCHREIBSTIL:\n' + schreibstil.inhalt + '\n\n' : ''}${firmendaten ? 'FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten) + '\n\n' : ''}${wissenText ? 'NACHSCHLAGEWERK (weiteres Wissen):\n' + wissenText + '\n\n' : ''}${mitarbeitendeListe ? 'MITARBEITENDE (unser eigenes Team - gehoert zu "uns", nicht zur Gegenseite):\n' + mitarbeitendeListe + '\n\n' : ''}${externeKontakteListe ? 'BEKANNTE EXTERNE FIRMEN (anhand der Domain im Mailkopf zuordenbar - gehoeren NICHT zu uns):\n' + externeKontakteListe + '\n\n' : ''}${faelleText ? 'FÄLLE (situative Regeln, gelten immer):\n' + faelleText + '\n\n' : ''}Pruefe die folgenden zwei Bereiche mit GLEICHER Prioritaet (keiner geht dem anderen automatisch vor) - MAIL-VORLAGEN und ZWEIGE sind fuer spezifische, bekannte Faelle (jede VORLAGE ist ueber einen Ast/Zweig eingeordnet - Ast und Zweig sind reine Einordnung, kein eigener Inhalt):
+${grundlogikText ? 'GRUNDLOGIK (wie du als Mail-Assistent grundsaetzlich vorgehst):\n' + grundlogikText + '\n\n' : ''}${schreibstil?.inhalt ? 'SCHREIBSTIL:\n' + schreibstil.inhalt + '\n\n' : ''}${firmendaten ? 'FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten) + '\n\n' : ''}${wissenText ? 'NACHSCHLAGEWERK (weiteres Wissen - nutze das bei Bedarf, z.B. wenn eine Vorlage eine konkrete Angabe braucht):\n' + wissenText + '\n\n' : ''}${mitarbeitendeListe ? 'MITARBEITENDE (unser eigenes Team - gehoert zu "uns", nicht zur Gegenseite):\n' + mitarbeitendeListe + '\n\n' : ''}${externeKontakteListe ? 'BEKANNTE EXTERNE FIRMEN (anhand der Domain im Mailkopf zuordenbar - gehoeren NICHT zu uns):\n' + externeKontakteListe + '\n\n' : ''}Pruefe die folgenden zwei Bereiche mit GLEICHER Prioritaet (keiner geht dem anderen automatisch vor) - MAIL-VORLAGEN und ZWEIGE sind fuer spezifische, bekannte Faelle (jede VORLAGE ist ueber einen Ast/Zweig eingeordnet - Ast und Zweig sind reine Einordnung, kein eigener Inhalt):
 
 MAIL-VORLAGEN:
 ${vorlagenMenu || '(keine erfasst)'}
 
 ZWEIGE MIT MEHREREN ANTWORTEN, MITARBEITER ENTSCHEIDET SELBST - hier gibt es KEINE feste Vorlage, der Mitarbeiter waehlt selbst manuell die passende Antwort aus der Liste des Zweigs:
 ${zweigeMenu || '(keine erfasst)'}
-
+${faelleText ? '\nREGELN (gelten IMMER fuer den fertigen Text - im Hinterkopf behalten und den Text danach ausrichten. WICHTIG: beeinflussen NICHT, welche VORLAGE/welcher ZWEIG zutrifft, das entscheidet sich rein anhand von "Anwenden bei"/"NICHT anwenden bei" oben - Regeln wirken erst danach, auf den fertigen Text):\n' + faelleText + '\n' : ''}
 Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Objekt (kein Text davor/danach), in einer dieser vier Formen:
 1. Direkter Entwurf möglich (einfache Vorlage/Auffangfall):
 {"aktion":"entwurf","text":"<fertiger Mailtext>","vorlageTitel":"<exakter Titel der verwendeten VORLAGE, sonst null>"}
@@ -507,23 +518,34 @@ async function berechneDistanzInfo(kundenAdresse: string, firmendaten: any, part
 // dieses Zweigs als Grundlage fuer den echten Entwurf verwenden.
 // ----------------------------------------------------------------------------
 async function modusRueckfrageAntwort(body: any, modell: string) {
-  const [{ data: schreibstil }, { data: firmendaten }, { data: wissen }, { data: vorlage }] = await Promise.all([
+  const [{ data: grundlogik }, { data: schreibstil }, { data: firmendaten }, { data: wissen }, { data: faelle }, { data: vorlage }] = await Promise.all([
+    sb.from('mailassistent_grundlogik_abschnitt').select('titel,inhalt').order('reihenfolge'),
     sb.from('mailassistent_schreibstil').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_firmendaten').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_wissen_abschnitt').select('titel,inhalt').order('reihenfolge'),
+    sb.from('mailassistent_faelle_abschnitt').select('titel,inhalt').order('reihenfolge'),
     sb.from('mailassistent_vorlage').select('*, mailassistent_vorlage_antwort(*)').eq('id', body.vorlageId).maybeSingle().then(r => r),
   ]);
   const zweig = (vorlage?.mailassistent_vorlage_antwort || []).find((z: any) => z.label === body.antwortLabel);
   if (!zweig) return json({ error: 'Antwort "' + body.antwortLabel + '" nicht gefunden.' }, 502);
+  const grundlogikText = (grundlogik || [])
+    .filter((a: any) => a.inhalt && a.inhalt.trim())
+    .map((a: any) => `${a.titel}:\n${a.inhalt}`)
+    .join('\n\n');
   const wissenText = (wissen || [])
+    .filter((a: any) => a.inhalt && a.inhalt.trim())
+    .map((a: any) => `${a.titel}:\n${a.inhalt}`)
+    .join('\n\n');
+  const faelleText = (faelle || [])
     .filter((a: any) => a.inhalt && a.inhalt.trim())
     .map((a: any) => `${a.titel}:\n${a.inhalt}`)
     .join('\n\n');
 
   const teile = [];
+  if (grundlogikText) teile.push('GRUNDLOGIK (wie du als Mail-Assistent grundsaetzlich vorgehst):\n' + grundlogikText);
   if (schreibstil?.inhalt) teile.push('SCHREIBSTIL:\n' + schreibstil.inhalt);
   if (firmendaten) teile.push('FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten));
-  if (wissenText) teile.push('NACHSCHLAGEWERK (weiteres Wissen):\n' + wissenText);
+  if (wissenText) teile.push('NACHSCHLAGEWERK (weiteres Wissen - nutze das bei Bedarf):\n' + wissenText);
   teile.push(`VORLAGE - als starke Richtschnur nehmen (Kernaussage/Entscheidung und Aufbau bleiben, das ist nicht verhandelbar), aber natürlich personalisieren: Namen der Person ansprechen, wo sinnvoll kurz auf Details aus der eingehenden Mail eingehen. Nicht stur wortwörtlich abschreiben, aber auch nichts an der eigentlichen Entscheidung/Aussage ändern.
 Platzhalter in eckigen Klammern (z.B. [Bauteil], [X Minuten]) werden so behandelt:
 - Einen Platzhalter der Form [ZF:...] IMMER exakt unveraendert stehen lassen - der wird danach automatisch ersetzt.
@@ -531,6 +553,7 @@ Platzhalter in eckigen Klammern (z.B. [Bauteil], [X Minuten]) werden so behandel
 - Jeden ANDEREN Platzhalter: kannst du aus der eingehenden Mail/dem Kontext einen konkreten, sinnvollen Wert ableiten, ersetze ihn durch diesen Wert in DOPPELTEN eckigen Klammern, z.B. wird aus [Bauteil] -> [[Ablaufventil]]. Bist du dir nicht sicher, lass ihn stattdessen unveraendert in einfachen eckigen Klammern stehen. Erfinde NIE einen Wert, den du nicht wirklich aus dem Kontext hast.
 - Text OHNE Klammern in der VORLAGE (z.B. schon konkrete Namen, Adressen, Telefonnummern, E-Mail-Adressen) bleibt IMMER exakt unveraendert stehen - erstelle NIEMALS neue eckige Klammern um bereits konkrete Angaben, auch nicht um sie "generischer" oder "vorlagenhafter" wirken zu lassen.
 VORLAGE:\n${zweig.inhalt}`);
+  if (faelleText) teile.push('REGELN (gelten IMMER fuer den fertigen Text - im Hinterkopf behalten und den Text danach ausrichten):\n' + faelleText);
   if (body.mailInhalt) teile.push('EINGEHENDE MAIL:\n' + body.mailInhalt);
   if (body.anweisung) teile.push('ZUSAETZLICHE ANWEISUNG: ' + body.anweisung);
   teile.push('Schreibe jetzt den fertigen Mailtext. Nur den Mailtext ausgeben, keine Erklärung.' + KG_FORMAT_HINWEIS);
@@ -576,12 +599,22 @@ VORLAGE:\n${zweig.inhalt}`);
 // einer eigenen Vorlage (1:1 an den Partnerbetrieb gebunden).
 // ----------------------------------------------------------------------------
 async function modusAuswahlAntwort(body: any, modell: string) {
-  const [{ data: schreibstil }, { data: firmendaten }, { data: wissen }] = await Promise.all([
+  const [{ data: grundlogik }, { data: schreibstil }, { data: firmendaten }, { data: wissen }, { data: faelle }] = await Promise.all([
+    sb.from('mailassistent_grundlogik_abschnitt').select('titel,inhalt').order('reihenfolge'),
     sb.from('mailassistent_schreibstil').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_firmendaten').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_wissen_abschnitt').select('titel,inhalt').order('reihenfolge'),
+    sb.from('mailassistent_faelle_abschnitt').select('titel,inhalt').order('reihenfolge'),
   ]);
+  const grundlogikText = (grundlogik || [])
+    .filter((a: any) => a.inhalt && a.inhalt.trim())
+    .map((a: any) => `${a.titel}:\n${a.inhalt}`)
+    .join('\n\n');
   const wissenText = (wissen || [])
+    .filter((a: any) => a.inhalt && a.inhalt.trim())
+    .map((a: any) => `${a.titel}:\n${a.inhalt}`)
+    .join('\n\n');
+  const faelleText = (faelle || [])
     .filter((a: any) => a.inhalt && a.inhalt.trim())
     .map((a: any) => `${a.titel}:\n${a.inhalt}`)
     .join('\n\n');
@@ -607,9 +640,10 @@ async function modusAuswahlAntwort(body: any, modell: string) {
   if (!inhalt.trim()) return json({ error: 'Für "' + titel + '" ist noch kein Text hinterlegt.' }, 502);
 
   const teile = [];
+  if (grundlogikText) teile.push('GRUNDLOGIK (wie du als Mail-Assistent grundsaetzlich vorgehst):\n' + grundlogikText);
   if (schreibstil?.inhalt) teile.push('SCHREIBSTIL:\n' + schreibstil.inhalt);
   if (firmendaten) teile.push('FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten));
-  if (wissenText) teile.push('NACHSCHLAGEWERK (weiteres Wissen):\n' + wissenText);
+  if (wissenText) teile.push('NACHSCHLAGEWERK (weiteres Wissen - nutze das bei Bedarf):\n' + wissenText);
   teile.push(`VORLAGE - als starke Richtschnur nehmen (Kernaussage/Entscheidung und Aufbau bleiben, das ist nicht verhandelbar), aber natürlich personalisieren: Namen der Person ansprechen, wo sinnvoll kurz auf Details aus der eingehenden Mail eingehen. Nicht stur wortwörtlich abschreiben, aber auch nichts an der eigentlichen Entscheidung/Aussage ändern.
 Platzhalter in eckigen Klammern (z.B. [Bauteil], [X Minuten]) werden so behandelt:
 - Einen Platzhalter der Form [ZF:...] IMMER exakt unveraendert stehen lassen - der wird danach automatisch ersetzt.
@@ -617,6 +651,7 @@ Platzhalter in eckigen Klammern (z.B. [Bauteil], [X Minuten]) werden so behandel
 - Jeden ANDEREN Platzhalter: kannst du aus der eingehenden Mail/dem Kontext einen konkreten, sinnvollen Wert ableiten, ersetze ihn durch diesen Wert in DOPPELTEN eckigen Klammern, z.B. wird aus [Bauteil] -> [[Ablaufventil]]. Bist du dir nicht sicher, lass ihn stattdessen unveraendert in einfachen eckigen Klammern stehen. Erfinde NIE einen Wert, den du nicht wirklich aus dem Kontext hast.
 - Text OHNE Klammern in der VORLAGE (z.B. schon konkrete Namen, Adressen, Telefonnummern, E-Mail-Adressen) bleibt IMMER exakt unveraendert stehen - erstelle NIEMALS neue eckige Klammern um bereits konkrete Angaben, auch nicht um sie "generischer" oder "vorlagenhafter" wirken zu lassen.
 VORLAGE:\n${inhalt}`);
+  if (faelleText) teile.push('REGELN (gelten IMMER fuer den fertigen Text - im Hinterkopf behalten und den Text danach ausrichten):\n' + faelleText);
   if (body.mailInhalt) teile.push('EINGEHENDE MAIL:\n' + body.mailInhalt);
   if (body.anweisung) teile.push('ZUSAETZLICHE ANWEISUNG: ' + body.anweisung);
   teile.push('Schreibe jetzt den fertigen Mailtext. Nur den Mailtext ausgeben, keine Erklärung.' + KG_FORMAT_HINWEIS);
