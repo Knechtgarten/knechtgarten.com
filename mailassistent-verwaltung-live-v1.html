@@ -106,7 +106,6 @@ textarea.abschnitt-text:focus{outline:none;border-color:var(--primary);}
 .mk-titel-input{border:none;background:none;font-size:14.5px;font-weight:700;color:var(--primary);padding:4px 6px;border-radius:4px;min-width:100px;font-family:inherit;}
 .mk-titel-input:hover,.mk-titel-input:focus{background:var(--soft);outline:none;}
 .mk-unterkat-titel-input{font-size:13px;}
-.mk-kat-aktionstyp,.mk-unterkat-aktionstyp{border:1px solid var(--line);border-radius:14px;padding:2px 8px;font-size:10.5px;font-weight:700;text-transform:uppercase;color:var(--muted);background:#fff;font-family:inherit;}
 .mk-summary-titel{font-size:13.5px;font-weight:700;color:var(--primary);padding:4px 6px;}
 .mk-gruppe-actions{margin-left:auto;display:flex;gap:4px;flex-shrink:0;}
 .mk-kategorie-body{padding:12px 14px 14px 14px;}
@@ -118,9 +117,16 @@ textarea.abschnitt-text:focus{outline:none;border-color:var(--primary);}
 .mk-unterkategorie-kopf:first-of-type{margin-top:10px;}
 .mk-unterkat-add,.mk-vorlage-add{background:none;border:none;color:var(--primary);font:inherit;font-size:12.5px;font-weight:700;cursor:pointer;padding:6px 0;margin-top:4px;display:block;}
 .mk-unterkat-add:hover,.mk-vorlage-add:hover{text-decoration:underline;}
-.aktionstyp-badge{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.02em;padding:2px 8px;border-radius:10px;background:var(--soft);color:var(--muted);white-space:nowrap;}
-.aktionstyp-badge.kundenanfrage{background:var(--accent-lime-light);color:var(--primary);}
-.aktionstyp-badge.rueckfrage{background:var(--accent-blue);color:var(--primary);}
+.mk-entscheidung-box{border:1px solid var(--line);background:var(--soft);border-radius:8px;padding:12px 14px;margin:10px 0 14px;}
+.mk-entscheidung-box .mk-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;}
+.mk-chip{font:inherit;font-size:11.5px;font-weight:600;padding:6px 13px;border-radius:16px;border:1px solid var(--line);background:#fff;color:var(--primary);cursor:pointer;}
+.mk-chip.on{background:var(--primary);border-color:var(--primary);color:#fff;}
+.mk-entscheidung-box .mk-frage-label{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:8px 0 5px;}
+.mk-entscheidung-box textarea{width:100%;border:1px solid var(--line);border-radius:6px;padding:7px 9px;font:inherit;font-size:12.5px;resize:none;overflow:hidden;min-height:34px;}
+.mk-verbindlichkeit-badge{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.02em;padding:2px 8px;border-radius:10px;white-space:nowrap;}
+.mk-verbindlichkeit-badge.haargenau{background:var(--accent-lime-light);color:#5E6B14;}
+.mk-verbindlichkeit-badge.angepasst{background:var(--accent-blue);color:var(--primary);}
+.mk-verbindlichkeit-badge.hilfetext{background:#F5E9D6;color:#8A5A1E;}
 .draghandle:active{cursor:grabbing;}
 .vorlagerow .txt{flex:1;min-width:0;}
 .vorlagerow .titelrow{display:flex;align-items:center;gap:8px;margin-bottom:3px;}
@@ -530,8 +536,15 @@ body.buero-rolle .admin-only{display:none !important;}
     <h3 id="vorlageOvlTitel">Vorlage</h3>
     <div class="fld" id="voTitelWrap"><label>Titel</label><input id="voTitel"></div>
     <div class="fld hidden" id="voBetreffWrap"><label>Betreff (kommt ins Betreff-Feld der Mail)</label><input id="voBetreff"></div>
-    <div class="fld hidden" id="voWannTrifftWrap"><label>Anwenden bei</label><textarea id="voWannTrifft" rows="1"></textarea></div>
-    <div class="fld hidden" id="voNichtAnwendenWrap"><label>Nicht anwenden bei</label><textarea id="voNichtAnwenden" rows="1"></textarea></div>
+    <div class="fld hidden" id="voWannTrifftWrap"><label>Kurzbeschreibung</label><textarea id="voWannTrifft" rows="1"></textarea></div>
+    <div class="fld hidden" id="voNichtAnwendenWrap">
+      <label>Verbindlichkeit</label>
+      <div class="typchips" id="voVerbindlichkeitChips">
+        <span class="typchip" data-wert="haargenau">Haargenau</span>
+        <span class="typchip on" data-wert="angepasst">Angepasst (~70-80%)</span>
+        <span class="typchip" data-wert="hilfetext">Nur Hilfetext (~20-30%)</span>
+      </div>
+    </div>
     <div class="typchips hidden" id="voTypChips">
       <span class="typchip on" data-typ="einfach">Einfache Vorlage</span>
       <span class="typchip" data-typ="rueckfrage">Vorlage mit Rückfrage</span>
@@ -1106,39 +1119,37 @@ let kategorienCache = [];
 let unterkategorienCache = [];
 async function ladeKategorien(){
   const [{ data: k, error: ek }, { data: u, error: eu }] = await Promise.all([
-    sb.from('mailassistent_kategorie').select('*').order('reihenfolge'),
-    sb.from('mailassistent_unterkategorie').select('*').order('reihenfolge'),
+    sb.from('mailassistent_ast').select('*').order('reihenfolge'),
+    sb.from('mailassistent_zweig').select('*').order('reihenfolge'),
   ]);
   if(ek) console.error(ek);
   if(eu) console.error(eu);
   kategorienCache = k || [];
   unterkategorienCache = u || [];
 }
-function aktionstypBadgeHtml(typ){
-  const labels = { entwurf: 'Direkter Entwurf', rueckfrage: 'Rückfrage-Fenster', kundenanfrage: 'Kundenanfrage-Fenster' };
-  return `<span class="aktionstyp-badge ${esc(typ)}">${esc(labels[typ] || typ)}</span>`;
-}
 
 // ---------------------------------------------------------------------------
-// Kategorie / Unterkategorie verwalten (Mailkategorien-Umbau)
+// Ast / Zweig verwalten (Ast/Zweig-Umbau, loest Kategorie/Unterkategorie ab -
+// die JS-Variablennamen kategorienCache/unterkategorienCache blieben aus
+// Aufwandsgruenden stehen, meinen aber jetzt Ast/Zweig)
 // ---------------------------------------------------------------------------
 async function speichereKategorieFeld(id, feld, wert){
-  const { error } = await sb.from('mailassistent_kategorie').update({ [feld]: wert }).eq('id', id);
+  const { error } = await sb.from('mailassistent_ast').update({ [feld]: wert }).eq('id', id);
   if(error){ showToast(friendlyError(error), true); return; }
   const item = kategorienCache.find(k => k.id === id);
   if(item) item[feld] = wert;
   showToast('Gespeichert.');
 }
 async function neueKategorie(){
-  const { error } = await sb.from('mailassistent_kategorie').insert({ titel: 'Neue Kategorie', aktionstyp: 'entwurf', reihenfolge: kategorienCache.length });
+  const { error } = await sb.from('mailassistent_ast').insert({ titel: 'Neuer Ast', reihenfolge: kategorienCache.length });
   if(error){ showToast(friendlyError(error), true); return; }
   await ladeKategorien();
   renderVorlagenListe('antworten');
 }
 async function loescheKategorie(id){
   const item = kategorienCache.find(k => k.id === id);
-  if(!await kgBestaetigen(`"${item?.titel || 'Diese Kategorie'}" wirklich löschen? Zugeordnete Vorlagen/Unterkategorien werden NICHT automatisch mitgelöscht, verlieren aber ihre Zuordnung.`)) return;
-  const { error } = await sb.from('mailassistent_kategorie').delete().eq('id', id);
+  if(!await kgBestaetigen(`"${item?.titel || 'Dieser Ast'}" wirklich löschen? Zugehörige Zweige werden mitgelöscht, deren Vorlagen NICHT automatisch, verlieren aber ihre Zuordnung.`)) return;
+  const { error } = await sb.from('mailassistent_ast').delete().eq('id', id);
   if(error){ showToast(friendlyError(error), true); return; }
   showToast('Gelöscht.');
   await ladeKategorien();
@@ -1146,24 +1157,24 @@ async function loescheKategorie(id){
 }
 
 async function speichereUnterkategorieFeld(id, feld, wert){
-  const { error } = await sb.from('mailassistent_unterkategorie').update({ [feld]: wert }).eq('id', id);
+  const { error } = await sb.from('mailassistent_zweig').update({ [feld]: wert }).eq('id', id);
   if(error){ showToast(friendlyError(error), true); return; }
   const item = unterkategorienCache.find(u => u.id === id);
   if(item) item[feld] = wert;
   showToast('Gespeichert.');
 }
 async function neueUnterkategorie(kategorieId){
-  const werte = { titel: 'Neue Unterkategorie', aktionstyp: 'entwurf', kategorie_id: kategorieId,
-    reihenfolge: unterkategorienCache.filter(u => u.kategorie_id === kategorieId).length };
-  const { error } = await sb.from('mailassistent_unterkategorie').insert(werte);
+  const werte = { titel: 'Neuer Zweig', ast_id: kategorieId,
+    reihenfolge: unterkategorienCache.filter(u => u.ast_id === kategorieId).length };
+  const { error } = await sb.from('mailassistent_zweig').insert(werte);
   if(error){ showToast(friendlyError(error), true); return; }
   await ladeKategorien();
   renderVorlagenListe('antworten');
 }
 async function loescheUnterkategorie(id){
   const item = unterkategorienCache.find(u => u.id === id);
-  if(!await kgBestaetigen(`"${item?.titel || 'Diese Unterkategorie'}" wirklich löschen? Zugeordnete Vorlagen werden NICHT automatisch mitgelöscht, verlieren aber ihre Zuordnung.`)) return;
-  const { error } = await sb.from('mailassistent_unterkategorie').delete().eq('id', id);
+  if(!await kgBestaetigen(`"${item?.titel || 'Dieser Zweig'}" wirklich löschen? Zugeordnete Vorlagen werden NICHT automatisch mitgelöscht, verlieren aber ihre Zuordnung.`)) return;
+  const { error } = await sb.from('mailassistent_zweig').delete().eq('id', id);
   if(error){ showToast(friendlyError(error), true); return; }
   showToast('Gelöscht.');
   await ladeKategorien();
@@ -1261,8 +1272,8 @@ function vorlageRowHtml(v, richtung){
     <div class="vorlagerow${istAktiv ? '' : ' vorlagerow-inaktiv'}" data-id="${v.id}">
       <span class="draghandle" title="Ziehen zum Verschieben">${ICON.grip}</span>
       <div class="txt">
-        <div class="titelrow"><span class="titel">${esc(v.titel)}</span>${v.typ === 'rueckfrage' ? '<span class="badge-partner">Mit Rückfrage</span>' : ''}${zfBadge}${istAktiv ? '' : '<span class="badge-inaktiv">Ausgeblendet</span>'}</div>
-        ${richtung === 'antworten' ? `<div class="wanntrifft">Wann trifft das zu? <i style="color:var(--ink);font-style:normal;">${esc(v.wann_trifft_zu || '–')}</i></div>` : ''}
+        <div class="titelrow"><span class="titel">${esc(v.titel)}</span>${v.typ === 'rueckfrage' ? '<span class="badge-partner">Mit Rückfrage</span>' : ''}${richtung === 'antworten' ? `<span class="mk-verbindlichkeit-badge ${esc(v.verbindlichkeit || 'angepasst')}">${{haargenau:'Haargenau',angepasst:'Angepasst',hilfetext:'Nur Hilfetext'}[v.verbindlichkeit || 'angepasst']}</span>` : ''}${zfBadge}${istAktiv ? '' : '<span class="badge-inaktiv">Ausgeblendet</span>'}</div>
+        ${richtung === 'antworten' ? `<div class="wanntrifft">Kurzbeschreibung: <i style="color:var(--ink);font-style:normal;">${esc(v.kurzbeschreibung || '–')}</i></div>` : ''}
         <div class="preview">${preview}</div>
       </div>
       <div class="rowactions">
@@ -1301,10 +1312,6 @@ function renderVorlagenListe(richtung){
 // Gruppe, statt zu verschwinden. Die einzelnen Zeilen (vorlageRowHtml) und
 // ihre Bearbeiten/Loeschen-Handler bleiben unveraendert - nur die Anordnung
 // drumherum ist neu.
-function mkAktionstypSelectHtml(typ, cssKlasse, id){
-  const optionen = [['entwurf','Direkter Entwurf'],['rueckfrage','Rückfrage-Fenster'],['kundenanfrage','Kundenanfrage-Fenster']];
-  return `<select class="${cssKlasse}" data-id="${id}">${optionen.map(([w,l]) => `<option value="${w}"${typ===w?' selected':''}>${l}</option>`).join('')}</select>`;
-}
 function mkBedingungFelderHtml(item, cssPrefix){
   return `
     <div class="mk-bedingung-felder">
@@ -1312,50 +1319,68 @@ function mkBedingungFelderHtml(item, cssPrefix){
       <div class="fld"><label>Nicht anwenden bei</label><textarea class="${cssPrefix}-nicht-anwenden" data-id="${item.id}" rows="1">${esc(item.nicht_anwenden_bei || '')}</textarea></div>
     </div>`;
 }
-// EINE weisse Box pro Kategorie (mit Abstand zur naechsten Kategorie-Box).
-// Alles Weitere - Unterkategorie-Titel, Bedingungsfelder, Vorlagen-Zeilen -
+// Wer entscheidet bei mehreren Vorlagen im Zweig, welche verwendet wird -
+// zwei getrennt gespeicherte Texte (frage_ki/frage_mitarbeiter), nur das
+// Textfeld zum gerade aktiven Button wird angezeigt.
+function mkEntscheidungBoxHtml(u){
+  const istKi = (u.entscheidung || 'ki') === 'ki';
+  return `
+    <div class="mk-entscheidung-box">
+      <div style="font-size:11.5px;font-weight:700;color:var(--primary);margin-bottom:8px;">Wer entscheidet, welche Vorlage verwendet wird?</div>
+      <div class="mk-chips">
+        <button type="button" class="mk-chip mk-zweig-entscheidung-ki ${istKi ? 'on' : ''}" data-id="${u.id}">KI entscheidet selbst</button>
+        <button type="button" class="mk-chip mk-zweig-entscheidung-mitarbeiter ${!istKi ? 'on' : ''}" data-id="${u.id}">Mitarbeiter entscheidet</button>
+      </div>
+      <div class="mk-frage-label">${istKi ? 'Denkhilfe für die KI: Woran erkennt sie, welche Vorlage passt?' : 'Frage an den Mitarbeiter (erscheint als Pop-up-Überschrift)'}</div>
+      <textarea class="mk-zweig-frage" data-id="${u.id}" data-feld="${istKi ? 'frage_ki' : 'frage_mitarbeiter'}" rows="1">${esc(istKi ? (u.frage_ki || '') : (u.frage_mitarbeiter || ''))}</textarea>
+    </div>`;
+}
+async function setZweigEntscheidung(id, wert){
+  await speichereUnterkategorieFeld(id, 'entscheidung', wert);
+  renderVorlagenListe('antworten');
+}
+// EINE weisse Box pro Ast (mit Abstand zur naechsten Ast-Box). Alles Weitere
+// - Zweig-Titel, Bedingungsfelder, Wer-entscheidet-Box, Vorlagen-Zeilen -
 // lebt INNERHALB dieser einen Box, ohne dass ein weiterer umrahmter Kasten
-// (Box in der Box) entsteht. Die Unterkategorie ist nur eine Titelzeile mit
-// eigenen Feldern, kein eigener Rahmen.
+// (Box in der Box) entsteht. Der Zweig ist nur eine Titelzeile mit eigenen
+// Feldern, kein eigener Rahmen. Ein Ast selbst hat KEINE eigenen Vorlagen
+// mehr (fixe Tiefe Ast -> Zweig -> Vorlagen) - jede Vorlage haengt an einem
+// Zweig, nie direkt am Ast.
 function renderVorlagenGruppiert(zielId, liste, richtung){
-  const ohneKategorie = liste.filter(v => !v.kategorie_id);
+  const ohneZweig = liste.filter(v => !v.zweig_id);
   const teile = [];
   kategorienCache.forEach(k => {
-    const direkt = liste.filter(v => v.kategorie_id === k.id && !v.unterkategorie_id);
-    const unterHtml = unterkategorienCache.filter(u => u.kategorie_id === k.id).map(u => {
-      const rows = liste.filter(v => v.unterkategorie_id === u.id);
+    const unterHtml = unterkategorienCache.filter(u => u.ast_id === k.id).map(u => {
+      const rows = liste.filter(v => v.zweig_id === u.id);
       return `
         <div class="mk-unterkategorie-kopf">
           <input class="mk-titel-input mk-unterkat-titel-input mk-unterkat-titel" data-id="${u.id}" value="${esc(u.titel)}">
-          ${mkAktionstypSelectHtml(u.aktionstyp, 'mk-unterkat-aktionstyp', u.id)}
           <span class="mk-gruppe-actions">
-            <button type="button" class="icobtn danger mk-unterkat-del" data-id="${u.id}" title="Unterkategorie löschen">${ICON.trash}</button>
+            <button type="button" class="icobtn danger mk-unterkat-del" data-id="${u.id}" title="Zweig löschen">${ICON.trash}</button>
           </span>
         </div>
         ${mkBedingungFelderHtml(u, 'mk-unterkat')}
-        <div class="mk-vorlagen-liste" data-gruppe="unter-${u.id}">${rows.map(v => vorlageRowHtml(v, richtung)).join('') || '<p style="font-size:12px;color:var(--muted);margin:4px 0 10px;">Noch keine Vorlagen in dieser Unterkategorie.</p>'}</div>
-        <button type="button" class="mk-vorlage-add" data-unterkategorie-id="${u.id}">+ Neue Vorlage hinzufügen</button>`;
+        ${mkEntscheidungBoxHtml(u)}
+        <div class="mk-vorlagen-liste" data-gruppe="zweig-${u.id}">${rows.map(v => vorlageRowHtml(v, richtung)).join('') || '<p style="font-size:12px;color:var(--muted);margin:4px 0 10px;">Noch keine Vorlagen in diesem Zweig.</p>'}</div>
+        <button type="button" class="mk-vorlage-add" data-zweig-id="${u.id}">+ Neue Vorlage hinzufügen</button>`;
     }).join('');
     teile.push(`
       <div class="mk-kategorie-box" data-id="${k.id}">
         <div class="mk-kategorie-kopf">
           <button type="button" class="mk-toggle">▾</button>
           <input class="mk-titel-input mk-kat-titel" data-id="${k.id}" value="${esc(k.titel)}">
-          ${mkAktionstypSelectHtml(k.aktionstyp, 'mk-kat-aktionstyp', k.id)}
           <span class="mk-gruppe-actions">
-            <button type="button" class="icobtn danger mk-kat-del" data-id="${k.id}" title="Kategorie löschen">${ICON.trash}</button>
+            <button type="button" class="icobtn danger mk-kat-del" data-id="${k.id}" title="Ast löschen">${ICON.trash}</button>
           </span>
         </div>
         <div class="mk-kategorie-body">
           ${mkBedingungFelderHtml(k, 'mk-kat')}
-          <div class="mk-vorlagen-liste" data-gruppe="direkt-${k.id}">${direkt.map(v => vorlageRowHtml(v, richtung)).join('') || '<p style="font-size:12px;color:var(--muted);margin:4px 0 10px;">Noch keine Vorlagen direkt in dieser Kategorie.</p>'}</div>
-          <button type="button" class="mk-vorlage-add" data-kategorie-id="${k.id}">+ Neue Vorlage hinzufügen</button>
           ${unterHtml}
-          <button type="button" class="mk-unterkat-add" data-kategorie-id="${k.id}">+ Neue Unterkategorie hinzufügen</button>
+          <button type="button" class="mk-unterkat-add" data-kategorie-id="${k.id}">+ Neuen Zweig hinzufügen</button>
         </div>
       </div>`);
   });
-  if(ohneKategorie.length){
+  if(ohneZweig.length){
     teile.push(`
       <div class="mk-kategorie-box">
         <div class="mk-kategorie-kopf">
@@ -1363,28 +1388,28 @@ function renderVorlagenGruppiert(zielId, liste, richtung){
           <span class="mk-summary-titel">Noch nicht zugeordnet</span>
         </div>
         <div class="mk-kategorie-body">
-          <div class="mk-vorlagen-liste">${ohneKategorie.map(v => vorlageRowHtml(v, richtung)).join('')}</div>
+          <div class="mk-vorlagen-liste">${ohneZweig.map(v => vorlageRowHtml(v, richtung)).join('')}</div>
         </div>
       </div>`);
   }
-  teile.push('<button type="button" class="btn btn-primary addvorlagebtn" id="mkKatAddBtn" style="margin-top:6px;">+ Neue Kategorie hinzufügen</button>');
+  teile.push('<button type="button" class="btn btn-primary addvorlagebtn" id="mkKatAddBtn" style="margin-top:6px;">+ Neuen Ast hinzufügen</button>');
   $(zielId).innerHTML = teile.join('');
   $(zielId).querySelectorAll('.mk-vorlagen-liste').forEach(row => voAktiviereDragDrop(row, richtung));
   $(zielId).querySelectorAll('.mk-toggle').forEach(b => b.addEventListener('click', () => b.closest('.mk-kategorie-box').classList.toggle('collapsed')));
   $(zielId).querySelectorAll('.mk-kat-titel').forEach(inp => inp.addEventListener('change', () => speichereKategorieFeld(inp.dataset.id, 'titel', inp.value.trim())));
-  $(zielId).querySelectorAll('.mk-kat-aktionstyp').forEach(sel => sel.addEventListener('change', () => speichereKategorieFeld(sel.dataset.id, 'aktionstyp', sel.value)));
   $(zielId).querySelectorAll('.mk-kat-anwenden').forEach(ta => { voAutoWachsen(ta); ta.addEventListener('input', () => voAutoWachsen(ta)); ta.addEventListener('change', () => speichereKategorieFeld(ta.dataset.id, 'anwenden_bei', ta.value.trim() || null)); });
   $(zielId).querySelectorAll('.mk-kat-nicht-anwenden').forEach(ta => { voAutoWachsen(ta); ta.addEventListener('input', () => voAutoWachsen(ta)); ta.addEventListener('change', () => speichereKategorieFeld(ta.dataset.id, 'nicht_anwenden_bei', ta.value.trim() || null)); });
   $(zielId).querySelectorAll('.mk-kat-del').forEach(b => b.addEventListener('click', () => loescheKategorie(b.dataset.id)));
   $(zielId).querySelectorAll('.mk-unterkat-titel').forEach(inp => inp.addEventListener('change', () => speichereUnterkategorieFeld(inp.dataset.id, 'titel', inp.value.trim())));
-  $(zielId).querySelectorAll('.mk-unterkat-aktionstyp').forEach(sel => sel.addEventListener('change', () => speichereUnterkategorieFeld(sel.dataset.id, 'aktionstyp', sel.value)));
   $(zielId).querySelectorAll('.mk-unterkat-anwenden').forEach(ta => { voAutoWachsen(ta); ta.addEventListener('input', () => voAutoWachsen(ta)); ta.addEventListener('change', () => speichereUnterkategorieFeld(ta.dataset.id, 'anwenden_bei', ta.value.trim() || null)); });
   $(zielId).querySelectorAll('.mk-unterkat-nicht-anwenden').forEach(ta => { voAutoWachsen(ta); ta.addEventListener('input', () => voAutoWachsen(ta)); ta.addEventListener('change', () => speichereUnterkategorieFeld(ta.dataset.id, 'nicht_anwenden_bei', ta.value.trim() || null)); });
   $(zielId).querySelectorAll('.mk-unterkat-del').forEach(b => b.addEventListener('click', () => loescheUnterkategorie(b.dataset.id)));
   $(zielId).querySelectorAll('.mk-unterkat-add').forEach(b => b.addEventListener('click', () => neueUnterkategorie(b.dataset.kategorieId)));
+  $(zielId).querySelectorAll('.mk-zweig-entscheidung-ki').forEach(b => b.addEventListener('click', () => setZweigEntscheidung(b.dataset.id, 'ki')));
+  $(zielId).querySelectorAll('.mk-zweig-entscheidung-mitarbeiter').forEach(b => b.addEventListener('click', () => setZweigEntscheidung(b.dataset.id, 'mitarbeiter')));
+  $(zielId).querySelectorAll('.mk-zweig-frage').forEach(ta => { voAutoWachsen(ta); ta.addEventListener('input', () => voAutoWachsen(ta)); ta.addEventListener('change', () => speichereUnterkategorieFeld(ta.dataset.id, ta.dataset.feld, ta.value.trim() || null)); });
   $(zielId).querySelectorAll('.mk-vorlage-add').forEach(b => b.addEventListener('click', () => oeffneVorlageModal('antworten', null, {
-    kategorieId: b.dataset.kategorieId || null,
-    unterkategorieId: b.dataset.unterkategorieId || null,
+    zweigId: b.dataset.zweigId || null,
   })));
   const addKatBtn = $(zielId).querySelector('#mkKatAddBtn');
   if(addKatBtn) addKatBtn.addEventListener('click', neueKategorie);
@@ -1460,7 +1485,7 @@ $('verfassenZurueckBtn').addEventListener('click', () => {
 
 let voAktuelleId = null, voAktuelleRichtung = null, voAntwortZaehler = 0;
 let voAktuellerIstDropdown = false, voAktuellerParentId = null;
-let voAktuellerKategorieId = null, voAktuellerUnterkategorieId = null;
+let voAktuellerZweigId = null;
 function voAntwortBlockHtml(idx, label, inhalt){
   return `
     <div class="antwortblock" data-idx="${idx}">
@@ -1578,8 +1603,7 @@ function oeffneVorlageModal(richtung, id, opts = {}){
   const v = id ? vorlagenCache[richtung].find(x => x.id === id) : null;
   voAktuellerIstDropdown = v ? v.typ === 'dropdown' : !!opts.istDropdown;
   voAktuellerParentId = v ? (v.parent_id || null) : (opts.parentId || null);
-  voAktuellerKategorieId = v ? (v.kategorie_id || null) : (opts.kategorieId || null);
-  voAktuellerUnterkategorieId = v ? (v.unterkategorie_id || null) : (opts.unterkategorieId || null);
+  voAktuellerZweigId = v ? (v.zweig_id || null) : (opts.zweigId || null);
 
   if(voAktuellerIstDropdown){
     $('vorlageOvlTitel').textContent = 'Dropdown-Vorlage (Gruppen-Button)';
@@ -1604,11 +1628,10 @@ function oeffneVorlageModal(richtung, id, opts = {}){
   $('voBetreffWrap').classList.toggle('hidden', richtung !== 'verfassen');
   $('voBetreff').value = v?.betreff || '';
   $('voWannTrifftWrap').classList.toggle('hidden', richtung !== 'antworten');
-  $('voWannTrifft').value = v?.wann_trifft_zu || '';
+  $('voWannTrifft').value = v?.kurzbeschreibung || '';
   voAutoWachsen($('voWannTrifft'));
   $('voNichtAnwendenWrap').classList.toggle('hidden', richtung !== 'antworten');
-  $('voNichtAnwenden').value = v?.nicht_anwenden_bei || '';
-  voAutoWachsen($('voNichtAnwenden'));
+  $('voVerbindlichkeitChips').querySelectorAll('.typchip').forEach(c => c.classList.toggle('on', c.dataset.wert === (v?.verbindlichkeit || 'angepasst')));
   const typ = richtung === 'antworten' ? (v?.typ || 'einfach') : 'einfach';
   // "Vorlage mit Rückfrage" ist ein abgeloester Mechanismus (seit der
   // Unterkategorie-Umstellung uebernimmt eine Unterkategorie mit Aktionstyp
@@ -1650,6 +1673,12 @@ function oeffneVorlageModal(richtung, id, opts = {}){
   }
   $('vorlageOvl').classList.add('show');
 }
+$('voVerbindlichkeitChips').querySelectorAll('.typchip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    $('voVerbindlichkeitChips').querySelectorAll('.typchip').forEach(c => c.classList.remove('on'));
+    chip.classList.add('on');
+  });
+});
 function voSyncTypAnzeige(typ){
   $('voInhaltWrap').classList.toggle('hidden', typ === 'rueckfrage');
   $('voRueckfrageWrap').classList.toggle('hidden', typ !== 'rueckfrage');
@@ -1684,7 +1713,6 @@ function voAutoWachsen(textarea){
   textarea.style.height = textarea.scrollHeight + 'px';
 }
 $('voWannTrifft').addEventListener('input', () => voAutoWachsen($('voWannTrifft')));
-$('voNichtAnwenden').addEventListener('input', () => voAutoWachsen($('voNichtAnwenden')));
 // Ein Zusatzfenster kann nicht mehr nur eines pro Vorlage sein - darum pro
 // angehaktem Zusatzfenster ein eigener Button, der dessen Platzhalter an
 // der Cursor-Position einfuegt.
@@ -1761,10 +1789,9 @@ $('voSaveBtn').addEventListener('click', async () => {
     inhalt: typ === 'einfach' ? $('voInhalt').value : null,
     betreff: istVerfassen ? betreffWert : null,
     frage: typ === 'rueckfrage' ? $('voFrage').value.trim() : null,
-    wann_trifft_zu: voAktuelleRichtung === 'antworten' ? $('voWannTrifft').value.trim() : null,
-    nicht_anwenden_bei: voAktuelleRichtung === 'antworten' ? ($('voNichtAnwenden').value.trim() || null) : null,
-    kategorie_id: voAktuelleRichtung === 'antworten' ? voAktuellerKategorieId : null,
-    unterkategorie_id: voAktuelleRichtung === 'antworten' ? voAktuellerUnterkategorieId : null,
+    kurzbeschreibung: voAktuelleRichtung === 'antworten' ? $('voWannTrifft').value.trim() : null,
+    verbindlichkeit: voAktuelleRichtung === 'antworten' ? ($('voVerbindlichkeitChips').querySelector('.typchip.on')?.dataset.wert || 'angepasst') : null,
+    zweig_id: voAktuelleRichtung === 'antworten' ? voAktuellerZweigId : null,
     parent_id: istVerfassen ? voAktuellerParentId : null,
     aktualisiert_am: new Date().toISOString()
   };
