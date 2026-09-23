@@ -2794,11 +2794,11 @@ async function ladeTagessatzDaten(otId){
     .from('arbeitsschritt')
     .select(`id, name, reihenfolge,
       teilschritt ( id, name, beschreibung, ausgeblendet,
-        ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, tagesleistung_menge,
+        ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, tagesleistung_menge, artikel_id,
           artikel ( bezeichnung, einheit, vp_knecht ) ),
         auswahlfeld ( id, name,
           auswahloption ( id, name, beschreibung, reihenfolge, mehrfachauswahl,
-            ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, tagesleistung_menge,
+            ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, tagesleistung_menge, artikel_id,
               artikel ( bezeichnung, einheit, vp_knecht ) ) ) ) )`)
     .eq('offertentyp_id', otId).eq('ausgeblendet', false).order('reihenfolge');
   if(error) throw error;
@@ -2811,6 +2811,7 @@ async function ladeTagessatzDaten(otId){
     tagessatzRessourcenzeilen.push({
       optionId, teilschrittId, arbeitsschrittId, arbeitsschritt: arbeitsschrittName,
       kategorie: rz.kategorie,
+      artikelId: rz.artikel_id || null,
       bezeichnung: rz.bezeichnung_override || rz.artikel?.bezeichnung || '(unbenannt)',
       einheit: rz.artikel?.einheit || '',
       preis: rz.preis_override ?? rz.artikel?.vp_knecht ?? 0,
@@ -5083,10 +5084,22 @@ async function recalc(){
         const aktive = tagessatzRessourcenzeilen.filter(rz => rz.teilschrittId === ts.id && (rz.optionId == null || ausgewaehlt.has(rz.optionId)));
         aktive.forEach(rz => {
           const menge = (rz.tagesleistungMenge || 0) * tage;
-          alleZeilen.push({ kategorie: rz.kategorie, arbeitsschritt: rz.arbeitsschritt, bezeichnung: rz.bezeichnung, einheit: rz.einheit || 'Std', preis: rz.preis, menge, betrag: menge * rz.preis });
+          alleZeilen.push({ kategorie: rz.kategorie, arbeitsschritt: rz.arbeitsschritt, bezeichnung: rz.bezeichnung, einheit: rz.einheit || 'Std', preis: rz.preis, menge, betrag: menge * rz.preis, artikelId: rz.artikelId });
         });
       });
-      gesamtPersonalStunden = alleZeilen.filter(r => r.kategorie === 'personal').reduce((s, r) => s + r.menge, 0);
+      // Fuer die Lieferwagenfahrzeit zaehlen nur die Stunden des Vorarbeiters
+      // (das Team faehrt gemeinsam zur Baustelle, nicht jeder einzeln - siehe
+      // Absprache) - nicht die Summe ALLER Personalrollen. Sonst wuerden bei
+      // mehreren gleichzeitig arbeitenden Rollen (z.B. Vorarbeiter +
+      // Gartenarbeiter) doppelt so viele Arbeitstage berechnet wie real vor
+      // Ort gearbeitet wird, weil deren Stunden addiert statt nur die
+      // laengste (i.d.R. immer der Vorarbeiter) genommen wuerden. Ist gar kein
+      // Vorarbeiter-Artikel hinterlegt, auf die Summe aller Personalrollen
+      // zurueckfallen statt die Fahrzeit auf 0 einbrechen zu lassen.
+      const vorarbeiterArtikelIds = [lieferwagenKonfig?.vorarbeiterArtikelId, lieferwagenKonfig?.vorarbeiterPoolbauArtikelId].filter(Boolean);
+      const personalZeilenTagessatz = alleZeilen.filter(r => r.kategorie === 'personal');
+      gesamtPersonalStunden = (vorarbeiterArtikelIds.length ? personalZeilenTagessatz.filter(r => vorarbeiterArtikelIds.includes(r.artikelId)) : personalZeilenTagessatz)
+        .reduce((s, r) => s + r.menge, 0);
       const lwZeilen = await berechneLieferwagenfahrzeit(gesamtPersonalStunden);
       if(meineGeneration !== recalcGeneration) return; // inzwischen ueberholt, siehe recalcGeneration oben
       alleZeilen = alleZeilen.concat(lwZeilen.personal, lwZeilen.logistik);
@@ -5319,7 +5332,22 @@ async function recalc(){
         }
       }
 
-      gesamtPersonalStunden = berechnet.filter(r => r.kategorie === 'personal').reduce((s, r) => s + r.menge, 0);
+      // Fuer die Lieferwagenfahrzeit zaehlen nur die Stunden des Vorarbeiters
+      // (das Team faehrt gemeinsam zur Baustelle, nicht jeder einzeln - siehe
+      // Absprache) - nicht die Summe ALLER Personalrollen. Sonst wuerden bei
+      // mehreren gleichzeitig arbeitenden Rollen (z.B. Vorarbeiter +
+      // Gartenarbeiter) doppelt so viele Arbeitstage berechnet wie real vor
+      // Ort gearbeitet wird, weil deren Stunden addiert statt nur die
+      // laengste (i.d.R. immer der Vorarbeiter) genommen wuerden. Die
+      // Vorarbeiter-Zeilen sind zu diesem Zeitpunkt bereits auf den aktuell
+      // gewaehlten Pool/Normal-Artikel vereinheitlicht (siehe oben). Ist gar
+      // kein Vorarbeiter-Artikel hinterlegt (Einstellungen -> Berechnungsregeln
+      // -> Lieferwagenfahrzeit-Konfiguration), auf die Summe aller Personal-
+      // rollen zurueckfallen statt die Fahrzeit auf 0 einbrechen zu lassen.
+      const vorarbeiterArtikelIds = [lieferwagenKonfig?.vorarbeiterArtikelId, lieferwagenKonfig?.vorarbeiterPoolbauArtikelId].filter(Boolean);
+      const personalZeilen = berechnet.filter(r => r.kategorie === 'personal');
+      gesamtPersonalStunden = (vorarbeiterArtikelIds.length ? personalZeilen.filter(r => vorarbeiterArtikelIds.includes(r.artikelId)) : personalZeilen)
+        .reduce((s, r) => s + r.menge, 0);
       const lwZeilen = await berechneLieferwagenfahrzeit(gesamtPersonalStunden);
       if(meineGeneration !== recalcGeneration) return; // inzwischen ueberholt, siehe recalcGeneration oben
       const alleZeilenFormel = berechnet.concat(lwZeilen.personal, lwZeilen.logistik, freitextAggregatZeilen());
