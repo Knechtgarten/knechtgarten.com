@@ -169,13 +169,23 @@ function formatiereFirmendaten(fd: any): string {
   ].filter(Boolean).join('\n');
 }
 
+// Gemeinsames Format fuer alle frei benannten Abschnitte-Listen (Grundlogik/
+// Schreibstil/Faelle-Regeln/Wissen) - je Abschnitt "Titel:\nInhalt", leere
+// Abschnitte werden uebersprungen.
+function formatiereAbschnitte(liste: any[] | null): string {
+  return (liste || [])
+    .filter((a: any) => a.inhalt && a.inhalt.trim())
+    .map((a: any) => `${a.titel}:\n${a.inhalt}`)
+    .join('\n\n');
+}
+
 // ----------------------------------------------------------------------------
 // Modus: verfassen
 // ----------------------------------------------------------------------------
 async function modusVerfassen(body: any, modell: string) {
   const [{ data: grundlogik }, { data: schreibstil }, { data: firmendaten }, { data: faelle }, { data: wissen }] = await Promise.all([
     sb.from('mailassistent_grundlogik_abschnitt').select('titel,inhalt').order('reihenfolge'),
-    sb.from('mailassistent_schreibstil').select('*').limit(1).maybeSingle(),
+    sb.from('mailassistent_schreibstil_abschnitt').select('titel,inhalt').order('reihenfolge'),
     sb.from('mailassistent_firmendaten').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_faelle_abschnitt').select('titel,inhalt').order('reihenfolge'),
     sb.from('mailassistent_wissen_abschnitt').select('titel,inhalt').order('reihenfolge'),
@@ -187,22 +197,14 @@ async function modusVerfassen(body: any, modell: string) {
     vorlage = data;
   }
 
-  const grundlogikText = (grundlogik || [])
-    .filter((a: any) => a.inhalt && a.inhalt.trim())
-    .map((a: any) => `${a.titel}:\n${a.inhalt}`)
-    .join('\n\n');
-  const faelleText = (faelle || [])
-    .filter((a: any) => a.inhalt && a.inhalt.trim())
-    .map((a: any) => `${a.titel}:\n${a.inhalt}`)
-    .join('\n\n');
-  const wissenText = (wissen || [])
-    .filter((a: any) => a.inhalt && a.inhalt.trim())
-    .map((a: any) => `${a.titel}:\n${a.inhalt}`)
-    .join('\n\n');
+  const grundlogikText = formatiereAbschnitte(grundlogik);
+  const schreibstilText = formatiereAbschnitte(schreibstil);
+  const faelleText = formatiereAbschnitte(faelle);
+  const wissenText = formatiereAbschnitte(wissen);
 
   const teile = [];
   if (grundlogikText) teile.push('GRUNDLOGIK (wie du als Mail-Assistent grundsaetzlich vorgehst):\n' + grundlogikText);
-  if (schreibstil?.inhalt) teile.push('SCHREIBSTIL:\n' + schreibstil.inhalt);
+  if (schreibstilText) teile.push('SCHREIBSTIL:\n' + schreibstilText);
   if (firmendaten) teile.push('FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten));
   if (wissenText) teile.push('NACHSCHLAGEWERK (weiteres Wissen - nutze das bei Bedarf, z.B. wenn du eine konkrete Angabe brauchst):\n' + wissenText);
   if (vorlage) teile.push(`VORLAGE "${vorlage.titel}" - GENAU DIESEN TEXT WORTGETREU UEBERNEHMEN, nur die Platzhalter behandeln. KEINEN eigenen Text erfinden, auch nicht wenn die Vorlage kurz oder unklar wirkt.
@@ -228,10 +230,11 @@ VORLAGE:\n${vorlage.inhalt}`);
 // volle Klassifizierungs-Prompt unten.
 // ----------------------------------------------------------------------------
 async function modusAntwortenIntern(body: any, modell: string) {
-  const { data: schreibstil } = await sb.from('mailassistent_schreibstil').select('*').limit(1).maybeSingle();
+  const { data: schreibstil } = await sb.from('mailassistent_schreibstil_abschnitt').select('titel,inhalt').order('reihenfolge');
+  const schreibstilText = formatiereAbschnitte(schreibstil);
   const system = `Du bist der Mail-Assistent von Knechtgarten. Diese Nachricht kommt von einer Kollegin/einem Kollegen (intern), keine Kundenmail.
 Antworte extrem kurz und direkt, wie eine knappe Chat-Nachricht unter Kollegen - z.B. "Ist ok, mache ich.", "Ja, passt.", "Nein, lieber am Montag.". KEINE Anrede ("Hallo ..."), KEINE Grussformel/Verabschiedung ("Freundliche Gruesse" o.ae.), KEINE Floskeln ("Vielen Dank fuer deine Nachricht" o.ae.) - nur die eigentliche Information/Antwort, sonst nichts.
-${schreibstil?.inhalt ? '\nSCHREIBSTIL (nur soweit auch fuer knappe interne Chat-Nachrichten sinnvoll - Anrede/Gruss aus dem Schreibstil hier NICHT uebernehmen):\n' + schreibstil.inhalt : ''}
+${schreibstilText ? '\nSCHREIBSTIL (nur soweit auch fuer knappe interne Chat-Nachrichten sinnvoll - Anrede/Gruss aus dem Schreibstil hier NICHT uebernehmen):\n' + schreibstilText : ''}
 Schreibe direkt den Antworttext. Nur den Mailtext ausgeben, keine Erklaerung, keine Anfuehrungszeichen drumherum.${KG_FORMAT_HINWEIS}`;
 
   const { text, tokensInput, tokensOutput } = await rufeClaudeAuf(modell, system, 'INTERNE NACHRICHT:\n' + body.mailInhalt, 400);
@@ -252,7 +255,7 @@ async function modusAntworten(body: any, modell: string) {
     { data: mitarbeitende }, { data: externeKontakte }, { data: zweige },
   ] = await Promise.all([
     sb.from('mailassistent_grundlogik_abschnitt').select('titel,inhalt').order('reihenfolge'),
-    sb.from('mailassistent_schreibstil').select('*').limit(1).maybeSingle(),
+    sb.from('mailassistent_schreibstil_abschnitt').select('titel,inhalt').order('reihenfolge'),
     sb.from('mailassistent_firmendaten').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_vorlage').select(`*, mailassistent_vorlage_antwort(*),
       mailassistent_vorlage_zusatzfenster(
@@ -268,24 +271,16 @@ async function modusAntworten(body: any, modell: string) {
     sb.from('mailassistent_zweig').select('*, mailassistent_ast(titel,ast_funktion)'),
   ]);
 
-  const grundlogikText = (grundlogik || [])
-    .filter((a: any) => a.inhalt && a.inhalt.trim())
-    .map((a: any) => `${a.titel}:\n${a.inhalt}`)
-    .join('\n\n');
+  const grundlogikText = formatiereAbschnitte(grundlogik);
+  const schreibstilText = formatiereAbschnitte(schreibstil);
   const mitarbeitendeListe = (mitarbeitende || [])
     .map((m: any) => `${m.name}${m.email ? ' <' + m.email + '>' : ''}${m.funktion ? ' - ' + m.funktion : ''}`)
     .join('\n');
   const externeKontakteListe = (externeKontakte || [])
     .map((k: any) => `${k.firma} (${k.domains})${k.rolle ? ' - ' + k.rolle : ''}${k.notiz ? ' - ' + k.notiz : ''}`)
     .join('\n');
-  const faelleText = (faelle || [])
-    .filter((a: any) => a.inhalt && a.inhalt.trim())
-    .map((a: any) => `${a.titel}:\n${a.inhalt}`)
-    .join('\n\n');
-  const wissenText = (wissen || [])
-    .filter((a: any) => a.inhalt && a.inhalt.trim())
-    .map((a: any) => `${a.titel}:\n${a.inhalt}`)
-    .join('\n\n');
+  const faelleText = formatiereAbschnitte(faelle);
+  const wissenText = formatiereAbschnitte(wissen);
 
   // Ast/Zweig sind reine Einordnung (Anwenden bei/Nicht anwenden bei), keine
   // eigene Vorlage. Ein Zweig ist nur dann eine eigene "Zweig-Menu"-Gruppe
@@ -326,7 +321,7 @@ async function modusAntworten(body: any, modell: string) {
 
   const system = `Du bist der Mail-Assistent von Knechtgarten (Gartenbau-Unternehmen, Heimenschwand/BE). Du liest eine eingehende Mail und entscheidest, wie sie beantwortet werden soll.
 
-${grundlogikText ? 'GRUNDLOGIK (wie du als Mail-Assistent grundsaetzlich vorgehst):\n' + grundlogikText + '\n\n' : ''}${schreibstil?.inhalt ? 'SCHREIBSTIL:\n' + schreibstil.inhalt + '\n\n' : ''}${firmendaten ? 'FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten) + '\n\n' : ''}${wissenText ? 'NACHSCHLAGEWERK (weiteres Wissen - nutze das bei Bedarf, z.B. wenn eine Vorlage eine konkrete Angabe braucht):\n' + wissenText + '\n\n' : ''}${mitarbeitendeListe ? 'MITARBEITENDE (unser eigenes Team - gehoert zu "uns", nicht zur Gegenseite):\n' + mitarbeitendeListe + '\n\n' : ''}${externeKontakteListe ? 'BEKANNTE EXTERNE FIRMEN (anhand der Domain im Mailkopf zuordenbar - gehoeren NICHT zu uns):\n' + externeKontakteListe + '\n\n' : ''}Pruefe die folgenden zwei Bereiche mit GLEICHER Prioritaet (keiner geht dem anderen automatisch vor) - MAIL-VORLAGEN und ZWEIGE sind fuer spezifische, bekannte Faelle (jede VORLAGE ist ueber einen Ast/Zweig eingeordnet - Ast und Zweig sind reine Einordnung, kein eigener Inhalt):
+${grundlogikText ? 'GRUNDLOGIK (wie du als Mail-Assistent grundsaetzlich vorgehst):\n' + grundlogikText + '\n\n' : ''}${schreibstilText ? 'SCHREIBSTIL:\n' + schreibstilText + '\n\n' : ''}${firmendaten ? 'FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten) + '\n\n' : ''}${wissenText ? 'NACHSCHLAGEWERK (weiteres Wissen - nutze das bei Bedarf, z.B. wenn eine Vorlage eine konkrete Angabe braucht):\n' + wissenText + '\n\n' : ''}${mitarbeitendeListe ? 'MITARBEITENDE (unser eigenes Team - gehoert zu "uns", nicht zur Gegenseite):\n' + mitarbeitendeListe + '\n\n' : ''}${externeKontakteListe ? 'BEKANNTE EXTERNE FIRMEN (anhand der Domain im Mailkopf zuordenbar - gehoeren NICHT zu uns):\n' + externeKontakteListe + '\n\n' : ''}Pruefe die folgenden zwei Bereiche mit GLEICHER Prioritaet (keiner geht dem anderen automatisch vor) - MAIL-VORLAGEN und ZWEIGE sind fuer spezifische, bekannte Faelle (jede VORLAGE ist ueber einen Ast/Zweig eingeordnet - Ast und Zweig sind reine Einordnung, kein eigener Inhalt):
 
 MAIL-VORLAGEN:
 ${vorlagenMenu || '(keine erfasst)'}
@@ -520,7 +515,7 @@ async function berechneDistanzInfo(kundenAdresse: string, firmendaten: any, part
 async function modusRueckfrageAntwort(body: any, modell: string) {
   const [{ data: grundlogik }, { data: schreibstil }, { data: firmendaten }, { data: wissen }, { data: faelle }, { data: vorlage }] = await Promise.all([
     sb.from('mailassistent_grundlogik_abschnitt').select('titel,inhalt').order('reihenfolge'),
-    sb.from('mailassistent_schreibstil').select('*').limit(1).maybeSingle(),
+    sb.from('mailassistent_schreibstil_abschnitt').select('titel,inhalt').order('reihenfolge'),
     sb.from('mailassistent_firmendaten').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_wissen_abschnitt').select('titel,inhalt').order('reihenfolge'),
     sb.from('mailassistent_faelle_abschnitt').select('titel,inhalt').order('reihenfolge'),
@@ -528,22 +523,14 @@ async function modusRueckfrageAntwort(body: any, modell: string) {
   ]);
   const zweig = (vorlage?.mailassistent_vorlage_antwort || []).find((z: any) => z.label === body.antwortLabel);
   if (!zweig) return json({ error: 'Antwort "' + body.antwortLabel + '" nicht gefunden.' }, 502);
-  const grundlogikText = (grundlogik || [])
-    .filter((a: any) => a.inhalt && a.inhalt.trim())
-    .map((a: any) => `${a.titel}:\n${a.inhalt}`)
-    .join('\n\n');
-  const wissenText = (wissen || [])
-    .filter((a: any) => a.inhalt && a.inhalt.trim())
-    .map((a: any) => `${a.titel}:\n${a.inhalt}`)
-    .join('\n\n');
-  const faelleText = (faelle || [])
-    .filter((a: any) => a.inhalt && a.inhalt.trim())
-    .map((a: any) => `${a.titel}:\n${a.inhalt}`)
-    .join('\n\n');
+  const grundlogikText = formatiereAbschnitte(grundlogik);
+  const schreibstilText = formatiereAbschnitte(schreibstil);
+  const wissenText = formatiereAbschnitte(wissen);
+  const faelleText = formatiereAbschnitte(faelle);
 
   const teile = [];
   if (grundlogikText) teile.push('GRUNDLOGIK (wie du als Mail-Assistent grundsaetzlich vorgehst):\n' + grundlogikText);
-  if (schreibstil?.inhalt) teile.push('SCHREIBSTIL:\n' + schreibstil.inhalt);
+  if (schreibstilText) teile.push('SCHREIBSTIL:\n' + schreibstilText);
   if (firmendaten) teile.push('FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten));
   if (wissenText) teile.push('NACHSCHLAGEWERK (weiteres Wissen - nutze das bei Bedarf):\n' + wissenText);
   teile.push(`VORLAGE - als starke Richtschnur nehmen (Kernaussage/Entscheidung und Aufbau bleiben, das ist nicht verhandelbar), aber natürlich personalisieren: Namen der Person ansprechen, wo sinnvoll kurz auf Details aus der eingehenden Mail eingehen. Nicht stur wortwörtlich abschreiben, aber auch nichts an der eigentlichen Entscheidung/Aussage ändern.
@@ -601,23 +588,15 @@ VORLAGE:\n${zweig.inhalt}`);
 async function modusAuswahlAntwort(body: any, modell: string) {
   const [{ data: grundlogik }, { data: schreibstil }, { data: firmendaten }, { data: wissen }, { data: faelle }] = await Promise.all([
     sb.from('mailassistent_grundlogik_abschnitt').select('titel,inhalt').order('reihenfolge'),
-    sb.from('mailassistent_schreibstil').select('*').limit(1).maybeSingle(),
+    sb.from('mailassistent_schreibstil_abschnitt').select('titel,inhalt').order('reihenfolge'),
     sb.from('mailassistent_firmendaten').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_wissen_abschnitt').select('titel,inhalt').order('reihenfolge'),
     sb.from('mailassistent_faelle_abschnitt').select('titel,inhalt').order('reihenfolge'),
   ]);
-  const grundlogikText = (grundlogik || [])
-    .filter((a: any) => a.inhalt && a.inhalt.trim())
-    .map((a: any) => `${a.titel}:\n${a.inhalt}`)
-    .join('\n\n');
-  const wissenText = (wissen || [])
-    .filter((a: any) => a.inhalt && a.inhalt.trim())
-    .map((a: any) => `${a.titel}:\n${a.inhalt}`)
-    .join('\n\n');
-  const faelleText = (faelle || [])
-    .filter((a: any) => a.inhalt && a.inhalt.trim())
-    .map((a: any) => `${a.titel}:\n${a.inhalt}`)
-    .join('\n\n');
+  const grundlogikText = formatiereAbschnitte(grundlogik);
+  const schreibstilText = formatiereAbschnitte(schreibstil);
+  const wissenText = formatiereAbschnitte(wissen);
+  const faelleText = formatiereAbschnitte(faelle);
 
   let titel: string, inhalt: string, logVorlageId: string | null;
   if (body.partnerbetriebId) {
@@ -641,7 +620,7 @@ async function modusAuswahlAntwort(body: any, modell: string) {
 
   const teile = [];
   if (grundlogikText) teile.push('GRUNDLOGIK (wie du als Mail-Assistent grundsaetzlich vorgehst):\n' + grundlogikText);
-  if (schreibstil?.inhalt) teile.push('SCHREIBSTIL:\n' + schreibstil.inhalt);
+  if (schreibstilText) teile.push('SCHREIBSTIL:\n' + schreibstilText);
   if (firmendaten) teile.push('FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten));
   if (wissenText) teile.push('NACHSCHLAGEWERK (weiteres Wissen - nutze das bei Bedarf):\n' + wissenText);
   teile.push(`VORLAGE - als starke Richtschnur nehmen (Kernaussage/Entscheidung und Aufbau bleiben, das ist nicht verhandelbar), aber natürlich personalisieren: Namen der Person ansprechen, wo sinnvoll kurz auf Details aus der eingehenden Mail eingehen. Nicht stur wortwörtlich abschreiben, aber auch nichts an der eigentlichen Entscheidung/Aussage ändern.
@@ -682,9 +661,10 @@ VORLAGE:\n${inhalt}`);
 // Modus: nachbessern
 // ----------------------------------------------------------------------------
 async function modusNachbessern(body: any, modell: string) {
-  const { data: schreibstil } = await sb.from('mailassistent_schreibstil').select('*').limit(1).maybeSingle();
+  const { data: schreibstil } = await sb.from('mailassistent_schreibstil_abschnitt').select('titel,inhalt').order('reihenfolge');
+  const schreibstilText = formatiereAbschnitte(schreibstil);
   const teile = [];
-  if (schreibstil?.inhalt) teile.push('SCHREIBSTIL (weiterhin einhalten):\n' + schreibstil.inhalt);
+  if (schreibstilText) teile.push('SCHREIBSTIL (weiterhin einhalten):\n' + schreibstilText);
   teile.push('BISHERIGER ENTWURF:\n' + body.aktuellerEntwurf);
   teile.push('ANWEISUNG ZUR ÜBERARBEITUNG:\n' + body.anweisung);
   teile.push('Schreibe den überarbeiteten Mailtext. Nur den Mailtext ausgeben, keine Erklärung.' + KG_FORMAT_HINWEIS);
