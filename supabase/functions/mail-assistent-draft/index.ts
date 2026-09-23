@@ -287,7 +287,7 @@ async function modusAntworten(body: any, modell: string) {
     sb.from('mailassistent_wissen_abschnitt').select('titel,inhalt').order('reihenfolge'),
     sb.from('mailassistent_mitarbeiter').select('name,email,funktion').order('reihenfolge'),
     sb.from('mailassistent_externe_kontakte').select('firma,domains,rolle,notiz,anrede').order('reihenfolge'),
-    sb.from('mailassistent_zweig').select('*, mailassistent_ast(titel,ast_funktion)'),
+    sb.from('mailassistent_zweig').select('*, mailassistent_ast(titel,anwenden_bei,nicht_anwenden_bei,ast_funktion)'),
   ]);
 
   const grundlogikText = formatiereAbschnitte(grundlogik);
@@ -315,8 +315,11 @@ async function modusAntworten(body: any, modell: string) {
       return `- VORLAGE "${v.titel}" [MIT RÜCKFRAGE] – trifft zu wenn: ${v.wann_trifft_zu || '–'}\n  Frage an den Mitarbeiter: "${v.frage}"\n  Mögliche Antworten: ${zweige2}`;
     }
     const zweig = v.zweig_id ? (zweige || []).find((z: any) => z.id === v.zweig_id) : null;
+    const ast = zweig?.mailassistent_ast;
     const einordnung = zweig
-      ? `\n  Einordnung: Ast "${zweig.mailassistent_ast?.titel || '–'}" > Zweig "${zweig.titel}"` +
+      ? `\n  Einordnung: Ast "${ast?.titel || '–'}" > Zweig "${zweig.titel}"` +
+        (ast?.anwenden_bei ? `\n  Ast trifft zu wenn: ${ast.anwenden_bei}` : '') +
+        (ast?.nicht_anwenden_bei ? `\n  Ast NICHT anwenden bei: ${ast.nicht_anwenden_bei}` : '') +
         (zweig.anwenden_bei ? `\n  Zweig trifft zu wenn: ${zweig.anwenden_bei}` : '') +
         (zweig.nicht_anwenden_bei ? `\n  Zweig NICHT anwenden bei: ${zweig.nicht_anwenden_bei}` : '') +
         (zweig.frage_ki ? `\n  Denkhilfe fuer diesen Zweig (mehrere Vorlagen moeglich): ${zweig.frage_ki}` : '')
@@ -332,9 +335,12 @@ async function modusAntworten(body: any, modell: string) {
   const zweigeMenu = (zweige || []).filter((z: any) => z.entscheidung === 'mitarbeiter').map((z: any) => {
     const zugehoerig = (vorlagen || []).filter((v: any) => v.zweig_id === z.id);
     const optionen = zugehoerig.map((v: any) => v.titel).join(' / ');
-    return `- ZWEIG "${z.titel}" (Ast: ${z.mailassistent_ast?.titel || '–'}) – zutreffend, wenn die Mail zu diesem Fall gehoert und der Mitarbeiter selbst zwischen mehreren Antworten waehlen soll.` +
-      (z.anwenden_bei ? `\n  Anwenden bei: ${z.anwenden_bei}` : '') +
-      (z.nicht_anwenden_bei ? `\n  NICHT anwenden bei: ${z.nicht_anwenden_bei}` : '') +
+    const ast = z.mailassistent_ast;
+    return `- ZWEIG "${z.titel}" (Ast: ${ast?.titel || '–'}) – zutreffend, wenn die Mail zu diesem Fall gehoert und der Mitarbeiter selbst zwischen mehreren Antworten waehlen soll.` +
+      (ast?.anwenden_bei ? `\n  Ast trifft zu wenn: ${ast.anwenden_bei}` : '') +
+      (ast?.nicht_anwenden_bei ? `\n  Ast NICHT anwenden bei: ${ast.nicht_anwenden_bei}` : '') +
+      (z.anwenden_bei ? `\n  Zweig trifft zu wenn: ${z.anwenden_bei}` : '') +
+      (z.nicht_anwenden_bei ? `\n  Zweig NICHT anwenden bei: ${z.nicht_anwenden_bei}` : '') +
       `\n  Moegliche Antworten: ${optionen || '(keine Vorlagen erfasst)'}`;
   }).join('\n');
 
