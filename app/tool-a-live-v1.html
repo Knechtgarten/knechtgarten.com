@@ -4917,17 +4917,28 @@ async function recalc(){
       return blockTotal;
     }
 
-    // Lieferwagenfahrzeit (Lieferwagen/Vorarbeiter/Gartenarbeiter) wird NICHT
-    // als eigener Kostenblock angezeigt, sondern als "virtuelle" Zeilen in
-    // Personalaufwand/Logistik eingespeist - dort landet sie ueber die
-    // bestehende Artikel-Identitaets-Gruppierung (byName in renderKostenblock)
-    // automatisch entweder in einer bereits vorhandenen Zeile mit demselben
-    // Artikel (Mengen/Betraege werden addiert) oder erzeugt eine neue Zeile.
-    // Die Karte oben (Toggle + dezente Vorschau) bleibt unveraendert bestehen.
-    // Muss VOR dem Rendern von Personalaufwand aufgerufen werden, braucht dafuer
-    // aber gesamtPersonalStunden - das steht erst fest, nachdem alle Personal-
-    // Zeilen (aller Teilflaechen) berechnet sind, aber noch bevor sie gerendert
-    // werden - siehe die beiden Aufrufstellen unten (Tagessatz/Formel).
+    // Lieferwagenfahrzeit - kurz erklaert (Absprache, siehe auch Hinweistext
+    // in Einstellungen -> Berechnungsregeln -> "Taegliche Fahrzeiten"):
+    // 1) Hin+Rueck-Fahrzeit (Google Maps) wird als TOTAL auf Viertelstunden
+    //    gerundet, mit einer konfigurierten Mindestfahrzeit pro Tag als Boden.
+    // 2) Anzahl Fahrten/Tage richtet sich nur nach den Arbeitsstunden des
+    //    Vorarbeiters (nicht der Summe aller Personalrollen), weil das Team
+    //    gemeinsam im selben Lieferwagen anreist.
+    // 3) Vorarbeiter UND Gartenarbeiter bekommen diese Fahrzeit je einzeln als
+    //    Lohnzeit angerechnet (beide sitzen mit), der Lieferwagen selbst
+    //    (Fahrzeugkosten Std/km) aber nur einmal - kein doppeltes Fahrzeug.
+    //
+    // Technisch: wird NICHT als eigener Kostenblock angezeigt, sondern als
+    // "virtuelle" Zeilen in Personalaufwand/Logistik eingespeist - dort landet
+    // sie ueber die bestehende Artikel-Identitaets-Gruppierung (byName in
+    // renderKostenblock) automatisch entweder in einer bereits vorhandenen
+    // Zeile mit demselben Artikel (Mengen/Betraege werden addiert) oder
+    // erzeugt eine neue Zeile. Die Karte oben (Toggle + dezente Vorschau)
+    // bleibt unveraendert bestehen. Muss VOR dem Rendern von Personalaufwand
+    // aufgerufen werden, braucht dafuer aber gesamtPersonalStunden - das
+    // steht erst fest, nachdem alle Personal-Zeilen (aller Teilflaechen)
+    // berechnet sind, aber noch bevor sie gerendert werden - siehe die beiden
+    // Aufrufstellen unten (Tagessatz/Formel).
     async function berechneLieferwagenfahrzeit(gesamtPersonalStundenWert){
       const plzFuerFahrzeit = $('kundePlz').value.trim();
       if(!(lieferwagenKonfig?.herkunft_adresse && lieferwagenKonfig.stundenpreis != null && lieferwagenKonfig.kmpreis != null && plzFuerFahrzeit)){
@@ -4944,19 +4955,16 @@ async function recalc(){
         $('lwFrequenzKarte').classList.add('hidden');
         return { personal: [], logistik: [] };
       }
-      // Mindestfahrzeit gilt PRO FAHRT (Einzelstrecke) - erst danach auf
-      // Hin+Rueck verdoppeln, sonst wuerde bei sehr kurzen Strecken (z.B.
-      // Kunde im selben Dorf) die Fahrzeit auf 0 Std runden, obwohl real
-      // immer ein Mindestaufwand pro Fahrt anfaellt.
-      const mindestStdEinweg = (lieferwagenKonfig.mindestfahrzeitMin || 0) / 60;
-      const stdHinRueckMitMindest = mindestStdEinweg > 0
-        ? Math.max(distanz.stdHinRueck / 2, mindestStdEinweg) * 2
-        : distanz.stdHinRueck;
-      // Auf ganze Stunden runden (rundeMenge) wuerde bei einer kurzen
-      // Mindestfahrzeit (z.B. 7 Min config: Hin+Rueck 14 Min ~= 0.23 Std)
-      // genau die Mindestfahrzeit wieder auf 0 herunterrunden - darum hier
-      // stattdessen auf Viertelstunden runden, damit ein konfiguriertes
-      // Minimum ungleich 0 nie verschwindet.
+      // Rechenweg Fahrzeit (Absprache): Hin- und Rueckfahrt werden ZUSAMMEN-
+      // GEZAEHLT und erst als TOTAL mit der Mindestfahrzeit verglichen (nicht
+      // mehr je Einzelstrecke) - "Mindestfahrzeit pro Tag" in Einstellungen
+      // ist also bereits der Hin+Rueck-Gesamtwert (z.B. 15 Min), nicht pro
+      // Fahrtrichtung.
+      const mindestStdTotal = (lieferwagenKonfig.mindestfahrzeitMin || 0) / 60;
+      const stdHinRueckMitMindest = Math.max(distanz.stdHinRueck, mindestStdTotal);
+      // Auf Viertelstunden runden (kaufmaennisch: ab 7.5 Min Rest wird
+      // aufgerundet, sonst abgerundet) - gilt fuers TOTAL (Hin+Rueck), nicht
+      // je Einzelstrecke.
       const stdGerundet = Math.round(stdHinRueckMitMindest * 4) / 4;
       const kmGerundet = rundeMenge(distanz.kmHinRueck);
       const stundenpreisGerundet = rundeCHF(lieferwagenKonfig.stundenpreis);
