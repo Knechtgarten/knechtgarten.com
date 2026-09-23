@@ -53,7 +53,15 @@ const sb = createClient(supabaseUrl, serviceRoleKey);
 // anderen Edge Functions dieses Projekts, die einen externen LLM per fetch
 // aufrufen statt eines SDKs).
 // ----------------------------------------------------------------------------
-async function rufeClaudeAuf(modell: string, system: string, userText: string, maxTokens = 2000) {
+// cacheSystem=true markiert den System-Prompt als cachebar (Anthropic Prompt
+// Caching, 5 Min. TTL) - lohnt sich bei grossen, zwischen Aufrufen meist
+// unveraenderten System-Prompts (z.B. modusAntworten: Grundlogik/Schreibstil/
+// alle Vorlagen/Zweige/Regeln aendern sich nur, wenn Stefan im Tool etwas
+// editiert, nicht pro eingehender Mail). Erster Aufruf nach einer Aenderung
+// bzw. nach 5 Min. Pause bleibt gleich schnell wie bisher, folgende Aufrufe
+// innert 5 Min. sind spuerbar schneller + guenstiger, weil Claude den
+// gecachten Teil nicht neu verarbeiten muss.
+async function rufeClaudeAuf(modell: string, system: string, userText: string, maxTokens = 2000, cacheSystem = false) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -64,7 +72,7 @@ async function rufeClaudeAuf(modell: string, system: string, userText: string, m
     body: JSON.stringify({
       model: modell,
       max_tokens: maxTokens,
-      system,
+      system: cacheSystem ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }] : system,
       messages: [{ role: 'user', content: userText }],
     }),
   });
@@ -359,7 +367,7 @@ ${KG_FORMAT_HINWEIS}`;
 
   let userText = 'EINGEHENDE MAIL:\n' + body.mailInhalt;
   if (body.stichworte) userText += '\n\nZUSAETZLICHE STICHWORTE/ANWEISUNG VOM MITARBEITER - unbedingt beruecksichtigen: ' + body.stichworte;
-  const { text, tokensInput, tokensOutput } = await rufeClaudeAuf(modell, system, userText, 3500);
+  const { text, tokensInput, tokensOutput } = await rufeClaudeAuf(modell, system, userText, 3500, true);
   let entscheidung;
   try { entscheidung = extrahiereJson(text); }
   catch (e) {
