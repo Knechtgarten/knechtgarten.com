@@ -236,7 +236,7 @@ async function modusAntworten(body: any, modell: string) {
   const [
     { data: schreibstil }, { data: firmendaten },
     { data: vorlagen }, { data: kundenanfrageVorlagen }, { data: distanzMeta }, { data: faelle },
-    { data: mitarbeitende }, { data: externeKontakte }, { data: unterkategorien },
+    { data: mitarbeitende }, { data: externeKontakte }, { data: zweige },
   ] = await Promise.all([
     sb.from('mailassistent_schreibstil').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_firmendaten').select('*').limit(1).maybeSingle(),
@@ -258,7 +258,7 @@ async function modusAntworten(body: any, modell: string) {
     sb.from('mailassistent_faelle_abschnitt').select('titel,inhalt').order('reihenfolge'),
     sb.from('mailassistent_mitarbeiter').select('name,email,funktion').order('reihenfolge'),
     sb.from('mailassistent_externe_kontakte').select('firma,domains,rolle,notiz').order('reihenfolge'),
-    sb.from('mailassistent_unterkategorie').select('*, mailassistent_kategorie(titel)'),
+    sb.from('mailassistent_zweig').select('*, mailassistent_ast(titel)'),
   ]);
 
   const mitarbeitendeListe = (mitarbeitende || [])
@@ -272,41 +272,52 @@ async function modusAntworten(body: any, modell: string) {
     .map((a: any) => `${a.titel}:\n${a.inhalt}`)
     .join('\n\n');
 
-  // Eine Unterkategorie ist nur dann eine eigene "Rueckfrage"-Gruppe (siehe
-  // unterkategorienMenu unten), wenn ihr Aktionstyp das auch sagt. Bei
-  // Aktionstyp "Direkter Entwurf" (oder "Kundenanfrage-Fenster", das rein
-  // dokumentarisch ist) ist die Unterkategorie nur ein Ordner fuers
-  // Verwaltungstool - ihre Vorlagen muessen ganz normal wie jede andere
-  // VORLAGE im vorlagenMenu erscheinen, sonst sieht die KI sie nie.
-  const rueckfrageUnterkategorieIds = new Set((unterkategorien || []).filter((u: any) => u.aktionstyp === 'rueckfrage').map((u: any) => u.id));
+  // Ast/Zweig sind reine Einordnung (Anwenden bei/Nicht anwenden bei), keine
+  // eigene Vorlage. Ein Zweig ist nur dann eine eigene "Zweig-Menu"-Gruppe
+  // (siehe zweigeMenu unten), wenn dort der Mitarbeiter selbst entscheiden
+  // soll - sonst sind seine Vorlagen ganz normale VORLAGEN im vorlagenMenu,
+  // nur mit der Ast/Zweig-Einordnung als Zusatzkontext.
+  const mitarbeiterZweigIds = new Set((zweige || []).filter((z: any) => z.entscheidung === 'mitarbeiter').map((z: any) => z.id));
 
   const vorlagenMenu = (vorlagen || []).map((v: any) => {
-    if (v.unterkategorie_id && rueckfrageUnterkategorieIds.has(v.unterkategorie_id)) return null; // wird stattdessen unten in UNTERKATEGORIEN gelistet
+    if (v.zweig_id && mitarbeiterZweigIds.has(v.zweig_id)) return null; // wird stattdessen unten bei ZWEIGE gelistet
     if (v.typ === 'rueckfrage') {
-      const zweige = (v.mailassistent_vorlage_antwort || []).map((z: any) => z.label).join(' / ');
-      return `- VORLAGE "${v.titel}" [MIT RÜCKFRAGE] – trifft zu wenn: ${v.wann_trifft_zu || '–'}\n  Frage an den Mitarbeiter: "${v.frage}"\n  Mögliche Antworten: ${zweige}`;
+      const zweige2 = (v.mailassistent_vorlage_antwort || []).map((z: any) => z.label).join(' / ');
+      return `- VORLAGE "${v.titel}" [MIT RÜCKFRAGE] – trifft zu wenn: ${v.wann_trifft_zu || '–'}\n  Frage an den Mitarbeiter: "${v.frage}"\n  Mögliche Antworten: ${zweige2}`;
     }
-    return `- VORLAGE "${v.titel}" – trifft zu wenn: ${v.wann_trifft_zu || '–'}${v.nicht_anwenden_bei ? `\n  NICHT anwenden bei: ${v.nicht_anwenden_bei}` : ''}\n  Text:\n${v.inhalt}`;
+    const zweig = v.zweig_id ? (zweige || []).find((z: any) => z.id === v.zweig_id) : null;
+    const einordnung = zweig
+      ? `\n  Einordnung: Ast "${zweig.mailassistent_ast?.titel || '–'}" > Zweig "${zweig.titel}"` +
+        (zweig.anwenden_bei ? `\n  Zweig trifft zu wenn: ${zweig.anwenden_bei}` : '') +
+        (zweig.nicht_anwenden_bei ? `\n  Zweig NICHT anwenden bei: ${zweig.nicht_anwenden_bei}` : '') +
+        (zweig.frage_ki ? `\n  Denkhilfe fuer diesen Zweig (mehrere Vorlagen moeglich): ${zweig.frage_ki}` : '')
+      : '';
+    const verbindlichkeitsHinweis = v.verbindlichkeit === 'haargenau'
+      ? 'GENAU DIESEN TEXT WORTGETREU UEBERNEHMEN, nur Platzhalter behandeln.'
+      : v.verbindlichkeit === 'hilfetext'
+        ? 'Nur als grober Anhaltspunkt verwenden - du darfst den Text weitgehend frei umschreiben, nur die Kernaussage/Entscheidung beibehalten.'
+        : 'Als starke Richtschnur nehmen (Kernaussage/Entscheidung und Aufbau bleiben), aber natuerlich personalisieren.';
+    return `- VORLAGE "${v.titel}" [${(v.verbindlichkeit || 'angepasst').toUpperCase()}] – ${verbindlichkeitsHinweis}${v.nicht_anwenden_bei ? `\n  NICHT anwenden bei: ${v.nicht_anwenden_bei}` : ''}${einordnung}${v.kurzbeschreibung ? `\n  Kurzbeschreibung: ${v.kurzbeschreibung}` : ''}\n  Text:\n${v.inhalt}`;
   }).filter(Boolean).join('\n\n');
 
-  const unterkategorienMenu = (unterkategorien || []).filter((u: any) => u.aktionstyp === 'rueckfrage').map((u: any) => {
-    const zugehoerig = (vorlagen || []).filter((v: any) => v.unterkategorie_id === u.id);
+  const zweigeMenu = (zweige || []).filter((z: any) => z.entscheidung === 'mitarbeiter').map((z: any) => {
+    const zugehoerig = (vorlagen || []).filter((v: any) => v.zweig_id === z.id);
     const optionen = zugehoerig.map((v: any) => v.titel).join(' / ');
-    return `- UNTERKATEGORIE "${u.titel}" (Kategorie: ${u.mailassistent_kategorie?.titel || '–'}) – zutreffend, wenn die Mail zu diesem Fall gehoert und mehrere gleichwertige Antworten in Frage kommen.` +
-      (u.anwenden_bei ? `\n  Anwenden bei: ${u.anwenden_bei}` : '') +
-      (u.nicht_anwenden_bei ? `\n  NICHT anwenden bei: ${u.nicht_anwenden_bei}` : '') +
-      `\n  Mögliche Antworten: ${optionen || '(keine Vorlagen erfasst)'}`;
+    return `- ZWEIG "${z.titel}" (Ast: ${z.mailassistent_ast?.titel || '–'}) – zutreffend, wenn die Mail zu diesem Fall gehoert und der Mitarbeiter selbst zwischen mehreren Antworten waehlen soll.` +
+      (z.anwenden_bei ? `\n  Anwenden bei: ${z.anwenden_bei}` : '') +
+      (z.nicht_anwenden_bei ? `\n  NICHT anwenden bei: ${z.nicht_anwenden_bei}` : '') +
+      `\n  Moegliche Antworten: ${optionen || '(keine Vorlagen erfasst)'}`;
   }).join('\n');
 
   const system = `Du bist der Mail-Assistent von Knechtgarten (Gartenbau-Unternehmen, Heimenschwand/BE). Du liest eine eingehende Mail und entscheidest, wie sie beantwortet werden soll.
 
-${schreibstil?.immer_antworten && schreibstil.inhalt ? 'SCHREIBSTIL:\n' + schreibstil.inhalt + '\n\n' : ''}${firmendaten?.immer_antworten ? 'FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten) + '\n\n' : ''}${mitarbeitendeListe ? 'MITARBEITENDE (unser eigenes Team - gehoert zu "uns", nicht zur Gegenseite):\n' + mitarbeitendeListe + '\n\n' : ''}${externeKontakteListe ? 'BEKANNTE EXTERNE FIRMEN (anhand der Domain im Mailkopf zuordenbar - gehoeren NICHT zu uns):\n' + externeKontakteListe + '\n\n' : ''}${faelleText ? 'FÄLLE (situative Regeln, gelten immer):\n' + faelleText + '\n\n' : ''}Pruefe die folgenden drei Bereiche mit GLEICHER Prioritaet (keiner geht den anderen automatisch vor) - MAIL-VORLAGEN und UNTERKATEGORIEN sind fuer spezifische, bekannte Faelle, KUNDENANFRAGEN ist der Auffangbereich fuer echte Neukunden-/Projektanfragen, die keine dieser spezifischen Vorlagen treffen:
+${schreibstil?.immer_antworten && schreibstil.inhalt ? 'SCHREIBSTIL:\n' + schreibstil.inhalt + '\n\n' : ''}${firmendaten?.immer_antworten ? 'FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten) + '\n\n' : ''}${mitarbeitendeListe ? 'MITARBEITENDE (unser eigenes Team - gehoert zu "uns", nicht zur Gegenseite):\n' + mitarbeitendeListe + '\n\n' : ''}${externeKontakteListe ? 'BEKANNTE EXTERNE FIRMEN (anhand der Domain im Mailkopf zuordenbar - gehoeren NICHT zu uns):\n' + externeKontakteListe + '\n\n' : ''}${faelleText ? 'FÄLLE (situative Regeln, gelten immer):\n' + faelleText + '\n\n' : ''}Pruefe die folgenden drei Bereiche mit GLEICHER Prioritaet (keiner geht den anderen automatisch vor) - MAIL-VORLAGEN und ZWEIGE sind fuer spezifische, bekannte Faelle (jede VORLAGE ist ueber einen Ast/Zweig eingeordnet - Ast und Zweig sind reine Einordnung, kein eigener Inhalt), KUNDENANFRAGEN ist der Auffangbereich fuer echte Neukunden-/Projektanfragen, die keine dieser spezifischen Vorlagen treffen:
 
 MAIL-VORLAGEN:
 ${vorlagenMenu || '(keine erfasst)'}
 
-UNTERKATEGORIEN MIT MEHREREN GLEICHWERTIGEN ANTWORTEN - hier gibt es KEINE feste Vorlage, der Mitarbeiter waehlt selbst manuell die passende Antwort aus der Liste der Unterkategorie:
-${unterkategorienMenu || '(keine erfasst)'}
+ZWEIGE MIT MEHREREN ANTWORTEN, MITARBEITER ENTSCHEIDET SELBST - hier gibt es KEINE feste Vorlage, der Mitarbeiter waehlt selbst manuell die passende Antwort aus der Liste des Zweigs:
+${zweigeMenu || '(keine erfasst)'}
 
 KUNDENANFRAGEN - dafür gibt es KEINE feste Vorlage, der Mitarbeiter wählt selbst manuell die passende Antwort aus einer Liste, du lieferst nur die Einordnung + falls möglich die Kundenadresse. Nur relevant wenn: ${distanzMeta?.wann_anwenden || '(nicht konfiguriert)'}
 
@@ -335,9 +346,9 @@ Nimm exakt das, was in der Mail steht (keine eigene Umformung/Ergänzung, nichts
 4. AUSNAHMEFALL - zwei (normalerweise nicht mehr) einfache VORLAGEN passen ungefähr GLEICH GUT, sagen inhaltlich aber unterschiedliche Dinge aus, und es ist fuer die Antwort wirklich wichtig, welche davon stimmt:
 {"aktion":"auswahl","frage":"<kurze, konkrete Frage an den Mitarbeiter, z.B. 'Geht es eher um X oder um Y?'>","vorlagenTitel":["<exakter Titel Vorlage A>","<exakter Titel Vorlage B>"]}
    Nutze Fall 4 NUR SELTEN, bei echter und relevanter Unsicherheit zwischen zwei VORLAGEN. Beim Abwaegen NUR zwischen Fall 1 und Fall 4 im Zweifel Fall 1 waehlen (diese Regel gilt nicht fuer die Wahl zwischen Fall 1 und Fall 3 - dort entscheidet allein, ob die KUNDENANFRAGEN-Bedingung zutrifft und eine passende VORLAGE mit Text existiert).
-5. Eine UNTERKATEGORIE MIT MEHREREN GLEICHWERTIGEN ANTWORTEN trifft zu (siehe oben):
-{"aktion":"unterkategorie","unterkategorieTitel":"<exakter Titel der Unterkategorie>"}
-   Nutze das NUR, wenn wirklich eine der oben gelisteten UNTERKATEGORIEN zutrifft - nicht fuer normale einfache VORLAGEN (dafuer Fall 1) und nicht fuer KUNDENANFRAGEN (dafuer Fall 3).
+5. Ein ZWEIG MIT MEHREREN ANTWORTEN trifft zu (siehe oben, Mitarbeiter entscheidet selbst):
+{"aktion":"zweig","zweigTitel":"<exakter Titel des Zweigs>"}
+   Nutze das NUR, wenn wirklich einer der oben gelisteten ZWEIGE zutrifft - nicht fuer normale einfache VORLAGEN (dafuer Fall 1) und nicht fuer KUNDENANFRAGEN (dafuer Fall 3).
 ${KG_FORMAT_HINWEIS}`;
 
   let userText = 'EINGEHENDE MAIL:\n' + body.mailInhalt;
@@ -418,13 +429,13 @@ ${KG_FORMAT_HINWEIS}`;
     }
   }
 
-  if (entscheidung.aktion === 'unterkategorie') {
-    const unterkategorie = (unterkategorien || []).find((u: any) => u.titel === entscheidung.unterkategorieTitel && u.aktionstyp === 'rueckfrage');
-    if (!unterkategorie) return json({ error: 'Unterkategorie "' + entscheidung.unterkategorieTitel + '" nicht gefunden.' }, 502);
-    const kandidaten = (vorlagen || []).filter((v: any) => v.unterkategorie_id === unterkategorie.id);
+  if (entscheidung.aktion === 'zweig') {
+    const zweig = (zweige || []).find((z: any) => z.titel === entscheidung.zweigTitel && z.entscheidung === 'mitarbeiter');
+    if (!zweig) return json({ error: 'Zweig "' + entscheidung.zweigTitel + '" nicht gefunden.' }, 502);
+    const kandidaten = (vorlagen || []).filter((v: any) => v.zweig_id === zweig.id);
     await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', null, tokensInput, tokensOutput);
     return json({
-      aktion: 'unterkategorie', titel: unterkategorie.titel,
+      aktion: 'zweig', titel: zweig.titel, frage: zweig.frage_mitarbeiter || null,
       antworten: kandidaten.map((v: any) => ({
         id: v.id, label: v.titel,
         zusatzfenster: (v.mailassistent_vorlage_zusatzfenster || []).map((e: any) => e.mailassistent_zusatzfenster).filter(Boolean),
