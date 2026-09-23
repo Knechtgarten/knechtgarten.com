@@ -297,7 +297,7 @@ async function modusAntworten(body: any, modell: string) {
       : v.verbindlichkeit === 'hilfetext'
         ? 'Nur als grober Anhaltspunkt verwenden - du darfst den Text weitgehend frei umschreiben, nur die Kernaussage/Entscheidung beibehalten.'
         : 'Als starke Richtschnur nehmen (Kernaussage/Entscheidung und Aufbau bleiben), aber natuerlich personalisieren.';
-    return `- VORLAGE "${v.titel}" [${(v.verbindlichkeit || 'angepasst').toUpperCase()}] – ${verbindlichkeitsHinweis}${v.nicht_anwenden_bei ? `\n  NICHT anwenden bei: ${v.nicht_anwenden_bei}` : ''}${einordnung}${v.kurzbeschreibung ? `\n  Kurzbeschreibung: ${v.kurzbeschreibung}` : ''}\n  Text:\n${v.inhalt}`;
+    return `- VORLAGE "${v.titel}" [${(v.verbindlichkeit || 'angepasst').toUpperCase()}] – ${verbindlichkeitsHinweis}${v.wann_trifft_zu ? `\n  Anwenden bei: ${v.wann_trifft_zu}` : ''}${v.nicht_anwenden_bei ? `\n  NICHT anwenden bei: ${v.nicht_anwenden_bei}` : ''}${einordnung}\n  Text:\n${v.inhalt}`;
   }).filter(Boolean).join('\n\n');
 
   const zweigeMenu = (zweige || []).filter((z: any) => z.entscheidung === 'mitarbeiter').map((z: any) => {
