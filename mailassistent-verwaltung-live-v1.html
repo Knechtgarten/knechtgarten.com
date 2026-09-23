@@ -310,7 +310,7 @@ body.buero-rolle .admin-only{display:none !important;}
       <a data-tab="grundlogik">Grundlogik</a>
       <a class="on" data-tab="schreibstil">Schreibstil</a>
       <a data-tab="faelle">Fälle</a>
-      <a data-tab="firmendaten">Firmendaten</a>
+      <a data-tab="firmendaten">Nachschlagewerk</a>
       <a data-tab="verfassen">Mail-Vorlagen: Verfassen</a>
       <a data-tab="antworten">Mail-Vorlagen: Antworten</a>
       <a data-tab="zusatzfenster">Zusatzfenster</a>
@@ -343,9 +343,9 @@ body.buero-rolle .admin-only{display:none !important;}
         <button class="btn btn-primary addvorlagebtn" id="faelleAddBtn">+ Neuen Abschnitt hinzufügen</button>
       </div>
 
-      <!-- FIRMENDATEN -->
+      <!-- FIRMENDATEN / NACHSCHLAGEWERK -->
       <div class="panel" id="tab-firmendaten">
-        <h1 class="page">Firmendaten</h1>
+        <h1 class="page">Nachschlagewerk</h1>
         <div class="card">
           <div class="cardlabel">Stammdaten</div>
           <div class="fldgrid">
@@ -373,7 +373,12 @@ body.buero-rolle .admin-only{display:none !important;}
         <h3 style="font-size:13.5px;font-weight:700;color:var(--primary);margin-bottom:2px;">Externe Kontakte &amp; Firmen</h3>
         <p style="font-size:11.5px;color:var(--muted);margin-bottom:12px;">Bekannte Lieferanten-/Architekten-/Partnerfirmen mit Domain(s) - damit die KI eine Mailadresse direkt einer Firma zuordnen kann, statt zu raten.</p>
         <div id="externeKontakteListe"></div>
-        <button class="btn btn-primary addvorlagebtn" id="externerKontaktAddBtn" style="margin-top:6px;">+ Firma hinzufügen</button>
+        <button class="btn btn-primary addvorlagebtn" id="externerKontaktAddBtn" style="margin-top:6px;margin-bottom:22px;">+ Firma hinzufügen</button>
+
+        <h3 style="font-size:13.5px;font-weight:700;color:var(--primary);margin-bottom:2px;">Weiteres Wissen</h3>
+        <p style="font-size:11.5px;color:var(--muted);margin-bottom:12px;">Frei benannte Blöcke für alles, was sonst nirgends reinpasst, aber für die KI gut zu wissen ist - wird bei Verfassen und Antworten immer mitgeschickt.</p>
+        <div id="wissenListe"></div>
+        <button class="btn btn-primary addvorlagebtn" id="wissenAddBtn" style="margin-top:6px;">+ Block hinzufügen</button>
       </div>
 
       <!-- MAIL-VORLAGEN VERFASSEN -->
@@ -677,7 +682,7 @@ async function pruefeAnmeldung(){
   // gleich beim ersten Aufbau mit, braucht partnerbetriebeCache also schon.
   await ladePartnerbetriebe();
   await Promise.all([
-    ladeGrundlogik(), ladeSchreibstilAbschnitte(), ladeFaelle(), ladeFirmendaten(), ladeMitarbeiter(), ladeExterneKontakte(), ladeZusatzfensterListe(), ladeErweiterung(),
+    ladeGrundlogik(), ladeSchreibstilAbschnitte(), ladeFaelle(), ladeFirmendaten(), ladeMitarbeiter(), ladeExterneKontakte(), ladeWissen(), ladeZusatzfensterListe(), ladeErweiterung(),
     ladeVorlagen('verfassen'), ladeVorlagen('antworten'),
     ladeNachbessernButtons(), ladeEinstellungen(), ladeNutzung()
   ]);
@@ -956,6 +961,41 @@ async function loescheExternerKontakt(id){
   showToast('Gelöscht.');
   await ladeExterneKontakte();
 }
+
+// Nachschlagewerk: frei benannte Wissens-Bloecke (Titel + Freitext), werden
+// bei Verfassen und Antworten immer mitgeschickt - gleiches Muster wie
+// Grundlogik/Faelle (renderAbschnitteListe), nur inhaltlich allgemeines
+// Wissen statt KI-Verhaltensregeln.
+let wissenListe = [];
+async function ladeWissen(){
+  const { data, error } = await sb.from('mailassistent_wissen_abschnitt').select('*').order('reihenfolge');
+  if(error){ console.error(error); return; }
+  wissenListe = data || [];
+  renderAbschnitteListe($('wissenListe'), wissenListe, {
+    onTitelChange: async (id, titel) => {
+      const { error } = await sb.from('mailassistent_wissen_abschnitt').update({ titel }).eq('id', id);
+      if(error){ showToast(friendlyError(error), true); return; }
+      showToast('Gespeichert.');
+    },
+    onInhaltChange: async (id, inhalt) => {
+      const { error } = await sb.from('mailassistent_wissen_abschnitt').update({ inhalt }).eq('id', id);
+      if(error){ showToast(friendlyError(error), true); return; }
+      showToast('Gespeichert.');
+    },
+    onDelete: async (id, titel) => {
+      if(!await kgBestaetigen(`"${titel || 'Diesen Block'}" wirklich löschen?`)) return;
+      const { error } = await sb.from('mailassistent_wissen_abschnitt').delete().eq('id', id);
+      if(error){ showToast(friendlyError(error), true); return; }
+      showToast('Gelöscht.');
+      await ladeWissen();
+    },
+  });
+}
+$('wissenAddBtn').addEventListener('click', async () => {
+  const { error } = await sb.from('mailassistent_wissen_abschnitt').insert({ titel: 'Neuer Block', inhalt: '', reihenfolge: wissenListe.length });
+  if(error){ showToast(friendlyError(error), true); return; }
+  await ladeWissen();
+});
 
 // ---------------------------------------------------------------------------
 // Mail-Vorlagen (Verfassen + Antworten, inkl. Rueckfrage-Typ)
