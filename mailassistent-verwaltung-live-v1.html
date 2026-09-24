@@ -143,7 +143,7 @@ textarea.abschnitt-text:focus{outline:none;border-color:var(--primary);}
 .vk-karte.offen .vk-body{display:block;padding-top:13px;}
 .vf{margin-bottom:12px;}
 .vf label{display:block;font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-bottom:5px;}
-.vf input,.vf textarea{width:100%;border:1px solid var(--line);border-radius:6px;padding:7px 9px;font:inherit;font-size:12.5px;color:var(--ink);}
+.vf input,.vf textarea,.vf select{width:100%;border:1px solid var(--line);border-radius:6px;padding:7px 9px;font:inherit;font-size:12.5px;color:var(--ink);background:#fff;}
 .vf textarea{resize:vertical;min-height:32px;}
 .vf textarea.vk-inhalt{min-height:150px;line-height:1.55;resize:vertical;}
 .funktionen-liste{display:flex;flex-wrap:wrap;gap:6px;}
@@ -1174,6 +1174,17 @@ function vorlageRowHtml(v, richtung, opts){
         ${richtung === 'verfassen' ? `<div class="vf"><label>Betreff</label><input class="vk-feld" data-feld="betreff" value="${esc(v.betreff || '')}"></div>` : ''}
         ${richtung === 'antworten' ? `
         <div class="vf">
+          <label>Zweig</label>
+          <select class="vk-zweig-verschieben">
+            <option value="">– Noch nicht zugeordnet –</option>
+            ${kategorienCache.map(k => `
+              <optgroup label="${esc(k.titel)}">
+                ${unterkategorienCache.filter(u => u.ast_id === k.id).map(u => `<option value="${u.id}" ${v.zweig_id === u.id ? 'selected' : ''}>${esc(u.titel)}</option>`).join('')}
+              </optgroup>`).join('')}
+          </select>
+        </div>` : ''}
+        ${richtung === 'antworten' ? `
+        <div class="vf">
           <label>Verbindlichkeit</label>
           <div class="mk-chips vk-verbindlichkeit-chips">
             <button type="button" class="mk-chip ${verbindlichkeit === 'haargenau' ? 'on' : ''}" data-wert="haargenau">Haargenau</button>
@@ -1215,6 +1226,18 @@ async function vkSpeichereFeld(id, richtung, feld, roherWert, karteEl){
       if(badge){ badge.className = 'mk-verbindlichkeit-badge ' + wert; badge.textContent = { haargenau: 'Haargenau', angepasst: 'Angepasst', hilfetext: 'Nur Hilfetext' }[wert]; }
     }
   }
+}
+// Vorlage in einen anderen Zweig verschieben (oder auf "noch nicht
+// zugeordnet" setzen) - da sich dadurch die Gruppierung aendert, ist ein
+// kompletter Neuaufbau der Liste noetig (gleiches Verhalten wie bei
+// Hinzufuegen/Loeschen einer Vorlage).
+async function vkVerschiebeZweig(id, richtung, neuerZweigId){
+  const { error } = await sb.from('mailassistent_vorlage').update({ zweig_id: neuerZweigId }).eq('id', id);
+  if(error){ showToast(friendlyError(error), true); return; }
+  const item = vorlagenCache[richtung].find(v => v.id === id);
+  if(item) item.zweig_id = neuerZweigId;
+  showToast('Verschoben.');
+  renderVorlagenListe(richtung);
 }
 // Funktionen (vormals Zusatzfenster) pro Karte: welche Funktion zugewiesen
 // ist, wird direkt aus dem Text abgeleitet (siehe voFunktionenPillen/
@@ -1296,6 +1319,11 @@ function voWireVorlagenKarten(containerEl, richtung){
         vkSpeichereFeld(id, richtung, 'verbindlichkeit', chip.dataset.wert, karte);
       });
     });
+    const zweigSelect = karte.querySelector('.vk-zweig-verschieben');
+    if(zweigSelect){
+      zweigSelect.addEventListener('click', e => e.stopPropagation());
+      zweigSelect.addEventListener('change', () => vkVerschiebeZweig(id, richtung, zweigSelect.value || null));
+    }
   });
   containerEl.querySelectorAll('.vo-dropdown-titel').forEach(inp => {
     inp.addEventListener('click', (e) => e.stopPropagation());
