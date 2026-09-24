@@ -2629,7 +2629,7 @@ async function ladeFormelDaten(otId){
         ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, artikel_id, ist_eigene_offertenposition, mengenoption_ausgenommen,
           zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4, mindestmenge, verschnitt_prozent, zuschlag_prozent,
           artikel ( bezeichnung, einheit, vp_knecht, zusatzwert, zusatzeinheit ),
-          staffelgruppe ( kategorie, name, titel, summen_zusatzeinheit, summen_scope, summen_reserve_prozent, staffelstufe ( menge_von, menge_bis, artikel_id, artikel ( vp_knecht, zusatzwert, zusatzeinheit ) ) ),
+          staffelgruppe ( kategorie, name, titel, summen_zusatzeinheit, summen_scope, summen_reserve_prozent, abrechnung_modus, staffelstufe ( menge_von, menge_bis, artikel_id, artikel ( vp_knecht, zusatzwert, zusatzeinheit, einheit ) ) ),
           zonengruppe ( kategorie, name, titel, zone ( artikel ( vp_knecht ), zone_plz ( plz ) ) ),
           sonderposition_typ ( kategorie, name, titel, einheit, mwst_satz_pct, lieferwagen_std_artikel_id, lieferwagen_km_artikel_id, lieferwagen_transport_ort, lieferwagen_std_artikel:artikel!lieferwagen_std_artikel_id ( vp_knecht, bezeichnung ), lieferwagen_km_artikel:artikel!lieferwagen_km_artikel_id ( vp_knecht, bezeichnung ) ) ),
         option_freitext_vorlage ( id, kategorie, bezeichnung, einheit, notiz, menge_vorschlag, preis_vorschlag, margen_vorschlag_prozent, ist_eigene_offertenposition ),
@@ -2638,7 +2638,7 @@ async function ladeFormelDaten(otId){
             ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, artikel_id, ist_eigene_offertenposition, mengenoption_ausgenommen,
               zugang_stufe1, zugang_stufe2, zugang_stufe3, zugang_stufe4, mindestmenge, verschnitt_prozent, zuschlag_prozent,
               artikel ( bezeichnung, einheit, vp_knecht, zusatzwert, zusatzeinheit ),
-              staffelgruppe ( kategorie, name, titel, summen_zusatzeinheit, summen_scope, summen_reserve_prozent, staffelstufe ( menge_von, menge_bis, artikel_id, artikel ( vp_knecht, zusatzwert, zusatzeinheit ) ) ),
+              staffelgruppe ( kategorie, name, titel, summen_zusatzeinheit, summen_scope, summen_reserve_prozent, abrechnung_modus, staffelstufe ( menge_von, menge_bis, artikel_id, artikel ( vp_knecht, zusatzwert, zusatzeinheit, einheit ) ) ),
               zonengruppe ( kategorie, name, titel, zone ( artikel ( vp_knecht ), zone_plz ( plz ) ) ),
               auswahlgruppe ( name, titel, auswahlgruppe_option ( id, label, artikel_id, artikel ( bezeichnung, einheit, vp_knecht, zusatzwert, zusatzeinheit ) ) ),
               sonderposition_typ ( kategorie, name, titel, einheit, mwst_satz_pct, lieferwagen_std_artikel_id, lieferwagen_km_artikel_id, lieferwagen_transport_ort, lieferwagen_std_artikel:artikel!lieferwagen_std_artikel_id ( vp_knecht, bezeichnung ), lieferwagen_km_artikel:artikel!lieferwagen_km_artikel_id ( vp_knecht, bezeichnung ) ) ),
@@ -5278,10 +5278,20 @@ async function recalc(){
             const stufe = (rz.staffelgruppe.staffelstufe || []).find(s => menge >= s.menge_von && (s.menge_bis == null || menge < s.menge_bis));
             const preis = stufe?.artikel?.vp_knecht ?? 0;
             const bezeichnung = stufe ? rz.bezeichnung : rz.bezeichnung + ' (keine Stufe gefunden)';
+            // Abrechnung (Einstellungen -> Sonderpositionen, pro Staffelgruppe):
+            // "pauschale" (Standard) = sobald die Menge in eine Stufe faellt,
+            // gilt der Stufenpreis als fixer Gesamtbetrag (z.B. Betonpumpe -
+            // du zahlst den Pauschalpreis der Stufe, nicht Menge x Preis).
+            // "pro_einheit" = die Stufe bestimmt nur den SATZ, verrechnet wird
+            // die echte Menge x Satz (z.B. Terrassenholz: CHF/m² sinkt mit der
+            // Flaeche, aber du zahlst Flaeche x Satz, nicht 1x Satz).
+            const proEinheit = rz.staffelgruppe.abrechnung_modus === 'pro_einheit';
             // artikelId/zusatzwert/zusatzeinheit der gewaehlten Stufe mitgeben -
             // Grundlage, falls diese Zeile selbst wieder in eine Summen-
             // Staffelgruppe (siehe unten) einfliessen soll.
-            return { ...rz, bezeichnung, einheit: 'Pauschale', menge: 1, preis, betrag: preis, artikelId: stufe?.artikel_id ?? null, zusatzwert: stufe?.artikel?.zusatzwert ?? null, zusatzeinheit: stufe?.artikel?.zusatzeinheit ?? null };
+            return proEinheit
+              ? { ...rz, bezeichnung, einheit: stufe?.artikel?.einheit || rz.einheit, menge, preis, betrag: menge * preis, artikelId: stufe?.artikel_id ?? null, zusatzwert: stufe?.artikel?.zusatzwert ?? null, zusatzeinheit: stufe?.artikel?.zusatzeinheit ?? null }
+              : { ...rz, bezeichnung, einheit: 'Pauschale', menge: 1, preis, betrag: preis, artikelId: stufe?.artikel_id ?? null, zusatzwert: stufe?.artikel?.zusatzwert ?? null, zusatzeinheit: stufe?.artikel?.zusatzeinheit ?? null };
           }
           if(rz.auswahlgruppe){
             // Anders als bei der Staffelgruppe ist "menge" hier bereits die
