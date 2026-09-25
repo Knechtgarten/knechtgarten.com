@@ -215,6 +215,11 @@ textarea.abschnitt-text:focus{outline:none;border-color:var(--primary);}
 .mk-funktion-partner-titel{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin:16px 0 6px;}
 .mk-funktion-leer{font-size:12px;color:var(--muted);}
 
+.ek-person-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--soft);}
+.ek-person-row:last-child{border-bottom:none;}
+.ek-person-name{flex:1;min-width:140px;border:1px solid var(--line);border-radius:6px;padding:6px 9px;font:inherit;font-size:12.5px;color:var(--ink);}
+.ek-person-anrede-chips{display:flex;gap:4px;flex-shrink:0;}
+
 .sonderrow{padding:13px 0;border-bottom:1px solid var(--soft);}
 .sonderrow:last-child{border-bottom:none;}
 .sonderrow-head{display:flex;align-items:center;justify-content:space-between;gap:12px;}
@@ -929,13 +934,57 @@ async function loescheMitarbeiter(id){
   await ladeMitarbeiter();
 }
 
+// Ansprechpartner-Zeile innerhalb einer Externe-Kontakte-Karte: eigener Name
+// + eigene Anrede (Du/Sie/Standard) - eine Firma kann mehrere Ansprechpartner
+// mit unterschiedlicher Anrede haben (z.B. mit dem einen per Du, mit der
+// anderen per Sie).
+function ekPersonRowHtml(p){
+  return `
+    <div class="ek-person-row" data-id="${p.id}">
+      <input class="ek-person-name" value="${esc(p.name || '')}" placeholder="Name (z.B. Silvio oder Herr Grütter)">
+      <div class="mk-chips ek-person-anrede-chips">
+        <button type="button" class="mk-chip ek-person-anrede-chip ${!p.anrede ? 'on' : ''}" data-wert="">Standard</button>
+        <button type="button" class="mk-chip ek-person-anrede-chip ${p.anrede === 'du' ? 'on' : ''}" data-wert="du">Du</button>
+        <button type="button" class="mk-chip ek-person-anrede-chip ${p.anrede === 'sie' ? 'on' : ''}" data-wert="sie">Sie</button>
+      </div>
+      <button type="button" class="icobtn danger ek-person-del" title="Löschen">${ICON.trash}</button>
+    </div>`;
+}
+function ekWirePersonenListe(container){
+  container.querySelectorAll('.ek-person-row').forEach(row => {
+    const id = row.dataset.id;
+    row.querySelector('.ek-person-name').addEventListener('change', async (e) => {
+      const wert = e.target.value.trim();
+      const { error } = await sb.from('mailassistent_externe_kontakt_person').update({ name: wert }).eq('id', id);
+      if(error){ showToast(friendlyError(error), true); return; }
+      showToast('Gespeichert.');
+    });
+    row.querySelectorAll('.ek-person-anrede-chip').forEach(chip => chip.addEventListener('click', async () => {
+      const wert = chip.dataset.wert || null;
+      const { error } = await sb.from('mailassistent_externe_kontakt_person').update({ anrede: wert }).eq('id', id);
+      if(error){ showToast(friendlyError(error), true); return; }
+      row.querySelectorAll('.ek-person-anrede-chip').forEach(c => c.classList.toggle('on', c === chip));
+      showToast('Gespeichert.');
+    }));
+    row.querySelector('.ek-person-del').addEventListener('click', async () => {
+      if(!await kgBestaetigen('Diesen Ansprechpartner wirklich löschen?')) return;
+      const { error } = await sb.from('mailassistent_externe_kontakt_person').delete().eq('id', id);
+      if(error){ showToast(friendlyError(error), true); return; }
+      showToast('Gelöscht.');
+      await ladeExterneKontakte();
+    });
+  });
+}
+
 let externeKontakteListe = [];
 async function ladeExterneKontakte(){
-  const { data, error } = await sb.from('mailassistent_externe_kontakte').select('*').order('reihenfolge');
+  const { data, error } = await sb.from('mailassistent_externe_kontakte').select('*, mailassistent_externe_kontakt_person(*)').order('reihenfolge');
   if(error){ console.error(error); return; }
   externeKontakteListe = data || [];
   const zielId = 'externeKontakteListe';
-  $(zielId).innerHTML = externeKontakteListe.map(k => `
+  $(zielId).innerHTML = externeKontakteListe.map(k => {
+    const personen = (k.mailassistent_externe_kontakt_person || []).slice().sort((a,b) => a.reihenfolge - b.reihenfolge);
+    return `
     <div class="vorlagerow vk-karte" data-id="${k.id}">
       <div class="vk-kopf">
         <span class="vk-titel-anzeige">${esc(k.firma)}</span>
@@ -949,29 +998,25 @@ async function ladeExterneKontakte(){
         <div class="vf"><label>Firma</label><input class="einfach-feld" data-feld="firma" value="${esc(k.firma)}"></div>
         <div class="vf"><label>Domain(s) - bei mehreren mit Komma trennen</label><input class="einfach-feld" data-feld="domains" value="${esc(k.domains)}" placeholder="z.B. drydenaqua.com, aquasolar.ch"></div>
         <div class="vf"><label>Rolle</label><input class="einfach-feld" data-feld="rolle" value="${esc(k.rolle || '')}" placeholder="z.B. Lieferant, Architekt, Partnerbetrieb"></div>
-        <div class="vf"><label>Anrede bei dieser Firma (überschreibt den Schreibstil-Standard)</label>
-          <div class="mk-chips ek-anrede-chips" data-id="${k.id}">
-            <button type="button" class="mk-chip ek-anrede-chip ${!k.anrede ? 'on' : ''}" data-wert="">Standard (Schreibstil)</button>
-            <button type="button" class="mk-chip ek-anrede-chip ${k.anrede === 'du' ? 'on' : ''}" data-wert="du">Per Du</button>
-            <button type="button" class="mk-chip ek-anrede-chip ${k.anrede === 'sie' ? 'on' : ''}" data-wert="sie">Per Sie</button>
-          </div>
+        <div class="vf">
+          <label>Ansprechpartner - Name + eigene Anrede (überschreibt den Schreibstil-Standard nur für diese Person), mehrere möglich</label>
+          <div class="ek-personen-liste" data-id="${k.id}">${personen.map(ekPersonRowHtml).join('') || '<p class="mk-funktion-leer">Noch keine Ansprechpartner erfasst.</p>'}</div>
+          <button type="button" class="btnlink ek-person-add" data-id="${k.id}" style="margin-top:6px;">+ Ansprechpartner hinzufügen</button>
         </div>
-        <div class="vf"><label>Name für Anrede (z.B. Vorname bei Du "Hallo Silvio", Nachname bei Sie "Guten Tag Herr Grütter") - falls in der Mail nicht eindeutig</label><input class="einfach-feld" data-feld="anrede_name" value="${esc(k.anrede_name || '')}" placeholder="z.B. Silvio oder Grütter"></div>
         <div class="vf"><label>Notiz (optional)</label><input class="einfach-feld" data-feld="notiz" value="${esc(k.notiz || '')}"></div>
       </div>
-    </div>`).join('') || '<p style="font-size:12px;color:var(--muted);">Noch keine externen Firmen erfasst.</p>';
+    </div>`;
+  }).join('') || '<p style="font-size:12px;color:var(--muted);">Noch keine externen Firmen erfasst.</p>';
   voWireEinfacheKarten($(zielId), 'mailassistent_externe_kontakte', externeKontakteListe, 'firma', 'domains');
   $(zielId).querySelectorAll('.ek-del').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); loescheExternerKontakt(b.dataset.id); }));
-  $(zielId).querySelectorAll('.ek-anrede-chip').forEach(btn => btn.addEventListener('click', async (e) => {
+  ekWirePersonenListe($(zielId));
+  $(zielId).querySelectorAll('.ek-person-add').forEach(btn => btn.addEventListener('click', async (e) => {
     e.stopPropagation();
-    const wrap = btn.closest('.ek-anrede-chips');
-    const id = wrap.dataset.id;
-    const wert = btn.dataset.wert || null;
-    const { error } = await sb.from('mailassistent_externe_kontakte').update({ anrede: wert }).eq('id', id);
+    const kontaktId = btn.dataset.id;
+    const anzahl = (externeKontakteListe.find(k => k.id === kontaktId)?.mailassistent_externe_kontakt_person || []).length;
+    const { error } = await sb.from('mailassistent_externe_kontakt_person').insert({ kontakt_id: kontaktId, name: '', anrede: null, reihenfolge: anzahl });
     if(error){ showToast(friendlyError(error), true); return; }
-    wrap.querySelectorAll('.ek-anrede-chip').forEach(b => b.classList.toggle('on', b === btn));
-    const item = externeKontakteListe.find(k => k.id === id); if(item) item.anrede = wert;
-    showToast('Gespeichert.');
+    await ladeExterneKontakte();
   }));
 }
 $('externerKontaktAddBtn').addEventListener('click', () => neueEinfacheKarte('mailassistent_externe_kontakte', ladeExterneKontakte, {
