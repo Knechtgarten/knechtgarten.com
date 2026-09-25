@@ -212,7 +212,7 @@ async function modusVerfassen(body: any, modell: string) {
 
   let vorlage = null;
   if (body.vorlageId) {
-    const { data } = await sb.from('mailassistent_vorlage').select('*').eq('id', body.vorlageId).maybeSingle();
+    const { data } = await sb.from('mailassistent_vorlage').select('*, mailassistent_vorlage_anhang(dateiname,url,immer_mitsenden)').eq('id', body.vorlageId).maybeSingle();
     vorlage = data;
   }
 
@@ -238,7 +238,12 @@ VORLAGE:\n${vorlage.inhalt}`);
 
   const { text, tokensInput, tokensOutput } = await rufeClaudeAuf(modell, 'Du hilfst einem Gartenbau-Unternehmen (Knechtgarten), professionelle Kunden-/Geschäftsmails zu verfassen.', teile.join('\n\n'), 2500);
   await protokolliereNutzung(body.mitarbeiterEmail, 'verfassen', vorlage?.id ?? null, tokensInput, tokensOutput);
-  return json({ aktion: 'entwurf', text: text.trim(), betreff: vorlage?.betreff || null, tokensInput, tokensOutput });
+  const anhaenge = (vorlage?.mailassistent_vorlage_anhang || []).filter((a: any) => a.immer_mitsenden).map((a: any) => ({ dateiname: a.dateiname, url: a.url }));
+  return json({
+    aktion: 'entwurf', text: text.trim(), betreff: vorlage?.betreff || null,
+    anhaenge: anhaenge.length ? anhaenge : undefined,
+    tokensInput, tokensOutput,
+  });
 }
 
 // ----------------------------------------------------------------------------
@@ -281,7 +286,8 @@ async function modusAntworten(body: any, modell: string) {
         mailassistent_zusatzfenster(id,typ,titel,platzhalter,erlaubt_eigene_eingabe,zeigt_anzahl,
           mailassistent_zusatzfenster_spalte(id,titel,typ,einheit,platzhalter,breite,reihenfolge,
             mailassistent_zusatzfenster_spalte_option(id,wert,reihenfolge)),
-          mailassistent_zusatzfenster_position(id,titel,reihenfolge)))`)
+          mailassistent_zusatzfenster_position(id,titel,reihenfolge))),
+      mailassistent_vorlage_anhang(dateiname,url,immer_mitsenden)`)
       .eq('richtung', 'antworten').eq('aktiv', true).order('reihenfolge'),
     sb.from('mailassistent_faelle_abschnitt').select('titel,inhalt').order('reihenfolge'),
     sb.from('mailassistent_wissen_abschnitt').select('titel,inhalt').order('reihenfolge'),
@@ -411,10 +417,12 @@ Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Obje
     }
     const zusatzfenster = (vorlage?.mailassistent_vorlage_zusatzfenster || [])
       .map((e: any) => e.mailassistent_zusatzfenster).filter(Boolean);
+    const anhaenge = (vorlage?.mailassistent_vorlage_anhang || []).filter((a: any) => a.immer_mitsenden).map((a: any) => ({ dateiname: a.dateiname, url: a.url }));
     await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', vorlage?.id ?? null, tokensInput, tokensOutput);
     return json({
       aktion: 'entwurf', vorlageId: vorlage?.id ?? null,
       zusatzfenster: zusatzfenster.length ? zusatzfenster : undefined,
+      anhaenge: anhaenge.length ? anhaenge : undefined,
       tokensInput, tokensOutput,
     });
   }
@@ -473,6 +481,7 @@ Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Obje
       antworten: kandidaten.map((v: any) => ({
         id: v.id, label: v.titel,
         zusatzfenster: (v.mailassistent_vorlage_zusatzfenster || []).map((e: any) => e.mailassistent_zusatzfenster).filter(Boolean),
+        anhaenge: (v.mailassistent_vorlage_anhang || []).filter((a: any) => a.immer_mitsenden).map((a: any) => ({ dateiname: a.dateiname, url: a.url })),
       })),
       ...distanzFelder,
       tokensInput, tokensOutput,
@@ -735,10 +744,15 @@ async function modusListeVerfassen() {
         mailassistent_zusatzfenster(id,typ,titel,platzhalter,erlaubt_eigene_eingabe,zeigt_anzahl,
           mailassistent_zusatzfenster_spalte(id,titel,typ,einheit,platzhalter,breite,reihenfolge,
             mailassistent_zusatzfenster_spalte_option(id,wert,reihenfolge)),
-          mailassistent_zusatzfenster_position(id,titel,reihenfolge)))`)
+          mailassistent_zusatzfenster_position(id,titel,reihenfolge))),
+      mailassistent_vorlage_anhang(dateiname,url,immer_mitsenden)`)
     .eq('richtung', 'verfassen').eq('aktiv', true).order('reihenfolge');
   if (error) return json({ error: 'Vorlagen konnten nicht geladen werden: ' + error.message }, 500);
-  return json({ vorlagen: data || [] });
+  const vorlagen = (data || []).map((v: any) => ({
+    ...v,
+    anhaenge: (v.mailassistent_vorlage_anhang || []).filter((a: any) => a.immer_mitsenden).map((a: any) => ({ dateiname: a.dateiname, url: a.url })),
+  }));
+  return json({ vorlagen });
 }
 async function modusListeNachbessern() {
   const { data } = await sb.from('mailassistent_nachbessern_button').select('id,titel,anweisung').order('reihenfolge');
