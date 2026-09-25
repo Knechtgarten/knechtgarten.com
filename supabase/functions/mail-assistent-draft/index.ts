@@ -283,7 +283,7 @@ async function modusAntworten(body: any, modell: string) {
     sb.from('mailassistent_firmendaten').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_vorlage').select(`*, mailassistent_vorlage_antwort(*),
       mailassistent_vorlage_zusatzfenster(
-        mailassistent_zusatzfenster(id,typ,titel,platzhalter,erlaubt_eigene_eingabe,zeigt_anzahl,
+        mailassistent_zusatzfenster(id,typ,titel,platzhalter,erlaubt_eigene_eingabe,zeigt_anzahl,mit_uhrzeit,
           mailassistent_zusatzfenster_spalte(id,titel,typ,einheit,platzhalter,breite,reihenfolge,
             mailassistent_zusatzfenster_spalte_option(id,wert,reihenfolge)),
           mailassistent_zusatzfenster_position(id,titel,reihenfolge))),
@@ -741,7 +741,7 @@ async function modusListeVerfassen() {
   const { data, error } = await sb.from('mailassistent_vorlage')
     .select(`id,titel,typ,inhalt,betreff,parent_id,
       mailassistent_vorlage_zusatzfenster(
-        mailassistent_zusatzfenster(id,typ,titel,platzhalter,erlaubt_eigene_eingabe,zeigt_anzahl,
+        mailassistent_zusatzfenster(id,typ,titel,platzhalter,erlaubt_eigene_eingabe,zeigt_anzahl,mit_uhrzeit,
           mailassistent_zusatzfenster_spalte(id,titel,typ,einheit,platzhalter,breite,reihenfolge,
             mailassistent_zusatzfenster_spalte_option(id,wert,reihenfolge)),
           mailassistent_zusatzfenster_position(id,titel,reihenfolge))),
