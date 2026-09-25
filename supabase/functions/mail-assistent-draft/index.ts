@@ -286,7 +286,7 @@ async function modusAntworten(body: any, modell: string) {
     sb.from('mailassistent_faelle_abschnitt').select('titel,inhalt').order('reihenfolge'),
     sb.from('mailassistent_wissen_abschnitt').select('titel,inhalt').order('reihenfolge'),
     sb.from('mailassistent_mitarbeiter').select('name,email,funktion').order('reihenfolge'),
-    sb.from('mailassistent_externe_kontakte').select('firma,domains,rolle,notiz,anrede').order('reihenfolge'),
+    sb.from('mailassistent_externe_kontakte').select('firma,domains,rolle,notiz,anrede,anrede_name').order('reihenfolge'),
     sb.from('mailassistent_zweig').select('*, mailassistent_ast(titel,anwenden_bei,nicht_anwenden_bei,ast_funktion)'),
   ]);
 
@@ -296,7 +296,7 @@ async function modusAntworten(body: any, modell: string) {
     .map((m: any) => `${m.name}${m.email ? ' <' + m.email + '>' : ''}${m.funktion ? ' - ' + m.funktion : ''}`)
     .join('\n');
   const externeKontakteListe = (externeKontakte || [])
-    .map((k: any) => `${k.firma} (${k.domains})${k.rolle ? ' - ' + k.rolle : ''}${k.anrede ? ' - IMMER PER ' + k.anrede.toUpperCase() + ' (unabhaengig vom generellen Schreibstil-Standard)' : ''}${k.notiz ? ' - ' + k.notiz : ''}`)
+    .map((k: any) => `${k.firma} (${k.domains})${k.rolle ? ' - ' + k.rolle : ''}${k.anrede ? ' - IMMER PER ' + k.anrede.toUpperCase() + ' (unabhaengig vom generellen Schreibstil-Standard)' : ''}${k.anrede_name ? ' - Name fuer die Anrede: "' + k.anrede_name + '" (nutzen, falls der Name aus der Mail selbst nicht eindeutig hervorgeht)' : ''}${k.notiz ? ' - ' + k.notiz : ''}`)
     .join('\n');
   const faelleText = formatiereAbschnitte(faelle);
   const wissenText = formatiereAbschnitte(wissen);
