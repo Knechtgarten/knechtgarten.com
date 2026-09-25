@@ -220,6 +220,13 @@ textarea.abschnitt-text:focus{outline:none;border-color:var(--primary);}
 .ek-person-name{flex:1;min-width:140px;border:1px solid var(--line);border-radius:6px;padding:6px 9px;font:inherit;font-size:12.5px;color:var(--ink);}
 .ek-person-anrede-chips{display:flex;gap:4px;flex-shrink:0;}
 
+.vk-anhang-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0;border-bottom:1px solid var(--soft);font-size:12px;}
+.vk-anhang-row:last-child{border-bottom:none;}
+.vk-anhang-name{flex:1;min-width:100px;color:var(--primary);font-weight:600;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.vk-anhang-name:hover{text-decoration:underline;}
+.vk-anhang-groesse{color:var(--muted);flex-shrink:0;}
+.vk-anhang-immer{display:flex;align-items:center;gap:5px;color:var(--muted);white-space:nowrap;flex-shrink:0;cursor:pointer;}
+
 .sonderrow{padding:13px 0;border-bottom:1px solid var(--soft);}
 .sonderrow:last-child{border-bottom:none;}
 .sonderrow-head{display:flex;align-items:center;justify-content:space-between;gap:12px;}
@@ -474,6 +481,7 @@ body.buero-rolle .admin-only{display:none !important;}
             <a class="btn btn-ghost hidden" id="erwDownloadBtn" target="_blank">Herunterladen</a>
           </div>
         </div>
+        <input type="file" id="vkAnhangUploadInput" class="hidden">
       </div>
 
     </div>
@@ -1142,7 +1150,8 @@ let voVerfassenElternId = null;
 async function ladeVorlagen(richtung){
   const { data, error } = await sb.from('mailassistent_vorlage')
     .select(`*, mailassistent_vorlage_antwort(*),
-      mailassistent_vorlage_zusatzfenster(zusatzfenster_id)`)
+      mailassistent_vorlage_zusatzfenster(zusatzfenster_id),
+      mailassistent_vorlage_anhang(*)`)
     .eq('richtung', richtung).order('reihenfolge');
   if(error){ console.error(error); return; }
   vorlagenCache[richtung] = data || [];
@@ -1199,6 +1208,7 @@ function vorlageRowHtml(v, richtung, opts){
   }
   // "einfach" - die eigentliche, aufklappbare Vorlagen-Karte.
   const zfAnzahl = zfIdsVon(v).length;
+  const anhangAnzahl = (v.mailassistent_vorlage_anhang || []).length;
   const verbindlichkeit = v.verbindlichkeit || 'angepasst';
   const verbindlichkeitLabel = { haargenau: 'Haargenau', angepasst: 'Angepasst', hilfetext: 'Nur Hilfetext' }[verbindlichkeit];
   return `
@@ -1208,6 +1218,7 @@ function vorlageRowHtml(v, richtung, opts){
         <span class="vk-titel-anzeige">${esc(v.titel)}</span>
         ${richtung === 'antworten' ? `<span class="mk-verbindlichkeit-badge ${verbindlichkeit}">${verbindlichkeitLabel}</span>` : ''}
         ${zfAnzahl ? `<span class="badge-zf">${zfAnzahl} Funktion${zfAnzahl === 1 ? '' : 'en'}</span>` : ''}
+        ${anhangAnzahl ? `<span class="badge-zf">${anhangAnzahl} Anhang${anhangAnzahl === 1 ? '' : 'e'}</span>` : ''}
         ${istAktiv ? '' : '<span class="badge-inaktiv">Ausgeblendet</span>'}
         <span class="rowactions">
           <button class="icobtn vo-toggle-aktiv" data-id="${v.id}" data-richtung="${richtung}" title="${istAktiv ? 'Ausblenden' : 'Wieder einblenden'}">${istAktiv ? ICON.eye : ICON.eyeOff}</button>
@@ -1252,7 +1263,26 @@ function vorlageRowHtml(v, richtung, opts){
           <label>Funktionen (anklicken fügt den Platzhalter an der Cursor-Position ein)</label>
           <div class="funktionen-liste vk-funktionen"></div>
         </div>
+        <div class="vf">
+          <label>Anhänge (werden beim Verwenden dieser Vorlage automatisch mitgesendet, wenn "immer mitsenden" aktiv ist)</label>
+          <div class="vk-anhaenge-liste" data-id="${v.id}">${(v.mailassistent_vorlage_anhang || []).slice().sort((a,b) => a.reihenfolge - b.reihenfolge).map(vkAnhangRowHtml).join('') || '<p class="mk-funktion-leer">Noch keine Anhänge.</p>'}</div>
+          <button type="button" class="btnlink vk-anhang-add" data-id="${v.id}" style="margin-top:6px;">+ Anhang hochladen</button>
+        </div>
       </div>
+    </div>`;
+}
+function vkFormatiereGroesse(bytes){
+  if(!bytes) return '';
+  if(bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+function vkAnhangRowHtml(a){
+  return `
+    <div class="vk-anhang-row" data-id="${a.id}" data-storage-pfad="${esc(a.storage_pfad)}">
+      <a href="${esc(a.url)}" target="_blank" rel="noopener" class="vk-anhang-name" title="${esc(a.dateiname)}">${esc(a.dateiname)}</a>
+      <span class="vk-anhang-groesse">${vkFormatiereGroesse(a.groesse_bytes)}</span>
+      <label class="vk-anhang-immer"><input type="checkbox" class="vk-anhang-immer-check" ${a.immer_mitsenden ? 'checked' : ''}> immer mitsenden</label>
+      <button type="button" class="icobtn danger vk-anhang-del" title="Löschen">${ICON.trash}</button>
     </div>`;
 }
 // Speichert ein einzelnes Feld sofort (kein Speichern-Knopf) und passt die
@@ -1370,11 +1400,65 @@ function voWireVorlagenKarten(containerEl, richtung){
       zweigSelect.addEventListener('click', e => e.stopPropagation());
       zweigSelect.addEventListener('change', () => vkVerschiebeZweig(id, richtung, zweigSelect.value || null));
     }
+    karte.querySelector('.vk-anhang-add')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      vkAnhangZielVorlageId = id;
+      vkAnhangZielRichtung = richtung;
+      $('vkAnhangUploadInput').value = '';
+      $('vkAnhangUploadInput').click();
+    });
+    karte.querySelectorAll('.vk-anhang-row').forEach(row => {
+      const anhangId = row.dataset.id;
+      row.querySelector('.vk-anhang-immer-check').addEventListener('click', (e) => e.stopPropagation());
+      row.querySelector('.vk-anhang-immer-check').addEventListener('change', (e) => vkAnhangImmerAendern(anhangId, e.target.checked));
+      row.querySelector('.vk-anhang-name').addEventListener('click', (e) => e.stopPropagation());
+      row.querySelector('.vk-anhang-del').addEventListener('click', (e) => {
+        e.stopPropagation();
+        vkAnhangLoeschen(anhangId, row.dataset.storagePfad, id, richtung);
+      });
+    });
   });
   containerEl.querySelectorAll('.vo-dropdown-titel').forEach(inp => {
     inp.addEventListener('click', (e) => e.stopPropagation());
     inp.addEventListener('change', () => vkSpeichereFeld(inp.dataset.id, richtung, 'titel', inp.value, null));
   });
+}
+// Anhaenge pro Vorlage: Datei landet im oeffentlichen Storage-Bucket
+// "mailassistent-vorlage-anhaenge", der Datensatz (Dateiname/URL/Groesse)
+// in mailassistent_vorlage_anhang. Ein einziges verstecktes Datei-Feld wird
+// von allen Karten gemeinsam genutzt - welche Vorlage gerade Ziel ist, steht
+// in vkAnhangZielVorlageId/vkAnhangZielRichtung.
+let vkAnhangZielVorlageId = null;
+let vkAnhangZielRichtung = null;
+$('vkAnhangUploadInput').addEventListener('change', async () => {
+  const file = $('vkAnhangUploadInput').files[0];
+  const vorlageId = vkAnhangZielVorlageId, richtung = vkAnhangZielRichtung;
+  if(!file || !vorlageId) return;
+  const storagePfad = `${vorlageId}/${Date.now()}-${file.name}`;
+  const { error: upErr } = await sb.storage.from('mailassistent-vorlage-anhaenge').upload(storagePfad, file);
+  if(upErr){ showToast(friendlyError(upErr), true); return; }
+  const url = sb.storage.from('mailassistent-vorlage-anhaenge').getPublicUrl(storagePfad).data.publicUrl;
+  const anzahl = (vorlagenCache[richtung].find(v => v.id === vorlageId)?.mailassistent_vorlage_anhang || []).length;
+  const { error } = await sb.from('mailassistent_vorlage_anhang').insert({
+    vorlage_id: vorlageId, dateiname: file.name, storage_pfad: storagePfad, url,
+    groesse_bytes: file.size, reihenfolge: anzahl,
+  });
+  if(error){ showToast(friendlyError(error), true); return; }
+  showToast('Hochgeladen.');
+  await ladeVorlagen(richtung);
+});
+async function vkAnhangImmerAendern(anhangId, checked){
+  const { error } = await sb.from('mailassistent_vorlage_anhang').update({ immer_mitsenden: checked }).eq('id', anhangId);
+  if(error){ showToast(friendlyError(error), true); return; }
+  showToast('Gespeichert.');
+}
+async function vkAnhangLoeschen(anhangId, storagePfad, vorlageId, richtung){
+  if(!await kgBestaetigen('Diesen Anhang wirklich löschen?')) return;
+  await sb.storage.from('mailassistent-vorlage-anhaenge').remove([storagePfad]);
+  const { error } = await sb.from('mailassistent_vorlage_anhang').delete().eq('id', anhangId);
+  if(error){ showToast(friendlyError(error), true); return; }
+  showToast('Gelöscht.');
+  await ladeVorlagen(richtung);
 }
 // Neue Vorlage direkt anlegen statt ueber ein Fenster - Karte erscheint gleich
 // aufgeklappt zum Ausfuellen.
