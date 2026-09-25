@@ -1218,7 +1218,7 @@ function vorlageRowHtml(v, richtung, opts){
         <span class="vk-titel-anzeige">${esc(v.titel)}</span>
         ${richtung === 'antworten' ? `<span class="mk-verbindlichkeit-badge ${verbindlichkeit}">${verbindlichkeitLabel}</span>` : ''}
         ${zfAnzahl ? `<span class="badge-zf">${zfAnzahl} Funktion${zfAnzahl === 1 ? '' : 'en'}</span>` : ''}
-        ${anhangAnzahl ? `<span class="badge-zf">${anhangAnzahl} Anhang${anhangAnzahl === 1 ? '' : 'e'}</span>` : ''}
+        ${anhangAnzahl ? `<span class="badge-zf badge-anhang">${anhangAnzahl} Anhang${anhangAnzahl === 1 ? '' : 'e'}</span>` : ''}
         ${istAktiv ? '' : '<span class="badge-inaktiv">Ausgeblendet</span>'}
         <span class="rowactions">
           <button class="icobtn vo-toggle-aktiv" data-id="${v.id}" data-richtung="${richtung}" title="${istAktiv ? 'Ausblenden' : 'Wieder einblenden'}">${istAktiv ? ICON.eye : ICON.eyeOff}</button>
@@ -1407,16 +1407,7 @@ function voWireVorlagenKarten(containerEl, richtung){
       $('vkAnhangUploadInput').value = '';
       $('vkAnhangUploadInput').click();
     });
-    karte.querySelectorAll('.vk-anhang-row').forEach(row => {
-      const anhangId = row.dataset.id;
-      row.querySelector('.vk-anhang-immer-check').addEventListener('click', (e) => e.stopPropagation());
-      row.querySelector('.vk-anhang-immer-check').addEventListener('change', (e) => vkAnhangImmerAendern(anhangId, e.target.checked));
-      row.querySelector('.vk-anhang-name').addEventListener('click', (e) => e.stopPropagation());
-      row.querySelector('.vk-anhang-del').addEventListener('click', (e) => {
-        e.stopPropagation();
-        vkAnhangLoeschen(anhangId, row.dataset.storagePfad, id, richtung);
-      });
-    });
+    karte.querySelectorAll('.vk-anhang-row').forEach(row => vkWireAnhangRow(row, id, richtung));
   });
   containerEl.querySelectorAll('.vo-dropdown-titel').forEach(inp => {
     inp.addEventListener('click', (e) => e.stopPropagation());
@@ -1445,7 +1436,7 @@ $('vkAnhangUploadInput').addEventListener('change', async () => {
   });
   if(error){ showToast(friendlyError(error), true); return; }
   showToast('Hochgeladen.');
-  await ladeVorlagen(richtung);
+  await vkAnhaengeNeuLaden(vorlageId, richtung);
 });
 async function vkAnhangImmerAendern(anhangId, checked){
   const { error } = await sb.from('mailassistent_vorlage_anhang').update({ immer_mitsenden: checked }).eq('id', anhangId);
@@ -1458,7 +1449,48 @@ async function vkAnhangLoeschen(anhangId, storagePfad, vorlageId, richtung){
   const { error } = await sb.from('mailassistent_vorlage_anhang').delete().eq('id', anhangId);
   if(error){ showToast(friendlyError(error), true); return; }
   showToast('Gelöscht.');
-  await ladeVorlagen(richtung);
+  await vkAnhaengeNeuLaden(vorlageId, richtung);
+}
+function vkWireAnhangRow(row, vorlageId, richtung){
+  const anhangId = row.dataset.id;
+  row.querySelector('.vk-anhang-immer-check').addEventListener('click', (e) => e.stopPropagation());
+  row.querySelector('.vk-anhang-immer-check').addEventListener('change', (e) => vkAnhangImmerAendern(anhangId, e.target.checked));
+  row.querySelector('.vk-anhang-name').addEventListener('click', (e) => e.stopPropagation());
+  row.querySelector('.vk-anhang-del').addEventListener('click', (e) => {
+    e.stopPropagation();
+    vkAnhangLoeschen(anhangId, row.dataset.storagePfad, vorlageId, richtung);
+  });
+}
+// Nach Hochladen/Loeschen NUR die betroffene Anhaenge-Liste + Badge
+// aktualisieren statt die ganze Vorlagen-Liste neu zu laden - sonst wuerden
+// (wie bei vkSpeichereFeld) alle gerade aufgeklappten Karten wieder zuklappen.
+async function vkAnhaengeNeuLaden(vorlageId, richtung){
+  const { data, error } = await sb.from('mailassistent_vorlage_anhang').select('*').eq('vorlage_id', vorlageId).order('reihenfolge');
+  if(error){ showToast(friendlyError(error), true); return; }
+  const anhaenge = data || [];
+  const vorlage = (vorlagenCache[richtung] || []).find(v => v.id === vorlageId);
+  if(vorlage) vorlage.mailassistent_vorlage_anhang = anhaenge;
+  const liste = document.querySelector(`.vk-anhaenge-liste[data-id="${vorlageId}"]`);
+  if(liste){
+    liste.innerHTML = anhaenge.slice().sort((a,b) => a.reihenfolge - b.reihenfolge).map(vkAnhangRowHtml).join('') || '<p class="mk-funktion-leer">Noch keine Anhänge.</p>';
+    liste.querySelectorAll('.vk-anhang-row').forEach(row => vkWireAnhangRow(row, vorlageId, richtung));
+  }
+  const kopf = document.querySelector(`.vorlagerow[data-id="${vorlageId}"] > .vk-kopf`);
+  if(kopf){
+    let badge = kopf.querySelector('.badge-anhang');
+    if(anhaenge.length){
+      const text = `${anhaenge.length} Anhang${anhaenge.length === 1 ? '' : 'e'}`;
+      if(badge){ badge.textContent = text; }
+      else {
+        badge = document.createElement('span');
+        badge.className = 'badge-zf badge-anhang';
+        badge.textContent = text;
+        kopf.querySelector('.rowactions')?.insertAdjacentElement('beforebegin', badge);
+      }
+    } else if(badge){
+      badge.remove();
+    }
+  }
 }
 // Neue Vorlage direkt anlegen statt ueber ein Fenster - Karte erscheint gleich
 // aufgeklappt zum Ausfuellen.
