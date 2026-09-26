@@ -235,7 +235,10 @@ function zeichneErgebnisse(ergebnisse) {
         </div>
         <div class="doc-meta"></div>
         <div class="doc-begruendung"></div>
-      </span>`;
+      </span>
+      ${e.vorschauBild ? `<img class="hover-vorschau" src="${e.vorschauBild}" loading="lazy">` : ''}`;
+    const hoverBild = row.querySelector('.hover-vorschau');
+    if (hoverBild) hoverBild.onerror = () => hoverBild.remove();
     row.querySelector('.doc-title').textContent = e.titel;
     const badge = row.querySelector('.match-badge');
     badge.textContent = e.uebereinstimmung === 'hoch' ? 'Hoch' : 'Möglich';
@@ -246,6 +249,20 @@ function zeichneErgebnisse(ergebnisse) {
     $('docList').appendChild(row);
   });
 }
+
+// ---------------------------------------------------------------------------
+// Sortierung (Relevanz = Original-Reihenfolge der KI, sonst Datum/Dateityp).
+// ---------------------------------------------------------------------------
+let letzteErgebnisRohliste = [];
+function sortiereUndZeichne() {
+  const modus = $('sortSelect').value;
+  let liste = [...letzteErgebnisRohliste];
+  if (modus === 'datum-neu') liste.sort((a, b) => new Date(b.datum || 0) - new Date(a.datum || 0));
+  else if (modus === 'datum-alt') liste.sort((a, b) => new Date(a.datum || 0) - new Date(b.datum || 0));
+  else if (modus === 'dateityp') liste.sort((a, b) => (a.dateityp || a.quelle).localeCompare(b.dateityp || b.quelle));
+  zeichneErgebnisse(liste);
+}
+$('sortSelect').addEventListener('change', sortiereUndZeichne);
 
 // ---------------------------------------------------------------------------
 // Vorschau-Lightbox: klicken zeigt Details + Vor/Zurueck statt sofort einen
@@ -337,7 +354,9 @@ async function suchen() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `Fehler ${res.status}`);
 
-    zeichneErgebnisse(data.ergebnisse || []);
+    letzteErgebnisRohliste = data.ergebnisse || [];
+    $('sortSelect').value = 'relevanz';
+    zeichneErgebnisse(letzteErgebnisRohliste);
 
     const schritte = data.suchschritte || [];
     if (schritte.length) {
