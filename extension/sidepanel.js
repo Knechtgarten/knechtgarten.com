@@ -117,17 +117,31 @@ document.querySelectorAll('.seg button[data-runden]').forEach((btn) => {
 // ---------------------------------------------------------------------------
 function alsDatumInput(d) { return d.toISOString().slice(0, 10); }
 
+function setzeZeitraumSchnellauswahl(aktivesBtn) {
+  $('btnZeitraum6Wochen').classList.toggle('active', aktivesBtn === 'sechsWochen');
+  $('btnZeitraumJahr').classList.toggle('active', aktivesBtn === 'jahr');
+}
+
 $('btnZeitraum6Wochen').addEventListener('click', () => {
   const von = new Date();
   von.setDate(von.getDate() - 42);
   $('zeitraumVon').value = alsDatumInput(von);
   $('zeitraumBis').value = '';
+  setzeZeitraumSchnellauswahl('sechsWochen');
 });
 $('btnZeitraumJahr').addEventListener('click', () => {
   const jahresanfang = new Date(new Date().getFullYear(), 0, 1);
   $('zeitraumVon').value = alsDatumInput(jahresanfang);
   $('zeitraumBis').value = '';
+  setzeZeitraumSchnellauswahl('jahr');
 });
+// Manuelle Datumsaenderung: Schnellauswahl-Buttons zeigen dann keinen
+// (falschen) aktiven Zustand mehr an.
+$('zeitraumVon').addEventListener('input', () => setzeZeitraumSchnellauswahl(null));
+$('zeitraumBis').addEventListener('input', () => setzeZeitraumSchnellauswahl(null));
+
+// Standardmaessig "Letzte 6 Wochen" vorausgewaehlt.
+$('btnZeitraum6Wochen').click();
 
 $('peaxBtn').addEventListener('click', () => {
   // TODO: Sobald bestaetigt ist, welcher URL-Parameter PEAX' Suchseite fuer
