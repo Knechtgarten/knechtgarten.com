@@ -215,7 +215,16 @@ ${dokumentartenFilter?.length ? `5. WICHTIG: Der Nutzer hat den Vorab-Filter "Do
 Antworte ausschliesslich durch Werkzeug-Aufrufe, keinen Fliesstext.`;
 }
 
-async function rufeClaudeMitTools(system: string, messages: any[]) {
+// "Schnell" (Haiku) / "Ausfuehrlich" (Sonnet) - Umschalter in der Erweiterung.
+// Haiku ist spuerbar schneller, aber etwas weniger differenziert bei
+// kniffligen Bewertungen - bewusster Geschwindigkeit/Guete-Kompromiss, den
+// die Mitarbeiterin/der Mitarbeiter selbst waehlt, nicht wir festlegen.
+const MODELL_MAP: Record<string, string> = {
+  haiku: 'claude-haiku-4-5-20251001',
+  sonnet: 'claude-sonnet-5',
+};
+
+async function rufeClaudeMitTools(system: string, messages: any[], modell: string) {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -224,7 +233,7 @@ async function rufeClaudeMitTools(system: string, messages: any[]) {
       'content-type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-5',
+      model: modell,
       max_tokens: 2000,
       system,
       tools: TOOLS,
@@ -259,7 +268,7 @@ Deno.serve(async (req) => {
 
   const {
     query, mitarbeiterEmail, googleAccessToken, quellen, zeitraumVon, zeitraumBis, papierkorbSpam,
-    suchgenauigkeit, maxRunden, kundeFirma, dokumentarten: dokumentartenFilter, dateiformate,
+    suchgenauigkeit, maxRunden, kundeFirma, dokumentarten: dokumentartenFilter, dateiformate, modell,
   } = body ?? {};
   if (!query || typeof query !== 'string') return json({ error: 'query fehlt.' }, 400);
   if (!mitarbeiterEmail || typeof mitarbeiterEmail !== 'string') return json({ error: 'mitarbeiterEmail fehlt.' }, 400);
@@ -268,6 +277,7 @@ Deno.serve(async (req) => {
 
   const gewuenschteQuellen: string[] = Array.isArray(quellen) && quellen.length ? quellen : ['drive', 'gmail'];
   const genauigkeit = ['genau', 'teilwort', 'sinngemaess'].includes(suchgenauigkeit) ? suchgenauigkeit : 'sinngemaess';
+  const modellName = MODELL_MAP[modell as string] || MODELL_MAP.sonnet;
 
   const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
@@ -318,7 +328,7 @@ Deno.serve(async (req) => {
   // keine beliebig teure Endlosschleife an Claude-Aufrufen ausloesen kann.
   const MAX_RUNDEN = Math.min(10, Math.max(1, Number(maxRunden) || 4));
   for (let runde = 0; runde < MAX_RUNDEN; runde++) {
-    const antwort = await rufeClaudeMitTools(system, messages);
+    const antwort = await rufeClaudeMitTools(system, messages, modellName);
     const toolUseBloecke = (antwort.content || []).filter((c: any) => c.type === 'tool_use');
     const abschluss = toolUseBloecke.find((c: any) => c.name === 'ergebnisse_liefern');
 

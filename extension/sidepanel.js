@@ -348,7 +348,8 @@ async function suchen() {
         dateiformate: dateiformatAuswahl.getSelected(),
         papierkorbSpam: $('papierkorbSpam').checked,
         suchgenauigkeit: document.querySelector('.seg button[data-genauigkeit].active')?.dataset.genauigkeit || 'sinngemaess',
-        maxRunden: Number(document.querySelector('.seg button[data-runden].active')?.dataset.runden || '4'),
+        maxRunden: Number(document.querySelector('.seg button[data-runden].active')?.dataset.runden || '7'),
+        modell: document.querySelector('.seg button[data-modell].active')?.dataset.modell || 'sonnet',
       }),
     });
     const data = await res.json();
