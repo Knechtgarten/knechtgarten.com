@@ -168,17 +168,18 @@ function zeichneGefilterteErgebnisse() {
   zeichneErgebnisse(gefiltert);
 }
 
+let lightboxListe = [];
+let lightboxIndex = 0;
+
 function zeichneErgebnisse(ergebnisse) {
+  lightboxListe = ergebnisse;
   $('resultsHeader').hidden = false;
   $('resultsCount').textContent = `${ergebnisse.length} Dokument${ergebnisse.length === 1 ? '' : 'e'}`;
   $('docList').innerHTML = '';
-  for (const e of ergebnisse) {
-    const a = document.createElement('a');
-    a.className = 'doc-row';
-    a.href = e.link;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-    a.innerHTML = `
+  ergebnisse.forEach((e, i) => {
+    const row = document.createElement('div');
+    row.className = 'doc-row';
+    row.innerHTML = `
       <span class="doc-icon">${ftypeIcon(e.dateityp, e.quelle)}</span>
       <span class="doc-main">
         <div class="doc-top-line">
@@ -188,15 +189,48 @@ function zeichneErgebnisse(ergebnisse) {
         <div class="doc-meta"></div>
         <div class="doc-begruendung"></div>
       </span>`;
-    a.querySelector('.doc-title').textContent = e.titel;
-    const badge = a.querySelector('.match-badge');
+    row.querySelector('.doc-title').textContent = e.titel;
+    const badge = row.querySelector('.match-badge');
     badge.textContent = e.uebereinstimmung === 'hoch' ? 'Hoch' : 'Möglich';
     badge.classList.add(e.uebereinstimmung === 'hoch' ? 'hoch' : 'moeglich');
-    a.querySelector('.doc-meta').textContent = `${e.quelle === 'drive' ? 'Drive' : 'Gmail'} · ${fmtDatum(e.datum)}${e.dokumentart ? ' · ' + e.dokumentart : ''}`;
-    a.querySelector('.doc-begruendung').textContent = e.begruendung || '';
-    $('docList').appendChild(a);
-  }
+    row.querySelector('.doc-meta').textContent = `${e.quelle === 'drive' ? 'Drive' : 'Gmail'} · ${fmtDatum(e.datum)}${e.dokumentart ? ' · ' + e.dokumentart : ''}`;
+    row.querySelector('.doc-begruendung').textContent = e.begruendung || '';
+    row.addEventListener('click', () => openLightbox(i));
+    $('docList').appendChild(row);
+  });
 }
+
+// ---------------------------------------------------------------------------
+// Vorschau-Lightbox: klicken zeigt Details + Vor/Zurueck statt sofort einen
+// neuen Tab zu oeffnen (Muster aus dem Mockup "Suchpanel").
+// ---------------------------------------------------------------------------
+function openLightbox(i) {
+  lightboxIndex = i;
+  renderLightbox();
+  $('lightbox').classList.add('open');
+}
+function closeLightbox() { $('lightbox').classList.remove('open'); }
+function navLightbox(delta) {
+  lightboxIndex = (lightboxIndex + delta + lightboxListe.length) % lightboxListe.length;
+  renderLightbox();
+}
+function renderLightbox() {
+  const e = lightboxListe[lightboxIndex];
+  if (!e) return;
+  $('lbIcon').innerHTML = ftypeIcon(e.dateityp, e.quelle);
+  $('lbTitle').textContent = e.titel;
+  $('lbMeta').textContent = `${e.quelle === 'drive' ? 'Drive' : 'Gmail'} · ${fmtDatum(e.datum)}${e.dokumentart ? ' · ' + e.dokumentart : ''}`;
+  const badge = $('lbMatch');
+  badge.textContent = e.uebereinstimmung === 'hoch' ? 'Hohe Übereinstimmung' : 'Mögliche Übereinstimmung';
+  badge.className = 'match-badge ' + (e.uebereinstimmung === 'hoch' ? 'hoch' : 'moeglich');
+  $('lbBody').textContent = e.begruendung || '';
+  $('lbPosition').textContent = `${lightboxIndex + 1} von ${lightboxListe.length}`;
+  $('lbOpen').onclick = () => chrome.tabs.create({ url: e.link });
+}
+$('lbClose').addEventListener('click', closeLightbox);
+$('lbPrev').addEventListener('click', () => navLightbox(-1));
+$('lbNext').addEventListener('click', () => navLightbox(1));
+$('lightbox').addEventListener('click', (ev) => { if (ev.target === $('lightbox')) closeLightbox(); });
 
 async function suchen() {
   const query = $('queryInput').value.trim();
