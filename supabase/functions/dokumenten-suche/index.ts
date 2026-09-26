@@ -250,13 +250,21 @@ Deno.serve(async (req) => {
     return new Response('ok', { headers: corsHeaders });
   }
 
-  // GET: liefert nur die admin-gepflegte Dokumentarten-Liste fuer den
-  // Vorab-Filter in der Erweiterung - kein Google-Login noetig dafuer.
+  // GET: liefert die admin-gepflegte Dokumentarten-Liste (Vorab-Filter) und
+  // die bestehende Lieferanten-Liste aus dem Offertentool (fuer die
+  // Datalist-Vorschlaege beim Lieferant-Feld) - kein Google-Login noetig.
   if (req.method === 'GET') {
     const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-    const { data, error } = await sb.from('dokumentensuche_dokumentart').select('name').eq('aktiv', true).order('sortierung');
-    if (error) return json({ error: error.message }, 500);
-    return json({ dokumentarten: (data || []).map((d: any) => d.name) });
+    const [{ data: arten, error: artenError }, { data: lieferanten, error: lieferantenError }] = await Promise.all([
+      sb.from('dokumentensuche_dokumentart').select('name').eq('aktiv', true).order('sortierung'),
+      sb.from('lieferant').select('name').is('archiviert_am', null).order('name'),
+    ]);
+    if (artenError) return json({ error: artenError.message }, 500);
+    if (lieferantenError) return json({ error: lieferantenError.message }, 500);
+    return json({
+      dokumentarten: (arten || []).map((d: any) => d.name),
+      lieferanten: (lieferanten || []).map((l: any) => l.name),
+    });
   }
 
   let body: any;
@@ -268,7 +276,7 @@ Deno.serve(async (req) => {
 
   const {
     query, mitarbeiterEmail, googleAccessToken, quellen, zeitraumVon, zeitraumBis, papierkorbSpam,
-    suchgenauigkeit, maxRunden, kundeFirma, dokumentarten: dokumentartenFilter, dateiformate, modell,
+    suchgenauigkeit, maxRunden, kunde, lieferant, dokumentarten: dokumentartenFilter, dateiformate, modell,
   } = body ?? {};
   if (!query || typeof query !== 'string') return json({ error: 'query fehlt.' }, 400);
   if (!mitarbeiterEmail || typeof mitarbeiterEmail !== 'string') return json({ error: 'mitarbeiterEmail fehlt.' }, 400);
@@ -317,10 +325,34 @@ Deno.serve(async (req) => {
 
   const dokumentartenFilterListe: string[] | undefined = Array.isArray(dokumentartenFilter) && dokumentartenFilter.length ? dokumentartenFilter : undefined;
   const system = baueSystemPrompt(dokumentarten, genauigkeit, dokumentartenFilterListe);
-  const kundeHinweis = typeof kundeFirma === 'string' && kundeFirma.trim()
-    ? `\nZusatzhinweis: Der gesuchte Kunde/die Firma ist "${kundeFirma.trim()}" - beziehe das stark in Suche und Bewertung ein (z.B. als zusaetzlichen Suchbegriff, und werte Treffer ohne erkennbaren Bezug dazu als hoechstens "moeglich").`
+
+  const kundeHinweis = typeof kunde === 'string' && kunde.trim()
+    ? `\nZusatzhinweis: Der gesuchte Kunde ist "${kunde.trim()}" - beziehe das stark in Suche und Bewertung ein, werte Treffer ohne erkennbaren Bezug dazu als hoechstens "moeglich".`
     : '';
-  const messages: any[] = [{ role: 'user', content: `Suchanfrage: ${query}${kundeHinweis}` }];
+
+  // Lieferant: falls er in der bestehenden Lieferanten-Tabelle des
+  // Offertentools gefunden wird, dessen hinterlegte E-Mail-Adressen als
+  // gezielten Gmail-Suchhinweis mitgeben - praeziser als nur der Firmenname.
+  let lieferantHinweis = '';
+  if (typeof lieferant === 'string' && lieferant.trim()) {
+    let emails: string[] = [];
+    try {
+      const { data: lieferantRow } = await sb.from('lieferant')
+        .select('name, kontaktdaten')
+        .ilike('name', `%${lieferant.trim()}%`)
+        .is('archiviert_am', null)
+        .limit(1)
+        .maybeSingle();
+      emails = (lieferantRow?.kontaktdaten as any)?.emails || [];
+    } catch (e) {
+      console.error('Lieferanten-Nachschlag fehlgeschlagen:', e);
+    }
+    lieferantHinweis = emails.length
+      ? `\nZusatzhinweis: Der gesuchte Lieferant ist "${lieferant.trim()}", bekannte E-Mail-Adressen: ${emails.join(', ')} - nutze diese gezielt in der Gmail-Suche (z.B. als Suchbegriff "from:${emails[0]}"), und werte Treffer ohne erkennbaren Bezug zu diesem Lieferanten als hoechstens "moeglich".`
+      : `\nZusatzhinweis: Der gesuchte Lieferant ist "${lieferant.trim()}" - beziehe das stark in Suche und Bewertung ein, werte Treffer ohne erkennbaren Bezug dazu als hoechstens "moeglich".`;
+  }
+
+  const messages: any[] = [{ role: 'user', content: `Suchanfrage: ${query}${kundeHinweis}${lieferantHinweis}` }];
 
   let bewertungen: any[] = [];
   // Nutzer-waehlbare Sicherheitsbremse (Schnell/Normal/Ausfuehrlich in der

@@ -210,6 +210,9 @@ async function ladeDokumentarten() {
     const data = await res.json();
     const optionen = (data.dokumentarten || []).map((name) => ({ value: name, label: name }));
     dokumentartAuswahl = baueMehrfachauswahl($('dokumentartVorabRow'), optionen);
+    $('lieferantenListe').innerHTML = (data.lieferanten || [])
+      .map((name) => `<option value="${esc(name)}"></option>`)
+      .join('');
   } catch (e) {
     console.error('Dokumentarten laden fehlgeschlagen:', e);
   }
@@ -343,7 +346,8 @@ async function suchen() {
         quellen,
         zeitraumVon: $('zeitraumVon').value || undefined,
         zeitraumBis: $('zeitraumBis').value || undefined,
-        kundeFirma: $('kundeFirma').value.trim() || undefined,
+        kunde: $('kundeFeld').value.trim() || undefined,
+        lieferant: $('lieferantFeld').value.trim() || undefined,
         dokumentarten: dokumentartAuswahl.getSelected(),
         dateiformate: dateiformatAuswahl.getSelected(),
         papierkorbSpam: $('papierkorbSpam').checked,
