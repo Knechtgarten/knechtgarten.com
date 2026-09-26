@@ -95,6 +95,13 @@ document.querySelectorAll('.seg button[data-genauigkeit]').forEach((btn) => {
   });
 });
 
+document.querySelectorAll('.seg button[data-runden]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.seg button[data-runden]').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+  });
+});
+
 $('peaxBtn').addEventListener('click', () => {
   // TODO: Sobald bestaetigt ist, welcher URL-Parameter PEAX' Suchseite fuer
   // einen vorausgefuellten Suchbegriff akzeptiert, hier ergaenzen
@@ -184,6 +191,7 @@ async function suchen() {
         zeitraumVon: $('zeitraumVon').value || undefined,
         papierkorbSpam: $('papierkorbSpam').checked,
         suchgenauigkeit: document.querySelector('.seg button[data-genauigkeit].active')?.dataset.genauigkeit || 'sinngemaess',
+        maxRunden: Number(document.querySelector('.seg button[data-runden].active')?.dataset.runden || '4'),
       }),
     });
     const data = await res.json();

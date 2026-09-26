@@ -209,7 +209,7 @@ Deno.serve(async (req) => {
     return json({ error: 'Ungueltiger Request-Body (JSON erwartet).' }, 400);
   }
 
-  const { query, mitarbeiterEmail, googleAccessToken, quellen, zeitraumVon, papierkorbSpam, suchgenauigkeit } = body ?? {};
+  const { query, mitarbeiterEmail, googleAccessToken, quellen, zeitraumVon, papierkorbSpam, suchgenauigkeit, maxRunden } = body ?? {};
   if (!query || typeof query !== 'string') return json({ error: 'query fehlt.' }, 400);
   if (!mitarbeiterEmail || typeof mitarbeiterEmail !== 'string') return json({ error: 'mitarbeiterEmail fehlt.' }, 400);
   if (!googleAccessToken || typeof googleAccessToken !== 'string') return json({ error: 'googleAccessToken fehlt.' }, 400);
@@ -258,7 +258,10 @@ Deno.serve(async (req) => {
   const messages: any[] = [{ role: 'user', content: `Suchanfrage: ${query}` }];
 
   let bewertungen: any[] = [];
-  const MAX_RUNDEN = 4;
+  // Nutzer-waehlbare Sicherheitsbremse (Schnell/Normal/Ausfuehrlich in der
+  // Erweiterung) - hart begrenzt, damit eine falsche/manipulierte Eingabe
+  // keine beliebig teure Endlosschleife an Claude-Aufrufen ausloesen kann.
+  const MAX_RUNDEN = Math.min(10, Math.max(1, Number(maxRunden) || 4));
   for (let runde = 0; runde < MAX_RUNDEN; runde++) {
     const antwort = await rufeClaudeMitTools(system, messages);
     const toolUseBloecke = (antwort.content || []).filter((c: any) => c.type === 'tool_use');
