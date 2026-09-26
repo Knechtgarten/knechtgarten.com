@@ -126,6 +126,12 @@ function setzeAktivenTab(tab) {
   document.querySelectorAll('[data-tab-scope]').forEach((el) => {
     el.hidden = !el.dataset.tabScope.split(' ').includes(tab);
   });
+  // Ausgeblendete Mehrfachauswahl-Filter (Dokumentart/Dateiformat) auf "Alle"
+  // zuruecksetzen - sonst wuerde eine auf einem anderen Tab getroffene, jetzt
+  // unsichtbare Auswahl die Suche hier unbemerkt mitfiltern (z.B. Gmail-Tab:
+  // Dateiformat ist ausgeblendet, dort reicht "Anhaenge durchsuchen").
+  if ($('dokumentartVorabRow').hidden) $('dokumentartVorabRow').querySelector('.chip')?.click();
+  if ($('dateiformatRow').hidden) $('dateiformatRow').querySelector('.chip')?.click();
 }
 document.querySelectorAll('.tab-bar button[data-tab]').forEach((btn) => {
   btn.addEventListener('click', () => setzeAktivenTab(btn.dataset.tab));
