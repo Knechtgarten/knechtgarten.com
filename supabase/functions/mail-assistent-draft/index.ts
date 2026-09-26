@@ -739,7 +739,7 @@ async function modusListeVerfassen() {
   // strukturierte Eingabemasken (z.B. Bestell-Tabellen) gezeigt werden
   // muessen statt sofort einzufuegen.
   const { data, error } = await sb.from('mailassistent_vorlage')
-    .select(`id,titel,typ,inhalt,betreff,parent_id,
+    .select(`id,titel,typ,inhalt,betreff,parent_id,zeigt_bei_verfassen,zeigt_bei_antworten,
       mailassistent_vorlage_zusatzfenster(
         mailassistent_zusatzfenster(id,typ,titel,platzhalter,erlaubt_eigene_eingabe,zeigt_anzahl,mit_uhrzeit,
           mailassistent_zusatzfenster_spalte(id,titel,typ,einheit,platzhalter,breite,reihenfolge,
