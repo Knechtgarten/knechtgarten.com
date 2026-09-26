@@ -22,6 +22,12 @@
 // ============================================================================
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
+// Experimentell (2026-09-27, noch nicht mit echten Anhaengen getestet):
+// PDF-Textextraktion fuer die optionale "Mail-Anhaenge inhaltlich
+// durchsuchen"-Funktion. Nutzt Mozillas pdf.js ueber den Deno-npm-Kompat-
+// Layer - unklar, ob das in dieser Runtime zuverlaessig laeuft, deshalb
+// grosszuegig try/catch drumherum (siehe extrahierePdfText).
+import * as pdfjsLib from 'npm:pdfjs-dist@4.0.379/legacy/build/pdf.mjs';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -114,7 +120,56 @@ async function sucheDrive(begriff: string, token: string, zeitraumVon?: string, 
   }));
 }
 
-async function sucheGmail(begriff: string, token: string, zeitraumVon?: string, zeitraumBis?: string, papierkorbSpam = false, dateiformate?: string[]): Promise<RohTreffer[]> {
+// Base64url (Gmail-Format) -> Bytes.
+function base64UrlZuBytes(b64url: string): Uint8Array {
+  const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+async function extrahierePdfText(bytes: Uint8Array): Promise<string> {
+  const doc = await pdfjsLib.getDocument({ data: bytes, useWorker: false, isEvalSupported: false }).promise;
+  let text = '';
+  for (let i = 1; i <= Math.min(doc.numPages, 5) && text.length < 3000; i++) {
+    const page = await doc.getPage(i);
+    const content = await page.getTextContent();
+    text += content.items.map((it: any) => it.str ?? '').join(' ') + '\n';
+  }
+  return text.slice(0, 3000).trim();
+}
+
+// Laedt PDF-Anhaenge einer Nachricht und haengt den extrahierten Text an -
+// nur wenn explizit gewuenscht (spuerbar langsamer: pro Anhang ein weiterer
+// API-Aufruf + PDF-Parsing).
+async function leseAnhaengeText(messageId: string, token: string): Promise<string> {
+  const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}?format=full`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return '';
+  const msg = await res.json();
+  const parts: any[] = msg.payload?.parts || [];
+  const pdfTeile = parts.filter((p) => p.mimeType === 'application/pdf' && p.body?.attachmentId);
+  const texte = await Promise.all(pdfTeile.slice(0, 3).map(async (teil) => {
+    try {
+      const anhangRes = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messageId}/attachments/${teil.body.attachmentId}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      if (!anhangRes.ok) return '';
+      const anhang = await anhangRes.json();
+      const bytes = base64UrlZuBytes(anhang.data);
+      return await extrahierePdfText(bytes);
+    } catch (e) {
+      console.error('PDF-Anhang lesen fehlgeschlagen:', e);
+      return '';
+    }
+  }));
+  return texte.filter(Boolean).join('\n---\n');
+}
+
+async function sucheGmail(begriff: string, token: string, zeitraumVon?: string, zeitraumBis?: string, papierkorbSpam = false, dateiformate?: string[], anhaengeDurchsuchen = false): Promise<RohTreffer[]> {
   let gmailQuery = begriff;
   if (zeitraumVon) gmailQuery += ` after:${zeitraumVon.slice(0, 10).replace(/-/g, '/')}`;
   if (zeitraumBis) gmailQuery += ` before:${zeitraumBis.slice(0, 10).replace(/-/g, '/')}`;
@@ -141,11 +196,16 @@ async function sucheGmail(begriff: string, token: string, zeitraumVon?: string, 
     if (!res.ok) return null;
     const msg = await res.json();
     const betreff = msg.payload?.headers?.find((h: any) => h.name === 'Subject')?.value || '(kein Betreff)';
+    let snippet = msg.snippet || '';
+    if (anhaengeDurchsuchen) {
+      const anhangText = await leseAnhaengeText(id, token);
+      if (anhangText) snippet += '\n[Anhang-Inhalt] ' + anhangText;
+    }
     return {
       quelle: 'gmail' as const,
       id: msg.id,
       titel: betreff,
-      snippet: msg.snippet || '',
+      snippet,
       datum: msg.internalDate ? new Date(Number(msg.internalDate)).toISOString() : null,
       link: `https://mail.google.com/mail/u/0/#all/${msg.id}`,
     };
@@ -286,6 +346,7 @@ Deno.serve(async (req) => {
   const {
     query, mitarbeiterEmail, googleAccessToken, quellen, zeitraumVon, zeitraumBis, papierkorbSpam,
     suchgenauigkeit, maxRunden, kunde, lieferant, dokumentarten: dokumentartenFilter, dateiformate, modell,
+    anhaengeDurchsuchen,
   } = body ?? {};
   if (!query || typeof query !== 'string') return json({ error: 'query fehlt.' }, 400);
   if (!mitarbeiterEmail || typeof mitarbeiterEmail !== 'string') return json({ error: 'mitarbeiterEmail fehlt.' }, 400);
@@ -317,7 +378,7 @@ Deno.serve(async (req) => {
         treffer = await sucheDrive(input.begriff, googleAccessToken, zeitraumVon, zeitraumBis, dateiformate);
         suchschritte.push({ quelle: 'drive', begriff: input.begriff });
       } else if (name === 'gmail_suchen' && gewuenschteQuellen.includes('gmail')) {
-        treffer = await sucheGmail(input.begriff, googleAccessToken, zeitraumVon, zeitraumBis, !!papierkorbSpam, dateiformate);
+        treffer = await sucheGmail(input.begriff, googleAccessToken, zeitraumVon, zeitraumBis, !!papierkorbSpam, dateiformate, !!anhaengeDurchsuchen);
         suchschritte.push({ quelle: 'gmail', begriff: input.begriff });
       } else {
         return 'Diese Quelle ist fuer diese Suche nicht ausgewaehlt.';

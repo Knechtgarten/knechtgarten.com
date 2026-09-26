@@ -394,7 +394,9 @@ async function suchen() {
     .map((c) => c.dataset.quelle);
 
   $('searchBtn').disabled = true;
-  $('statusLine').textContent = 'KI durchsucht Drive/Gmail, kann ein paar Sekunden dauern …';
+  $('statusLine').textContent = $('anhaengeDurchsuchen').checked
+    ? 'KI durchsucht Drive/Gmail inkl. Anhänge – kann spürbar länger dauern …'
+    : 'KI durchsucht Drive/Gmail, kann ein paar Sekunden dauern …';
   $('statusLine').className = 'status-line';
   $('resultsHeader').hidden = true;
   $('docList').innerHTML = '';
@@ -417,6 +419,7 @@ async function suchen() {
         dokumentarten: dokumentartAuswahl.getSelected(),
         dateiformate: dateiformatAuswahl.getSelected(),
         papierkorbSpam: $('papierkorbSpam').checked,
+        anhaengeDurchsuchen: $('anhaengeDurchsuchen').checked,
         suchgenauigkeit: document.querySelector('.seg button[data-genauigkeit].active')?.dataset.genauigkeit || 'sinngemaess',
         maxRunden: Number(document.querySelector('.seg button[data-runden].active')?.dataset.runden || '7'),
         modell: document.querySelector('.seg button[data-modell].active')?.dataset.modell || 'sonnet',
