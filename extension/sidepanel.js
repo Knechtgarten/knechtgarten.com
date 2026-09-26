@@ -5,8 +5,8 @@
 // Token, kein Client-Secret im Code - siehe extension/erweiterungs-id.md fuer
 // die feste Erweiterungs-ID/Redirect-URI). Token wird in chrome.storage.local
 // zwischengespeichert und bis zum Ablauf wiederverwendet. Die eigentliche
-// Suche laeuft ueber die Supabase Edge Function "dokumenten-suche" (Phase 2,
-// noch ohne KI-Ebene - siehe Projekt-Notiz).
+// Suche laeuft ueber die Supabase Edge Function "dokumenten-suche" (Phase 3:
+// Claude orchestriert die Google-Suche selbst und bewertet die Treffer).
 //
 // PEAX ist bewusst NICHT Teil der gemeinsamen Suche (kein API-Zugang) -
 // der PEAX-Chip oeffnet stattdessen direkt PEAX' eigene Suchseite in einem
@@ -126,6 +126,38 @@ function fmtDatum(iso) {
   return new Date(iso).toLocaleDateString('de-CH');
 }
 
+let letzteErgebnisse = [];
+let aktiverDokumentartFilter = null; // null = "Alle"
+
+function renderDokumentartFilter() {
+  const arten = [...new Set(letzteErgebnisse.map((e) => e.dokumentart).filter(Boolean))];
+  const row = $('dokumentartFilterRow');
+  if (!arten.length) { row.hidden = true; row.innerHTML = ''; return; }
+
+  row.hidden = false;
+  row.innerHTML = '';
+  const alleChip = document.createElement('span');
+  alleChip.className = 'chip' + (aktiverDokumentartFilter === null ? ' active' : '');
+  alleChip.textContent = 'Alle';
+  alleChip.addEventListener('click', () => { aktiverDokumentartFilter = null; renderDokumentartFilter(); zeichneGefilterteErgebnisse(); });
+  row.appendChild(alleChip);
+
+  for (const art of arten) {
+    const chip = document.createElement('span');
+    chip.className = 'chip' + (aktiverDokumentartFilter === art ? ' active' : '');
+    chip.textContent = art;
+    chip.addEventListener('click', () => { aktiverDokumentartFilter = art; renderDokumentartFilter(); zeichneGefilterteErgebnisse(); });
+    row.appendChild(chip);
+  }
+}
+
+function zeichneGefilterteErgebnisse() {
+  const gefiltert = aktiverDokumentartFilter === null
+    ? letzteErgebnisse
+    : letzteErgebnisse.filter((e) => e.dokumentart === aktiverDokumentartFilter);
+  zeichneErgebnisse(gefiltert);
+}
+
 function zeichneErgebnisse(ergebnisse) {
   $('resultsHeader').hidden = false;
   $('resultsCount').textContent = `${ergebnisse.length} Dokument${ergebnisse.length === 1 ? '' : 'e'}`;
@@ -177,6 +209,7 @@ async function suchen() {
   $('statusLine').className = 'status-line';
   $('resultsHeader').hidden = true;
   $('docList').innerHTML = '';
+  $('dokumentartFilterRow').hidden = true;
 
   try {
     const profil = await new Promise((resolve) => chrome.identity.getProfileUserInfo({ accountStatus: 'ANY' }, resolve));
@@ -197,7 +230,10 @@ async function suchen() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `Fehler ${res.status}`);
 
-    zeichneErgebnisse(data.ergebnisse || []);
+    letzteErgebnisse = data.ergebnisse || [];
+    aktiverDokumentartFilter = null;
+    renderDokumentartFilter();
+    zeichneGefilterteErgebnisse();
     if (data.fehler?.length) {
       $('statusLine').textContent = 'Teilweise fehlgeschlagen: ' + data.fehler.join(' / ');
       $('statusLine').className = 'status-line err';
