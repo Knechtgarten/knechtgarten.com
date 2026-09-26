@@ -79,6 +79,7 @@ function verbinden() {
 function zeigeSuche() {
   $('connectBox').hidden = true;
   $('searchBox').hidden = false;
+  ladeDokumentarten();
 }
 
 // ---------------------------------------------------------------------------
@@ -121,6 +122,7 @@ const FTYPE_ICONS = {
   docs: '<svg viewBox="0 0 24 24"><path d="M6 2h9l5 5v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" fill="#fff" stroke="#DADCE0"/><path d="M15 2v5h5z" fill="#A4C2F4"/><rect x="7.5" y="10" width="9" height="1.4" rx=".5" fill="#4285F4"/><rect x="7.5" y="13" width="9" height="1.4" rx=".5" fill="#4285F4"/><rect x="7.5" y="16" width="6" height="1.4" rx=".5" fill="#4285F4"/></svg>',
   sheets: '<svg viewBox="0 0 24 24"><path d="M6 2h9l5 5v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" fill="#fff" stroke="#DADCE0"/><path d="M15 2v5h5z" fill="#A8DAB5"/><rect x="7.5" y="10" width="9" height="7" fill="none" stroke="#0F9D58" stroke-width="1"/><line x1="7.5" y1="13.5" x2="16.5" y2="13.5" stroke="#0F9D58" stroke-width="1"/><line x1="11.8" y1="10" x2="11.8" y2="17" stroke="#0F9D58" stroke-width="1"/></svg>',
   mail: '<svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2" fill="#EA4335"/><path d="M3 6l9 6.5L21 6" fill="none" stroke="#fff" stroke-width="1.4"/></svg>',
+  bild: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" fill="#F3E8FD" stroke="#8C6DAB"/><circle cx="8.5" cy="9.5" r="1.6" fill="#8C6DAB"/><path d="M4 17l5-5 4 4 3-3 4 4" fill="none" stroke="#8C6DAB" stroke-width="1.4"/></svg>',
   generic: '<svg viewBox="0 0 24 24"><path d="M6 2h9l5 5v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" fill="#fff" stroke="#DADCE0"/><path d="M15 2v5h5z" fill="#D7D3CE"/></svg>',
 };
 function ftypeIcon(dateityp, quelle) {
@@ -128,7 +130,17 @@ function ftypeIcon(dateityp, quelle) {
   if (dateityp === 'application/pdf') return FTYPE_ICONS.pdf;
   if (dateityp === 'application/vnd.google-apps.document') return FTYPE_ICONS.docs;
   if (dateityp === 'application/vnd.google-apps.spreadsheet') return FTYPE_ICONS.sheets;
+  if (dateityp?.startsWith('image/')) return FTYPE_ICONS.bild;
   return FTYPE_ICONS.generic;
+}
+
+const SOURCE_ICONS = {
+  drive: '<svg viewBox="0 0 24 24"><path fill="#4285F4" d="M8.5 3h7l7.5 13-3.5 6h-15z"/><path fill="#34A853" d="M4.5 22l3.5-6h15l-3.5 6z"/><path fill="#FBBC05" d="M8.5 3l-4 7 4 6.5 4-6.5z"/></svg>',
+  gmail: '<svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2" fill="#EA4335"/><path fill="#fff" d="M4 6l8 6 8-6v2l-8 6-8-6z"/></svg>',
+};
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 function fmtDatum(iso) {
@@ -136,36 +148,63 @@ function fmtDatum(iso) {
   return new Date(iso).toLocaleDateString('de-CH');
 }
 
-let letzteErgebnisse = [];
-let aktiverDokumentartFilter = null; // null = "Alle"
-
-function renderDokumentartFilter() {
-  const arten = [...new Set(letzteErgebnisse.map((e) => e.dokumentart).filter(Boolean))];
-  const row = $('dokumentartFilterRow');
-  if (!arten.length) { row.hidden = true; row.innerHTML = ''; return; }
-
-  row.hidden = false;
-  row.innerHTML = '';
-  const alleChip = document.createElement('span');
-  alleChip.className = 'chip' + (aktiverDokumentartFilter === null ? ' active' : '');
-  alleChip.textContent = 'Alle';
-  alleChip.addEventListener('click', () => { aktiverDokumentartFilter = null; renderDokumentartFilter(); zeichneGefilterteErgebnisse(); });
-  row.appendChild(alleChip);
-
-  for (const art of arten) {
-    const chip = document.createElement('span');
-    chip.className = 'chip' + (aktiverDokumentartFilter === art ? ' active' : '');
-    chip.textContent = art;
-    chip.addEventListener('click', () => { aktiverDokumentartFilter = art; renderDokumentartFilter(); zeichneGefilterteErgebnisse(); });
-    row.appendChild(chip);
+// ---------------------------------------------------------------------------
+// Wiederverwendbare Mehrfachauswahl-Chipreihe mit "Alle" (Dokumentart,
+// Dateiformat) - leere Auswahl bedeutet "Alle" (keine Einschraenkung).
+// ---------------------------------------------------------------------------
+function baueMehrfachauswahl(container, optionen) {
+  const ausgewaehlt = new Set();
+  function render() {
+    container.innerHTML = '';
+    const alle = document.createElement('span');
+    alle.className = 'chip' + (ausgewaehlt.size === 0 ? ' active' : '');
+    alle.textContent = 'Alle';
+    alle.addEventListener('click', () => { ausgewaehlt.clear(); render(); });
+    container.appendChild(alle);
+    for (const opt of optionen) {
+      const chip = document.createElement('span');
+      chip.className = 'chip' + (opt.icon ? ' ftype-chip' : '') + (ausgewaehlt.has(opt.value) ? ' active' : '');
+      chip.title = opt.label;
+      if (opt.icon) {
+        const iconSpan = document.createElement('span');
+        iconSpan.className = 'chip-icon';
+        iconSpan.innerHTML = opt.icon;
+        chip.appendChild(iconSpan);
+      } else {
+        chip.appendChild(document.createTextNode(opt.label));
+      }
+      chip.addEventListener('click', () => {
+        if (ausgewaehlt.has(opt.value)) ausgewaehlt.delete(opt.value); else ausgewaehlt.add(opt.value);
+        render();
+      });
+      container.appendChild(chip);
+    }
   }
+  render();
+  return { getSelected: () => (ausgewaehlt.size ? [...ausgewaehlt] : undefined) };
 }
 
-function zeichneGefilterteErgebnisse() {
-  const gefiltert = aktiverDokumentartFilter === null
-    ? letzteErgebnisse
-    : letzteErgebnisse.filter((e) => e.dokumentart === aktiverDokumentartFilter);
-  zeichneErgebnisse(gefiltert);
+const dateiformatAuswahl = baueMehrfachauswahl($('dateiformatRow'), [
+  { value: 'pdf', label: 'PDF', icon: FTYPE_ICONS.pdf },
+  { value: 'docs', label: 'Google Docs', icon: FTYPE_ICONS.docs },
+  { value: 'sheets', label: 'Google Sheets', icon: FTYPE_ICONS.sheets },
+  { value: 'mail', label: 'Mail', icon: FTYPE_ICONS.mail },
+  { value: 'bild', label: 'Bild', icon: FTYPE_ICONS.bild },
+]);
+
+let dokumentartAuswahl = { getSelected: () => undefined };
+async function ladeDokumentarten() {
+  try {
+    const res = await fetch(EDGE_FUNCTION_URL, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+    });
+    const data = await res.json();
+    const optionen = (data.dokumentarten || []).map((name) => ({ value: name, label: name }));
+    dokumentartAuswahl = baueMehrfachauswahl($('dokumentartVorabRow'), optionen);
+  } catch (e) {
+    console.error('Dokumentarten laden fehlgeschlagen:', e);
+  }
 }
 
 let lightboxListe = [];
@@ -193,7 +232,7 @@ function zeichneErgebnisse(ergebnisse) {
     const badge = row.querySelector('.match-badge');
     badge.textContent = e.uebereinstimmung === 'hoch' ? 'Hoch' : 'Möglich';
     badge.classList.add(e.uebereinstimmung === 'hoch' ? 'hoch' : 'moeglich');
-    row.querySelector('.doc-meta').textContent = `${e.quelle === 'drive' ? 'Drive' : 'Gmail'} · ${fmtDatum(e.datum)}${e.dokumentart ? ' · ' + e.dokumentart : ''}`;
+    row.querySelector('.doc-meta').innerHTML = `<span class="src-icon">${SOURCE_ICONS[e.quelle] || ''}</span>${e.quelle === 'drive' ? 'Drive' : 'Gmail'} · ${fmtDatum(e.datum)}${e.dokumentart ? ' · ' + e.dokumentart : ''}`;
     row.querySelector('.doc-begruendung').textContent = e.begruendung || '';
     row.addEventListener('click', () => openLightbox(i));
     $('docList').appendChild(row);
@@ -219,7 +258,7 @@ function renderLightbox() {
   if (!e) return;
   $('lbIcon').innerHTML = ftypeIcon(e.dateityp, e.quelle);
   $('lbTitle').textContent = e.titel;
-  $('lbMeta').textContent = `${e.quelle === 'drive' ? 'Drive' : 'Gmail'} · ${fmtDatum(e.datum)}${e.dokumentart ? ' · ' + e.dokumentart : ''}`;
+  $('lbMeta').innerHTML = `<span class="src-icon">${SOURCE_ICONS[e.quelle] || ''}</span>${e.quelle === 'drive' ? 'Drive' : 'Gmail'} · ${fmtDatum(e.datum)}${e.dokumentart ? ' · ' + e.dokumentart : ''}`;
   const badge = $('lbMatch');
   badge.textContent = e.uebereinstimmung === 'hoch' ? 'Hohe Übereinstimmung' : 'Mögliche Übereinstimmung';
   badge.className = 'match-badge ' + (e.uebereinstimmung === 'hoch' ? 'hoch' : 'moeglich');
@@ -253,7 +292,7 @@ async function suchen() {
   $('statusLine').className = 'status-line';
   $('resultsHeader').hidden = true;
   $('docList').innerHTML = '';
-  $('dokumentartFilterRow').hidden = true;
+  $('suchschritteBox').hidden = true;
 
   try {
     const profil = await new Promise((resolve) => chrome.identity.getProfileUserInfo({ accountStatus: 'ANY' }, resolve));
@@ -266,7 +305,10 @@ async function suchen() {
         googleAccessToken: token,
         quellen,
         zeitraumVon: $('zeitraumVon').value || undefined,
+        zeitraumBis: $('zeitraumBis').value || undefined,
         kundeFirma: $('kundeFirma').value.trim() || undefined,
+        dokumentarten: dokumentartAuswahl.getSelected(),
+        dateiformate: dateiformatAuswahl.getSelected(),
         papierkorbSpam: $('papierkorbSpam').checked,
         suchgenauigkeit: document.querySelector('.seg button[data-genauigkeit].active')?.dataset.genauigkeit || 'sinngemaess',
         maxRunden: Number(document.querySelector('.seg button[data-runden].active')?.dataset.runden || '4'),
@@ -275,10 +317,16 @@ async function suchen() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `Fehler ${res.status}`);
 
-    letzteErgebnisse = data.ergebnisse || [];
-    aktiverDokumentartFilter = null;
-    renderDokumentartFilter();
-    zeichneGefilterteErgebnisse();
+    zeichneErgebnisse(data.ergebnisse || []);
+
+    const schritte = data.suchschritte || [];
+    if (schritte.length) {
+      $('suchschritteBox').hidden = false;
+      $('suchschritteListe').innerHTML = schritte
+        .map((s) => `<li>${s.quelle === 'drive' ? 'Drive' : 'Gmail'}: „${esc(s.begriff)}“</li>`)
+        .join('');
+    }
+
     if (data.fehler?.length) {
       $('statusLine').textContent = 'Teilweise fehlgeschlagen: ' + data.fehler.join(' / ');
       $('statusLine').className = 'status-line err';

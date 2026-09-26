@@ -50,9 +50,34 @@ function escapeDriveQuery(text: string): string {
   return text.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
-async function sucheDrive(begriff: string, token: string, zeitraumVon?: string): Promise<RohTreffer[]> {
+// Dateiformat-Filter (Erweiterung: "Alle"/PDF/Google Docs/Google Sheets/Mail/
+// Bild) - fuer Drive als harte mimeType-Bedingung, fuer Gmail als Anhang-
+// Dateiendungs-Hinweis (siehe sucheGmail). "mail" selbst betrifft nur Gmail
+// (der Mailinhalt zaehlt dort immer, unabhaengig von Anhaengen).
+const DRIVE_MIME_BEDINGUNG: Record<string, string> = {
+  pdf: "mimeType = 'application/pdf'",
+  docs: "mimeType = 'application/vnd.google-apps.document'",
+  sheets: "mimeType = 'application/vnd.google-apps.spreadsheet'",
+  bild: "mimeType contains 'image/'",
+};
+const GMAIL_DATEIENDUNGEN: Record<string, string[]> = {
+  pdf: ['pdf'],
+  docs: ['doc', 'docx'],
+  sheets: ['xls', 'xlsx'],
+  bild: ['jpg', 'jpeg', 'png'],
+};
+
+async function sucheDrive(begriff: string, token: string, zeitraumVon?: string, zeitraumBis?: string, dateiformate?: string[]): Promise<RohTreffer[]> {
   const bedingungen = [`fullText contains '${escapeDriveQuery(begriff)}'`, 'trashed = false'];
   if (zeitraumVon) bedingungen.push(`modifiedTime >= '${zeitraumVon}'`);
+  if (zeitraumBis) bedingungen.push(`modifiedTime <= '${zeitraumBis}'`);
+  if (dateiformate?.length) {
+    const mimeBedingungen = dateiformate.map((f) => DRIVE_MIME_BEDINGUNG[f]).filter(Boolean);
+    // Wurden ausschliesslich Formate gewaehlt, die es in Drive gar nicht geben
+    // kann (aktuell nur "mail"), gibt es absichtlich keine Drive-Treffer.
+    if (!mimeBedingungen.length) return [];
+    bedingungen.push(`(${mimeBedingungen.join(' or ')})`);
+  }
   const params = new URLSearchParams({
     q: bedingungen.join(' and '),
     fields: 'files(id,name,mimeType,modifiedTime,webViewLink)',
@@ -74,10 +99,17 @@ async function sucheDrive(begriff: string, token: string, zeitraumVon?: string):
   }));
 }
 
-async function sucheGmail(begriff: string, token: string, zeitraumVon?: string, papierkorbSpam = false): Promise<RohTreffer[]> {
+async function sucheGmail(begriff: string, token: string, zeitraumVon?: string, zeitraumBis?: string, papierkorbSpam = false, dateiformate?: string[]): Promise<RohTreffer[]> {
   let gmailQuery = begriff;
   if (zeitraumVon) gmailQuery += ` after:${zeitraumVon.slice(0, 10).replace(/-/g, '/')}`;
+  if (zeitraumBis) gmailQuery += ` before:${zeitraumBis.slice(0, 10).replace(/-/g, '/')}`;
   if (papierkorbSpam) gmailQuery += ' in:anywhere';
+  if (dateiformate?.length && !dateiformate.includes('mail')) {
+    const endungen = [...new Set(dateiformate.flatMap((f) => GMAIL_DATEIENDUNGEN[f] || []))];
+    gmailQuery += endungen.length
+      ? ` has:attachment (${endungen.map((e) => `filename:${e}`).join(' OR ')})`
+      : ' has:attachment';
+  }
   const listParams = new URLSearchParams({ q: gmailQuery, maxResults: '10' });
   const listRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?${listParams}`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -155,7 +187,7 @@ const TOOLS = [
   },
 ];
 
-function baueSystemPrompt(dokumentarten: string[], suchgenauigkeit: string): string {
+function baueSystemPrompt(dokumentarten: string[], suchgenauigkeit: string, dokumentartenFilter?: string[]): string {
   const genauigkeitsHinweis = {
     genau: 'Suchgenauigkeit "Genau": nutze ausschliesslich den exakten, vom Nutzer eingegebenen Begriff woertlich, keine Synonyme oder verwandte Begriffe erfinden.',
     teilwort: 'Suchgenauigkeit "Teilwort": der Begriff darf auch als Teil eines laengeren Worts vorkommen (z.B. "Technik" in "Gartentechnik") - trotzdem nah am Wortlaut bleiben, keine Synonyme.',
@@ -172,6 +204,7 @@ Vorgehen:
 2. Bei Bedarf mit anderen Begriffen nochmal suchen, wenn die ersten Treffer nicht ueberzeugen. Insgesamt reichen normalerweise 1-4 Suchaufrufe.
 3. Wenn du genug gesehen hast, rufe ergebnisse_liefern auf. Nimm dort NUR Treffer auf, die wirklich zur Anfrage passen (nicht die komplette Rohliste durchreichen). Bewerte jeden Treffer ehrlich: "hoch" nur wenn du dir wirklich sicher bist, sonst "moeglich".
 4. Erlaubte Dokumentarten fuer das Feld "dokumentart" (nur wenn eindeutig erkennbar, sonst weglassen): ${dokumentarten.join(', ') || '(keine Liste hinterlegt)'}.
+${dokumentartenFilter?.length ? `5. WICHTIG: Der Nutzer hat den Vorab-Filter "Dokumentart" auf folgende Arten eingeschraenkt: ${dokumentartenFilter.join(', ')}. Nimm in ergebnisse_liefern NUR Treffer auf, die eindeutig zu einer dieser Arten gehoeren, und setze das Feld "dokumentart" bei diesen Treffern immer entsprechend (nicht leer lassen). Alles andere weglassen, auch wenn es sonst thematisch passen wuerde.` : ''}
 
 Antworte ausschliesslich durch Werkzeug-Aufrufe, keinen Fliesstext.`;
 }
@@ -202,6 +235,15 @@ Deno.serve(async (req) => {
     return new Response('ok', { headers: corsHeaders });
   }
 
+  // GET: liefert nur die admin-gepflegte Dokumentarten-Liste fuer den
+  // Vorab-Filter in der Erweiterung - kein Google-Login noetig dafuer.
+  if (req.method === 'GET') {
+    const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+    const { data, error } = await sb.from('dokumentensuche_dokumentart').select('name').eq('aktiv', true).order('sortierung');
+    if (error) return json({ error: error.message }, 500);
+    return json({ dokumentarten: (data || []).map((d: any) => d.name) });
+  }
+
   let body: any;
   try {
     body = await req.json();
@@ -209,7 +251,10 @@ Deno.serve(async (req) => {
     return json({ error: 'Ungueltiger Request-Body (JSON erwartet).' }, 400);
   }
 
-  const { query, mitarbeiterEmail, googleAccessToken, quellen, zeitraumVon, papierkorbSpam, suchgenauigkeit, maxRunden, kundeFirma } = body ?? {};
+  const {
+    query, mitarbeiterEmail, googleAccessToken, quellen, zeitraumVon, zeitraumBis, papierkorbSpam,
+    suchgenauigkeit, maxRunden, kundeFirma, dokumentarten: dokumentartenFilter, dateiformate,
+  } = body ?? {};
   if (!query || typeof query !== 'string') return json({ error: 'query fehlt.' }, 400);
   if (!mitarbeiterEmail || typeof mitarbeiterEmail !== 'string') return json({ error: 'mitarbeiterEmail fehlt.' }, 400);
   if (!googleAccessToken || typeof googleAccessToken !== 'string') return json({ error: 'googleAccessToken fehlt.' }, 400);
@@ -236,10 +281,10 @@ Deno.serve(async (req) => {
     try {
       let treffer: RohTreffer[] = [];
       if (name === 'drive_suchen' && gewuenschteQuellen.includes('drive')) {
-        treffer = await sucheDrive(input.begriff, googleAccessToken, zeitraumVon);
+        treffer = await sucheDrive(input.begriff, googleAccessToken, zeitraumVon, zeitraumBis, dateiformate);
         suchschritte.push({ quelle: 'drive', begriff: input.begriff });
       } else if (name === 'gmail_suchen' && gewuenschteQuellen.includes('gmail')) {
-        treffer = await sucheGmail(input.begriff, googleAccessToken, zeitraumVon, !!papierkorbSpam);
+        treffer = await sucheGmail(input.begriff, googleAccessToken, zeitraumVon, zeitraumBis, !!papierkorbSpam, dateiformate);
         suchschritte.push({ quelle: 'gmail', begriff: input.begriff });
       } else {
         return 'Diese Quelle ist fuer diese Suche nicht ausgewaehlt.';
@@ -254,7 +299,8 @@ Deno.serve(async (req) => {
     }
   }
 
-  const system = baueSystemPrompt(dokumentarten, genauigkeit);
+  const dokumentartenFilterListe: string[] | undefined = Array.isArray(dokumentartenFilter) && dokumentartenFilter.length ? dokumentartenFilter : undefined;
+  const system = baueSystemPrompt(dokumentarten, genauigkeit, dokumentartenFilterListe);
   const kundeHinweis = typeof kundeFirma === 'string' && kundeFirma.trim()
     ? `\nZusatzhinweis: Der gesuchte Kunde/die Firma ist "${kundeFirma.trim()}" - beziehe das stark in Suche und Bewertung ein (z.B. als zusaetzlichen Suchbegriff, und werte Treffer ohne erkennbaren Bezug dazu als hoechstens "moeglich").`
     : '';
@@ -286,10 +332,14 @@ Deno.serve(async (req) => {
   }
 
   // Claudes Bewertung + unsere eigenen, vertrauenswuerdigen Rohdaten zusammenfuehren.
+  // Zusaetzliche, vom Claude-Verhalten unabhaengige Absicherung: wurde ein
+  // Dokumentart-Vorab-Filter gewaehlt, faellt ein Treffer ohne passende
+  // Dokumentart auch dann raus, wenn Claude die Prompt-Anweisung missachtet.
   const ergebnisse = bewertungen
     .map((b: any) => {
       const roh = gesehen.get(`${b.quelle}:${b.id}`);
       if (!roh) return null;
+      if (dokumentartenFilterListe && !dokumentartenFilterListe.includes(b.dokumentart)) return null;
       return {
         quelle: roh.quelle,
         id: roh.id,
