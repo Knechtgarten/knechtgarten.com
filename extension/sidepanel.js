@@ -116,7 +116,7 @@ $('peaxBtn').addEventListener('click', () => {
   // einen vorausgefuellten Suchbegriff akzeptiert, hier ergaenzen
   // (z.B. ?q=... oder ?search=...). Bis dahin oeffnet der Button nur die
   // Suchseite selbst, der Begriff muesste manuell eingetippt werden.
-  chrome.tabs.create({ url: 'https://app.peax.ch/inbox/search' });
+  chrome.tabs.create({ url: 'https://app.peax.ch/inbox/search', active: false });
 });
 
 // ---------------------------------------------------------------------------
@@ -272,7 +272,19 @@ function renderLightbox() {
   badge.className = 'match-badge ' + (e.uebereinstimmung === 'hoch' ? 'hoch' : 'moeglich');
   $('lbBody').textContent = e.begruendung || '';
   $('lbPosition').textContent = `${lightboxIndex + 1} von ${lightboxListe.length}`;
-  $('lbOpen').onclick = () => chrome.tabs.create({ url: e.link });
+  // Öffnet im Hintergrund (active:false), damit der Tab, in dem gerade
+  // weitergearbeitet wird (z.B. Easybill), nicht weggeschnappt wird.
+  $('lbOpen').onclick = () => chrome.tabs.create({ url: e.link, active: false });
+
+  const bild = $('lbVorschauBild');
+  if (e.vorschauBild) {
+    bild.hidden = false;
+    bild.src = e.vorschauBild;
+    bild.onerror = () => { bild.hidden = true; };
+  } else {
+    bild.hidden = true;
+    bild.removeAttribute('src');
+  }
 }
 $('lbClose').addEventListener('click', closeLightbox);
 $('lbPrev').addEventListener('click', () => navLightbox(-1));

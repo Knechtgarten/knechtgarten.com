@@ -43,6 +43,7 @@ interface RohTreffer {
   datum: string | null;
   link: string;
   dateityp?: string;
+  vorschauBild?: string;
 }
 
 // Google-Drive-Suchsyntax verlangt Escaping von Apostrophen im Suchbegriff.
@@ -80,7 +81,7 @@ async function sucheDrive(begriff: string, token: string, zeitraumVon?: string, 
   }
   const params = new URLSearchParams({
     q: bedingungen.join(' and '),
-    fields: 'files(id,name,mimeType,modifiedTime,webViewLink)',
+    fields: 'files(id,name,mimeType,modifiedTime,webViewLink,thumbnailLink)',
     pageSize: '10',
   });
   const res = await fetch(`https://www.googleapis.com/drive/v3/files?${params}`, {
@@ -96,6 +97,11 @@ async function sucheDrive(begriff: string, token: string, zeitraumVon?: string, 
     datum: f.modifiedTime ?? null,
     link: f.webViewLink,
     dateityp: f.mimeType,
+    // Google generiert bei den meisten Dateitypen (PDF/Bild/Docs/Sheets) ein
+    // Vorschaubild - reicht fuer eine schnelle Ansicht, ohne die eigentliche
+    // Datei/den Tab zu wechseln. Braucht eine aktive Google-Session im
+    // Browser zum Laden (kein separater API-Aufruf, einfacher <img src>).
+    vorschauBild: f.thumbnailLink ?? undefined,
   }));
 }
 
@@ -347,6 +353,7 @@ Deno.serve(async (req) => {
         datum: roh.datum,
         link: roh.link,
         dateityp: roh.dateityp,
+        vorschauBild: roh.vorschauBild,
         uebereinstimmung: b.uebereinstimmung === 'hoch' ? 'hoch' : 'moeglich',
         begruendung: b.begruendung || '',
         dokumentart: b.dokumentart || undefined,
