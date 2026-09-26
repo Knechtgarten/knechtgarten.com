@@ -209,7 +209,7 @@ Deno.serve(async (req) => {
     return json({ error: 'Ungueltiger Request-Body (JSON erwartet).' }, 400);
   }
 
-  const { query, mitarbeiterEmail, googleAccessToken, quellen, zeitraumVon, papierkorbSpam, suchgenauigkeit, maxRunden } = body ?? {};
+  const { query, mitarbeiterEmail, googleAccessToken, quellen, zeitraumVon, papierkorbSpam, suchgenauigkeit, maxRunden, kundeFirma } = body ?? {};
   if (!query || typeof query !== 'string') return json({ error: 'query fehlt.' }, 400);
   if (!mitarbeiterEmail || typeof mitarbeiterEmail !== 'string') return json({ error: 'mitarbeiterEmail fehlt.' }, 400);
   if (!googleAccessToken || typeof googleAccessToken !== 'string') return json({ error: 'googleAccessToken fehlt.' }, 400);
@@ -255,7 +255,10 @@ Deno.serve(async (req) => {
   }
 
   const system = baueSystemPrompt(dokumentarten, genauigkeit);
-  const messages: any[] = [{ role: 'user', content: `Suchanfrage: ${query}` }];
+  const kundeHinweis = typeof kundeFirma === 'string' && kundeFirma.trim()
+    ? `\nZusatzhinweis: Der gesuchte Kunde/die Firma ist "${kundeFirma.trim()}" - beziehe das stark in Suche und Bewertung ein (z.B. als zusaetzlichen Suchbegriff, und werte Treffer ohne erkennbaren Bezug dazu als hoechstens "moeglich").`
+    : '';
+  const messages: any[] = [{ role: 'user', content: `Suchanfrage: ${query}${kundeHinweis}` }];
 
   let bewertungen: any[] = [];
   // Nutzer-waehlbare Sicherheitsbremse (Schnell/Normal/Ausfuehrlich in der

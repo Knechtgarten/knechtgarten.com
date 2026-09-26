@@ -266,6 +266,7 @@ async function suchen() {
         googleAccessToken: token,
         quellen,
         zeitraumVon: $('zeitraumVon').value || undefined,
+        kundeFirma: $('kundeFirma').value.trim() || undefined,
         papierkorbSpam: $('papierkorbSpam').checked,
         suchgenauigkeit: document.querySelector('.seg button[data-genauigkeit].active')?.dataset.genauigkeit || 'sinngemaess',
         maxRunden: Number(document.querySelector('.seg button[data-runden].active')?.dataset.runden || '4'),
