@@ -85,8 +85,16 @@ function zeigeSuche() {
 // ---------------------------------------------------------------------------
 // Quelle-Chips (Drive/Gmail toggle, PEAX separat)
 // ---------------------------------------------------------------------------
-document.querySelectorAll('.chip[data-quelle]').forEach((chip) => {
-  chip.addEventListener('click', () => chip.classList.toggle('active'));
+const quelleChips = document.querySelectorAll('.chip[data-quelle]');
+function aktualisiereQuelleAlle() {
+  $('quelleAlleBtn').classList.toggle('active', Array.from(quelleChips).every((c) => c.classList.contains('active')));
+}
+quelleChips.forEach((chip) => {
+  chip.addEventListener('click', () => { chip.classList.toggle('active'); aktualisiereQuelleAlle(); });
+});
+$('quelleAlleBtn').addEventListener('click', () => {
+  quelleChips.forEach((c) => c.classList.add('active'));
+  aktualisiereQuelleAlle();
 });
 
 document.querySelectorAll('.seg button[data-genauigkeit]').forEach((btn) => {
@@ -119,10 +127,10 @@ $('peaxBtn').addEventListener('click', () => {
 // gleiche SVGs wie im Mockup "Suchpanel".
 const FTYPE_ICONS = {
   pdf: '<svg viewBox="0 0 24 24"><path d="M6 2h9l5 5v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" fill="#fff" stroke="#DADCE0"/><path d="M15 2v5h5z" fill="#F7B4AC"/><rect x="5" y="14" width="14" height="6" rx="1" fill="#DB4437"/><text x="12" y="18.6" font-size="5" font-weight="700" fill="#fff" text-anchor="middle" font-family="Arial, sans-serif">PDF</text></svg>',
-  docs: '<svg viewBox="0 0 24 24"><path d="M6 2h9l5 5v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" fill="#fff" stroke="#DADCE0"/><path d="M15 2v5h5z" fill="#A4C2F4"/><rect x="7.5" y="10" width="9" height="1.4" rx=".5" fill="#4285F4"/><rect x="7.5" y="13" width="9" height="1.4" rx=".5" fill="#4285F4"/><rect x="7.5" y="16" width="6" height="1.4" rx=".5" fill="#4285F4"/></svg>',
-  sheets: '<svg viewBox="0 0 24 24"><path d="M6 2h9l5 5v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" fill="#fff" stroke="#DADCE0"/><path d="M15 2v5h5z" fill="#A8DAB5"/><rect x="7.5" y="10" width="9" height="7" fill="none" stroke="#0F9D58" stroke-width="1"/><line x1="7.5" y1="13.5" x2="16.5" y2="13.5" stroke="#0F9D58" stroke-width="1"/><line x1="11.8" y1="10" x2="11.8" y2="17" stroke="#0F9D58" stroke-width="1"/></svg>',
-  mail: '<svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2" fill="#EA4335"/><path d="M3 6l9 6.5L21 6" fill="none" stroke="#fff" stroke-width="1.4"/></svg>',
-  bild: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" fill="#F3E8FD" stroke="#8C6DAB"/><circle cx="8.5" cy="9.5" r="1.6" fill="#8C6DAB"/><path d="M4 17l5-5 4 4 3-3 4 4" fill="none" stroke="#8C6DAB" stroke-width="1.4"/></svg>',
+  docs: '<svg viewBox="0 0 24 24"><path d="M6 2h9l5 5v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" fill="#fff" stroke="#DADCE0"/><path d="M15 2v5h5z" fill="#A4C2F4"/><rect x="7" y="9.5" width="10" height="1.8" rx=".5" fill="#4285F4"/><rect x="7" y="13" width="10" height="1.8" rx=".5" fill="#4285F4"/><rect x="7" y="16.5" width="7" height="1.8" rx=".5" fill="#4285F4"/></svg>',
+  sheets: '<svg viewBox="0 0 24 24"><path d="M6 2h9l5 5v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" fill="#fff" stroke="#DADCE0"/><path d="M15 2v5h5z" fill="#A8DAB5"/><rect x="7" y="9.5" width="10" height="7.5" fill="none" stroke="#0F9D58" stroke-width="1.6"/><line x1="7" y1="13.25" x2="17" y2="13.25" stroke="#0F9D58" stroke-width="1.6"/><line x1="12" y1="9.5" x2="12" y2="17" stroke="#0F9D58" stroke-width="1.6"/></svg>',
+  mail: '<svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2" fill="#EA4335"/><path d="M3 6l9 6.5L21 6" fill="none" stroke="#fff" stroke-width="2"/></svg>',
+  bild: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" fill="#F3E8FD" stroke="#8C6DAB" stroke-width="1.4"/><circle cx="8.5" cy="9.5" r="2" fill="#8C6DAB"/><path d="M4 17l5-5 4 4 3-3 4 4" fill="none" stroke="#8C6DAB" stroke-width="2"/></svg>',
   generic: '<svg viewBox="0 0 24 24"><path d="M6 2h9l5 5v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" fill="#fff" stroke="#DADCE0"/><path d="M15 2v5h5z" fill="#D7D3CE"/></svg>',
 };
 function ftypeIcon(dateityp, quelle) {
