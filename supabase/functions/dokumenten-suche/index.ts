@@ -324,15 +324,26 @@ Deno.serve(async (req) => {
   // Datalist-Vorschlaege beim Lieferant-Feld) - kein Google-Login noetig.
   if (req.method === 'GET') {
     const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-    const [{ data: arten, error: artenError }, { data: lieferanten, error: lieferantenError }] = await Promise.all([
+    const [
+      { data: arten, error: artenError },
+      { data: lieferanten, error: lieferantenError },
+      { data: urlZuordnung, error: urlZuordnungError },
+      { data: einstellungen, error: einstellungenError },
+    ] = await Promise.all([
       sb.from('dokumentensuche_dokumentart').select('name').eq('aktiv', true).order('sortierung'),
       sb.from('lieferant').select('name').is('archiviert_am', null).order('name'),
+      sb.from('dokumentensuche_url_zuordnung').select('url_muster, standard_tab').eq('aktiv', true).order('sortierung'),
+      sb.from('dokumentensuche_einstellungen').select('standard_tab_fallback').limit(1).maybeSingle(),
     ]);
     if (artenError) return json({ error: artenError.message }, 500);
     if (lieferantenError) return json({ error: lieferantenError.message }, 500);
+    if (urlZuordnungError) return json({ error: urlZuordnungError.message }, 500);
+    if (einstellungenError) return json({ error: einstellungenError.message }, 500);
     return json({
       dokumentarten: (arten || []).map((d: any) => d.name),
       lieferanten: (lieferanten || []).map((l: any) => l.name),
+      urlZuordnung: (urlZuordnung || []).map((u: any) => ({ urlMuster: u.url_muster, tab: u.standard_tab })),
+      standardTabFallback: einstellungen?.standard_tab_fallback || 'alle',
     });
   }
 

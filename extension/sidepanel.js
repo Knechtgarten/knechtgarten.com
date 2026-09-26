@@ -83,19 +83,54 @@ function zeigeSuche() {
 }
 
 // ---------------------------------------------------------------------------
-// Quelle-Chips (Drive/Gmail toggle, PEAX separat)
+// Tabs (Alle/Drive/Gmail/PEAX) - ersetzen die fruehere Quelle-Mehrfachauswahl:
+// ein Tab bestimmt sowohl welche Filterfelder sichtbar sind als auch welche
+// Quellen die Suche durchsucht. Zusaetzlich wird beim Oeffnen des Panels
+// versucht, den passenden Tab automatisch anhand der Adresse des gerade
+// aktiven Browser-Tabs vorauszuwaehlen (siehe erkenneUndSetzeTabAusAktivemBrowserTab).
 // ---------------------------------------------------------------------------
-const quelleChips = document.querySelectorAll('.chip[data-quelle]');
-function aktualisiereQuelleAlle() {
-  $('quelleAlleBtn').classList.toggle('active', Array.from(quelleChips).every((c) => c.classList.contains('active')));
+let aktiverTab = 'alle';
+let urlZuordnungListe = [];
+let standardTabFallback = 'alle';
+
+// Fest hinterlegte Standardfaelle - admin-gepflegte Zuordnungen (aus der GET-
+// Antwort) werden zuerst geprueft, damit sie diese bei Bedarf ueberschreiben
+// koennen.
+const HARDCODIERTE_URL_ZUORDNUNG = [
+  { urlMuster: 'drive.google.com', tab: 'drive' },
+  { urlMuster: 'mail.google.com', tab: 'gmail' },
+  { urlMuster: 'app.peax.ch', tab: 'peax' },
+];
+
+function ermittleTabFuerUrl(url) {
+  if (!url) return standardTabFallback;
+  const treffer = urlZuordnungListe.find((z) => url.includes(z.urlMuster))
+    || HARDCODIERTE_URL_ZUORDNUNG.find((z) => url.includes(z.urlMuster));
+  return treffer ? treffer.tab : standardTabFallback;
 }
-quelleChips.forEach((chip) => {
-  chip.addEventListener('click', () => { chip.classList.toggle('active'); aktualisiereQuelleAlle(); });
+
+async function erkenneUndSetzeTabAusAktivemBrowserTab() {
+  try {
+    const tabs = await new Promise((resolve) => chrome.tabs.query({ active: true, currentWindow: true }, resolve));
+    setzeAktivenTab(ermittleTabFuerUrl(tabs?.[0]?.url || ''));
+  } catch (e) {
+    console.error('Aktiven Browser-Tab erkennen fehlgeschlagen:', e);
+  }
+}
+
+function setzeAktivenTab(tab) {
+  aktiverTab = tab;
+  document.querySelectorAll('.tab-bar button[data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
+  $('normalSuchePanel').hidden = tab === 'peax';
+  $('peaxPanel').hidden = tab !== 'peax';
+  document.querySelectorAll('[data-tab-scope]').forEach((el) => {
+    el.hidden = !el.dataset.tabScope.split(' ').includes(tab);
+  });
+}
+document.querySelectorAll('.tab-bar button[data-tab]').forEach((btn) => {
+  btn.addEventListener('click', () => setzeAktivenTab(btn.dataset.tab));
 });
-$('quelleAlleBtn').addEventListener('click', () => {
-  quelleChips.forEach((c) => c.classList.add('active'));
-  aktualisiereQuelleAlle();
-});
+setzeAktivenTab('alle');
 
 document.querySelectorAll('.seg button[data-genauigkeit]').forEach((btn) => {
   btn.addEventListener('click', () => {
@@ -245,8 +280,15 @@ async function ladeDokumentarten() {
     $('lieferantenListe').innerHTML = (data.lieferanten || [])
       .map((name) => `<option value="${esc(name)}"></option>`)
       .join('');
+    urlZuordnungListe = data.urlZuordnung || [];
+    standardTabFallback = data.standardTabFallback || 'alle';
   } catch (e) {
     console.error('Dokumentarten laden fehlgeschlagen:', e);
+  } finally {
+    // Erst NACH dem Laden der (admin-gepflegten) URL-Zuordnung erkennen, sonst
+    // wuerde beim allerersten Panel-Oeffnen noch mit leerer Liste (nur den
+    // hartcodierten Standardfaellen) erkannt.
+    erkenneUndSetzeTabAusAktivemBrowserTab();
   }
 }
 
@@ -390,8 +432,7 @@ async function suchen() {
     return;
   }
 
-  const quellen = Array.from(document.querySelectorAll('.chip[data-quelle].active'))
-    .map((c) => c.dataset.quelle);
+  const quellen = aktiverTab === 'drive' ? ['drive'] : aktiverTab === 'gmail' ? ['gmail'] : ['drive', 'gmail'];
 
   $('searchBtn').disabled = true;
   $('statusLine').textContent = $('anhaengeDurchsuchen').checked

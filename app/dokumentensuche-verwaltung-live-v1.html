@@ -160,6 +160,7 @@ body.buero-rolle .admin-only{display:none !important;}
     <div class="settingsnav">
       <a class="on" data-tab="quellen">Quellen</a>
       <a data-tab="dokumentarten">Dokumentarten</a>
+      <a data-tab="urlzuordnung">URL-Zuordnung</a>
       <a data-tab="einstellungen">Einstellungen</a>
       <a data-tab="erweiterung">Erweiterung</a>
       <a data-tab="nutzung">Nutzung</a>
@@ -186,6 +187,16 @@ body.buero-rolle .admin-only{display:none !important;}
         </div>
       </div>
 
+      <!-- URL-ZUORDNUNG -->
+      <div class="panel" id="tab-urlzuordnung">
+        <h1 class="page">URL-Zuordnung</h1>
+        <p style="font-size:12.5px;color:var(--muted);margin:-6px 0 14px;max-width:640px;">Beim Öffnen des Suchpanels wird die Adresse des gerade aktiven Browser-Tabs geprüft und automatisch der passende Tab (Alle/Drive/Gmail/PEAX) vorausgewählt. Drive/Gmail/PEAX selbst sind bereits fest hinterlegt – hier lassen sich zusätzliche Adressen ergänzen (z.B. easybill.de → Drive).</p>
+        <div class="card">
+          <div id="urlZuordnungListe"></div>
+          <button class="btn addbtn" id="urlZuordnungAddBtn">+ Neue Zuordnung hinzufügen</button>
+        </div>
+      </div>
+
       <!-- EINSTELLUNGEN -->
       <div class="panel" id="tab-einstellungen">
         <h1 class="page">Einstellungen</h1>
@@ -206,6 +217,15 @@ body.buero-rolle .admin-only{display:none !important;}
               <select id="einPapierkorbSpam">
                 <option value="false">Nein</option>
                 <option value="true">Ja</option>
+              </select>
+            </div>
+            <div class="fld">
+              <label>Standard-Tab für nicht zugeordnete Seiten</label>
+              <select id="einStandardTabFallback">
+                <option value="alle">Alle</option>
+                <option value="drive">Drive</option>
+                <option value="gmail">Gmail</option>
+                <option value="peax">PEAX</option>
               </select>
             </div>
           </div>
@@ -349,7 +369,7 @@ async function pruefeAnmeldung(){
   $('appMain').classList.remove('hidden');
   document.body.classList.toggle('buero-rolle', aktuelleRolle !== 'admin');
 
-  await Promise.all([ladeQuellen(), ladeDokumentarten(), ladeEinstellungen(), ladeErweiterung(), ladeNutzung()]);
+  await Promise.all([ladeQuellen(), ladeDokumentarten(), ladeUrlZuordnung(), ladeEinstellungen(), ladeErweiterung(), ladeNutzung()]);
   return true;
 }
 
@@ -450,15 +470,67 @@ async function ladeEinstellungen(){
   einstellungenId = data.id;
   $('einSuchgenauigkeit').value = data.such_genauigkeit_standard;
   $('einPapierkorbSpam').value = String(data.papierkorb_spam_standard);
+  $('einStandardTabFallback').value = data.standard_tab_fallback || 'alle';
 }
 $('einstellungenSpeichernBtn').addEventListener('click', async () => {
   const { error } = await sb.from('dokumentensuche_einstellungen').update({
     such_genauigkeit_standard: $('einSuchgenauigkeit').value,
     papierkorb_spam_standard: $('einPapierkorbSpam').value === 'true',
+    standard_tab_fallback: $('einStandardTabFallback').value,
     aktualisiert_am: new Date().toISOString()
   }).eq('id', einstellungenId);
   if(error){ showToast(friendlyError(error), true); return; }
   showToast('Einstellungen gespeichert.');
+});
+
+// ---------------------------------------------------------------------------
+// URL-Zuordnung (automatische Tab-Auswahl beim Panel-Oeffnen)
+// ---------------------------------------------------------------------------
+const TAB_LABEL = { alle: 'Alle', drive: 'Drive', gmail: 'Gmail', peax: 'PEAX' };
+async function ladeUrlZuordnung(){
+  const { data, error } = await sb.from('dokumentensuche_url_zuordnung').select('*').order('sortierung');
+  if(error){ showToast(friendlyError(error), true); return; }
+  $('urlZuordnungListe').innerHTML = (data || []).map(z => `
+    <div class="dartrow" data-id="${z.id}">
+      <input value="${esc(z.url_muster)}" placeholder="z.B. easybill.de" style="flex:2;">
+      <select style="flex:none;width:110px;border:1px solid var(--line);border-radius:6px;padding:6px 9px;font:inherit;font-size:12.5px;color:var(--ink);">
+        ${Object.entries(TAB_LABEL).map(([v,l]) => `<option value="${v}" ${z.standard_tab===v?'selected':''}>${l}</option>`).join('')}
+      </select>
+      <div class="rowactions">
+        <button type="button" class="icobtn danger uz-del" title="Löschen">${ICON.trash}</button>
+      </div>
+    </div>`).join('') || '<p style="font-size:12px;color:var(--muted);">Noch keine zusätzlichen Zuordnungen erfasst.</p>';
+
+  $('urlZuordnungListe').querySelectorAll('.dartrow').forEach(row => {
+    const id = row.dataset.id;
+    const input = row.querySelector('input');
+    const select = row.querySelector('select');
+    async function speichern(){
+      const { error } = await sb.from('dokumentensuche_url_zuordnung')
+        .update({ url_muster: input.value.trim(), standard_tab: select.value }).eq('id', id);
+      if(error){ showToast(friendlyError(error), true); return; }
+      showToast('Gespeichert.');
+    }
+    input.addEventListener('change', speichern);
+    select.addEventListener('change', speichern);
+    row.querySelector('.uz-del').addEventListener('click', async () => {
+      if(!await kgBestaetigen(`Zuordnung "${input.value}" wirklich löschen?`)) return;
+      const { error } = await sb.from('dokumentensuche_url_zuordnung').delete().eq('id', id);
+      if(error){ showToast(friendlyError(error), true); return; }
+      showToast('Gelöscht.');
+      await ladeUrlZuordnung();
+    });
+  });
+}
+$('urlZuordnungAddBtn').addEventListener('click', async () => {
+  const { data, error } = await sb.from('dokumentensuche_url_zuordnung')
+    .select('sortierung').order('sortierung', { ascending: false }).limit(1);
+  if(error){ showToast(friendlyError(error), true); return; }
+  const naechsteSortierung = (data?.[0]?.sortierung ?? 0) + 1;
+  const { error: insErr } = await sb.from('dokumentensuche_url_zuordnung')
+    .insert({ url_muster: 'beispiel.ch', standard_tab: 'alle', sortierung: naechsteSortierung });
+  if(insErr){ showToast(friendlyError(insErr), true); return; }
+  await ladeUrlZuordnung();
 });
 
 // ---------------------------------------------------------------------------
@@ -472,7 +544,7 @@ async function ladeErweiterung(){
   erweiterungId = data.id;
   $('erwVersion').value = data.version || '';
   $('erwDownloadUrl').value = data.download_url || '';
-});
+}
 $('erwHochladenBtn').addEventListener('click', () => $('erwDateiInput').click());
 $('erwDateiInput').addEventListener('change', async () => {
   const file = $('erwDateiInput').files[0];
