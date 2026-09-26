@@ -88,6 +88,13 @@ document.querySelectorAll('.chip[data-quelle]').forEach((chip) => {
   chip.addEventListener('click', () => chip.classList.toggle('active'));
 });
 
+document.querySelectorAll('.seg button[data-genauigkeit]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.seg button[data-genauigkeit]').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+  });
+});
+
 $('peaxBtn').addEventListener('click', () => {
   // TODO: Sobald bestaetigt ist, welcher URL-Parameter PEAX' Suchseite fuer
   // einen vorausgefuellten Suchbegriff akzeptiert, hier ergaenzen
@@ -125,11 +132,19 @@ function zeichneErgebnisse(ergebnisse) {
     a.innerHTML = `
       <span class="doc-icon">${ftypeSymbol(e.dateityp, e.quelle)}</span>
       <span class="doc-main">
-        <div class="doc-title"></div>
+        <div class="doc-top-line">
+          <div class="doc-title"></div>
+          <span class="match-badge"></span>
+        </div>
         <div class="doc-meta"></div>
+        <div class="doc-begruendung"></div>
       </span>`;
     a.querySelector('.doc-title').textContent = e.titel;
-    a.querySelector('.doc-meta').textContent = `${e.quelle === 'drive' ? 'Drive' : 'Gmail'} · ${fmtDatum(e.datum)}${e.snippet ? ' · ' + e.snippet : ''}`;
+    const badge = a.querySelector('.match-badge');
+    badge.textContent = e.uebereinstimmung === 'hoch' ? 'Hoch' : 'Möglich';
+    badge.classList.add(e.uebereinstimmung === 'hoch' ? 'hoch' : 'moeglich');
+    a.querySelector('.doc-meta').textContent = `${e.quelle === 'drive' ? 'Drive' : 'Gmail'} · ${fmtDatum(e.datum)}${e.dokumentart ? ' · ' + e.dokumentart : ''}`;
+    a.querySelector('.doc-begruendung').textContent = e.begruendung || '';
     $('docList').appendChild(a);
   }
 }
@@ -151,7 +166,7 @@ async function suchen() {
     .map((c) => c.dataset.quelle);
 
   $('searchBtn').disabled = true;
-  $('statusLine').textContent = 'Suche läuft …';
+  $('statusLine').textContent = 'KI durchsucht Drive/Gmail, kann ein paar Sekunden dauern …';
   $('statusLine').className = 'status-line';
   $('resultsHeader').hidden = true;
   $('docList').innerHTML = '';
@@ -168,6 +183,7 @@ async function suchen() {
         quellen,
         zeitraumVon: $('zeitraumVon').value || undefined,
         papierkorbSpam: $('papierkorbSpam').checked,
+        suchgenauigkeit: document.querySelector('.seg button[data-genauigkeit].active')?.dataset.genauigkeit || 'sinngemaess',
       }),
     });
     const data = await res.json();
