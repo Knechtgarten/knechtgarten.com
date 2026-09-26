@@ -113,12 +113,22 @@ $('peaxBtn').addEventListener('click', () => {
 // ---------------------------------------------------------------------------
 // Suche
 // ---------------------------------------------------------------------------
-function ftypeSymbol(dateityp, quelle) {
-  if (quelle === 'gmail') return '✉';
-  if (dateityp === 'application/pdf') return 'PDF';
-  if (dateityp === 'application/vnd.google-apps.spreadsheet') return '⊞';
-  if (dateityp === 'application/vnd.google-apps.document') return '≡';
-  return '📄';
+// An Original-Icons angelehnt (bewusste Ausnahme vom sonst einheitlichen
+// Linien-Icon-Stil - Dateityp-Erkennung lebt von den bekannten Farbcodes),
+// gleiche SVGs wie im Mockup "Suchpanel".
+const FTYPE_ICONS = {
+  pdf: '<svg viewBox="0 0 24 24"><path d="M6 2h9l5 5v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" fill="#fff" stroke="#DADCE0"/><path d="M15 2v5h5z" fill="#F7B4AC"/><rect x="5" y="14" width="14" height="6" rx="1" fill="#DB4437"/><text x="12" y="18.6" font-size="5" font-weight="700" fill="#fff" text-anchor="middle" font-family="Arial, sans-serif">PDF</text></svg>',
+  docs: '<svg viewBox="0 0 24 24"><path d="M6 2h9l5 5v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" fill="#fff" stroke="#DADCE0"/><path d="M15 2v5h5z" fill="#A4C2F4"/><rect x="7.5" y="10" width="9" height="1.4" rx=".5" fill="#4285F4"/><rect x="7.5" y="13" width="9" height="1.4" rx=".5" fill="#4285F4"/><rect x="7.5" y="16" width="6" height="1.4" rx=".5" fill="#4285F4"/></svg>',
+  sheets: '<svg viewBox="0 0 24 24"><path d="M6 2h9l5 5v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" fill="#fff" stroke="#DADCE0"/><path d="M15 2v5h5z" fill="#A8DAB5"/><rect x="7.5" y="10" width="9" height="7" fill="none" stroke="#0F9D58" stroke-width="1"/><line x1="7.5" y1="13.5" x2="16.5" y2="13.5" stroke="#0F9D58" stroke-width="1"/><line x1="11.8" y1="10" x2="11.8" y2="17" stroke="#0F9D58" stroke-width="1"/></svg>',
+  mail: '<svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2" fill="#EA4335"/><path d="M3 6l9 6.5L21 6" fill="none" stroke="#fff" stroke-width="1.4"/></svg>',
+  generic: '<svg viewBox="0 0 24 24"><path d="M6 2h9l5 5v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" fill="#fff" stroke="#DADCE0"/><path d="M15 2v5h5z" fill="#D7D3CE"/></svg>',
+};
+function ftypeIcon(dateityp, quelle) {
+  if (quelle === 'gmail') return FTYPE_ICONS.mail;
+  if (dateityp === 'application/pdf') return FTYPE_ICONS.pdf;
+  if (dateityp === 'application/vnd.google-apps.document') return FTYPE_ICONS.docs;
+  if (dateityp === 'application/vnd.google-apps.spreadsheet') return FTYPE_ICONS.sheets;
+  return FTYPE_ICONS.generic;
 }
 
 function fmtDatum(iso) {
@@ -169,7 +179,7 @@ function zeichneErgebnisse(ergebnisse) {
     a.target = '_blank';
     a.rel = 'noopener noreferrer';
     a.innerHTML = `
-      <span class="doc-icon">${ftypeSymbol(e.dateityp, e.quelle)}</span>
+      <span class="doc-icon">${ftypeIcon(e.dateityp, e.quelle)}</span>
       <span class="doc-main">
         <div class="doc-top-line">
           <div class="doc-title"></div>
