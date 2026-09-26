@@ -1,0 +1,201 @@
+// ============================================================================
+// Dokumenten-Suche - Seitenpanel-Logik.
+//
+// Ablauf: Google-Login per chrome.identity.launchWebAuthFlow (implizites
+// Token, kein Client-Secret im Code - siehe extension/erweiterungs-id.md fuer
+// die feste Erweiterungs-ID/Redirect-URI). Token wird in chrome.storage.local
+// zwischengespeichert und bis zum Ablauf wiederverwendet. Die eigentliche
+// Suche laeuft ueber die Supabase Edge Function "dokumenten-suche" (Phase 2,
+// noch ohne KI-Ebene - siehe Projekt-Notiz).
+//
+// PEAX ist bewusst NICHT Teil der gemeinsamen Suche (kein API-Zugang) -
+// der PEAX-Chip oeffnet stattdessen direkt PEAX' eigene Suchseite in einem
+// neuen Tab. Die genaue URL/Query-Parameter von PEAX' Suchseite sind noch
+// nicht bestaetigt (siehe TODO unten) - vorerst wird nur die Suchseite ohne
+// vorausgefuellten Begriff geoeffnet.
+// ============================================================================
+
+const GOOGLE_CLIENT_ID = '689526517764-f2727pi1nglt5lkbttec3ssjqkgl47k5.apps.googleusercontent.com';
+const GOOGLE_SCOPES = [
+  'https://www.googleapis.com/auth/drive.readonly',
+  'https://www.googleapis.com/auth/gmail.readonly',
+];
+const EDGE_FUNCTION_URL = 'https://oalapdxinqlnzwxhyuzy.supabase.co/functions/v1/dokumenten-suche';
+const SUPABASE_ANON_KEY = 'sb_publishable_DoeD4uEnwemmnFu4AxE9uw_5lmQYc5P';
+
+const $ = (id) => document.getElementById(id);
+
+// ---------------------------------------------------------------------------
+// Google-Login
+// ---------------------------------------------------------------------------
+function baueAuthUrl() {
+  const redirectUri = chrome.identity.getRedirectURL();
+  const params = new URLSearchParams({
+    client_id: GOOGLE_CLIENT_ID,
+    response_type: 'token',
+    redirect_uri: redirectUri,
+    scope: GOOGLE_SCOPES.join(' '),
+  });
+  return `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
+}
+
+function parseTokenAusRedirect(redirectUrl) {
+  const fragment = new URL(redirectUrl).hash.slice(1);
+  const params = new URLSearchParams(fragment);
+  const accessToken = params.get('access_token');
+  const expiresIn = Number(params.get('expires_in') || '3600');
+  if (!accessToken) throw new Error('Kein access_token in der Antwort von Google.');
+  return { accessToken, ablaufZeit: Date.now() + expiresIn * 1000 };
+}
+
+async function holeGespeichertenToken() {
+  const { googleToken } = await chrome.storage.local.get('googleToken');
+  if (!googleToken) return null;
+  // 60 Sekunden Puffer vor dem eigentlichen Ablauf.
+  if (googleToken.ablaufZeit < Date.now() + 60_000) return null;
+  return googleToken.accessToken;
+}
+
+function verbinden() {
+  $('connectStatus').textContent = 'Google-Anmeldefenster öffnet sich …';
+  $('connectStatus').className = 'status-line';
+  chrome.identity.launchWebAuthFlow({ url: baueAuthUrl(), interactive: true }, async (redirectUrl) => {
+    if (chrome.runtime.lastError || !redirectUrl) {
+      $('connectStatus').textContent = 'Anmeldung fehlgeschlagen: ' + (chrome.runtime.lastError?.message || 'abgebrochen');
+      $('connectStatus').className = 'status-line err';
+      return;
+    }
+    try {
+      const token = parseTokenAusRedirect(redirectUrl);
+      await chrome.storage.local.set({ googleToken: token });
+      zeigeSuche();
+    } catch (e) {
+      $('connectStatus').textContent = 'Fehler: ' + e.message;
+      $('connectStatus').className = 'status-line err';
+    }
+  });
+}
+
+function zeigeSuche() {
+  $('connectBox').hidden = true;
+  $('searchBox').hidden = false;
+}
+
+// ---------------------------------------------------------------------------
+// Quelle-Chips (Drive/Gmail toggle, PEAX separat)
+// ---------------------------------------------------------------------------
+document.querySelectorAll('.chip[data-quelle]').forEach((chip) => {
+  chip.addEventListener('click', () => chip.classList.toggle('active'));
+});
+
+$('peaxBtn').addEventListener('click', () => {
+  // TODO: Sobald bestaetigt ist, welcher URL-Parameter PEAX' Suchseite fuer
+  // einen vorausgefuellten Suchbegriff akzeptiert, hier ergaenzen
+  // (z.B. ?q=... oder ?search=...). Bis dahin oeffnet der Button nur die
+  // Suchseite selbst, der Begriff muesste manuell eingetippt werden.
+  chrome.tabs.create({ url: 'https://app.peax.ch/inbox/search' });
+});
+
+// ---------------------------------------------------------------------------
+// Suche
+// ---------------------------------------------------------------------------
+function ftypeSymbol(dateityp, quelle) {
+  if (quelle === 'gmail') return '✉';
+  if (dateityp === 'application/pdf') return 'PDF';
+  if (dateityp === 'application/vnd.google-apps.spreadsheet') return '⊞';
+  if (dateityp === 'application/vnd.google-apps.document') return '≡';
+  return '📄';
+}
+
+function fmtDatum(iso) {
+  if (!iso) return '';
+  return new Date(iso).toLocaleDateString('de-CH');
+}
+
+function zeichneErgebnisse(ergebnisse) {
+  $('resultsHeader').hidden = false;
+  $('resultsCount').textContent = `${ergebnisse.length} Dokument${ergebnisse.length === 1 ? '' : 'e'}`;
+  $('docList').innerHTML = '';
+  for (const e of ergebnisse) {
+    const a = document.createElement('a');
+    a.className = 'doc-row';
+    a.href = e.link;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.innerHTML = `
+      <span class="doc-icon">${ftypeSymbol(e.dateityp, e.quelle)}</span>
+      <span class="doc-main">
+        <div class="doc-title"></div>
+        <div class="doc-meta"></div>
+      </span>`;
+    a.querySelector('.doc-title').textContent = e.titel;
+    a.querySelector('.doc-meta').textContent = `${e.quelle === 'drive' ? 'Drive' : 'Gmail'} · ${fmtDatum(e.datum)}${e.snippet ? ' · ' + e.snippet : ''}`;
+    $('docList').appendChild(a);
+  }
+}
+
+async function suchen() {
+  const query = $('queryInput').value.trim();
+  if (!query) return;
+
+  const token = await holeGespeichertenToken();
+  if (!token) {
+    $('connectBox').hidden = false;
+    $('searchBox').hidden = true;
+    $('connectStatus').textContent = 'Anmeldung ist abgelaufen, bitte erneut verbinden.';
+    $('connectStatus').className = 'status-line err';
+    return;
+  }
+
+  const quellen = Array.from(document.querySelectorAll('.chip[data-quelle].active'))
+    .map((c) => c.dataset.quelle);
+
+  $('searchBtn').disabled = true;
+  $('statusLine').textContent = 'Suche läuft …';
+  $('statusLine').className = 'status-line';
+  $('resultsHeader').hidden = true;
+  $('docList').innerHTML = '';
+
+  try {
+    const profil = await new Promise((resolve) => chrome.identity.getProfileUserInfo({ accountStatus: 'ANY' }, resolve));
+    const res = await fetch(EDGE_FUNCTION_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+      body: JSON.stringify({
+        query,
+        mitarbeiterEmail: profil?.email || 'unbekannt',
+        googleAccessToken: token,
+        quellen,
+        zeitraumVon: $('zeitraumVon').value || undefined,
+        papierkorbSpam: $('papierkorbSpam').checked,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `Fehler ${res.status}`);
+
+    zeichneErgebnisse(data.ergebnisse || []);
+    if (data.fehler?.length) {
+      $('statusLine').textContent = 'Teilweise fehlgeschlagen: ' + data.fehler.join(' / ');
+      $('statusLine').className = 'status-line err';
+    } else {
+      $('statusLine').textContent = '';
+    }
+  } catch (e) {
+    $('statusLine').textContent = 'Fehler: ' + e.message;
+    $('statusLine').className = 'status-line err';
+  } finally {
+    $('searchBtn').disabled = false;
+  }
+}
+
+$('connectBtn').addEventListener('click', verbinden);
+$('searchBtn').addEventListener('click', suchen);
+$('queryInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') suchen(); });
+
+// ---------------------------------------------------------------------------
+// Start: pruefen, ob schon ein gueltiges Google-Token vorliegt.
+// ---------------------------------------------------------------------------
+(async () => {
+  const token = await holeGespeichertenToken();
+  if (token) zeigeSuche();
+})();
