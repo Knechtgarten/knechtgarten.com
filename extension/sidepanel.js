@@ -296,13 +296,14 @@ function renderLightbox() {
   // weitergearbeitet wird (z.B. Easybill), nicht weggeschnappt wird.
   $('lbOpen').onclick = () => chrome.tabs.create({ url: e.link, active: false });
 
+  const wrap = $('lbVorschauWrap');
   const bild = $('lbVorschauBild');
   if (e.vorschauBild) {
-    bild.hidden = false;
+    wrap.hidden = false;
     bild.src = e.vorschauBild;
-    bild.onerror = () => { bild.hidden = true; };
+    bild.onerror = () => { wrap.hidden = true; };
   } else {
-    bild.hidden = true;
+    wrap.hidden = true;
     bild.removeAttribute('src');
   }
 }
@@ -310,6 +311,39 @@ $('lbClose').addEventListener('click', closeLightbox);
 $('lbPrev').addEventListener('click', () => navLightbox(-1));
 $('lbNext').addEventListener('click', () => navLightbox(1));
 $('lightbox').addEventListener('click', (ev) => { if (ev.target === $('lightbox')) closeLightbox(); });
+
+// ---------------------------------------------------------------------------
+// Vorschaubild per Maus verschieben (Bild ist groesser als der sichtbare
+// Rahmen gerendert - Ziehen zeigt den Rest, ohne das Fenster selbst zu
+// vergroessern).
+// ---------------------------------------------------------------------------
+(function () {
+  const wrap = $('lbVorschauWrap');
+  const bild = $('lbVorschauBild');
+  let ziehtGerade = false;
+  let startX = 0, startY = 0, curX = 0, curY = 0, minX = 0, minY = 0;
+
+  bild.addEventListener('load', () => {
+    curX = 0; curY = 0;
+    bild.style.transform = 'translate(0px, 0px)';
+    minX = Math.min(0, wrap.clientWidth - bild.offsetWidth);
+    minY = Math.min(0, wrap.clientHeight - bild.offsetHeight);
+  });
+
+  wrap.addEventListener('mousedown', (ev) => {
+    ziehtGerade = true;
+    startX = ev.clientX - curX;
+    startY = ev.clientY - curY;
+    wrap.classList.add('greift');
+  });
+  window.addEventListener('mousemove', (ev) => {
+    if (!ziehtGerade) return;
+    curX = Math.min(0, Math.max(minX, ev.clientX - startX));
+    curY = Math.min(0, Math.max(minY, ev.clientY - startY));
+    bild.style.transform = `translate(${curX}px, ${curY}px)`;
+  });
+  window.addEventListener('mouseup', () => { ziehtGerade = false; wrap.classList.remove('greift'); });
+})();
 
 async function suchen() {
   const query = $('queryInput').value.trim();
