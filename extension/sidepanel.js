@@ -111,6 +111,24 @@ document.querySelectorAll('.seg button[data-runden]').forEach((btn) => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Zeitraum-Schnellauswahl: fuellt Von/Bis automatisch aus statt manuell im
+// Datumspicker zu klicken.
+// ---------------------------------------------------------------------------
+function alsDatumInput(d) { return d.toISOString().slice(0, 10); }
+
+$('btnZeitraum6Wochen').addEventListener('click', () => {
+  const von = new Date();
+  von.setDate(von.getDate() - 42);
+  $('zeitraumVon').value = alsDatumInput(von);
+  $('zeitraumBis').value = '';
+});
+$('btnZeitraumJahr').addEventListener('click', () => {
+  const jahresanfang = new Date(new Date().getFullYear(), 0, 1);
+  $('zeitraumVon').value = alsDatumInput(jahresanfang);
+  $('zeitraumBis').value = '';
+});
+
 $('peaxBtn').addEventListener('click', () => {
   // TODO: Sobald bestaetigt ist, welcher URL-Parameter PEAX' Suchseite fuer
   // einen vorausgefuellten Suchbegriff akzeptiert, hier ergaenzen
