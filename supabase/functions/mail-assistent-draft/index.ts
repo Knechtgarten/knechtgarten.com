@@ -274,12 +274,11 @@ async function modusAntworten(body: any, modell: string) {
   if (body.intern) return await modusAntwortenIntern(body, modell);
 
   const [
-    { data: grundlogik }, { data: schreibstil }, { data: firmendaten },
+    { data: grundlogik }, { data: firmendaten },
     { data: vorlagen }, { data: faelle }, { data: wissen },
     { data: mitarbeitende }, { data: externeKontakte }, { data: zweige },
   ] = await Promise.all([
     sb.from('mailassistent_grundlogik_abschnitt').select('titel,inhalt').order('reihenfolge'),
-    sb.from('mailassistent_schreibstil_abschnitt').select('titel,inhalt').order('reihenfolge'),
     sb.from('mailassistent_firmendaten').select('*').limit(1).maybeSingle(),
     sb.from('mailassistent_vorlage').select(`*, mailassistent_vorlage_antwort(*),
       mailassistent_vorlage_zusatzfenster(
@@ -296,8 +295,14 @@ async function modusAntworten(body: any, modell: string) {
     sb.from('mailassistent_zweig').select('*, mailassistent_ast(titel,anwenden_bei,nicht_anwenden_bei,ast_funktion)'),
   ]);
 
+  // Schreibstil wird bewusst NICHT mitgeschickt - dieser Aufruf entscheidet
+  // nur, welche Vorlage/welcher Zweig zutrifft (reines JSON), schreibt noch
+  // keinen Mailtext. Mit dem inzwischen umfangreichen Schreibstil-Text
+  // (ausformulierte Beispielmails + Selbstpruef-Checkliste) hat die KI hier
+  // teils angefangen, Fliesstext statt JSON auszugeben und ist am
+  // max_tokens-Limit abgeschnitten worden. Schreibstil kommt weiterhin in
+  // modusAuswahlAntwort/modusVerfassen zum Zug, wo tatsaechlich geschrieben wird.
   const grundlogikText = formatiereAbschnitte(grundlogik);
-  const schreibstilText = formatiereAbschnitte(schreibstil);
   const mitarbeitendeListe = (mitarbeitende || [])
     .map((m: any) => `${m.name}${m.email ? ' <' + m.email + '>' : ''}${m.funktion ? ' - ' + m.funktion : ''}`)
     .join('\n');
@@ -358,7 +363,7 @@ async function modusAntworten(body: any, modell: string) {
 
   const system = `Du bist der Mail-Assistent von Knechtgarten (Gartenbau-Unternehmen, Heimenschwand/BE). Du liest eine eingehende Mail und entscheidest, wie sie beantwortet werden soll.
 
-${grundlogikText ? 'GRUNDLOGIK (wie du als Mail-Assistent grundsaetzlich vorgehst):\n' + grundlogikText + '\n\n' : ''}${schreibstilText ? 'SCHREIBSTIL:\n' + schreibstilText + '\n\n' : ''}${firmendaten ? 'FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten) + '\n\n' : ''}${wissenText ? 'NACHSCHLAGEWERK (weiteres Wissen - nutze das bei Bedarf, z.B. wenn eine Vorlage eine konkrete Angabe braucht):\n' + wissenText + '\n\n' : ''}${mitarbeitendeListe ? 'MITARBEITENDE (unser eigenes Team - gehoert zu "uns", nicht zur Gegenseite):\n' + mitarbeitendeListe + '\n\n' : ''}${externeKontakteListe ? 'BEKANNTE EXTERNE FIRMEN (anhand der Domain im Mailkopf zuordenbar - gehoeren NICHT zu uns; wo eine Anrede hinterlegt ist, gilt DIESE statt dem generellen Schreibstil-Standard):\n' + externeKontakteListe + '\n\n' : ''}Pruefe die folgenden zwei Bereiche mit GLEICHER Prioritaet (keiner geht dem anderen automatisch vor) - MAIL-VORLAGEN und ZWEIGE sind fuer spezifische, bekannte Faelle (jede VORLAGE ist ueber einen Ast/Zweig eingeordnet - Ast und Zweig sind reine Einordnung, kein eigener Inhalt):
+${grundlogikText ? 'GRUNDLOGIK (wie du als Mail-Assistent grundsaetzlich vorgehst):\n' + grundlogikText + '\n\n' : ''}${firmendaten ? 'FIRMENDATEN:\n' + formatiereFirmendaten(firmendaten) + '\n\n' : ''}${wissenText ? 'NACHSCHLAGEWERK (weiteres Wissen - nutze das bei Bedarf, z.B. wenn eine Vorlage eine konkrete Angabe braucht):\n' + wissenText + '\n\n' : ''}${mitarbeitendeListe ? 'MITARBEITENDE (unser eigenes Team - gehoert zu "uns", nicht zur Gegenseite):\n' + mitarbeitendeListe + '\n\n' : ''}${externeKontakteListe ? 'BEKANNTE EXTERNE FIRMEN (anhand der Domain im Mailkopf zuordenbar - gehoeren NICHT zu uns; wo eine Anrede hinterlegt ist, gilt DIESE statt dem generellen Schreibstil-Standard):\n' + externeKontakteListe + '\n\n' : ''}Pruefe die folgenden zwei Bereiche mit GLEICHER Prioritaet (keiner geht dem anderen automatisch vor) - MAIL-VORLAGEN und ZWEIGE sind fuer spezifische, bekannte Faelle (jede VORLAGE ist ueber einen Ast/Zweig eingeordnet - Ast und Zweig sind reine Einordnung, kein eigener Inhalt):
 
 MAIL-VORLAGEN:
 ${vorlagenMenu || '(keine erfasst)'}
