@@ -51,6 +51,15 @@ function escapeDriveQuery(text: string): string {
   return text.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
+// Drive liefert das Vorschaubild standardmaessig sehr klein (~220px, endet
+// auf "=s220") - fuer die Lightbox-Grossansicht viel zu unscharf. Dieselbe
+// Bild-Adresse akzeptiert aber eine deutlich groessere Grioesenangabe, ohne
+// dass ein zusaetzlicher API-Aufruf noetig ist.
+function vergroessereThumbnail(url?: string): string | undefined {
+  if (!url) return undefined;
+  return /=s\d+$/.test(url) ? url.replace(/=s\d+$/, '=s1600') : `${url}=s1600`;
+}
+
 // Dateiformat-Filter (Erweiterung: "Alle"/PDF/Google Docs/Google Sheets/Mail/
 // Bild) - fuer Drive als harte mimeType-Bedingung, fuer Gmail als Anhang-
 // Dateiendungs-Hinweis (siehe sucheGmail). "mail" selbst betrifft nur Gmail
@@ -101,7 +110,7 @@ async function sucheDrive(begriff: string, token: string, zeitraumVon?: string, 
     // Vorschaubild - reicht fuer eine schnelle Ansicht, ohne die eigentliche
     // Datei/den Tab zu wechseln. Braucht eine aktive Google-Session im
     // Browser zum Laden (kein separater API-Aufruf, einfacher <img src>).
-    vorschauBild: f.thumbnailLink ?? undefined,
+    vorschauBild: vergroessereThumbnail(f.thumbnailLink),
   }));
 }
 
