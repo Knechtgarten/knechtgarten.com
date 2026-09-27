@@ -475,6 +475,14 @@ function renderLightbox() {
   const wrap = $('lbVorschauWrap');
   const bild = $('lbVorschauBild');
   const iframe = $('lbVorschauIframe');
+  const seitenBox = $('lbVorschauSeiten');
+  const schaerferBtn = $('lbPeaxSchaerfer');
+  seitenBox.hidden = true;
+  seitenBox.innerHTML = '';
+  schaerferBtn.hidden = true;
+  schaerferBtn.disabled = false;
+  schaerferBtn.textContent = 'Scharfe Vorschau laden';
+
   if (e.quelle === 'drive') {
     // Drive bietet eine offizielle Einbett-Vorschau, die mehrseitige PDFs/Docs
     // per echtem Scrollen anzeigt (statt nur eines statischen Vorschaubilds
@@ -498,8 +506,72 @@ function renderLightbox() {
       wrap.hidden = true;
       bild.removeAttribute('src');
     }
+    // PEAX hat keine Einbett-Vorschau wie Drive - stattdessen auf Wunsch
+    // (kann einige Sekunden dauern, oeffnet kurz einen Hintergrund-Tab)
+    // die echten, scharfen Seiten aus PEAX' eigenem PDF-Betrachter holen.
+    if (e.quelle === 'peax') {
+      wrap.hidden = false;
+      schaerferBtn.hidden = false;
+    }
   }
 }
+
+// PEAX hat keine per DevTools auffindbare PDF-Datei-Adresse (geprueft
+// 2026-09-27) - deshalb wird kurz ein Hintergrund-Tab mit dem echten
+// Dokument geoeffnet, PEAX' eigener PDF-Betrachter rendert die Seiten, das
+// Content-Script (peax-content.js) liest sie als fertige Bilder aus
+// (canvas.toDataURL) und schickt sie zurueck. Kein API-Zugriff noetig, da
+// nur gelesen wird, was PEAX selbst schon auf dem Bildschirm zeichnet.
+async function ladeSchaerferePeaxVorschau(eintrag) {
+  const btn = $('lbPeaxSchaerfer');
+  const seitenBox = $('lbVorschauSeiten');
+  const bild = $('lbVorschauBild');
+  btn.disabled = true;
+  btn.textContent = 'Lade … (kann einige Sekunden dauern)';
+
+  let tab;
+  try {
+    tab = await new Promise((resolve, reject) => {
+      chrome.tabs.create({ url: eintrag.link, active: false }, (t) => {
+        if (chrome.runtime.lastError || !t) reject(new Error(chrome.runtime.lastError?.message || 'Tab konnte nicht geöffnet werden.'));
+        else resolve(t);
+      });
+    });
+    await new Promise((resolve) => {
+      function listener(tabId, info) {
+        if (tabId === tab.id && info.status === 'complete') {
+          chrome.tabs.onUpdated.removeListener(listener);
+          resolve();
+        }
+      }
+      chrome.tabs.onUpdated.addListener(listener);
+    });
+    const antwort = await new Promise((resolve, reject) => {
+      chrome.tabs.sendMessage(tab.id, { peaxAction: 'seiten-lesen' }, (res) => {
+        if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+        else resolve(res);
+      });
+    });
+    const seiten = antwort?.seiten || [];
+    if (!seiten.length) {
+      btn.textContent = 'Konnte keine Seiten lesen – bitte "Original öffnen" nutzen.';
+      return;
+    }
+    seitenBox.innerHTML = seiten.map((src) => `<img src="${src}">`).join('');
+    seitenBox.hidden = false;
+    bild.hidden = true;
+    btn.hidden = true;
+  } catch (err) {
+    btn.textContent = 'Fehler beim Laden – bitte "Original öffnen" nutzen.';
+  } finally {
+    btn.disabled = false;
+    if (tab) chrome.tabs.remove(tab.id).catch(() => {});
+  }
+}
+$('lbPeaxSchaerfer').addEventListener('click', () => {
+  const e = lightboxListe[lightboxIndex];
+  if (e) ladeSchaerferePeaxVorschau(e);
+});
 $('lbClose').addEventListener('click', closeLightbox);
 $('lbPrev').addEventListener('click', () => navLightbox(-1));
 $('lbNext').addEventListener('click', () => navLightbox(1));

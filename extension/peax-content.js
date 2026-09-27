@@ -126,6 +126,43 @@ function liesErgebnislisteAus() {
   return [...document.querySelectorAll('[data-testid="tile-list-tile"]')].map(liesKachelAus);
 }
 
+// ----------------------------------------------------------------------------
+// Scharfe Dokument-Vorschau: PEAX hat keine per DevTools auffindbare
+// PDF-Datei-URL (geprueft 2026-09-27, Netzwerk-Tab zeigte nur kleine
+// Token-/Analytics-Aufrufe) - vermutlich kommen die Rohdaten bereits als Teil
+// einer anderen Antwort und werden clientseitig direkt an PDF.js
+// weitergereicht, statt als eigene Browser-Anfrage sichtbar zu sein. Deshalb
+// hier der Umweg: PEAX' eigenen PDF-Betrachter (ngx-extended-pdf-viewer, auf
+// der Dokument-Detailseite https://app.peax.ch/inbox/search/<doc-id>) fertig
+// rendern lassen und die bereits gezeichneten <canvas>-Seiten als Bild
+// abgreifen (canvas.toDataURL) - kein Netzwerkzugriff noetig, da wir nur
+// lesen, was der Browser selbst schon auf dem Bildschirm hat.
+// Bestaetigte Selektoren (Stand 2026-09-27): #viewerContainer = scrollbarer
+// Rahmen um alle Seiten, .page[data-page-number] = eine Seite, darin ein
+// <canvas> mit dem fertig gerenderten Seiteninhalt.
+async function liesPeaxSeitenAus() {
+  const container = await warteAufElement('#viewerContainer', 8000);
+  if (!container) return [];
+  await warteAufElement('.page[data-page-number]', 8000);
+
+  // PDF.js rendert aus Speichergruenden meist nur Seiten nahe der aktuellen
+  // Bildschirmposition - deshalb einmal komplett durchscrollen, damit jede
+  // Seite ihren Canvas-Inhalt bekommt, bevor wir alles auslesen.
+  const gesamtHoehe = container.scrollHeight;
+  const schritt = Math.max(200, Math.floor(container.clientHeight * 0.8));
+  for (let pos = 0; pos <= gesamtHoehe; pos += schritt) {
+    container.scrollTop = pos;
+    await warte(400);
+  }
+  container.scrollTop = 0;
+  await warte(300);
+
+  return [...document.querySelectorAll('.page[data-page-number]')]
+    .map((seite) => seite.querySelector('canvas'))
+    .filter(Boolean)
+    .map((canvas) => canvas.toDataURL('image/png'));
+}
+
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.peaxAction === 'suche') {
     (async () => {
@@ -136,5 +173,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       sendResponse({ ergebnisse: liesErgebnislisteAus(), sucheAusgeloest });
     })();
     return true; // asynchrone Antwort
+  }
+  if (msg?.peaxAction === 'seiten-lesen') {
+    (async () => {
+      const seiten = await liesPeaxSeitenAus();
+      sendResponse({ seiten });
+    })();
+    return true;
   }
 });
