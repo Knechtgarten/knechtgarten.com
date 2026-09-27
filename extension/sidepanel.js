@@ -335,6 +335,12 @@ function istMailtextTreffer(e) {
 function anzeigeTitel(e) {
   return e.quelle === 'gmail' && e.anhangId ? (e.anhangDateiname || e.titel) : e.titel;
 }
+// Absender-Header ist oft "Name (Firma) <adresse@example.com>" - fuer die
+// Anzeige reicht der Teil vor der spitzen Klammer (Gmail matcht z.B. auch auf
+// den Firmennamen im Absender, nicht nur auf Betreff/Text).
+function kurzAbsender(absender) {
+  return (absender || '').replace(/\s*<[^>]*>\s*$/, '').trim();
+}
 
 const SOURCE_ICONS = {
   drive: '<svg viewBox="0 0 24 24"><path fill="#4285F4" d="M8.5 3h7l7.5 13-3.5 6h-15z"/><path fill="#34A853" d="M4.5 22l3.5-6h15l-3.5 6z"/><path fill="#FBBC05" d="M8.5 3l-4 7 4 6.5 4-6.5z"/></svg>',
@@ -475,6 +481,7 @@ function zeichneErgebnisseZeile(e, i) {
   // Bei einem Anhang zusaetzlich den Mail-Betreff zeigen, aus dem er stammt -
   // sonst wirkt der jetzt als Titel angezeigte Dateiname kontextlos.
   if (e.quelle === 'gmail' && e.anhangId) metaTeile.push(`aus Mail «${esc(e.titel)}»`);
+  if (e.quelle === 'gmail' && kurzAbsender(e.absender)) metaTeile.push(`von ${esc(kurzAbsender(e.absender))}`);
   row.querySelector('.doc-meta').innerHTML = metaTeile.filter(Boolean).join(' · ');
   row.querySelector('.doc-begruendung').textContent = e.begruendung || '';
   row.addEventListener('click', () => openLightbox(i));
@@ -581,6 +588,7 @@ function renderLightbox() {
   const lbMetaTeile = [`<span class="src-icon">${SOURCE_ICONS[e.quelle] || ''}</span>${quelleLabel(e.quelle)}`, datumAnzeige(e)];
   if (e.dokumentart) lbMetaTeile.push(e.dokumentart);
   if (e.quelle === 'gmail' && e.anhangId) lbMetaTeile.push(`aus Mail «${esc(e.titel)}»`);
+  if (e.quelle === 'gmail' && kurzAbsender(e.absender)) lbMetaTeile.push(`von ${esc(kurzAbsender(e.absender))}`);
   $('lbMeta').innerHTML = lbMetaTeile.filter(Boolean).join(' · ');
   const badge = $('lbMatch');
   if (e.uebereinstimmung) {

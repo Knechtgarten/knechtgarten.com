@@ -68,6 +68,11 @@ interface RohTreffer {
   // (statt nur des kurzen Snippets), damit die Vorschau im Seitenpanel bei
   // reinen Text-Mails auch etwas Sinnvolles zeigen kann.
   mailInhalt?: string;
+  // Nur Gmail: Absendername/-adresse - Gmails eigene Suche findet Treffer
+  // genauso im Absendernamen (z.B. Firmenname) wie im Betreff oder Text, aber
+  // ohne diesen Wert wuesste Claude gar nicht, WARUM eine Mail gefunden wurde,
+  // wenn weder Betreff noch der kurze Snippet den Suchbegriff enthalten.
+  absender?: string;
 }
 
 // Google-Drive-Suchsyntax verlangt Escaping von Apostrophen im Suchbegriff.
@@ -208,8 +213,8 @@ async function sucheGmail(begriff: string, token: string, zeitraumVon?: string, 
     // "full" statt "metadata" - liefert zusaetzlich die MIME-Teile-Struktur
     // (Dateiname/attachmentId pro Anhang), OHNE die eigentlichen Anhang-Bytes
     // mitzuladen (die kommen nur ueber einen separaten Aufruf - siehe
-    // leseAnhaengeText/Anhang-Vorschau im Seitenpanel). Noetig fuer die
-    // scharfe PDF-Anhang-Vorschau (attachmentId muss bekannt sein).
+    // Anhang-Vorschau im Seitenpanel). Noetig fuer die scharfe PDF-Anhang-
+    // Vorschau (attachmentId muss bekannt sein).
     const params = new URLSearchParams({ format: 'full' });
     const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?${params}`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -217,6 +222,7 @@ async function sucheGmail(begriff: string, token: string, zeitraumVon?: string, 
     if (!res.ok) return null;
     const msg = await res.json();
     const betreff = msg.payload?.headers?.find((h: any) => h.name === 'Subject')?.value || '(kein Betreff)';
+    const absender = msg.payload?.headers?.find((h: any) => h.name === 'From')?.value || '';
     const snippet = msg.snippet || '';
     const pdfAnhang = findeAlleTeile(msg.payload?.parts || []).find(
       (p: any) => p.mimeType === 'application/pdf' && p.body?.attachmentId,
@@ -230,6 +236,7 @@ async function sucheGmail(begriff: string, token: string, zeitraumVon?: string, 
       link: `https://mail.google.com/mail/u/0/#all/${msg.id}`,
       anhangId: pdfAnhang?.body?.attachmentId || undefined,
       anhangDateiname: pdfAnhang?.filename || undefined,
+      absender: absender || undefined,
       // Nur wenn kein PDF-Anhang existiert - sonst zeigt die Vorschau
       // ohnehin schon den echten Anhang, der volle Mailtext waere da nur
       // Ballast (und macht die Antwort unnoetig gross).
@@ -303,7 +310,7 @@ ${genauigkeitsHinweis}
 Vorgehen:
 1. Rufe drive_suchen und/oder gmail_suchen mit gut gewaehlten Suchbegriffen auf (nicht zwingend beide Quellen, nur wo sinnvoll).
 2. Bei Bedarf mit anderen Begriffen nochmal suchen, wenn die ersten Treffer nicht ueberzeugen. Insgesamt reichen normalerweise 1-4 Suchaufrufe.
-3. Wenn du genug gesehen hast, rufe ergebnisse_liefern auf. Nimm dort NUR Treffer auf, die wirklich zur Anfrage passen (nicht die komplette Rohliste durchreichen). Bewerte jeden Treffer ehrlich: "hoch" nur wenn du dir wirklich sicher bist, sonst "moeglich".
+3. Wenn du genug gesehen hast, rufe ergebnisse_liefern auf. Nimm dort NUR Treffer auf, die wirklich zur Anfrage passen (nicht die komplette Rohliste durchreichen). Bewerte jeden Treffer ehrlich: "hoch" nur wenn du dir wirklich sicher bist, sonst "moeglich". Bei Gmail-Treffern zaehlt ein Treffer im Betreff oder im Absendernamen (z.B. Firmenname) genauso viel wie einer im Mailtext selbst - werte das gleichwertig, auch wenn der eigentliche PDF-Anhang den Suchbegriff gar nicht enthaelt.
 4. Erlaubte Dokumentarten fuer das Feld "dokumentart" (nur wenn eindeutig erkennbar, sonst weglassen): ${dokumentarten.join(', ') || '(keine Liste hinterlegt)'}.
 ${dokumentartenFilter?.length ? `5. WICHTIG: Der Nutzer hat den Vorab-Filter "Dokumentart" auf folgende Arten eingeschraenkt: ${dokumentartenFilter.join(', ')}. Nimm in ergebnisse_liefern NUR Treffer auf, die eindeutig zu einer dieser Arten gehoeren, und setze das Feld "dokumentart" bei diesen Treffern immer entsprechend (nicht leer lassen). Alles andere weglassen, auch wenn es sonst thematisch passen wuerde.` : ''}
 
@@ -458,7 +465,7 @@ Deno.serve(async (req) => {
       }
       for (const t of treffer) gesehen.set(`${t.quelle}:${t.id}`, t);
       if (!treffer.length) return 'Keine Treffer.';
-      return treffer.map((t) => `id=${t.id} | ${t.titel}${t.snippet ? ' | ' + t.snippet : ''} | ${t.datum ?? ''}`).join('\n');
+      return treffer.map((t) => `id=${t.id} | ${t.titel}${t.absender ? ' | Von: ' + t.absender : ''}${t.snippet ? ' | ' + t.snippet : ''} | ${t.datum ?? ''}`).join('\n');
     } catch (e) {
       const msg = String(e instanceof Error ? e.message : e);
       fehler.push(msg);
@@ -542,6 +549,7 @@ Deno.serve(async (req) => {
         anhangId: roh.anhangId,
         anhangDateiname: roh.anhangDateiname,
         mailInhalt: roh.mailInhalt,
+        absender: roh.absender,
         uebereinstimmung: b.uebereinstimmung === 'hoch' ? 'hoch' : 'moeglich',
         begruendung: b.begruendung || '',
         dokumentart: b.dokumentart || undefined,
