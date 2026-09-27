@@ -726,13 +726,22 @@ async function suchePeax(query) {
 }
 
 async function suchen() {
-  const query = $('queryInput').value.trim();
-  if (!query) return;
-
   if (aktiverTab === 'peax') {
+    // Zwei getrennte Felder (Lieferant/Details) statt einem einzelnen
+    // Suchfeld - PEAX selbst kennt zwar keine getrennten Suchparameter
+    // (nimmt nur einen einzigen Begriff entgegen), aber die Aufteilung hilft
+    // Mitarbeitenden daran zu denken, ueberhaupt mehrere Angaben zu machen
+    // (Nutzer-Wunsch 2026-09-27).
+    const lieferant = $('peaxLieferantFeld').value.trim();
+    const details = $('peaxDetailsFeld').value.trim();
+    const query = [lieferant, details].filter(Boolean).join(' ');
+    if (!query) return;
     await suchePeax(query);
     return;
   }
+
+  const query = $('queryInput').value.trim();
+  if (!query) return;
 
   const token = await holeGespeichertenToken();
   if (!token) {
@@ -810,6 +819,8 @@ async function suchen() {
 $('connectBtn').addEventListener('click', verbinden);
 $('searchBtn').addEventListener('click', suchen);
 $('queryInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') suchen(); });
+$('peaxLieferantFeld').addEventListener('keydown', (e) => { if (e.key === 'Enter') suchen(); });
+$('peaxDetailsFeld').addEventListener('keydown', (e) => { if (e.key === 'Enter') suchen(); });
 
 // ---------------------------------------------------------------------------
 // Start: pruefen, ob schon ein gueltiges Google-Token vorliegt.
