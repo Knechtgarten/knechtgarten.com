@@ -558,7 +558,11 @@ async function ladeSchaerferePeaxVorschau(eintrag) {
     });
     const seiten = antwort?.seiten || [];
     if (!seiten.length) {
-      btn.textContent = 'Konnte keine Seiten lesen – bitte "Original öffnen" nutzen.';
+      const d = antwort?.diagnose;
+      const diagnoseText = d
+        ? ` (Container: ${d.containerGefunden ? 'ja' : 'nein'}, Seiten: ${d.seitenGefunden}, Canvas: ${d.canvasGefunden}, Canvas-Fehler: ${d.canvasFehler})`
+        : '';
+      btn.textContent = `Konnte keine Seiten lesen – bitte "Original öffnen" nutzen.${diagnoseText}`;
       return;
     }
     seitenBox.innerHTML = seiten.map((src) => `<img src="${src}">`).join('');

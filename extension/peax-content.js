@@ -141,8 +141,12 @@ function liesErgebnislisteAus() {
 // Rahmen um alle Seiten, .page[data-page-number] = eine Seite, darin ein
 // <canvas> mit dem fertig gerenderten Seiteninhalt.
 async function liesPeaxSeitenAus() {
+  const diagnose = { containerGefunden: false, seitenGefunden: 0, canvasGefunden: 0, canvasFehler: 0 };
+
   const container = await warteAufElement('#viewerContainer', 8000);
-  if (!container) return [];
+  if (!container) return { seiten: [], diagnose };
+  diagnose.containerGefunden = true;
+
   await warteAufElement('.page[data-page-number]', 8000);
 
   // PDF.js rendert aus Speichergruenden meist nur Seiten nahe der aktuellen
@@ -157,10 +161,23 @@ async function liesPeaxSeitenAus() {
   container.scrollTop = 0;
   await warte(300);
 
-  return [...document.querySelectorAll('.page[data-page-number]')]
-    .map((seite) => seite.querySelector('canvas'))
-    .filter(Boolean)
-    .map((canvas) => canvas.toDataURL('image/png'));
+  const seitenElemente = [...document.querySelectorAll('.page[data-page-number]')];
+  diagnose.seitenGefunden = seitenElemente.length;
+
+  const seiten = [];
+  for (const seite of seitenElemente) {
+    const canvas = seite.querySelector('canvas');
+    if (!canvas) continue;
+    diagnose.canvasGefunden++;
+    try {
+      seiten.push(canvas.toDataURL('image/png'));
+    } catch (err) {
+      // z.B. SecurityError, falls der Canvas durch eine fremde Bildquelle
+      // "verunreinigt" wurde und sich deshalb nicht auslesen laesst.
+      diagnose.canvasFehler++;
+    }
+  }
+  return { seiten, diagnose };
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -176,8 +193,8 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   }
   if (msg?.peaxAction === 'seiten-lesen') {
     (async () => {
-      const seiten = await liesPeaxSeitenAus();
-      sendResponse({ seiten });
+      const { seiten, diagnose } = await liesPeaxSeitenAus();
+      sendResponse({ seiten, diagnose });
     })();
     return true;
   }
