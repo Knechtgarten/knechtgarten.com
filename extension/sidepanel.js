@@ -323,6 +323,18 @@ function ftypeIcon(e) {
   if (e.dateityp?.startsWith('image/')) return FTYPE_ICONS.bild;
   return FTYPE_ICONS.generic;
 }
+// Ein "Dokument" ist eine eigenstaendige Datei (Drive-Datei oder Gmail-Anhang) -
+// ein reiner Treffer im Fliesstext einer Mail ist davon grundsaetzlich etwas
+// anderes (kein Dateiname, kein eigenstaendiger Inhalt) und wird deshalb in
+// der Liste getrennt angezeigt (Nutzer-Wunsch 2026-09-27).
+function istMailtextTreffer(e) {
+  return e.quelle === 'gmail' && !e.anhangId;
+}
+// Bei einem Anhang den Dateinamen zeigen statt des Mail-Betreffs - liest sich
+// dann wie ein Dokument statt wie eine Mail.
+function anzeigeTitel(e) {
+  return e.quelle === 'gmail' && e.anhangId ? (e.anhangDateiname || e.titel) : e.titel;
+}
 
 const SOURCE_ICONS = {
   drive: '<svg viewBox="0 0 24 24"><path fill="#4285F4" d="M8.5 3h7l7.5 13-3.5 6h-15z"/><path fill="#34A853" d="M4.5 22l3.5-6h15l-3.5 6z"/><path fill="#FBBC05" d="M8.5 3l-4 7 4 6.5 4-6.5z"/></svg>',
@@ -434,40 +446,67 @@ async function ladeDokumentarten() {
   }
 }
 
+function zeichneErgebnisseZeile(e, i) {
+  const row = document.createElement('div');
+  row.className = 'doc-row';
+  row.innerHTML = `
+    <span class="doc-icon">${ftypeIcon(e)}</span>
+    <span class="doc-main">
+      <div class="doc-top-line">
+        <div class="doc-title"></div>
+        <span class="match-badge"></span>
+      </div>
+      <div class="doc-meta"></div>
+      <div class="doc-begruendung"></div>
+    </span>
+    ${e.vorschauBild ? `<img class="hover-vorschau" src="${e.vorschauBild}" loading="lazy">` : ''}`;
+  const hoverBild = row.querySelector('.hover-vorschau');
+  if (hoverBild) hoverBild.onerror = () => hoverBild.remove();
+  row.querySelector('.doc-title').textContent = anzeigeTitel(e);
+  const badge = row.querySelector('.match-badge');
+  if (e.uebereinstimmung) {
+    badge.textContent = e.uebereinstimmung === 'hoch' ? 'Hoch' : 'Möglich';
+    badge.classList.add(e.uebereinstimmung === 'hoch' ? 'hoch' : 'moeglich');
+  } else {
+    badge.hidden = true;
+  }
+  const metaTeile = [`<span class="src-icon">${SOURCE_ICONS[e.quelle] || ''}</span>${quelleLabel(e.quelle)}`, datumAnzeige(e)];
+  if (e.dokumentart) metaTeile.push(e.dokumentart);
+  // Bei einem Anhang zusaetzlich den Mail-Betreff zeigen, aus dem er stammt -
+  // sonst wirkt der jetzt als Titel angezeigte Dateiname kontextlos.
+  if (e.quelle === 'gmail' && e.anhangId) metaTeile.push(`aus Mail «${esc(e.titel)}»`);
+  row.querySelector('.doc-meta').innerHTML = metaTeile.filter(Boolean).join(' · ');
+  row.querySelector('.doc-begruendung').textContent = e.begruendung || '';
+  row.addEventListener('click', () => openLightbox(i));
+  return row;
+}
+
+// Dokumente (Drive-Dateien + Gmail-Anhaenge) und reine Mailtext-Treffer sind
+// grundsaetzlich unterschiedliche Dinge (echte Datei vs. nur Fliesstext) -
+// deshalb getrennt gruppiert statt vermischt (Nutzer-Wunsch 2026-09-27).
 function zeichneErgebnisse(ergebnisse) {
   lightboxListe = ergebnisse;
   $('resultsHeader').hidden = false;
   $('resultsCount').textContent = `${ergebnisse.length} Dokument${ergebnisse.length === 1 ? '' : 'e'}`;
   $('docList').innerHTML = '';
-  ergebnisse.forEach((e, i) => {
-    const row = document.createElement('div');
-    row.className = 'doc-row';
-    row.innerHTML = `
-      <span class="doc-icon">${ftypeIcon(e)}</span>
-      <span class="doc-main">
-        <div class="doc-top-line">
-          <div class="doc-title"></div>
-          <span class="match-badge"></span>
-        </div>
-        <div class="doc-meta"></div>
-        <div class="doc-begruendung"></div>
-      </span>
-      ${e.vorschauBild ? `<img class="hover-vorschau" src="${e.vorschauBild}" loading="lazy">` : ''}`;
-    const hoverBild = row.querySelector('.hover-vorschau');
-    if (hoverBild) hoverBild.onerror = () => hoverBild.remove();
-    row.querySelector('.doc-title').textContent = e.titel;
-    const badge = row.querySelector('.match-badge');
-    if (e.uebereinstimmung) {
-      badge.textContent = e.uebereinstimmung === 'hoch' ? 'Hoch' : 'Möglich';
-      badge.classList.add(e.uebereinstimmung === 'hoch' ? 'hoch' : 'moeglich');
-    } else {
-      badge.hidden = true;
+
+  const dokumente = [];
+  const mailtreffer = [];
+  ergebnisse.forEach((e, i) => (istMailtextTreffer(e) ? mailtreffer : dokumente).push(i));
+
+  const beideGruppen = dokumente.length > 0 && mailtreffer.length > 0;
+  function zeichneGruppe(titel, indizes) {
+    if (!indizes.length) return;
+    if (beideGruppen) {
+      const header = document.createElement('div');
+      header.className = 'doc-gruppen-titel';
+      header.textContent = titel;
+      $('docList').appendChild(header);
     }
-    row.querySelector('.doc-meta').innerHTML = `<span class="src-icon">${SOURCE_ICONS[e.quelle] || ''}</span>${quelleLabel(e.quelle)} · ${datumAnzeige(e)}${e.dokumentart ? ' · ' + e.dokumentart : ''}`;
-    row.querySelector('.doc-begruendung').textContent = e.begruendung || '';
-    row.addEventListener('click', () => openLightbox(i));
-    $('docList').appendChild(row);
-  });
+    indizes.forEach((i) => $('docList').appendChild(zeichneErgebnisseZeile(ergebnisse[i], i)));
+  }
+  zeichneGruppe('Dokumente', dokumente);
+  zeichneGruppe('Treffer im Mailtext', mailtreffer);
 }
 
 // ---------------------------------------------------------------------------
@@ -538,8 +577,11 @@ function renderLightbox() {
   const e = lightboxListe[lightboxIndex];
   if (!e) return;
   $('lbIcon').innerHTML = ftypeIcon(e);
-  $('lbTitle').textContent = e.titel;
-  $('lbMeta').innerHTML = `<span class="src-icon">${SOURCE_ICONS[e.quelle] || ''}</span>${quelleLabel(e.quelle)} · ${datumAnzeige(e)}${e.dokumentart ? ' · ' + e.dokumentart : ''}`;
+  $('lbTitle').textContent = anzeigeTitel(e);
+  const lbMetaTeile = [`<span class="src-icon">${SOURCE_ICONS[e.quelle] || ''}</span>${quelleLabel(e.quelle)}`, datumAnzeige(e)];
+  if (e.dokumentart) lbMetaTeile.push(e.dokumentart);
+  if (e.quelle === 'gmail' && e.anhangId) lbMetaTeile.push(`aus Mail «${esc(e.titel)}»`);
+  $('lbMeta').innerHTML = lbMetaTeile.filter(Boolean).join(' · ');
   const badge = $('lbMatch');
   if (e.uebereinstimmung) {
     badge.hidden = false;
