@@ -36,6 +36,29 @@ function warte(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// PEAX ist eine grosse Angular-App: Der Tab meldet "complete", bevor Angular
+// fertig gebootet und den Header (mit dem Lupe-Symbol) gerendert hat. Daher
+// hier aktiv auf das Element warten (bis zu `timeoutMs`), statt nur einmal
+// fix zu pausieren.
+function warteAufElement(selector, timeoutMs = 8000, intervallMs = 200) {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    function pruefen() {
+      const el = document.querySelector(selector);
+      if (el) {
+        resolve(el);
+        return;
+      }
+      if (Date.now() - start >= timeoutMs) {
+        resolve(null);
+        return;
+      }
+      setTimeout(pruefen, intervallMs);
+    }
+    pruefen();
+  });
+}
+
 // Angular's ReactiveFormsModule hoert auf native "input"-Events, reagiert
 // aber NICHT auf eine simple ".value = ..."-Zuweisung, da Angular die
 // Aenderung sonst nicht mitbekommt. Deshalb ueber den nativen Property-
@@ -55,14 +78,14 @@ function feuereEnter(input) {
 
 async function fuehreSucheAus(begriff) {
   // Das Suchfeld existiert erst NACH einem Klick auf das Lupe-Symbol im
-  // Header - vorher ist es gar nicht im DOM vorhanden.
-  const oeffnenButton = document.querySelector('[data-testid="search-button-open"]');
+  // Header - vorher ist es gar nicht im DOM vorhanden. Beide Elemente
+  // koennen erst nach mehreren Sekunden auftauchen (Angular-Bootstrapping).
+  const oeffnenButton = await warteAufElement('[data-testid="search-button-open"]', 8000);
   if (oeffnenButton) {
     oeffnenButton.click();
-    await warte(300);
   }
 
-  const feld = document.querySelector('[data-testid="search-input"]');
+  const feld = await warteAufElement('[data-testid="search-input"]', 5000);
   if (!feld) return false;
   feld.focus();
   setzeEingabewert(feld, begriff);
