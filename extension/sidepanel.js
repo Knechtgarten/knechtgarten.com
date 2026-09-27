@@ -311,13 +311,16 @@ const FTYPE_ICONS = {
   generic: '<svg viewBox="0 0 24 24"><path d="M6 2h9l5 5v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" fill="#fff" stroke="#DADCE0"/><path d="M15 2v5h5z" fill="#D7D3CE"/></svg>',
   peax: '<svg viewBox="0 0 24 24"><path d="M12 2l8 3v6c0 5-3.5 8.5-8 11-4.5-2.5-8-6-8-11V5z" fill="#F5C400" stroke="#1E1E1E" stroke-width="1"/></svg>',
 };
-function ftypeIcon(dateityp, quelle) {
-  if (quelle === 'gmail') return FTYPE_ICONS.mail;
-  if (quelle === 'peax') return FTYPE_ICONS.peax;
-  if (dateityp === 'application/pdf') return FTYPE_ICONS.pdf;
-  if (dateityp === 'application/vnd.google-apps.document') return FTYPE_ICONS.docs;
-  if (dateityp === 'application/vnd.google-apps.spreadsheet') return FTYPE_ICONS.sheets;
-  if (dateityp?.startsWith('image/')) return FTYPE_ICONS.bild;
+function ftypeIcon(e) {
+  // Gmail-Treffer MIT erkanntem PDF-Anhang zeigen das PDF-Icon statt des
+  // generischen Mail-Umschlags - macht auf einen Blick sichtbar, ob eine
+  // scharfe Anhang-Vorschau moeglich ist oder nicht (Nutzer-Wunsch 2026-09-27).
+  if (e.quelle === 'gmail') return e.anhangId ? FTYPE_ICONS.pdf : FTYPE_ICONS.mail;
+  if (e.quelle === 'peax') return FTYPE_ICONS.peax;
+  if (e.dateityp === 'application/pdf') return FTYPE_ICONS.pdf;
+  if (e.dateityp === 'application/vnd.google-apps.document') return FTYPE_ICONS.docs;
+  if (e.dateityp === 'application/vnd.google-apps.spreadsheet') return FTYPE_ICONS.sheets;
+  if (e.dateityp?.startsWith('image/')) return FTYPE_ICONS.bild;
   return FTYPE_ICONS.generic;
 }
 
@@ -440,7 +443,7 @@ function zeichneErgebnisse(ergebnisse) {
     const row = document.createElement('div');
     row.className = 'doc-row';
     row.innerHTML = `
-      <span class="doc-icon">${ftypeIcon(e.dateityp, e.quelle)}</span>
+      <span class="doc-icon">${ftypeIcon(e)}</span>
       <span class="doc-main">
         <div class="doc-top-line">
           <div class="doc-title"></div>
@@ -534,7 +537,7 @@ async function ladeGmailAnhangVorschau(eintrag) {
 function renderLightbox() {
   const e = lightboxListe[lightboxIndex];
   if (!e) return;
-  $('lbIcon').innerHTML = ftypeIcon(e.dateityp, e.quelle);
+  $('lbIcon').innerHTML = ftypeIcon(e);
   $('lbTitle').textContent = e.titel;
   $('lbMeta').innerHTML = `<span class="src-icon">${SOURCE_ICONS[e.quelle] || ''}</span>${quelleLabel(e.quelle)} · ${datumAnzeige(e)}${e.dokumentart ? ' · ' + e.dokumentart : ''}`;
   const badge = $('lbMatch');
@@ -556,11 +559,14 @@ function renderLightbox() {
   const iframe = $('lbVorschauIframe');
   const seitenBox = $('lbVorschauSeiten');
   const schaerferBtn = $('lbPeaxSchaerfer');
+  const mailInhaltBox = $('lbMailInhalt');
   seitenBox.hidden = true;
   seitenBox.innerHTML = '';
   schaerferBtn.hidden = true;
   schaerferBtn.disabled = false;
   schaerferBtn.textContent = 'Scharfe Vorschau laden';
+  mailInhaltBox.hidden = true;
+  mailInhaltBox.textContent = '';
 
   // Blob-URL eines evtl. vorher angezeigten Gmail-Anhangs freigeben, bevor
   // wir zu einem anderen Treffer wechseln (sonst haeuft sich der Speicher).
@@ -604,6 +610,15 @@ function renderLightbox() {
     // echtem Scrollen) gezeigt werden, kein Screenshot-Umweg noetig.
     if (e.quelle === 'gmail' && e.anhangId) {
       ladeGmailAnhangVorschau(e);
+    } else if (e.quelle === 'gmail' && e.mailInhalt) {
+      // Kein PDF-Anhang gefunden - stattdessen den vollen Mailtext direkt
+      // hier anzeigen (statt nur der kurzen KI-Begruendung), ohne ein
+      // separates Fenster/Tab zu oeffnen.
+      wrap.hidden = false;
+      wrap.classList.add('kein-ziehen');
+      bild.hidden = true;
+      mailInhaltBox.hidden = false;
+      mailInhaltBox.textContent = e.mailInhalt;
     }
   }
 }

@@ -70,6 +70,10 @@ interface RohTreffer {
   // Seitenpanel - Rohbytes werden dort direkt per Gmail-API geholt).
   anhangId?: string;
   anhangDateiname?: string;
+  // Nur Gmail, nur wenn KEIN PDF-Anhang gefunden wurde: der volle Mailtext
+  // (statt nur des kurzen Snippets), damit die Vorschau im Seitenpanel bei
+  // reinen Text-Mails auch etwas Sinnvolles zeigen kann.
+  mailInhalt?: string;
 }
 
 // Google-Drive-Suchsyntax verlangt Escaping von Apostrophen im Suchbegriff.
@@ -173,6 +177,28 @@ function findeAlleTeile(teile: any[]): any[] {
   return ergebnis;
 }
 
+function entferneHtmlTags(html: string): string {
+  return html.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+// Vollen Mailtext (nicht nur das kurze Snippet) aus der Payload-Struktur
+// holen - bevorzugt text/plain, sonst text/html (Tags grob entfernt). Nur
+// fuer Mails OHNE PDF-Anhang gedacht (siehe sucheGmail), damit die Vorschau
+// im Seitenpanel bei reinen Text-Mails trotzdem etwas Sinnvolles zeigt.
+function extrahiereMailText(payload: any): string {
+  if (!payload) return '';
+  if (payload.body?.data && (payload.mimeType === 'text/plain' || payload.mimeType === 'text/html')) {
+    const text = new TextDecoder().decode(base64UrlZuBytes(payload.body.data));
+    return payload.mimeType === 'text/html' ? entferneHtmlTags(text) : text;
+  }
+  const teile = findeAlleTeile(payload.parts || []);
+  const plain = teile.find((p) => p.mimeType === 'text/plain' && p.body?.data);
+  if (plain) return new TextDecoder().decode(base64UrlZuBytes(plain.body.data));
+  const html = teile.find((p) => p.mimeType === 'text/html' && p.body?.data);
+  if (html) return entferneHtmlTags(new TextDecoder().decode(base64UrlZuBytes(html.body.data)));
+  return '';
+}
+
 // Laedt PDF-Anhaenge einer Nachricht und haengt den extrahierten Text an -
 // nur wenn explizit gewuenscht (spuerbar langsamer: pro Anhang ein weiterer
 // API-Aufruf + PDF-Parsing).
@@ -251,6 +277,10 @@ async function sucheGmail(begriff: string, token: string, zeitraumVon?: string, 
       link: `https://mail.google.com/mail/u/0/#all/${msg.id}`,
       anhangId: pdfAnhang?.body?.attachmentId || undefined,
       anhangDateiname: pdfAnhang?.filename || undefined,
+      // Nur wenn kein PDF-Anhang existiert - sonst zeigt die Vorschau
+      // ohnehin schon den echten Anhang, der volle Mailtext waere da nur
+      // Ballast (und macht die Antwort unnoetig gross).
+      mailInhalt: pdfAnhang ? undefined : extrahiereMailText(msg.payload).slice(0, 4000),
     };
   }));
   return details.filter((d): d is RohTreffer => d !== null);
@@ -559,6 +589,7 @@ Deno.serve(async (req) => {
         vorschauBild: roh.vorschauBild,
         anhangId: roh.anhangId,
         anhangDateiname: roh.anhangDateiname,
+        mailInhalt: roh.mailInhalt,
         uebereinstimmung: b.uebereinstimmung === 'hoch' ? 'hoch' : 'moeglich',
         begruendung: b.begruendung || '',
         dokumentart: b.dokumentart || undefined,
