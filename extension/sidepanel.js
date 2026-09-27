@@ -309,6 +309,15 @@ function fmtDatum(iso) {
   return new Date(iso).toLocaleDateString('de-CH');
 }
 
+// PEAX selbst kennt keinen Datumsfilter - die Datumsangabe kommt bereits als
+// Schweizer Format "tt.mm.jjjj" aus der Kachel (siehe peax-content.js).
+// Fuers Vergleichen mit den Zeitraum-Feldern (ISO-Format vom <input type=date>)
+// hier ins gleiche Format umwandeln.
+function parsePeaxDatumZuIso(text) {
+  const m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec((text || '').trim());
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : null;
+}
+
 // ---------------------------------------------------------------------------
 // Wiederverwendbare Mehrfachauswahl-Chipreihe mit "Alle" (Dokumentart,
 // Dateiformat) - leere Auswahl bedeutet "Alle" (keine Einschraenkung).
@@ -682,6 +691,21 @@ async function suchePeax(query) {
     });
 
     letzteErgebnisRohliste = antwort?.ergebnisse || [];
+
+    // PEAX selbst kann nicht nach Zeitraum filtern - deshalb erst hier,
+    // nachtraeglich auf der bereits ausgelesenen Trefferliste.
+    const zeitraumVon = $('zeitraumVon').value;
+    const zeitraumBis = $('zeitraumBis').value;
+    if (zeitraumVon || zeitraumBis) {
+      letzteErgebnisRohliste = letzteErgebnisRohliste.filter((e) => {
+        const iso = parsePeaxDatumZuIso(e.datum);
+        if (!iso) return true; // kein erkennbares Datum - lieber anzeigen als verstecken
+        if (zeitraumVon && iso < zeitraumVon) return false;
+        if (zeitraumBis && iso > zeitraumBis) return false;
+        return true;
+      });
+    }
+
     $('sortSelect').value = 'relevanz';
     zeichneErgebnisse(letzteErgebnisRohliste);
     if (antwort && !antwort.sucheAusgeloest) {
