@@ -534,9 +534,19 @@ async function ladeSchaerferePeaxVorschau(eintrag) {
   btn.textContent = 'Lade … (kann einige Sekunden dauern)';
 
   let tab;
+  let vorherigerTabId;
   try {
+    // Wichtiger Fund (2026-09-27): Ein Hintergrund-Tab (active:false) bleibt
+    // fuer den Browser "unsichtbar" (document.hidden=true) - PEAX' PDF-
+    // Betrachter zeichnet dann nie etwas in den Canvas (Ressourcen sparen),
+    // egal wie lange man wartet/scrollt. Deshalb muss der Tab kurz WIRKLICH
+    // sichtbar sein; wir merken uns den vorher aktiven Tab, um danach dorthin
+    // zurueckzuspringen (der Nutzer soll nicht auf PEAX haengen bleiben).
+    vorherigerTabId = await new Promise((resolve) => {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => resolve(tabs?.[0]?.id));
+    });
     tab = await new Promise((resolve, reject) => {
-      chrome.tabs.create({ url: eintrag.link, active: false }, (t) => {
+      chrome.tabs.create({ url: eintrag.link, active: true }, (t) => {
         if (chrome.runtime.lastError || !t) reject(new Error(chrome.runtime.lastError?.message || 'Tab konnte nicht geöffnet werden.'));
         else resolve(t);
       });
@@ -575,6 +585,7 @@ async function ladeSchaerferePeaxVorschau(eintrag) {
     btn.disabled = false;
     peaxSchaerfereLadeLaeuft = false;
     if (tab) chrome.tabs.remove(tab.id).catch(() => {});
+    if (vorherigerTabId) chrome.tabs.update(vorherigerTabId, { active: true }).catch(() => {});
   }
 }
 $('lbPeaxSchaerfer').addEventListener('click', () => {
