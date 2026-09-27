@@ -223,10 +223,17 @@ async function sucheGmail(begriff: string, token: string, zeitraumVon?: string, 
     const msg = await res.json();
     const betreff = msg.payload?.headers?.find((h: any) => h.name === 'Subject')?.value || '(kein Betreff)';
     const absender = msg.payload?.headers?.find((h: any) => h.name === 'From')?.value || '';
-    const snippet = msg.snippet || '';
     const pdfAnhang = findeAlleTeile(msg.payload?.parts || []).find(
       (p: any) => p.mimeType === 'application/pdf' && p.body?.attachmentId,
     );
+    // Gmails eigener "snippet" ist nur der Textanfang (~100 Zeichen) - ein
+    // Treffer weiter unten in der Mail (z.B. in der Signatur/Fusszeile, wie
+    // eine Firmenbezeichnung) taucht darin oft gar nicht auf. Deshalb den
+    // echten Mailtext IMMER auslesen (kostet keinen weiteren API-Aufruf, die
+    // Mail ist ja schon geladen) und Claude einen laengeren Ausschnitt davon
+    // mitgeben - unabhaengig davon, ob ein PDF-Anhang existiert.
+    const mailText = extrahiereMailText(msg.payload);
+    const snippet = [msg.snippet || '', mailText ? mailText.slice(0, 600) : ''].filter(Boolean).join(' … ');
     return {
       quelle: 'gmail' as const,
       id: msg.id,
@@ -240,7 +247,7 @@ async function sucheGmail(begriff: string, token: string, zeitraumVon?: string, 
       // Nur wenn kein PDF-Anhang existiert - sonst zeigt die Vorschau
       // ohnehin schon den echten Anhang, der volle Mailtext waere da nur
       // Ballast (und macht die Antwort unnoetig gross).
-      mailInhalt: pdfAnhang ? undefined : extrahiereMailText(msg.payload).slice(0, 4000),
+      mailInhalt: pdfAnhang ? undefined : mailText.slice(0, 4000),
     };
   }));
   return details.filter((d): d is RohTreffer => d !== null);
@@ -310,7 +317,7 @@ ${genauigkeitsHinweis}
 Vorgehen:
 1. Rufe drive_suchen und/oder gmail_suchen mit gut gewaehlten Suchbegriffen auf (nicht zwingend beide Quellen, nur wo sinnvoll).
 2. Bei Bedarf mit anderen Begriffen nochmal suchen, wenn die ersten Treffer nicht ueberzeugen. Insgesamt reichen normalerweise 1-4 Suchaufrufe.
-3. Wenn du genug gesehen hast, rufe ergebnisse_liefern auf. Nimm dort NUR Treffer auf, die wirklich zur Anfrage passen (nicht die komplette Rohliste durchreichen). Bewerte jeden Treffer ehrlich: "hoch" nur wenn du dir wirklich sicher bist, sonst "moeglich". Bei Gmail-Treffern zaehlt ein Treffer im Betreff oder im Absendernamen (z.B. Firmenname) genauso viel wie einer im Mailtext selbst - werte das gleichwertig, auch wenn der eigentliche PDF-Anhang den Suchbegriff gar nicht enthaelt.
+3. Wenn du genug gesehen hast, rufe ergebnisse_liefern auf. Nimm dort NUR Treffer auf, die wirklich zur Anfrage passen (nicht die komplette Rohliste durchreichen). Bewerte jeden Treffer ehrlich: "hoch" nur wenn du dir wirklich sicher bist, sonst "moeglich". Bei Gmail-Treffern zaehlt ein Treffer im Betreff, im Absendernamen (z.B. Firmenname) oder irgendwo im Mailtext (auch in einer Signatur/Fusszeile am Ende, nicht nur am Anfang) gleich viel - werte das gleichwertig, auch wenn der eigentliche PDF-Anhang den Suchbegriff gar nicht enthaelt.
 4. Erlaubte Dokumentarten fuer das Feld "dokumentart" (nur wenn eindeutig erkennbar, sonst weglassen): ${dokumentarten.join(', ') || '(keine Liste hinterlegt)'}.
 ${dokumentartenFilter?.length ? `5. WICHTIG: Der Nutzer hat den Vorab-Filter "Dokumentart" auf folgende Arten eingeschraenkt: ${dokumentartenFilter.join(', ')}. Nimm in ergebnisse_liefern NUR Treffer auf, die eindeutig zu einer dieser Arten gehoeren, und setze das Feld "dokumentart" bei diesen Treffern immer entsprechend (nicht leer lassen). Alles andere weglassen, auch wenn es sonst thematisch passen wuerde.` : ''}
 
