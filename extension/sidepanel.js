@@ -188,8 +188,6 @@ async function erkenneUndSetzeTabAusAktivemBrowserTab() {
 function setzeAktivenTab(tab) {
   aktiverTab = tab;
   document.querySelectorAll('.tab-bar button[data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
-  $('normalSuchePanel').hidden = tab === 'peax';
-  $('peaxPanel').hidden = tab !== 'peax';
   document.querySelectorAll('[data-tab-scope]').forEach((el) => {
     el.hidden = !el.dataset.tabScope.split(' ').includes(tab);
   });
@@ -252,11 +250,11 @@ $('zeitraumBis').addEventListener('input', () => setzeZeitraumSchnellauswahl(nul
 $('btnZeitraum6Wochen').click();
 
 $('peaxBtn').addEventListener('click', () => {
-  // TODO: Sobald bestaetigt ist, welcher URL-Parameter PEAX' Suchseite fuer
-  // einen vorausgefuellten Suchbegriff akzeptiert, hier ergaenzen
-  // (z.B. ?q=... oder ?search=...). Bis dahin oeffnet der Button nur die
-  // Suchseite selbst, der Begriff muesste manuell eingetippt werden.
-  chrome.tabs.create({ url: 'https://app.peax.ch/inbox/search', active: false });
+  // Manueller Ausweichweg: PEAX' eigene Suchseite direkt oeffnen (z.B. um
+  // selbst nachzuschauen, falls das automatische Auslesen mal nichts findet).
+  const query = $('queryInput').value.trim();
+  const url = query ? `https://app.peax.ch/inbox/search?q=${encodeURIComponent(query)}` : 'https://app.peax.ch/inbox/search';
+  chrome.tabs.create({ url, active: false });
 });
 
 // ---------------------------------------------------------------------------
@@ -272,9 +270,11 @@ const FTYPE_ICONS = {
   mail: '<svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2" fill="#EA4335"/><path d="M3 6l9 6.5L21 6" fill="none" stroke="#fff" stroke-width="2"/></svg>',
   bild: '<svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" fill="#F3E8FD" stroke="#8C6DAB" stroke-width="1.4"/><circle cx="8.5" cy="9.5" r="2" fill="#8C6DAB"/><path d="M4 17l5-5 4 4 3-3 4 4" fill="none" stroke="#8C6DAB" stroke-width="2"/></svg>',
   generic: '<svg viewBox="0 0 24 24"><path d="M6 2h9l5 5v15a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" fill="#fff" stroke="#DADCE0"/><path d="M15 2v5h5z" fill="#D7D3CE"/></svg>',
+  peax: '<svg viewBox="0 0 24 24"><path d="M12 2l8 3v6c0 5-3.5 8.5-8 11-4.5-2.5-8-6-8-11V5z" fill="#F5C400" stroke="#1E1E1E" stroke-width="1"/></svg>',
 };
 function ftypeIcon(dateityp, quelle) {
   if (quelle === 'gmail') return FTYPE_ICONS.mail;
+  if (quelle === 'peax') return FTYPE_ICONS.peax;
   if (dateityp === 'application/pdf') return FTYPE_ICONS.pdf;
   if (dateityp === 'application/vnd.google-apps.document') return FTYPE_ICONS.docs;
   if (dateityp === 'application/vnd.google-apps.spreadsheet') return FTYPE_ICONS.sheets;
@@ -285,7 +285,16 @@ function ftypeIcon(dateityp, quelle) {
 const SOURCE_ICONS = {
   drive: '<svg viewBox="0 0 24 24"><path fill="#4285F4" d="M8.5 3h7l7.5 13-3.5 6h-15z"/><path fill="#34A853" d="M4.5 22l3.5-6h15l-3.5 6z"/><path fill="#FBBC05" d="M8.5 3l-4 7 4 6.5 4-6.5z"/></svg>',
   gmail: '<svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2" fill="#EA4335"/><path fill="#fff" d="M4 6l8 6 8-6v2l-8 6-8-6z"/></svg>',
+  peax: '<svg viewBox="0 0 24 24"><path d="M12 2l8 3v6c0 5-3.5 8.5-8 11-4.5-2.5-8-6-8-11V5z" fill="#F5C400" stroke="#1E1E1E" stroke-width="1"/></svg>',
 };
+function quelleLabel(quelle) {
+  return quelle === 'drive' ? 'Drive' : quelle === 'gmail' ? 'Gmail' : 'PEAX';
+}
+// PEAX liefert Datum bereits als fertig formatierten Text (z.B. "10.09.2026"),
+// Drive/Gmail liefern ein ISO-Datum - deshalb hier je nach Quelle behandeln.
+function datumAnzeige(e) {
+  return e.quelle === 'peax' ? (e.datum || '') : fmtDatum(e.datum);
+}
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -391,9 +400,13 @@ function zeichneErgebnisse(ergebnisse) {
     if (hoverBild) hoverBild.onerror = () => hoverBild.remove();
     row.querySelector('.doc-title').textContent = e.titel;
     const badge = row.querySelector('.match-badge');
-    badge.textContent = e.uebereinstimmung === 'hoch' ? 'Hoch' : 'Möglich';
-    badge.classList.add(e.uebereinstimmung === 'hoch' ? 'hoch' : 'moeglich');
-    row.querySelector('.doc-meta').innerHTML = `<span class="src-icon">${SOURCE_ICONS[e.quelle] || ''}</span>${e.quelle === 'drive' ? 'Drive' : 'Gmail'} · ${fmtDatum(e.datum)}${e.dokumentart ? ' · ' + e.dokumentart : ''}`;
+    if (e.uebereinstimmung) {
+      badge.textContent = e.uebereinstimmung === 'hoch' ? 'Hoch' : 'Möglich';
+      badge.classList.add(e.uebereinstimmung === 'hoch' ? 'hoch' : 'moeglich');
+    } else {
+      badge.hidden = true;
+    }
+    row.querySelector('.doc-meta').innerHTML = `<span class="src-icon">${SOURCE_ICONS[e.quelle] || ''}</span>${quelleLabel(e.quelle)} · ${datumAnzeige(e)}${e.dokumentart ? ' · ' + e.dokumentart : ''}`;
     row.querySelector('.doc-begruendung').textContent = e.begruendung || '';
     row.addEventListener('click', () => openLightbox(i));
     $('docList').appendChild(row);
@@ -433,10 +446,15 @@ function renderLightbox() {
   if (!e) return;
   $('lbIcon').innerHTML = ftypeIcon(e.dateityp, e.quelle);
   $('lbTitle').textContent = e.titel;
-  $('lbMeta').innerHTML = `<span class="src-icon">${SOURCE_ICONS[e.quelle] || ''}</span>${e.quelle === 'drive' ? 'Drive' : 'Gmail'} · ${fmtDatum(e.datum)}${e.dokumentart ? ' · ' + e.dokumentart : ''}`;
+  $('lbMeta').innerHTML = `<span class="src-icon">${SOURCE_ICONS[e.quelle] || ''}</span>${quelleLabel(e.quelle)} · ${datumAnzeige(e)}${e.dokumentart ? ' · ' + e.dokumentart : ''}`;
   const badge = $('lbMatch');
-  badge.textContent = e.uebereinstimmung === 'hoch' ? 'Hohe Übereinstimmung' : 'Mögliche Übereinstimmung';
-  badge.className = 'match-badge ' + (e.uebereinstimmung === 'hoch' ? 'hoch' : 'moeglich');
+  if (e.uebereinstimmung) {
+    badge.hidden = false;
+    badge.textContent = e.uebereinstimmung === 'hoch' ? 'Hohe Übereinstimmung' : 'Mögliche Übereinstimmung';
+    badge.className = 'match-badge ' + (e.uebereinstimmung === 'hoch' ? 'hoch' : 'moeglich');
+  } else {
+    badge.hidden = true;
+  }
   $('lbBody').textContent = e.begruendung || '';
   $('lbPosition').textContent = `${lightboxIndex + 1} von ${lightboxListe.length}`;
   // Öffnet im Hintergrund (active:false), damit der Tab, in dem gerade
@@ -492,9 +510,68 @@ $('lightbox').addEventListener('click', (ev) => { if (ev.target === $('lightbox'
   window.addEventListener('mouseup', () => { ziehtGerade = false; wrap.classList.remove('greift'); });
 })();
 
+// PEAX-Suche: kein API-Zugang (offizielle Anbindung mit CHF 7'500.- offeriert,
+// abgelehnt) - stattdessen wird PEAX' eigene Suchseite im Hintergrund
+// geoeffnet und per Content-Script (peax-content.js) ausgelesen. Keine
+// KI-Bewertung, PEAX' eigene Trefferliste wird 1:1 uebernommen. Der
+// URL-Parameter "?q=" ist ein erster Versuch, PEAX' Suche vorauszufuellen -
+// noch nicht in jedem Fall bestaetigt, ob PEAX ihn tatsaechlich auswertet.
+async function suchePeax(query) {
+  $('searchBtn').disabled = true;
+  $('statusLine').textContent = 'Lese Ergebnisse direkt aus PEAX …';
+  $('statusLine').className = 'status-line';
+  $('resultsHeader').hidden = true;
+  $('docList').innerHTML = '';
+  $('suchschritteBox').hidden = true;
+
+  let tab;
+  try {
+    const url = `https://app.peax.ch/inbox/search?q=${encodeURIComponent(query)}`;
+    tab = await new Promise((resolve, reject) => {
+      chrome.tabs.create({ url, active: false }, (t) => {
+        if (chrome.runtime.lastError || !t) reject(new Error(chrome.runtime.lastError?.message || 'Tab konnte nicht geöffnet werden.'));
+        else resolve(t);
+      });
+    });
+    await new Promise((resolve) => {
+      function listener(tabId, info) {
+        if (tabId === tab.id && info.status === 'complete') {
+          chrome.tabs.onUpdated.removeListener(listener);
+          resolve();
+        }
+      }
+      chrome.tabs.onUpdated.addListener(listener);
+    });
+    const antwort = await new Promise((resolve, reject) => {
+      chrome.tabs.sendMessage(tab.id, { peaxAction: 'suche' }, (res) => {
+        if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+        else resolve(res);
+      });
+    });
+
+    letzteErgebnisRohliste = antwort?.ergebnisse || [];
+    $('sortSelect').value = 'relevanz';
+    zeichneErgebnisse(letzteErgebnisRohliste);
+    $('statusLine').textContent = letzteErgebnisRohliste.length
+      ? ''
+      : 'Keine Treffer gefunden (oder PEAX hat die Seite geändert - bitte melden).';
+  } catch (e) {
+    $('statusLine').textContent = 'Fehler bei der PEAX-Suche: ' + e.message;
+    $('statusLine').className = 'status-line err';
+  } finally {
+    $('searchBtn').disabled = false;
+    if (tab) chrome.tabs.remove(tab.id).catch(() => {});
+  }
+}
+
 async function suchen() {
   const query = $('queryInput').value.trim();
   if (!query) return;
+
+  if (aktiverTab === 'peax') {
+    await suchePeax(query);
+    return;
+  }
 
   const token = await holeGespeichertenToken();
   if (!token) {
