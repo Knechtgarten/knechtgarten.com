@@ -244,10 +244,11 @@ async function sucheGmail(begriff: string, token: string, zeitraumVon?: string, 
       anhangId: pdfAnhang?.body?.attachmentId || undefined,
       anhangDateiname: pdfAnhang?.filename || undefined,
       absender: absender || undefined,
-      // Nur wenn kein PDF-Anhang existiert - sonst zeigt die Vorschau
-      // ohnehin schon den echten Anhang, der volle Mailtext waere da nur
-      // Ballast (und macht die Antwort unnoetig gross).
-      mailInhalt: pdfAnhang ? undefined : mailText.slice(0, 4000),
+      // Immer mitgeben, auch wenn ein PDF-Anhang existiert - manchmal ist der
+      // Mailtext genauso wichtig wie der Anhang. Das Seitenpanel zeigt in dem
+      // Fall beides ueber einen Umschalter "Anhang/Mailtext" an, statt eins
+      // von beidem zu verstecken.
+      mailInhalt: mailText ? mailText.slice(0, 4000) : undefined,
     };
   }));
   return details.filter((d): d is RohTreffer => d !== null);

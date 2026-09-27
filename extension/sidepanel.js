@@ -544,6 +544,10 @@ function navLightbox(delta) {
   renderLightbox();
 }
 let letzterGmailBlobUrl = null;
+// Zu welchem Mail-Treffer der aktuell gecachte Blob gehoert - beim Wechsel
+// zwischen "Anhang"/"Mailtext"-Reiter fuer DIESELBE Mail (siehe
+// zeigeGmailAnhang) muss der PDF-Anhang nicht jedes Mal neu geladen werden.
+let letzterGmailBlobUrlId = null;
 // Zaehler, um veraltete Antworten zu verwerfen, wenn man schnell zum
 // naechsten Treffer weiterklickt, bevor der Anhang fertig geladen ist.
 let gmailAnhangLadeZaehler = 0;
@@ -570,6 +574,7 @@ async function ladeGmailAnhangVorschau(eintrag) {
       return;
     }
     letzterGmailBlobUrl = url;
+    letzterGmailBlobUrlId = eintrag.id;
     wrap.hidden = false;
     wrap.classList.add('kein-ziehen');
     bild.hidden = true;
@@ -579,6 +584,48 @@ async function ladeGmailAnhangVorschau(eintrag) {
     console.error('Gmail-Anhang laden fehlgeschlagen:', err);
   }
 }
+
+// Zeigt fuer einen Gmail-Treffer den PDF-Anhang bzw. den Mailtext an - beide
+// koennen bei derselben Mail vorhanden sein, der Reiter "lbAnsichtTabs"
+// (siehe renderLightbox) wechselt dann zwischen den beiden Ansichten,
+// statt eins von beidem zu verstecken (Nutzer-Wunsch 2026-09-27).
+function zeigeGmailAnhang(e) {
+  const wrap = $('lbVorschauWrap');
+  const bild = $('lbVorschauBild');
+  const iframe = $('lbVorschauIframe');
+  const mailInhaltBox = $('lbMailInhalt');
+  wrap.hidden = false;
+  wrap.classList.add('kein-ziehen');
+  bild.hidden = true;
+  mailInhaltBox.hidden = true;
+  if (letzterGmailBlobUrl && letzterGmailBlobUrlId === e.id) {
+    iframe.hidden = false;
+    iframe.src = letzterGmailBlobUrl;
+  } else {
+    ladeGmailAnhangVorschau(e);
+  }
+}
+function zeigeGmailMailtext(e) {
+  const wrap = $('lbVorschauWrap');
+  const bild = $('lbVorschauBild');
+  const iframe = $('lbVorschauIframe');
+  const mailInhaltBox = $('lbMailInhalt');
+  wrap.hidden = false;
+  wrap.classList.add('kein-ziehen');
+  bild.hidden = true;
+  iframe.hidden = true;
+  mailInhaltBox.hidden = false;
+  mailInhaltBox.textContent = e.mailInhalt || '';
+}
+document.querySelectorAll('#lbAnsichtTabs button').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#lbAnsichtTabs button').forEach((b) => b.classList.toggle('active', b === btn));
+    const e = lightboxListe[lightboxIndex];
+    if (!e) return;
+    if (btn.dataset.ansicht === 'anhang') zeigeGmailAnhang(e);
+    else zeigeGmailMailtext(e);
+  });
+});
 
 function renderLightbox() {
   const e = lightboxListe[lightboxIndex];
@@ -608,6 +655,7 @@ function renderLightbox() {
   const seitenBox = $('lbVorschauSeiten');
   const schaerferBtn = $('lbPeaxSchaerfer');
   const mailInhaltBox = $('lbMailInhalt');
+  const ansichtTabs = $('lbAnsichtTabs');
   seitenBox.hidden = true;
   seitenBox.innerHTML = '';
   schaerferBtn.hidden = true;
@@ -615,12 +663,15 @@ function renderLightbox() {
   schaerferBtn.textContent = 'Scharfe Vorschau laden';
   mailInhaltBox.hidden = true;
   mailInhaltBox.textContent = '';
+  ansichtTabs.hidden = true;
+  ansichtTabs.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.ansicht === 'anhang'));
 
   // Blob-URL eines evtl. vorher angezeigten Gmail-Anhangs freigeben, bevor
   // wir zu einem anderen Treffer wechseln (sonst haeuft sich der Speicher).
   if (letzterGmailBlobUrl) {
     URL.revokeObjectURL(letzterGmailBlobUrl);
     letzterGmailBlobUrl = null;
+    letzterGmailBlobUrlId = null;
   }
 
   if (e.quelle === 'drive') {
@@ -656,17 +707,18 @@ function renderLightbox() {
     // Gmail hat (anders als PEAX) eine offizielle Anhang-API - die PDF-Bytes
     // koennen direkt geholt und wie bei Drive als eingebettetes PDF (mit
     // echtem Scrollen) gezeigt werden, kein Screenshot-Umweg noetig.
-    if (e.quelle === 'gmail' && e.anhangId) {
-      ladeGmailAnhangVorschau(e);
+    if (e.quelle === 'gmail' && e.anhangId && e.mailInhalt) {
+      // Beides vorhanden (Anhang UND relevanter Mailtext) - Umschalter
+      // zeigen, standardmaessig mit dem Anhang startend.
+      ansichtTabs.hidden = false;
+      zeigeGmailAnhang(e);
+    } else if (e.quelle === 'gmail' && e.anhangId) {
+      zeigeGmailAnhang(e);
     } else if (e.quelle === 'gmail' && e.mailInhalt) {
       // Kein PDF-Anhang gefunden - stattdessen den vollen Mailtext direkt
       // hier anzeigen (statt nur der kurzen KI-Begruendung), ohne ein
       // separates Fenster/Tab zu oeffnen.
-      wrap.hidden = false;
-      wrap.classList.add('kein-ziehen');
-      bild.hidden = true;
-      mailInhaltBox.hidden = false;
-      mailInhaltBox.textContent = e.mailInhalt;
+      zeigeGmailMailtext(e);
     }
   }
 }
