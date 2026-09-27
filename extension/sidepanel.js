@@ -522,7 +522,11 @@ function renderLightbox() {
 // Content-Script (peax-content.js) liest sie als fertige Bilder aus
 // (canvas.toDataURL) und schickt sie zurueck. Kein API-Zugriff noetig, da
 // nur gelesen wird, was PEAX selbst schon auf dem Bildschirm zeichnet.
+let peaxSchaerfereLadeLaeuft = false;
 async function ladeSchaerferePeaxVorschau(eintrag) {
+  if (peaxSchaerfereLadeLaeuft) return; // Doppelklick o.ae. ignorieren, sonst laufen zwei Ladevorgaenge parallel
+  peaxSchaerfereLadeLaeuft = true;
+
   const btn = $('lbPeaxSchaerfer');
   const seitenBox = $('lbVorschauSeiten');
   const bild = $('lbVorschauBild');
@@ -565,6 +569,7 @@ async function ladeSchaerferePeaxVorschau(eintrag) {
     btn.textContent = 'Fehler beim Laden – bitte "Original öffnen" nutzen.';
   } finally {
     btn.disabled = false;
+    peaxSchaerfereLadeLaeuft = false;
     if (tab) chrome.tabs.remove(tab.id).catch(() => {});
   }
 }
