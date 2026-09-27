@@ -554,7 +554,14 @@ async function ladeSchaerferePeaxVorschau(eintrag) {
         }
       );
     });
+    // windows.create liefert "tabs" nicht immer zuverlaessig direkt mit -
+    // zur Sicherheit den Tab notfalls per eigener Abfrage nachholen.
     tab = fenster.tabs?.[0];
+    if (!tab) {
+      tab = await new Promise((resolve) => {
+        chrome.tabs.query({ windowId: fenster.id }, (tabs) => resolve(tabs?.[0]));
+      });
+    }
     if (!tab) throw new Error('Kein Tab im neuen Fenster gefunden.');
     await new Promise((resolve) => {
       function listener(tabId, info) {
@@ -585,7 +592,7 @@ async function ladeSchaerferePeaxVorschau(eintrag) {
     bild.hidden = true;
     btn.hidden = true;
   } catch (err) {
-    btn.textContent = 'Fehler beim Laden – bitte "Original öffnen" nutzen.';
+    btn.textContent = `Fehler beim Laden – bitte "Original öffnen" nutzen. (${err.message || err})`;
   } finally {
     btn.disabled = false;
     peaxSchaerfereLadeLaeuft = false;
