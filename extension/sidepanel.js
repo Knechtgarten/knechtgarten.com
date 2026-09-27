@@ -261,14 +261,6 @@ $('zeitraumBis').addEventListener('input', () => setzeZeitraumSchnellauswahl(nul
 // Standardmaessig "Letzte 6 Wochen" vorausgewaehlt.
 $('btnZeitraum6Wochen').click();
 
-$('peaxBtn').addEventListener('click', () => {
-  // Manueller Ausweichweg: PEAX' eigene Suchseite direkt oeffnen (z.B. um
-  // selbst nachzuschauen, falls das automatische Auslesen mal nichts findet).
-  // Kein URL-Parameter moeglich (PEAX' Suche laeuft clientseitig), deshalb
-  // muss der Suchbegriff dort von Hand erneut eingetippt werden.
-  chrome.tabs.create({ url: 'https://app.peax.ch/inbox/search', active: false });
-});
-
 // ---------------------------------------------------------------------------
 // Suche
 // ---------------------------------------------------------------------------
