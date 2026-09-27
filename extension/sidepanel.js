@@ -539,15 +539,16 @@ async function ladeSchaerferePeaxVorschau(eintrag) {
     // Wichtiger Fund (2026-09-27): Ein Hintergrund-Tab (active:false) bleibt
     // fuer den Browser "unsichtbar" (document.hidden=true) - PEAX' PDF-
     // Betrachter zeichnet dann nie etwas in den Canvas (Ressourcen sparen),
-    // egal wie lange man wartet/scrollt. Ein eigenes, kurz sichtbar
-    // aufblitzendes Fenster war fuer den Nutzer stoerend. Deshalb hier
-    // stattdessen ein eigenes Popup-Fenster ausserhalb des sichtbaren
-    // Bildschirmbereichs (weit im Minus positioniert) - fuer den Browser
-    // zaehlt es trotzdem als "sichtbar" (nicht minimiert, aktiver Tab
-    // seines Fensters), aber der Nutzer sieht nichts aufblitzen.
+    // egal wie lange man wartet/scrollt. Ein Fenster komplett ausserhalb des
+    // Bildschirms lehnt Chrome bewusst ab ("Bounds must be at least 50%
+    // within visible screen space" - offenbar genau gegen diesen Trick
+    // eingebaut). Deshalb zweitbeste Loesung: ein eigenes, unfokussiertes
+    // Popup-Fenster (der aktuelle Tab/das aktuelle Fenster des Nutzers bleibt
+    // dabei unangetastet, es poppt nur kurz zusaetzlich auf und schliesst
+    // sich danach wieder von selbst).
     fenster = await new Promise((resolve, reject) => {
       chrome.windows.create(
-        { url: eintrag.link, type: 'popup', focused: false, width: 1000, height: 800, left: -3000, top: 0 },
+        { url: eintrag.link, type: 'popup', focused: false, width: 900, height: 700 },
         (w) => {
           if (chrome.runtime.lastError || !w) reject(new Error(chrome.runtime.lastError?.message || 'Fenster konnte nicht geöffnet werden.'));
           else resolve(w);
