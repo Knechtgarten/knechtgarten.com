@@ -463,13 +463,30 @@ function renderLightbox() {
 
   const wrap = $('lbVorschauWrap');
   const bild = $('lbVorschauBild');
-  if (e.vorschauBild) {
+  const iframe = $('lbVorschauIframe');
+  if (e.quelle === 'drive') {
+    // Drive bietet eine offizielle Einbett-Vorschau, die mehrseitige PDFs/Docs
+    // per echtem Scrollen anzeigt (statt nur eines statischen Vorschaubilds
+    // der ersten Seite) - kein zusaetzlicher API-Aufruf noetig.
     wrap.hidden = false;
-    bild.src = e.vorschauBild;
-    bild.onerror = () => { wrap.hidden = true; };
-  } else {
-    wrap.hidden = true;
+    wrap.classList.add('kein-ziehen');
+    bild.hidden = true;
     bild.removeAttribute('src');
+    iframe.hidden = false;
+    iframe.src = `https://drive.google.com/file/d/${e.id}/preview`;
+  } else {
+    iframe.hidden = true;
+    iframe.removeAttribute('src');
+    wrap.classList.remove('kein-ziehen');
+    bild.hidden = false;
+    if (e.vorschauBild) {
+      wrap.hidden = false;
+      bild.src = e.vorschauBild;
+      bild.onerror = () => { wrap.hidden = true; };
+    } else {
+      wrap.hidden = true;
+      bild.removeAttribute('src');
+    }
   }
 }
 $('lbClose').addEventListener('click', closeLightbox);
@@ -496,6 +513,7 @@ $('lightbox').addEventListener('click', (ev) => { if (ev.target === $('lightbox'
   });
 
   wrap.addEventListener('mousedown', (ev) => {
+    if (wrap.classList.contains('kein-ziehen')) return; // Drive-Einbettung scrollt selbst
     ziehtGerade = true;
     startX = ev.clientX - curX;
     startY = ev.clientY - curY;
