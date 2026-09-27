@@ -13,6 +13,10 @@
 // Stabile Kennzeichnungen, auf die sich dieses Skript verlaesst (Stand
 // 2026-09-27, kann bei einem PEAX-Layout-Wechsel brechen - siehe
 // Projekt-Notiz zur Risikoeinschaetzung):
+// - [data-testid="search-button-open"] = Lupe-Symbol oben im Header, muss
+//   zuerst angeklickt werden, damit das Suchfeld im DOM ueberhaupt entsteht
+//   (bestaetigt durch echten Test 2026-09-27 - ohne diesen Klick ist
+//   [data-testid="search-input"] gar nicht vorhanden).
 // - [data-testid="search-input"] = PEAX' eigenes Suchfeld (Angular-
 //   Autovervollstaendigung: Tippen zeigt ein Dropdown mit Vorschlaegen,
 //   Enter OHNE Auswahl loest trotzdem die volle Suche aus - genau das
@@ -50,6 +54,14 @@ function feuereEnter(input) {
 }
 
 async function fuehreSucheAus(begriff) {
+  // Das Suchfeld existiert erst NACH einem Klick auf das Lupe-Symbol im
+  // Header - vorher ist es gar nicht im DOM vorhanden.
+  const oeffnenButton = document.querySelector('[data-testid="search-button-open"]');
+  if (oeffnenButton) {
+    oeffnenButton.click();
+    await warte(300);
+  }
+
   const feld = document.querySelector('[data-testid="search-input"]');
   if (!feld) return false;
   feld.focus();
