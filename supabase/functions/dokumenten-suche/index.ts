@@ -41,6 +41,22 @@ function json(body: unknown, status = 200) {
   });
 }
 
+// Oeffentliche Client-ID (unproblematisch im Code der Erweiterung) - fuer den
+// serverseitigen Token-Austausch/-Refresh hier zusaetzlich gebraucht, siehe
+// oauthAction-Handling in Deno.serve weiter unten.
+const GOOGLE_CLIENT_ID = '689526517764-f2727pi1nglt5lkbttec3ssjqkgl47k5.apps.googleusercontent.com';
+
+async function googleTokenRequest(params: Record<string, string>) {
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams(params),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error_description || data?.error || `Google-Token-Fehler (${res.status})`);
+  return data;
+}
+
 interface RohTreffer {
   quelle: 'drive' | 'gmail';
   id: string;
@@ -352,6 +368,43 @@ Deno.serve(async (req) => {
     body = await req.json();
   } catch {
     return json({ error: 'Ungueltiger Request-Body (JSON erwartet).' }, 400);
+  }
+
+  // OAuth-Token-Austausch/-Erneuerung fuer die Erweiterung (Authorization-Code
+  // + PKCE + Refresh-Token statt des frueheren Implicit-Grant-Tokens, das nach
+  // ~1h ohne Erneuerungsmoeglichkeit ablief und ein woechentliches "Mit Google
+  // verbinden" erzwang). Das Google-Client-Secret bleibt ausschliesslich hier
+  // serverseitig (GOOGLE_CLIENT_SECRET), nie im Code der Erweiterung.
+  if (body?.oauthAction === 'exchange' || body?.oauthAction === 'refresh') {
+    const clientSecret = Deno.env.get('GOOGLE_CLIENT_SECRET');
+    if (!clientSecret) return json({ error: 'GOOGLE_CLIENT_SECRET ist serverseitig nicht gesetzt.' }, 500);
+    try {
+      if (body.oauthAction === 'exchange') {
+        const { code, codeVerifier, redirectUri } = body;
+        if (!code || !codeVerifier || !redirectUri) return json({ error: 'code/codeVerifier/redirectUri fehlt.' }, 400);
+        const data = await googleTokenRequest({
+          code,
+          client_id: GOOGLE_CLIENT_ID,
+          client_secret: clientSecret,
+          redirect_uri: redirectUri,
+          grant_type: 'authorization_code',
+          code_verifier: codeVerifier,
+        });
+        return json({ accessToken: data.access_token, expiresIn: data.expires_in, refreshToken: data.refresh_token });
+      } else {
+        const { refreshToken } = body;
+        if (!refreshToken) return json({ error: 'refreshToken fehlt.' }, 400);
+        const data = await googleTokenRequest({
+          refresh_token: refreshToken,
+          client_id: GOOGLE_CLIENT_ID,
+          client_secret: clientSecret,
+          grant_type: 'refresh_token',
+        });
+        return json({ accessToken: data.access_token, expiresIn: data.expires_in });
+      }
+    } catch (e) {
+      return json({ error: String(e instanceof Error ? e.message : e) }, 400);
+    }
   }
 
   const {

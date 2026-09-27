@@ -1,12 +1,18 @@
 // ============================================================================
 // Dokumenten-Suche - Seitenpanel-Logik.
 //
-// Ablauf: Google-Login per chrome.identity.launchWebAuthFlow (implizites
-// Token, kein Client-Secret im Code - siehe extension/erweiterungs-id.md fuer
-// die feste Erweiterungs-ID/Redirect-URI). Token wird in chrome.storage.local
-// zwischengespeichert und bis zum Ablauf wiederverwendet. Die eigentliche
-// Suche laeuft ueber die Supabase Edge Function "dokumenten-suche" (Phase 3:
-// Claude orchestriert die Google-Suche selbst und bewertet die Treffer).
+// Ablauf: Google-Login per chrome.identity.launchWebAuthFlow mit Authorization-
+// Code + PKCE (kein Client-Secret im Erweiterungscode - der Code-Tausch und
+// die spaetere Token-Erneuerung laufen ueber die Edge Function, die das
+// Secret serverseitig haelt). Ergebnis ist ein kurzlebiger Access-Token PLUS
+// ein langlebiger Refresh-Token, der in chrome.storage.local zwischengespeichert
+// wird - laeuft der Access-Token ab, wird er im Hintergrund per Refresh-Token
+// automatisch erneuert, ohne dass sich die/der Mitarbeitende erneut mit
+// Google verbinden muss (fruehere Version nutzte einen Implicit-Grant-Token
+// ohne Erneuerungsmoeglichkeit, der nach ~1h eine erneute manuelle Anmeldung
+// erzwang). Die eigentliche Suche laeuft ueber dieselbe Supabase Edge
+// Function "dokumenten-suche" (Phase 3: Claude orchestriert die Google-Suche
+// selbst und bewertet die Treffer).
 //
 // PEAX ist bewusst NICHT Teil der gemeinsamen Suche (kein API-Zugang) -
 // der PEAX-Chip oeffnet stattdessen direkt PEAX' eigene Suchseite in einem
@@ -26,54 +32,115 @@ const SUPABASE_ANON_KEY = 'sb_publishable_DoeD4uEnwemmnFu4AxE9uw_5lmQYc5P';
 const $ = (id) => document.getElementById(id);
 
 // ---------------------------------------------------------------------------
-// Google-Login
+// Google-Login (Authorization Code + PKCE + Refresh-Token)
 // ---------------------------------------------------------------------------
-function baueAuthUrl() {
-  const redirectUri = chrome.identity.getRedirectURL();
+function base64UrlVonBytes(bytes) {
+  let bin = '';
+  bytes.forEach((b) => { bin += String.fromCharCode(b); });
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function zufallsCodeVerifier() {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return base64UrlVonBytes(bytes);
+}
+async function codeChallengeAus(verifier) {
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+  return base64UrlVonBytes(new Uint8Array(hash));
+}
+
+function baueAuthUrl(redirectUri, codeChallenge) {
   const params = new URLSearchParams({
     client_id: GOOGLE_CLIENT_ID,
-    response_type: 'token',
+    response_type: 'code',
     redirect_uri: redirectUri,
     scope: GOOGLE_SCOPES.join(' '),
+    // access_type=offline + prompt=consent erzwingen, dass Google ueberhaupt
+    // einen Refresh-Token ausstellt (sonst nur beim allerersten Consent).
+    access_type: 'offline',
+    prompt: 'consent',
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256',
   });
   return `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
 }
 
-function parseTokenAusRedirect(redirectUrl) {
-  const fragment = new URL(redirectUrl).hash.slice(1);
-  const params = new URLSearchParams(fragment);
-  const accessToken = params.get('access_token');
-  const expiresIn = Number(params.get('expires_in') || '3600');
-  if (!accessToken) throw new Error('Kein access_token in der Antwort von Google.');
-  return { accessToken, ablaufZeit: Date.now() + expiresIn * 1000 };
+function parseCodeAusRedirect(redirectUrl) {
+  const code = new URL(redirectUrl).searchParams.get('code');
+  if (!code) throw new Error('Kein code in der Antwort von Google.');
+  return code;
+}
+
+// Speichert Access-Token + Ablaufzeit, behaelt einen vorhandenen Refresh-Token
+// bei, falls die aktuelle Antwort (z.B. eine reine Erneuerung) keinen neuen
+// mitliefert - Google gibt den Refresh-Token normalerweise nur beim ersten
+// Consent zurueck.
+async function speichereToken({ accessToken, expiresIn, refreshToken }) {
+  const vorhandenes = (await chrome.storage.local.get('googleToken')).googleToken || {};
+  await chrome.storage.local.set({
+    googleToken: {
+      accessToken,
+      ablaufZeit: Date.now() + (Number(expiresIn) || 3600) * 1000,
+      refreshToken: refreshToken || vorhandenes.refreshToken || null,
+    },
+  });
 }
 
 async function holeGespeichertenToken() {
   const { googleToken } = await chrome.storage.local.get('googleToken');
   if (!googleToken) return null;
   // 60 Sekunden Puffer vor dem eigentlichen Ablauf.
-  if (googleToken.ablaufZeit < Date.now() + 60_000) return null;
-  return googleToken.accessToken;
+  if (googleToken.ablaufZeit > Date.now() + 60_000) return googleToken.accessToken;
+  if (!googleToken.refreshToken) return null;
+  // Access-Token abgelaufen, aber Refresh-Token vorhanden: im Hintergrund
+  // erneuern statt die/den Mitarbeitende(n) erneut durch die Google-Anmeldung
+  // zu schicken.
+  try {
+    const res = await fetch(EDGE_FUNCTION_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+      body: JSON.stringify({ oauthAction: 'refresh', refreshToken: googleToken.refreshToken }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.accessToken) throw new Error(data.error || 'Refresh fehlgeschlagen.');
+    await speichereToken({ accessToken: data.accessToken, expiresIn: data.expiresIn, refreshToken: googleToken.refreshToken });
+    return data.accessToken;
+  } catch (e) {
+    console.error('Automatische Token-Erneuerung fehlgeschlagen:', e);
+    return null;
+  }
 }
 
 function verbinden() {
   $('connectStatus').textContent = 'Google-Anmeldefenster öffnet sich …';
   $('connectStatus').className = 'status-line';
-  chrome.identity.launchWebAuthFlow({ url: baueAuthUrl(), interactive: true }, async (redirectUrl) => {
-    if (chrome.runtime.lastError || !redirectUrl) {
-      $('connectStatus').textContent = 'Anmeldung fehlgeschlagen: ' + (chrome.runtime.lastError?.message || 'abgebrochen');
-      $('connectStatus').className = 'status-line err';
-      return;
-    }
-    try {
-      const token = parseTokenAusRedirect(redirectUrl);
-      await chrome.storage.local.set({ googleToken: token });
-      zeigeSuche();
-    } catch (e) {
-      $('connectStatus').textContent = 'Fehler: ' + e.message;
-      $('connectStatus').className = 'status-line err';
-    }
+  verbindenAblauf().catch((e) => {
+    $('connectStatus').textContent = 'Fehler: ' + e.message;
+    $('connectStatus').className = 'status-line err';
   });
+}
+
+async function verbindenAblauf() {
+  const redirectUri = chrome.identity.getRedirectURL();
+  const codeVerifier = zufallsCodeVerifier();
+  const codeChallenge = await codeChallengeAus(codeVerifier);
+  const redirectUrl = await new Promise((resolve, reject) => {
+    chrome.identity.launchWebAuthFlow({ url: baueAuthUrl(redirectUri, codeChallenge), interactive: true }, (url) => {
+      if (chrome.runtime.lastError || !url) reject(new Error(chrome.runtime.lastError?.message || 'abgebrochen'));
+      else resolve(url);
+    });
+  });
+  const code = parseCodeAusRedirect(redirectUrl);
+  const res = await fetch(EDGE_FUNCTION_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+    body: JSON.stringify({ oauthAction: 'exchange', code, codeVerifier, redirectUri }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || `Fehler ${res.status}`);
+  if (!data.accessToken) throw new Error('Kein accessToken erhalten.');
+  await speichereToken(data);
+  zeigeSuche();
 }
 
 function zeigeSuche() {
