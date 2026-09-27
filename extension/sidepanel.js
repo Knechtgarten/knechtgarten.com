@@ -550,9 +550,7 @@ function renderLightbox() {
   }
   $('lbBody').textContent = e.begruendung || '';
   $('lbPosition').textContent = `${lightboxIndex + 1} von ${lightboxListe.length}`;
-  // Öffnet im Hintergrund (active:false), damit der Tab, in dem gerade
-  // weitergearbeitet wird (z.B. Easybill), nicht weggeschnappt wird.
-  $('lbOpen').onclick = () => chrome.tabs.create({ url: e.link, active: false });
+  $('lbOpen').onclick = () => chrome.tabs.create({ url: e.link, active: true });
 
   const wrap = $('lbVorschauWrap');
   const bild = $('lbVorschauBild');
@@ -862,9 +860,7 @@ async function suchen() {
   const quellenText = quellen.length === 2 ? 'Drive/Gmail' : quellen[0] === 'drive' ? 'Drive' : 'Gmail';
 
   $('searchBtn').disabled = true;
-  $('statusLine').textContent = $('anhaengeDurchsuchen').checked
-    ? `KI durchsucht ${quellenText} inkl. Anhänge – kann spürbar länger dauern …`
-    : `KI durchsucht ${quellenText}, kann ein paar Sekunden dauern …`;
+  $('statusLine').textContent = `KI durchsucht ${quellenText}, kann ein paar Sekunden dauern …`;
   $('statusLine').className = 'status-line';
   $('resultsHeader').hidden = true;
   $('docList').innerHTML = '';
@@ -887,7 +883,6 @@ async function suchen() {
         dokumentarten: dokumentartAuswahl.getSelected(),
         dateiformate: dateiformatAuswahl.getSelected(),
         papierkorbSpam: $('papierkorbSpam').checked,
-        anhaengeDurchsuchen: $('anhaengeDurchsuchen').checked,
         suchgenauigkeit: document.querySelector('.seg button[data-genauigkeit].active')?.dataset.genauigkeit || 'sinngemaess',
         maxRunden: Number(document.querySelector('.seg button[data-runden].active')?.dataset.runden || '7'),
         modell: document.querySelector('.seg button[data-modell].active')?.dataset.modell || 'sonnet',
