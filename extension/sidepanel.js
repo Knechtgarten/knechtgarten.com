@@ -535,20 +535,26 @@ async function ladeSchaerferePeaxVorschau(eintrag) {
 
   let fenster;
   let tab;
+  let vorherigesFensterId;
   try {
-    // Wichtiger Fund (2026-09-27): Ein Hintergrund-Tab (active:false) bleibt
-    // fuer den Browser "unsichtbar" (document.hidden=true) - PEAX' PDF-
-    // Betrachter zeichnet dann nie etwas in den Canvas (Ressourcen sparen),
-    // egal wie lange man wartet/scrollt. Ein Fenster komplett ausserhalb des
-    // Bildschirms lehnt Chrome bewusst ab ("Bounds must be at least 50%
-    // within visible screen space" - offenbar genau gegen diesen Trick
-    // eingebaut). Deshalb zweitbeste Loesung: ein eigenes, unfokussiertes
-    // Popup-Fenster (der aktuelle Tab/das aktuelle Fenster des Nutzers bleibt
-    // dabei unangetastet, es poppt nur kurz zusaetzlich auf und schliesst
-    // sich danach wieder von selbst).
+    // Wichtige Funde (2026-09-27): Ein Hintergrund-Tab (active:false) bleibt
+    // fuer den Browser "unsichtbar" (document.hidden=true), PEAX' PDF-
+    // Betrachter zeichnet dann nie etwas in den Canvas. Ein Fenster komplett
+    // ausserhalb des Bildschirms lehnt Chrome ab ("Bounds must be at least
+    // 50% within visible screen space"). Und selbst ein normal positioniertes
+    // Fenster mit focused:false reicht NICHT - offenbar zaehlt fuer die
+    // Sichtbarkeit auch, ob das FENSTER selbst im Vordergrund ist, nicht nur
+    // ob der Tab darin aktiv ist. Ein echter, kurzer Fokus-Wechsel laesst
+    // sich technisch also nicht vermeiden - wir merken uns aber das vorher
+    // aktive Fenster, um den Fokus danach automatisch zurueckzugeben (der
+    // eigentliche Tab-Inhalt des Nutzers bleibt dabei unberuehrt, nur ein
+    // separates Fenster blitzt kurz zusaetzlich auf).
+    vorherigesFensterId = await new Promise((resolve) => {
+      chrome.windows.getLastFocused((w) => resolve(w?.id));
+    });
     fenster = await new Promise((resolve, reject) => {
       chrome.windows.create(
-        { url: eintrag.link, type: 'popup', focused: false, width: 900, height: 700 },
+        { url: eintrag.link, type: 'popup', focused: true, width: 900, height: 700 },
         (w) => {
           if (chrome.runtime.lastError || !w) reject(new Error(chrome.runtime.lastError?.message || 'Fenster konnte nicht geöffnet werden.'));
           else resolve(w);
@@ -598,6 +604,7 @@ async function ladeSchaerferePeaxVorschau(eintrag) {
     btn.disabled = false;
     peaxSchaerfereLadeLaeuft = false;
     if (fenster) chrome.windows.remove(fenster.id).catch(() => {});
+    if (vorherigesFensterId) chrome.windows.update(vorherigesFensterId, { focused: true }).catch(() => {});
   }
 }
 $('lbPeaxSchaerfer').addEventListener('click', () => {
