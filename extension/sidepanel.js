@@ -162,6 +162,12 @@ let standardTabFallback = 'alle';
 // Muss vor setzeAktivenTab() deklariert sein, da der allererste Aufruf
 // (setzeAktivenTab('alle') weiter unten) schon beim Laden ausgefuehrt wird.
 let letzteErgebnisRohliste = [];
+let lightboxListe = [];
+let lightboxIndex = 0;
+// Merkt sich pro Tab (alle/drive/gmail/peax) den letzten Anzeigezustand -
+// ein kurzer Blick in einen anderen Tab (ohne dort zu suchen) und zurueck
+// soll die eigene Trefferliste nicht wegwerfen (Nutzer-Wunsch 2026-09-27).
+let ergebnisseNachTab = {};
 
 // Fest hinterlegte Standardfaelle - admin-gepflegte Zuordnungen (aus der GET-
 // Antwort) werden zuerst geprueft, damit sie diese bei Bedarf ueberschreiben
@@ -188,7 +194,41 @@ async function erkenneUndSetzeTabAusAktivemBrowserTab() {
   }
 }
 
+// Momentanen Anzeigezustand (Trefferliste + Statuszeile + "Wonach die KI
+// gesucht hat") als einfaches Objekt einfangen/wiederherstellen - so kann ihn
+// setzeAktivenTab() pro Tab merken.
+function erfasseAnzeigezustand() {
+  return {
+    liste: letzteErgebnisRohliste,
+    docListHTML: $('docList').innerHTML,
+    resultsHeaderHidden: $('resultsHeader').hidden,
+    resultsCountText: $('resultsCount').textContent,
+    statusText: $('statusLine').textContent,
+    statusClassName: $('statusLine').className,
+    suchschritteHidden: $('suchschritteBox').hidden,
+    suchschritteHTML: $('suchschritteListe').innerHTML,
+    sortSelectValue: $('sortSelect').value,
+  };
+}
+function wendeAnzeigezustandAn(zustand) {
+  letzteErgebnisRohliste = zustand ? zustand.liste : [];
+  lightboxListe = letzteErgebnisRohliste;
+  $('docList').innerHTML = zustand ? zustand.docListHTML : '';
+  $('resultsHeader').hidden = zustand ? zustand.resultsHeaderHidden : true;
+  $('resultsCount').textContent = zustand ? zustand.resultsCountText : '';
+  $('statusLine').textContent = zustand ? zustand.statusText : '';
+  $('statusLine').className = zustand ? zustand.statusClassName : 'status-line';
+  $('suchschritteBox').hidden = zustand ? zustand.suchschritteHidden : true;
+  $('suchschritteListe').innerHTML = zustand ? zustand.suchschritteHTML : '';
+  $('sortSelect').value = zustand ? zustand.sortSelectValue : 'relevanz';
+}
+
 function setzeAktivenTab(tab) {
+  // Anzeige des BISHERIGEN Tabs merken, bevor gewechselt wird - ein kurzer
+  // Blick in einen anderen Tab (ohne dort zu suchen) und zurueck soll die
+  // eigene Trefferliste nicht wegwerfen.
+  if (aktiverTab) ergebnisseNachTab[aktiverTab] = erfasseAnzeigezustand();
+
   aktiverTab = tab;
   document.querySelectorAll('.tab-bar button[data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
   document.querySelectorAll('[data-tab-scope]').forEach((el) => {
@@ -201,14 +241,9 @@ function setzeAktivenTab(tab) {
   if ($('dokumentartVorabRow').hidden) $('dokumentartVorabRow').querySelector('.chip')?.click();
   if ($('dateiformatRow').hidden) $('dateiformatRow').querySelector('.chip')?.click();
 
-  // Trefferliste eines anderen Tabs gehoert nicht hierher - sonst blieben
-  // z.B. Drive-Ergebnisse sichtbar, wenn man zu PEAX/Gmail wechselt, obwohl
-  // dort noch gar nicht gesucht wurde.
-  letzteErgebnisRohliste = [];
-  $('docList').innerHTML = '';
-  $('resultsHeader').hidden = true;
-  $('statusLine').textContent = '';
-  $('suchschritteBox').hidden = true;
+  // Trefferliste dieses Tabs wiederherstellen (falls hier schon mal gesucht
+  // wurde), sonst leer anzeigen - nie die eines ANDEREN Tabs.
+  wendeAnzeigezustandAn(ergebnisseNachTab[tab]);
 }
 document.querySelectorAll('.tab-bar button[data-tab]').forEach((btn) => {
   btn.addEventListener('click', () => setzeAktivenTab(btn.dataset.tab));
@@ -386,9 +421,6 @@ async function ladeDokumentarten() {
     erkenneUndSetzeTabAusAktivemBrowserTab();
   }
 }
-
-let lightboxListe = [];
-let lightboxIndex = 0;
 
 function zeichneErgebnisse(ergebnisse) {
   lightboxListe = ergebnisse;
