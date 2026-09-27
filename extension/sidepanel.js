@@ -159,6 +159,9 @@ function zeigeSuche() {
 let aktiverTab = 'alle';
 let urlZuordnungListe = [];
 let standardTabFallback = 'alle';
+// Muss vor setzeAktivenTab() deklariert sein, da der allererste Aufruf
+// (setzeAktivenTab('alle') weiter unten) schon beim Laden ausgefuehrt wird.
+let letzteErgebnisRohliste = [];
 
 // Fest hinterlegte Standardfaelle - admin-gepflegte Zuordnungen (aus der GET-
 // Antwort) werden zuerst geprueft, damit sie diese bei Bedarf ueberschreiben
@@ -197,6 +200,15 @@ function setzeAktivenTab(tab) {
   // Dateiformat ist ausgeblendet, dort reicht "Anhaenge durchsuchen").
   if ($('dokumentartVorabRow').hidden) $('dokumentartVorabRow').querySelector('.chip')?.click();
   if ($('dateiformatRow').hidden) $('dateiformatRow').querySelector('.chip')?.click();
+
+  // Trefferliste eines anderen Tabs gehoert nicht hierher - sonst blieben
+  // z.B. Drive-Ergebnisse sichtbar, wenn man zu PEAX/Gmail wechselt, obwohl
+  // dort noch gar nicht gesucht wurde.
+  letzteErgebnisRohliste = [];
+  $('docList').innerHTML = '';
+  $('resultsHeader').hidden = true;
+  $('statusLine').textContent = '';
+  $('suchschritteBox').hidden = true;
 }
 document.querySelectorAll('.tab-bar button[data-tab]').forEach((btn) => {
   btn.addEventListener('click', () => setzeAktivenTab(btn.dataset.tab));
@@ -416,7 +428,6 @@ function zeichneErgebnisse(ergebnisse) {
 // ---------------------------------------------------------------------------
 // Sortierung (Relevanz = Original-Reihenfolge der KI, sonst Datum/Dateityp).
 // ---------------------------------------------------------------------------
-let letzteErgebnisRohliste = [];
 function sortiereUndZeichne() {
   const modus = $('sortSelect').value;
   let liste = [...letzteErgebnisRohliste];
