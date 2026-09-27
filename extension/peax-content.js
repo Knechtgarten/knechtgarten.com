@@ -13,6 +13,11 @@
 // Stabile Kennzeichnungen, auf die sich dieses Skript verlaesst (Stand
 // 2026-09-27, kann bei einem PEAX-Layout-Wechsel brechen - siehe
 // Projekt-Notiz zur Risikoeinschaetzung):
+// - [data-testid="search-input"] = PEAX' eigenes Suchfeld (Angular-
+//   Autovervollstaendigung: Tippen zeigt ein Dropdown mit Vorschlaegen,
+//   Enter OHNE Auswahl loest trotzdem die volle Suche aus - genau das
+//   simuliert dieses Skript, bestaetigt durch echten Test 2026-09-27). Die
+//   Adresse aendert sich dabei NICHT (kein URL-Parameter moeglich).
 // - [data-testid="tile-list-tile"] = eine Ergebnis-Kachel, mit
 //   data-testid-doc-id = eindeutige Dokument-ID (Teil der Detail-URL
 //   https://app.peax.ch/inbox/search/<doc-id>, bestaetigt durch echten Test).
@@ -22,6 +27,40 @@
 // - .amount = Betrag, .tile-status = Status (z.B. "Bezahlt").
 // - .tile-background img = Vorschaubild-URL.
 // ============================================================================
+
+function warte(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Angular's ReactiveFormsModule hoert auf native "input"-Events, reagiert
+// aber NICHT auf eine simple ".value = ..."-Zuweisung, da Angular die
+// Aenderung sonst nicht mitbekommt. Deshalb ueber den nativen Property-
+// Setter setzen (umgeht etwaige eigene Getter/Setter der Bibliothek) und
+// danach das Event manuell auffeuern.
+function setzeEingabewert(input, text) {
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+  setter.call(input, text);
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function feuereEnter(input) {
+  const optionen = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true };
+  input.dispatchEvent(new KeyboardEvent('keydown', optionen));
+  input.dispatchEvent(new KeyboardEvent('keyup', optionen));
+}
+
+async function fuehreSucheAus(begriff) {
+  const feld = document.querySelector('[data-testid="search-input"]');
+  if (!feld) return false;
+  feld.focus();
+  setzeEingabewert(feld, begriff);
+  // Kurze Pause, damit Angular das Autovervollstaendigungs-Dropdown aufbaut,
+  // bevor Enter gedrueckt wird (bestaetigt durch echten Test: Enter ohne
+  // Dropdown-Auswahl loest trotzdem die volle Suche aus).
+  await warte(500);
+  feuereEnter(feld);
+  return true;
+}
 
 function liesKachelAus(tile) {
   const docId = tile.getAttribute('data-testid-doc-id') || '';
@@ -54,11 +93,13 @@ function liesErgebnislisteAus() {
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.peaxAction === 'suche') {
-    // Kurze Wartezeit, damit Angular die Ergebnisliste nach dem Navigieren
-    // fertig gerendert hat, bevor wir auslesen.
-    setTimeout(() => {
-      sendResponse({ ergebnisse: liesErgebnislisteAus() });
-    }, 1500);
+    (async () => {
+      const sucheAusgeloest = await fuehreSucheAus(msg.begriff || '');
+      // Wartezeit, bis Angular die (neue) Ergebnisliste fertig gerendert
+      // hat, bevor wir auslesen.
+      await warte(1500);
+      sendResponse({ ergebnisse: liesErgebnislisteAus(), sucheAusgeloest });
+    })();
     return true; // asynchrone Antwort
   }
 });

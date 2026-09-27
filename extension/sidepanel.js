@@ -252,9 +252,9 @@ $('btnZeitraum6Wochen').click();
 $('peaxBtn').addEventListener('click', () => {
   // Manueller Ausweichweg: PEAX' eigene Suchseite direkt oeffnen (z.B. um
   // selbst nachzuschauen, falls das automatische Auslesen mal nichts findet).
-  const query = $('queryInput').value.trim();
-  const url = query ? `https://app.peax.ch/inbox/search?q=${encodeURIComponent(query)}` : 'https://app.peax.ch/inbox/search';
-  chrome.tabs.create({ url, active: false });
+  // Kein URL-Parameter moeglich (PEAX' Suche laeuft clientseitig), deshalb
+  // muss der Suchbegriff dort von Hand erneut eingetippt werden.
+  chrome.tabs.create({ url: 'https://app.peax.ch/inbox/search', active: false });
 });
 
 // ---------------------------------------------------------------------------
@@ -512,10 +512,11 @@ $('lightbox').addEventListener('click', (ev) => { if (ev.target === $('lightbox'
 
 // PEAX-Suche: kein API-Zugang (offizielle Anbindung mit CHF 7'500.- offeriert,
 // abgelehnt) - stattdessen wird PEAX' eigene Suchseite im Hintergrund
-// geoeffnet und per Content-Script (peax-content.js) ausgelesen. Keine
-// KI-Bewertung, PEAX' eigene Trefferliste wird 1:1 uebernommen. Der
-// URL-Parameter "?q=" ist ein erster Versuch, PEAX' Suche vorauszufuellen -
-// noch nicht in jedem Fall bestaetigt, ob PEAX ihn tatsaechlich auswertet.
+// geoeffnet, das Content-Script (peax-content.js) tippt den Suchbegriff in
+// PEAX' eigenes Suchfeld und loest per Enter die Suche aus (bestaetigt: ein
+// URL-Parameter funktioniert NICHT, PEAX' Suche laeuft rein clientseitig
+// ohne Adressaenderung), danach wird die Ergebnisliste ausgelesen. Keine
+// KI-Bewertung, PEAX' eigene Trefferliste wird 1:1 uebernommen.
 async function suchePeax(query) {
   $('searchBtn').disabled = true;
   $('statusLine').textContent = 'Lese Ergebnisse direkt aus PEAX …';
@@ -526,9 +527,8 @@ async function suchePeax(query) {
 
   let tab;
   try {
-    const url = `https://app.peax.ch/inbox/search?q=${encodeURIComponent(query)}`;
     tab = await new Promise((resolve, reject) => {
-      chrome.tabs.create({ url, active: false }, (t) => {
+      chrome.tabs.create({ url: 'https://app.peax.ch/inbox/search', active: false }, (t) => {
         if (chrome.runtime.lastError || !t) reject(new Error(chrome.runtime.lastError?.message || 'Tab konnte nicht geöffnet werden.'));
         else resolve(t);
       });
@@ -543,7 +543,7 @@ async function suchePeax(query) {
       chrome.tabs.onUpdated.addListener(listener);
     });
     const antwort = await new Promise((resolve, reject) => {
-      chrome.tabs.sendMessage(tab.id, { peaxAction: 'suche' }, (res) => {
+      chrome.tabs.sendMessage(tab.id, { peaxAction: 'suche', begriff: query }, (res) => {
         if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
         else resolve(res);
       });
@@ -552,9 +552,14 @@ async function suchePeax(query) {
     letzteErgebnisRohliste = antwort?.ergebnisse || [];
     $('sortSelect').value = 'relevanz';
     zeichneErgebnisse(letzteErgebnisRohliste);
-    $('statusLine').textContent = letzteErgebnisRohliste.length
-      ? ''
-      : 'Keine Treffer gefunden (oder PEAX hat die Seite geändert - bitte melden).';
+    if (antwort && !antwort.sucheAusgeloest) {
+      $('statusLine').textContent = 'PEAX-Suchfeld nicht gefunden (Seitenstruktur hat sich vermutlich geändert) - zeigt evtl. ungefilterte Ergebnisse. Bitte melden.';
+      $('statusLine').className = 'status-line err';
+    } else {
+      $('statusLine').textContent = letzteErgebnisRohliste.length
+        ? ''
+        : 'Keine Treffer gefunden.';
+    }
   } catch (e) {
     $('statusLine').textContent = 'Fehler bei der PEAX-Suche: ' + e.message;
     $('statusLine').className = 'status-line err';
