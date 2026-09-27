@@ -19,6 +19,10 @@
 //
 // PEAX ist weiterhin NICHT Teil dieser Function (kein API-Zugang) - siehe
 // Projekt-Notiz. Die Erweiterung oeffnet PEAX' eigene Suche separat.
+//
+// Testpush 2026-09-27: prueft, ob die neu eingerichtete Supabase-GitHub-
+// Integration diese Datei automatisch deployt (kann nach erfolgreichem Test
+// wieder entfernt werden).
 // ============================================================================
 
 import { createClient } from 'npm:@supabase/supabase-js@2';
