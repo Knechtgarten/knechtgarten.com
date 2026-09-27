@@ -339,6 +339,15 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+// Gmail liefert Anhang-Bytes base64url-codiert (wie bei der Edge Function).
+function base64UrlZuBytes(b64url) {
+  const b64 = b64url.replace(/-/g, '+').replace(/_/g, '/');
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
 function fmtDatum(iso) {
   if (!iso) return '';
   return new Date(iso).toLocaleDateString('de-CH');
@@ -485,6 +494,43 @@ function navLightbox(delta) {
   lightboxIndex = (lightboxIndex + delta + lightboxListe.length) % lightboxListe.length;
   renderLightbox();
 }
+let letzterGmailBlobUrl = null;
+// Zaehler, um veraltete Antworten zu verwerfen, wenn man schnell zum
+// naechsten Treffer weiterklickt, bevor der Anhang fertig geladen ist.
+let gmailAnhangLadeZaehler = 0;
+async function ladeGmailAnhangVorschau(eintrag) {
+  const meineNummer = ++gmailAnhangLadeZaehler;
+  const wrap = $('lbVorschauWrap');
+  const bild = $('lbVorschauBild');
+  const iframe = $('lbVorschauIframe');
+  try {
+    const token = await holeGespeichertenToken();
+    if (!token || meineNummer !== gmailAnhangLadeZaehler) return;
+    const res = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${eintrag.id}/attachments/${eintrag.anhangId}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    if (!res.ok || meineNummer !== gmailAnhangLadeZaehler) return;
+    const daten = await res.json();
+    const bytes = base64UrlZuBytes(daten.data);
+    const blob = new Blob([bytes], { type: 'application/pdf' });
+    const url = URL.createObjectURL(blob);
+    if (meineNummer !== gmailAnhangLadeZaehler) {
+      // Nutzer hat inzwischen zu einem anderen Treffer weitergeklickt.
+      URL.revokeObjectURL(url);
+      return;
+    }
+    letzterGmailBlobUrl = url;
+    wrap.hidden = false;
+    wrap.classList.add('kein-ziehen');
+    bild.hidden = true;
+    iframe.hidden = false;
+    iframe.src = url;
+  } catch (err) {
+    console.error('Gmail-Anhang laden fehlgeschlagen:', err);
+  }
+}
+
 function renderLightbox() {
   const e = lightboxListe[lightboxIndex];
   if (!e) return;
@@ -516,6 +562,13 @@ function renderLightbox() {
   schaerferBtn.disabled = false;
   schaerferBtn.textContent = 'Scharfe Vorschau laden';
 
+  // Blob-URL eines evtl. vorher angezeigten Gmail-Anhangs freigeben, bevor
+  // wir zu einem anderen Treffer wechseln (sonst haeuft sich der Speicher).
+  if (letzterGmailBlobUrl) {
+    URL.revokeObjectURL(letzterGmailBlobUrl);
+    letzterGmailBlobUrl = null;
+  }
+
   if (e.quelle === 'drive') {
     // Drive bietet eine offizielle Einbett-Vorschau, die mehrseitige PDFs/Docs
     // per echtem Scrollen anzeigt (statt nur eines statischen Vorschaubilds
@@ -545,6 +598,12 @@ function renderLightbox() {
     if (e.quelle === 'peax') {
       wrap.hidden = false;
       schaerferBtn.hidden = false;
+    }
+    // Gmail hat (anders als PEAX) eine offizielle Anhang-API - die PDF-Bytes
+    // koennen direkt geholt und wie bei Drive als eingebettetes PDF (mit
+    // echtem Scrollen) gezeigt werden, kein Screenshot-Umweg noetig.
+    if (e.quelle === 'gmail' && e.anhangId) {
+      ladeGmailAnhangVorschau(e);
     }
   }
 }

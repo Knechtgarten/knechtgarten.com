@@ -66,6 +66,10 @@ interface RohTreffer {
   link: string;
   dateityp?: string;
   vorschauBild?: string;
+  // Nur Gmail: ID des ersten PDF-Anhangs (fuer die scharfe Vorschau im
+  // Seitenpanel - Rohbytes werden dort direkt per Gmail-API geholt).
+  anhangId?: string;
+  anhangDateiname?: string;
 }
 
 // Google-Drive-Suchsyntax verlangt Escaping von Apostrophen im Suchbegriff.
@@ -205,7 +209,12 @@ async function sucheGmail(begriff: string, token: string, zeitraumVon?: string, 
   const ids: string[] = (liste.messages || []).map((m: any) => m.id);
 
   const details = await Promise.all(ids.map(async (id) => {
-    const params = new URLSearchParams({ format: 'metadata', metadataHeaders: 'Subject' });
+    // "full" statt "metadata" - liefert zusaetzlich die MIME-Teile-Struktur
+    // (Dateiname/attachmentId pro Anhang), OHNE die eigentlichen Anhang-Bytes
+    // mitzuladen (die kommen nur ueber einen separaten Aufruf - siehe
+    // leseAnhaengeText/Anhang-Vorschau im Seitenpanel). Noetig fuer die
+    // scharfe PDF-Anhang-Vorschau (attachmentId muss bekannt sein).
+    const params = new URLSearchParams({ format: 'full' });
     const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?${params}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
@@ -217,6 +226,9 @@ async function sucheGmail(begriff: string, token: string, zeitraumVon?: string, 
       const anhangText = await leseAnhaengeText(id, token);
       if (anhangText) snippet += '\n[Anhang-Inhalt] ' + anhangText;
     }
+    const pdfAnhang = (msg.payload?.parts || []).find(
+      (p: any) => p.mimeType === 'application/pdf' && p.body?.attachmentId,
+    );
     return {
       quelle: 'gmail' as const,
       id: msg.id,
@@ -224,6 +236,8 @@ async function sucheGmail(begriff: string, token: string, zeitraumVon?: string, 
       snippet,
       datum: msg.internalDate ? new Date(Number(msg.internalDate)).toISOString() : null,
       link: `https://mail.google.com/mail/u/0/#all/${msg.id}`,
+      anhangId: pdfAnhang?.body?.attachmentId || undefined,
+      anhangDateiname: pdfAnhang?.filename || undefined,
     };
   }));
   return details.filter((d): d is RohTreffer => d !== null);
@@ -530,6 +544,8 @@ Deno.serve(async (req) => {
         link: roh.link,
         dateityp: roh.dateityp,
         vorschauBild: roh.vorschauBild,
+        anhangId: roh.anhangId,
+        anhangDateiname: roh.anhangDateiname,
         uebereinstimmung: b.uebereinstimmung === 'hoch' ? 'hoch' : 'moeglich',
         begruendung: b.begruendung || '',
         dokumentart: b.dokumentart || undefined,
