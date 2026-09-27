@@ -506,11 +506,12 @@ async function suchen() {
   }
 
   const quellen = aktiverTab === 'drive' ? ['drive'] : aktiverTab === 'gmail' ? ['gmail'] : ['drive', 'gmail'];
+  const quellenText = quellen.length === 2 ? 'Drive/Gmail' : quellen[0] === 'drive' ? 'Drive' : 'Gmail';
 
   $('searchBtn').disabled = true;
   $('statusLine').textContent = $('anhaengeDurchsuchen').checked
-    ? 'KI durchsucht Drive/Gmail inkl. Anhänge – kann spürbar länger dauern …'
-    : 'KI durchsucht Drive/Gmail, kann ein paar Sekunden dauern …';
+    ? `KI durchsucht ${quellenText} inkl. Anhänge – kann spürbar länger dauern …`
+    : `KI durchsucht ${quellenText}, kann ein paar Sekunden dauern …`;
   $('statusLine').className = 'status-line';
   $('resultsHeader').hidden = true;
   $('docList').innerHTML = '';
