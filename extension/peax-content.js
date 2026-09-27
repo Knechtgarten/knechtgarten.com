@@ -149,34 +149,35 @@ async function liesPeaxSeitenAus() {
 
   await warteAufElement('.page[data-page-number]', 8000);
 
-  // PDF.js rendert aus Speichergruenden meist nur Seiten nahe der aktuellen
-  // Bildschirmposition - deshalb einmal komplett durchscrollen, damit jede
-  // Seite ihren Canvas-Inhalt bekommt, bevor wir alles auslesen.
-  const gesamtHoehe = container.scrollHeight;
-  const schritt = Math.max(200, Math.floor(container.clientHeight * 0.8));
-  for (let pos = 0; pos <= gesamtHoehe; pos += schritt) {
-    container.scrollTop = pos;
-    await warte(400);
-  }
-  container.scrollTop = 0;
-  await warte(300);
-
+  // Wichtiger Fund (2026-09-27): PDF.js zeichnet aus Speichergruenden nur
+  // die gerade sichtbare(n) Seite(n) und entfernt den Canvas-Inhalt wieder,
+  // sobald man weiterscrollt - ein Canvas existiert oft nur fuer einen
+  // kurzen Moment. Deshalb NICHT erst komplett durchscrollen und danach
+  // alles auf einmal auslesen (dann sind laengst wieder leer), sondern
+  // jede Seite EINZELN in den sichtbaren Bereich holen und SOFORT danach
+  // ihren Canvas abgreifen.
   const seitenElemente = [...document.querySelectorAll('.page[data-page-number]')];
   diagnose.seitenGefunden = seitenElemente.length;
 
-  const seiten = [];
+  const bilderNachSeite = new Map();
   for (const seite of seitenElemente) {
+    seite.scrollIntoView({ block: 'center' });
+    await warte(500);
     const canvas = seite.querySelector('canvas');
     if (!canvas) continue;
     diagnose.canvasGefunden++;
     try {
-      seiten.push(canvas.toDataURL('image/png'));
+      const nr = Number(seite.getAttribute('data-page-number')) || bilderNachSeite.size + 1;
+      bilderNachSeite.set(nr, canvas.toDataURL('image/png'));
     } catch (err) {
       // z.B. SecurityError, falls der Canvas durch eine fremde Bildquelle
       // "verunreinigt" wurde und sich deshalb nicht auslesen laesst.
       diagnose.canvasFehler++;
     }
   }
+  container.scrollTop = 0;
+
+  const seiten = [...bilderNachSeite.keys()].sort((a, b) => a - b).map((nr) => bilderNachSeite.get(nr));
   return { seiten, diagnose };
 }
 
