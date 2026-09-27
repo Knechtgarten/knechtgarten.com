@@ -160,6 +160,19 @@ async function extrahierePdfText(bytes: Uint8Array): Promise<string> {
   return text.slice(0, 3000).trim();
 }
 
+// Gmail verschachtelt MIME-Teile mehrstufig (z.B. bei weitergeleiteten Mails
+// steckt der eigentliche Anhang oft eine oder mehrere Ebenen tiefer, unter
+// einem multipart/mixed- oder message/rfc822-Teil) - deshalb rekursiv statt
+// nur die oberste Ebene absuchen.
+function findeAlleTeile(teile: any[]): any[] {
+  const ergebnis: any[] = [];
+  for (const teil of teile || []) {
+    ergebnis.push(teil);
+    if (teil.parts) ergebnis.push(...findeAlleTeile(teil.parts));
+  }
+  return ergebnis;
+}
+
 // Laedt PDF-Anhaenge einer Nachricht und haengt den extrahierten Text an -
 // nur wenn explizit gewuenscht (spuerbar langsamer: pro Anhang ein weiterer
 // API-Aufruf + PDF-Parsing).
@@ -169,7 +182,7 @@ async function leseAnhaengeText(messageId: string, token: string): Promise<strin
   });
   if (!res.ok) return '';
   const msg = await res.json();
-  const parts: any[] = msg.payload?.parts || [];
+  const parts: any[] = findeAlleTeile(msg.payload?.parts || []);
   const pdfTeile = parts.filter((p) => p.mimeType === 'application/pdf' && p.body?.attachmentId);
   const texte = await Promise.all(pdfTeile.slice(0, 3).map(async (teil) => {
     try {
@@ -226,7 +239,7 @@ async function sucheGmail(begriff: string, token: string, zeitraumVon?: string, 
       const anhangText = await leseAnhaengeText(id, token);
       if (anhangText) snippet += '\n[Anhang-Inhalt] ' + anhangText;
     }
-    const pdfAnhang = (msg.payload?.parts || []).find(
+    const pdfAnhang = findeAlleTeile(msg.payload?.parts || []).find(
       (p: any) => p.mimeType === 'application/pdf' && p.body?.attachmentId,
     );
     return {
