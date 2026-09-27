@@ -239,7 +239,10 @@ async function sucheGmail(begriff: string, token: string, zeitraumVon?: string, 
       ? ` has:attachment (${endungen.map((e) => `filename:${e}`).join(' OR ')})`
       : ' has:attachment';
   }
-  const listParams = new URLSearchParams({ q: gmailQuery, maxResults: '10' });
+  // 30 statt vorher 10: Claude sieht sonst nur die obersten 10 Gmail-Treffer
+  // und uebersieht dadurch Mails, bei denen der Suchbegriff nur im Text
+  // (nicht Betreff/Anhang) vorkommt, wenn es insgesamt viele Treffer gibt.
+  const listParams = new URLSearchParams({ q: gmailQuery, maxResults: '30' });
   const listRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?${listParams}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
