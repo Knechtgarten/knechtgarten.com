@@ -533,24 +533,29 @@ async function ladeSchaerferePeaxVorschau(eintrag) {
   btn.disabled = true;
   btn.textContent = 'Lade … (kann einige Sekunden dauern)';
 
+  let fenster;
   let tab;
-  let vorherigerTabId;
   try {
     // Wichtiger Fund (2026-09-27): Ein Hintergrund-Tab (active:false) bleibt
     // fuer den Browser "unsichtbar" (document.hidden=true) - PEAX' PDF-
     // Betrachter zeichnet dann nie etwas in den Canvas (Ressourcen sparen),
-    // egal wie lange man wartet/scrollt. Deshalb muss der Tab kurz WIRKLICH
-    // sichtbar sein; wir merken uns den vorher aktiven Tab, um danach dorthin
-    // zurueckzuspringen (der Nutzer soll nicht auf PEAX haengen bleiben).
-    vorherigerTabId = await new Promise((resolve) => {
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => resolve(tabs?.[0]?.id));
+    // egal wie lange man wartet/scrollt. Ein eigenes, kurz sichtbar
+    // aufblitzendes Fenster war fuer den Nutzer stoerend. Deshalb hier
+    // stattdessen ein eigenes Popup-Fenster ausserhalb des sichtbaren
+    // Bildschirmbereichs (weit im Minus positioniert) - fuer den Browser
+    // zaehlt es trotzdem als "sichtbar" (nicht minimiert, aktiver Tab
+    // seines Fensters), aber der Nutzer sieht nichts aufblitzen.
+    fenster = await new Promise((resolve, reject) => {
+      chrome.windows.create(
+        { url: eintrag.link, type: 'popup', focused: false, width: 1000, height: 800, left: -3000, top: 0 },
+        (w) => {
+          if (chrome.runtime.lastError || !w) reject(new Error(chrome.runtime.lastError?.message || 'Fenster konnte nicht geöffnet werden.'));
+          else resolve(w);
+        }
+      );
     });
-    tab = await new Promise((resolve, reject) => {
-      chrome.tabs.create({ url: eintrag.link, active: true }, (t) => {
-        if (chrome.runtime.lastError || !t) reject(new Error(chrome.runtime.lastError?.message || 'Tab konnte nicht geöffnet werden.'));
-        else resolve(t);
-      });
-    });
+    tab = fenster.tabs?.[0];
+    if (!tab) throw new Error('Kein Tab im neuen Fenster gefunden.');
     await new Promise((resolve) => {
       function listener(tabId, info) {
         if (tabId === tab.id && info.status === 'complete') {
@@ -584,8 +589,7 @@ async function ladeSchaerferePeaxVorschau(eintrag) {
   } finally {
     btn.disabled = false;
     peaxSchaerfereLadeLaeuft = false;
-    if (tab) chrome.tabs.remove(tab.id).catch(() => {});
-    if (vorherigerTabId) chrome.tabs.update(vorherigerTabId, { active: true }).catch(() => {});
+    if (fenster) chrome.windows.remove(fenster.id).catch(() => {});
   }
 }
 $('lbPeaxSchaerfer').addEventListener('click', () => {
