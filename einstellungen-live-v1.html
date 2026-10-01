@@ -955,6 +955,7 @@ const $ = id => document.getElementById(id);
 const ICON = {
   drag: '<svg width="12" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="8" cy="5" r="1.5"/><circle cx="16" cy="5" r="1.5"/><circle cx="8" cy="12" r="1.5"/><circle cx="16" cy="12" r="1.5"/><circle cx="8" cy="19" r="1.5"/><circle cx="16" cy="19" r="1.5"/></svg>',
   trash: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></svg>',
+  warning: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3L2 20h20L12 3Z"/><path d="M12 9v5"/><path d="M12 17.5v.01"/></svg>',
   edit: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
   copy: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="1.5"/><path d="M5 15V5a1.5 1.5 0 0 1 1.5-1.5H15"/></svg>',
   eye: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>',
@@ -2188,13 +2189,34 @@ function artikelDetailText(id){
 // Logik verwenden - die Unterscheidung ist rein ueber summen_zusatzeinheit
 // (gesetzt = Kalkulationsstaffelung) und rein visuell, keine eigene DB-
 // Struktur noetig.
+// Erkennt Luecken/Ueberlappungen zwischen aufeinanderfolgenden Staffelstufen
+// (z.B. Bis=80 bei der einen Zeile, Von=90 bei der naechsten - dazwischen
+// wuerde in der Offerte keine Stufe gefunden und CHF 0.00 verrechnet, siehe
+// tool-a-live-v1.html "(keine Stufe gefunden)"). Prueft nur zwischen Zeilen,
+// nicht den Beginn bei "Von" der ersten Zeile - stufenSortiert MUSS nach
+// menge_von aufsteigend sortiert sein (siehe Aufrufstellen).
+function staffelStufenFehler(stufenSortiert){
+  const fehler = [];
+  for(let i = 0; i < stufenSortiert.length - 1; i++){
+    const a = stufenSortiert[i], b = stufenSortiert[i + 1];
+    if(a.menge_bis == null) continue; // "kein Limit" - sollte ohnehin die letzte Zeile sein
+    if(a.menge_bis < b.menge_von) fehler.push({ nachIndex: i, typ: 'luecke', von: a.menge_bis, bis: b.menge_von });
+    else if(a.menge_bis > b.menge_von) fehler.push({ nachIndex: i, typ: 'ueberlappung', von: b.menge_von, bis: a.menge_bis });
+  }
+  return fehler;
+}
+function staffelgruppeStufenSortiert(sgId){
+  return STAFFELSTUFEN.filter(s => s.staffelgruppe_id === sgId).sort((a, b) => a.menge_von - b.menge_von);
+}
 function renderStaffelgruppenListe(containerId, gruppen){
   $(containerId).innerHTML = gruppen.map(sg => {
     const expanded = !!staffelExpanded[sg.id];
+    const hatFehler = staffelStufenFehler(staffelgruppeStufenSortiert(sg.id)).length > 0;
     return `<div class="card">
       <div class="cardheader" data-sgid="${sg.id}">
         <span class="cardchevron" style="${expanded ? 'transform:rotate(90deg);' : ''}">&#9656;</span>
         <div class="cardlabel" style="flex:1;margin-bottom:0;">${sg.titel || sg.name}</div>
+        ${hatFehler ? `<span class="badge aus" style="display:inline-flex;align-items:center;gap:4px;margin-right:8px;" title="Lücke oder Überlappung zwischen zwei Stufen - bitte prüfen">${ICON.warning} Stufen prüfen</span>` : ''}
         <button class="icobtn danger admin-only sgDeleteGroupBtn" data-sgid="${sg.id}" title="Staffelung löschen">${ICON.trash}</button>
       </div>
       <div class="hint">Sonderposition mit Staffelung für ${sg.titel || sg.name}:</div>
@@ -2232,7 +2254,9 @@ function renderStaffelgruppen(){
 }
 
 function renderSgBody(sg){
-  const stufen = STAFFELSTUFEN.filter(s => s.staffelgruppe_id === sg.id).sort((a,b) => a.menge_von - b.menge_von);
+  const stufen = staffelgruppeStufenSortiert(sg.id);
+  const fehlerNachIndex = {};
+  staffelStufenFehler(stufen).forEach(f => { fehlerNachIndex[f.nachIndex] = f; });
   const nurLesen = aktuelleRolle !== 'admin' ? 'readonly' : '';
   const draftArtikel = sgDraftArtikel[sg.id];
   return `<div class="cardbody" data-sgbody="${sg.id}">
@@ -2262,13 +2286,18 @@ function renderSgBody(sg){
     <table class="sgtable">
       <thead><tr><th style="width:150px;">Von</th><th style="width:150px;">Bis</th><th style="width:320px;">Artikel</th><th style="width:40px;"></th></tr></thead>
       <tbody>
-        ${stufen.map(s => {
-          return `<tr class="sgStufeRow" data-stufe="${s.id}">
+        ${stufen.map((s, i) => {
+          const zeile = `<tr class="sgStufeRow" data-stufe="${s.id}">
             <td><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="number" step="0.01" class="sgVonEdit" value="${s.menge_von}" ${nurLesen}></td>
             <td><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="number" step="0.01" class="sgBisEdit" value="${s.menge_bis ?? ''}" placeholder="kein Limit" ${nurLesen}></td>
             <td>${artikelDetailText(s.artikel_id)}</td>
             <td><button class="icobtn danger admin-only sgDeleteBtn" data-stufe="${s.id}" title="Stufe löschen">${ICON.trash}</button></td>
           </tr>`;
+          const f = fehlerNachIndex[i];
+          const warnZeile = f ? `<tr class="sgStufeWarnRow"><td colspan="4" style="background:#FBEFEC;color:var(--danger);font-size:12.5px;padding:8px 10px;display:flex;align-items:center;gap:6px;">${ICON.warning}${f.typ === 'luecke'
+            ? ` Lücke zwischen ${f.von} und ${f.bis}: in diesem Bereich würde CHF 0.00 verrechnet.`
+            : ` Überlappung zwischen ${f.von} und ${f.bis}: zwei Stufen widersprechen sich hier - es gilt die erste passende Zeile.`}</td></tr>` : '';
+          return zeile + warnZeile;
         }).join('')}
         <tr class="sgDraftRow admin-only" data-sgid="${sg.id}">
           <td><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="number" step="0.01" class="sgEditVon" placeholder="Von"></td>
