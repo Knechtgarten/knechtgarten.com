@@ -5229,8 +5229,18 @@ async function recalc(){
           }
           const lwAdressliste = lieferwagenTransportAdressliste(rz.sonderpositionTyp?.lieferwagen_transport_ort);
           if(lwAdressliste){
-            const einheit = rz.sonderpositionTyp.einheit || 'Fahrt';
+            // Der Stundenansatz (ansatz, z.B. 108 CHF/Std) ist FIX - er aendert
+            // sich nie, egal wie weit die naechstgelegene Adresse entfernt ist
+            // (Absprache). Nur die Menge (Std bzw. km) variiert je nach
+            // Distanz. Darum hier einheit IMMER auf Std/km setzen (nicht die
+            // evtl. abweichend konfigurierte sonderposition_typ.einheit
+            // uebernehmen) und die Fahrzeit/-strecke pro Fahrt in die MENGE
+            // einrechnen statt in den Preis - sonst wuerde beim Zusammenzaehlen
+            // mit anderen Lieferwagen-Zeilen (z.B. der Hin+Rueckfahrt zur
+            // Baustelle) ein unsinniger Mischpreis entstehen, siehe
+            // renderKostenblock() "logistik"-Block.
             const kmModus = lieferwagenModus === 'distanz';
+            const einheit = kmModus ? 'km' : 'Std';
             const ansatz = kmModus ? rz.sonderpositionTyp.lieferwagen_km_artikel?.vp_knecht : rz.sonderpositionTyp.lieferwagen_std_artikel?.vp_knecht;
             if(ansatz == null){
               return { ...rz, bezeichnung: rz.bezeichnung + ` (kein ${kmModus ? 'Km' : 'Std'}-Preis-Artikel hinterlegt)`, einheit, menge: 0, preis: 0, betrag: 0 };
@@ -5247,10 +5257,14 @@ async function recalc(){
             } catch(e) {
               return { ...rz, bezeichnung: rz.bezeichnung + ` (Berechnung fehlgeschlagen: ${e.message || e})`, einheit, menge: 0, preis: 0, betrag: 0 };
             }
-            const menge = mengeRoh * anzahlFaktor(rz);
+            // Menge-Formel der Ressourcenzeile ergibt die Anzahl Fahrten -
+            // die echte Menge (Std/km) ist das mal die Fahrzeit/-strecke zur
+            // naechstgelegenen Adresse, verrechnet zum fixen Ansatz.
+            const fahrten = mengeRoh * anzahlFaktor(rz);
             const einzelwert = kmModus ? naechste.d.km : naechste.d.std;
-            const betrag = einzelwert * ansatz * menge;
-            const preis = menge > 0 ? betrag / menge : 0;
+            const menge = einzelwert * fahrten;
+            const preis = ansatz;
+            const betrag = menge * preis;
             const bezeichnung = rz.bezeichnung + ` (${naechste.a.name})`;
             return { ...rz, bezeichnung, einheit, menge, preis, betrag };
           }
