@@ -353,7 +353,8 @@ async function modusAntworten(body: any, modell: string) {
     const zugehoerig = (vorlagen || []).filter((v: any) => v.zweig_id === z.id);
     const optionen = zugehoerig.map((v: any) => v.titel).join(' / ');
     const ast = z.mailassistent_ast;
-    return `- ZWEIG "${z.titel}" (Ast: ${ast?.titel || '–'}) – zutreffend, wenn die Mail zu diesem Fall gehoert und der Mitarbeiter selbst zwischen mehreren Antworten waehlen soll.` +
+    const istDistanzZweig = ast?.ast_funktion?.typ === 'distanzlogik';
+    return `- ZWEIG "${z.titel}" (Ast: ${ast?.titel || '–'}) – zutreffend, wenn die Mail zu diesem Fall gehoert und der Mitarbeiter selbst zwischen mehreren Antworten waehlen soll.${istDistanzZweig ? ' [DISTANZLOGIK: Mitarbeiter entscheidet hier IMMER selbst, auch wenn er schon eine Anweisung geschrieben hat]' : ''}` +
       (ast?.anwenden_bei ? `\n  Ast trifft zu wenn: ${ast.anwenden_bei}` : '') +
       (ast?.nicht_anwenden_bei ? `\n  Ast NICHT anwenden bei: ${ast.nicht_anwenden_bei}` : '') +
       (z.anwenden_bei ? `\n  Zweig trifft zu wenn: ${z.anwenden_bei}` : '') +
@@ -391,7 +392,14 @@ Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Obje
    Nimm exakt das, was in der Mail steht (keine eigene Umformung/Ergänzung, nichts dazu erfinden). Nur wenn wirklich gar kein Hinweis auf einen Standort vorhanden ist, setze null.`;
 
   let userText = 'EINGEHENDE MAIL:\n' + body.mailInhalt;
-  if (body.stichworte) userText += '\n\nZUSAETZLICHE STICHWORTE/ANWEISUNG VOM MITARBEITER - unbedingt beruecksichtigen: ' + body.stichworte;
+  const hatStichworte = !!(body.stichworte && String(body.stichworte).trim());
+  if (hatStichworte) {
+    userText += '\n\nZUSAETZLICHE STICHWORTE/ANWEISUNG VOM MITARBEITER - unbedingt beruecksichtigen: ' + body.stichworte;
+    // Der Mitarbeiter hat schon gesagt, was er will - dann soll er nicht
+    // zusaetzlich noch eine Antwort aus einer Liste waehlen muessen. Steht
+    // hier im userText (nicht im gecachten System-Prompt), da nur bei Bedarf.
+    userText += '\n\nWICHTIG: Weil der Mitarbeiter bereits eine Anweisung geschrieben hat, waehle SELBST die passendste Vorlage (Fall 1, aktion "entwurf") - oder vorlageTitel:null, wenn keine passt. Verwende Fall 3 ("auswahl") NICHT und Fall 4 ("zweig") NUR bei einem ZWEIG mit [DISTANZLOGIK]. Fall 2 ("rueckfrage") bleibt wie bisher, wenn eine Vorlage MIT RUECKFRAGE zutrifft.';
+  }
   // Kleineres max_tokens als frueher: dieser Aufruf entscheidet nur noch, WAS
   // zutrifft (Vorlage/Zweig/Rueckfrage), schreibt den Mailtext nicht mehr
   // selbst - das passiert bei Fall 1 in einem zweiten, gestreamten Aufruf
@@ -407,10 +415,50 @@ Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Obje
       : 'KI-Antwort konnte nicht gelesen werden: ' + String(e) }, 502);
   }
 
+  // Baut die "Direkter Entwurf"-Antwort (nur Einordnung, noch kein Text) fuer
+  // eine gewaehlte Vorlage (oder null = Auffangfall). Wird vom normalen Fall 1
+  // UND vom Fallback unten genutzt (extraTokens = Zusatzaufruf der Auswahl).
+  const entwurfFuerVorlage = async (vorlage: any, extraIn = 0, extraOut = 0) => {
+    const zusatzfenster = (vorlage?.mailassistent_vorlage_zusatzfenster || [])
+      .map((e: any) => e.mailassistent_zusatzfenster).filter(Boolean);
+    const anhaenge = (vorlage?.mailassistent_vorlage_anhang || []).filter((a: any) => a.immer_mitsenden).map((a: any) => ({ dateiname: a.dateiname, url: a.url }));
+    await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', vorlage?.id ?? null, tokensInput + extraIn, tokensOutput + extraOut);
+    return json({
+      aktion: 'entwurf', vorlageId: vorlage?.id ?? null,
+      zusatzfenster: zusatzfenster.length ? zusatzfenster : undefined,
+      anhaenge: anhaenge.length ? anhaenge : undefined,
+      tokensInput: tokensInput + extraIn, tokensOutput: tokensOutput + extraOut,
+    });
+  };
+
+  // Fallback fuer den Fall, dass die KI trotz Anweisung des Mitarbeiters
+  // 'zweig'/'auswahl' liefert: ein kurzer Zusatzaufruf waehlt aus den
+  // Kandidaten die passendste Vorlage (nur solche mit Text), damit der
+  // Mitarbeiter nicht nochmal manuell waehlen muss.
+  const waehleVorlageSelbst = async (kandidaten: any[]) => {
+    const mitText = kandidaten.filter((v: any) => v.inhalt && String(v.inhalt).trim());
+    if (!mitText.length) return { vorlage: null, tIn: 0, tOut: 0 };
+    if (mitText.length === 1) return { vorlage: mitText[0], tIn: 0, tOut: 0 };
+    const liste = mitText.map((v: any) =>
+      `- "${v.titel}"${v.wann_trifft_zu ? ' (trifft zu wenn: ' + v.wann_trifft_zu + ')' : ''}${v.nicht_anwenden_bei ? ' (NICHT bei: ' + v.nicht_anwenden_bei + ')' : ''}\n  Textanfang: ${String(v.inhalt).slice(0, 350).replace(/\s+/g, ' ')}`
+    ).join('\n');
+    const sys = 'Du waehlst fuer Knechtgarten (Gartenbau) die passendste Antwort-Vorlage zu einer eingehenden Mail. Antworte AUSSCHLIESSLICH mit JSON: {"vorlageTitel":"<exakter Titel aus der Liste>"}';
+    const usr = `EINGEHENDE MAIL:\n${body.mailInhalt}\n\nANWEISUNG DES MITARBEITERS:\n${body.stichworte}\n\nVORLAGEN:\n${liste}`;
+    try {
+      const r = await rufeClaudeAuf(modell, sys, usr, 200);
+      const j = extrahiereJson(r.text);
+      const gewaehlt = mitText.find((v: any) => v.titel === j.vorlageTitel)
+        || mitText.find((v: any) => (v.titel || '').trim().toLowerCase() === String(j.vorlageTitel || '').trim().toLowerCase());
+      return { vorlage: gewaehlt || mitText[0], tIn: r.tokensInput, tOut: r.tokensOutput };
+    } catch (_e) {
+      return { vorlage: mitText[0], tIn: 0, tOut: 0 };
+    }
+  };
+
   if (entscheidung.aktion === 'entwurf') {
     // Schreibt den Text NICHT mehr selbst - liefert nur die Einordnung, die
     // Erweiterung ruft danach 'auswahl-antwort' auf (gestreamt), siehe
-    // kgZeigeErgaenzungImPopup in content.js.
+    // kgStarteKlassifizierung in content.js.
     let vorlage = null;
     if (entscheidung.vorlageTitel) {
       const gesucht = String(entscheidung.vorlageTitel).trim().toLowerCase();
@@ -420,16 +468,7 @@ Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Obje
         return json({ error: 'Vorlage "' + entscheidung.vorlageTitel + '" wurde nicht gefunden (Titel stimmt nicht exakt mit der Verwaltung ueberein) - dadurch waere z.B. ein zugehoeriges Zusatzfenster verloren gegangen. Bitte nochmal versuchen oder den Vorlagen-Titel in der Verwaltung pruefen.' }, 502);
       }
     }
-    const zusatzfenster = (vorlage?.mailassistent_vorlage_zusatzfenster || [])
-      .map((e: any) => e.mailassistent_zusatzfenster).filter(Boolean);
-    const anhaenge = (vorlage?.mailassistent_vorlage_anhang || []).filter((a: any) => a.immer_mitsenden).map((a: any) => ({ dateiname: a.dateiname, url: a.url }));
-    await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', vorlage?.id ?? null, tokensInput, tokensOutput);
-    return json({
-      aktion: 'entwurf', vorlageId: vorlage?.id ?? null,
-      zusatzfenster: zusatzfenster.length ? zusatzfenster : undefined,
-      anhaenge: anhaenge.length ? anhaenge : undefined,
-      tokensInput, tokensOutput,
-    });
+    return await entwurfFuerVorlage(vorlage);
   }
 
   if (entscheidung.aktion === 'rueckfrage') {
@@ -448,6 +487,10 @@ Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Obje
       .map((t: string) => (vorlagen || []).find((v: any) => v.titel === t))
       .filter(Boolean);
     if (kandidaten.length >= 2) {
+      if (hatStichworte) {
+        const w = await waehleVorlageSelbst(kandidaten);
+        return await entwurfFuerVorlage(w.vorlage || kandidaten[0], w.tIn, w.tOut);
+      }
       await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', null, tokensInput, tokensOutput);
       return json({
         aktion: 'auswahl', frage: entscheidung.frage || 'Welche Vorlage passt besser?',
@@ -467,6 +510,15 @@ Entscheide jetzt, was zutrifft, und antworte AUSSCHLIESSLICH mit einem JSON-Obje
     // die Fahrzeit zu Knechtgarten + allen Partnerbetrieben dieses Asts
     // berechnen, als reine Entscheidungshilfe fuer den Mitarbeiter.
     const astFunktion = zweig.mailassistent_ast?.ast_funktion;
+
+    // Hat der Mitarbeiter schon eine Anweisung geschrieben, waehlt die KI
+    // selbst die passendste Antwort aus dem Zweig - ausser bei Distanzlogik
+    // (Kundenanfragen: Fahrzeit/Partnerbetriebe als Entscheidungshilfe, da
+    // entscheidet der Mitarbeiter weiterhin selbst).
+    if (hatStichworte && astFunktion?.typ !== 'distanzlogik' && kandidaten.length) {
+      const w = await waehleVorlageSelbst(kandidaten);
+      return await entwurfFuerVorlage(w.vorlage, w.tIn, w.tOut);
+    }
     let distanzFelder: any = {};
     if (astFunktion?.typ === 'distanzlogik') {
       const distanz = entscheidung.kundenAdresse
@@ -583,7 +635,8 @@ Platzhalter in eckigen Klammern (z.B. [Bauteil], [X Minuten]) werden so behandel
 VORLAGE:\n${zweig.inhalt}`);
   if (faelleText) teile.push('REGELN (gelten IMMER fuer den fertigen Text - im Hinterkopf behalten und den Text danach ausrichten):\n' + faelleText);
   if (body.mailInhalt) teile.push('EINGEHENDE MAIL:\n' + body.mailInhalt);
-  if (body.anweisung) teile.push('ZUSAETZLICHE ANWEISUNG: ' + body.anweisung);
+  const anweisungText = body.anweisung || body.stichworte;
+  if (anweisungText) teile.push('ZUSAETZLICHE ANWEISUNG VOM MITARBEITER (beantwortet auch offene Fragen aus der eingehenden Mail - setze dafuer KEINEN [Antwort: ...]-Platzhalter, sondern verwende die Angabe): ' + anweisungText);
   teile.push('Schreibe jetzt den fertigen Mailtext. Nur den Mailtext ausgeben, keine Erklärung.' + KG_FORMAT_HINWEIS);
 
   // Gestreamt statt am Stueck: dieser Schritt uebernimmt im Wesentlichen eine
@@ -675,7 +728,7 @@ async function modusAuswahlAntwort(body: any, modell: string) {
   if (wissenText) teile.push('NACHSCHLAGEWERK (weiteres Wissen - nutze das bei Bedarf):\n' + wissenText);
   if (istAuffangfall) {
     teile.push(`Es gibt keine passende Vorlage fuer diese Mail (Auffangfall). Schreibe selbst einen passenden, kurzen Antworttext.
-Wird eine konkrete Sachfrage gestellt, die NUR das Team selbst beantworten kann (z.B. ein internes Detail, das nicht aus der eingehenden Mail hervorgeht) - erfinde NIEMALS eine Antwort darauf. Setze stattdessen einen Platzhalter in eckigen Klammern ein, der kurz beschreibt, was einzusetzen ist, z.B. [Antwort: eigene Space 2.0-Einheiten im Einsatz?] - der Mitarbeiter kann per Klick draufantworten, bevor die Mail rausgeht.`);
+Wird eine konkrete Sachfrage gestellt, die NUR das Team selbst beantworten kann (z.B. ein internes Detail, das weder aus der eingehenden Mail noch aus der ZUSAETZLICHEN ANWEISUNG des Mitarbeiters hervorgeht - steht die Antwort dort schon, verwende sie und setze KEINEN Platzhalter) - erfinde NIEMALS eine Antwort darauf. Setze stattdessen einen Platzhalter in eckigen Klammern ein, der kurz beschreibt, was einzusetzen ist, z.B. [Antwort: eigene Space 2.0-Einheiten im Einsatz?] - der Mitarbeiter kann per Klick draufantworten, bevor die Mail rausgeht.`);
   } else {
     teile.push(`VORLAGE - als starke Richtschnur nehmen (Kernaussage/Entscheidung und Aufbau bleiben, das ist nicht verhandelbar), aber natürlich personalisieren: Namen der Person ansprechen, wo sinnvoll kurz auf Details aus der eingehenden Mail eingehen. Nicht stur wortwörtlich abschreiben, aber auch nichts an der eigentlichen Entscheidung/Aussage ändern.
 Platzhalter in eckigen Klammern (z.B. [Bauteil], [X Minuten]) werden so behandelt:
@@ -687,7 +740,8 @@ VORLAGE:\n${inhalt}`);
   }
   if (faelleText) teile.push('REGELN (gelten IMMER fuer den fertigen Text - im Hinterkopf behalten und den Text danach ausrichten):\n' + faelleText);
   if (body.mailInhalt) teile.push('EINGEHENDE MAIL:\n' + body.mailInhalt);
-  if (body.anweisung) teile.push('ZUSAETZLICHE ANWEISUNG: ' + body.anweisung);
+  const anweisungText = body.anweisung || body.stichworte;
+  if (anweisungText) teile.push('ZUSAETZLICHE ANWEISUNG VOM MITARBEITER (beantwortet auch offene Fragen aus der eingehenden Mail, z.B. "nichts zusaetzlich beruecksichtigen" = keine weiteren Anpassungen noetig - setze dafuer KEINEN [Antwort: ...]-Platzhalter, sondern verwende die Angabe): ' + anweisungText);
   teile.push('Schreibe jetzt den fertigen Mailtext. Nur den Mailtext ausgeben, keine Erklärung.' + KG_FORMAT_HINWEIS);
 
   // Gleiches Streaming-Muster wie rueckfrage-antwort - auch hier ist die
