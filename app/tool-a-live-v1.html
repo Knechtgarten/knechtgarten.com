@@ -4260,6 +4260,26 @@ let unvollstaendigeFreitextZeilen = [];
 // hinterlegt ist) und bleiben danach ganz normal editierbar, so wie jede
 // andere Eigene Position.
 function seedeFreitextZeilen(){
+  // Aufraeumen (Absprache): wird die Option einer Freitext-Position
+  // abgewaehlt, verschwindet ihre Zeile wieder - aber nur, solange sie noch
+  // UNBERUEHRT ist (Bezeichnung/Menge/Preis wie im Vorschlag, keine Fotos).
+  // Eine Zeile mit eingetragenen Werten bleibt stehen (sonst waere der
+  // Preis bei einem versehentlichen Abwaehlen weg) und laesst sich von Hand
+  // loeschen. Eine von Hand geloeschte Zeile (geloescht=true, siehe ez-del)
+  // bleibt als unsichtbare Markierung erhalten, damit sie nicht sofort wieder
+  // angelegt wird - diese Markierung faellt weg, sobald die Option
+  // abgewaehlt wird (erneutes Anwaehlen = frischer Start).
+  eigeneZeilen = eigeneZeilen.filter(z => {
+    if(!z.freitextVorlageId) return true;
+    const v = freitextVorlagen.find(x => x.id === z.freitextVorlageId);
+    if(!v) return true;
+    const aktiv = v.istEigenePosition && (v.optionId == null || bereichSelectedOptions.has(v.optionId));
+    if(aktiv) return true;
+    if(z.geloescht) return false;
+    const unberuehrt = z.bezeichnung === v.bezeichnung && (z.menge || 0) === (v.mengeVorschlag ?? 0) && (z.preis || 0) === (v.preisVorschlag ?? 0)
+      && !z.foto1Url && !z.foto2Url && !z.foto3Url;
+    return !unberuehrt;
+  });
   freitextVorlagen.forEach(v => {
     if(!v.istEigenePosition) return;
     if(v.optionId != null && !bereichSelectedOptions.has(v.optionId)) return;
@@ -4314,7 +4334,7 @@ async function speichereZeilenKorrekturen(offerteId){
 
 function renderEigeneZeilenFuerKategorie(kat, container){
   let summe = 0;
-  eigeneZeilen.filter(z => z.kategorie === kat).forEach(z => {
+  eigeneZeilen.filter(z => z.kategorie === kat && !z.geloescht).forEach(z => {
     const betrag = rundeCHF((z.menge || 0) * (z.preis || 0));
     summe += betrag;
     snapshotZeile(KAT_LABEL[kat], { bezeichnung: z.bezeichnung, menge: z.menge || 0, einheit: z.einheit || '', preis: z.preis || 0, betrag, geloescht: false });
@@ -4339,7 +4359,11 @@ function renderEigeneZeilenFuerKategorie(kat, container){
     tr.querySelector('.ez-preis').addEventListener('change', e => { z.preis = parseFloat(e.target.value) || 0; e.target.value = z.preis.toFixed(2); recalc(); });
     tr.querySelector('.ez-rechner').addEventListener('click', () => oeffneEzRechner(z.clientKey));
     tr.querySelector('.ez-del').addEventListener('click', () => {
-      eigeneZeilen = eigeneZeilen.filter(x => x.clientKey !== z.clientKey);
+      // Freitext-Position aus einer Vorlage: nur als geloescht markieren,
+      // sonst legt seedeFreitextZeilen() sie beim naechsten recalc() sofort
+      // wieder an (war der Grund, warum sie sich nicht loeschen liess).
+      if(z.freitextVorlageId) z.geloescht = true;
+      else eigeneZeilen = eigeneZeilen.filter(x => x.clientKey !== z.clientKey);
       recalc();
       planAutosave();
     });
@@ -4379,7 +4403,8 @@ async function ladeEigeneZeilen(offerteId){
     eigeneZeileCounter++;
     return {
       clientKey: 'ez' + eigeneZeileCounter, dbId: r.id, kategorie: r.kategorie, bezeichnung: r.bezeichnung, menge: r.menge, einheit: r.einheit, preis: r.preis,
-      freitextVorlageId: r.freitext_vorlage_id, foto1Url: r.foto1_url || null, foto2Url: r.foto2_url || null, foto3Url: r.foto3_url || null
+      freitextVorlageId: r.freitext_vorlage_id, foto1Url: r.foto1_url || null, foto2Url: r.foto2_url || null, foto3Url: r.foto3_url || null,
+      geloescht: !!r.geloescht
     };
   });
 }
@@ -4389,7 +4414,7 @@ async function speichereEigeneZeilen(offerteId){
   if(delErr) throw delErr;
   const echte = eigeneZeilen.filter(z => z.bezeichnung.trim());
   if(echte.length){
-    const rows = echte.map((z, i) => ({ offerte_id: offerteId, kategorie: z.kategorie, bezeichnung: z.bezeichnung.trim(), menge: z.menge || 0, einheit: z.einheit || '', preis: z.preis || 0, reihenfolge: i, freitext_vorlage_id: z.freitextVorlageId ?? null, foto1_url: z.foto1Url ?? null, foto2_url: z.foto2Url ?? null, foto3_url: z.foto3Url ?? null }));
+    const rows = echte.map((z, i) => ({ offerte_id: offerteId, kategorie: z.kategorie, bezeichnung: z.bezeichnung.trim(), menge: z.menge || 0, einheit: z.einheit || '', preis: z.preis || 0, reihenfolge: i, freitext_vorlage_id: z.freitextVorlageId ?? null, foto1_url: z.foto1Url ?? null, foto2_url: z.foto2Url ?? null, foto3_url: z.foto3Url ?? null, ...(z.geloescht ? { geloescht: true } : {}) }));
     const { error: insErr } = await sb.from('offerte_eigene_zeile').insert(rows);
     if(insErr) throw insErr;
   }
