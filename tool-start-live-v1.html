@@ -1139,7 +1139,9 @@ async function kopiereOfferteFuerKunde(zielKunde){
       // Auswahl haengen jetzt direkt an offerte_id statt an einer
       // Teilflaeche, darum kein Id-Mapping mehr noetig.
       const [eigene, korrektur, geo, efWerte, auswahl, efNotizen, tabZeilen] = await Promise.all([
-        sb.from('offerte_eigene_zeile').select('kategorie, bezeichnung, menge, einheit, preis, reihenfolge').eq('offerte_id', kopierQuelle.id),
+        // select('*'), damit das Kopieren auch ohne die Spalte "geloescht"
+        // (Migration noch nicht eingespielt) funktioniert.
+        sb.from('offerte_eigene_zeile').select('*').eq('offerte_id', kopierQuelle.id),
         sb.from('offerte_zeilen_korrektur').select('zeilen_schluessel, menge_korrektur, preis_korrektur, geloescht').eq('offerte_id', kopierQuelle.id),
         sb.from('offerte_geometrie_element').select('form_typ, bezeichnung, anzahl, masse, flaeche, volumen, reihenfolge').eq('offerte_id', kopierQuelle.id),
         sb.from('offerte_eingabefeld_wert').select('eingabefeld_id, wert').eq('offerte_id', kopierQuelle.id),
@@ -1148,7 +1150,13 @@ async function kopiereOfferteFuerKunde(zielKunde){
         sb.from('offerte_tabelle_zeile').select('eingabefeld_id, name, reihenfolge, offerte_tabelle_wert(spalte_id, wert, notiz)').eq('offerte_id', kopierQuelle.id)
       ]);
       for(const r of [eigene, korrektur, geo, efWerte, auswahl, efNotizen, tabZeilen]) if(r.error) throw r.error;
-      if(eigene.data.length){ const { error } = await sb.from('offerte_eigene_zeile').insert(eigene.data.map(r => ({...r, offerte_id: neu.id}))); if(error) throw error; }
+      // freitext_vorlage_id und die Loesch-Markierung mitkopieren - sonst legt
+      // Tool A beim Oeffnen der Kopie die Freitext-Positionen ein zweites Mal
+      // an (Dubletten) bzw. weckt von Hand geloeschte wieder auf.
+      if(eigene.data.length){ const { error } = await sb.from('offerte_eigene_zeile').insert(eigene.data.map(r => ({
+        kategorie: r.kategorie, bezeichnung: r.bezeichnung, menge: r.menge, einheit: r.einheit, preis: r.preis, reihenfolge: r.reihenfolge,
+        freitext_vorlage_id: r.freitext_vorlage_id ?? null, offerte_id: neu.id, ...(r.geloescht ? { geloescht: true } : {})
+      }))); if(error) throw error; }
       if(korrektur.data.length){ const { error } = await sb.from('offerte_zeilen_korrektur').insert(korrektur.data.map(r => ({...r, offerte_id: neu.id}))); if(error) throw error; }
       if(geo.data.length){ const { error } = await sb.from('offerte_geometrie_element').insert(geo.data.map(r => ({...r, offerte_id: neu.id}))); if(error) throw error; }
       if(efWerte.data.length){ const { error } = await sb.from('offerte_eingabefeld_wert').insert(efWerte.data.map(r => ({...r, offerte_id: neu.id}))); if(error) throw error; }
