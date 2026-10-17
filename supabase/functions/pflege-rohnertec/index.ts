@@ -41,6 +41,9 @@ async function rohnertecToken(): Promise<string> {
   return token;
 }
 
+// Vergleich unabhaengig von der Feldreihenfolge (jsonb sortiert Schluessel um)
+const kanon = (x: any): any => Array.isArray(x) ? x.map(kanon)
+  : x && typeof x === 'object' ? Object.fromEntries(Object.keys(x).sort().map(k => [k, kanon(x[k])])) : x;
 const dm = (d: string | null) => d ? `${+d.slice(8, 10)}.${+d.slice(5, 7)}.` : '';
 const sauber = (s: string) => (s || '').trim().replace(/\s+/g, ' ');
 
@@ -50,6 +53,8 @@ async function planVon(get: (u: string) => Promise<any>, clientId: number) {
     get(`client-sensors-table?user_id=${clientId}&offset=0&rownum=200&sorting=`).then(r => r?.[1] || []),
     get(`client-valves-table?user_id=${clientId}&offset=0&rownum=200&sorting=`).then(r => r?.[1] || []),
   ]);
+  // Rohnertec liefert die Ventile nach letzter Messung sortiert -> fest nach Name ordnen (stabil, gut lesbar)
+  ven.sort((x: any, y: any) => sauber(x.valve_name).localeCompare(sauber(y.valve_name), 'de', { numeric: true }));
   return Promise.all(ven.map(async (v: any) => {
     const [det, ai] = await Promise.all([get(`valve-by-id-details/${v.uuid}`), get(`valve/auto-irrigation/${v.uuid}`)]);
     const d = det?.data || {}, a = ai?.data || {};
@@ -111,7 +116,7 @@ Deno.serve(async (req) => {
         .eq('kunde_id', zeile.kunde_id).eq('kategorie_id', kat?.id).is('objekt_id', null).maybeSingle();
       if (!kk) { aus.push({ ...zeile, status: 'ohne_bewaesserung' }); continue; }
       const plan = await planVon(get, c.client_id);
-      const geaendert = JSON.stringify(plan) !== JSON.stringify(kk.bewaesserung || []);
+      const geaendert = JSON.stringify(kanon(plan)) !== JSON.stringify(kanon(kk.bewaesserung || []));
       const { error } = await sb.from('pflege_kunde_kategorie').update({ bewaesserung: plan, bewaesserung_stand: stand }).eq('id', kk.id);
       if (error) throw error;
       aus.push({ ...zeile, status: geaendert ? 'geaendert' : 'gleich', ventile: plan.length });
