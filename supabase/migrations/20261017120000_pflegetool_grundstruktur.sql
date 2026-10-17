@@ -7,7 +7,7 @@
 -- zentralen Tabelle einheit. Vorlage: docs/pflegetool/pflegetool-mockup-v56.html
 --
 -- Rechte:
---   Einstellungen (Kategorien, Felder, Standardarbeiten, Tabelle, Mitarbeiter):
+--   Einstellungen (Kategorien, Felder, Standardarbeiten, Tabelle):
 --     lesen = alle eingeloggten, schreiben = Buero-Team/Admin
 --   Kundendaten (Werte, Arbeiten, Status, Fotos, Dokumente):
 --     alle eingeloggten (Techniker duerfen Angaben/Fotos/Status ergaenzen)
@@ -75,17 +75,6 @@ create table pflege_tabelle_spalte (
 create index pflege_tabelle_spalte_tabelle_idx on pflege_tabelle_spalte (tabelle_id, reihenfolge);
 
 -- ----------------------------------------------------------------------------
--- Service-Mitarbeiter (Feld «Zustaendig») - eigene Liste, Login optional
--- ----------------------------------------------------------------------------
-create table pflege_mitarbeiter (
-  id uuid primary key default gen_random_uuid(),
-  name text not null,
-  aktiv boolean not null default true,
-  benutzer_id uuid null unique references benutzer(id) on delete set null,
-  reihenfolge integer not null default 0
-);
-
--- ----------------------------------------------------------------------------
 -- Kundendaten
 -- ----------------------------------------------------------------------------
 -- Pflege-Angaben pro Kunde (Kunde selbst = Tabelle kunde, nicht duplizieren)
@@ -113,12 +102,30 @@ create table pflege_kunde_kategorie (
 );
 create index pflege_kunde_kategorie_kategorie_idx on pflege_kunde_kategorie (kategorie_id);
 
--- Zustaendig: 0..n Mitarbeiter pro Kunde+Kategorie
+-- Zustaendig: 0..n Benutzer pro Kunde+Kategorie (Service-Mitarbeiter = Benutzer,
+-- z.B. Rolle service_team; Techniker bekommen in Etappe 6 ohnehin einen Login)
 create table pflege_kunde_kategorie_zustaendig (
   kunde_kategorie_id uuid not null references pflege_kunde_kategorie(id) on delete cascade,
-  mitarbeiter_id uuid not null references pflege_mitarbeiter(id) on delete cascade,
-  primary key (kunde_kategorie_id, mitarbeiter_id)
+  benutzer_id uuid not null references benutzer(id) on delete cascade,
+  primary key (kunde_kategorie_id, benutzer_id)
 );
+
+-- Auswahl fuer «Zustaendig»: benutzer ist per RLS nur fuer Admin lesbar,
+-- darum liefert diese Funktion nur id/email/rolle der aktiven Benutzer.
+create or replace function pflege_zustaendige()
+returns table (id uuid, email text, rolle text)
+language sql
+security definer
+stable
+set search_path = public
+as $$
+  select b.id, b.email, b.rolle
+  from benutzer b
+  where ist_eingeloggter_benutzer() and b.aktiv and b.rolle is not null
+  order by b.email;
+$$;
+revoke all on function pflege_zustaendige() from public, anon;
+grant execute on function pflege_zustaendige() to authenticated;
 
 -- Arbeiten beim Kunden: Standardarbeit (arbeit_id gesetzt) oder Zusatzarbeit (titel)
 --   kw null = Standard-KW der Arbeit; abgewaehlte_jahre = Jahre, in denen sie nicht gilt
@@ -192,7 +199,7 @@ declare
 begin
   foreach t in array array[
     'pflege_kategorie', 'pflege_feld', 'pflege_arbeit', 'pflege_tabelle',
-    'pflege_tabelle_spalte', 'pflege_mitarbeiter'
+    'pflege_tabelle_spalte'
   ] loop
     execute format('alter table %I enable row level security;', t);
     execute format('create policy %I_lesen on %I for select using (ist_eingeloggter_benutzer());', t, t);
