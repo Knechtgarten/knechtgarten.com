@@ -113,6 +113,7 @@ tbody tr:last-child td{border-bottom:none;}
 .kunden td{white-space:nowrap;}
 .kunden td:last-child{white-space:normal;min-width:220px;}
 .kunden .name{font-weight:700;color:var(--primary);}
+.obj-l{display:block;font-size:11px;color:#6B7420;line-height:1.3;white-space:normal;max-width:260px;}
 .kchips{display:flex;flex-wrap:wrap;gap:1px 8px;line-height:1.25;}
 .kc{display:inline-flex;align-items:center;gap:4px;font-size:11px;white-space:nowrap;}
 .kc .kdot{width:7px;height:7px;}
@@ -137,6 +138,17 @@ tbody tr:last-child td{border-bottom:none;}
 .field > label{font-size:11px;color:var(--muted);}
 .kh-notiz textarea{min-height:90px;flex:1;}
 .kh-notiz{align-self:stretch;}
+/* Objekte: Auswahl im Kopf, darunter eigener Kopf mit Objekt-Adresse + Notiz */
+.objs{display:flex;flex-wrap:wrap;gap:6px;margin-top:14px;}
+.objs button{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:5px;padding:5px 10px;border-radius:16px;border:1px solid var(--line);font-size:12px;color:var(--primary);background:#fff;}
+.objs button:hover{border-color:var(--accent-lime);}
+.objs button[aria-pressed="true"]{background:var(--accent-lime);border-color:var(--accent-lime);font-weight:700;}
+.objs .obj-neu{color:var(--muted);border-style:dashed;}
+.objs .i{width:14px;height:14px;}
+.o-head{border-left:4px solid var(--accent-lime);margin-top:8px;}
+.o-head h2{font-size:17px;color:var(--primary);}
+.o-adr{display:grid;grid-template-columns:minmax(0,2fr) 80px minmax(0,1.3fr);gap:8px;margin-top:10px;}
+.o-head .addrow{margin-top:10px;}
 
 .reg-wrap{margin-top:20px;}
 .reg-tabs{display:flex;gap:4px;flex-wrap:wrap;padding-left:12px;align-items:flex-end;}
@@ -490,7 +502,7 @@ const zustAuswahl = (schon = []) => S.zust.filter(b => b.pflege_zustaendig || sc
 // ---------------------------------------------------------------------------
 const S = {
   kat: [], felder: [], arbeiten: [], tabellen: [], spalten: [], zust: [],
-  kunden: [], kk: [], kz: [], ka: [], fotos: [], fk: [], urls: {}, dok: [], dk: [], eb: {}, auNur: true, auZeigen: 20, auVon: '',
+  kunden: [], obj: [], kk: [], kz: [], ka: [], fotos: [], fk: [], urls: {}, dok: [], dk: [], eb: {}, auNur: true, auZeigen: 20, auVon: '',
   f: { q: '', abo: [], ma: [], kat: '' },
   ktab: null, kwAsk: null, modal: null, fotoTag: '', hochladen: 0, lb: null
 };
@@ -499,9 +511,12 @@ const felderVon = katId => S.felder.filter(f => f.kategorie_id === katId).sort(n
 const arbeitenVon = katId => S.arbeiten.filter(a => a.kategorie_id === katId).sort(nachReihe);
 const tabelleVon = katId => S.tabellen.find(t => t.kategorie_id === katId);
 const spaltenVon = tabId => S.spalten.filter(s => s.tabelle_id === tabId).sort(nachReihe);
-const kkVonKunde = kundeId => S.kk.filter(x => x.kunde_id === kundeId).sort((a, b) => (katById(a.kategorie_id)?.reihenfolge ?? 0) - (katById(b.kategorie_id)?.reihenfolge ?? 0));
+// objektId: null = Hauptadresse, ein Objekt = nur dessen Kategorien, undefined = alle (Kundenliste)
+const kkVonKunde = (kundeId, objektId) => S.kk.filter(x => x.kunde_id === kundeId && (objektId === undefined || (x.objekt_id || null) === objektId)).sort((a, b) => (katById(a.kategorie_id)?.reihenfolge ?? 0) - (katById(b.kategorie_id)?.reihenfolge ?? 0));
 const zustVon = kkId => S.kz.filter(z => z.kunde_kategorie_id === kkId).map(z => z.benutzer_id);
 const kundeById = id => S.kunden.find(k => k.kunde_id === id);
+const objekteVon = kundeId => S.obj.filter(o => o.kunde_id === kundeId).sort((a, b) => nachReihe(a, b) || a.erstellt_am.localeCompare(b.erstellt_am));
+const objektName = o => [o.strasse, o.ort].filter(Boolean).join(', ') || 'Neues Objekt';
 const telVon = k => { const c = k.kunde?.kontaktdaten || {}; return c.telefon1 || c.mobil || c.telefon2 || ''; };
 
 async function ladeAlles(){
@@ -513,6 +528,7 @@ async function ladeAlles(){
     sb.from('pflege_tabelle_spalte').select('*'),
     sb.rpc('pflege_zustaendige'),
     sb.from('pflege_kunde').select('*, kunde(id,name,strasse,plz,ort,kontaktdaten,easybill_id,kundennummer)'),
+    sb.from('pflege_objekt').select('*'),
     sb.from('pflege_kunde_kategorie').select('*'),
     sb.from('pflege_kunde_kategorie_zustaendig').select('*'),
     sb.from('pflege_kunde_arbeit').select('*'),
@@ -523,7 +539,7 @@ async function ladeAlles(){
   ]);
   const fehler = r.find(x => x.error);
   if(fehler){ showToast(friendlyError(fehler.error), true); return; }
-  [S.kat, S.felder, S.arbeiten, S.tabellen, S.spalten, S.zust, S.kunden, S.kk, S.kz, S.ka, S.fotos, S.fk, S.dok, S.dk] = r.map(x => x.data || []);
+  [S.kat, S.felder, S.arbeiten, S.tabellen, S.spalten, S.zust, S.kunden, S.obj, S.kk, S.kz, S.ka, S.fotos, S.fk, S.dok, S.dk] = r.map(x => x.data || []);
   S.kunden.sort((a, b) => (a.kunde?.name || '').localeCompare(b.kunde?.name || '', 'de'));
   render();
 }
@@ -540,8 +556,16 @@ async function speichere(tabelle, filter, werte){
 // ---------------------------------------------------------------------------
 // Ansicht waehlen: #k=<kunde_id> = Kunden-Detail, sonst Liste
 // ---------------------------------------------------------------------------
+// #k=<kunde_id>&o=<objekt_id>: gewaehltes Objekt, ohne o= die Hauptadresse
 const aktKundeId = () => (location.hash.match(/k=([0-9a-f-]+)/) || [])[1] || null;
-window.addEventListener('hashchange', () => { S.kwAsk = null; render(); window.scrollTo(0, 0); });
+const aktObjektId = () => { const id = (location.hash.match(/[&#]o=([0-9a-f-]+)/) || [])[1]; return id && S.obj.some(o => o.id === id) ? id : null; };
+const zeigeObjekt = (kundeId, objektId) => { location.hash = 'k=' + kundeId + (objektId ? '&o=' + objektId : ''); };
+let letzterKunde = null;
+window.addEventListener('hashchange', () => {
+  S.kwAsk = null; render();
+  if(aktKundeId() !== letzterKunde) window.scrollTo(0, 0);   // Objektwechsel: Seite bleibt stehen
+  letzterKunde = aktKundeId();
+});
 function render(){
   const id = aktKundeId();
   if(id && kundeById(id)) renderDetail(id); else renderListe();
@@ -567,7 +591,7 @@ function gefilterteKunden(){
   const f = S.f, q = f.q.trim().toLowerCase();
   return S.kunden.filter(k => {
     const kks = kkVonKunde(k.kunde_id);
-    const text = [k.kunde?.name, k.kunde?.strasse, k.kunde?.ort, k.kunde?.kundennummer].join(' ').toLowerCase();
+    const text = [k.kunde?.name, k.kunde?.strasse, k.kunde?.ort, k.kunde?.kundennummer, ...objekteVon(k.kunde_id).flatMap(o => [o.strasse, o.ort])].join(' ').toLowerCase();
     return (!q || text.includes(q))
       && (!f.abo.length || f.abo.includes(k.abo_typ))
       && (!f.kat || kks.some(x => x.kategorie_id === f.kat))
@@ -586,7 +610,7 @@ function renderListe(){
         `<button class="abob${f.abo.length && !f.abo.includes(a.id) ? ' off' : ''}" data-act="f-abo" data-abo="${a.id}" aria-pressed="${f.abo.includes(a.id)}">${aboIcon(a.id)}</button>`).join('')}</div>
       ${zustFilterHtml()}
       <select data-act="f-kat" aria-label="Pflegekategorie"><option value="">Alle Pflegekategorien</option>${S.kat.map(k => `<option value="${k.id}" ${f.kat === k.id ? 'selected' : ''}>${esc(k.name)}</option>`).join('')}</select>
-      <label class="search">${I('search')}<input type="text" data-act="f-q" placeholder="Name, Adresse, Ort" value="${esc(f.q)}" aria-label="Suchen"></label>
+      <label class="search">${I('search')}<input type="text" data-act="f-q" placeholder="Name, Adresse, Ort, Objekt"value="${esc(f.q)}" aria-label="Suchen"></label>
     </div>
     <div class="tbl-wrap"><table class="kunden">
       <thead><tr><th>Kunde</th><th>Adresse</th><th>Ort</th><th>Telefon</th><th>Zuständig</th><th>Abo</th><th>Pflegekategorien</th></tr></thead>
@@ -601,7 +625,7 @@ function renderListeZeilen(){
     const kks = kkVonKunde(k.kunde_id);
     const zust = [...new Set(kks.flatMap(x => zustVon(x.id)))].map(zustName);
     return `<tr data-act="kunde-oeffnen" data-id="${k.kunde_id}" tabindex="0">
-      <td><span class="name">${esc(k.kunde?.name)}</span></td>
+      <td><span class="name">${esc(k.kunde?.name)}</span>${objekteVon(k.kunde_id).length ? `<span class="obj-l">${objekteVon(k.kunde_id).map(o => esc(objektName(o))).join(' · ')}</span>` : ''}</td>
       <td>${esc(k.kunde?.strasse)}</td>
       <td>${esc(k.kunde?.ort)}</td>
       <td>${esc(telVon(k))}</td>
@@ -795,14 +819,15 @@ function tabelleHtml(kk, tab){
 
 function renderDetail(kundeId){
   const k = kundeById(kundeId), ku = k.kunde || {};
-  const kks = kkVonKunde(kundeId);
+  const oid = aktObjektId(), obj = oid && S.obj.find(o => o.id === oid), objs = objekteVon(kundeId);
+  const kks = kkVonKunde(kundeId, oid);
   if(!S.ktab || !kks.some(x => x.kategorie_id === S.ktab)) S.ktab = kks[0]?.kategorie_id || null;
   const kk = kks.find(x => x.kategorie_id === S.ktab), kat = kk && katById(kk.kategorie_id);
   const freie = S.kat.filter(c => !kks.some(x => x.kategorie_id === c.id));
 
   let body;
   if(!kat){
-    body = `<div class="hint">Dieser Kunde hat noch keine Pflegekategorie. Oben über «+ Pflegekategorie» eine hinzufügen.</div>`;
+    body = `<div class="hint">${obj ? 'Dieses Objekt' : 'Dieser Kunde'} hat noch keine Pflegekategorie. Oben über «+ Pflegekategorie» eine hinzufügen.</div>`;
   } else {
     const zust = `<section class="card panel"><div class="panel-h"><h3>Zuständig</h3><span class="muted small">${esc(kat.name)}</span></div>${zustHtml(kk)}</section>`;
     const arb = arbeitenHtml(kk, kat);
@@ -813,7 +838,7 @@ function renderDetail(kundeId){
       ? `<div class="kbody"><div class="col">${zust}</div><div class="col">${arb}</div></div>`
       : `<div class="kbody"><div class="col">${angaben}</div><div class="col">${zust}${arb}</div></div>`)
       + (tab ? tabelleHtml(kk, tab) : '')
-      + `<div><button class="addrow danger" data-act="kat-entfernen">«${esc(kat.name)}» bei diesem Kunden entfernen</button></div>`;
+      + `<div><button class="addrow danger" data-act="kat-entfernen">«${esc(kat.name)}» bei ${obj ? 'diesem Objekt' : 'diesem Kunden'} entfernen</button></div>`;
   }
 
   $('app').innerHTML = `
@@ -828,9 +853,27 @@ function renderDetail(kundeId){
           <div>${I('phone')}${telVon(k) ? `<a href="tel:${esc(telVon(k).replace(/\s+/g, ''))}">${esc(telVon(k))}</a>` : '<span class="muted">Kein Telefon</span>'}</div>
           <div class="muted small">${I('link')}${ku.easybill_id ? `Easybill-Kunde ${esc(ku.kundennummer || ku.easybill_id)} · Adresse und Telefon kommen aus Easybill` : 'Nicht mit Easybill verknüpft'}</div>
         </div>
+        <div class="objs" role="group" aria-label="Hauptadresse oder Objekt">
+          <button type="button" data-act="objekt" data-o="" aria-pressed="${!obj}">${I('pin')}Hauptadresse</button>
+          ${objs.map(o => `<button type="button" data-act="objekt" data-o="${o.id}" aria-pressed="${o.id === oid}">${esc(objektName(o))}</button>`).join('')}
+          <button type="button" class="obj-neu" data-act="objekt-neu">${I('plus')}Objekt</button>
+        </div>
       </div>
       <div class="field kh-notiz"><label for="notiz">Notiz</label><textarea id="notiz" class="autogrow" rows="3" data-act="notiz" placeholder="Zugang, Schlüssel, Haustiere, Parkplatz, Wünsche der Kundschaft">${esc(k.notiz || '')}</textarea></div>
     </section>
+    ${obj ? `<section class="card k-head o-head">
+      <div>
+        <h2>${esc(objektName(obj))}</h2>
+        <div class="muted small">Objekt von ${esc(ku.name)} · alles unten gilt nur für dieses Objekt</div>
+        <div class="o-adr">
+          <div class="field"><label for="oStr">Strasse</label><input id="oStr" type="text" data-act="obj-feld" data-f="strasse" value="${esc(obj.strasse || '')}"></div>
+          <div class="field"><label for="oPlz">PLZ</label><input id="oPlz" type="text" data-act="obj-feld" data-f="plz" value="${esc(obj.plz || '')}" inputmode="numeric"></div>
+          <div class="field"><label for="oOrt">Ort</label><input id="oOrt" type="text" data-act="obj-feld" data-f="ort" value="${esc(obj.ort || '')}"></div>
+        </div>
+        <button class="addrow danger" data-act="objekt-entfernen">Objekt entfernen</button>
+      </div>
+      <div class="field kh-notiz"><label for="oNotiz">Notiz zum Objekt</label><textarea id="oNotiz" class="autogrow" rows="3" data-act="obj-feld" data-f="notiz" placeholder="Kontakt vor Ort, Zugang, Schlüssel, Parkplatz">${esc(obj.notiz || '')}</textarea></div>
+    </section>` : ''}
     <div class="reg-wrap">
       <div class="reg-tabs" role="tablist">
         ${kks.map(x => { const c = katById(x.kategorie_id); return c ? `<button role="tab" data-act="tab" data-kat="${c.id}" aria-selected="${c.id === S.ktab}" style="--kc:${esc(c.farbe)}">${dot(c)}${esc(c.name)}</button>` : ''; }).join('')}
@@ -838,7 +881,7 @@ function renderDetail(kundeId){
       </div>
       <div class="reg" ${kat ? `style="--kc:${esc(kat.farbe)}"` : ''}>${body}</div>
     </div>
-    <div class="allg-h"><span>Kunde allgemein</span><small>gilt für alle Pflegekategorien</small></div>
+    <div class="allg-h"><span>${obj ? 'Objekt allgemein' : 'Kunde allgemein'}</span><small>gilt für alle Pflegekategorien${obj ? ' dieses Objekts' : ''}</small></div>
     ${fotosHtml(kundeId, kks)}
     ${dokumenteHtml(kundeId, kks)}
     <div id="auftraege">${auftraegeHtml(kundeId)}</div>
@@ -867,7 +910,8 @@ function dokKachel(d){
 }
 function dokumenteHtml(kundeId){
   const reihe = art => {
-    const l = S.dok.filter(d => d.kunde_id === kundeId && d.art === art)
+    const oid = aktObjektId();
+    const l = S.dok.filter(d => d.kunde_id === kundeId && (d.objekt_id || null) === oid && d.art === art)
       .sort((a, b) => (a.ersetzt - b.ersetzt) || ((S.ktab && dokKats(b.id).includes(S.ktab)) - (S.ktab && dokKats(a.id).includes(S.ktab))));
     return `<div class="dok-sec">
       <div class="panel-h"><h3>${art === 'angebot' ? 'Angebote' : 'Allgemeine Dokumente'} <span class="muted small">${l.filter(d => !d.ersetzt).length}</span></h3></div>
@@ -933,7 +977,7 @@ function zeigeAngebotListe(){
   $('modalOvl').classList.add('show');
 }
 function zeigeDokDetail(){
-  const m = S.modal, d = m.draft, kks = kkVonKunde(aktKundeId()), istAng = d.art === 'angebot', wort = istAng ? 'Angebot' : 'Dokument';
+  const m = S.modal, d = m.draft, kks = kkVonKunde(aktKundeId(), aktObjektId()), istAng = d.art === 'angebot', wort = istAng ? 'Angebot' : 'Dokument';
   $('modalBox').innerHTML = `
     <div class="ovl-h"><div><div class="muted small">${d.easybill_nummer ? 'Easybill ' + esc(d.easybill_nummer) : 'PDF' + (d.dateiname ? ' · ' + esc(d.dateiname) : '')}</div><h3>${m.neu ? wort + ' hinzufügen' : wort + ' bearbeiten'}</h3></div>
       <button class="icon-btn" data-m="zu" aria-label="Schliessen">${I('x')}</button></div>
@@ -949,7 +993,7 @@ function zeigeDokDetail(){
   $('modalOvl').classList.add('show');
 }
 async function speichereDok(knopf){
-  const m = S.modal, d = m.draft, kundeId = aktKundeId();
+  const m = S.modal, d = m.draft, kundeId = aktKundeId(), objektId = aktObjektId();
   const titel = $('dokTitel').value.trim() || d.titel || 'Dokument';
   const datum = $('dokDatum') ? ($('dokDatum').value || null) : d.datum;
   const kats = [...$('modalBox').querySelectorAll('.chkl input[value]:checked')].map(x => x.value);
@@ -960,7 +1004,7 @@ async function speichereDok(knopf){
       const pdf = d.datei || await easybillPdf(d.easybill_dokument_id);
       const { error: ue } = await sb.storage.from(DOK_BUCKET).upload(pfad, pdf, { contentType: 'application/pdf' });
       if(ue) throw ue;
-      const { data, error } = await sb.from('pflege_dokument').insert({ id, kunde_id: kundeId, art: d.art, titel, datum,
+      const { data, error } = await sb.from('pflege_dokument').insert({ id, kunde_id: kundeId, objekt_id: objektId, art: d.art, titel, datum,
         easybill_dokument_id: d.easybill_dokument_id || null, easybill_nummer: d.easybill_nummer || null, storage_pfad: pfad }).select().single();
       if(error){ await sb.storage.from(DOK_BUCKET).remove([pfad]); throw error; }
       S.dok.unshift(data);
@@ -1045,7 +1089,7 @@ async function ladeAuftraege(kundeId){
 // ---------------------------------------------------------------------------
 const FOTO_BUCKET = 'pflege-fotos';
 const vorschauPfad = p => p.replace(/\.jpg$/, '_t.jpg');
-const fotosVon = kundeId => S.fotos.filter(f => f.kunde_id === kundeId);
+const fotosVon = (kundeId, objektId = aktObjektId()) => S.fotos.filter(f => f.kunde_id === kundeId && (f.objekt_id || null) === objektId);
 const fotoKats = fotoId => S.fk.filter(x => x.foto_id === fotoId).map(x => x.kategorie_id);
 const datumCh = iso => { const d = new Date(iso); return `${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()}`; };
 function fotoFilter(f, tag){ const k = fotoKats(f.id); return tag === '' ? true : tag === '-' ? !k.length : k.includes(tag); }
@@ -1098,7 +1142,7 @@ async function verkleinere(datei, max, qualitaet){
   return new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('Bild konnte nicht umgewandelt werden')), 'image/jpeg', qualitaet));
 }
 async function ladeFotosHoch(dateien){
-  const kundeId = aktKundeId(); if(!kundeId) return;
+  const kundeId = aktKundeId(), objektId = aktObjektId(); if(!kundeId) return;
   const bilder = [...dateien].filter(d => d.type.startsWith('image/') || /\.(heic|heif)$/i.test(d.name));
   if(!bilder.length) return;
   // Neue Fotos bekommen die offene Kategorie als Schlagwort (ausser Filter «Ohne Zuordnung»)
@@ -1114,7 +1158,7 @@ async function ladeFotosHoch(dateien){
       ]);
       const upErr = up.find(x => x.error); if(upErr) throw upErr.error;
       const aufgenommen = d.lastModified && d.lastModified < Date.now() ? new Date(d.lastModified).toISOString() : new Date().toISOString();
-      const { data, error } = await sb.from('pflege_foto').insert({ id, kunde_id: kundeId, storage_pfad: pfad, aufgenommen_am: aufgenommen, erstellt_von: aktuelleUserId }).select().single();
+      const { data, error } = await sb.from('pflege_foto').insert({ id, kunde_id: kundeId, objekt_id: objektId, storage_pfad: pfad, aufgenommen_am: aufgenommen, erstellt_von: aktuelleUserId }).select().single();
       if(error) throw error;
       S.fotos.unshift(data);
       if(tag){
@@ -1131,7 +1175,7 @@ async function ladeFotosHoch(dateien){
 }
 
 function oeffneFotoEdit(fotoId){
-  const f = S.fotos.find(x => x.id === fotoId), kks = kkVonKunde(f.kunde_id), sel = fotoKats(f.id);
+  const f = S.fotos.find(x => x.id === fotoId), kks = kkVonKunde(f.kunde_id, f.objekt_id || null), sel = fotoKats(f.id);
   S.modal = { art: 'foto', id: f.id };
   $('modalBox').innerHTML = `
     <div class="ovl-h"><h3>Foto</h3><button class="icon-btn" data-m="zu" aria-label="Schliessen">${I('x')}</button></div>
@@ -1316,7 +1360,7 @@ document.addEventListener('click', e => {
 // ---------------------------------------------------------------------------
 // Aenderungen speichern
 // ---------------------------------------------------------------------------
-const aktKk = () => S.kk.find(x => x.kunde_id === aktKundeId() && x.kategorie_id === S.ktab);
+const aktKk = () => S.kk.find(x => x.kunde_id === aktKundeId() && (x.objekt_id || null) === aktObjektId() && x.kategorie_id === S.ktab);
 
 async function setzeWert(kk, feldId, wert){
   const werte = { ...(kk.werte || {}) };
@@ -1373,13 +1417,21 @@ $('app').addEventListener('change', async e => {
     S.f.ma = el.checked ? [...S.f.ma, el.value] : S.f.ma.filter(v => v !== el.value);
     const d = $('fma'); d.outerHTML = zustFilterHtml(); $('fma').open = true; renderListeZeilen();
   }
+  else if(act === 'obj-feld'){
+    const o = S.obj.find(x => x.id === aktObjektId()), feld = el.dataset.f, wert = el.value.trim() || null;
+    if(!o || !await speichere('pflege_objekt', { id: o.id }, { [feld]: wert })) return;
+    o[feld] = wert;
+    // Name auf Knopf und Titel nachfuehren, ohne neu aufzubauen (Fokus im naechsten Feld bleibt)
+    const btn = document.querySelector(`.objs [data-o="${o.id}"]`); if(btn) btn.textContent = objektName(o);
+    const h = document.querySelector('.o-head h2'); if(h) h.textContent = objektName(o);
+  }
   else if(act === 'notiz'){
     const notiz = el.value.trim() || null;
     if(await speichere('pflege_kunde', { kunde_id: kundeId }, { notiz, aktualisiert_am: new Date().toISOString() })) k.notiz = notiz;
   }
   else if(act === 'kat-add'){
     const katId = el.value; if(!katId) return;
-    const { data, error } = await sb.from('pflege_kunde_kategorie').insert({ kunde_id: kundeId, kategorie_id: katId }).select().single();
+    const { data, error } = await sb.from('pflege_kunde_kategorie').insert({ kunde_id: kundeId, objekt_id: aktObjektId(), kategorie_id: katId }).select().single();
     if(error){ showToast(friendlyError(error), true); return; }
     S.kk.push(data);
     // Neue Kategorie beim Kunden = alle Standardarbeiten vorausgefuellt
@@ -1440,6 +1492,28 @@ $('app').addEventListener('click', async e => {
     if(await speichere('pflege_kunde', { kunde_id: kundeId }, { abo_typ: b.dataset.abo, aktualisiert_am: new Date().toISOString() })){ k.abo_typ = b.dataset.abo; render(); }
   }
   else if(act === 'tab'){ S.ktab = b.dataset.kat; S.kwAsk = null; render(); }
+  else if(act === 'objekt') zeigeObjekt(kundeId, b.dataset.o || null);
+  else if(act === 'objekt-neu'){
+    const reihe = Math.max(0, ...objekteVon(kundeId).map(o => o.reihenfolge ?? 0)) + 1;
+    const { data, error } = await sb.from('pflege_objekt').insert({ kunde_id: kundeId, reihenfolge: reihe }).select().single();
+    if(error){ showToast(friendlyError(error), true); return; }
+    S.obj.push(data);
+    zeigeObjekt(kundeId, data.id);
+    setTimeout(() => $('oStr')?.focus(), 0);
+  }
+  else if(act === 'objekt-entfernen'){
+    const oid = aktObjektId(), o = S.obj.find(x => x.id === oid); if(!o) return;
+    const fotos = fotosVon(kundeId, oid), doks = S.dok.filter(d => d.objekt_id === oid);
+    if(!await kgBestaetigen(`Objekt «${objektName(o)}» entfernen? Alle Pflegekategorien, Arbeiten${fotos.length ? `, ${fotos.length} ${fotos.length === 1 ? 'Foto' : 'Fotos'}` : ''}${doks.length ? ` und ${doks.length} ${doks.length === 1 ? 'Dokument' : 'Dokumente'}` : ''} dieses Objekts gehen verloren.`, 'Objekt entfernen?', 'Entfernen')) return;
+    if(!await loescheFotos(fotos) || !await loescheDoks(doks)) return;
+    const { error } = await sb.from('pflege_objekt').delete().eq('id', oid);
+    if(error){ showToast(friendlyError(error), true); return; }
+    const kkIds = new Set(S.kk.filter(x => x.objekt_id === oid).map(x => x.id));
+    S.obj = S.obj.filter(x => x.id !== oid); S.kk = S.kk.filter(x => !kkIds.has(x.id));
+    S.ka = S.ka.filter(x => !kkIds.has(x.kunde_kategorie_id)); S.kz = S.kz.filter(x => !kkIds.has(x.kunde_kategorie_id));
+    showToast('Objekt entfernt.');
+    zeigeObjekt(kundeId, null);
+  }
   else if(act === 'jn'){
     const v = b.getAttribute('aria-pressed') === 'true' ? '' : b.dataset.v;   // nochmals klicken = leeren
     await setzeWert(kk, b.dataset.feld, v);
@@ -1502,9 +1576,9 @@ $('app').addEventListener('click', async e => {
   else if(act === 'eb-pdf'){ const id = +b.closest('[data-eb]').dataset.eb; oeffnePdf(async () => URL.createObjectURL(await easybillPdf(id))); }
   else if(act === 'au-mehr'){ S.auZeigen += 20; $('auftraege').innerHTML = auftraegeHtml(kundeId); }
   else if(act === 'kunde-entfernen'){
-    const n = fotosVon(kundeId).length;
-    if(!await kgBestaetigen(`«${k.kunde?.name}» aus dem Pflege-Tool entfernen? Alle Pflege-Angaben${n ? ` und ${n} ${n === 1 ? 'Foto' : 'Fotos'}` : ''} dieses Kunden gehen verloren. Der Kunde selbst bleibt im Offertentool und in Easybill.`, 'Kunde entfernen?', 'Entfernen')) return;
-    if(!await loescheFotos(fotosVon(kundeId))) return;
+    const alleFotos = S.fotos.filter(f => f.kunde_id === kundeId), n = alleFotos.length, no = objekteVon(kundeId).length;
+    if(!await kgBestaetigen(`«${k.kunde?.name}» aus dem Pflege-Tool entfernen? Alle Pflege-Angaben${no ? `, ${no} ${no === 1 ? 'Objekt' : 'Objekte'}` : ''}${n ? ` und ${n} ${n === 1 ? 'Foto' : 'Fotos'}` : ''} dieses Kunden gehen verloren. Der Kunde selbst bleibt im Offertentool und in Easybill.`, 'Kunde entfernen?', 'Entfernen')) return;
+    if(!await loescheFotos(alleFotos)) return;
     if(!await loescheDoks(S.dok.filter(d => d.kunde_id === kundeId))) return;
     const { error } = await sb.from('pflege_kunde').delete().eq('kunde_id', kundeId);
     if(error){ showToast(friendlyError(error), true); return; }
