@@ -169,7 +169,7 @@ tbody tr:last-child td{border-bottom:none;}
 .wt th{padding:6px 8px;}
 .wt td{padding:6px 8px;border-bottom:1px solid var(--soft);}
 .wt .c{text-align:center;}
-.wt .w-i{width:44px;} .wt .w-art{width:120px;} .wt .w-kw{width:70px;} .wt .w-std{width:70px;} .wt .w-x{width:36px;}
+.wt .w-i{width:44px;} .wt .w-art{width:120px;} .wt .w-wo{width:190px;} .wt .w-x{width:36px;}
 .wt td input[type=number]{width:56px;padding:4px 6px;text-align:center;}
 .wt .ask-row td{padding:0 0 8px;}
 .wt-n{font-size:13px;}
@@ -284,6 +284,26 @@ table.au tr.sto td{color:var(--muted);text-decoration:line-through;}
 
 @media (max-width:900px){ .k-head,.kbody{grid-template-columns:1fr;} }
 @media (max-width:560px){ .fgrid{grid-template-columns:1fr;} }
+/* Wochenstreifen (Standardarbeiten mehrmals pro Jahr, Entwurf Wochenplanung v2) */
+.wk{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border:1px solid var(--line);border-radius:6px;background:#fff;font-size:12px;font-variant-numeric:tabular-nums;max-width:100%;box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.wk:hover{border-color:var(--primary);}
+.wk .i{width:14px;height:14px;flex:none;}
+.wk .n{color:var(--muted);}
+.ws{display:grid;grid-template-columns:repeat(53,minmax(0,1fr));gap:2px;}
+.ws-mon{font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;border-left:1px solid var(--line);padding-left:3px;white-space:nowrap;overflow:hidden;}
+.ws-b{all:unset;cursor:pointer;height:28px;border-radius:3px;border:1px solid var(--line);background:#fff;font-size:9.5px;text-align:center;line-height:28px;color:var(--muted);font-variant-numeric:tabular-nums;box-sizing:border-box;}
+.ws-b:hover{border-color:var(--primary);}
+.ws-b.on{background:#323E4E;border-color:#323E4E;color:#fff;font-weight:700;}
+.ws-b.std{box-shadow:inset 0 -4px 0 #D1DB5F;}
+.ws-b.weg{border:1.5px dashed #323E4E;color:#323E4E;}
+.ws-b.now{outline:2px solid #D1DB5F;outline-offset:-2px;}
+.ws-q{display:none;}
+.ws-leg{display:flex;gap:16px;flex-wrap:wrap;font-size:11.5px;color:var(--muted);align-items:center;}
+.ws-leg span{display:inline-flex;align-items:center;gap:6px;}
+.ws-leg .ws-b{width:22px;height:18px;line-height:18px;cursor:default;}
+.ws-diff{font-size:12.5px;}
+.ovlbox.breit{max-width:1000px;}
+@media (max-width:760px){ .ws{display:none;} .ws-q{display:grid;grid-template-columns:auto repeat(13,minmax(0,1fr));gap:3px;align-items:center;} .ws-q .ql{font-size:10.5px;color:var(--muted);padding-right:4px;} }
 </style>
 </head>
 <body>
@@ -675,41 +695,57 @@ function zustHtml(kk){
   </div>`;
 }
 
-// Arbeiten: eine Liste aus Standard- (arbeit_id) und Zusatzarbeiten, nach KW sortiert
-function effKw(ka){ return ka.arbeit_id ? (ka.kw ?? S.arbeiten.find(a => a.id === ka.arbeit_id)?.standard_kw ?? null) : ka.kw; }
+// Arbeiten: eine Liste aus Standard- (arbeit_id) und Zusatzarbeiten, nach erster Woche sortiert.
+// Standardarbeit = Standard-Wochen der Kategorie, beim Kunden nur die Abweichung (kws_plus / kws_minus).
+function wochenVon(ka){
+  if(!ka.arbeit_id) return sortiertW(ka.kws || []);
+  const std = S.arbeiten.find(a => a.id === ka.arbeit_id)?.standard_kws || [], minus = ka.kws_minus || [];
+  return sortiertW(new Set([...std.filter(w => !minus.includes(w)), ...(ka.kws_plus || [])]));
+}
+// ---------------------------------------------------------------------------
+// Wochenstreifen: 52/53 Kaestchen, Klick schaltet eine Woche. Beim Kunden zeigt er die
+// Abweichung vom Standard (gruener Strich = Standard-Woche, gestrichelt = weggelassen).
+// ---------------------------------------------------------------------------
+const WS_MONATE = [['Jan',1],['Feb',6],['Mär',10],['Apr',14],['Mai',19],['Jun',23],['Jul',27],['Aug',32],['Sep',36],['Okt',40],['Nov',45],['Dez',49]];
+const sortiertW = s => [...s].sort((a, b) => a - b);
+function wochenKurz(w){
+  if(!w || !w.length) return 'keine';
+  return w.length <= 3 ? 'KW ' + w.join(', ') : `KW ${w.slice(0, 3).join(', ')} … <span class="n">(${w.length}×)</span>`;
+}
+function streifenHtml(sel, std, kwJetzt){
+  const b = w => { const on = sel.has(w), s = std.includes(w);
+    return `<button type="button" class="ws-b${on ? ' on' : ''}${s && on ? ' std' : ''}${s && !on ? ' weg' : ''}${w === kwJetzt ? ' now' : ''}" data-ws="${w}" aria-pressed="${on}" aria-label="KW ${w}">${w}</button>`; };
+  const kopf = WS_MONATE.map((m, i) => `<div class="ws-mon" style="grid-column:span ${(WS_MONATE[i + 1]?.[1] ?? 54) - m[1]}">${m[0]}</div>`).join('');
+  const kunde = std.length > 0;
+  const plus = sortiertW([...sel].filter(w => !std.includes(w))), minus = std.filter(w => !sel.has(w));
+  return `<div class="ws">${kopf}${Array.from({ length: 53 }, (_, i) => b(i + 1)).join('')}</div>
+    <div class="ws-q">${[0, 1, 2, 3].map(q => `<span class="ql">Q${q + 1}</span>` + Array.from({ length: 13 }, (_, i) => b(q * 13 + i + 1)).join('')).join('')}<span class="ql"></span>${b(53)}</div>
+    <div class="ws-leg">${kunde
+      ? '<span><i class="ws-b on std"></i>Standard-Woche</span><span><i class="ws-b on"></i>zusätzliche Woche</span><span><i class="ws-b weg"></i>weggelassene Standard-Woche</span>'
+      : '<span><i class="ws-b on"></i>geplante Woche</span>'}<span><i class="ws-b now"></i>aktuelle Woche</span></div>
+    ${kunde ? `<div class="ws-diff">${plus.length || minus.length ? `<b>Abweichung vom Standard:</b> ${plus.length ? 'zusätzlich KW ' + plus.join(', ') : ''}${plus.length && minus.length ? ' · ' : ''}${minus.length ? 'weggelassen KW ' + minus.join(', ') : ''}` : '<span class="muted">Wie Standard der Kategorie.</span>'}</div>` : ''}
+    <div class="muted small"><b style="color:var(--primary)">${sel.size}</b> ${sel.size === 1 ? 'Woche' : 'Wochen'} geplant · Klick auf ein Kästchen schaltet die Woche ein oder aus</div>`;
+}
 function arbeitenHtml(kk, kat){
   const zeilen = S.ka.filter(x => x.kunde_kategorie_id === kk.id && (!x.arbeit_id || S.arbeiten.some(a => a.id === x.arbeit_id)))
-    .sort((a, b) => (effKw(a) ?? 99) - (effKw(b) ?? 99));
+    .sort((a, b) => (wochenVon(a)[0] ?? 99) - (wochenVon(b)[0] ?? 99));
   const zugeordnet = new Set(zeilen.map(x => x.arbeit_id).filter(Boolean));
   const rest = kat.individuell ? [] : arbeitenVon(kat.id).filter(a => !zugeordnet.has(a.id));
-  const ask = S.kwAsk;
   const zeile = ka => {
-    const jk = jahreKurz(ka.abgewaehlte_jahre);
-    if(!ka.arbeit_id) return `<tr data-id="${ka.id}">
-      <td class="c"><button class="rbtn" data-act="arb-info" title="Infos zur Zusatzarbeit" aria-label="Infos">${I('info')}</button></td>
-      <td class="wt-art">Zusatz${jk ? ' · ' + jk : ''}</td>
-      <td><input class="tin" type="text" data-act="zus-titel" value="${esc(ka.titel)}" placeholder="Titel der Zusatzarbeit" aria-label="Titel Zusatzarbeit"></td>
-      <td><input type="number" min="1" max="53" data-act="kw" value="${ka.kw ?? ''}" aria-label="KW"></td>
-      <td></td>
-      <td><button class="icon-btn" data-act="arb-rm" aria-label="Zusatzarbeit entfernen">${I('x')}</button></td>
-    </tr>`;
-    const a = S.arbeiten.find(x => x.id === ka.arbeit_id), ov = ka.kw != null && ka.kw !== a.standard_kw;
-    const fragt = ask && ask.id === ka.id;
+    const jk = jahreKurz(ka.abgewaehlte_jahre), a = ka.arbeit_id && S.arbeiten.find(x => x.id === ka.arbeit_id);
     return `<tr data-id="${ka.id}">
-      <td class="c"><button class="rbtn" data-act="arb-info" title="Ablauf" aria-label="Ablauf ${esc(a.name)}">${I('info')}</button></td>
-      <td class="wt-art">Standard${jk ? ' · ' + jk : ''}</td>
-      <td><span class="wt-n">${esc(a.name)}</span></td>
-      <td><input class="kwin${ov ? ' ov' : ''}" type="number" min="1" max="53" data-act="kw" value="${fragt ? ask.v : (effKw(ka) ?? '')}" aria-label="KW ${esc(a.name)}"></td>
-      <td class="wt-std">${ov ? 'KW ' + (a.standard_kw ?? '–') : ''}</td>
-      <td><button class="icon-btn" data-act="arb-rm" aria-label="${esc(a.name)} entfernen">${I('x')}</button></td>
-    </tr>${fragt ? `<tr class="ask-row"><td colspan="6"><div class="ask" role="alert">Die Standardwoche für «${esc(a.name)}» ist KW ${a.standard_kw ?? '–'}. Für diesen Kunden wirklich KW ${ask.v} verwenden?
-      <span class="row"><button class="btn btn-primary" data-act="kw-ja">KW ${ask.v} verwenden</button><button class="btn btn-ghost" data-act="kw-nein">Standard KW ${a.standard_kw ?? '–'} behalten</button></span></div></td></tr>` : ''}`;
+      <td class="c"><button class="rbtn" data-act="arb-info" title="${a ? 'Ablauf' : 'Infos zur Zusatzarbeit'}" aria-label="Infos">${I('info')}</button></td>
+      <td class="wt-art">${a ? 'Standard' : 'Zusatz'}${jk ? ' · ' + jk : ''}</td>
+      <td>${a ? `<span class="wt-n">${esc(a.name)}</span>` : `<input class="tin" type="text" data-act="zus-titel" value="${esc(ka.titel)}" placeholder="Titel der Zusatzarbeit" aria-label="Titel Zusatzarbeit">`}</td>
+      <td><button type="button" class="wk" data-act="arb-wochen" title="Wochen bearbeiten">${I('cal')}${wochenKurz(wochenVon(ka))}</button></td>
+      <td><button class="icon-btn" data-act="arb-rm" aria-label="Arbeit entfernen">${I('x')}</button></td>
+    </tr>`;
   };
   return `<section class="card panel">
     <div class="panel-h"><h3>Arbeiten</h3></div>
     <table class="wt">
-      <thead><tr><th class="w-i c">Infos</th><th class="w-art">Art</th><th>Arbeit</th><th class="w-kw">KW</th><th class="w-std" title="Standard-KW, nur angezeigt wenn abweichend">Standard</th><th class="w-x"></th></tr></thead>
-      <tbody>${zeilen.map(zeile).join('') || '<tr><td colspan="6" class="muted small">Noch keine Arbeiten. Unten hinzufügen.</td></tr>'}</tbody>
+      <thead><tr><th class="w-i c">Infos</th><th class="w-art">Art</th><th>Arbeit</th><th class="w-wo">Wochen</th><th class="w-x"></th></tr></thead>
+      <tbody>${zeilen.map(zeile).join('') || '<tr><td colspan="5" class="muted small">Noch keine Arbeiten. Unten hinzufügen.</td></tr>'}</tbody>
     </table>
     <div class="addlinks">
       ${kat.individuell ? '' : `<details class="ms spick" id="spick">
@@ -717,7 +753,7 @@ function arbeitenHtml(kk, kat){
         <div class="ms-panel sp-panel">
           <label class="search">${I('search')}<input id="sq" type="text" placeholder="Standardarbeit suchen" aria-label="Standardarbeit suchen"></label>
           <div class="sp-h">${esc(kat.name)}</div>
-          ${rest.map(a => `<button type="button" class="sp-item" data-act="std-add" data-arbeit="${a.id}" data-such="${esc(a.name.toLowerCase())}"><span>${esc(a.name)}</span><span class="muted small">KW ${a.standard_kw ?? '–'}</span></button>`).join('')
+          ${rest.map(a => `<button type="button" class="sp-item" data-act="std-add" data-arbeit="${a.id}" data-such="${esc(a.name.toLowerCase())}"><span>${esc(a.name)}</span><span class="muted small">${wochenKurz(a.standard_kws)}</span></button>`).join('')
             || '<div class="muted small" style="padding:8px">Alle Standardarbeiten sind schon hinzugefügt.</div>'}
         </div>
       </details>`}
@@ -1173,7 +1209,7 @@ function oeffneArbeitInfo(ka){
   const punkte = a ? (a.ablauf || '').split('\n').map(s => s.replace(/^[-•*\d.)\s]+/, '').trim()).filter(Boolean) : [];
   S.modal = { art: 'arbeit', id: ka.id, aus: [...(ka.abgewaehlte_jahre || [])] };
   $('modalBox').innerHTML = `
-    <div class="ovl-h"><div><div class="muted small">${esc(kat?.name)} · ${a ? 'Standardarbeit' : 'Zusatzarbeit'} · KW ${effKw(ka) ?? '–'}</div><h3>${esc(a ? a.name : (ka.titel || 'Zusatzarbeit'))}</h3></div>
+    <div class="ovl-h"><div><div class="muted small">${esc(kat?.name)} · ${a ? 'Standardarbeit' : 'Zusatzarbeit'} · ${wochenKurz(wochenVon(ka))}</div><h3>${esc(a ? a.name : (ka.titel || 'Zusatzarbeit'))}</h3></div>
       <button class="icon-btn" data-m="zu" aria-label="Schliessen">${I('x')}</button></div>
     ${a
       ? (punkte.length ? `<ol class="dlist">${punkte.map(p => `<li>${esc(p)}</li>`).join('')}</ol>` : '<div class="hint">Für diese Arbeit ist noch kein Ablauf erfasst. Erfassen unter «Pflegekategorien».</div>')
@@ -1184,13 +1220,39 @@ function oeffneArbeitInfo(ka){
     <div class="ovlbtns"><button class="btn btn-ghost" data-m="zu">Abbrechen</button><button class="btn btn-primary" data-m="arbeit-speichern">Speichern</button></div>`;
   $('modalOvl').classList.add('show');
 }
-function schliesseModal(){ S.modal = null; $('modalOvl').classList.remove('show'); }
+function schliesseModal(){ S.modal = null; $('modalOvl').classList.remove('show'); $('modalBox').classList.remove('breit'); }
+
+// Wochen einer Arbeit beim Kunden: Standardarbeit zeigt die Abweichung vom Standard der Kategorie
+function oeffneWochen(ka){
+  const a = ka.arbeit_id && S.arbeiten.find(x => x.id === ka.arbeit_id), k = kundeById(aktKundeId());
+  const kat = katById(S.kk.find(x => x.id === ka.kunde_kategorie_id)?.kategorie_id);
+  S.modal = { art: 'wochen', id: ka.id, sel: new Set(wochenVon(ka)), std: a ? (a.standard_kws || []) : [] };
+  $('modalBox').innerHTML = `
+    <div class="ovl-h"><div><div class="muted small">${esc(k?.kunde?.name)} · ${esc(kat?.name)} · ${a ? (S.modal.std.length ? 'Standard der Kategorie: KW ' + S.modal.std.join(', ') : 'keine Standard-Wochen') : 'Zusatzarbeit'}</div><h3>${esc(a ? a.name : (ka.titel || 'Zusatzarbeit'))}</h3></div>
+      <button class="icon-btn" data-m="zu" aria-label="Schliessen">${I('x')}</button></div>
+    <div id="wsInhalt">${streifenHtml(S.modal.sel, S.modal.std, KW_NOW)}</div>
+    <div class="ovlbtns"><button class="btn btn-ghost" data-m="zu">Abbrechen</button><button class="btn btn-primary" data-m="wochen-speichern">Speichern</button></div>`;
+  $('modalBox').classList.add('breit');
+  $('modalOvl').classList.add('show');
+}
+async function speichereWochen(){
+  const m = S.modal, ka = S.ka.find(x => x.id === m.id), w = sortiertW(m.sel);
+  const werte = ka.arbeit_id
+    ? { kws_plus: w.filter(x => !m.std.includes(x)), kws_minus: m.std.filter(x => !w.includes(x)) }
+    : { kws: w };
+  if(!await speichere('pflege_kunde_arbeit', { id: ka.id }, werte)) return;
+  Object.assign(ka, werte);
+  schliesseModal(); render();
+}
 
 $('modalOvl').addEventListener('click', async e => {
   if(e.target.id === 'modalOvl'){ schliesseModal(); return; }
+  const ws = e.target.closest('[data-ws]');
+  if(ws && S.modal?.art === 'wochen'){ const w = +ws.dataset.ws; S.modal.sel.has(w) ? S.modal.sel.delete(w) : S.modal.sel.add(w); $('wsInhalt').innerHTML = streifenHtml(S.modal.sel, S.modal.std, KW_NOW); return; }
   const b = e.target.closest('[data-m]'); if(!b) return;
   const m = b.dataset.m;
   if(m === 'zu') return schliesseModal();
+  if(m === 'wochen-speichern') return speichereWochen();
   if(m === 'foto-speichern') return speichereFoto();
   if(m === 'ang-wahl'){
     const d = S.eb[aktKundeId() + '|OFFER'].dokumente.find(x => x.id === +b.dataset.eb);
@@ -1339,15 +1401,6 @@ $('app').addEventListener('change', async e => {
     await setzeZustaendig(kk, neu);
     render(); $('zustMs').open = true;
   }
-  else if(act === 'kw'){
-    const id = el.closest('[data-id]').dataset.id, ka = S.ka.find(x => x.id === id), v = kwWert(el.value);
-    if(v === null){ showToast('KW muss zwischen 1 und 53 liegen.', true); render(); return; }
-    if(!ka.arbeit_id){ if(await speichere('pflege_kunde_arbeit', { id }, { kw: v })) ka.kw = v; render(); return; }
-    const std = S.arbeiten.find(a => a.id === ka.arbeit_id).standard_kw;
-    if(v === std){ if(await speichere('pflege_kunde_arbeit', { id }, { kw: null })) ka.kw = null; S.kwAsk = null; render(); return; }
-    // Standardwoche uebersteuern nur nach Rueckfrage
-    S.kwAsk = { id, v }; render();
-  }
   else if(act === 'zus-titel'){
     const id = el.closest('[data-id]').dataset.id, ka = S.ka.find(x => x.id === id), titel = el.value.trim();
     if(await speichere('pflege_kunde_arbeit', { id }, { titel })) ka.titel = titel;
@@ -1394,11 +1447,7 @@ $('app').addEventListener('click', async e => {
   }
   else if(act === 'zust-rm'){ await setzeZustaendig(kk, zustVon(kk.id).filter(x => x !== b.dataset.b)); render(); }
   else if(act === 'zust-niemand'){ await setzeZustaendig(kk, []); render(); }
-  else if(act === 'kw-ja' || act === 'kw-nein'){
-    const ka = S.ka.find(x => x.id === S.kwAsk.id);
-    if(act === 'kw-ja' && await speichere('pflege_kunde_arbeit', { id: ka.id }, { kw: S.kwAsk.v })) ka.kw = S.kwAsk.v;
-    S.kwAsk = null; render();
-  }
+  else if(act === 'arb-wochen') oeffneWochen(S.ka.find(x => x.id === b.closest('[data-id]').dataset.id));
   else if(act === 'arb-info') oeffneArbeitInfo(S.ka.find(x => x.id === b.closest('[data-id]').dataset.id));
   else if(act === 'arb-rm'){
     const id = b.closest('[data-id]').dataset.id, ka = S.ka.find(x => x.id === id);
@@ -1414,7 +1463,7 @@ $('app').addEventListener('click', async e => {
     S.ka.push(data); render();
   }
   else if(act === 'zus-add'){
-    const { data, error } = await sb.from('pflege_kunde_arbeit').insert({ kunde_kategorie_id: kk.id, titel: '', kw: KW_NOW }).select().single();
+    const { data, error } = await sb.from('pflege_kunde_arbeit').insert({ kunde_kategorie_id: kk.id, titel: '', kws: [KW_NOW] }).select().single();
     if(error){ showToast(friendlyError(error), true); return; }
     S.ka.push(data); render();
     document.querySelector(`tr[data-id="${data.id}"] [data-act="zus-titel"]`)?.focus();

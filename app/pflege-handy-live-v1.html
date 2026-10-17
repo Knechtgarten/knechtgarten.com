@@ -330,13 +330,17 @@ async function ladeAlles(){
 
 // Einsaetze (Kunde + Kategorie + KW) eines Jahres
 function arbeitName(ka){ return ka.arbeit_id ? (S.arbeiten.find(a => a.id === ka.arbeit_id)?.name || '') : (ka.titel || 'Zusatzarbeit'); }
-function effKw(ka){ return ka.arbeit_id ? (ka.kw ?? S.arbeiten.find(a => a.id === ka.arbeit_id)?.standard_kw ?? null) : ka.kw; }
+// Wochen einer Arbeit: Standard-Wochen der Kategorie +/- Abweichung beim Kunden, Zusatzarbeit = eigene Liste
+function wochenVon(ka){
+  if(!ka.arbeit_id) return [...(ka.kws || [])].sort((a, b) => a - b);
+  const std = S.arbeiten.find(a => a.id === ka.arbeit_id)?.standard_kws || [], minus = ka.kws_minus || [];
+  return [...new Set([...std.filter(w => !minus.includes(w)), ...(ka.kws_plus || [])])].sort((a, b) => a - b);
+}
+// Arbeiten einer Kunden-Kategorie im Jahr, als Liste { ka, kw } (eine Arbeit kann mehrere Wochen haben)
 function jobsVonKk(kk, jahr){
-  return S.ka.filter(x => x.kunde_kategorie_id === kk.id).filter(ka => {
-    if(ka.arbeit_id && !S.arbeiten.some(a => a.id === ka.arbeit_id)) return false;
-    const kw = effKw(ka);
-    return kw && kw <= wochenImJahr(jahr) && !(ka.abgewaehlte_jahre || []).includes(jahr);
-  });
+  return S.ka.filter(x => x.kunde_kategorie_id === kk.id)
+    .filter(ka => !(ka.arbeit_id && !S.arbeiten.some(a => a.id === ka.arbeit_id)) && !(ka.abgewaehlte_jahre || []).includes(jahr))
+    .flatMap(ka => wochenVon(ka).filter(kw => kw <= wochenImJahr(jahr)).map(kw => ({ ka, kw })));
 }
 function einsaetze(jahr){
   const f = S.f, out = [];
@@ -348,7 +352,7 @@ function einsaetze(jahr){
       const zust = zustVon(kk.id);
       if(f.ma === '-' ? zust.length : (f.ma && !zust.includes(f.ma))) return;
       const proKw = {};
-      jobsVonKk(kk, jahr).forEach(ka => (proKw[effKw(ka)] = proKw[effKw(ka)] || []).push(ka));
+      jobsVonKk(kk, jahr).forEach(j => (proKw[j.kw] = proKw[j.kw] || []).push(j.ka));
       Object.entries(proKw).forEach(([kw, jobs]) => {
         const done = erledigt(kk.id, jahr, +kw);
         if(f.status.length && !f.status.includes(done ? 'erledigt' : 'offen')) return;
@@ -481,7 +485,7 @@ function renderKunde(r){
 
   // Wochen dieser Kategorie (laufendes + naechstes Jahr), Fokus: aus «Faellig» uebernommen, sonst naechste offene
   const wochen = [];
-  [JETZT.jahr, JETZT.jahr + 1].forEach(j => [...new Set(jobsVonKk(kk, j).map(effKw))].sort((a, b) => a - b).forEach(w => wochen.push({ jahr: j, kw: w })));
+  [JETZT.jahr, JETZT.jahr + 1].forEach(j => [...new Set(jobsVonKk(kk, j).map(x => x.kw))].sort((a, b) => a - b).forEach(w => wochen.push({ jahr: j, kw: w })));
   const wk = x => `${x.jahr}-${x.kw}`, nachJetzt = x => x.jahr > JETZT.jahr || x.kw >= JETZT.kw;
   // wie Mockup: naechste offene ab heute, sonst irgendeine offene, sonst die letzte vergangene
   const fokus = wochen.find(x => wk(x) === r.wk)
@@ -490,7 +494,7 @@ function renderKunde(r){
     || [...wochen].reverse().find(x => !nachJetzt(x)) || wochen[0];
   const sichtbar = wochen.filter(x => x.jahr === JETZT.jahr || (fokus && x.jahr === fokus.jahr));
   const done = fokus && erledigt(kk.id, fokus.jahr, fokus.kw);
-  const diese = fokus ? jobsVonKk(kk, fokus.jahr).filter(ka => effKw(ka) === fokus.kw) : [];
+  const diese = fokus ? jobsVonKk(kk, fokus.jahr).filter(x => x.kw === fokus.kw).map(x => x.ka) : [];
   const fotos = fotosFuer(kk);
   const doks = S.dok.filter(d => d.kunde_id === k.kunde_id && !d.ersetzt && (() => { const kd = S.dk.filter(x => x.dokument_id === d.id).map(x => x.kategorie_id); return !kd.length || kd.includes(kat.id); })());
   const tab = !kat.individuell && tabelleVon(kat.id), zust = zustVon(kk.id);

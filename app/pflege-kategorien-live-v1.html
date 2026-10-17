@@ -144,6 +144,26 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
   .fgrid{grid-template-columns:1fr;}
   .def{grid-template-columns:minmax(0,1fr) 110px 70px 32px 28px;}
 }
+/* Wochenstreifen (Standardarbeiten mehrmals pro Jahr, Entwurf Wochenplanung v2) */
+.wk{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border:1px solid var(--line);border-radius:6px;background:#fff;font-size:12px;font-variant-numeric:tabular-nums;max-width:100%;box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.wk:hover{border-color:var(--primary);}
+.wk .i{width:14px;height:14px;flex:none;}
+.wk .n{color:var(--muted);}
+.ws{display:grid;grid-template-columns:repeat(53,minmax(0,1fr));gap:2px;}
+.ws-mon{font-size:9.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;border-left:1px solid var(--line);padding-left:3px;white-space:nowrap;overflow:hidden;}
+.ws-b{all:unset;cursor:pointer;height:28px;border-radius:3px;border:1px solid var(--line);background:#fff;font-size:9.5px;text-align:center;line-height:28px;color:var(--muted);font-variant-numeric:tabular-nums;box-sizing:border-box;}
+.ws-b:hover{border-color:var(--primary);}
+.ws-b.on{background:#323E4E;border-color:#323E4E;color:#fff;font-weight:700;}
+.ws-b.std{box-shadow:inset 0 -4px 0 #D1DB5F;}
+.ws-b.weg{border:1.5px dashed #323E4E;color:#323E4E;}
+.ws-b.now{outline:2px solid #D1DB5F;outline-offset:-2px;}
+.ws-q{display:none;}
+.ws-leg{display:flex;gap:16px;flex-wrap:wrap;font-size:11.5px;color:var(--muted);align-items:center;}
+.ws-leg span{display:inline-flex;align-items:center;gap:6px;}
+.ws-leg .ws-b{width:22px;height:18px;line-height:18px;cursor:default;}
+.ws-diff{font-size:12.5px;}
+.ovlbox.breit{max-width:1000px;}
+@media (max-width:760px){ .ws{display:none;} .ws-q{display:grid;grid-template-columns:auto repeat(13,minmax(0,1fr));gap:3px;align-items:center;} .ws-q .ql{font-size:10.5px;color:var(--muted);padding-right:4px;} }
 </style>
 </head>
 <body>
@@ -435,7 +455,7 @@ function feldZeile(f){
 function arbeitZeile(a){
   return `<div class="def" data-drag="arbeit" data-id="${a.id}">
     <div class="fn-wrap">${griff}<input type="text" data-act="arbeit-name" value="${esc(a.name)}" aria-label="Arbeit"></div>
-    <input type="number" min="1" max="53" data-act="arbeit-kw" value="${a.standard_kw ?? ''}" aria-label="Standard-KW">
+    <button type="button" class="wk" data-act="arbeit-wochen" title="Standard-Wochen bearbeiten">${I('cal')}${wochenKurz(a.standard_kws)}</button>
     <span></span>
     <button class="rbtn" data-act="arbeit-ablauf" title="Ablauf ${a.ablauf ? 'ansehen' : 'erfassen'}" aria-label="Ablauf ${esc(a.name)}">${I('info')}</button>
     <button class="icon-btn" data-act="arbeit-loeschen" title="Arbeit entfernen" aria-label="Arbeit entfernen">${I('x')}</button>
@@ -495,9 +515,9 @@ function renderInhalt(){
       <div><button class="addrow" data-act="feld-neu">${I('plus')}Feld hinzufügen</button></div>
     </section>
     <section class="card panel">
-      <div class="panel-h"><h3>Standardarbeiten</h3><span class="muted small">Standard-KW gilt für alle Kunden, beim Kunden übersteuerbar</span></div>
+      <div class="panel-h"><h3>Standardarbeiten</h3><span class="muted small">Standard-Wochen gelten für alle Kunden, beim Kunden anpassbar</span></div>
       <div>
-        <div class="def hdr"><span>Arbeit</span><span>Standard-KW</span><span></span><span class="c" title="Ablauf der Arbeit">Infos</span><span></span></div>
+        <div class="def hdr"><span>Arbeit</span><span>Standard-Wochen</span><span></span><span class="c" title="Ablauf der Arbeit">Infos</span><span></span></div>
         ${arbeitenVon(k.id).map(arbeitZeile).join('') || '<div class="muted small" style="padding:8px 0">Noch keine Standardarbeiten.</div>'}
       </div>
       <div><button class="addrow" data-act="arbeit-neu">${I('plus')}Standardarbeit hinzufügen</button></div>
@@ -547,8 +567,35 @@ function einheitenHtml(){
 // ---------------------------------------------------------------------------
 // Fenster: Optionen (Zeilenliste) und Ablauf
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Wochenstreifen: 52/53 Kaestchen, Klick schaltet eine Woche. Beim Kunden zeigt er die
+// Abweichung vom Standard (gruener Strich = Standard-Woche, gestrichelt = weggelassen).
+// ---------------------------------------------------------------------------
+const WS_MONATE = [['Jan',1],['Feb',6],['Mär',10],['Apr',14],['Mai',19],['Jun',23],['Jul',27],['Aug',32],['Sep',36],['Okt',40],['Nov',45],['Dez',49]];
+const sortiertW = s => [...s].sort((a, b) => a - b);
+function wochenKurz(w){
+  if(!w || !w.length) return 'keine';
+  return w.length <= 3 ? 'KW ' + w.join(', ') : `KW ${w.slice(0, 3).join(', ')} … <span class="n">(${w.length}×)</span>`;
+}
+function streifenHtml(sel, std, kwJetzt){
+  const b = w => { const on = sel.has(w), s = std.includes(w);
+    return `<button type="button" class="ws-b${on ? ' on' : ''}${s && on ? ' std' : ''}${s && !on ? ' weg' : ''}${w === kwJetzt ? ' now' : ''}" data-ws="${w}" aria-pressed="${on}" aria-label="KW ${w}">${w}</button>`; };
+  const kopf = WS_MONATE.map((m, i) => `<div class="ws-mon" style="grid-column:span ${(WS_MONATE[i + 1]?.[1] ?? 54) - m[1]}">${m[0]}</div>`).join('');
+  const kunde = std.length > 0;
+  const plus = sortiertW([...sel].filter(w => !std.includes(w))), minus = std.filter(w => !sel.has(w));
+  return `<div class="ws">${kopf}${Array.from({ length: 53 }, (_, i) => b(i + 1)).join('')}</div>
+    <div class="ws-q">${[0, 1, 2, 3].map(q => `<span class="ql">Q${q + 1}</span>` + Array.from({ length: 13 }, (_, i) => b(q * 13 + i + 1)).join('')).join('')}<span class="ql"></span>${b(53)}</div>
+    <div class="ws-leg">${kunde
+      ? '<span><i class="ws-b on std"></i>Standard-Woche</span><span><i class="ws-b on"></i>zusätzliche Woche</span><span><i class="ws-b weg"></i>weggelassene Standard-Woche</span>'
+      : '<span><i class="ws-b on"></i>geplante Woche</span>'}<span><i class="ws-b now"></i>aktuelle Woche</span></div>
+    ${kunde ? `<div class="ws-diff">${plus.length || minus.length ? `<b>Abweichung vom Standard:</b> ${plus.length ? 'zusätzlich KW ' + plus.join(', ') : ''}${plus.length && minus.length ? ' · ' : ''}${minus.length ? 'weggelassen KW ' + minus.join(', ') : ''}` : '<span class="muted">Wie Standard der Kategorie.</span>'}</div>` : ''}
+    <div class="muted small"><b style="color:var(--primary)">${sel.size}</b> ${sel.size === 1 ? 'Woche' : 'Wochen'} geplant · Klick auf ein Kästchen schaltet die Woche ein oder aus</div>`;
+}
+// aktuelle Kalenderwoche (ISO) fuer die Markierung im Wochenstreifen
+const KW_JETZT = (() => { const d = new Date(), t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())); t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7)); return Math.ceil(((t - new Date(Date.UTC(t.getUTCFullYear(), 0, 1))) / 86400000 + 1) / 7); })();
 function renderModal(){
   const m = S.modal;
+  $('modalBox').classList.remove('breit');
   if(!m){ $('modalOvl').classList.remove('show'); return; }
   const k = kat();
   if(m.art === 'optionen'){
@@ -562,9 +609,16 @@ function renderModal(){
       </div>
       <div><button class="addrow" data-m="oadd">${I('plus')}Auswahlmöglichkeit hinzufügen</button></div>
       <div class="ovlbtns"><button class="btn btn-ghost" data-m="zu">Abbrechen</button><button class="btn btn-primary" data-m="speichern">Speichern</button></div>`;
+  } else if(m.art === 'wochen'){
+    $('modalBox').innerHTML = `
+      <div class="ovl-h"><div><div class="muted small">${esc(k?.name)} · Standard-Wochen für alle Kunden</div><h3>${esc(m.titel)}</h3></div>
+        <button class="icon-btn" data-m="zu" aria-label="Schliessen">${I('x')}</button></div>
+      <div id="wsInhalt">${streifenHtml(m.sel, [], KW_JETZT)}</div>
+      <div class="ovlbtns"><button class="btn btn-ghost" data-m="zu">Abbrechen</button><button class="btn btn-primary" data-m="speichern">Speichern</button></div>`;
+    $('modalBox').classList.add('breit');
   } else {
     $('modalBox').innerHTML = `
-      <div class="ovl-h"><div><div class="muted small">${esc(k?.name)}${m.kw ? ' · Standard KW ' + m.kw : ''}</div><h3>${esc(m.titel)}</h3></div>
+      <div class="ovl-h"><div><div class="muted small">${esc(k?.name)}${m.wochen?.length ? ' · Standard ' + m.wochen.map(w => 'KW ' + w).join(', ') : ''}</div><h3>${esc(m.titel)}</h3></div>
         <button class="icon-btn" data-m="zu" aria-label="Schliessen">${I('x')}</button></div>
       <label class="muted small" for="ablaufText">Ablauf, ein Punkt pro Zeile</label>
       <textarea id="ablaufText" class="dtext" placeholder="Hauptabsperrung schliessen&#10;Steuergerät auf Winterbetrieb stellen&#10;…">${esc(m.entwurf)}</textarea>
@@ -578,7 +632,7 @@ function oeffneOptionen(tabelle, obj){
   $('modalBox').querySelector('[data-oj]')?.focus();
 }
 function oeffneAblauf(a){
-  S.modal = { art: 'ablauf', id: a.id, titel: a.name, kw: a.standard_kw, entwurf: a.ablauf || '' };
+  S.modal = { art: 'ablauf', id: a.id, titel: a.name, wochen: a.standard_kws, entwurf: a.ablauf || '' };
   renderModal();
   $('ablaufText').focus();
 }
@@ -591,6 +645,8 @@ function optionHinzufuegen(){
 $('modalOvl').addEventListener('click', async e => {
   if(e.target.id === 'modalOvl'){ S.modal = null; renderModal(); return; }
   const m = S.modal;
+  const ws = e.target.closest('[data-ws]');
+  if(ws && m?.art === 'wochen'){ const w = +ws.dataset.ws; m.sel.has(w) ? m.sel.delete(w) : m.sel.add(w); $('wsInhalt').innerHTML = streifenHtml(m.sel, [], KW_JETZT); return; }
   const rm = e.target.closest('[data-orm]');
   if(rm){ m.entwurf.splice(+rm.dataset.orm, 1); renderModal(); return; }
   const b = e.target.closest('[data-m]');
@@ -603,6 +659,10 @@ $('modalOvl').addEventListener('click', async e => {
       if(!await speichere(m.tabelle, m.id, { optionen })) return;
       const liste = m.tabelle === 'pflege_feld' ? S.felder : S.spalten;
       liste.find(x => x.id === m.id).optionen = optionen;
+    } else if(m.art === 'wochen'){
+      const standard_kws = sortiertW(m.sel);
+      if(!await speichere('pflege_arbeit', m.id, { standard_kws })) return;
+      S.arbeiten.find(x => x.id === m.id).standard_kws = standard_kws;
     } else {
       const ablauf = $('ablaufText').value.trim() || null;
       if(!await speichere('pflege_arbeit', m.id, { ablauf })) return;
@@ -644,7 +704,6 @@ $('nav').addEventListener('click', async e => {
 // Inhalt rechts: Aenderungen (sofort speichern)
 // ---------------------------------------------------------------------------
 const zeilenId = el => el.closest('[data-id]')?.dataset.id;
-const kwWert = v => { const n = parseInt(v, 10); return n >= 1 && n <= 53 ? n : null; };
 
 $('inhalt').addEventListener('change', async e => {
   const el = e.target, act = el.dataset.act, k = kat();
@@ -686,11 +745,6 @@ $('inhalt').addEventListener('change', async e => {
     const name = el.value.trim();
     if(!name){ el.value = a.name; return; }
     if(await speichere('pflege_arbeit', id, { name })) a.name = name;
-  }
-  else if(act === 'arbeit-kw'){
-    const kw = kwWert(el.value);
-    if(el.value !== '' && kw === null){ showToast('KW muss zwischen 1 und 53 liegen.', true); el.value = a.standard_kw ?? ''; return; }
-    if(await speichere('pflege_arbeit', id, { standard_kw: kw })) a.standard_kw = kw;
   }
   else if(act === 'tab-name'){
     const t = tabelleVon(k.id), name = el.value.trim();
@@ -775,6 +829,11 @@ $('inhalt').addEventListener('click', async e => {
     if(a){ S.arbeiten.push(a); renderInhalt(); fokusLetzte('arbeit-name'); }
   }
   else if(act === 'arbeit-ablauf'){ oeffneAblauf(S.arbeiten.find(x => x.id === id)); }
+  else if(act === 'arbeit-wochen'){
+    const a = S.arbeiten.find(x => x.id === id);
+    S.modal = { art: 'wochen', id, titel: a.name, sel: new Set(a.standard_kws || []) };
+    renderModal();
+  }
   else if(act === 'arbeit-loeschen'){
     const a = S.arbeiten.find(x => x.id === id);
     const { count } = await sb.from('pflege_kunde_arbeit').select('id', { count: 'exact', head: true }).eq('arbeit_id', id);

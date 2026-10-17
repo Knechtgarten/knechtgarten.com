@@ -391,18 +391,21 @@ async function ladeAlles(){
   render();
 }
 
-// Einsaetze eines Kunden in einem Jahr: jede Arbeit (Standard-KW oder uebersteuert) in den Jahren, in denen sie gilt
+// Einsaetze eines Kunden in einem Jahr: jede Woche jeder Arbeit (Standard-Wochen +/- Abweichung) in den Jahren, in denen sie gilt
 function arbeitName(ka){ return ka.arbeit_id ? (S.arbeiten.find(a => a.id === ka.arbeit_id)?.name || '') : (ka.titel || 'Zusatzarbeit'); }
-function effKw(ka){ return ka.arbeit_id ? (ka.kw ?? S.arbeiten.find(a => a.id === ka.arbeit_id)?.standard_kw ?? null) : ka.kw; }
+function wochenVon(ka){
+  if(!ka.arbeit_id) return [...(ka.kws || [])].sort((a, b) => a - b);
+  const std = S.arbeiten.find(a => a.id === ka.arbeit_id)?.standard_kws || [], minus = ka.kws_minus || [];
+  return [...new Set([...std.filter(w => !minus.includes(w)), ...(ka.kws_plus || [])])].sort((a, b) => a - b);
+}
 function jobsVon(kundeId, jahr){
   const out = [];
   S.kk.filter(x => x.kunde_id === kundeId).forEach(kk => {
     const kat = katById(kk.kategorie_id); if(!kat) return;
     S.ka.filter(x => x.kunde_kategorie_id === kk.id).forEach(ka => {
       if(ka.arbeit_id && !S.arbeiten.some(a => a.id === ka.arbeit_id)) return;
-      const kw = effKw(ka);
-      if(!kw || kw > wochenImJahr(jahr) || (ka.abgewaehlte_jahre || []).includes(jahr)) return;
-      out.push({ kk, kat, kw, ka, zust: zustVon(kk.id) });
+      if((ka.abgewaehlte_jahre || []).includes(jahr)) return;
+      wochenVon(ka).filter(kw => kw <= wochenImJahr(jahr)).forEach(kw => out.push({ kk, kat, kw, ka, zust: zustVon(kk.id) }));
     });
   });
   return out;
@@ -598,8 +601,9 @@ function renderNeu(){
   const n = S.neu, k = kundeById(n.kundeId), kks = S.kk.filter(x => x.kunde_id === n.kundeId);
   if(!kks.some(x => x.id === n.kkId)) n.kkId = kks[0]?.id;
   const kk = kks.find(x => x.id === n.kkId), kat = kk && katById(kk.kategorie_id);
-  const zugeordnet = new Set(S.ka.filter(x => x.kunde_kategorie_id === kk?.id && x.arbeit_id).map(x => x.arbeit_id));
-  const frei = !kat || kat.individuell ? [] : S.arbeiten.filter(a => a.kategorie_id === kat.id && !zugeordnet.has(a.id)).sort(nachReihe);
+  // alle Standardarbeiten der Kategorie, die in dieser Woche noch nicht eingeplant sind
+  const kaVon = a => S.ka.find(x => x.kunde_kategorie_id === kk?.id && x.arbeit_id === a.id);
+  const frei = !kat || kat.individuell ? [] : S.arbeiten.filter(a => a.kategorie_id === kat.id && !(kaVon(a) && wochenVon(kaVon(a)).includes(n.kw))).sort(nachReihe);
   const art = kat?.individuell ? 'zus' : n.art;
   $('side').innerHTML = `
     <aside class="sidepanel" aria-label="Arbeit hinzufügen">
@@ -611,8 +615,8 @@ function renderNeu(){
         <button data-act="neu-art" data-v="std" aria-pressed="${art === 'std'}">Standardarbeit</button><button data-act="neu-art" data-v="zus" aria-pressed="${art === 'zus'}">Zusatzarbeit</button></div>`}
       ${art === 'std'
         ? (frei.length
-          ? `<div class="field"><label for="ns">Standardarbeit</label><select id="ns">${frei.map(a => `<option value="${a.id}">${esc(a.name)} (Standard KW ${a.standard_kw ?? '–'})</option>`).join('')}</select></div>
-             <div class="muted small">Wird bei diesem Kunden in KW ${n.kw} eingeplant, jedes Jahr.</div>`
+          ? `<div class="field"><label for="ns">Standardarbeit</label><select id="ns">${frei.map(a => `<option value="${a.id}">${esc(a.name)}${kaVon(a) ? ' (schon eingeplant, Woche dazu)' : ''}</option>`).join('')}</select></div>
+             <div class="muted small">KW ${n.kw} wird bei diesem Kunden dazu genommen, jedes Jahr.</div>`
           : `<div class="hint">Alle Standardarbeiten von «${esc(kat?.name)}» sind bei diesem Kunden schon eingeplant.</div>`)
         : `<div class="field"><label for="nt">Arbeit</label><input id="nt" type="text" placeholder="z. B. Rosen zurückschneiden"></div>
            <div class="field"><label for="nb">Infos</label><textarea id="nb" rows="4" placeholder="Was genau zu tun ist, Material, Hinweise"></textarea></div>
@@ -686,18 +690,29 @@ document.addEventListener('click', async e => {
   else if(act === 'neu-art'){ S.neu.art = b.dataset.v; renderSide(); }
   else if(act === 'neu-add'){
     const n = S.neu, kk = S.kk.find(x => x.id === n.kkId), kat = katById(kk.kategorie_id);
-    let row;
+    let row, vorhanden = null;
     if($('ns') && !kat.individuell && n.art === 'std'){
-      const a = S.arbeiten.find(x => x.id === $('ns').value);
-      row = { kunde_kategorie_id: kk.id, arbeit_id: a.id, kw: n.kw === a.standard_kw ? null : n.kw };
+      const a = S.arbeiten.find(x => x.id === $('ns').value), std = a.standard_kws || [];
+      vorhanden = S.ka.find(x => x.kunde_kategorie_id === kk.id && x.arbeit_id === a.id);
+      if(vorhanden){
+        // Woche dazu: weggelassene Standard-Woche zurueckholen oder als zusaetzliche Woche
+        row = std.includes(n.kw)
+          ? { kws_minus: (vorhanden.kws_minus || []).filter(w => w !== n.kw) }
+          : { kws_plus: [...new Set([...(vorhanden.kws_plus || []), n.kw])].sort((x, y) => x - y) };
+      } else {
+        // neu beim Kunden: nur diese Woche (die anderen Standard-Wochen weglassen)
+        row = { kunde_kategorie_id: kk.id, arbeit_id: a.id, kws_plus: std.includes(n.kw) ? [] : [n.kw], kws_minus: std.filter(w => w !== n.kw) };
+      }
     } else {
       const titel = $('nt').value.trim();
       if(!titel){ $('nt').focus(); showToast('Bitte einen Titel für die Arbeit eingeben.', true); return; }
-      row = { kunde_kategorie_id: kk.id, titel, beschrieb: $('nb').value.trim() || null, kw: n.kw };
+      row = { kunde_kategorie_id: kk.id, titel, beschrieb: $('nb').value.trim() || null, kws: [n.kw] };
     }
-    const { data, error } = await sb.from('pflege_kunde_arbeit').insert(row).select().single();
+    const { data, error } = vorhanden
+      ? await sb.from('pflege_kunde_arbeit').update(row).eq('id', vorhanden.id).select().single()
+      : await sb.from('pflege_kunde_arbeit').insert(row).select().single();
     if(error){ showToast(friendlyError(error), true); return; }
-    S.ka.push(data);
+    if(vorhanden) Object.assign(vorhanden, data); else S.ka.push(data);
     S.neu = null; S.side = { kkId: kk.id, kw: n.kw };
     showToast('Arbeit hinzugefügt.');
     render();
