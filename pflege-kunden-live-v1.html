@@ -116,6 +116,8 @@ tbody tr:last-child td{border-bottom:none;}
 .obj-l{display:block;font-size:11px;color:#6B7420;line-height:1.3;white-space:normal;max-width:260px;}
 .kchips{display:flex;flex-wrap:wrap;gap:1px 8px;line-height:1.25;}
 .kc{display:inline-flex;align-items:center;gap:4px;font-size:11px;white-space:nowrap;}
+.tagc{display:inline-flex;align-items:center;gap:3px;font-size:10.5px;font-weight:700;white-space:nowrap;color:var(--primary);background:var(--accent-blue);border-radius:9px;padding:0 6px;line-height:16px;}
+.tagc .i{width:10px;height:10px;}
 .kc .kdot{width:7px;height:7px;}
 .count{font-size:11.5px;color:var(--muted);margin-top:8px;}
 
@@ -367,6 +369,7 @@ table.au tr.sto td{color:var(--muted);text-decoration:line-through;}
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
   <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
   <symbol id="i-unlock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.5-2"/></symbol>
+  <symbol id="i-tag" viewBox="0 0 24 24"><path d="M3 12V4h8l10 10-8 8L3 12z"/><circle cx="7.5" cy="8" r="1.3"/></symbol>
   <symbol id="i-sensor" viewBox="0 0 24 24"><path d="M12 3v10M8 7H6M8 10H6"/><circle cx="12" cy="16" r="4"/></symbol>
   <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="16" rx="2"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/></symbol>
   <symbol id="i-mobile" viewBox="0 0 24 24"><rect x="6.5" y="2.5" width="11" height="19" rx="2"/><path d="M10.5 18.5h3"/></symbol>
@@ -550,7 +553,7 @@ const zustAuswahl = (schon = []) => S.zust.filter(b => b.pflege_zustaendig || sc
 const S = {
   kat: [], felder: [], arbeiten: [], tabellen: [], spalten: [], zust: [],
   kunden: [], obj: [], kk: [], kz: [], ka: [], fotos: [], fk: [], urls: {}, dok: [], dk: [], eb: {}, auNur: true, auZeigen: 20, auVon: '',
-  f: { q: '', abo: [], ma: [], kat: '' },
+  f: { q: '', abo: [], ma: [], kat: '', tags: [] }, tags: [],
   ktab: null, kwAsk: null, modal: null, fotoTag: '', hochladen: 0, lb: null, bpOffen: new Set(), bpLaeuft: false
 };
 const katById = id => S.kat.find(k => k.id === id);
@@ -582,11 +585,12 @@ async function ladeAlles(){
     sb.from('pflege_foto').select('*').order('aufgenommen_am', { ascending: false }),
     sb.from('pflege_foto_kategorie').select('*'),
     sb.from('pflege_dokument').select('*').order('datum', { ascending: false, nullsFirst: false }),
-    sb.from('pflege_dokument_kategorie').select('*')
+    sb.from('pflege_dokument_kategorie').select('*'),
+    sb.from('pflege_tag').select('*').order('name')
   ]);
   const fehler = r.find(x => x.error);
   if(fehler){ showToast(friendlyError(fehler.error), true); return; }
-  [S.kat, S.felder, S.arbeiten, S.tabellen, S.spalten, S.zust, S.kunden, S.obj, S.kk, S.kz, S.ka, S.fotos, S.fk, S.dok, S.dk] = r.map(x => x.data || []);
+  [S.kat, S.felder, S.arbeiten, S.tabellen, S.spalten, S.zust, S.kunden, S.obj, S.kk, S.kz, S.ka, S.fotos, S.fk, S.dok, S.dk, S.tags] = r.map(x => x.data || []);
   S.kunden.sort((a, b) => (a.kunde?.name || '').localeCompare(b.kunde?.name || '', 'de'));
   render();
 }
@@ -634,6 +638,34 @@ function zustFilterHtml(){
     </div>
   </details>`;
 }
+// Tags eines Kunden: automatisch aus Angaben (Auswahl / Ja) und Arbeiten, die in den
+// Pflegekategorien mit einem Tag verknuepft sind; jeder Tag zaehlt nur einmal
+function tagsVonKunde(kundeId){
+  const t = new Set();
+  kkVonKunde(kundeId).forEach(kk => {
+    const w = kk.werte || {};
+    felderVon(kk.kategorie_id).forEach(f => {
+      const v = w[f.id], m = f.tags || {};
+      if(f.typ === 'auswahl' && v && m[v]) t.add(m[v]);
+      if(f.typ === 'janein' && v === 'ja' && m.ja) t.add(m.ja);
+    });
+    S.ka.forEach(ka => { if(ka.kunde_kategorie_id === kk.id && ka.arbeit_id){ const a = S.arbeiten.find(x => x.id === ka.arbeit_id); if(a?.tag_id) t.add(a.tag_id); } });
+  });
+  return new Set([...t].filter(id => S.tags.some(x => x.id === id)));
+}
+const tagChips = kundeId => [...tagsVonKunde(kundeId)].map(id => S.tags.find(x => x.id === id)).sort((a, b) => a.name.localeCompare(b.name, 'de'))
+  .map(t => `<span class="tagc">${I('tag')}${esc(t.name)}</span>`).join('');
+function tagFilterHtml(){
+  if(!S.tags.length) return '';
+  const sel = S.f.tags, label = !sel.length ? 'Alle Tags' : S.tags.filter(t => sel.includes(t.id)).map(t => t.name).join(' + ');
+  return `<details class="ms msf" id="ftag">
+    <summary>${I('tag')}<span class="msf-l">${esc(label)}</span>${I('chev')}</summary>
+    <div class="ms-panel">
+      ${S.tags.map(t => `<label><input type="checkbox" data-act="f-tag" value="${t.id}" ${sel.includes(t.id) ? 'checked' : ''}>${esc(t.name)}</label>`).join('')}
+      <button type="button" class="ms-none" data-act="f-tag-alle">Alle Tags</button>
+    </div>
+  </details>`;
+}
 function gefilterteKunden(){
   const f = S.f, q = f.q.trim().toLowerCase();
   return S.kunden.filter(k => {
@@ -642,7 +674,8 @@ function gefilterteKunden(){
     return (!q || text.includes(q))
       && (!f.abo.length || f.abo.includes(k.abo_typ))
       && (!f.kat || kks.some(x => x.kategorie_id === f.kat))
-      && (!f.ma.length || kks.some(x => zustPass(zustVon(x.id), f.ma)));
+      && (!f.ma.length || kks.some(x => zustPass(zustVon(x.id), f.ma)))
+      && (!f.tags.length || (t => f.tags.every(x => t.has(x)))(tagsVonKunde(k.kunde_id)));
   });
 }
 function renderListe(){
@@ -656,6 +689,7 @@ function renderListe(){
       <div class="abof" role="group" aria-label="Abo-Typ"><span class="muted small">Abo</span>${ABO.map(a =>
         `<button class="abob${f.abo.length && !f.abo.includes(a.id) ? ' off' : ''}" data-act="f-abo" data-abo="${a.id}" aria-pressed="${f.abo.includes(a.id)}">${aboIcon(a.id)}</button>`).join('')}</div>
       ${zustFilterHtml()}
+      ${tagFilterHtml()}
       <select data-act="f-kat" aria-label="Pflegekategorie"><option value="">Alle Pflegekategorien</option>${S.kat.map(k => `<option value="${k.id}" ${f.kat === k.id ? 'selected' : ''}>${esc(k.name)}</option>`).join('')}</select>
       <label class="search">${I('search')}<input type="text" data-act="f-q" placeholder="Name, Adresse, Ort, Objekt"value="${esc(f.q)}" aria-label="Suchen"></label>
     </div>
@@ -678,7 +712,7 @@ function renderListeZeilen(){
       <td>${esc(telVon(k))}</td>
       <td>${zust.map(esc).join(', ') || '<span class="muted">–</span>'}</td>
       <td>${aboIcon(k.abo_typ)}</td>
-      <td><div class="kchips">${kks.map(x => { const kat = katById(x.kategorie_id); return kat ? `<span class="kc">${dot(kat)}${esc(kat.name)}</span>` : ''; }).join('')}</div></td>
+      <td><div class="kchips">${kks.map(x => { const kat = katById(x.kategorie_id); return kat ? `<span class="kc">${dot(kat)}${esc(kat.name)}</span>` : ''; }).join('')}${tagChips(k.kunde_id)}</div></td>
     </tr>`;
   }).join('') || `<tr><td colspan="7" class="muted">${S.kunden.length ? 'Keine Kunden für diese Filter.' : 'Noch keine Kunden im Pflege-Tool. Oben «Kunde aus Easybill hinzufügen».'}</td></tr>`;
   $('kundenCount').textContent = `${liste.length} von ${S.kunden.length} Kunden`;
@@ -944,6 +978,7 @@ function renderDetail(kundeId){
           <div>${I('pin')}${esc([ku.strasse, [ku.plz, ku.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ')) || '<span class="muted">Keine Adresse</span>'}</div>
           <div>${I('phone')}${telVon(k) ? `<a href="tel:${esc(telVon(k).replace(/\s+/g, ''))}">${esc(telVon(k))}</a>` : '<span class="muted">Kein Telefon</span>'}</div>
           <div class="muted small">${I('link')}${ku.easybill_id ? `Easybill-Kunde ${esc(ku.kundennummer || ku.easybill_id)} · Adresse und Telefon kommen aus Easybill` : 'Nicht mit Easybill verknüpft'}</div>
+          ${tagsVonKunde(kundeId).size ? `<div class="kchips">${tagChips(kundeId)}</div>` : ''}
         </div>
         <div class="objs" role="group" aria-label="Hauptadresse oder Objekt">
           <button type="button" data-act="objekt" data-o="" aria-pressed="${!obj}">${I('pin')}Hauptadresse</button>
@@ -1505,6 +1540,10 @@ $('app').addEventListener('change', async e => {
   }
   else if(act === 'au-nur'){ S.auNur = el.checked; S.auZeigen = 20; $('auftraege').innerHTML = auftraegeHtml(kundeId); ladeAuftraege(kundeId); }
   else if(act === 'au-von'){ S.auVon = el.value; S.auZeigen = 20; $('auftraege').innerHTML = auftraegeHtml(kundeId); }
+  else if(act === 'f-tag'){
+    S.f.tags = el.checked ? [...S.f.tags, el.value] : S.f.tags.filter(v => v !== el.value);
+    $('ftag').outerHTML = tagFilterHtml(); $('ftag').open = true; renderListeZeilen();
+  }
   else if(act === 'f-ma'){
     S.f.ma = el.checked ? [...S.f.ma, el.value] : S.f.ma.filter(v => v !== el.value);
     const d = $('fma'); d.outerHTML = zustFilterHtml(); $('fma').open = true; renderListeZeilen();
@@ -1590,6 +1629,7 @@ $('app').addEventListener('click', async e => {
     renderListe();
   }
   else if(act === 'f-ma-alle'){ S.f.ma = []; renderListe(); }
+  else if(act === 'f-tag-alle'){ S.f.tags = []; renderListe(); }
   else if(act === 'zurueck') location.hash = '';
   else if(act === 'abo'){
     if(await speichere('pflege_kunde', { kunde_id: kundeId }, { abo_typ: b.dataset.abo, aktualisiert_am: new Date().toISOString() })){ k.abo_typ = b.dataset.abo; render(); }
