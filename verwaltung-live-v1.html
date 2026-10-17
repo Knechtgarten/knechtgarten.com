@@ -151,6 +151,7 @@ input[type=checkbox].modulCheck:checked::after{content:'';position:absolute;left
 <div class="ovl" id="ovl">
   <div class="ovlbox">
     <div class="ovlmsg" id="ovlMsg"></div>
+    <div id="ovlExtra"></div>
     <div class="ovlbtns">
       <button class="btnlink" id="ovlCancel">Abbrechen</button>
       <button class="btn" id="ovlConfirm">Bestätigen</button>
@@ -745,9 +746,10 @@ $('passwortAendernBtn').addEventListener('click', async () => {
   $('passwortStatus').textContent = 'Passwort geändert.'; $('passwortStatus').className = 'status ok';
   $('neuesPasswortInput').value = ''; $('neuesPasswortInput2').value = '';
 });
-function confirmDialog(message){
+function confirmDialog(message, extraHtml = ''){
   return new Promise(resolve => {
     $('ovlMsg').textContent = message;
+    $('ovlExtra').innerHTML = extraHtml;
     $('ovl').classList.add('show');
     function cleanup(){ $('ovl').classList.remove('show'); $('ovlConfirm').removeEventListener('click', onYes); $('ovlCancel').removeEventListener('click', onNo); }
     function onYes(){ cleanup(); resolve(true); }
@@ -884,7 +886,7 @@ async function loadBenutzer(){
   });
   document.querySelectorAll('.platzhalterLoeschenBtn').forEach(btn => {
     btn.addEventListener('click', async () => {
-      if(!(await confirmDialog(`Person ohne Login "${btn.dataset.name}" löschen? Ihre Zuständigkeiten im Pflege-Tool gehen verloren.`))) return;
+      if(!(await vorLoeschenUebertragen(btn.dataset.id, btn.dataset.name, `Person ohne Login "${btn.dataset.name}" löschen?`))) return;
       const { error } = await sb.from('benutzer').delete().eq('id', btn.dataset.id).eq('ist_platzhalter', true);
       if(error){ showToast(friendlyError(error), true); return; }
       showToast('Gelöscht.');
@@ -893,7 +895,7 @@ async function loadBenutzer(){
   });
   document.querySelectorAll('.benutzerLoeschenBtn').forEach(btn => {
     btn.addEventListener('click', async () => {
-      if(!(await confirmDialog(`Benutzer "${btn.dataset.email}" wirklich vollstaendig loeschen? Zugriff UND Auth-Konto werden entfernt - die E-Mail-Adresse kann sich danach wieder neu registrieren.`))) return;
+      if(!(await vorLoeschenUebertragen(btn.dataset.id, btn.dataset.email, `Benutzer "${btn.dataset.email}" wirklich vollständig löschen? Zugriff UND Auth-Konto werden entfernt - die E-Mail-Adresse kann sich danach wieder neu registrieren.`))) return;
       const { data, error } = await sb.functions.invoke('benutzer-vollstaendig-loeschen', { body: { id: btn.dataset.id } });
       if(error){ showToast(friendlyError(error), true); return; }
       if(data?.error){ showToast(data.error, true); return; }
@@ -933,8 +935,31 @@ $('addDomainBtn').addEventListener('click', async () => {
 });
 
 // Zustaendigkeiten uebertragen: Auswahl mit Anzahl Kunden-Kategorien pro Person
-let uebertragNamen = {};
+let uebertragNamen = {}, alleBenutzer = [];
+// Loesch-Schutz: Hat die Person Zustaendigkeiten im Pflege-Tool, muss man vor dem Loeschen waehlen,
+// an wen sie gehen. Erst nach erfolgreichem Uebertragen wird geloescht (true = weiter loeschen).
+async function vorLoeschenUebertragen(id, name, frage){
+  const { count, error } = await sb.from('pflege_kunde_kategorie_zustaendig').select('benutzer_id', { count: 'exact', head: true }).eq('benutzer_id', id);
+  if(error){ showToast(friendlyError(error), true); return false; }
+  if(!count) return confirmDialog(frage);
+  const ziele = alleBenutzer.filter(b => b.id !== id && b.pflege_zustaendig && b.aktiv && b.rolle);
+  if(!ziele.length){ showToast(`"${name}" ist im Pflege-Tool für ${count} Kategorien zuständig. Zuerst eine andere Person mit Häkchen «Pflegetool» erfassen.`, true); return false; }
+  const auswahl = `<div class="fld"><label>${count} Zuständigkeiten im Pflege-Tool übertragen an</label>
+    <select id="loeschenAn"><option value="">– wählen –</option>${ziele.map(b => `<option value="${b.id}">${(uebertragNamen[b.id] || '').replace(/</g, '&lt;')}</option>`).join('')}</select></div>`;
+  while(true){
+    if(!(await confirmDialog(`${frage} Die Person ist im Pflege-Tool noch zuständig. Wähle, wer diese Kunden übernimmt.`, auswahl))) return false;
+    const an = $('loeschenAn').value;
+    if(an){
+      const { error: ue } = await sb.rpc('pflege_zustaendig_uebertragen', { von: id, an });
+      if(ue){ showToast(friendlyError(ue), true); return false; }
+      showToast(`${count} Zuständigkeiten an "${uebertragNamen[an]}" übertragen.`);
+      return true;
+    }
+    showToast('Bitte wählen, an wen die Zuständigkeiten gehen.', true);
+  }
+}
 async function ladeUebertragen(benutzer){
+  alleBenutzer = benutzer;
   const { data: z } = await sb.from('pflege_kunde_kategorie_zustaendig').select('benutzer_id');
   const anzahl = {}; (z || []).forEach(x => { anzahl[x.benutzer_id] = (anzahl[x.benutzer_id] || 0) + 1; });
   const name = b => (b.anzeigename || b.email || 'ohne Namen') + (b.ist_platzhalter ? ' (ohne Login)' : '');
