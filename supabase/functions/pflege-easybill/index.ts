@@ -91,7 +91,7 @@ Deno.serve(async (req) => {
       const dokumente = (d.items || [])
         .map((x: any) => ({
           id: x.id,
-          nummer: x.number || '',
+          nummer: String(x.number || '').replace(/^=+/, ''),   // Easybill-Auftraege haben teils «=====» vorne
           typ: x.type,
           typ_label: TYP_LABEL[x.type] || x.type,
           datum: x.document_date,
