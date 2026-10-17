@@ -241,6 +241,14 @@ tbody tr:last-child td{border-bottom:none;}
 .bp .icon-btn .i{width:14px;height:14px;}
 .bp .leer{color:var(--muted);font-style:italic;}
 .bp-stand{font-size:11.5px;color:var(--muted);}
+.bp-rt{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end;}
+.bp-kn{padding:3px 9px;font-size:12px;}
+.bp-kn .i{width:14px;height:14px;}
+/* gesperrt (Rohnertec): nur lesen, Felder ohne Rahmen, keine Knoepfe */
+.bp-w.zu .icon-btn{display:none;}
+.bp-w.zu input{border-color:transparent;background:transparent;}
+.bp-w.zu input::placeholder{color:transparent;}
+.bp-w.zu .chip:not([aria-pressed="true"]){background:transparent;}
 .tz{display:flex;align-items:center;gap:3px;white-space:nowrap;}
 .tz small{color:var(--muted);font-size:10.5px;margin-left:3px;min-width:44px;}
 .tu{display:flex;align-items:center;gap:3px;}
@@ -357,6 +365,8 @@ table.au tr.sto td{color:var(--muted);text-decoration:line-through;}
 <body>
 
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+  <symbol id="i-unlock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.5-2"/></symbol>
   <symbol id="i-sensor" viewBox="0 0 24 24"><path d="M12 3v10M8 7H6M8 10H6"/><circle cx="12" cy="16" r="4"/></symbol>
   <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="16" rx="2"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/></symbol>
   <symbol id="i-mobile" viewBox="0 0 24 24"><rect x="6.5" y="2.5" width="11" height="19" rx="2"/><path d="M10.5 18.5h3"/></symbol>
@@ -541,7 +551,7 @@ const S = {
   kat: [], felder: [], arbeiten: [], tabellen: [], spalten: [], zust: [],
   kunden: [], obj: [], kk: [], kz: [], ka: [], fotos: [], fk: [], urls: {}, dok: [], dk: [], eb: {}, auNur: true, auZeigen: 20, auVon: '',
   f: { q: '', abo: [], ma: [], kat: '' },
-  ktab: null, kwAsk: null, modal: null, fotoTag: '', hochladen: 0, lb: null
+  ktab: null, kwAsk: null, modal: null, fotoTag: '', hochladen: 0, lb: null, bpOffen: new Set(), bpLaeuft: false
 };
 const katById = id => S.kat.find(k => k.id === id);
 const felderVon = katId => S.felder.filter(f => f.kategorie_id === katId).sort(nachReihe);
@@ -859,8 +869,11 @@ function tabelleHtml(kk, tab){
 // kk.bewaesserung = [{ rt, name, sensor, bem, muster:[{ von, bis, tage:[0..6], gw, zr }] }]
 // ---------------------------------------------------------------------------
 const BP_TAGE = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+// Rohnertec-Kunden (Hauptadresse): gesperrt, Schloss oeffnet fuer Handaenderungen (bis zum naechsten Abgleich)
+const bpRohnertec = kk => !kk.objekt_id && !!kundeById(kk.kunde_id)?.rohnertec_id;
+const bpGesperrt = kk => bpRohnertec(kk) && !S.bpOffen.has(kk.id);
 function bpHtml(kk){
-  const vl = kk.bewaesserung || [];
+  const vl = kk.bewaesserung || [], rt = bpRohnertec(kk), zu = bpGesperrt(kk);
   const gruppe = (v, vi) => {
     const kopf = `<td class="vn" rowspan="${Math.max(v.muster.length, 1)}">
       <div class="vk"><input class="n" data-act="bp-feld" data-f="name" data-vi="${vi}" value="${esc(v.name)}" aria-label="Ventilname" placeholder="Ventilname">
@@ -877,12 +890,17 @@ function bpHtml(kk){
       <td><button type="button" class="icon-btn" data-act="bp-muster-rm" title="Muster entfernen" aria-label="Muster entfernen">${I('x')}</button></td></tr>`).join('')}</tbody>`;
   };
   return `<section class="card panel">
-    <div class="panel-h"><h3>Bewässerungsplan</h3>${kk.bewaesserung_stand ? `<span class="bp-stand">Aus Rohnertec, Stand ${datumCh(kk.bewaesserung_stand)}</span>` : ''}</div>
-    <div class="bp-w"><table class="bp">
+    <div class="panel-h"><h3>Bewässerungsplan</h3>
+      ${rt ? `<div class="bp-rt"><span class="bp-stand">Aus Rohnertec${kk.bewaesserung_stand ? ', Stand ' + datumCh(kk.bewaesserung_stand) : ''}</span>
+        <button class="btn btn-ghost bp-kn" data-act="bp-abgleich" ${S.bpLaeuft ? 'disabled' : ''}>${I('repeat')}${S.bpLaeuft ? 'Gleiche ab …' : 'Neu abgleichen'}</button>
+        <button class="btn btn-ghost bp-kn" data-act="bp-schloss" title="${zu ? 'Zum Ändern von Hand entsperren' : 'Wieder sperren'}">${I(zu ? 'lock' : 'unlock')}${zu ? 'Gesperrt' : 'Entsperrt'}</button></div>`
+        : (kk.bewaesserung_stand ? `<span class="bp-stand">Stand ${datumCh(kk.bewaesserung_stand)}</span>` : '')}</div>
+    ${rt && !zu ? '<div class="hint" style="padding:6px 10px">Entsperrt: Änderungen von Hand werden beim nächsten Abgleich mit Rohnertec überschrieben.</div>' : ''}
+    <div class="bp-w${zu ? ' zu' : ''}" ${zu ? 'inert' : ''}><table class="bp">
       <thead><tr><th>Ventil / Sensor</th><th>Zeit</th><th>Tage</th><th>Grenzwert</th><th>Zeitraum</th><th style="width:28px"></th></tr></thead>
       ${vl.map(gruppe).join('') || '<tbody><tr><td colspan="6" class="leer" style="padding:10px">Noch keine Ventile erfasst.</td></tr></tbody>'}
     </table></div>
-    <div><button class="addrow" data-act="bp-ventil-add">${I('plus')}Ventil hinzufügen</button></div>
+    ${zu ? '' : `<div><button class="addrow" data-act="bp-ventil-add">${I('plus')}Ventil hinzufügen</button></div>`}
   </section>`;
 }
 async function speichereBp(kk, vl, neuZeichnen = true){
@@ -1626,6 +1644,25 @@ $('app').addEventListener('click', async e => {
     if(error){ showToast(friendlyError(error), true); return; }
     S.ka.push(data); render();
     document.querySelector(`tr[data-id="${data.id}"] [data-act="zus-titel"]`)?.focus();
+  }
+  else if(act === 'bp-schloss'){
+    if(S.bpOffen.has(kk.id)){ S.bpOffen.delete(kk.id); render(); return; }
+    if(!await kgBestaetigen('Bewässerungsplan zum Ändern von Hand entsperren? Beim nächsten Abgleich mit Rohnertec werden Handänderungen wieder überschrieben.', 'Entsperren?', 'Entsperren')) return;
+    S.bpOffen.add(kk.id); render();
+  }
+  else if(act === 'bp-abgleich'){
+    S.bpLaeuft = true; render();
+    const { data, error } = await sb.functions.invoke('pflege-rohnertec', { body: { aktion: 'abgleich', rohnertec_id: k.rohnertec_id } });
+    let fehler = data?.error;
+    if(error && !fehler){ try { fehler = (await error.context?.json())?.error; } catch {} fehler = fehler || error.message; }
+    S.bpLaeuft = false;
+    if(fehler){ showToast('Abgleich fehlgeschlagen: ' + fehler, true); render(); return; }
+    const r = data.kunden?.[0];
+    showToast(r?.status === 'geaendert' ? 'Plan aus Rohnertec aktualisiert.' : r?.status === 'gleich' ? 'Plan ist schon aktuell.' : 'Kein Plan übernommen.');
+    S.bpOffen.delete(kk.id);
+    const { data: neu } = await sb.from('pflege_kunde_kategorie').select('bewaesserung,bewaesserung_stand').eq('id', kk.id).single();
+    if(neu) Object.assign(kk, neu);
+    render();
   }
   else if(act === 'bp-tag'){
     const tr = b.closest('tr'), vl = bpKopie(kk), m = vl[+tr.dataset.vi].muster[+tr.dataset.mi], t = +b.dataset.tag;

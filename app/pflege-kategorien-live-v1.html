@@ -175,6 +175,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
   <symbol id="i-info" viewBox="0 0 24 24"><path d="M12 10.5v7"/><circle cx="12" cy="6.8" r="0.6" fill="currentColor"/><path d="M10 17.5h4"/></symbol>
   <symbol id="i-list" viewBox="0 0 24 24"><path d="M10 7h9M10 12h9M10 17h9"/><circle cx="5.5" cy="7" r="1"/><circle cx="5.5" cy="12" r="1"/><circle cx="5.5" cy="17" r="1"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-repeat" viewBox="0 0 24 24"><path d="M4 12V9a3 3 0 0 1 3-3h13M17 3l3 3-3 3M20 12v3a3 3 0 0 1-3 3H4M7 21l-3-3 3-3"/></symbol>
   <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="16" rx="2"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/></symbol>
   <symbol id="i-mobile" viewBox="0 0 24 24"><rect x="6.5" y="2.5" width="11" height="19" rx="2"/><path d="M10.5 18.5h3"/></symbol>
   <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.3c2.1.7 3.5 2.8 3.5 5.7"/></symbol>
@@ -525,6 +526,9 @@ function renderInhalt(){
     ${k.sondertabelle === 'bewaesserung' ? `<section class="card panel">
       <div class="panel-h"><h3>Bewässerungsplan</h3><span class="muted small">feste Tabelle</span></div>
       <div class="muted small">Diese Kategorie hat den festen Bewässerungsplan: eine Zeile pro Ventil mit Sensor, darunter pro Muster Zeit, Tage, Grenzwert in % und Zeitraum. Er wird beim Kunden ausgefüllt bzw. aus Rohnertec übernommen und lässt sich hier nicht umbauen.</div>
+      <div class="addlinks"><button class="btn btn-ghost" data-act="rt-abgleich" ${S.rt?.laeuft ? 'disabled' : ''}>${I('repeat')}${S.rt?.laeuft ? 'Gleiche ab …' : 'Mit Rohnertec abgleichen'}</button>
+        <span class="muted small">Holt die Pläne aller verknüpften Kunden neu. Bei Rohnertec wird nichts verändert.</span></div>
+      <div id="rtErgebnis">${rtErgebnisHtml()}</div>
     </section>` : `<section class="card panel">
       <div class="panel-h"><h3>Tabelle</h3><span class="muted small">Erscheint beim Kunden als eigener Rahmen unter «Angaben / Eckdaten»</span></div>
       ${tab ? `
@@ -787,10 +791,49 @@ function fokusLetzte(act){
   l[l.length - 1]?.select();
 }
 
+// ---------------------------------------------------------------------------
+// Rohnertec-Abgleich (Edge Function pflege-rohnertec): Ergebnisliste + Kunden verknuepfen
+// ---------------------------------------------------------------------------
+const RT_STATUS = { geaendert: 'aktualisiert', gleich: 'unverändert', nicht_verknuepft: 'nicht verknüpft', ohne_bewaesserung: 'ohne Kategorie Bewässerung' };
+function rtErgebnisHtml(){
+  const r = S.rt; if(!r || r.laeuft) return '';
+  if(r.fehler) return `<div class="hint" style="margin-top:8px">Abgleich fehlgeschlagen: ${esc(r.fehler)}</div>`;
+  const n = s => r.kunden.filter(x => x.status === s).length;
+  const offen = r.kunden.filter(x => x.status === 'nicht_verknuepft' || x.status === 'ohne_bewaesserung');
+  const opts = (r.pk || []).filter(p => !p.rohnertec_id).map(p => `<option value="${p.kunde_id}">${esc(p.kunde?.name)}${p.kunde?.ort ? ' · ' + esc(p.kunde.ort) : ''}</option>`).join('');
+  return `<div style="margin-top:10px;display:grid;gap:6px">
+    <div><b>Abgleich fertig:</b> ${n('geaendert')} aktualisiert, ${n('gleich')} unverändert${offen.length ? `, ${offen.length} offen` : ''}.</div>
+    ${r.kunden.filter(x => x.status === 'geaendert').length ? `<div class="muted small">Aktualisiert: ${r.kunden.filter(x => x.status === 'geaendert').map(x => esc(x.name)).join(', ')}</div>` : ''}
+    ${offen.map(x => `<div class="def" style="grid-template-columns:minmax(0,1fr) auto;align-items:center">
+      <span><b>${esc(x.name)}</b> <span class="muted small">${esc(x.ort)} · ${RT_STATUS[x.status]}</span></span>
+      ${x.status === 'nicht_verknuepft'
+        ? `<select data-act="rt-verknuepfen" data-rt="${x.rohnertec_id}" aria-label="Pflege-Kunde für ${esc(x.name)}"><option value="">Pflege-Kunde wählen …</option>${opts}</select>`
+        : '<span class="muted small">Beim Kunden die Kategorie Bewässerung hinzufügen, dann neu abgleichen.</span>'}</div>`).join('')}
+  </div>`;
+}
+async function rtAbgleich(rohnertecId){
+  S.rt = { laeuft: true }; render();
+  const { data, error } = await sb.functions.invoke('pflege-rohnertec', { body: { aktion: 'abgleich', ...(rohnertecId ? { rohnertec_id: rohnertecId } : {}) } });
+  let fehler = data?.error;
+  if(error && !fehler){ try { fehler = (await error.context?.json())?.error; } catch {} fehler = fehler || error.message; }
+  if(fehler){ S.rt = { fehler }; render(); return; }
+  const { data: pk } = await sb.from('pflege_kunde').select('kunde_id,rohnertec_id,kunde(name,ort)');
+  S.rt = { kunden: data.kunden, pk: (pk || []).sort((a, b) => (a.kunde?.name || '').localeCompare(b.kunde?.name || '', 'de')) };
+  render();
+}
+$('inhalt').addEventListener('change', async e => {
+  const el = e.target; if(el.dataset.act !== 'rt-verknuepfen' || !el.value) return;
+  const { error } = await sb.from('pflege_kunde').update({ rohnertec_id: +el.dataset.rt }).eq('kunde_id', el.value);
+  if(error){ showToast(friendlyError(error), true); return; }
+  showToast('Verknüpft. Hole den Plan …');
+  await rtAbgleich();
+});
+
 $('inhalt').addEventListener('click', async e => {
   const b = e.target.closest('button[data-act]');
   if(!b) return;
   const act = b.dataset.act, k = kat(), id = zeilenId(b);
+  if(act === 'rt-abgleich'){ rtAbgleich(); return; }
 
   if(act === 'kat-farbe'){
     if(await speichere('pflege_kategorie', k.id, { farbe: b.dataset.farbe })){ k.farbe = b.dataset.farbe; render(); }
