@@ -228,6 +228,18 @@ input[type=checkbox].modulCheck:checked::after{content:'';position:absolute;left
         <thead><tr><th>E-Mail</th><th>Anzeigename</th><th>Status</th><th>Rolle</th><th title="Im Pflege-Tool bei «Zuständig» auswählbar">Pflegetool</th><th>Seit</th><th></th></tr></thead>
         <tbody id="benutzerBody"></tbody>
       </table>
+      <div class="hint" style="margin-top:16px;"><b>Person ohne Login:</b> für Mitarbeitende, die (noch) kein Login haben, aber im Pflege-Tool zuständig sein sollen. Registriert sich die Person später mit derselben E-Mail, wird sie automatisch übernommen, inklusive aller Zuständigkeiten.</div>
+      <div class="row">
+        <div class="fld"><label>Anzeigename</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" id="platzhalterName" placeholder="z. B. Marco"></div>
+        <div class="fld"><label>E-Mail (optional, für spätere Übernahme)</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" id="platzhalterEmail" type="email"></div>
+      </div>
+      <button class="btn" id="addPlatzhalterBtn">+ Person ohne Login</button>
+      <div class="hint" style="margin-top:16px;"><b>Zuständigkeiten im Pflege-Tool übertragen:</b> z. B. wenn jemand kündigt. Alle Kunden der ersten Person gehen an die zweite.</div>
+      <div class="row">
+        <div class="fld"><label>Von</label><select id="uebertragVon"></select></div>
+        <div class="fld"><label>An</label><select id="uebertragAn"></select></div>
+      </div>
+      <button class="btn" id="uebertragenBtn">Zuständigkeiten übertragen</button>
       <div class="hint" style="margin-top:16px;">Normalerweise registrieren sich Mitarbeiter selbst auf der Startseite und erscheinen oben in der Liste zum Freischalten. Dieses Formular ist nur ein Fallback: Der Auth-Account muss zuerst im Supabase-Dashboard unter Authentication → Users angelegt werden (inkl. "Auto Confirm User"). Die User-ID von dort hier eintragen, um eine Rolle zuzuweisen.</div>
       <div class="row">
         <div class="fld"><label>User-ID (aus Supabase-Dashboard)</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" id="newBenutzerId" placeholder="UUID"></div>
@@ -772,9 +784,23 @@ function oeffneFreischaltMail(email){
 }
 
 async function loadBenutzer(){
-  const { data, error } = await sb.from('benutzer').select('id,email,rolle,aktiv,erstellt_am,anzeigename,pflege_zustaendig').order('erstellt_am');
+  const { data, error } = await sb.from('benutzer').select('id,email,rolle,aktiv,erstellt_am,anzeigename,pflege_zustaendig,ist_platzhalter').order('erstellt_am');
   if(error){ console.error(error); return; }
+  ladeUebertragen(data);
   $('benutzerBody').innerHTML = data.map(b => {
+    if(b.ist_platzhalter){
+      // Person ohne Login (z.B. «Zustaendig» im Pflege-Tool). Registriert sie sich spaeter
+      // mit derselben E-Mail, wird sie automatisch zum echten Benutzer.
+      return `<tr>
+        <td>${b.email || '<span style="color:var(--muted)">– keine E-Mail –</span>'}</td>
+        <td><input class="benutzerAnzeigename" data-id="${b.id}" value="${(b.anzeigename || '').replace(/"/g, '&quot;')}" placeholder="z. B. Lukas" style="width:130px;"></td>
+        <td><span class="statuspill wartet" title="Kann sich nicht anmelden. Registriert sich die Person mit dieser E-Mail, wird sie automatisch übernommen.">ohne Login</span></td>
+        <td style="color:var(--muted);font-size:12px;">Service-Team</td>
+        <td style="text-align:center;"><input type="checkbox" class="benutzerPflegeZustaendig" data-id="${b.id}" ${b.pflege_zustaendig ? 'checked' : ''} title="Im Pflege-Tool bei «Zuständig» auswählbar" style="width:16px;height:16px;accent-color:#323E4E;"></td>
+        <td>${new Date(b.erstellt_am).toLocaleDateString('de-CH')}</td>
+        <td><button type="button" class="icobtn danger platzhalterLoeschenBtn" data-id="${b.id}" data-name="${(b.anzeigename || b.email || '').replace(/"/g, '&quot;')}" title="Person ohne Login löschen">${ICON.trash}</button></td>
+      </tr>`;
+    }
     if(!b.rolle){
       // Frisch selbst registriert, noch keine Rolle - Zugriff bleibt gesperrt,
       // bis hier eine Rolle zugewiesen und damit freigeschaltet wird.
@@ -854,6 +880,15 @@ async function loadBenutzer(){
       await loadBenutzer();
     });
   });
+  document.querySelectorAll('.platzhalterLoeschenBtn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if(!(await confirmDialog(`Person ohne Login "${btn.dataset.name}" löschen? Ihre Zuständigkeiten im Pflege-Tool gehen verloren.`))) return;
+      const { error } = await sb.from('benutzer').delete().eq('id', btn.dataset.id).eq('ist_platzhalter', true);
+      if(error){ showToast(friendlyError(error), true); return; }
+      showToast('Gelöscht.');
+      await loadBenutzer();
+    });
+  });
   document.querySelectorAll('.benutzerLoeschenBtn').forEach(btn => {
     btn.addEventListener('click', async () => {
       if(!(await confirmDialog(`Benutzer "${btn.dataset.email}" wirklich vollstaendig loeschen? Zugriff UND Auth-Konto werden entfernt - die E-Mail-Adresse kann sich danach wieder neu registrieren.`))) return;
@@ -895,6 +930,36 @@ $('addDomainBtn').addEventListener('click', async () => {
   await loadDomains();
 });
 
+// Zustaendigkeiten uebertragen: Auswahl mit Anzahl Kunden-Kategorien pro Person
+let uebertragNamen = {};
+async function ladeUebertragen(benutzer){
+  const { data: z } = await sb.from('pflege_kunde_kategorie_zustaendig').select('benutzer_id');
+  const anzahl = {}; (z || []).forEach(x => { anzahl[x.benutzer_id] = (anzahl[x.benutzer_id] || 0) + 1; });
+  const name = b => (b.anzeigename || b.email || 'ohne Namen') + (b.ist_platzhalter ? ' (ohne Login)' : '');
+  uebertragNamen = {}; benutzer.forEach(b => { uebertragNamen[b.id] = name(b); });
+  const opt = b => `<option value="${b.id}">${name(b).replace(/</g, '&lt;')}${anzahl[b.id] ? ' · ' + anzahl[b.id] + ' Zuständigkeiten' : ''}</option>`;
+  $('uebertragVon').innerHTML = '<option value="">– wählen –</option>' + benutzer.filter(b => anzahl[b.id]).map(opt).join('');
+  $('uebertragAn').innerHTML = '<option value="">– wählen –</option>' + benutzer.filter(b => b.pflege_zustaendig && b.aktiv && b.rolle).map(opt).join('');
+}
+$('uebertragenBtn').addEventListener('click', async () => {
+  const von = $('uebertragVon').value, an = $('uebertragAn').value;
+  if(!von || !an){ showToast('Bitte «Von» und «An» wählen.', true); return; }
+  if(von === an){ showToast('«Von» und «An» sind dieselbe Person.', true); return; }
+  if(!(await confirmDialog(`Alle Zuständigkeiten von "${uebertragNamen[von]}" an "${uebertragNamen[an]}" übertragen?`))) return;
+  const { data, error } = await sb.rpc('pflege_zustaendig_uebertragen', { von, an });
+  if(error){ showToast(friendlyError(error), true); return; }
+  showToast(`${data} Zuständigkeiten übertragen.`);
+  await loadBenutzer();
+});
+$('addPlatzhalterBtn').addEventListener('click', async () => {
+  const anzeigename = $('platzhalterName').value.trim(), email = $('platzhalterEmail').value.trim().toLowerCase() || null;
+  if(!anzeigename){ showToast('Bitte einen Anzeigenamen eingeben.', true); return; }
+  const { error } = await sb.from('benutzer').insert({ id: crypto.randomUUID(), email, anzeigename, rolle: 'service_team', aktiv: true, pflege_zustaendig: true, ist_platzhalter: true });
+  if(error){ showToast(friendlyError(error), true); return; }
+  $('platzhalterName').value = ''; $('platzhalterEmail').value = '';
+  showToast('Person ohne Login angelegt.');
+  await loadBenutzer();
+});
 $('addBenutzerBtn').addEventListener('click', async () => {
   const id = $('newBenutzerId').value.trim();
   const email = $('newBenutzerEmail').value.trim();
