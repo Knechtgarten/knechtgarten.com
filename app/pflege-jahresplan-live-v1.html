@@ -168,6 +168,15 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 .field > label{font-size:11px;color:var(--muted);}
 .row-end{display:flex;justify-content:flex-end;gap:8px;}
 
+.sd-fotos{display:grid;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:6px;}
+.sd-foto{all:unset;cursor:zoom-in;aspect-ratio:4/3;border-radius:5px;background:var(--soft);overflow:hidden;}
+.sd-foto img{width:100%;height:100%;object-fit:cover;display:block;}
+.lb{position:fixed;inset:0;z-index:80;background:rgba(20,25,32,.9);display:flex;align-items:center;justify-content:center;padding:50px 60px;}
+.lb img{max-width:100%;max-height:100%;object-fit:contain;border-radius:4px;}
+.lb .lb-x{position:absolute;top:14px;right:14px;}
+.lb .lb-nav{position:absolute;top:50%;transform:translateY(-50%);width:36px;height:36px;}
+.lb .lb-nav.l{left:14px;} .lb .lb-nav.r{right:14px;}
+.lb .lb-cap{position:absolute;bottom:14px;left:0;right:0;text-align:center;color:#fff;font-size:12.5px;}
 .toastwrap{position:fixed;bottom:16px;left:16px;z-index:70;display:flex;flex-direction:column;gap:6px;}
 .toast{background:var(--primary);color:#fff;font-size:12.5px;padding:9px 14px;border-radius:7px;box-shadow:0 6px 20px rgba(0,0,0,.2);}
 .toast.err{background:var(--danger);}
@@ -246,6 +255,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 <main class="wrap hidden" id="appMain"><div id="app"></div></main>
 <div class="pop" id="pop" hidden></div>
 <div id="side"></div>
+<div class="lb hidden" id="lb"></div>
 <div class="toastwrap" id="toastwrap"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
@@ -333,7 +343,7 @@ const telVon = k => { const c = k.kunde?.kontaktdaten || {}; return c.telefon1 |
 // ---------------------------------------------------------------------------
 const S = {
   kat: [], felder: [], arbeiten: [], tabellen: [], spalten: [], zust: [],
-  kunden: [], kk: [], kz: [], ka: [], status: new Set(),
+  kunden: [], kk: [], kz: [], ka: [], status: new Set(), fotos: [], fk: [], urls: {}, lb: null,
   jahr: YEAR_NOW, katSel: [], f: { abo: [], ma: [], status: '' },
   side: null, neu: null, scroll: null
 };
@@ -357,12 +367,14 @@ async function ladeAlles(){
     sb.from('pflege_kunde_kategorie').select('*'),
     sb.from('pflege_kunde_kategorie_zustaendig').select('*'),
     sb.from('pflege_kunde_arbeit').select('*'),
-    sb.from('pflege_einsatz_status').select('kunde_kategorie_id,jahr,kw')
+    sb.from('pflege_einsatz_status').select('kunde_kategorie_id,jahr,kw'),
+    sb.from('pflege_foto').select('*').order('aufgenommen_am', { ascending: false }),
+    sb.from('pflege_foto_kategorie').select('*')
   ]);
   const fehler = r.find(x => x.error);
   if(fehler){ showToast(friendlyError(fehler.error), true); return; }
   let st;
-  [S.kat, S.felder, S.arbeiten, S.tabellen, S.spalten, S.zust, S.kunden, S.kk, S.kz, S.ka, st] = r.map(x => x.data || []);
+  [S.kat, S.felder, S.arbeiten, S.tabellen, S.spalten, S.zust, S.kunden, S.kk, S.kz, S.ka, st, S.fotos, S.fk] = r.map(x => x.data || []);
   S.status = new Set(st.map(s => statusKey(s.kunde_kategorie_id, s.jahr, s.kw)));
   S.kunden.sort((a, b) => (a.kunde?.name || '').localeCompare(b.kunde?.name || '', 'de'));
   render();
@@ -526,9 +538,48 @@ function renderSide(){
       </div>
       <section class="sd-sec"><h3>Arbeiten</h3><div>${arbeiten}</div></section>
       <section class="sd-sec"><h3>Angaben / Eckdaten</h3>${angaben}</section>
+      ${(() => { const fl = fotosFuer(kk); return fl.length ? `<section class="sd-sec"><h3>Fotos</h3><div class="sd-fotos">${fl.map(f =>
+        `<button class="sd-foto" data-act="lb" data-foto="${f.id}" aria-label="${esc(f.beschriftung || 'Foto')} vergrössern">${S.urls[vorschauPfad(f.storage_pfad)] ? `<img alt="" src="${esc(S.urls[vorschauPfad(f.storage_pfad)])}">` : ''}</button>`).join('')}</div></section>` : ''; })()}
       <div class="sd-foot"><span class="sd-l">Zuständig</span>${zust.length ? esc(zust.map(zustName).join(', ')) : '<span class="muted">Niemand zuständig</span>'}</div>
     </aside>`;
+  ladeFotoUrls(fotosFuer(kk));
 }
+
+// Fotos im Seitenfenster: mit Schlagwort dieser Kategorie oder ohne Zuordnung (privater Speicher, Links 1 h gueltig)
+const vorschauPfad = p => p.replace(/\.jpg$/, '_t.jpg');
+const fotoKats = fotoId => S.fk.filter(x => x.foto_id === fotoId).map(x => x.kategorie_id);
+const fotosFuer = kk => S.fotos.filter(f => f.kunde_id === kk.kunde_id && (!fotoKats(f.id).length || fotoKats(f.id).includes(kk.kategorie_id)));
+let urlsZeit = Date.now();
+async function ladeFotoUrls(fotos){
+  if(Date.now() - urlsZeit > 50 * 60000){ S.urls = {}; urlsZeit = Date.now(); }
+  const pfade = fotos.flatMap(f => [f.storage_pfad, vorschauPfad(f.storage_pfad)]).filter(p => !S.urls[p]);
+  if(!pfade.length) return;
+  const { data, error } = await sb.storage.from('pflege-fotos').createSignedUrls(pfade, 3600);
+  if(error){ showToast(friendlyError(error), true); return; }
+  (data || []).forEach(d => { if(d.signedUrl) S.urls[d.path] = d.signedUrl; });
+  document.querySelectorAll('.sd-foto[data-foto]').forEach(b => {
+    const f = S.fotos.find(x => x.id === b.dataset.foto), url = f && S.urls[vorschauPfad(f.storage_pfad)];
+    if(url && !b.querySelector('img')) b.innerHTML = `<img alt="" src="${esc(url)}">`;
+  });
+}
+const datumCh = iso => { const d = new Date(iso); return `${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()}`; };
+function zeigeLb(){
+  const el = $('lb');
+  if(!S.lb){ el.classList.add('hidden'); el.innerHTML = ''; return; }
+  const { liste, i } = S.lb, f = S.fotos.find(x => x.id === liste[i]);
+  const kats = fotoKats(f.id).map(id => katById(id)?.name).filter(Boolean);
+  el.innerHTML = `
+    <button class="icon-btn lb-x" data-lb="zu" aria-label="Schliessen">${I('x')}</button>
+    ${liste.length > 1 ? `<button class="icon-btn lb-nav l" data-lb="-1" aria-label="Vorheriges">${I('back')}</button><button class="icon-btn lb-nav r" data-lb="1" aria-label="Nächstes">${I('next')}</button>` : ''}
+    ${S.urls[f.storage_pfad] ? `<img alt="" src="${esc(S.urls[f.storage_pfad])}">` : '<span style="color:#fff">Bild wird geladen …</span>'}
+    <div class="lb-cap">${esc([f.beschriftung, datumCh(f.aufgenommen_am), kats.join(', ')].filter(Boolean).join(' · '))} · ${i + 1} / ${liste.length}</div>`;
+  el.classList.remove('hidden');
+}
+$('lb').addEventListener('click', e => {
+  const b = e.target.closest('[data-lb]');
+  if(e.target.id === 'lb' || b?.dataset.lb === 'zu'){ S.lb = null; return zeigeLb(); }
+  if(b){ const n = S.lb.liste.length; S.lb.i = (S.lb.i + +b.dataset.lb + n) % n; zeigeLb(); }
+});
 function renderNeu(){
   const n = S.neu, k = kundeById(n.kundeId), kks = S.kk.filter(x => x.kunde_id === n.kundeId);
   if(!kks.some(x => x.id === n.kkId)) n.kkId = kks[0]?.id;
@@ -597,6 +648,10 @@ document.addEventListener('click', async e => {
     render();
   }
   else if(act === 'side-zu'){ S.side = null; S.neu = null; render(); }
+  else if(act === 'lb'){
+    const liste = fotosFuer(S.kk.find(x => x.id === S.side.kkId)).map(f => f.id);
+    S.lb = { liste, i: Math.max(0, liste.indexOf(b.dataset.foto)) }; zeigeLb();
+  }
   else if(act === 'status'){
     const { kkId, kw } = S.side, key = statusKey(kkId, S.jahr, kw), soll = b.dataset.v === 'erledigt';
     if(soll === S.status.has(key)) return;
@@ -636,7 +691,14 @@ document.addEventListener('change', e => {
   }
   else if(act === 'neu-kat'){ S.neu.kkId = el.value; renderSide(); }
 });
-document.addEventListener('keydown', e => { if(e.key === 'Escape' && (S.side || S.neu)){ S.side = null; S.neu = null; render(); } });
+document.addEventListener('keydown', e => {
+  if(S.lb){
+    if(e.key === 'Escape'){ S.lb = null; zeigeLb(); }
+    if(e.key === 'ArrowRight' || e.key === 'ArrowLeft'){ const n = S.lb.liste.length; S.lb.i = (S.lb.i + (e.key === 'ArrowRight' ? 1 : -1) + n) % n; zeigeLb(); }
+    return;
+  }
+  if(e.key === 'Escape' && (S.side || S.neu)){ S.side = null; S.neu = null; render(); }
+});
 
 // Mouse-over auf dem Kundennamen: Adresse, Telefon (anrufbar + kopierbar), Notiz
 let popTimer = null, popFuer = null;
