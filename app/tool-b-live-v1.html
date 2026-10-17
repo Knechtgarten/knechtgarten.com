@@ -181,6 +181,19 @@ td{padding:6px 6px;border-bottom:1px solid var(--soft);vertical-align:top;}
 .tshead .nm:hover{border-color:var(--line);}
 .tshead .nm:focus{outline:none;border-color:var(--primary);background:#fff;}
 .tshead .tschev{color:var(--muted);font-size:10px;transition:transform .15s;display:inline-flex;align-items:center;}
+.tsbadges{display:inline-flex;gap:6px;flex-wrap:wrap;align-items:center;}
+.tsbadge{font-size:11px;border-radius:999px;padding:1px 9px;background:var(--soft);color:var(--muted);white-space:nowrap;}
+.tsbadge.belag{background:var(--accent-lime);color:var(--primary);font-weight:700;}
+.tspop{position:fixed;z-index:60;width:330px;max-width:calc(100vw - 16px);background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.18);padding:6px;}
+.tspop[hidden]{display:none;}
+.tspi{display:flex;align-items:flex-start;gap:10px;padding:8px;border-radius:6px;cursor:pointer;font-size:13px;color:var(--ink);}
+.tspi:hover{background:var(--soft);}
+.tspi.plain{cursor:default;}
+.tspi.plain:hover{background:none;}
+.tspi small{display:block;color:var(--muted);font-size:11.5px;margin-top:1px;}
+.tspi input[type=checkbox]{margin-top:2px;width:16px;height:16px;flex:0 0 auto;}
+.tspi .tspbtns{display:flex;gap:8px;margin-top:6px;}
+.tspi .btn.secondary{background:#fff;color:var(--ink);border:1px solid var(--line);font-weight:600;}
 .tsblock.collapsed .tschev{transform:rotate(-90deg);}
 .tsblock.collapsed .tsbody{display:none;}
 .tsbody{padding:14px;}
@@ -2121,10 +2134,14 @@ function renderTerms(){
 function normalisiereRzKategorie(rz){
   rz.kategorie = rz.staffelgruppe?.kategorie || rz.zonengruppe?.kategorie || rz.sonderposition_typ?.kategorie || rz.kategorie;
 }
+// Spalte teilschritt.ist_belag (Migration 20260928100000): fehlt sie noch in der
+// Datenbank, wird einmalig ohne sie geladen, statt dass Tool B gar nicht mehr
+// startet. Sobald die Migration eingespielt ist, greift der Normalfall.
+let TS_HAT_IST_BELAG = true;
 async function loadArbeitsschritte(){
-  const { data, error } = await sb.from('arbeitsschritt')
+  const lade = () => sb.from('arbeitsschritt')
     .select(`id, name, reihenfolge, notiz, ausgeblendet, titel_offerte,
-      teilschritt ( id, name, beschreibung, reihenfolge, ausgeblendet,
+      teilschritt ( id, name, beschreibung, reihenfolge, ausgeblendet,${TS_HAT_IST_BELAG ? ' ist_belag,' : ''}
         anzeige_eingabefeld_id, anzeige_eingabefeld:eingabefeld!anzeige_eingabefeld_id(name),
         anzeige_term_id, anzeige_term:term!anzeige_term_id(name),
         ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, menge_ausdruck, tagesleistung_menge, notiz, reihenfolge, ist_eigene_offertenposition, mengenoption_ausgenommen,
@@ -2146,6 +2163,11 @@ async function loadArbeitsschritte(){
               sonderposition_typ_id, sonderposition_typ(kategorie, name, titel, hat_eigene_berechnung) ),
             option_freitext_vorlage ( id, kategorie, bezeichnung, einheit, notiz, menge_vorschlag, preis_vorschlag, margen_vorschlag_prozent, reihenfolge, ist_eigene_offertenposition ) ) ) )`)
     .eq('offertentyp_id', currentOffertentypId).order('reihenfolge');
+  let { data, error } = await lade();
+  if(error && TS_HAT_IST_BELAG && String(error.message || '').includes('ist_belag')){
+    TS_HAT_IST_BELAG = false;
+    ({ data, error } = await lade());
+  }
   if(error){ console.error(error); return; }
   ARBEITSSCHRITTE = data;
   // Ressourcenzeile-Reihenfolge kommt aus zwei verschiedenen Verschachtelungs-
@@ -2263,12 +2285,15 @@ function renderTeilschritt(asId, ts, nummer){
       <div class="tshead ${ts.ausgeblendet?'is-hidden':''}" onclick="toggleEingeklappt('${ts.id}', this)">
         <span class="draghandle" title="Verschieben" onclick="event.stopPropagation()">${ICON.drag}</span>
         <span class="num">${nummer}</span><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="nm" value="${ts.name}" onclick="event.stopPropagation()" onblur="speichereTeilschrittName('${ts.id}', this.value)">
-        <button class="icobtn ${anzeigeName?'active':''}" onclick="event.stopPropagation(); openMengeAnzeigenPicker('${ts.id}')" title="${anzeigeName ? 'Menge-Anzeige: ' + anzeigeName + ' (klicken zum Ändern)' : 'Menge beim Titel anzeigen (optional)'}">${ICON.ruler}</button>
-        ${anzeigeName ? `<button class="icobtn" onclick="event.stopPropagation(); entferneMengeAnzeige('${ts.id}')" title="Menge-Anzeige entfernen">${ICON.close}</button>` : ''}
+        ${(ts.ist_belag || ts.ausgeblendet || anzeigeName) ? `<span class="tsbadges">
+          ${ts.ist_belag ? '<span class="tsbadge belag" title="Wird in Flächentabellen als Belag angeboten">Belag</span>' : ''}
+          ${ts.ausgeblendet ? '<span class="tsbadge" title="Erscheint nicht in der Offerte">ausgeblendet</span>' : ''}
+          ${anzeigeName ? `<span class="tsbadge" title="Menge beim Titel: ${escAttr(anzeigeName)}">Menge: ${anzeigeName}</span>` : ''}
+        </span>` : ''}
+        <button class="icobtn" onclick="event.stopPropagation(); openTsEinstellungen('${ts.id}', this)" title="Einstellungen dieses Teilschritts" aria-haspopup="true">${ICON.gear}</button>
+        <button class="icobtn" onclick="event.stopPropagation(); verschiebeTeilschrittZuEigenemArbeitsschritt('${ts.id}')" title="Als eigenen Arbeitsschritt lösen (einmalige Aktion)">${ICON.promote}</button>
         <button class="icobtn" onclick="event.stopPropagation(); duplicateTeilschritt('${ts.id}')" title="Teilschritt duplizieren">${ICON.copy}</button>
-        <button class="icobtn" onclick="event.stopPropagation(); verschiebeTeilschrittZuEigenemArbeitsschritt('${ts.id}')" title="Als eigenen Arbeitsschritt lösen (bisher ein Teilschritt hier drin, wird zu einem eigenständigen Arbeitsschritt - Optionen/Artikel bleiben erhalten)">${ICON.promote}</button>
-        <button class="icobtn" onclick="event.stopPropagation(); toggleAusblenden('teilschritt','${ts.id}',${ts.ausgeblendet})" title="${ts.ausgeblendet?'Wieder einblenden':'Ausblenden'}">${ICON.eye}</button>
-        <button class="icobtn" onclick="event.stopPropagation(); deleteTeilschritt('${ts.id}')">${ICON.trash}</button>
+        <button class="icobtn" onclick="event.stopPropagation(); deleteTeilschritt('${ts.id}')" title="Teilschritt löschen">${ICON.trash}</button>
         <span class="tschev">${ICON.chevronDown}</span>
       </div>
       <div class="tsbody ${ts.ausgeblendet?'is-hidden':''}">
@@ -2797,6 +2822,13 @@ function openAddOptModal(afId, existingOpt){
   $('addOptHinweisbildWrap').classList.toggle('hidden', !existingOpt);
   $('addOptHinweistextInput').value = existingOpt?.hinweistext || '';
   $('addOptMehrfachauswahlInput').checked = !!existingOpt?.mehrfachauswahl;
+  // Teilschritte, die als Belag fuer Flaechen angeboten werden (Zahnrad beim
+  // Teilschritt), erlauben nur EIN Produkt pro Flaeche - Mehrfachauswahl ist dort
+  // gesperrt.
+  const istBelagTs = !!ARBEITSSCHRITTE.flatMap(a => a.teilschritt || []).find(t => t.auswahlfeld?.id === afId)?.ist_belag;
+  $('addOptMehrfachauswahlInput').disabled = istBelagTs;
+  if(istBelagTs) $('addOptMehrfachauswahlInput').checked = false;
+  document.querySelector('label[for="addOptMehrfachauswahlInput"]').textContent = istBelagTs ? 'Mehrfachauswahl (gesperrt: Belag, nur ein Produkt pro Fläche)' : 'Mehrfachauswahl';
   $('addOptMengenoptionInput').checked = !!existingOpt?.mengenoption;
   $('addOptMengenoptionEinheitSelect').innerHTML = einheitOptionsHtml(existingOpt?.mengenoption_einheit || 'Stk.');
   $('addOptMengenoptionEinheitSelect').classList.toggle('hidden', !$('addOptMengenoptionInput').checked);
@@ -3021,6 +3053,77 @@ async function toggleAusblenden(tabelle, id, aktuell){
   await loadArbeitsschritte();
 }
 
+// ---------------------------------------------------------------------------
+// Zahnrad-Menue beim Teilschritt-Titel: alle EIGENSCHAFTEN (Dinge, die an
+// oder aus sind) liegen hier mit Text statt als einzelne Icons. Vorne im
+// Titel bleiben nur die einmaligen AKTIONEN (Loesen, Kopieren, Loeschen).
+// Was aktiv ist, zeigt ein Etikett am Titel (siehe renderTeilschritt).
+// Ein einziges, frei positioniertes Menue (position:fixed), damit es nicht
+// von einem Elternelement abgeschnitten wird.
+// ---------------------------------------------------------------------------
+function findTeilschrittById(tsId){
+  for(const as of ARBEITSSCHRITTE){
+    const ts = (as.teilschritt || []).find(t => t.id === tsId);
+    if(ts) return ts;
+  }
+  return null;
+}
+function schliesseTsEinstellungen(){
+  const pop = $('tsPop');
+  if(pop) pop.hidden = true;
+}
+function openTsEinstellungen(tsId, btn){
+  const ts = findTeilschrittById(tsId);
+  if(!ts) return;
+  let pop = $('tsPop');
+  if(!pop){
+    pop = document.createElement('div');
+    pop.id = 'tsPop'; pop.className = 'tspop'; pop.hidden = true; pop.setAttribute('role', 'menu');
+    pop.addEventListener('click', e => e.stopPropagation());
+    document.body.appendChild(pop);
+  }
+  if(!pop.hidden && pop.dataset.ts === tsId){ pop.hidden = true; return; }
+  const anzeigeName = ts.anzeige_eingabefeld?.name || ts.anzeige_term?.name || null;
+  const mengeZeile = ts.ist_belag
+    ? `<div class="tspi plain"><span>Menge beim Titel anzeigen<small>Beim Belag wird automatisch die Fläche dieses Belags angezeigt.</small></span></div>`
+    : `<div class="tspi plain"><span style="flex:1">Menge beim Titel anzeigen<small>${anzeigeName ? 'Aktuell: ' + anzeigeName : 'Wert, der neben dem Titel in der Offerte steht (nur zur Info).'}</small>
+        <div class="tspbtns"><button type="button" class="btn secondary" onclick="schliesseTsEinstellungen(); openMengeAnzeigenPicker('${ts.id}')">${anzeigeName ? 'Ändern …' : 'Wählen …'}</button>${anzeigeName ? `<button type="button" class="btn secondary" onclick="schliesseTsEinstellungen(); entferneMengeAnzeige('${ts.id}')">Entfernen</button>` : ''}</div></span></div>`;
+  pop.innerHTML = `
+    <label class="tspi"><input type="checkbox" ${ts.ist_belag ? 'checked' : ''} ${TS_HAT_IST_BELAG ? '' : 'disabled'} onchange="toggleTeilschrittBelag('${ts.id}', this.checked)"><span>Als Belag für Flächen anbieten<small>${TS_HAT_IST_BELAG ? 'Erscheint im Dropdown der Flächentabelle. Nur ein Produkt pro Belag.' : 'Noch nicht verfügbar: Die Datenbank-Migration wurde noch nicht eingespielt.'}</small></span></label>
+    <label class="tspi"><input type="checkbox" ${ts.ausgeblendet ? 'checked' : ''} onchange="schliesseTsEinstellungen(); toggleAusblenden('teilschritt','${ts.id}',${!!ts.ausgeblendet})"><span>Ausblenden<small>Teilschritt erscheint nicht in der Offerte.</small></span></label>
+    ${mengeZeile}`;
+  pop.dataset.ts = tsId;
+  pop.hidden = false;
+  const r = btn.getBoundingClientRect();
+  const breite = pop.offsetWidth || 330;
+  pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - breite - 8)) + 'px';
+  pop.style.top = (r.bottom + 6) + 'px';
+}
+document.addEventListener('click', () => schliesseTsEinstellungen());
+document.addEventListener('keydown', e => { if(e.key === 'Escape') schliesseTsEinstellungen(); });
+
+// Belag-Schalter: ein Belag bekommt pro Flaeche genau EIN Produkt - darum wird
+// die Mehrfachauswahl bei allen Optionen dieses Teilschritts ausgeschaltet
+// (mit Rueckfrage, falls sie bereits irgendwo an ist).
+async function toggleTeilschrittBelag(tsId, an){
+  schliesseTsEinstellungen();
+  const ts = findTeilschrittById(tsId);
+  if(!ts) return;
+  const optionen = ts.auswahlfeld?.auswahloption || [];
+  if(an){
+    const mehrfach = optionen.filter(o => o.mehrfachauswahl);
+    if(mehrfach.length){
+      const ok = await confirmDialog(`Bei ${mehrfach.length === 1 ? 'einer Option' : mehrfach.length + ' Optionen'} ist "Mehrfachauswahl" an (${mehrfach.map(o => o.name).join(', ')}). Ein Belag erlaubt nur ein Produkt - die Mehrfachauswahl wird dort ausgeschaltet. Fortfahren?`, 'Fortfahren');
+      if(!ok){ await loadArbeitsschritte(); return; }
+      const { error: mErr } = await sb.from('auswahloption').update({ mehrfachauswahl: false }).in('id', mehrfach.map(o => o.id));
+      if(mErr){ showToast(friendlyError(mErr), true); return; }
+    }
+  }
+  const { error } = await sb.from('teilschritt').update({ ist_belag: an }).eq('id', tsId);
+  if(error){ showToast(friendlyError(error), true); await loadArbeitsschritte(); return; }
+  await loadArbeitsschritte();
+}
+
 // "Eigene Offertenposition" auf Artikel-Ebene (Stecknadel-Icon) - zieht
 // genau diese Ressourcenzeile in Tool A aus dem Materialpaket/
 // Logistikaufwand ihres Arbeitsschritts (und ihrer Option) heraus und zeigt
@@ -3138,7 +3241,7 @@ async function verschiebeTeilschrittZuEigenemArbeitsschritt(tsId){
     if(found){ tsObj = found; break; }
   }
   if(!tsObj) return;
-  if(!(await confirmDialog(`"${tsObj.name}" aus diesem Arbeitsschritt lösen und als eigenen, neuen Arbeitsschritt einfügen? Alle Optionen/Artikel dieses Teilschritts bleiben dabei erhalten.`, 'Verschieben'))) return;
+  if(!(await confirmDialog(`"${tsObj.name}" aus diesem Arbeitsschritt lösen und als eigenen, neuen Arbeitsschritt einfügen? Alle Optionen/Artikel dieses Teilschritts bleiben erhalten. Das lässt sich nicht mehr rückgängig machen.`, 'Ja, lösen'))) return;
   try{
     const { data: neuerAs, error: asErr } = await sb.from('arbeitsschritt')
       .insert({ offertentyp_id: currentOffertentypId, name: tsObj.name, reihenfolge: naechsteReihenfolge(ARBEITSSCHRITTE) })
