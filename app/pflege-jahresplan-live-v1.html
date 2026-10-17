@@ -168,6 +168,11 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 .field > label{font-size:11px;color:var(--muted);}
 .row-end{display:flex;justify-content:flex-end;gap:8px;}
 
+.sd-doks{display:flex;flex-direction:column;}
+.sd-dok{all:unset;cursor:pointer;display:flex;gap:8px;align-items:flex-start;padding:6px 0;border-bottom:1px solid var(--soft);font-size:12.5px;}
+.sd-dok:hover span{text-decoration:underline;}
+.sd-dok .i{color:var(--danger);width:17px;height:17px;flex:none;}
+.sd-dok small{display:block;color:var(--muted);font-size:11px;}
 .sd-fotos{display:grid;grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:6px;}
 .sd-foto{all:unset;cursor:zoom-in;aspect-ratio:4/3;border-radius:5px;background:var(--soft);overflow:hidden;}
 .sd-foto img{width:100%;height:100%;object-fit:cover;display:block;}
@@ -209,6 +214,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
   <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.6 3.1-6 7-6s7 2.4 7 6"/></symbol>
   <symbol id="i-chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M6.5 3.5h7l4 4v13h-11z"/><path d="M13.5 3.5v4h4M9 12.5h6M9 16h6"/></symbol>
   <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="1.5"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/></symbol>
   <symbol id="i-repeat" viewBox="0 0 24 24"><path d="M4 12V9a3 3 0 0 1 3-3h13M17 3l3 3-3 3M20 12v3a3 3 0 0 1-3 3H4M7 21l-3-3 3-3"/></symbol>
   <symbol id="i-minus" viewBox="0 0 24 24"><path d="M7 12h10"/></symbol>
@@ -369,12 +375,14 @@ async function ladeAlles(){
     sb.from('pflege_kunde_arbeit').select('*'),
     sb.from('pflege_einsatz_status').select('kunde_kategorie_id,jahr,kw'),
     sb.from('pflege_foto').select('*').order('aufgenommen_am', { ascending: false }),
-    sb.from('pflege_foto_kategorie').select('*')
+    sb.from('pflege_foto_kategorie').select('*'),
+    sb.from('pflege_dokument').select('*').order('datum', { ascending: false, nullsFirst: false }),
+    sb.from('pflege_dokument_kategorie').select('*')
   ]);
   const fehler = r.find(x => x.error);
   if(fehler){ showToast(friendlyError(fehler.error), true); return; }
   let st;
-  [S.kat, S.felder, S.arbeiten, S.tabellen, S.spalten, S.zust, S.kunden, S.kk, S.kz, S.ka, st, S.fotos, S.fk] = r.map(x => x.data || []);
+  [S.kat, S.felder, S.arbeiten, S.tabellen, S.spalten, S.zust, S.kunden, S.kk, S.kz, S.ka, st, S.fotos, S.fk, S.dok, S.dk] = r.map(x => x.data || []);
   S.status = new Set(st.map(s => statusKey(s.kunde_kategorie_id, s.jahr, s.kw)));
   S.kunden.sort((a, b) => (a.kunde?.name || '').localeCompare(b.kunde?.name || '', 'de'));
   render();
@@ -538,6 +546,9 @@ function renderSide(){
       </div>
       <section class="sd-sec"><h3>Arbeiten</h3><div>${arbeiten}</div></section>
       <section class="sd-sec"><h3>Angaben / Eckdaten</h3>${angaben}</section>
+      ${(() => { const dl = (S.dok || []).filter(d => d.kunde_id === kk.kunde_id && !d.ersetzt && (() => { const k2 = S.dk.filter(x => x.dokument_id === d.id).map(x => x.kategorie_id); return !k2.length || k2.includes(kk.kategorie_id); })());
+        return dl.length ? `<section class="sd-sec"><h3>Angebote und Dokumente</h3><div class="sd-doks">${dl.map(d =>
+          `<button class="sd-dok" data-act="dok" data-dok="${d.id}">${I('file')}<span>${esc(d.titel)}<small>${esc(d.easybill_nummer || 'PDF')}${d.datum ? ' · ' + esc(d.datum.split('-').reverse().join('.')) : ''}</small></span></button>`).join('')}</div></section>` : ''; })()}
       ${(() => { const fl = fotosFuer(kk); return fl.length ? `<section class="sd-sec"><h3>Fotos</h3><div class="sd-fotos">${fl.map(f =>
         `<button class="sd-foto" data-act="lb" data-foto="${f.id}" aria-label="${esc(f.beschriftung || 'Foto')} vergrössern">${S.urls[vorschauPfad(f.storage_pfad)] ? `<img alt="" src="${esc(S.urls[vorschauPfad(f.storage_pfad)])}">` : ''}</button>`).join('')}</div></section>` : ''; })()}
       <div class="sd-foot"><span class="sd-l">Zuständig</span>${zust.length ? esc(zust.map(zustName).join(', ')) : '<span class="muted">Niemand zuständig</span>'}</div>
@@ -648,6 +659,12 @@ document.addEventListener('click', async e => {
     render();
   }
   else if(act === 'side-zu'){ S.side = null; S.neu = null; render(); }
+  else if(act === 'dok'){
+    const d = S.dok.find(x => x.id === b.dataset.dok), w = window.open('', '_blank');
+    const { data, error } = await sb.storage.from('pflege-dokumente').createSignedUrl(d.storage_pfad, 3600);
+    if(error){ w?.close(); showToast(friendlyError(error), true); return; }
+    if(w) w.location = data.signedUrl; else location.href = data.signedUrl;
+  }
   else if(act === 'lb'){
     const liste = fotosFuer(S.kk.find(x => x.id === S.side.kkId)).map(f => f.id);
     S.lb = { liste, i: Math.max(0, liste.indexOf(b.dataset.foto)) }; zeigeLb();
