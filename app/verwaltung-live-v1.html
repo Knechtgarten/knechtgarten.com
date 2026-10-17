@@ -225,7 +225,7 @@ input[type=checkbox].modulCheck:checked::after{content:'';position:absolute;left
     <div class="cardheader" onclick="toggleCard(this)"><span class="cardchevron">&#9656;</span><div class="cardlabel">Benutzerverwaltung</div></div>
     <div class="cardbody hidden">
       <table>
-        <thead><tr><th>E-Mail</th><th>Status</th><th>Rolle</th><th>Seit</th><th></th></tr></thead>
+        <thead><tr><th>E-Mail</th><th>Anzeigename</th><th>Status</th><th>Rolle</th><th title="Erscheint im Pflege-Tool bei «Zuständig»">Pflege zuständig</th><th>Seit</th><th></th></tr></thead>
         <tbody id="benutzerBody"></tbody>
       </table>
       <div class="hint" style="margin-top:16px;">Normalerweise registrieren sich Mitarbeiter selbst auf der Startseite und erscheinen oben in der Liste zum Freischalten. Dieses Formular ist nur ein Fallback: Der Auth-Account muss zuerst im Supabase-Dashboard unter Authentication → Users angelegt werden (inkl. "Auto Confirm User"). Die User-ID von dort hier eintragen, um eine Rolle zuzuweisen.</div>
@@ -772,7 +772,7 @@ function oeffneFreischaltMail(email){
 }
 
 async function loadBenutzer(){
-  const { data, error } = await sb.from('benutzer').select('id,email,rolle,aktiv,erstellt_am').order('erstellt_am');
+  const { data, error } = await sb.from('benutzer').select('id,email,rolle,aktiv,erstellt_am,anzeigename,pflege_zustaendig').order('erstellt_am');
   if(error){ console.error(error); return; }
   $('benutzerBody').innerHTML = data.map(b => {
     if(!b.rolle){
@@ -780,6 +780,7 @@ async function loadBenutzer(){
       // bis hier eine Rolle zugewiesen und damit freigeschaltet wird.
       return `<tr>
         <td>${b.email}</td>
+        <td></td>
         <td><span class="statuspill wartet">Wartet</span></td>
         <td>
           <select class="benutzerFreischaltRolle" data-id="${b.id}" style="margin-right:6px;">
@@ -790,12 +791,14 @@ async function loadBenutzer(){
           </select>
           <button type="button" class="btn benutzerFreischaltenBtn" data-id="${b.id}" data-email="${b.email}" style="padding:5px 10px;font-size:11px;">Freischalten</button>
         </td>
+        <td></td>
         <td>${new Date(b.erstellt_am).toLocaleDateString('de-CH')}</td>
         <td><button type="button" class="icobtn danger benutzerLoeschenBtn" data-id="${b.id}" data-email="${b.email}" title="Benutzer löschen">${ICON.trash}</button></td>
       </tr>`;
     }
     return `<tr>
       <td>${b.email}</td>
+      <td><input class="benutzerAnzeigename" data-id="${b.id}" value="${(b.anzeigename || '').replace(/"/g, '&quot;')}" placeholder="z. B. Lukas" style="width:130px;"></td>
       <td><span class="statuspill ${b.aktiv ? 'aktiv' : 'deaktiviert'}">${b.aktiv ? 'Aktiv' : 'Deaktiviert'}</span></td>
       <td><select class="benutzerRolle" data-id="${b.id}">
         <option value="buero_team" ${b.rolle==='buero_team'?'selected':''}>Büro-Team</option>
@@ -803,13 +806,28 @@ async function loadBenutzer(){
         <option value="service_team" ${b.rolle==='service_team'?'selected':''}>Service-Team</option>
         <option value="admin" ${b.rolle==='admin'?'selected':''}>Admin</option>
       </select></td>
+      <td style="text-align:center;"><input type="checkbox" class="benutzerPflegeZustaendig" data-id="${b.id}" ${b.pflege_zustaendig ? 'checked' : ''} title="Im Pflege-Tool bei «Zuständig» auswählbar" style="width:16px;height:16px;accent-color:#323E4E;"></td>
       <td>${new Date(b.erstellt_am).toLocaleDateString('de-CH')}</td>
       <td style="display:flex;gap:4px;">
         <button type="button" class="icobtn benutzerToggleBtn" data-id="${b.id}" data-aktiv="${b.aktiv}" title="${b.aktiv ? 'Deaktivieren' : 'Aktivieren'}">${ICON.power}</button>
         <button type="button" class="icobtn danger benutzerLoeschenBtn" data-id="${b.id}" data-email="${b.email}" title="Benutzer löschen">${ICON.trash}</button>
       </td>
     </tr>`;
-  }).join('') || '<tr><td colspan="5" class="hint">Keine Benutzer gefunden.</td></tr>';
+  }).join('') || '<tr><td colspan="7" class="hint">Keine Benutzer gefunden.</td></tr>';
+  document.querySelectorAll('.benutzerAnzeigename').forEach(inp => {
+    inp.addEventListener('change', async () => {
+      const { error } = await sb.from('benutzer').update({ anzeigename: inp.value.trim() || null }).eq('id', inp.dataset.id);
+      if(error){ showToast(friendlyError(error), true); return; }
+      showToast('Anzeigename gespeichert.');
+    });
+  });
+  document.querySelectorAll('.benutzerPflegeZustaendig').forEach(cb => {
+    cb.addEventListener('change', async () => {
+      const { error } = await sb.from('benutzer').update({ pflege_zustaendig: cb.checked }).eq('id', cb.dataset.id);
+      if(error){ showToast(friendlyError(error), true); cb.checked = !cb.checked; return; }
+      showToast(cb.checked ? 'Im Pflege-Tool als zuständig auswählbar.' : 'Im Pflege-Tool nicht mehr auswählbar.');
+    });
+  });
   document.querySelectorAll('.benutzerRolle').forEach(sel => {
     sel.addEventListener('change', async () => {
       const { error } = await sb.from('benutzer').update({ rolle: sel.value }).eq('id', sel.dataset.id);
