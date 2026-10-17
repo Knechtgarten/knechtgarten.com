@@ -2,7 +2,7 @@
 // Pflege-Tool - Easybill-Dokumente eines Kunden lesen (nur lesen, nie schreiben)
 //
 // Haelt den Easybill-API-Key serverseitig geheim. Zwei Aktionen:
-//   { aktion: 'liste', customer_id, typ: 'ORDER' | 'OFFER' | 'ALLE' }
+//   { aktion: 'liste', customer_id, typ: 'AUFTRAG' | 'OFFER' | 'ALLE' }   (AUFTRAG = Easybill-Typ CHARGE «Auftrag»)
 //       -> { dokumente: [{ id, nummer, typ, datum, titel, betrag, ausgefuehrt_von, storniert }] }
 //          neueste zuerst, Entwuerfe ausgeschlossen. «Ausgefuehrt von» = der in
 //          Easybill zugeordnete Benutzer (login_id, «Verknuepft mit»).
@@ -31,9 +31,9 @@ function json(body: unknown, status = 200) {
 }
 
 const TYP_LABEL: Record<string, string> = {
-  ORDER: 'Auftrag', OFFER: 'Angebot', INVOICE: 'Rechnung', CREDIT: 'Gutschrift', DELIVERY: 'Lieferschein',
+  CHARGE: 'Auftrag', ORDER: 'Auftragsbestätigung', OFFER: 'Angebot', INVOICE: 'Rechnung', CREDIT: 'Gutschrift', DELIVERY: 'Lieferschein',
   REMINDER: 'Zahlungserinnerung', DUNNING: 'Mahnung', STORNO: 'Storno', LETTER: 'Brief', PDF: 'PDF',
-  PROFORMA_INVOICE: 'Proforma-Rechnung', CHARGE: 'Auftrag (Charge)', CHARGE_CONFIRM: 'Auftragsbestätigung',
+  PROFORMA_INVOICE: 'Proforma-Rechnung', CHARGE_CONFIRM: 'Auftragsbestätigung (Auftrag)',
 };
 
 // Easybill-Benutzer (fuer «Ausgefuehrt von») - pro Function-Instanz zwischengespeichert
@@ -44,7 +44,8 @@ async function loginNamen(auth: string): Promise<Record<number, string>> {
   const namen: Record<number, string> = {};
   if (res.ok) {
     const d = await res.json();
-    for (const l of d.items || []) namen[l.id] = [l.first_name, l.last_name].filter((x: string) => x && x !== '.').join(' ') || l.display_name || '';
+    // Namen ohne Buchstaben (z.B. Haupt-Login «. .») -> Teil der E-Mail vor dem @
+    for (const l of d.items || []) namen[l.id] = [l.first_name, l.last_name].filter((x: string) => /\p{L}/u.test(x || '')).join(' ') || (l.email || '').split('@')[0];
   }
   loginCache = { zeit: Date.now(), namen };
   return namen;
@@ -79,7 +80,7 @@ Deno.serve(async (req) => {
     if (body.aktion === 'liste') {
       const customerId = Number(body.customer_id);
       if (!customerId) return json({ error: 'customer_id fehlt.' }, 400);
-      const typ = ['ORDER', 'OFFER'].includes(body.typ) ? `&type=${body.typ}` : '';
+      const typ = body.typ === 'AUFTRAG' ? '&type=CHARGE' : body.typ === 'OFFER' ? '&type=OFFER' : '';
       // Easybill sortiert nicht nach Datum -> alle Dokumente des Kunden holen (max. 1000) und selbst sortieren
       const [res, namen] = await Promise.all([
         fetch(`${EASYBILL_BASE_URL}/documents?customer_id=${customerId}${typ}&is_draft=0&limit=1000`, { headers: { Authorization: auth } }),
