@@ -3544,21 +3544,24 @@ async function berechneAlleTabellenwerte(systemwerteMap){
 // ---------------------------------------------------------------------------
 // Belag-Flaechen (Dropdown-Spalte in Flaechentabellen)
 // ---------------------------------------------------------------------------
-// "Flaeche" einer Tabelle mit Dropdown-Spalte = erste Eingabespalte mit
-// Einheit m2/m² (sonst die erste Eingabespalte ohne Dropdown). Pro Belag-
+// "Flaeche" einer Tabelle mit Dropdown-Spalte = die Spalte, deren Name "Flaeche"
+// enthaelt (auch Berechnungsspalte Laenge x Breite), sonst die erste Spalte mit
+// Einheit m2/m² (sonst die erste Nicht-Dropdown-Spalte). Pro Belag-
 // Teilschritt wird die Flaeche aller Zeilen summiert, die ihn im Dropdown
-// gewaehlt haben. Nicht zugeordnete Zeilen zaehlen nur bei "alle Belaege".
+// gewaehlt haben; "alle Belaege" = Summe aller Zeilen MIT gewaehltem Belag.
 function belagFlaechenSpalten(ef){
   const spalten = TABELLEN_SPALTEN[ef.id] || [];
   const dropdown = spalten.find(s => s.ist_dropdown);
   if(!dropdown) return null;
-  const eingaben = spalten.filter(s => !s.ist_berechnung && !s.ist_dropdown);
-  const flaeche = eingaben.find(s => /^m\s*[²2]$/i.test((s.einheit || '').trim())) || eingaben[0];
+  const eingaben = spalten.filter(s => !s.ist_dropdown);
+  const flaeche = eingaben.find(s => /fl(ä|ae)che/i.test(s.name))
+    || eingaben.find(s => /^m\s*[²2]$/i.test((s.einheit || '').trim()))
+    || eingaben[0];
   return flaeche ? { dropdown, flaeche } : null;
 }
 function berechneBelagFlaechen(){
   const proBelag = {}; // teilschrittId -> m2
-  let alle = 0, zeilenOhneZuordnung = 0, flaecheOhneZuordnung = 0, pflichtOhne = 0;
+  let alle = 0;
   let hatDropdownTabelle = false;
   const hinweise = {}; // efId -> {ohneZuordnung, flaecheOhne, pflichtOhne}
   eingabefelder.forEach(ef => {
@@ -3570,8 +3573,10 @@ function berechneBelagFlaechen(){
     (bereichTabelleZeilen[ef.id] || []).forEach(z => {
       const m2 = z.werte[sp.flaeche.id]?.wert ?? 0;
       const belag = z.werte[sp.dropdown.id]?.text || null;
-      alle += m2;
-      if(belag) proBelag[belag] = (proBelag[belag] || 0) + m2;
+      // "Fläche aller Beläge" = nur Zeilen mit gewähltem Belag (Fugen o.ä.); Zeilen
+      // ohne Zuordnung (z.B. Kies) zählen dort nicht - ihr Volumen steckt in den
+      // Volumen-Spalten der Tabelle.
+      if(belag){ proBelag[belag] = (proBelag[belag] || 0) + m2; alle += m2; }
       else if(m2 > 0 || sp.dropdown.dropdown_pflicht){ h.ohneZuordnung++; h.flaecheOhne += m2; }
     });
   });
@@ -3596,7 +3601,7 @@ function aktualisiereTabellenHinweise(){
     const n = h.ohneZuordnung;
     el.textContent = h.pflicht
       ? `${n} Zeile${n === 1 ? '' : 'n'} ohne Zuordnung – bitte einen Belag wählen.`
-      : `${n} Zeile${n === 1 ? '' : 'n'} (${h.flaecheOhne.toLocaleString('de-CH', { maximumFractionDigits: 2 })} m²) ohne Zuordnung – zählt bei den Gesamtsummen, aber bei keinem einzelnen Belag.`;
+      : `${n} Zeile${n === 1 ? '' : 'n'} (${h.flaecheOhne.toLocaleString('de-CH', { maximumFractionDigits: 2 })} m²) ohne Zuordnung – wird bei keinem Belag mitgerechnet (Aushub/Fundation zählt trotzdem).`;
     el.classList.toggle('pflicht', !!h.pflicht);
     el.classList.remove('hidden');
   });
@@ -5289,6 +5294,11 @@ async function recalc(){
       // - diese Summen stehen danach wie ein ganz normaler Eingabefeld-Wert
       // fuer alle Formeln unten zur Verfuegung (siehe tabelleSummenMap unten).
       const tabelleSummenMap = await berechneAlleTabellenwerte(systemwerteMap);
+      // Belag-Flaechen NACH den Tabellen-Berechnungsspalten neu bilden (die
+      // Flaeche ist meist eine Berechnungsspalte Laenge x Breite und waere
+      // vorher noch veraltet) - belagSystemwerte() liest den Stand erst
+      // beim Auswerten der Formeln unten.
+      BELAG_FLAECHEN = berechneBelagFlaechen();
       aktualisiereTabellenHinweise();
       // Naechstgelegenes Kieswerk/Betonwerk zur Kunde-PLZ - haengt nur von der
       // PLZ ab (nicht von der Teilflaeche/Option), daher einmal pro
@@ -5591,7 +5601,7 @@ async function recalc(){
           einheit = ts.anzeigeEingabefeldEinheit || '';
         }else{
           try{
-            const { data, error } = await sb.rpc('eval_ausdruck', { node: ts.anzeigeTermAusdruck, werte: { ...bereichWerteMap, ...systemwerteMap, ...tabelleSummenMap } });
+            const { data, error } = await sb.rpc('eval_ausdruck', { node: ts.anzeigeTermAusdruck, werte: { ...bereichWerteMap, ...systemwerteMap, ...belagSystemwerte(null), ...tabelleSummenMap } });
             if(error) throw error;
             wert = data;
             einheit = ts.anzeigeTermEinheit || '';
