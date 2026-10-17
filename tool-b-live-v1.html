@@ -1051,6 +1051,19 @@ let ALLE_TERMS = [];
 // ALLE_TERMS: Formel-Vorschau (labelFuerNode/refLabel) und den Auswahl-Picker.
 let ALLE_TABELLEN = [];
 let ALLE_TABELLE_SPALTEN = [];
+// Dropdown-Spalten (Migration 20260928110000): fehlen die Spalten noch in der
+// Datenbank, wird einmalig ohne sie geladen, statt dass die Formel-Bibliothek
+// gar nicht mehr laedt.
+let SPALTE_HAT_DROPDOWN = true;
+async function selectSpalten(basis, extra, filterFn){
+  const abfrage = () => filterFn(sb.from('eingabefeld_tabelle_spalte').select(basis + (SPALTE_HAT_DROPDOWN ? ',' + extra : '')));
+  let res = await abfrage();
+  if(res.error && SPALTE_HAT_DROPDOWN && String(res.error.message || '').includes('ist_dropdown')){
+    SPALTE_HAT_DROPDOWN = false;
+    res = await abfrage();
+  }
+  return res;
+}
 async function ladeAlleVariablen(){
   // ist_titel/ist_tabelle ausschliessen - das sind keine referenzierbaren
   // Einzelwerte (eine Tabelle referenziert man ueber ihre Spalten, siehe
@@ -1064,7 +1077,7 @@ async function ladeAlleVariablen(){
   ALLE_TABELLEN = tabellen || [];
   const tabellenIds = ALLE_TABELLEN.map(t => t.id);
   const { data: spalten } = tabellenIds.length
-    ? await sb.from('eingabefeld_tabelle_spalte').select('id,eingabefeld_id,name,einheit,reihenfolge,ist_berechnung,ausdruck').in('eingabefeld_id', tabellenIds).order('reihenfolge')
+    ? await selectSpalten('id,eingabefeld_id,name,einheit,reihenfolge,ist_berechnung,ausdruck', 'ist_dropdown', q => q.in('eingabefeld_id', tabellenIds).order('reihenfolge'))
     : { data: [] };
   ALLE_TABELLE_SPALTEN = spalten || [];
   // Systemwerte hier (statt nur beim Laden der Allgemein-Seite) sicherstellen -
@@ -1500,9 +1513,10 @@ async function loadFormelBibliothek(){
   const tabellenIds = EINGABEFELDER.filter(e => e.ist_tabelle).map(e => e.id);
   TABELLE_SPALTEN = {};
   if(tabellenIds.length){
-    const { data: spalten, error: spErr } = await sb.from('eingabefeld_tabelle_spalte')
-      .select('id,eingabefeld_id,name,einheit,reihenfolge,ist_berechnung,ausdruck,zusatztext_moeglich,flaechenformel_moeglich,vorschlagswert,formel_modus,formel_text,formel_baukasten_ausdruck')
-      .in('eingabefeld_id', tabellenIds).order('reihenfolge');
+    const { data: spalten, error: spErr } = await selectSpalten(
+      'id,eingabefeld_id,name,einheit,reihenfolge,ist_berechnung,ausdruck,zusatztext_moeglich,flaechenformel_moeglich,vorschlagswert,formel_modus,formel_text,formel_baukasten_ausdruck',
+      'ist_dropdown,dropdown_leer_label,dropdown_pflicht',
+      q => q.in('eingabefeld_id', tabellenIds).order('reihenfolge'));
     if(spErr){ console.error(spErr); return; }
     (spalten || []).forEach(s => { (TABELLE_SPALTEN[s.eingabefeld_id] ||= []).push(s); });
   }
@@ -1934,7 +1948,7 @@ let efTabelleSpalten = [];
 let efTabelleSpalteCounter = 0;
 
 function neueEfTabelleSpalte(){
-  return { id: null, name: '', einheit: '', ist_berechnung: false, zusatztext_moeglich: false, flaechenformel_moeglich: false, vorschlagswert: null, glieder: null, formelState: null, _key: ++efTabelleSpalteCounter };
+  return { id: null, name: '', einheit: '', ist_berechnung: false, ist_dropdown: false, dropdown_leer_label: '', dropdown_pflicht: false, zusatztext_moeglich: false, flaechenformel_moeglich: false, vorschlagswert: null, glieder: null, formelState: null, _key: ++efTabelleSpalteCounter };
 }
 function openNeueEingabefeldTabelleModal(){
   efTabelleId = null;
@@ -1955,6 +1969,7 @@ function openEingabefeldTabelleModal(id){
     const basis = s.ist_berechnung ? formelStateAusZeile(s, 'formel', s.ausdruck) : null;
     return {
       id: s.id, name: s.name, einheit: s.einheit, ist_berechnung: s.ist_berechnung,
+      ist_dropdown: !!s.ist_dropdown, dropdown_leer_label: s.dropdown_leer_label || '', dropdown_pflicht: !!s.dropdown_pflicht,
       zusatztext_moeglich: s.zusatztext_moeglich, flaechenformel_moeglich: s.flaechenformel_moeglich,
       vorschlagswert: s.vorschlagswert,
       glieder: basis ? basis.glieder : [{ op: null, mode: 'lit', refKind: null, refId: null, text: '' }],
@@ -1985,15 +2000,24 @@ function renderEfTabelleSpalten(){
       <div class="spaltentop">
         <span class="draghandle" title="Verschieben">${ICON.drag}</span>
         <input class="spaltenname" data-k="name" value="${(s.name || '').replace(/"/g, '&quot;')}" placeholder="Spaltenname">
-        <select class="spalteneinheit" data-k="einheit">${einheitOptionsHtml(s.einheit || '', true)}</select>
+        <select class="spalteneinheit" data-k="einheit" ${s.ist_dropdown ? 'hidden' : ''}>${einheitOptionsHtml(s.einheit || '', true)}</select>
         <select class="spaltentyp" data-k="typ">
-          <option value="eingabe" ${!s.ist_berechnung ? 'selected' : ''}>Eingabe</option>
+          <option value="eingabe" ${!s.ist_berechnung && !s.ist_dropdown ? 'selected' : ''}>Eingabe</option>
           <option value="berechnung" ${s.ist_berechnung ? 'selected' : ''}>Berechnung</option>
+          ${(formelBibliothekKategorie !== 'allgemein' || s.ist_dropdown) ? `<option value="dropdown" ${s.ist_dropdown ? 'selected' : ''}>Dropdown (Auswahl)</option>` : ''}
         </select>
         <button type="button" class="icobtn danger" data-action="entfernen" title="Entfernen">${ICON.trash}</button>
       </div>
       <div class="spaltensub">
-        ${s.ist_berechnung ? `
+        ${s.ist_dropdown ? `
+          <div class="hint" style="margin-bottom:6px;">Zeigt in der Tabelle eine Auswahl aus allen Teilschritten dieser Vorlage, bei denen im Zahnrad «Als Belag für Flächen anbieten» gesetzt ist. Die Summe pro Auswahl wird automatisch als Formel-Baustein angeboten.</div>
+          <div class="spaltensub-checks">
+            <input data-k="dropdown_leer_label" value="${(s.dropdown_leer_label || '').replace(/"/g, '&quot;')}" placeholder="– nicht zugeordnet –" style="width:200px;font-size:11.5px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;color:var(--ink);" ${s.dropdown_pflicht ? 'disabled' : ''} title="Text der leeren Auswahl. Leer lassen für den Standardtext.">
+            <span style="font-size:11.5px;color:var(--muted);">Text der leeren Auswahl</span>
+            <label class="spaltencheck" style="margin-left:auto;"><input type="checkbox" data-k="dropdown_pflicht" ${s.dropdown_pflicht ? 'checked' : ''}> Zuordnung ist Pflicht (keine leere Auswahl)</label>
+          </div>
+          ${!SPALTE_HAT_DROPDOWN ? '<div class="hint" style="margin-top:4px;color:var(--danger);">Noch nicht speicherbar: Die Datenbank-Migration für Dropdown-Spalten wurde noch nicht eingespielt.</div>' : ''}
+        ` : s.ist_berechnung ? `
           <div id="efTabelleFormelWrap_${s._key}"></div>
           ${!s.id ? '<div class="hint" style="margin-top:4px;">Andere Spalten dieser Tabelle stehen als Formel-Baustein erst nach dem ersten Speichern zur Auswahl.</div>' : ''}
         ` : `
@@ -2012,7 +2036,10 @@ function renderEfTabelleSpalten(){
     if(!card) return;
     card.querySelector('[data-k="name"]').addEventListener('input', e => { s.name = e.target.value; });
     card.querySelector('[data-k="einheit"]').addEventListener('change', e => { s.einheit = e.target.value; });
+    card.querySelector('[data-k="dropdown_leer_label"]')?.addEventListener('input', e => { s.dropdown_leer_label = e.target.value; });
+    card.querySelector('[data-k="dropdown_pflicht"]')?.addEventListener('change', e => { s.dropdown_pflicht = e.target.checked; renderEfTabelleSpalten(); });
     card.querySelector('[data-k="typ"]').addEventListener('change', e => {
+      s.ist_dropdown = e.target.value === 'dropdown';
       s.ist_berechnung = e.target.value === 'berechnung';
       if(s.ist_berechnung && !s.glieder){
         s.glieder = [{ op: null, mode: 'lit', refKind: null, refId: null, text: '' }];
@@ -2049,7 +2076,8 @@ $('efTabelleSave').addEventListener('click', async () => {
   if(!efTabelleSpalten.length) return fehler('Bitte mindestens eine Spalte hinzufuegen.');
   for(const s of efTabelleSpalten){
     if(!s.name.trim()) return fehler('Bitte bei jeder Spalte einen Namen eingeben.');
-    if(!s.einheit) return fehler(`Bitte bei Spalte "${s.name}" eine Einheit waehlen.`);
+    if(s.ist_dropdown && !SPALTE_HAT_DROPDOWN) return fehler('Dropdown-Spalten sind noch nicht speicherbar: Die Datenbank-Migration wurde noch nicht eingespielt.');
+    if(!s.ist_dropdown && !s.einheit) return fehler(`Bitte bei Spalte "${s.name}" eine Einheit waehlen.`);
     if(s.ist_berechnung){
       s._parsedNode = formelAusZustand(`efTabelleFormelWrap_${s._key}`, s.formelState);
       if(!s._parsedNode){
@@ -2082,13 +2110,20 @@ $('efTabelleSave').addEventListener('click', async () => {
   for(let i = 0; i < efTabelleSpalten.length; i++){
     const s = efTabelleSpalten[i];
     const ausdruck = s.ist_berechnung ? s._parsedNode : null;
+    const keinNormalWert = s.ist_berechnung || s.ist_dropdown;
     const payload = {
-      eingabefeld_id: tabelleId, name: s.name.trim(), einheit: s.einheit, reihenfolge: i + 1,
+      eingabefeld_id: tabelleId, name: s.name.trim(), einheit: s.ist_dropdown ? '' : s.einheit, reihenfolge: i + 1,
       ist_berechnung: s.ist_berechnung, ausdruck,
-      zusatztext_moeglich: s.ist_berechnung ? false : s.zusatztext_moeglich,
-      flaechenformel_moeglich: s.ist_berechnung ? false : s.flaechenformel_moeglich,
-      vorschlagswert: s.ist_berechnung ? null : s.vorschlagswert,
-      ...(s.ist_berechnung ? formelSpaltenZumSpeichern('formel', s.formelState, s._parsedNode) : { formel_modus: 'baukasten', formel_text: null, formel_baukasten_ausdruck: null })
+      zusatztext_moeglich: keinNormalWert ? false : s.zusatztext_moeglich,
+      flaechenformel_moeglich: keinNormalWert ? false : s.flaechenformel_moeglich,
+      vorschlagswert: keinNormalWert ? null : s.vorschlagswert,
+      ...(s.ist_berechnung ? formelSpaltenZumSpeichern('formel', s.formelState, s._parsedNode) : { formel_modus: 'baukasten', formel_text: null, formel_baukasten_ausdruck: null }),
+      // Nur schreiben, wenn die Migration da ist (sonst wuerde jedes Speichern scheitern).
+      ...(SPALTE_HAT_DROPDOWN ? {
+        ist_dropdown: !!s.ist_dropdown,
+        dropdown_leer_label: s.ist_dropdown && !s.dropdown_pflicht ? (s.dropdown_leer_label || '').trim() || null : null,
+        dropdown_pflicht: !!s.ist_dropdown && !!s.dropdown_pflicht
+      } : {})
     };
     if(s.id){
       const { error } = await sb.from('eingabefeld_tabelle_spalte').update(payload).eq('id', s.id);
@@ -4639,7 +4674,7 @@ function renderVarPickerListen(){
   if(vpEinzelwertCallback && !vpEinzelwertTabellenErlaubt){
     // nichts anbieten
   }else if(vpTabelleKontextId){
-    const spalten = ALLE_TABELLE_SPALTEN.filter(s => s.eingabefeld_id === vpTabelleKontextId && s.id !== vpExcludeSpalteId);
+    const spalten = ALLE_TABELLE_SPALTEN.filter(s => s.eingabefeld_id === vpTabelleKontextId && s.id !== vpExcludeSpalteId && !s.ist_dropdown);
     if(spalten.length){
       const tabelle = ALLE_TABELLEN.find(t => t.id === vpTabelleKontextId);
       tabellenHtml = `<div class="vargroup"><div class="gt">Tabelle ${tabelle ? tabelle.name : ''}</div>` +
@@ -4648,7 +4683,7 @@ function renderVarPickerListen(){
     }
   }else{
     ALLE_TABELLEN.filter(t => passt(t.offertentyp_id)).forEach(t => {
-      const spalten = ALLE_TABELLE_SPALTEN.filter(s => s.eingabefeld_id === t.id);
+      const spalten = ALLE_TABELLE_SPALTEN.filter(s => s.eingabefeld_id === t.id && !s.ist_dropdown);
       if(!spalten.length) return;
       tabellenHtml += `<div class="vargroup"><div class="gt">${t.name} (Tabelle)</div>` +
         spalten.map(s => `<div class="varitem" onclick="waehleVar('spalte','${s.id}')"><b>${t.name} – ${s.name}</b><span>Summe über alle Zeilen · ${s.einheit}</span></div>`).join('') +
