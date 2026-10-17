@@ -207,6 +207,38 @@ tbody tr:last-child td{border-bottom:none;}
 .tabf-t td input.zeit{width:62px;text-align:center;font-variant-numeric:tabular-nums;}
 .tabf-t td input.txt{min-width:190px;}   /* Textspalten (Ventilname, Intervall, Sensor) nicht zusammenquetschen */
 .tabf-t td .tu input{min-width:56px;}
+/* Bewaesserungsplan (feste Sondertabelle): eine Gruppe pro Ventil, eine Zeile pro Muster, Ventile abwechselnd weiss/grau */
+.bp-w{overflow-x:auto;border:1px solid var(--line);border-radius:7px;}
+.bp{border-collapse:collapse;width:100%;min-width:860px;font-size:12px;}
+.bp th{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);text-align:left;padding:5px 8px;background:var(--soft);font-weight:700;white-space:nowrap;}
+.bp td{padding:2px 8px;vertical-align:middle;height:26px;border-bottom:0;}
+.bp tbody.v tr:first-child td{border-top:1px solid var(--line);}
+.bp tbody.v:first-of-type tr:first-child td{border-top:0;}
+.bp tbody.v:nth-of-type(odd) td{background:#fff;}
+.bp tbody.v:nth-of-type(even) td{background:#E3E8EE;}
+.bp td.vn{vertical-align:top;padding-top:4px;padding-bottom:4px;width:250px;}
+.bp .vk{display:flex;gap:4px;align-items:center;}
+.bp input{font:inherit;font-size:12px;color:var(--ink);background:#fff;border:1px solid var(--line);border-radius:5px;padding:1px 4px;height:22px;}
+.bp .vn input{border-color:transparent;background:transparent;width:100%;padding:0 3px;height:20px;}
+.bp .vn input:hover,.bp .vn input:focus{border-color:var(--line);background:#fff;}
+.bp .vn .n{font-weight:800;color:var(--primary);}
+.bp .vn .s{font-size:11.5px;color:var(--muted);}
+.bp .vn .b{font-size:11px;color:var(--muted);font-style:italic;}
+.bp .vn .i{width:13px;height:13px;color:var(--muted);flex:none;}
+.bp input.zeit{width:48px;text-align:center;font-variant-numeric:tabular-nums;}
+.bp input.gw{width:34px;text-align:right;font-variant-numeric:tabular-nums;}
+.bp input.zr{width:96px;}
+.bp .zz{display:flex;align-items:center;gap:3px;white-space:nowrap;}
+.bp .zz small{color:var(--muted);margin-left:3px;font-size:11px;font-variant-numeric:tabular-nums;}
+.bp .days{display:flex;gap:2px;}
+.bp .chip{all:unset;cursor:pointer;width:22px;height:18px;border-radius:4px;display:grid;place-items:center;font-size:10px;font-weight:700;color:var(--muted);border:1px solid var(--line);background:#fff;}
+.bp .chip[aria-pressed="true"]{background:var(--primary);border-color:var(--primary);color:#fff;}
+.bp .chip:focus-visible{outline:2px solid var(--primary);outline-offset:1px;}
+.bp .gwz{display:flex;gap:4px;align-items:center;color:var(--muted);}
+.bp .icon-btn{width:20px;height:20px;}
+.bp .icon-btn .i{width:14px;height:14px;}
+.bp .leer{color:var(--muted);font-style:italic;}
+.bp-stand{font-size:11.5px;color:var(--muted);}
 .tz{display:flex;align-items:center;gap:3px;white-space:nowrap;}
 .tz small{color:var(--muted);font-size:10.5px;margin-left:3px;min-width:44px;}
 .tu{display:flex;align-items:center;gap:3px;}
@@ -323,6 +355,7 @@ table.au tr.sto td{color:var(--muted);text-decoration:line-through;}
 <body>
 
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-sensor" viewBox="0 0 24 24"><path d="M12 3v10M8 7H6M8 10H6"/><circle cx="12" cy="16" r="4"/></symbol>
   <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="16" rx="2"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/></symbol>
   <symbol id="i-mobile" viewBox="0 0 24 24"><rect x="6.5" y="2.5" width="11" height="19" rx="2"/><path d="M10.5 18.5h3"/></symbol>
   <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8M18 14.3c2.1.7 3.5 2.8 3.5 5.7"/></symbol>
@@ -819,6 +852,43 @@ function tabelleHtml(kk, tab){
   </section>`;
 }
 
+// ---------------------------------------------------------------------------
+// Bewaesserungsplan (feste Sondertabelle der Kategorie Bewaesserung)
+// kk.bewaesserung = [{ rt, name, sensor, bem, muster:[{ von, bis, tage:[0..6], gw, zr }] }]
+// ---------------------------------------------------------------------------
+const BP_TAGE = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+function bpHtml(kk){
+  const vl = kk.bewaesserung || [];
+  const gruppe = (v, vi) => {
+    const kopf = `<td class="vn" rowspan="${Math.max(v.muster.length, 1)}">
+      <div class="vk"><input class="n" data-act="bp-feld" data-f="name" data-vi="${vi}" value="${esc(v.name)}" aria-label="Ventilname" placeholder="Ventilname">
+        <button type="button" class="icon-btn" data-act="bp-muster-add" data-vi="${vi}" title="Muster hinzufügen" aria-label="Muster hinzufügen">${I('plus')}</button>
+        <button type="button" class="icon-btn" data-act="bp-ventil-rm" data-vi="${vi}" title="Ventil entfernen" aria-label="Ventil entfernen">${I('x')}</button></div>
+      <div class="vk">${I('sensor')}<input class="s" data-act="bp-feld" data-f="sensor" data-vi="${vi}" value="${esc(v.sensor)}" placeholder="kein Sensor" aria-label="Sensor"></div>
+      <input class="b" data-act="bp-feld" data-f="bem" data-vi="${vi}" value="${esc(v.bem)}" placeholder="Bemerkung" aria-label="Bemerkung"></td>`;
+    if(!v.muster.length) return `<tbody class="v"><tr>${kopf}<td colspan="5" class="leer">Keine Zeiten hinterlegt</td></tr></tbody>`;
+    return `<tbody class="v">${v.muster.map((m, mi) => `<tr data-vi="${vi}" data-mi="${mi}">${mi === 0 ? kopf : ''}
+      <td><div class="zz"><input class="zeit" data-act="bp-m" data-f="von" inputmode="numeric" maxlength="5" value="${esc(m.von)}" aria-label="von">–<input class="zeit" data-act="bp-m" data-f="bis" inputmode="numeric" maxlength="5" value="${esc(m.bis)}" aria-label="bis"><small>${dauer(m.von, m.bis)}</small></div></td>
+      <td><div class="days">${BP_TAGE.map((t, i) => `<button type="button" class="chip" data-act="bp-tag" data-tag="${i}" aria-pressed="${(m.tage || []).includes(i)}" aria-label="${t}">${t}</button>`).join('')}</div></td>
+      <td><div class="gwz"><input class="gw" data-act="bp-m" data-f="gw" inputmode="numeric" value="${m.gw ?? ''}" placeholder="–" aria-label="Grenzwert in Prozent">%</div></td>
+      <td><input class="zr" data-act="bp-m" data-f="zr" value="${esc(m.zr)}" placeholder="ganzjährig" aria-label="Zeitraum, z. B. 26.5.–31.8."></td>
+      <td><button type="button" class="icon-btn" data-act="bp-muster-rm" title="Muster entfernen" aria-label="Muster entfernen">${I('x')}</button></td></tr>`).join('')}</tbody>`;
+  };
+  return `<section class="card panel">
+    <div class="panel-h"><h3>Bewässerungsplan</h3>${kk.bewaesserung_stand ? `<span class="bp-stand">Aus Rohnertec, Stand ${datumCh(kk.bewaesserung_stand)}</span>` : ''}</div>
+    <div class="bp-w"><table class="bp">
+      <thead><tr><th>Ventil / Sensor</th><th>Zeit</th><th>Tage</th><th>Grenzwert</th><th>Zeitraum</th><th style="width:28px"></th></tr></thead>
+      ${vl.map(gruppe).join('') || '<tbody><tr><td colspan="6" class="leer" style="padding:10px">Noch keine Ventile erfasst.</td></tr></tbody>'}
+    </table></div>
+    <div><button class="addrow" data-act="bp-ventil-add">${I('plus')}Ventil hinzufügen</button></div>
+  </section>`;
+}
+async function speichereBp(kk, vl, neuZeichnen = true){
+  if(await speichere('pflege_kunde_kategorie', { id: kk.id }, { bewaesserung: vl })) kk.bewaesserung = vl;
+  if(neuZeichnen) render();
+}
+const bpKopie = kk => JSON.parse(JSON.stringify(kk.bewaesserung || []));
+
 function renderDetail(kundeId){
   const k = kundeById(kundeId), ku = k.kunde || {};
   const oid = aktObjektId(), obj = oid && S.obj.find(o => o.id === oid), objs = objekteVon(kundeId);
@@ -839,7 +909,7 @@ function renderDetail(kundeId){
     body = (kat.individuell
       ? `<div class="kbody"><div class="col">${zust}</div><div class="col">${arb}</div></div>`
       : `<div class="kbody"><div class="col">${angaben}</div><div class="col">${zust}${arb}</div></div>`)
-      + (tab ? tabelleHtml(kk, tab) : '')
+      + (kat.sondertabelle === 'bewaesserung' ? bpHtml(kk) : tab ? tabelleHtml(kk, tab) : '')
       + `<div><button class="addrow danger" data-act="kat-entfernen">«${esc(kat.name)}» bei ${obj ? 'diesem Objekt' : 'diesem Kunden'} entfernen</button></div>`;
   }
 
@@ -1459,6 +1529,17 @@ $('app').addEventListener('change', async e => {
     const id = el.closest('[data-id]').dataset.id, ka = S.ka.find(x => x.id === id), titel = el.value.trim();
     if(await speichere('pflege_kunde_arbeit', { id }, { titel })) ka.titel = titel;
   }
+  else if(act === 'bp-feld'){
+    const vl = bpKopie(kk); vl[+el.dataset.vi][el.dataset.f] = el.value.trim();
+    await speichereBp(kk, vl, false);
+  }
+  else if(act === 'bp-m'){
+    const tr = el.closest('tr'), vl = bpKopie(kk), m = vl[+tr.dataset.vi].muster[+tr.dataset.mi], f = el.dataset.f;
+    if(f === 'von' || f === 'bis'){ el.value = normZeit(el.value); m[f] = el.value; }
+    else if(f === 'gw'){ const n = parseFloat(el.value.replace(',', '.')); m.gw = Number.isFinite(n) ? n : null; }
+    else m.zr = el.value.trim();
+    await speichereBp(kk, vl, f === 'von' || f === 'bis');   // Dauer neu anzeigen
+  }
   else if(act === 'zelle'){
     const rows = (kk.tabelle_zeilen || []).map(r => ({ ...r })), ri = +el.dataset.ri, sp = el.dataset.sp;
     if(el.classList.contains('zeit')) el.value = normZeit(el.value);
@@ -1543,6 +1624,32 @@ $('app').addEventListener('click', async e => {
     if(error){ showToast(friendlyError(error), true); return; }
     S.ka.push(data); render();
     document.querySelector(`tr[data-id="${data.id}"] [data-act="zus-titel"]`)?.focus();
+  }
+  else if(act === 'bp-tag'){
+    const tr = b.closest('tr'), vl = bpKopie(kk), m = vl[+tr.dataset.vi].muster[+tr.dataset.mi], t = +b.dataset.tag;
+    m.tage = (m.tage || []).includes(t) ? m.tage.filter(x => x !== t) : [...(m.tage || []), t].sort((x, y) => x - y);
+    await speichereBp(kk, vl);
+  }
+  else if(act === 'bp-muster-add'){
+    const vl = bpKopie(kk), v = vl[+b.dataset.vi], last = v.muster[v.muster.length - 1];
+    v.muster.push(last ? { ...last, tage: [...(last.tage || [])] } : { von: '06:00', bis: '06:30', tage: [0, 1, 2, 3, 4, 5, 6], gw: null, zr: '' });
+    await speichereBp(kk, vl);
+  }
+  else if(act === 'bp-muster-rm'){
+    const tr = b.closest('tr'), vl = bpKopie(kk);
+    vl[+tr.dataset.vi].muster.splice(+tr.dataset.mi, 1);
+    await speichereBp(kk, vl);
+  }
+  else if(act === 'bp-ventil-add'){
+    const vl = bpKopie(kk); vl.push({ rt: null, name: '', sensor: '', bem: '', muster: [] });
+    await speichereBp(kk, vl);
+    const inp = [...document.querySelectorAll('.bp input.n')].pop(); inp?.focus();
+  }
+  else if(act === 'bp-ventil-rm'){
+    const vl = bpKopie(kk), v = vl[+b.dataset.vi];
+    if(!await kgBestaetigen(`Ventil «${v.name || 'ohne Namen'}» mit allen Zeiten entfernen?`, 'Ventil entfernen?', 'Entfernen')) return;
+    vl.splice(+b.dataset.vi, 1);
+    await speichereBp(kk, vl);
   }
   else if(act === 'trow-add'){
     await speichereZeilen(kk, [...(kk.tabelle_zeilen || []), {}]); render();
