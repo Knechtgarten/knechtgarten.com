@@ -86,6 +86,10 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 .mh-ktabs::-webkit-scrollbar{display:none;}
 .mh-ktabs button{all:unset;cursor:pointer;flex:none;display:inline-flex;align-items:center;gap:6px;padding:8px 13px;border-radius:18px;border:1px solid var(--line);background:#fff;font-size:14px;}
 .mh-ktabs button[aria-pressed="true"]{background:#323E4E;border-color:#323E4E;color:#fff;}
+/* Objekte: Auswahl Hauptadresse / Objekt, Objektname gruen */
+.mh-orte{margin-top:10px;}
+.mh-orte button[aria-pressed="true"]{background:var(--accent-lime, #D1DB5F);border-color:var(--accent-lime, #D1DB5F);color:#323E4E;font-weight:700;}
+.mc-ob{color:#6B7420;}
 .mh-wk{display:flex;gap:6px;flex-wrap:wrap;}
 .mh-wk button{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:4px;padding:6px 11px;border-radius:6px;border:1px solid var(--line);font-size:13px;background:#fff;}
 .mh-wk button .i{width:13px;height:13px;stroke-width:2.2;}
@@ -286,7 +290,7 @@ const mapsLink = ku => 'https://maps.google.com/?q=' + encodeURIComponent(adress
 // ---------------------------------------------------------------------------
 const S = {
   kat: [], felder: [], arbeiten: [], tabellen: [], spalten: [], zust: [],
-  kunden: [], kk: [], kz: [], ka: [], status: new Set(), fotos: [], fk: [], dok: [], dk: [], urls: {},
+  kunden: [], obj: [], kk: [], kz: [], ka: [], status: new Set(), fotos: [], fk: [], dok: [], dk: [], urls: {},
   tab: 'faellig', f: { kat: '', ma: null, abo: [], status: [] }, q: '', bearbeiten: false, lb: null, wk: null
 };
 const katById = id => S.kat.find(k => k.id === id);
@@ -295,7 +299,11 @@ const tabelleVon = katId => S.tabellen.find(t => t.kategorie_id === katId);
 const spaltenVon = tabId => S.spalten.filter(s => s.tabelle_id === tabId).sort(nachReihe);
 const zustVon = kkId => S.kz.filter(z => z.kunde_kategorie_id === kkId).map(z => z.benutzer_id);
 const kundeById = id => S.kunden.find(k => k.kunde_id === id);
-const kkVonKunde = kundeId => S.kk.filter(x => x.kunde_id === kundeId).sort((a, b) => (katById(a.kategorie_id)?.reihenfolge ?? 0) - (katById(b.kategorie_id)?.reihenfolge ?? 0));
+const objById = id => id ? S.obj.find(o => o.id === id) : null;
+const objekteVon = kundeId => S.obj.filter(o => o.kunde_id === kundeId).sort((a, b) => nachReihe(a, b) || a.erstellt_am.localeCompare(b.erstellt_am));
+const objektName = o => [o.strasse, o.ort].filter(Boolean).join(', ') || 'Objekt';
+// objektId: null = Hauptadresse, id = nur dieses Objekt, undefined = alles des Kunden
+const kkVonKunde = (kundeId, objektId) => S.kk.filter(x => x.kunde_id === kundeId && (objektId === undefined || (x.objekt_id || null) === objektId)).sort((a, b) => (katById(a.kategorie_id)?.reihenfolge ?? 0) - (katById(b.kategorie_id)?.reihenfolge ?? 0));
 const statusKey = (kkId, jahr, kw) => `${kkId}|${jahr}|${kw}`;
 const erledigt = (kkId, jahr, kw) => S.status.has(statusKey(kkId, jahr, kw));
 
@@ -308,6 +316,7 @@ async function ladeAlles(){
     sb.from('pflege_tabelle_spalte').select('*'),
     sb.rpc('pflege_zustaendige'),
     sb.from('pflege_kunde').select('*, kunde(id,name,strasse,plz,ort,kontaktdaten)'),
+    sb.from('pflege_objekt').select('*'),
     sb.from('pflege_kunde_kategorie').select('*'),
     sb.from('pflege_kunde_kategorie_zustaendig').select('*'),
     sb.from('pflege_kunde_arbeit').select('*'),
@@ -320,7 +329,7 @@ async function ladeAlles(){
   const fehler = r.find(x => x.error);
   if(fehler){ showToast(friendlyError(fehler.error), true); return; }
   let st;
-  [S.kat, S.felder, S.arbeiten, S.tabellen, S.spalten, S.zust, S.kunden, S.kk, S.kz, S.ka, st, S.fotos, S.fk, S.dok, S.dk] = r.map(x => x.data || []);
+  [S.kat, S.felder, S.arbeiten, S.tabellen, S.spalten, S.zust, S.kunden, S.obj, S.kk, S.kz, S.ka, st, S.fotos, S.fk, S.dok, S.dk] = r.map(x => x.data || []);
   S.status = new Set(st.map(s => statusKey(s.kunde_kategorie_id, s.jahr, s.kw)));
   S.kunden.sort((a, b) => (a.kunde?.name || '').localeCompare(b.kunde?.name || '', 'de'));
   // Techniker sieht standardmaessig die eigenen Einsaetze (wenn er bei «Pflegetool» angehakt ist)
@@ -356,7 +365,7 @@ function einsaetze(jahr){
       Object.entries(proKw).forEach(([kw, jobs]) => {
         const done = erledigt(kk.id, jahr, +kw);
         if(f.status.length && !f.status.includes(done ? 'erledigt' : 'offen')) return;
-        out.push({ k, kk, kat, jahr, kw: +kw, jobs, done, zust });
+        out.push({ k, o: objById(kk.objekt_id), kk, kat, jahr, kw: +kw, jobs, done, zust });
       });
     });
   });
@@ -364,12 +373,16 @@ function einsaetze(jahr){
 }
 
 // ---------------------------------------------------------------------------
-// Ansichten: #k=<kunde>&kat=<kategorie>&kw=<jahr-kw>  sonst Faellig / Kunden
+// Ansichten: #k=<kunde>&o=<objekt>&kat=<kategorie>&kw=<jahr-kw>  sonst Faellig / Kunden
 // ---------------------------------------------------------------------------
 function route(){
   const p = new URLSearchParams(location.hash.slice(1));
-  return { kunde: p.get('k'), kat: p.get('kat'), wk: p.get('wk') };
+  return { kunde: p.get('k'), o: p.get('o'), kat: p.get('kat'), wk: p.get('wk') };
 }
+// in der Kundenseite gezeigter Ort (Objekt-id oder null = Hauptadresse) und Kunden-Kategorie
+let aktObjekt = null, aktKkId = null;
+const aktOrt = () => aktObjekt;
+const zeigeKunde = (kunde, o, kat, wk) => { const p = new URLSearchParams({ k: kunde }); if(o) p.set('o', o); if(kat) p.set('kat', kat); if(wk) p.set('wk', wk); location.hash = p.toString(); };
 window.addEventListener('hashchange', () => { S.bearbeiten = false; render(); window.scrollTo(0, 0); });
 function render(){
   const r = route();
@@ -384,15 +397,15 @@ function render(){
 function karte(c){
   const ku = c.k.kunde || {}, tel = telVon(c.k);
   return `<div class="mc${c.done ? ' done' : ''}">
-    <button class="mc-main" data-act="oeffne" data-kunde="${c.k.kunde_id}" data-kat="${c.kat.id}" data-wk="${c.jahr}-${c.kw}">
+    <button class="mc-main" data-act="oeffne" data-kunde="${c.k.kunde_id}" data-objekt="${c.o?.id || ''}" data-kat="${c.kat.id}" data-wk="${c.jahr}-${c.kw}">
       <span class="mc-head"><span class="mc-n">${esc(ku.name)}</span><span class="kchip" style="${katStyle(c.kat)}">${esc(c.kat.kuerzel)}</span></span>
-      <span class="mc-o">${esc(ku.ort)} · KW ${c.kw}${c.zust.length ? ' · ' + esc(c.zust.map(zustName).join(', ')) : ''}</span>
+      <span class="mc-o">${c.o ? `<span class="mc-ob">${esc(objektName(c.o))}</span>` : esc(ku.ort)} · KW ${c.kw}${c.zust.length ? ' · ' + esc(c.zust.map(zustName).join(', ')) : ''}</span>
       <span class="mc-j">${c.jobs.map(ka => esc(arbeitName(ka))).join(' · ')}</span>
     </button>
     <div class="mc-act">
       <button class="mc-done${c.done ? ' on' : ''}" data-act="erledigt" data-kk="${c.kk.id}" data-wk="${c.jahr}-${c.kw}" aria-pressed="${c.done}">${I('check')}${c.done ? 'Erledigt' : 'Erledigen'}</button>
-      <label class="mc-foto">${I('cam')}Foto<input type="file" accept="image/*" capture="environment" hidden data-act="foto" data-kunde="${c.k.kunde_id}" data-kat="${c.kat.id}"></label>
-      <a class="mh-ic" href="${mapsLink(ku)}" target="_blank" rel="noopener" aria-label="Route">${I('pin')}</a>
+      <label class="mc-foto">${I('cam')}Foto<input type="file" accept="image/*" capture="environment" hidden data-act="foto" data-kunde="${c.k.kunde_id}" data-objekt="${c.o?.id || ''}" data-kat="${c.kat.id}"></label>
+      <a class="mh-ic" href="${mapsLink(c.o || ku)}" target="_blank" rel="noopener" aria-label="Route">${I('pin')}</a>
       ${tel ? `<a class="mh-ic" href="tel:${esc(tel.replace(/\s+/g, ''))}" aria-label="Anrufen">${I('phone')}</a>` : ''}
     </div>
   </div>`;
@@ -433,10 +446,11 @@ function renderKundenListe(){
 }
 function renderKundenTreffer(){
   const q = S.q.trim().toLowerCase();
-  const l = S.kunden.filter(k => !q || [k.kunde?.name, k.kunde?.strasse, k.kunde?.ort, telVon(k)].join(' ').toLowerCase().includes(q));
+  const l = S.kunden.filter(k => !q || [k.kunde?.name, k.kunde?.strasse, k.kunde?.ort, telVon(k), ...objekteVon(k.kunde_id).flatMap(o => [o.strasse, o.ort])].join(' ').toLowerCase().includes(q));
   $('klist').innerHTML = l.map(k => `<button class="mk" data-act="oeffne" data-kunde="${k.kunde_id}">
       <span class="mc-n">${esc(k.kunde?.name)}</span>
       <span class="mc-o">${esc(adresse(k.kunde || {}))}</span>
+      ${objekteVon(k.kunde_id).length ? `<span class="mc-o mc-ob">${objekteVon(k.kunde_id).map(o => esc(objektName(o))).join(' · ')}</span>` : ''}
       <span class="mk-kats">${kkVonKunde(k.kunde_id).map(x => { const c = katById(x.kategorie_id); return c ? `<span class="kc">${dot(c)}${esc(c.name)}</span>` : ''; }).join('')}</span>
     </button>`).join('') || '<div class="mh-leer">Kein Kunde gefunden.</div>';
 }
@@ -447,7 +461,7 @@ function renderKundenTreffer(){
 const punkte = t => (t || '').split('\n').map(s => s.replace(/^[-•*\d.)\s]+/, '').trim()).filter(Boolean);
 const vorschauPfad = p => p.replace(/\.jpg$/, '_t.jpg');
 const fotoKats = fotoId => S.fk.filter(x => x.foto_id === fotoId).map(x => x.kategorie_id);
-const fotosFuer = kk => S.fotos.filter(f => f.kunde_id === kk.kunde_id && (!fotoKats(f.id).length || fotoKats(f.id).includes(kk.kategorie_id)));
+const fotosFuer = kk => S.fotos.filter(f => f.kunde_id === kk.kunde_id && (f.objekt_id || null) === (kk.objekt_id || null) && (!fotoKats(f.id).length || fotoKats(f.id).includes(kk.kategorie_id)));
 function wertText(f, v){
   if(v == null || v === '') return '<span class="muted">–</span>';
   if(f.typ === 'janein') return v === 'ja' ? 'Ja' : 'Nein';
@@ -471,16 +485,23 @@ function feldInput(f, val){
 }
 
 function renderKunde(r){
-  const k = kundeById(r.kunde), ku = k.kunde || {}, kks = kkVonKunde(k.kunde_id), tel = telVon(k);
+  const k = kundeById(r.kunde), ku = k.kunde || {}, tel = telVon(k), objs = objekteVon(k.kunde_id);
+  // Hauptadresse oder Objekt; ohne Angabe die Hauptadresse, ausser nur Objekte haben Kategorien
+  let o = objById(r.o);
+  if(!r.o && !kkVonKunde(k.kunde_id, null).length) o = objs.find(x => kkVonKunde(k.kunde_id, x.id).length) || null;
+  const kks = kkVonKunde(k.kunde_id, o ? o.id : null), adr = o || ku;
   const kk = kks.find(x => x.kategorie_id === r.kat) || kks[0];
+  aktObjekt = o ? o.id : null; aktKkId = kk?.id || null;
   const kopf = `
     <div class="md-top"><button class="mh-ic" data-act="zurueck" aria-label="Zurück">${I('back')}</button><h2>${esc(ku.name)}</h2></div>
+    ${objs.length ? `<div class="mh-ktabs mh-orte">${[null, ...objs].map(x => `<button data-act="ort" data-o="${x ? x.id : ''}" aria-pressed="${(x ? x.id : null) === (o ? o.id : null)}">${x ? esc(objektName(x)) : 'Hauptadresse'}</button>`).join('')}</div>` : ''}
     <div class="md-mini">
-      <a href="${mapsLink(ku)}" target="_blank" rel="noopener">${I('pin')}${esc(adresse(ku))}</a>
+      <a href="${mapsLink(adr)}" target="_blank" rel="noopener">${I('pin')}${esc(adresse(adr))}</a>
       ${tel ? `<a href="tel:${esc(tel.replace(/\s+/g, ''))}">${I('phone')}${esc(tel)}</a>` : ''}
     </div>
+    ${o?.notiz ? `<div class="hint">${esc(o.notiz)}</div>` : ''}
     ${k.notiz ? `<div class="hint">${esc(k.notiz)}</div>` : ''}`;
-  if(!kk){ $('app').innerHTML = kopf + '<div class="mh-leer">Für diesen Kunden ist noch keine Pflegekategorie erfasst.</div>'; return; }
+  if(!kk){ $('app').innerHTML = kopf + `<div class="mh-leer">Für ${o ? 'dieses Objekt' : 'diesen Kunden'} ist noch keine Pflegekategorie erfasst.</div>`; return; }
   const kat = katById(kk.kategorie_id);
 
   // Wochen dieser Kategorie (laufendes + naechstes Jahr), Fokus: aus «Faellig» uebernommen, sonst naechste offene
@@ -496,7 +517,7 @@ function renderKunde(r){
   const done = fokus && erledigt(kk.id, fokus.jahr, fokus.kw);
   const diese = fokus ? jobsVonKk(kk, fokus.jahr).filter(x => x.kw === fokus.kw).map(x => x.ka) : [];
   const fotos = fotosFuer(kk);
-  const doks = S.dok.filter(d => d.kunde_id === k.kunde_id && !d.ersetzt && (() => { const kd = S.dk.filter(x => x.dokument_id === d.id).map(x => x.kategorie_id); return !kd.length || kd.includes(kat.id); })());
+  const doks = S.dok.filter(d => d.kunde_id === k.kunde_id && (d.objekt_id || null) === (kk.objekt_id || null) && !d.ersetzt && (() => { const kd = S.dk.filter(x => x.dokument_id === d.id).map(x => x.kategorie_id); return !kd.length || kd.includes(kat.id); })());
   const tab = !kat.individuell && tabelleVon(kat.id), zust = zustVon(kk.id);
 
   $('app').innerHTML = kopf + `
@@ -505,7 +526,7 @@ function renderKunde(r){
     ${fokus ? `<button class="big-done${done ? ' on' : ''}" data-act="erledigt" data-kk="${kk.id}" data-wk="${wk(fokus)}" aria-pressed="${done}">${I('check')}${done ? `Erledigt · KW ${fokus.kw}` : `Als erledigt markieren · KW ${fokus.kw}`}</button>` : ''}
     <section class="sd-sec"><h3>Fotos</h3>
       ${fotos.length ? `<div class="photos">${fotos.map(f => `<button class="ph" data-act="lb" data-foto="${f.id}">${S.urls[vorschauPfad(f.storage_pfad)] ? `<img alt="" src="${esc(S.urls[vorschauPfad(f.storage_pfad)])}">` : ''}</button>`).join('')}</div>` : '<div class="muted small">Noch keine Fotos.</div>'}
-      <label class="big-foto">${I('cam')}Foto hinzufügen<input type="file" accept="image/*" capture="environment" hidden data-act="foto" data-kunde="${k.kunde_id}" data-kat="${kat.id}"></label>
+      <label class="big-foto">${I('cam')}Foto hinzufügen<input type="file" accept="image/*" capture="environment" hidden data-act="foto" data-kunde="${k.kunde_id}" data-objekt="${kk.objekt_id || ''}" data-kat="${kat.id}"></label>
     </section>
     ${fokus ? `<section class="sd-sec"><h3>Arbeiten KW ${fokus.kw}</h3>${diese.map(ka => {
         const a = ka.arbeit_id && S.arbeiten.find(x => x.id === ka.arbeit_id), p = punkte(a ? a.ablauf : ka.beschrieb);
@@ -549,7 +570,7 @@ async function verkleinere(datei, max, qualitaet){
   return new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('Bild konnte nicht umgewandelt werden')), 'image/jpeg', qualitaet));
 }
 // Foto vom Handy: verkleinern, hochladen, Kategorie des Einsatzes als Schlagwort
-async function ladeFotoHoch(datei, kundeId, katId){
+async function ladeFotoHoch(datei, kundeId, katId, objektId){
   showToast('Foto wird hochgeladen …');
   try {
     const [gross, klein] = await Promise.all([verkleinere(datei, 1920, 0.85), verkleinere(datei, 480, 0.8)]);
@@ -559,7 +580,7 @@ async function ladeFotoHoch(datei, kundeId, katId){
       sb.storage.from('pflege-fotos').upload(vorschauPfad(pfad), klein, { contentType: 'image/jpeg' })
     ]);
     const ue = up.find(x => x.error); if(ue) throw ue.error;
-    const { data, error } = await sb.from('pflege_foto').insert({ id, kunde_id: kundeId, storage_pfad: pfad, erstellt_von: aktuelleUserId }).select().single();
+    const { data, error } = await sb.from('pflege_foto').insert({ id, kunde_id: kundeId, objekt_id: objektId || null, storage_pfad: pfad, erstellt_von: aktuelleUserId }).select().single();
     if(error) throw error;
     S.fotos.unshift(data);
     const { error: e2 } = await sb.from('pflege_foto_kategorie').insert({ foto_id: id, kategorie_id: katId });
@@ -602,7 +623,8 @@ document.addEventListener('click', async e => {
   if(!b || b.tagName === 'INPUT' || b.tagName === 'SELECT') return;
   const act = b.dataset.act, f = S.f, r = route();
   if(act === 'tab'){ S.tab = b.dataset.tab; if(location.hash) location.hash = ''; else render(); window.scrollTo(0, 0); }
-  else if(act === 'oeffne'){ const p = new URLSearchParams({ k: b.dataset.kunde }); if(b.dataset.kat) p.set('kat', b.dataset.kat); if(b.dataset.wk) p.set('wk', b.dataset.wk); location.hash = p.toString(); }
+  else if(act === 'oeffne') zeigeKunde(b.dataset.kunde, b.dataset.objekt, b.dataset.kat, b.dataset.wk);
+  else if(act === 'ort') zeigeKunde(r.kunde, b.dataset.o || '');
   else if(act === 'zurueck') location.hash = '';
   else if(act === 'f-abo' || act === 'f-status'){
     const liste = act === 'f-abo' ? 'abo' : 'status', v = b.dataset.v, max = act === 'f-abo' ? 3 : 2;
@@ -611,10 +633,10 @@ document.addEventListener('click', async e => {
     render();
   }
   else if(act === 'erledigt'){ const [j, w] = b.dataset.wk.split('-').map(Number); await setzeErledigt(b.dataset.kk, j, w, b.getAttribute('aria-pressed') !== 'true'); }
-  else if(act === 'kat'){ const p = new URLSearchParams({ k: r.kunde, kat: b.dataset.kat }); location.hash = p.toString(); }
-  else if(act === 'wk'){ const p = new URLSearchParams({ k: r.kunde, kat: r.kat || '', wk: b.dataset.wk }); history.replaceState(null, '', '#' + p.toString()); render(); }
+  else if(act === 'kat') zeigeKunde(r.kunde, aktOrt(), b.dataset.kat);
+  else if(act === 'wk'){ const p = new URLSearchParams({ k: r.kunde }); if(aktOrt()) p.set('o', aktOrt()); p.set('kat', r.kat || ''); p.set('wk', b.dataset.wk); history.replaceState(null, '', '#' + p.toString()); render(); }
   else if(act === 'lb'){
-    const kk = S.kk.find(x => x.kunde_id === r.kunde && x.kategorie_id === (r.kat || kkVonKunde(r.kunde)[0]?.kategorie_id));
+    const kk = S.kk.find(x => x.id === aktKkId);
     const liste = fotosFuer(kk).map(x => x.id); S.lb = { liste, i: Math.max(0, liste.indexOf(b.dataset.foto)) }; zeigeLb();
   }
   else if(act === 'dok'){
@@ -646,7 +668,7 @@ document.addEventListener('change', e => {
   const el = e.target, act = el.dataset.act;
   if(act === 'f-kat'){ S.f.kat = el.value; render(); }
   else if(act === 'f-ma'){ S.f.ma = el.value; render(); }
-  else if(act === 'foto'){ const d = el.files[0]; el.value = ''; if(d) ladeFotoHoch(d, el.dataset.kunde, el.dataset.kat); }
+  else if(act === 'foto'){ const d = el.files[0]; el.value = ''; if(d) ladeFotoHoch(d, el.dataset.kunde, el.dataset.kat, el.dataset.objekt); }
 });
 document.addEventListener('input', e => { if(e.target.dataset.act === 'q'){ S.q = e.target.value; renderKundenTreffer(); } });
 

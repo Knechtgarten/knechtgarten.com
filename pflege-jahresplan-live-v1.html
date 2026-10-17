@@ -100,8 +100,11 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 .plan thead th{position:sticky;background:#fff;z-index:2;text-align:center;font-size:10.5px;color:var(--muted);font-weight:600;}
 .plan thead tr:first-child th{top:0;height:24px;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;}
 .plan thead tr:nth-child(2) th{top:24px;height:24px;}
-.plan .nm{position:sticky;left:0;background:#fff;z-index:1;text-align:left;padding:0 10px;min-width:210px;max-width:210px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.plan thead .nm{z-index:3;}
+.plan .nm{position:sticky;left:0;background:#fff;z-index:1;text-align:left;padding:0 10px;box-sizing:border-box;min-width:210px;max-width:210px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.plan thead .nm,.plan thead .ob{z-index:3;}
+/* Spalte Objekt: eigene Zeile pro Objekt (Hauptadresse = leer) */
+.plan .ob{position:sticky;left:210px;background:#fff;z-index:1;text-align:left;padding:0 10px;box-sizing:border-box;min-width:160px;max-width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11.5px;color:#6B7420;}
+.plan tfoot .ob{background:var(--soft);}
 .plan .nm a{color:var(--ink);text-decoration:none;font-weight:700;cursor:pointer;}
 .plan .nm a:hover{text-decoration:underline;}
 .plan .nm .s{font-size:11px;color:var(--muted);font-weight:400;margin-left:6px;}
@@ -352,7 +355,7 @@ const telVon = k => { const c = k.kunde?.kontaktdaten || {}; return c.telefon1 |
 // ---------------------------------------------------------------------------
 const S = {
   kat: [], felder: [], arbeiten: [], tabellen: [], spalten: [], zust: [],
-  kunden: [], kk: [], kz: [], ka: [], status: new Set(), fotos: [], fk: [], urls: {}, lb: null,
+  kunden: [], obj: [], kk: [], kz: [], ka: [], status: new Set(), fotos: [], fk: [], urls: {}, lb: null,
   jahr: YEAR_NOW, katSel: [], f: { abo: [], ma: [], status: '' },
   side: null, neu: null, scroll: null
 };
@@ -362,6 +365,10 @@ const tabelleVon = katId => S.tabellen.find(t => t.kategorie_id === katId);
 const spaltenVon = tabId => S.spalten.filter(s => s.tabelle_id === tabId).sort(nachReihe);
 const zustVon = kkId => S.kz.filter(z => z.kunde_kategorie_id === kkId).map(z => z.benutzer_id);
 const kundeById = id => S.kunden.find(k => k.kunde_id === id);
+const objById = id => id ? S.obj.find(o => o.id === id) : null;
+const objekteVon = kundeId => S.obj.filter(o => o.kunde_id === kundeId).sort((a, b) => nachReihe(a, b) || a.erstellt_am.localeCompare(b.erstellt_am));
+const objektName = o => [o.strasse, o.ort].filter(Boolean).join(', ') || 'Neues Objekt';
+const detailLink = (kundeId, objektId) => `pflege-kunden-live-v1.html#k=${kundeId}${objektId ? '&o=' + objektId : ''}`;
 const statusKey = (kkId, jahr, kw) => `${kkId}|${jahr}|${kw}`;
 
 async function ladeAlles(){
@@ -373,6 +380,7 @@ async function ladeAlles(){
     sb.from('pflege_tabelle_spalte').select('*'),
     sb.rpc('pflege_zustaendige'),
     sb.from('pflege_kunde').select('*, kunde(id,name,strasse,plz,ort,kontaktdaten)'),
+    sb.from('pflege_objekt').select('*'),
     sb.from('pflege_kunde_kategorie').select('*'),
     sb.from('pflege_kunde_kategorie_zustaendig').select('*'),
     sb.from('pflege_kunde_arbeit').select('*'),
@@ -385,7 +393,7 @@ async function ladeAlles(){
   const fehler = r.find(x => x.error);
   if(fehler){ showToast(friendlyError(fehler.error), true); return; }
   let st;
-  [S.kat, S.felder, S.arbeiten, S.tabellen, S.spalten, S.zust, S.kunden, S.kk, S.kz, S.ka, st, S.fotos, S.fk, S.dok, S.dk] = r.map(x => x.data || []);
+  [S.kat, S.felder, S.arbeiten, S.tabellen, S.spalten, S.zust, S.kunden, S.obj, S.kk, S.kz, S.ka, st, S.fotos, S.fk, S.dok, S.dk] = r.map(x => x.data || []);
   S.status = new Set(st.map(s => statusKey(s.kunde_kategorie_id, s.jahr, s.kw)));
   S.kunden.sort((a, b) => (a.kunde?.name || '').localeCompare(b.kunde?.name || '', 'de'));
   render();
@@ -398,9 +406,10 @@ function wochenVon(ka){
   const std = S.arbeiten.find(a => a.id === ka.arbeit_id)?.standard_kws || [], minus = ka.kws_minus || [];
   return [...new Set([...std.filter(w => !minus.includes(w)), ...(ka.kws_plus || [])])].sort((a, b) => a - b);
 }
-function jobsVon(kundeId, jahr){
+// objektId: null = Hauptadresse, id = nur dieses Objekt, undefined = alles des Kunden
+function jobsVon(kundeId, jahr, objektId){
   const out = [];
-  S.kk.filter(x => x.kunde_id === kundeId).forEach(kk => {
+  S.kk.filter(x => x.kunde_id === kundeId && (objektId === undefined || (x.objekt_id || null) === objektId)).forEach(kk => {
     const kat = katById(kk.kategorie_id); if(!kat) return;
     S.ka.filter(x => x.kunde_kategorie_id === kk.id).forEach(ka => {
       if(ka.arbeit_id && !S.arbeiten.some(a => a.id === ka.arbeit_id)) return;
@@ -450,8 +459,9 @@ function render(){
   const statusPass = j => !f.status || erledigt(j.kk.id, jahr, j.kw) === (f.status === 'erledigt');
   const katPass = j => !S.katSel.length || S.katSel.includes(j.kat.id);
   const kundePass = k => !f.abo.length || f.abo.includes(k.abo_typ);
+  // eine Zeile pro Kunde (Hauptadresse) und pro Objekt
   const zeilen = S.kunden.filter(kundePass)
-    .map(k => ({ k, jobs: jobsVon(k.kunde_id, jahr).filter(j => katPass(j) && zustPass(j.zust, f.ma) && statusPass(j)) }))
+    .flatMap(k => [null, ...objekteVon(k.kunde_id)].map(o => ({ k, o, jobs: jobsVon(k.kunde_id, jahr, o ? o.id : null).filter(j => katPass(j) && zustPass(j.zust, f.ma) && statusPass(j)) })))
     .filter(z => z.jobs.length);
   const zaehle = id => S.kunden.filter(k => kundePass(k) && jobsVon(k.kunde_id, jahr).some(j => (id === 'alle' || j.kat.id === id) && zustPass(j.zust, f.ma) && statusPass(j))).length;
   const proWoche = Array(54).fill(0);
@@ -460,8 +470,9 @@ function render(){
 
   const zelle = (z, w) => {
     const kats = [...new Set(z.jobs.filter(j => j.kw === w).map(j => j.kk.id))].map(id => z.jobs.find(j => j.kk.id === id));
-    const neu = S.neu && S.neu.kundeId === z.k.kunde_id && S.neu.kw === w;
-    return `<td class="c${jetzt(w) ? ' now' : ''}${kats.length ? '' : ' leer'}${neu ? ' neu' : ''}" data-kunde="${z.k.kunde_id}" data-kw="${w}">${kats.map(j => {
+    const oid = z.o ? z.o.id : '';
+    const neu = S.neu && S.neu.kundeId === z.k.kunde_id && (S.neu.objektId || '') === oid && S.neu.kw === w;
+    return `<td class="c${jetzt(w) ? ' now' : ''}${kats.length ? '' : ' leer'}${neu ? ' neu' : ''}" data-kunde="${z.k.kunde_id}" data-objekt="${oid}" data-kw="${w}">${kats.map(j => {
       const done = erledigt(j.kk.id, jahr, w), sel = S.side && S.side.kkId === j.kk.id && S.side.kw === w;
       return `<button class="job${sel ? ' sel' : ''}" style="${katStyle(j.kat)}" data-act="job" data-kk="${j.kk.id}" data-kw="${w}" aria-label="${esc(j.kat.name)} KW ${w}, ${done ? 'erledigt' : 'offen'}">${done ? I('check') : esc(j.kat.kuerzel)}</button>`;
     }).join('')}</td>`;
@@ -486,14 +497,14 @@ function render(){
     </div>
     <div class="plan-wrap"><table class="plan">
       <thead>
-        <tr><th class="nm"></th>${MONATE.map(([m, a, b]) => { const n = Math.min(b, kws.length) - a + 1; return n > 0 ? `<th colspan="${n}">${m}</th>` : ''; }).join('')}</tr>
-        <tr><th class="nm small">Kunde</th>${kws.map(w => `<th class="${jetzt(w) ? 'now' : ''}">${w}</th>`).join('')}</tr>
+        <tr><th class="nm"></th><th class="ob"></th>${MONATE.map(([m, a, b]) => { const n = Math.min(b, kws.length) - a + 1; return n > 0 ? `<th colspan="${n}">${m}</th>` : ''; }).join('')}</tr>
+        <tr><th class="nm small">Kunde</th><th class="ob small">Objekt</th>${kws.map(w => `<th class="${jetzt(w) ? 'now' : ''}">${w}</th>`).join('')}</tr>
       </thead>
-      <tbody>${zeilen.map(z => `<tr><td class="nm"><a data-act="kunde" data-kunde="${z.k.kunde_id}" href="pflege-kunden-live-v1.html#k=${z.k.kunde_id}">${esc(z.k.kunde?.name)}</a><span class="s">${esc(z.k.kunde?.ort)}</span></td>${kws.map(w => zelle(z, w)).join('')}</tr>`).join('')
-        || `<tr><td class="nm muted">Keine Einsätze</td>${kws.map(() => '<td class="c"></td>').join('')}</tr>`}</tbody>
-      <tfoot><tr><td class="nm">Einsätze pro Woche</td>${kws.map(w => `<td>${proWoche[w] || ''}</td>`).join('')}</tr></tfoot>
+      <tbody>${zeilen.map(z => `<tr><td class="nm"><a data-act="kunde" data-kunde="${z.k.kunde_id}" href="${detailLink(z.k.kunde_id, z.o?.id)}">${esc(z.k.kunde?.name)}</a><span class="s">${esc(z.k.kunde?.ort)}</span></td><td class="ob"${z.o ? ` title="${esc(objektName(z.o))}"` : ''}>${z.o ? esc(objektName(z.o)) : ''}</td>${kws.map(w => zelle(z, w)).join('')}</tr>`).join('')
+        || `<tr><td class="nm muted">Keine Einsätze</td><td class="ob"></td>${kws.map(() => '<td class="c"></td>').join('')}</tr>`}</tbody>
+      <tfoot><tr><td class="nm">Einsätze pro Woche</td><td class="ob"></td>${kws.map(w => `<td>${proWoche[w] || ''}</td>`).join('')}</tr></tfoot>
     </table></div>
-    <div class="count">${zeilen.length} ${zeilen.length === 1 ? 'Kunde' : 'Kunden'} · ${proWoche.reduce((a, b) => a + b, 0)} Einsätze${jahr === YEAR_NOW ? ` · aktuelle Woche KW ${KW_NOW} hervorgehoben` : ''}</div>`;
+    <div class="count">${zeilen.length} ${zeilen.length === 1 ? 'Zeile' : 'Zeilen'} (Kunden und Objekte) ·${proWoche.reduce((a, b) => a + b, 0)} Einsätze${jahr === YEAR_NOW ? ` · aktuelle Woche KW ${KW_NOW} hervorgehoben` : ''}</div>`;
   const pw = document.querySelector('.plan-wrap');
   pw.scrollLeft = altScroll ?? S.scroll ?? Math.max(0, (KW_NOW - 8) * 35);
   S.scroll = pw.scrollLeft;
@@ -516,9 +527,10 @@ function renderSide(){
   if(!S.side){ $('side').innerHTML = ''; return; }
   const kk = S.kk.find(x => x.id === S.side.kkId), kw = S.side.kw, jahr = S.jahr;
   if(!kk){ S.side = null; $('side').innerHTML = ''; return; }
-  const kat = katById(kk.kategorie_id), k = kundeById(kk.kunde_id), ku = k.kunde || {};
+  const kat = katById(kk.kategorie_id), k = kundeById(kk.kunde_id), ku = k.kunde || {}, o = objById(kk.objekt_id);
+  const adr = o || ku;
   const done = erledigt(kk.id, jahr, kw);
-  const jobs = jobsVon(kk.kunde_id, jahr).filter(j => j.kk.id === kk.id && j.kw === kw);
+  const jobs = jobsVon(kk.kunde_id, jahr, kk.objekt_id || null).filter(j => j.kk.id === kk.id && j.kw === kw);
   const punkte = t => (t || '').split('\n').map(s => s.replace(/^[-•*\d.)\s]+/, '').trim()).filter(Boolean);
   const arbeiten = jobs.map(j => {
     const a = j.ka.arbeit_id && S.arbeiten.find(x => x.id === j.ka.arbeit_id);
@@ -543,8 +555,10 @@ function renderSide(){
     <aside class="sidepanel" aria-label="Einsatz ${esc(kat.name)} KW ${kw}">
       <div class="sd-head"><div class="sd-meta"><span class="kchip" style="${katStyle(kat)}">${esc(kat.name)}</span><span class="muted small">KW ${kw} · ${jahr}</span></div>
         <button class="icon-btn" data-act="side-zu" aria-label="Seitenfenster schliessen">${I('x')}</button></div>
-      <h2 class="sd-k"><a href="pflege-kunden-live-v1.html#k=${kk.kunde_id}">${esc(ku.name)}</a></h2>
-      <div class="muted small">${esc([ku.strasse, [ku.plz, ku.ort].filter(Boolean).join(' ')].filter(Boolean).join(', '))}</div>
+      <h2 class="sd-k"><a href="${detailLink(kk.kunde_id, kk.objekt_id)}">${esc(ku.name)}</a></h2>
+      ${o ? '<div class="small" style="color:#6B7420;font-weight:700">Objekt</div>' : ''}
+      <div class="muted small">${esc([adr.strasse, [adr.plz, adr.ort].filter(Boolean).join(' ')].filter(Boolean).join(', '))}</div>
+      ${o?.notiz ? `<div class="hint" style="white-space:pre-wrap">${esc(o.notiz)}</div>` : ''}
       ${k.notiz ? `<div class="hint" style="white-space:pre-wrap">${esc(k.notiz)}</div>` : ''}
       <div class="stat" role="group" aria-label="Status">
         <button data-act="status" data-v="offen" class="s-offen" aria-pressed="${!done}">Offen</button>
@@ -552,7 +566,7 @@ function renderSide(){
       </div>
       <section class="sd-sec"><h3>Arbeiten</h3><div>${arbeiten}</div></section>
       <section class="sd-sec"><h3>Angaben / Eckdaten</h3>${angaben}</section>
-      ${(() => { const dl = (S.dok || []).filter(d => d.kunde_id === kk.kunde_id && !d.ersetzt && (() => { const k2 = S.dk.filter(x => x.dokument_id === d.id).map(x => x.kategorie_id); return !k2.length || k2.includes(kk.kategorie_id); })());
+      ${(() => { const dl = (S.dok || []).filter(d => d.kunde_id === kk.kunde_id && (d.objekt_id || null) === (kk.objekt_id || null) && !d.ersetzt && (() => { const k2 = S.dk.filter(x => x.dokument_id === d.id).map(x => x.kategorie_id); return !k2.length || k2.includes(kk.kategorie_id); })());
         return dl.length ? `<section class="sd-sec"><h3>Angebote und Dokumente</h3><div class="sd-doks">${dl.map(d =>
           `<button class="sd-dok" data-act="dok" data-dok="${d.id}">${I('file')}<span>${esc(d.titel)}<small>${esc(d.easybill_nummer || 'PDF')}${d.datum ? ' · ' + esc(d.datum.split('-').reverse().join('.')) : ''}</small></span></button>`).join('')}</div></section>` : ''; })()}
       ${(() => { const fl = fotosFuer(kk); return fl.length ? `<section class="sd-sec"><h3>Fotos</h3><div class="sd-fotos">${fl.map(f =>
@@ -565,7 +579,7 @@ function renderSide(){
 // Fotos im Seitenfenster: mit Schlagwort dieser Kategorie oder ohne Zuordnung (privater Speicher, Links 1 h gueltig)
 const vorschauPfad = p => p.replace(/\.jpg$/, '_t.jpg');
 const fotoKats = fotoId => S.fk.filter(x => x.foto_id === fotoId).map(x => x.kategorie_id);
-const fotosFuer = kk => S.fotos.filter(f => f.kunde_id === kk.kunde_id && (!fotoKats(f.id).length || fotoKats(f.id).includes(kk.kategorie_id)));
+const fotosFuer = kk => S.fotos.filter(f => f.kunde_id === kk.kunde_id && (f.objekt_id || null) === (kk.objekt_id || null) && (!fotoKats(f.id).length || fotoKats(f.id).includes(kk.kategorie_id)));
 let urlsZeit = Date.now();
 async function ladeFotoUrls(fotos){
   if(Date.now() - urlsZeit > 50 * 60000){ S.urls = {}; urlsZeit = Date.now(); }
@@ -598,7 +612,7 @@ $('lb').addEventListener('click', e => {
   if(b){ const n = S.lb.liste.length; S.lb.i = (S.lb.i + +b.dataset.lb + n) % n; zeigeLb(); }
 });
 function renderNeu(){
-  const n = S.neu, k = kundeById(n.kundeId), kks = S.kk.filter(x => x.kunde_id === n.kundeId);
+  const n = S.neu, k = kundeById(n.kundeId), o = objById(n.objektId), kks = S.kk.filter(x => x.kunde_id === n.kundeId && (x.objekt_id || null) === (n.objektId || null));
   if(!kks.some(x => x.id === n.kkId)) n.kkId = kks[0]?.id;
   const kk = kks.find(x => x.id === n.kkId), kat = kk && katById(kk.kategorie_id);
   // alle Standardarbeiten der Kategorie, die in dieser Woche noch nicht eingeplant sind
@@ -610,6 +624,7 @@ function renderNeu(){
       <div class="sd-head"><div class="sd-meta"><span class="muted small">Arbeit hinzufügen · KW ${n.kw}</span></div>
         <button class="icon-btn" data-act="side-zu" aria-label="Schliessen">${I('x')}</button></div>
       <h2 class="sd-k">${esc(k.kunde?.name)}</h2>
+      ${o ? `<div class="small" style="color:#6B7420;font-weight:700">Objekt ${esc(objektName(o))}</div>` : ''}
       <div class="field"><label for="nk">Pflegekategorie</label><select id="nk" data-act="neu-kat">${kks.map(x => { const c = katById(x.kategorie_id); return `<option value="${x.id}" ${x.id === n.kkId ? 'selected' : ''}>${esc(c?.name)}</option>`; }).join('')}</select></div>
       ${kat?.individuell ? '' : `<div class="seg" role="group" aria-label="Art">
         <button data-act="neu-art" data-v="std" aria-pressed="${art === 'std'}">Standardarbeit</button><button data-act="neu-art" data-v="zus" aria-pressed="${art === 'zus'}">Zusatzarbeit</button></div>`}
@@ -635,9 +650,9 @@ document.addEventListener('click', async e => {
   if(!b){
     const td = e.target.closest('.plan td.c.leer');
     if(td){
-      const kundeId = td.dataset.kunde, kw = +td.dataset.kw;
+      const kundeId = td.dataset.kunde, objektId = td.dataset.objekt || null, kw = +td.dataset.kw;
       S.side = null;
-      S.neu = S.neu && S.neu.kundeId === kundeId && S.neu.kw === kw ? null : { kundeId, kw, art: 'std', kkId: null };
+      S.neu = S.neu && S.neu.kundeId === kundeId && S.neu.objektId === objektId && S.neu.kw === kw ? null : { kundeId, objektId, kw, art: 'std', kkId: null };
       render(); $('nt')?.focus();
     }
     return;
