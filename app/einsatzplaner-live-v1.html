@@ -144,6 +144,10 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 .row.grp .lane .bar{top:2px;height:15px;}
 .aghost{position:fixed;z-index:95;background:var(--primary);color:#fff;font-size:11.5px;padding:4px 8px;border-radius:5px;pointer-events:none;box-shadow:0 4px 12px rgba(0,0,0,.2);}
 .lane.drop{background:#F2F5D6 !important;}
+.gadd{all:unset;cursor:pointer;width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;border-radius:4px;color:rgba(255,255,255,.6);flex:none;margin-left:auto;}
+.gadd .i{width:13px;height:13px;}
+.gadd:hover{color:#fff;background:rgba(255,255,255,.15);}
+.gadd + .pzb{margin-left:0;}
 .pzb{all:unset;cursor:pointer;margin-left:auto;width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;border-radius:4px;color:#C3C8CE;flex:none;}
 .pzb .i{width:13px;height:13px;}
 .pzb.has{color:var(--primary);background:var(--soft);}
@@ -695,7 +699,7 @@ function renderRows(){
   grps.forEach(g => {
     const ps = act.filter(p => (p.gruppe_id || '_ohne') === g.id).sort((a, b) => a.sortierung - b.sortierung || a.name.localeCompare(b.name));
     if(!ps.length) return; const zu = collapsed.has(g.id);
-    h += `<div class="row grp${zu ? ' zu' : ''}" data-g="${g.id}"><div class="nm">${I('chev')}${esc(g.name)} <span style="opacity:.6;font-weight:400">(${ps.length})</span>${g.id !== '_ohne' ? pzBtn('gruppe', g.id) : ''}</div><div class="lane" style="width:${W}px;height:20px">${provBars('g:' + g.id)}</div></div>`;
+    h += `<div class="row grp${zu ? ' zu' : ''}" data-g="${g.id}"><div class="nm">${I('chev')}${esc(g.name)} <span style="opacity:.6;font-weight:400">(${ps.length})</span>${isBuero() && g.id !== '_ohne' ? `<button class="gadd" data-gadd="${g.id}" title="Zeile hinzufügen" aria-label="Zeile hinzufügen">${I('plus')}</button>` : ''}${g.id !== '_ohne' ? pzBtn('gruppe', g.id) : ''}</div><div class="lane" style="width:${W}px;height:20px">${provBars('g:' + g.id)}</div></div>`;
     if(!zu) ps.forEach(p => { h += personRow(p, W, bgx); });
   });
   const sl = t.scrollLeft, stp = t.scrollTop;
@@ -1024,6 +1028,7 @@ function bindTimeline(t){
   let scT; t.addEventListener('scroll', () => { updateRange(); closePop(); if(zoom === 'tag'){ clearTimeout(scT); scT = setTimeout(() => { const c = Math.floor(t.scrollLeft / dayW); if(c < HR[0] + 3 || c > HR[1] - 4) renderRows(); }, 120); } }, { passive: true });
   t.addEventListener('pointerdown', e => {
     if(e.button !== 0) return; closePop();
+    const ga = e.target.closest('[data-gadd]'); if(ga){ e.stopPropagation(); personDlg(null, ga.dataset.gadd); return; }
     const pzb = e.target.closest('[data-pz]'); if(pzb){ e.stopPropagation(); const [eb, ref] = pzb.dataset.pz.split(':'); openBoard(eb, ref || null); return; }
     const pv = e.target.closest('.bar.prov[data-prov]'); if(pv){ drag = { kind: 'prov', pid: pv.dataset.prov, x0: e.clientX, y0: e.clientY, moved: false, rect: pv.getBoundingClientRect() }; e.preventDefault(); return; }
     const g = e.target.closest('.row.grp'); if(g){ const id = g.dataset.g; collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id); lsSet('zu', [...collapsed]); renderRows(); return; }
@@ -1405,7 +1410,7 @@ function renderPersonen(){
         ${ps.map((p, i) => `<div class="prow${p.aktiv ? '' : ' off'}"><span class="dot" style="width:14px;height:14px;border-radius:3px;background:${p.farbe || '#fff'};border:1px solid rgba(50,62,78,.25)"></span>
           <span><b>${esc(p.name)}</b>${p.kuerzel ? ` <span class="muted small">${esc(p.kuerzel)}</span>` : ''}${p.zusatz ? ` <span class="muted small">· ${esc(p.zusatz)}</span>` : ''}</span>
           <span>${p.ist_vorarbeiter ? '<span class="tag">Vorarbeiter</span>' : ''}${p.ist_projektleiter ? '<span class="tag">Projektleiter</span>' : ''}${p.aktiv ? '' : '<span class="tag">inaktiv</span>'}</span>
-          <span class="small muted">${p.benutzer_id ? esc(BENUTZER.find(b => b.id === p.benutzer_id)?.email || 'Login verknüpft') : 'kein Login'}</span>
+          <span class="small muted">${p.benutzer_id ? esc(BENUTZER.find(b => b.id === p.benutzer_id)?.email || 'Benutzer ohne Login') : 'kein Benutzer'}</span>
           <span class="acts"><button class="icon-btn" data-pu="${p.id}" aria-label="Nach oben" ${i === 0 ? 'disabled' : ''}>${I('up')}</button><button class="icon-btn" data-pd="${p.id}" aria-label="Nach unten" ${i === ps.length - 1 ? 'disabled' : ''}>${I('down')}</button><button class="icon-btn" data-pe="${p.id}" aria-label="Bearbeiten">${I('edit')}</button></span></div>`).join('') || '<div class="prow"><span></span><span class="muted small">Noch niemand in dieser Gruppe</span></div>'}
       </div>`; }).join('')}
   </div>`;
@@ -1428,8 +1433,8 @@ function frage(titel, wert){
     d.querySelector('#fOk').onclick = () => fertig(inp.value.trim()); d.querySelector('#fNo').onclick = () => fertig(null);
     inp.onkeydown = e => { if(e.key === 'Enter') fertig(inp.value.trim()); if(e.key === 'Escape') fertig(null); }; });
 }
-function personDlg(p){
-  const neu = !p; p = p || { name: '', kuerzel: '', zusatz: '', farbe: PALETTE[PERSONEN.length % PALETTE.length], gruppe_id: GRUPPEN[0]?.id || null, ist_vorarbeiter: false, ist_projektleiter: false, benutzer_id: null, aktiv: true };
+function personDlg(p, gid){
+  const neu = !p; p = p || { name: '', kuerzel: '', zusatz: '', farbe: PALETTE[PERSONEN.length % PALETTE.length], gruppe_id: gid || GRUPPEN[0]?.id || null, ist_vorarbeiter: false, ist_projektleiter: false, benutzer_id: null, aktiv: true };
   const sers = neu ? [] : SERIEN.filter(s => s.person_id === p.id);
   const vergeben = new Set(PERSONEN.filter(x => x.benutzer_id && x.id !== p.id).map(x => x.benutzer_id));
   const d = document.createElement('div'); d.className = 'dlg';
@@ -1440,7 +1445,7 @@ function personDlg(p){
     <div class="fld"><label>Farbe (Balken)</label><div class="pal" id="dF">${PALETTE.map(c => `<button style="background:${c}" data-c="${c}" aria-pressed="${c === p.farbe}" aria-label="Farbe ${c}"></button>`).join('')}</div></div>
     <label class="chk"><input type="checkbox" id="dV" ${p.ist_vorarbeiter ? 'checked' : ''}>Vorarbeiter (Baustellen ohne Mithilfe zeigen «Personal fehlt»)</label>
     <label class="chk"><input type="checkbox" id="dP" ${p.ist_projektleiter ? 'checked' : ''}>Projektleiter (Baustellen bekommen seine Farbe)</label>
-    <div class="fld"><label>Login</label><select id="dB"><option value="">Kein Login (z. B. Lernende, Temporäre)</option>${BENUTZER.filter(b => b.email && !vergeben.has(b.id)).map(b => `<option value="${b.id}"${b.id === p.benutzer_id ? ' selected' : ''}>${esc(b.email)} (${esc(ROLLE_LABEL[b.rolle] || b.rolle)})</option>`).join('')}</select></div>
+    <div class="fld"><label>Login</label><select id="dB"><option value="">Kein Login (z. B. Lernende, Temporäre)</option>${BENUTZER.filter(b => (b.email || b.id === p.benutzer_id) && !vergeben.has(b.id)).map(b => `<option value="${b.id}"${b.id === p.benutzer_id ? ' selected' : ''}>${esc(b.email || (p.name + ' (Benutzer ohne Login)'))} (${esc(ROLLE_LABEL[b.rolle] || b.rolle)})</option>`).join('')}</select></div>
     <label class="chk"><input type="checkbox" id="dA" ${p.aktiv ? 'checked' : ''}>Aktiv (im Planer sichtbar)</label>
     ${neu ? '' : `<div class="fld"><label>Wiederkehrend (Schule, Teilzeit-Frei …)</label>
       <div>${sers.map(s => `<div class="ser"><span style="flex:1">${esc(s.titel)} · jeden ${WDL[s.wochentag % 7]}${s.teil === 'vm' ? ' Vormittag' : s.teil === 'nm' ? ' Nachmittag' : ''}${s.alle_zwei_wochen ? ', alle 2 Wochen' : ''} · ab ${esc(s.von.split('-').reverse().join('.'))}${s.bis ? ' bis ' + esc(s.bis.split('-').reverse().join('.')) : ''}</span><button class="icon-btn" data-sx="${s.id}" aria-label="Serie löschen">${I('trash')}</button></div>`).join('') || '<span class="small muted">Keine</span>'}</div>
