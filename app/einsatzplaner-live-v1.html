@@ -262,6 +262,18 @@ table.bp td{padding:4px;border-top:1px solid var(--soft);white-space:nowrap;}
 .dokl{all:unset;cursor:pointer;display:flex;gap:6px;align-items:center;font-size:12.5px;}
 .dokl:hover{text-decoration:underline;}
 .dokl .i{color:var(--danger);width:15px;height:15px;}
+.abs-chips{display:flex;flex-wrap:wrap;gap:5px;}
+.abs-chips button{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:16px;padding:4px 10px;font-size:12px;}
+.abs-chips button i{width:12px;height:12px;border-radius:3px;border:1px solid rgba(35,43,53,.2);}
+.abs-chips button.on{border-color:var(--primary);box-shadow:inset 0 0 0 1px var(--primary);font-weight:700;}
+.abrow{display:grid;grid-template-columns:18px minmax(0,180px) auto 1fr auto;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--soft);}
+.abrow:last-child{border-bottom:0;}
+.greys{display:flex;gap:4px;flex-wrap:wrap;}
+.greys button{all:unset;cursor:pointer;width:24px;height:22px;border-radius:5px;border:2px solid transparent;box-shadow:inset 0 0 0 1px rgba(35,43,53,.15);}
+.greys button.on{border-color:var(--primary);}
+.greys .stp{background:repeating-linear-gradient(135deg,#A6ADB4 0 4px,#fff 4px 7px);}
+.prev{border-radius:4px;padding:3px 8px;font-size:11px;font-weight:600;justify-self:start;border:1px solid rgba(35,43,53,.2);}
+@media (max-width:640px){ .abrow{grid-template-columns:18px 1fr;} }
 .leiste{position:fixed;z-index:65;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 28px rgba(30,37,48,.18);padding:10px;display:flex;flex-direction:column;gap:8px;width:min(380px,calc(100vw - 16px));}
 .leiste .lh{display:flex;flex-direction:column;gap:1px;color:var(--primary);font-size:12.5px;}
 .leiste .lb{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;}
@@ -374,7 +386,7 @@ table.ft td{padding:7px 10px;border-bottom:1px solid var(--soft);}
   <a data-view="handy"><svg class="i"><use href="#i-mobile"/></svg>Handy-Ansicht</a>
   <a data-view="personen" class="buero"><svg class="i"><use href="#i-users"/></svg>Personen &amp; Gruppen</a>
   <a data-view="ressourcen" class="buero"><svg class="i"><use href="#i-truck"/></svg>Fahrzeuge &amp; Maschinen</a>
-  <a data-view="feiertage" class="buero"><svg class="i"><use href="#i-flag"/></svg>Feiertage</a>
+  <a data-view="feiertage" class="buero"><svg class="i"><use href="#i-flag"/></svg>Feiertage &amp; Absenzen</a>
 </div></nav>
 
 <div class="wrap hidden" id="loginwrap">
@@ -489,7 +501,7 @@ async function fetchAll(mk){ let out = [], i = 0; for(;;){ const { data, error }
 async function ladeAlles(){
   try{
     const von = fromU(0), bis = fromU(NDAYS);
-    const [g, p, e, s, f, k, r, z, au, pz] = await Promise.all([
+    const [g, p, e, s, f, k, r, z, au, pz, at] = await Promise.all([
       fetchAll(() => sb.from('planer_gruppe').select('*').order('sortierung')),
       fetchAll(() => sb.from('planer_person').select('*').order('sortierung')),
       fetchAll(() => sb.from('planer_einsatz').select('*, planer_datei(id,art,name,storage_pfad)').lt('beginn', bis).gt('ende', von)),
@@ -499,9 +511,10 @@ async function ladeAlles(){
       fetchAll(() => sb.from('planer_ressource').select('*').order('sortierung')),
       fetchAll(() => sb.from('planer_ressource_einsatz').select('*')),
       fetchAll(() => sb.from('planer_auftrag').select('*').order('erstellt_am')),
-      fetchAll(() => sb.from('planer_pendenz').select('*').eq('erledigt', false))
+      fetchAll(() => sb.from('planer_pendenz').select('*').eq('erledigt', false)),
+      fetchAll(() => sb.from('planer_absenz_typ').select('*').order('sortierung'))
     ]);
-    AUF = au; PZ = pz;
+    AUF = au; PZ = pz; ABST = at;
     RES = r; RESE = z.map(x => ({ id: x.id, rid: x.ressource_id, art: x.art, eid: x.einsatz_id, mid: x.person_id, s: x.beginn ? toU(x.beginn) : null, e: x.ende ? toU(x.ende) : null }));
     GRUPPEN = g; PERSONEN = p; P = {}; p.forEach(x => P[x.id] = x);
     EINS = e.map(rowToItem); SERIEN = s;
@@ -535,9 +548,14 @@ function labOf(it){
   return kShort(KUNDEN[it.kid]) || it.title || ART[it.kind];
 }
 const txtOn = c => { const m = /^#?([0-9a-f]{6})$/i.exec(c || ''); if(!m) return '#FFFFFF'; const n = parseInt(m[1], 16); const l = (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255; return l > .62 ? '#232B35' : '#FFFFFF'; };
+// Absenz-Typen: 6 gut unterscheidbare Grautöne, optional gestreift (Seite «Feiertage & Absenzen»)
+let ABST = [];
+const GREYS = ['#E3E6E9', '#D0D4D8', '#BCC2C8', '#A6ADB4', '#8F969E', '#787F87'];
+function absStyle(name){ const t = ABST.find(x => x.name.toLowerCase() === String(name || '').toLowerCase()); const c = GREYS[t ? t.grauton : 1];
+  return { bg: t && t.gestreift ? `repeating-linear-gradient(135deg,${c} 0 5px,#FFFFFF77 5px 9px),${c}` : c, fg: (t ? t.grauton : 1) >= 4 ? '#FFFFFF' : '#323E4E', bd: 'rgba(35,43,53,.18)' }; }
 function barStyle(it){
   if(it.kind === 'termin') return { bg: '#D6E7F4', fg: '#232B35', bd: '#A9C7E0' };
-  if(it.kind === 'absenz') return { bg: '#C9CED4', fg: '#323E4E', bd: '#B3B9C0' };
+  if(it.kind === 'absenz') return absStyle(it.title);
   if(it.kind === 'intern') return { bg: '#E9ECEF', fg: '#323E4E', bd: '#C9CED4' };
   let c;
   // Baustelle = Farbe des Projektleiters, ohne Projektleiter = «selber abgemacht»; Mithilfe = Farbe der Person, mit der man arbeitet
@@ -1531,6 +1549,7 @@ function openPanel(id, isNew){
     <div class="sd-head"><div style="min-width:0"><h3>${esc(it.kind === 'absenz' ? (it.title || 'Absenz') : titleOf(it))}</h3>${k && kOrt(k) ? `<div class="small muted">${I('pin').replace('class="i"', 'class="i" style="width:12px;height:12px;vertical-align:-2px"')} ${esc(kOrt(k))}</div>` : ''}<div class="when">${esc(spanLabel(it))} · ${esc(wer)}</div></div><button class="icon-btn" id="pX" aria-label="Schliessen">${I('x')}</button></div>
     ${offen ? `<div class="banner vor"><b>Offener Auftrag · noch nicht abgemacht</b>${ed ? (panelAbm ? abmHTML(it.s, it.e, false) : `<button class="btn btn-primary" id="pAbm" style="align-self:flex-start">${I('check')}Termin ist abgemacht</button>`) : ''}</div>` : ''}
     ${it.soll && L.n < it.soll - .01 ? `<div class="info">Geplant waren ${fmtN(it.soll)} Tage, durch Unterbrüche jetzt ${fmtN(L.n)}. ${ed ? `<button class="btn btn-ghost" id="pExt" style="padding:2px 8px;margin-top:4px">Ende verschieben</button>` : ''}</div>` : ''}
+    ${it.kind === 'absenz' ? `<div class="abs-chips">${ABST.map(t => `<button data-pabs="${esc(t.name)}" class="${t.name === it.title ? 'on' : ''}" ${dis}><i style="background:${absStyle(t.name).bg}"></i>${esc(t.name)}</button>`).join('')}</div>` : ''}
     <div class="fld"><label>${it.kind === 'absenz' ? 'Grund / Notiz' : 'Notiz'}</label><textarea id="pNotiz" placeholder="${it.kind === 'absenz' ? 'z. B. Arztzeugnis bis …' : 'Was ist zu tun, Zufahrt, Material …'}" ${dis}>${esc(it.text)}</textarea></div>
     ${secs}
     ${pflege}
@@ -1558,6 +1577,7 @@ function openPanel(id, isNew){
   if(pflege) pflegeMedien(it.kid);
   if(!ed) return;
   const save = async (patch, local) => { Object.assign(it, local); $('pSave').textContent = 'Speichere …'; const ok = await speichere(it, patch); $('pSave').textContent = ok ? 'Gespeichert' : ''; if(VIEW === 'plan') renderRows(); else render(); return ok; };
+  $('side').querySelectorAll('[data-pabs]').forEach(b => b.onclick = () => save({ titel: b.dataset.pabs }, { title: b.dataset.pabs }).then(() => openPanel(id)));
   on('#pAbm', 'onclick', () => { panelAbm = true; openPanel(id); });
   on('#aNo', 'onclick', () => { panelAbm = false; openPanel(id); });
   on('#aOk', 'onclick', async () => { const v = leseAbm(); if(!v){ toast('«Bis» muss nach «Von» liegen.', null, true); return; } panelAbm = false;
@@ -1887,6 +1907,22 @@ function renderFeiertage(){
     <p class="hint" style="margin-top:6px">Betriebsferien über mehrere Tage: jeden Tag einzeln eintragen (Wochenenden nicht nötig).</p></div>`;
   $('fAdd').onclick = async () => { const d = $('fD').value, n = $('fN').value.trim(); if(!d || !n){ toast('Datum und Name eingeben.', null, true); return; } const { error } = await sb.from('planer_feiertag').upsert({ datum: d, name: n }); if(error) return fehler(error); await neuLaden(); };
   document.querySelectorAll('[data-fx]').forEach(b => b.onclick = async () => { const { error } = await sb.from('planer_feiertag').delete().eq('datum', b.dataset.fx); if(error) return fehler(error); await neuLaden(); });
+  // Absenz-Typen mit Grauton
+  const box = document.createElement('div'); box.className = 'page'; box.style.paddingTop = '0';
+  box.innerHTML = `<h2>Absenz-Typen</h2><p class="hint">Jeder Typ bekommt einen von sechs gut unterscheidbaren Grautönen, auf Wunsch gestreift. Der Typ steht auch als Text auf dem Balken. Beim Eintragen: ziehen, 4 drücken, dann die Nummer des Typs.</p>
+    <div class="card" style="margin-top:12px;padding:4px 14px">${ABST.map((t, i) => `<div class="abrow"><b class="small muted">${i + 1}</b><input type="text" data-an="${t.id}" value="${esc(t.name)}" aria-label="Name">
+      <div class="greys">${GREYS.map((c, j) => `<button data-ag="${t.id}" data-g="${j}" class="${t.grauton === j ? 'on' : ''}" style="background:${c}" aria-label="Grauton ${j + 1}"></button>`).join('')}<button data-as="${t.id}" class="stp${t.gestreift ? ' on' : ''}" title="gestreift" aria-label="gestreift"></button></div>
+      <span class="prev" style="background:${absStyle(t.name).bg};color:${absStyle(t.name).fg}">${esc(t.name)}</span>
+      <span class="acts"><button class="icon-btn" data-au="${t.id}" aria-label="Nach oben" ${i === 0 ? 'disabled' : ''}>${I('up')}</button><button class="icon-btn" data-ax="${t.id}" aria-label="Löschen">${I('trash')}</button></span></div>`).join('')}</div>
+    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><input type="text" id="aNeu" placeholder="Neuer Typ, z. B. Weiterbildung"><button class="btn btn-primary" id="aAdd">${I('plus')}Hinzufügen</button></div>`;
+  $('appMain').appendChild(box);
+  const upd = async (id, row) => { const { error } = await sb.from('planer_absenz_typ').update(row).eq('id', id); if(error) return fehler(error); await neuLaden(); };
+  box.querySelectorAll('[data-ag]').forEach(b => b.onclick = () => upd(b.dataset.ag, { grauton: +b.dataset.g }));
+  box.querySelectorAll('[data-as]').forEach(b => b.onclick = () => upd(b.dataset.as, { gestreift: !ABST.find(t => t.id === b.dataset.as).gestreift }));
+  box.querySelectorAll('[data-an]').forEach(i => i.onchange = () => { const n = i.value.trim(); if(n) upd(i.dataset.an, { name: n }); });
+  box.querySelectorAll('[data-au]').forEach(b => b.onclick = async () => { const l = [...ABST]; const k = l.findIndex(t => t.id === b.dataset.au); if(k < 1) return; [l[k - 1], l[k]] = [l[k], l[k - 1]]; await Promise.all(l.map((t, j) => sb.from('planer_absenz_typ').update({ sortierung: (j + 1) * 10 }).eq('id', t.id))); await neuLaden(); });
+  box.querySelectorAll('[data-ax]').forEach(b => b.onclick = async () => { const { error } = await sb.from('planer_absenz_typ').delete().eq('id', b.dataset.ax); if(error) return fehler(error); await neuLaden(); });
+  $('aAdd').onclick = async () => { const n = $('aNeu').value.trim(); if(!n) return; const { error } = await sb.from('planer_absenz_typ').insert({ name: n, grauton: 2, sortierung: 10 + Math.max(0, ...ABST.map(t => t.sortierung)) }); if(error) return fehler(error); await neuLaden(); };
 }
 
 // ---------------------------------------------------------------------------
@@ -1899,7 +1935,7 @@ async function starteLive(){
   const { data: { session } } = await sb.auth.getSession(); if(session) await sb.realtime.setAuth(session.access_token);
   sb.auth.onAuthStateChange((ev, s) => { if(s && (ev === 'TOKEN_REFRESHED' || ev === 'SIGNED_IN')) sb.realtime.setAuth(s.access_token); });
   const ch = sb.channel('einsatzplaner');
-  ['planer_einsatz', 'planer_serie', 'planer_person', 'planer_gruppe', 'planer_feiertag', 'planer_ressource', 'planer_ressource_einsatz', 'planer_auftrag', 'planer_pendenz'].forEach(t =>
+  ['planer_einsatz', 'planer_serie', 'planer_person', 'planer_gruppe', 'planer_feiertag', 'planer_ressource', 'planer_ressource_einsatz', 'planer_auftrag', 'planer_pendenz', 'planer_absenz_typ'].forEach(t =>
     ch.on('postgres_changes', { event: '*', schema: 'public', table: t }, () => { clearTimeout(reloadT); reloadT = setTimeout(() => { if(drag){ reloadT = setTimeout(neuLaden, 800); return; } if(document.activeElement && $('side').contains(document.activeElement)) return; neuLaden(); }, 500); }));
   ch.subscribe();
   // Beim Zurückkommen auf die Seite (Handy entsperrt) frisch laden
