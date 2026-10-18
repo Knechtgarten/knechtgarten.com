@@ -139,6 +139,9 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 .arow span{overflow:hidden;text-overflow:ellipsis;}
 .arow:hover{background:#F7F9FA;}
 .aleer{padding:4px 10px;color:var(--muted);}
+.bar.prov{background:repeating-linear-gradient(135deg,#E9EDB8 0 4px,#FFFFFF 4px 8px);border:1px dashed #9CA43A;color:#323E4E;cursor:grab;}
+.bar.prov.over{border:1.5px solid var(--red);}
+.row.grp .lane .bar{top:2px;height:15px;}
 .aghost{position:fixed;z-index:95;background:var(--primary);color:#fff;font-size:11.5px;padding:4px 8px;border-radius:5px;pointer-events:none;box-shadow:0 4px 12px rgba(0,0,0,.2);}
 .lane.drop{background:#F2F5D6 !important;}
 .pzb{all:unset;cursor:pointer;margin-left:auto;width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;border-radius:4px;color:#C3C8CE;flex:none;}
@@ -432,10 +435,11 @@ async function ladeAlles(){
     FEIER = new Map(); f.forEach(x => FEIER.set(fromIso(x.datum), x.name));
     if(k){ KUNDEN = {}; k.forEach(x => KUNDEN[x.id] = x); KLIST = k.map(x => ({ id: x.id, lab: kLabel(x) })); }
     if(isBuero() && !BENUTZER.length){ const { data } = await sb.rpc('pflege_zustaendige'); BENUTZER = data || []; }
+    if(!PF || Date.now() - (PF.t || 0) > 300000){ await ladePflege(); if(PF) PF.t = Date.now(); }
   }catch(err){ fehler(err, 'Laden'); }
 }
-function rowToItem(r){ return { id: r.id, mid: r.person_id, kind: r.art, s: toU(r.beginn), e: toU(r.ende), kid: r.kunde_id, title: r.titel || '', text: r.notiz || '', pl: r.projektleiter_id, link: r.mit_einsatz_id, allein: r.allein, ok: r.abgemacht, soll: r.soll_tage, files: r.planer_datei || [] }; }
-function itemToRow(it){ return { person_id: it.mid, art: it.kind, beginn: fromU(it.s), ende: fromU(it.e, true), kunde_id: it.kid || null, titel: it.title || null, notiz: it.text || null, projektleiter_id: it.pl || null, mit_einsatz_id: it.link || null, allein: !!it.allein, abgemacht: it.ok !== false, soll_tage: it.soll ?? null }; }
+function rowToItem(r){ return { id: r.id, mid: r.person_id, kind: r.art, s: toU(r.beginn), e: toU(r.ende), kid: r.kunde_id, title: r.titel || '', text: r.notiz || '', pl: r.projektleiter_id, link: r.mit_einsatz_id, allein: r.allein, ok: r.abgemacht, soll: r.soll_tage, files: r.planer_datei || [], pkk: r.pflege_kunde_kategorie_id, pj: r.pflege_jahr, pkw: r.pflege_kw }; }
+function itemToRow(it){ return { person_id: it.mid, art: it.kind, beginn: fromU(it.s), ende: fromU(it.e, true), kunde_id: it.kid || null, titel: it.title || null, notiz: it.text || null, projektleiter_id: it.pl || null, mit_einsatz_id: it.link || null, allein: !!it.allein, abgemacht: it.ok !== false, soll_tage: it.soll ?? null, pflege_kunde_kategorie_id: it.pkk || null, pflege_jahr: it.pj || null, pflege_kw: it.pkw || null }; }
 const kName = k => k ? (k.firma || [k.nachname, k.vorname].filter(Boolean).join(' ') || k.name) : '';
 const kShort = k => k ? (k.firma || k.nachname || k.name || '') : '';
 const kOrt = k => k ? [k.strasse, [k.plz, k.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ') : '';
@@ -516,7 +520,7 @@ function compute(){
   // Vorarbeiter-Baustelle ohne Mithilfe (und nicht «allein») = Personal fehlt (nur ab heute)
   const cover = {}; ALL.forEach(h => { if(h.kind === 'hilfe' && h.link && LAY[h.id]) LAY[h.id].free.forEach(k => (cover[h.link] ??= new Set()).add(k)); });
   ALL.forEach(b => { if(b.kind !== 'baustelle' || b.allein || !P[b.mid]?.ist_vorarbeiter || !LAY[b.id]) return; const c = cover[b.id] || new Set(); LAY[b.id].miss = LAY[b.id].free.filter(k => !c.has(k) && k >= TODAY * 2); });
-  computeRU();
+  computeRU(); computeProv();
 }
 const spanLabel = it => {
   const d0 = Math.floor(it.s + 1e-9), d1 = Math.ceil(it.e - 1e-9) - 1;
@@ -594,7 +598,8 @@ function renderChips(){
   $('plChips').innerHTML = pls.length ? `<span class="hint">Zuständig</span>` + pls.map(p => `<button class="chip" data-pl="${p.id}" aria-pressed="${plFilter === p.id}" title="Nur ${esc(p.name)} hervorheben"><i style="background:${p.farbe || '#5B8C6A'}"></i>${esc(p.kuerzel || first(p.name))}</button>`).join('') : '';
   $('plChips').querySelectorAll('[data-pl]').forEach(b => b.onclick = () => { plFilter = plFilter === b.dataset.pl ? null : b.dataset.pl; renderChips(); renderRows(); });
   const tag = zoom === 'tag' ? 'Viertelstunden-Raster.' : zoom === 'woche' ? 'Stunden-Raster.' : 'Halbtags-Raster.';
-  $('legend').innerHTML = `<span class="lg"><span class="sw" style="background:#5B8C6A"></span>Baustelle</span><span class="lg"><span class="sw" style="background:#D6E7F4"></span>Termin</span><span class="lg"><span class="sw" style="background:#C9CED4"></span>Absenz</span><span class="lg"><span class="sw" style="background:#E9ECEF"></span>Werkhof</span><span class="lg"><span class="sw" style="background:repeating-linear-gradient(135deg,#5B8C6A99 0 3px,#fff 3px 6px)"></span>noch nicht abgemacht</span><span class="lg"><span class="rdot" style="position:static;display:inline-block"></span>Personal fehlt</span><span class="lg"><span class="bdot" style="position:static;display:inline-block"></span>allein</span><span class="lg" style="margin-left:auto">${tag} Ziehen = neuer Einsatz · Shift + Ziehen = Absenz · Alt + Ziehen = noch nicht abgemacht</span>`;
+  $('legend').innerHTML = `<span class="lg"><span class="sw" style="background:#5B8C6A"></span>Baustelle</span><span class="lg"><span class="sw" style="background:#D6E7F4"></span>Termin</span><span class="lg"><span class="sw" style="background:#C9CED4"></span>Absenz</span><span class="lg"><span class="sw" style="background:#E9ECEF"></span>Werkhof</span><span class="lg"><span class="sw" style="background:repeating-linear-gradient(135deg,#5B8C6A99 0 3px,#fff 3px 6px)"></span>noch nicht abgemacht</span><span class="lg"><span class="rdot" style="position:static;display:inline-block"></span>Personal fehlt</span><span class="lg"><span class="bdot" style="position:static;display:inline-block"></span>allein</span><label class="lg" style="cursor:pointer"><input type="checkbox" id="provChk" ${showProv ? 'checked' : ''} style="accent-color:var(--primary)">Pflege-Vorschläge</label><span class="lg" style="margin-left:auto">${tag} Ziehen = neuer Einsatz · Shift + Ziehen = Absenz · Alt + Ziehen = noch nicht abgemacht</span>`;
+  const pc = $('provChk'); if(pc) pc.onchange = () => { showProv = pc.checked; lsSet('prov', showProv); renderRows(); };
 }
 function setZoom(z){ if(z === zoom) return; const t = tlEl(); const a = t.scrollLeft / dayW, b = a + visW() / dayW; const tv = TODAY + 1 > a + .05 && TODAY < b - .05; const c = centerU(); zoom = z; lsSet('zoom', z); dayW = calcDayW(); renderRows(); scrollToU(c, 'center'); renderPlan(); if(tv) goToday(); }
 const tlEl = () => $('tl');
@@ -677,7 +682,7 @@ function personRow(p, W, bgx){
     }
   });
   const mine = p.benutzer_id === ME;
-  return `<div class="row" data-mid="${p.id}"><div class="nm" title="${esc(p.name + (p.zusatz ? ' · ' + p.zusatz : ''))}"><span class="dot" style="background:${p.farbe || '#fff'}"></span><span class="n">${esc(p.name)}</span>${p.zusatz ? `<span class="z">${esc(p.zusatz)}</span>` : ''}${mine ? '<span class="me">Ich</span>' : ''}${pzBtn('person', p.id)}</div><div class="lane${ed ? ' ed' : ''}" data-mid="${p.id}" style="width:${W}px;${bgx}">${feierHTML()}${bars}${vehLine(p)}</div></div>`;
+  return `<div class="row" data-mid="${p.id}"><div class="nm" title="${esc(p.name + (p.zusatz ? ' · ' + p.zusatz : ''))}"><span class="dot" style="background:${p.farbe || '#fff'}"></span><span class="n">${esc(p.name)}</span>${p.zusatz ? `<span class="z">${esc(p.zusatz)}</span>` : ''}${mine ? '<span class="me">Ich</span>' : ''}${pzBtn('person', p.id)}</div><div class="lane${ed ? ' ed' : ''}" data-mid="${p.id}" style="width:${W}px;${bgx}">${feierHTML()}${bars}${provBars('p:' + p.id)}${vehLine(p)}</div></div>`;
 }
 function renderRows(){
   const t = tlEl(); if(!t) return; compute();
@@ -690,7 +695,7 @@ function renderRows(){
   grps.forEach(g => {
     const ps = act.filter(p => (p.gruppe_id || '_ohne') === g.id).sort((a, b) => a.sortierung - b.sortierung || a.name.localeCompare(b.name));
     if(!ps.length) return; const zu = collapsed.has(g.id);
-    h += `<div class="row grp${zu ? ' zu' : ''}" data-g="${g.id}"><div class="nm">${I('chev')}${esc(g.name)} <span style="opacity:.6;font-weight:400">(${ps.length})</span>${g.id !== '_ohne' ? pzBtn('gruppe', g.id) : ''}</div><div class="lane" style="width:${W}px;height:20px"></div></div>`;
+    h += `<div class="row grp${zu ? ' zu' : ''}" data-g="${g.id}"><div class="nm">${I('chev')}${esc(g.name)} <span style="opacity:.6;font-weight:400">(${ps.length})</span>${g.id !== '_ohne' ? pzBtn('gruppe', g.id) : ''}</div><div class="lane" style="width:${W}px;height:20px">${provBars('g:' + g.id)}</div></div>`;
     if(!zu) ps.forEach(p => { h += personRow(p, W, bgx); });
   });
   const sl = t.scrollLeft, stp = t.scrollTop;
@@ -832,7 +837,7 @@ function renderAuf(){
   box.className = 'aufp';
   const sec = (key, title, list, add) => { const zu = aufZu.has(key);
     return `<div class="asec${zu ? ' zu' : ''}"><div class="ash" data-ak="${key}">${I('chev')}<span>${esc(title)}</span><span class="n">${list.length}</span>${add ? `<button class="icon-btn" data-aadd="${add}" aria-label="Auftrag hinzufügen">${I('plus')}</button>` : ''}</div>
-      ${zu ? '' : list.map(a => `<div class="arow" data-auf="${a.id}" title="${esc(aufLab(a) + '\n' + DAUER[a.dauer] + (a.dauer === 'mehr' && a.dauer_tage ? ' (' + fmtN(a.dauer_tage) + ' Tage)' : '') + (a.notiz ? '\n' + a.notiz : '') + '\nErfasst: ' + creatorName(a.erstellt_von))}"><i style="background:${creatorCol(a.erstellt_von)}"></i><span>${esc(aufLab(a))}</span></div>`).join('') || '<div class="aleer">–</div>'}</div>`; };
+      ${zu ? '' : list.map(a => `<div class="arow" data-auf="${a.id}" title="${esc(aufLab(a) + '\n' + DAUER[a.dauer] + (a.dauer === 'mehr' && a.dauer_tage ? ' (' + fmtN(a.dauer_tage) + ' Tage)' : '') + (a.notiz ? '\n' + a.notiz : '') + '\nErfasst: ' + creatorName(a.erstellt_von))}"><i style="background:${creatorCol(a.erstellt_von)}"></i><span>${esc(aufLab(a))}</span></div>`).join('')}</div>`; };
   let h = `<div class="ahead"><b>Aufträge</b><button class="icon-btn" id="aufX" aria-label="Einklappen">${I('next')}</button></div><div class="ahint">Auf eine Zeile im Plan ziehen = einplanen. Balken hierher ziehen = wieder offen.</div>`;
   h += sec('sammel', 'Alle · ganzes Team', AUF.filter(a => a.scope === 'sammel'), 'sammel');
   GRUPPEN.forEach(g => { h += sec('g' + g.id, g.name, AUF.filter(a => a.scope === 'team' && a.gruppe_id === g.id), 'team:' + g.id); });
@@ -931,6 +936,88 @@ function renderBoard(){
     await sb.from('planer_pendenz').delete().eq('id', z.id); aufOpen = true; lsSet('aufOpen', true); await neuLaden(); toast('Als Auftrag in der Spalte rechts'); });
 }
 
+// ---------------------------------------------------------------------------
+// PFLEGE-VORSCHLÄGE «Perlenkette» – Etappe 4
+// Fällige Pflege-Arbeiten (Jahresplan, KW) als gestreifte Vorschläge, aufgereiht
+// nach KW → Ortschaft → Name, um feste Einsätze, Wochenenden und Feiertage herum.
+// Zuständige Person = ihre Zeile, sonst Teamzeile (Gruppe Pflege/Service).
+// ---------------------------------------------------------------------------
+let PF = null, PROV = [], PROVLAY = {}, showProv = lsGet('prov', true);
+async function ladePflege(){
+  try{
+    const y = new Date().getFullYear();
+    const [kat, arb, ku, kk, ka, zu, st] = await Promise.all([
+      fetchAll(() => sb.from('pflege_kategorie').select('id,name,kuerzel,farbe')),
+      fetchAll(() => sb.from('pflege_arbeit').select('id,kategorie_id,name,standard_kws,dauer_min')),
+      fetchAll(() => sb.from('pflege_kunde').select('kunde_id,abo_typ,wunsch_wochentage')),
+      fetchAll(() => sb.from('pflege_kunde_kategorie').select('id,kunde_id,kategorie_id')),
+      fetchAll(() => sb.from('pflege_kunde_arbeit').select('id,kunde_kategorie_id,arbeit_id,titel,kws,kws_plus,kws_minus,abgewaehlte_jahre,dauer_min')),
+      fetchAll(() => sb.from('pflege_kunde_kategorie_zustaendig').select('*')),
+      fetchAll(() => sb.from('pflege_einsatz_status').select('kunde_kategorie_id,jahr,kw').in('jahr', [y, y + 1]))
+    ]);
+    const m = l => { const o = {}; l.forEach(x => o[x.id] = x); return o; };
+    PF = { kat: m(kat), arb: m(arb), ku: Object.fromEntries(ku.map(x => [x.kunde_id, x])), kk, ka, zu, st: new Set(st.map(s => `${s.kunde_kategorie_id}_${s.jahr}_${s.kw}`)) };
+  }catch(e){ console.warn('Pflege-Daten nicht geladen', e); PF = null; }
+}
+function kwMonday(y, w){ const j4 = new Date(y, 0, 4); const mon = new Date(y, 0, 4 - ((j4.getDay() + 6) % 7) + (w - 1) * 7); return dayIdx(mon); }
+const teamLaneId = () => (GRUPPEN.find(g => /pflege|service/i.test(g.name)) || GRUPPEN[0])?.id;
+function computeProv(){
+  PROV = []; PROVLAY = {}; if(!PF || !showProv) return;
+  const now = dDate(TODAY), y0 = now.getFullYear(), k0 = kw(TODAY);
+  const linked = new Set(EINS.filter(e => e.pkk).map(e => `${e.pkk}_${e.pj}_${e.pkw}`));
+  const weeks = []; for(let i = 0; i < 12; i++){ const mon = kwMonday(y0, k0) + i * 7; if(mon >= NDAYS) break; const x = dDate(mon + 3); weeks.push({ y: x.getFullYear(), w: kw(mon), mon }); }
+  const byKk = {}; PF.ka.forEach(a => (byKk[a.kunde_kategorie_id] ??= []).push(a));
+  PF.kk.forEach(kk => {
+    const ku = PF.ku[kk.kunde_id]; if(!ku || ku.abo_typ === 'kein_abo') return; const kat = PF.kat[kk.kategorie_id]; const k = KUNDEN[kk.kunde_id]; if(!kat || !k) return;
+    const zu = PF.zu.filter(z => z.kunde_kategorie_id === kk.id).map(z => PERSONEN.find(p => p.benutzer_id === z.benutzer_id && p.aktiv)).filter(Boolean);
+    const lane = zu.length ? 'p:' + zu[0].id : (teamLaneId() ? 'g:' + teamLaneId() : null); if(!lane) return;
+    weeks.forEach(({ y, w, mon }) => {
+      if(PF.st.has(`${kk.id}_${y}_${w}`) || linked.has(`${kk.id}_${y}_${w}`)) return;
+      const arb = []; let min = 0;
+      (byKk[kk.id] || []).forEach(a => { if((a.abgewaehlte_jahre || []).includes(y)) return; const std = a.arbeit_id ? PF.arb[a.arbeit_id] : null;
+        const kws = std ? new Set([...(std.standard_kws || []).filter(x => !(a.kws_minus || []).includes(x)), ...(a.kws_plus || [])]) : new Set(a.kws || []);
+        if(!kws.has(w)) return; arb.push(std ? std.name : a.titel); min += a.dauer_min || std?.dauer_min || 60; });
+      if(!arb.length) return;
+      PROV.push({ id: `${kk.id}_${y}_${w}`, kk: kk.id, y, w, mon, kid: kk.kunde_id, kat, arb, min, lane, wd: ku.wunsch_wochentage || [] });
+    });
+  });
+  // Perlenkette pro Zeile
+  const lanes = {}; PROV.forEach(p => (lanes[p.lane] ??= []).push(p));
+  Object.entries(lanes).forEach(([key, list]) => {
+    list.sort((a, b) => a.mon - b.mon || (KUNDEN[a.kid]?.ort || '').localeCompare(KUNDEN[b.kid]?.ort || '') || kShort(KUNDEN[a.kid]).localeCompare(kShort(KUNDEN[b.kid])));
+    const bl = key.startsWith('p:') ? ALL.filter(i => i.mid === key.slice(2)).map(i => [i.s, i.e]) : [];
+    let cur = -1; const out = [];
+    list.forEach(p => {
+      const len = p.min / 60 / 12; const start = Math.max(p.mon, TODAY) + 1 / 12; if(cur < start) cur = start;
+      for(let g = 0; g < 300; g++){
+        const d = Math.floor(cur);
+        if(isOff(d) || (p.wd.length && !p.wd.includes(dDate(d).getDay() || 7))){ cur = d + 1 + 1 / 12; continue; }
+        if(cur + len > d + 11 / 12 + 1e-6){ cur = d + 1 + 1 / 12; continue; }
+        const c = bl.find(([a, b]) => a < cur + len - 1e-6 && b > cur + 1e-6); if(c){ cur = c[1] - Math.floor(c[1]) < 1e-6 ? c[1] + 1 / 12 : c[1]; continue; }
+        break;
+      }
+      out.push({ p, s: cur, e: cur + len, over: Math.floor(cur) >= p.mon + 5 }); cur += len;
+    });
+    PROVLAY[key] = out;
+  });
+}
+function provBars(key){ return (PROVLAY[key] || []).map(x => { const p = x.p, k = KUNDEN[p.kid]; const l = x.s * dayW + 1, w = Math.max(4, (x.e - x.s) * dayW - 2);
+  const tip = `${kName(k)} · ${p.kat.name}\n${k?.ort || ''} · KW ${p.w} · ${fmtN(p.min / 60)} Std.\n${p.arb.join(', ')}\nNoch nicht abgemacht${x.over ? '\nPasst nicht mehr in die KW!' : ''}`;
+  return `<div class="bar prov${x.over ? ' over' : ''}" data-prov="${p.id}" style="left:${l}px;width:${w}px" title="${esc(tip)}">${w > 16 ? `<span class="t" style="left:3px;width:${w - 6}px">${esc(kShort(k))}</span>` : ''}</div>`; }).join(''); }
+async function provToEinsatz(pid, mid, s, e, ok){
+  const p = PROV.find(x => x.id === pid); if(!p) return;
+  const neu = await neuerEinsatz({ mid, kind: 'termin', s: r48(s), e: r48(e), kid: p.kid, title: `${p.kat.name}: ${p.arb.join(', ')}`, text: '', ok, pkk: p.kk, pj: p.y, pkw: p.w }, false);
+  if(neu){ renderRows(); toast(`${kShort(KUNDEN[p.kid])}: ${ok ? 'abgemacht' : 'angeheftet'} bei ${P[mid].name}`, () => loescheEinsatz(neu)); }
+}
+function openProvPop(pid, rect){
+  const p = PROV.find(x => x.id === pid); const L = (PROVLAY[p.lane] || []).find(x => x.p === p); const k = KUNDEN[p.kid];
+  const team = p.lane.startsWith('g:'); const pers = PERSONEN.filter(x => x.aktiv && canEdit(x.id) && (!team || x.gruppe_id === p.lane.slice(2)));
+  const pop = popAt(rect, `<b>${esc(kName(k))}</b><span class="muted small">${esc(kOrt(k))}<br>${esc(p.kat.name)} · KW ${p.w} · ${fmtN(p.min / 60)} Std.<br>${esc(p.arb.join(', '))}<br>Vorschlag: ${esc(spanLabel({ s: L.s, e: L.e }))}</span>
+    ${team ? `<select id="ppP"><option value="">Wer geht?</option>${pers.map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join('')}</select>` : ''}
+    ${canEdit(team ? (pers[0]?.id) : p.lane.slice(2)) ? `<button class="btn btn-primary" id="ppOk">${I('check')}Abgemacht</button>` : ''}<span class="small muted">Oder auf eine Zeile ziehen = dort anheften (noch nicht abgemacht).</span>`);
+  const b = pop.querySelector('#ppOk'); if(b) b.onclick = async () => { const mid = team ? pop.querySelector('#ppP').value : p.lane.slice(2); if(!mid){ toast('Bitte wählen, wer geht.', null, true); return; } closePop(); await provToEinsatz(pid, mid, L.s, L.e, true); };
+}
+
 // Ziehen, Verschieben, Verlängern, neu Aufziehen
 function uAt(x){ const t = tlEl(); const r = t.getBoundingClientRect(); return (x - r.left - 190 + t.scrollLeft) / dayW; }
 function bindTimeline(t){
@@ -938,6 +1025,7 @@ function bindTimeline(t){
   t.addEventListener('pointerdown', e => {
     if(e.button !== 0) return; closePop();
     const pzb = e.target.closest('[data-pz]'); if(pzb){ e.stopPropagation(); const [eb, ref] = pzb.dataset.pz.split(':'); openBoard(eb, ref || null); return; }
+    const pv = e.target.closest('.bar.prov[data-prov]'); if(pv){ drag = { kind: 'prov', pid: pv.dataset.prov, x0: e.clientX, y0: e.clientY, moved: false, rect: pv.getBoundingClientRect() }; e.preventDefault(); return; }
     const g = e.target.closest('.row.grp'); if(g){ const id = g.dataset.g; collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id); lsSet('zu', [...collapsed]); renderRows(); return; }
     const tgp = e.target.closest('.tgrp'); if(tgp){ const d = +tgp.dataset.tday; drag = { kind: 'click', fn: () => { zoom = 'tag'; lsSet('zoom', 'tag'); dayW = calcDayW(); renderRows(); scrollToU(d, 'left'); renderPlan(); } }; return; }
     // Übersicht Maschinen / Fahrzeuge / Anhänger
@@ -978,9 +1066,9 @@ function bindWindow(){
       else if(drag.mode === 'l') it.s = r48(Math.min(drag.e0 - sn, drag.s0 + du));
       else it.e = r48(Math.max(drag.s0 + sn, drag.e0 + du));
       if(!drag.raf){ drag.raf = requestAnimationFrame(() => { if(drag) drag.raf = 0; renderRows(); }); }
-    } else if(drag.kind === 'auf'){
+    } else if(drag.kind === 'auf' || drag.kind === 'prov'){
       if(!drag.moved && Math.abs(e.clientX - drag.x0) < 5 && Math.abs(e.clientY - drag.y0) < 5) return;
-      if(!drag.moved){ drag.moved = true; drag.gh = document.createElement('div'); drag.gh.className = 'aghost'; drag.gh.textContent = aufLab(drag.a); document.body.appendChild(drag.gh); }
+      if(!drag.moved){ drag.moved = true; drag.gh = document.createElement('div'); drag.gh.className = 'aghost'; drag.gh.textContent = drag.kind === 'auf' ? aufLab(drag.a) : kShort(KUNDEN[PROV.find(x => x.id === drag.pid)?.kid]); document.body.appendChild(drag.gh); }
       drag.gh.style.left = e.clientX + 10 + 'px'; drag.gh.style.top = e.clientY + 8 + 'px';
       document.querySelectorAll('.lane.drop').forEach(l => l.classList.remove('drop'));
       const ln = document.elementFromPoint(e.clientX, e.clientY)?.closest('.lane[data-mid]'); if(ln && canEdit(ln.dataset.mid)) ln.classList.add('drop');
@@ -1005,6 +1093,13 @@ function bindWindow(){
   addEventListener('pointerup', async e => {
     const d = drag; drag = null; if(!d) return;
     if(d.kind === 'click'){ d.fn(); return; }
+    if(d.kind === 'prov'){
+      d.gh?.remove(); document.querySelectorAll('.lane.drop').forEach(l => l.classList.remove('drop'));
+      if(!d.moved){ openProvPop(d.pid, d.rect); return; }
+      const p = PROV.find(x => x.id === d.pid); const ln = document.elementFromPoint(e.clientX, e.clientY)?.closest('.lane[data-mid]');
+      if(p && ln && canEdit(ln.dataset.mid)){ const len = p.min / 60 / 12; const s = zoom === 'tag' || zoom === 'woche' ? Math.round(uAt(e.clientX) * 48) / 48 : Math.floor(uAt(e.clientX)) + 1 / 12; await provToEinsatz(p.id, ln.dataset.mid, s, s + len, false); }
+      return;
+    }
     if(d.kind === 'auf'){
       d.gh?.remove(); document.querySelectorAll('.lane.drop').forEach(l => l.classList.remove('drop'));
       if(!d.moved){ aufDlg(d.a, false); return; }
