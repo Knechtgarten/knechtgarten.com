@@ -148,6 +148,9 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 .gadd .i{width:13px;height:13px;}
 .gadd:hover{color:#fff;background:rgba(255,255,255,.15);}
 .gadd + .pzb{margin-left:0;}
+.dropline{position:fixed;height:3px;background:var(--primary);z-index:96;pointer-events:none;border-radius:2px;}
+.tl.sortable .row .nm{cursor:grab;}
+.tl.sortable .row .nm button{cursor:pointer;}
 .mab{all:unset;cursor:pointer;width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;border-radius:4px;color:#9AA1A8;flex:none;margin-left:auto;}
 .mab .i{width:14px;height:14px;}
 .mab:hover{color:var(--primary);background:var(--soft);}
@@ -594,7 +597,7 @@ function renderPlan(){
         <input type="search" id="qIn" placeholder="Kunde, Ort, Notiz suchen" style="width:190px">
       </div>
       <div class="legend" id="legend"></div>
-      <div class="planwrap"><div class="tl" id="tl"></div><aside class="aufp" id="aufp"></aside></div>`;
+      <div class="planwrap"><div class="tl${isBuero() ? ' sortable' : ''}" id="tl"></div><aside class="aufp" id="aufp"></aside></div>`;
     main.querySelectorAll('#zoomSeg button').forEach(b => b.onclick = () => setZoom(b.dataset.z));
     main.querySelectorAll('#laySeg button').forEach(b => b.onclick = () => { layer = b.dataset.l; lsSet('layer', layer); closePanel(); renderRows(); main.querySelectorAll('#laySeg button').forEach(x => x.setAttribute('aria-pressed', x.dataset.l === layer)); });
     $('prevB').onclick = () => step(-1); $('nextB').onclick = () => step(1);
@@ -1036,6 +1039,39 @@ function openProvPop(pid, rect){
   const b = pop.querySelector('#ppOk'); if(b) b.onclick = async () => { const mid = team ? pop.querySelector('#ppP').value : p.lane.slice(2); if(!mid){ toast('Bitte wählen, wer geht.', null, true); return; } closePop(); await provToEinsatz(pid, mid, L.s, L.e, true); };
 }
 
+// ---------------------------------------------------------------------------
+// Zeilen und Gruppen per Drag & Drop sortieren (Büro / Admin)
+// ---------------------------------------------------------------------------
+const grpPersons = gid => PERSONEN.filter(p => (p.gruppe_id || null) === gid).sort((a, b) => (b.aktiv - a.aktiv) || a.sortierung - b.sortierung || a.name.localeCompare(b.name));
+function sortTarget(d, y){
+  const x = tlEl().getBoundingClientRect().left + 60;
+  const r = document.elementFromPoint(x, y)?.closest('.row'); if(!r || r.classList.contains('ov')) return null; const rc = r.getBoundingClientRect();
+  if(d.kind === 'prow'){
+    if(r.dataset.mid){ if(r.dataset.mid === d.mid) return null; const after = y > rc.top + rc.height / 2; return { mid: r.dataset.mid, after, y: after ? rc.bottom : rc.top }; }
+    if(r.dataset.g && r.dataset.g !== '_ohne') return { gid: r.dataset.g, start: true, y: rc.bottom };
+    return null;
+  }
+  const gid = r.dataset.g || P[r.dataset.mid]?.gruppe_id; if(!gid || gid === '_ohne' || gid === d.gid) return null;
+  const ids = GRUPPEN.map(g => g.id); const before = ids.indexOf(gid) < ids.indexOf(d.gid);
+  const head = document.querySelector(`.row.grp[data-g="${gid}"]`); const hr = head.getBoundingClientRect();
+  if(before) return { gid, before, y: hr.top };
+  let el = head.nextElementSibling, last = head; while(el && !el.classList.contains('grp')){ last = el; el = el.nextElementSibling; }
+  return { gid, before, y: last.getBoundingClientRect().bottom };
+}
+async function sortApply(d){
+  const t = d.tgt; let jobs = [];
+  if(d.kind === 'grow'){
+    const ids = GRUPPEN.map(g => g.id).filter(id => id !== d.gid); const ti = ids.indexOf(t.gid); ids.splice(t.before ? ti : ti + 1, 0, d.gid);
+    jobs = ids.map((id, k) => sb.from('planer_gruppe').update({ sortierung: (k + 1) * 10 }).eq('id', id));
+  } else {
+    const gid = t.gid || P[t.mid].gruppe_id; const list = grpPersons(gid).filter(p => p.id !== d.mid);
+    const idx = t.start ? 0 : list.findIndex(p => p.id === t.mid) + (t.after ? 1 : 0); list.splice(idx, 0, P[d.mid]);
+    jobs = list.map((p, k) => sb.from('planer_person').update(p.id === d.mid ? { sortierung: (k + 1) * 10, gruppe_id: gid } : { sortierung: (k + 1) * 10 }).eq('id', p.id));
+  }
+  const res = await Promise.all(jobs); const err = res.find(r => r.error); if(err) fehler(err.error, 'Sortieren');
+  await neuLaden();
+}
+
 // Ziehen, Verschieben, Verlängern, neu Aufziehen
 function uAt(x){ const t = tlEl(); const r = t.getBoundingClientRect(); return (x - r.left - 190 + t.scrollLeft) / dayW; }
 function bindTimeline(t){
@@ -1046,7 +1082,12 @@ function bindTimeline(t){
     const ga = e.target.closest('[data-gadd]'); if(ga){ e.stopPropagation(); personDlg(null, ga.dataset.gadd); return; }
     const pzb = e.target.closest('[data-pz]'); if(pzb){ e.stopPropagation(); const [eb, ref] = pzb.dataset.pz.split(':'); openBoard(eb, ref || null); return; }
     const pv = e.target.closest('.bar.prov[data-prov]'); if(pv){ drag = { kind: 'prov', pid: pv.dataset.prov, x0: e.clientX, y0: e.clientY, moved: false, rect: pv.getBoundingClientRect() }; e.preventDefault(); return; }
-    const g = e.target.closest('.row.grp'); if(g){ const id = g.dataset.g; collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id); lsSet('zu', [...collapsed]); renderRows(); return; }
+    const g = e.target.closest('.row.grp');
+    const toggle = id => { collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id); lsSet('zu', [...collapsed]); renderRows(); };
+    // Büro: Gruppe am Kopf ziehen = ganze Gruppe verschieben (kurzer Klick = auf-/zuklappen)
+    if(g){ const id = g.dataset.g; if(isBuero() && id !== '_ohne' && layer === 'p' && e.target.closest('.nm')){ drag = { kind: 'grow', gid: id, x0: e.clientX, y0: e.clientY, moved: false, toggle }; e.preventDefault(); return; } toggle(id); return; }
+    // Büro: Person am Namen ziehen = umsortieren / andere Gruppe (kurzer Klick = bearbeiten)
+    const pn = e.target.closest('.row[data-mid] > .nm'); if(pn && isBuero() && layer === 'p'){ drag = { kind: 'prow', mid: pn.parentElement.dataset.mid, x0: e.clientX, y0: e.clientY, moved: false }; e.preventDefault(); return; }
     const tgp = e.target.closest('.tgrp'); if(tgp){ const d = +tgp.dataset.tday; drag = { kind: 'click', fn: () => { zoom = 'tag'; lsSet('zoom', 'tag'); dayW = calcDayW(); renderRows(); scrollToU(d, 'left'); renderPlan(); } }; return; }
     // Übersicht Maschinen / Fahrzeuge / Anhänger
     const band = e.target.closest('.band[data-rz]'), rl = e.target.closest('.lane[data-rid]');
@@ -1086,6 +1127,13 @@ function bindWindow(){
       else if(drag.mode === 'l') it.s = r48(Math.min(drag.e0 - sn, drag.s0 + du));
       else it.e = r48(Math.max(drag.s0 + sn, drag.e0 + du));
       if(!drag.raf){ drag.raf = requestAnimationFrame(() => { if(drag) drag.raf = 0; renderRows(); }); }
+    } else if(drag.kind === 'grow' || drag.kind === 'prow'){
+      if(!drag.moved && Math.abs(e.clientY - drag.y0) < 5) return;
+      if(!drag.moved){ drag.moved = true; drag.gh = document.createElement('div'); drag.gh.className = 'aghost'; drag.gh.textContent = drag.kind === 'grow' ? GRUPPEN.find(x => x.id === drag.gid)?.name : P[drag.mid]?.name; document.body.appendChild(drag.gh);
+        drag.line = document.createElement('div'); drag.line.className = 'dropline'; document.body.appendChild(drag.line); }
+      drag.gh.style.left = e.clientX + 10 + 'px'; drag.gh.style.top = e.clientY + 8 + 'px';
+      drag.tgt = sortTarget(drag, e.clientY);
+      if(drag.tgt){ const tr = tlEl().getBoundingClientRect(); drag.line.style.cssText = `left:${tr.left}px;width:190px;top:${drag.tgt.y - 1}px`; drag.line.hidden = false; } else drag.line.hidden = true;
     } else if(drag.kind === 'auf' || drag.kind === 'prov'){
       if(!drag.moved && Math.abs(e.clientX - drag.x0) < 5 && Math.abs(e.clientY - drag.y0) < 5) return;
       if(!drag.moved){ drag.moved = true; drag.gh = document.createElement('div'); drag.gh.className = 'aghost'; drag.gh.textContent = drag.kind === 'auf' ? aufLab(drag.a) : kShort(KUNDEN[PROV.find(x => x.id === drag.pid)?.kid]); document.body.appendChild(drag.gh); }
@@ -1113,6 +1161,11 @@ function bindWindow(){
   addEventListener('pointerup', async e => {
     const d = drag; drag = null; if(!d) return;
     if(d.kind === 'click'){ d.fn(); return; }
+    if(d.kind === 'grow' || d.kind === 'prow'){
+      d.gh?.remove(); d.line?.remove();
+      if(!d.moved){ if(d.kind === 'grow') d.toggle(d.gid); else personDlg(P[d.mid]); return; }
+      if(d.tgt) await sortApply(d); return;
+    }
     if(d.kind === 'prov'){
       d.gh?.remove(); document.querySelectorAll('.lane.drop').forEach(l => l.classList.remove('drop'));
       if(!d.moved){ openProvPop(d.pid, d.rect); return; }
