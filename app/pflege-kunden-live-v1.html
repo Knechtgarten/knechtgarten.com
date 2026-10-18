@@ -195,6 +195,7 @@ tbody tr:last-child td{border-bottom:none;}
 .wt td{padding:6px 8px;border-bottom:1px solid var(--soft);}
 .wt .c{text-align:center;}
 .wt .w-i{width:44px;} .wt .w-art{width:120px;} .wt .w-wo{width:190px;} .wt .w-x{width:36px;}
+.wt .w-zt{width:96px;} .zt{display:inline-flex;align-items:center;gap:4px;} .zt .tin{width:52px;text-align:right;margin-left:0;border:1px solid var(--line) !important;background:#fff !important;border-radius:5px;} .zt span{font-size:11.5px;color:var(--muted);}
 .wt td input[type=number]{width:56px;padding:4px 6px;text-align:center;}
 .wt .ask-row td{padding:0 0 8px;}
 .wt-n{font-size:13px;}
@@ -847,6 +848,9 @@ function streifenHtml(sel, std, kwJetzt){
     ${kunde ? `<div class="ws-diff">${plus.length || minus.length ? `<b>Abweichung vom Standard:</b> ${plus.length ? 'zusätzlich KW ' + plus.join(', ') : ''}${plus.length && minus.length ? ' · ' : ''}${minus.length ? 'weggelassen KW ' + minus.join(', ') : ''}` : '<span class="muted">Wie Standard der Kategorie.</span>'}</div>` : ''}
     <div class="muted small"><b style="color:var(--primary)">${sel.size}</b> ${sel.size === 1 ? 'Woche' : 'Wochen'} geplant · Klick auf ein Kästchen schaltet die Woche ein oder aus</div>`;
 }
+// Zeit einer Arbeit: gespeichert in Minuten, angezeigt in Stunden (1,5). Leer = Standard der Arbeit.
+const zeitText = m => m == null ? '' : String(Math.round(m / 60 * 100) / 100).replace('.', ',');
+function parseZeit(v){ v = String(v || '').trim().replace(',', '.'); if(!v) return null; const h = parseFloat(v); if(isNaN(h)) return undefined; const m = Math.round(h * 60 / 5) * 5; return m >= 5 && m <= 1440 ? m : undefined; }
 function arbeitenHtml(kk, kat){
   const zeilen = S.ka.filter(x => x.kunde_kategorie_id === kk.id && (!x.arbeit_id || S.arbeiten.some(a => a.id === x.arbeit_id)))
     .sort((a, b) => (wochenVon(a)[0] ?? 99) - (wochenVon(b)[0] ?? 99));
@@ -859,14 +863,15 @@ function arbeitenHtml(kk, kat){
       <td class="wt-art">${a ? 'Standard' : 'Zusatz'}${jk ? ' · ' + jk : ''}</td>
       <td>${a ? `<span class="wt-n">${esc(a.name)}</span>` : `<input class="tin" type="text" data-act="zus-titel" value="${esc(ka.titel)}" placeholder="Titel der Zusatzarbeit" aria-label="Titel Zusatzarbeit">`}</td>
       <td><button type="button" class="wk" data-act="arb-wochen" title="Wochen bearbeiten">${I('cal')}${wochenKurz(wochenVon(ka))}</button></td>
+      <td><span class="zt"><input class="tin" type="text" inputmode="decimal" data-act="arb-zeit" value="${zeitText(ka.dauer_min)}" placeholder="${a && a.dauer_min != null ? zeitText(a.dauer_min) : '–'}" title="${a && a.dauer_min != null ? 'Standard: ' + zeitText(a.dauer_min) + ' Std. – hier für diesen Kunden überschreiben' : 'Zeit für diesen Kunden in Stunden (z. B. 1,5)'}" aria-label="Zeit in Stunden"><span>Std.</span></span></td>
       <td><button class="icon-btn" data-act="arb-rm" aria-label="Arbeit entfernen">${I('x')}</button></td>
     </tr>`;
   };
   return `<section class="card panel">
     <div class="panel-h"><h3>Arbeiten</h3></div>
     <table class="wt">
-      <thead><tr><th class="w-i c">Infos</th><th class="w-art">Art</th><th>Arbeit</th><th class="w-wo">Wochen</th><th class="w-x"></th></tr></thead>
-      <tbody>${zeilen.map(zeile).join('') || '<tr><td colspan="5" class="muted small">Noch keine Arbeiten. Unten hinzufügen.</td></tr>'}</tbody>
+      <thead><tr><th class="w-i c">Infos</th><th class="w-art">Art</th><th>Arbeit</th><th class="w-wo">Wochen</th><th class="w-zt" title="Zeit pro Einsatz. Grau = Standard der Arbeit, hier überschreibbar.">Zeit</th><th class="w-x"></th></tr></thead>
+      <tbody>${zeilen.map(zeile).join('') || '<tr><td colspan="6" class="muted small">Noch keine Arbeiten. Unten hinzufügen.</td></tr>'}</tbody>
     </table>
     <div class="addlinks">
       ${kat.individuell ? '' : `<details class="ms spick" id="spick">
@@ -1598,6 +1603,12 @@ $('app').addEventListener('change', async e => {
     const neu = [...$('zustMs').querySelectorAll('input:checked')].map(x => x.value);
     await setzeZustaendig(kk, neu);
     render(); $('zustMs').open = true;
+  }
+  else if(act === 'arb-zeit'){
+    const id = el.closest('[data-id]').dataset.id, ka = S.ka.find(x => x.id === id), m = parseZeit(el.value);
+    if(m === undefined){ showToast('Zeit in Stunden eingeben, z. B. 1,5', true); el.value = zeitText(ka.dauer_min); return; }
+    if(await speichere('pflege_kunde_arbeit', { id }, { dauer_min: m })) ka.dauer_min = m;
+    el.value = zeitText(m);
   }
   else if(act === 'zus-titel'){
     const id = el.closest('[data-id]').dataset.id, ka = S.ka.find(x => x.id === id), titel = el.value.trim();

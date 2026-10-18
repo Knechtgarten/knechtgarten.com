@@ -141,6 +141,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 .aleer{padding:4px 10px;color:var(--muted);}
 .bar.prov{background:repeating-linear-gradient(135deg,#E9EDB8 0 4px,#FFFFFF 4px 8px);border:1px dashed #9CA43A;color:#323E4E;cursor:grab;}
 .bar.prov.over{border:1.5px solid var(--red);}
+.bar.prov.nozeit{background:repeating-linear-gradient(135deg,#E9EDB8 0 4px,#FFFFFF 4px 8px);border:1px dashed #C08A2E;}
 .row.grp .lane .bar{top:2px;height:15px;}
 .aghost{position:fixed;z-index:95;background:var(--primary);color:#fff;font-size:11.5px;padding:4px 8px;border-radius:5px;pointer-events:none;box-shadow:0 4px 12px rgba(0,0,0,.2);}
 .lane.drop{background:#F2F5D6 !important;}
@@ -1062,12 +1063,12 @@ function computeProv(){
     const lane = zu.length ? 'p:' + zu[0].id : (teamLaneId() ? 'g:' + teamLaneId() : null); if(!lane) return;
     weeks.forEach(({ y, w, mon }) => {
       if(PF.st.has(`${kk.id}_${y}_${w}`) || linked.has(`${kk.id}_${y}_${w}`)) return;
-      const arb = []; let min = 0;
+      const arb = []; let min = 0, fehlt = false;
       (byKk[kk.id] || []).forEach(a => { if((a.abgewaehlte_jahre || []).includes(y)) return; const std = a.arbeit_id ? PF.arb[a.arbeit_id] : null;
         const kws = std ? new Set([...(std.standard_kws || []).filter(x => !(a.kws_minus || []).includes(x)), ...(a.kws_plus || [])]) : new Set(a.kws || []);
-        if(!kws.has(w)) return; arb.push(std ? std.name : a.titel); min += a.dauer_min || std?.dauer_min || 60; });
+        if(!kws.has(w)) return; arb.push(std ? std.name : a.titel); const dm = a.dauer_min ?? std?.dauer_min; if(dm == null) fehlt = true; min += dm ?? 60; });
       if(!arb.length) return;
-      PROV.push({ id: `${kk.id}_${y}_${w}`, kk: kk.id, y, w, mon, kid: kk.kunde_id, kat, arb, min, lane, wd: ku.wunsch_wochentage || [] });
+      PROV.push({ id: `${kk.id}_${y}_${w}`, kk: kk.id, y, w, mon, kid: kk.kunde_id, kat, arb, min, fehlt, lane, wd: ku.wunsch_wochentage || [] });
     });
   });
   // Perlenkette pro Zeile
@@ -1091,8 +1092,8 @@ function computeProv(){
   });
 }
 function provBars(key){ return (PROVLAY[key] || []).map(x => { const p = x.p, k = KUNDEN[p.kid]; const l = x.s * dayW + 1, w = Math.max(4, (x.e - x.s) * dayW - 2);
-  const tip = `${kName(k)} · ${p.kat.name}\n${k?.ort || ''} · KW ${p.w} · ${fmtN(p.min / 60)} Std.\n${p.arb.join(', ')}\nNoch nicht abgemacht${x.over ? '\nPasst nicht mehr in die KW!' : ''}`;
-  return `<div class="bar prov${x.over ? ' over' : ''}" data-prov="${p.id}" style="left:${l}px;width:${w}px" title="${esc(tip)}">${w > 16 ? `<span class="t" style="left:3px;width:${w - 6}px">${esc(kShort(k))}</span>` : ''}</div>`; }).join(''); }
+  const tip = `${kName(k)} · ${p.kat.name}\n${k?.ort || ''} · KW ${p.w} · ${fmtN(p.min / 60)} Std.\n${p.arb.join(', ')}\nNoch nicht abgemacht${p.fehlt ? '\nZeit fehlt im Pflege-Tool – 1 Std. angenommen' : ''}${x.over ? '\nPasst nicht mehr in die KW!' : ''}`;
+  return `<div class="bar prov${x.over ? ' over' : ''}${p.fehlt ? ' nozeit' : ''}" data-prov="${p.id}" style="left:${l}px;width:${w}px" title="${esc(tip)}">${w > 16 ? `<span class="t" style="left:3px;width:${w - 6}px">${esc(kShort(k))}</span>` : ''}</div>`; }).join(''); }
 async function provToEinsatz(pid, mid, s, e, ok){
   const p = PROV.find(x => x.id === pid); if(!p) return;
   const neu = await neuerEinsatz({ mid, kind: 'termin', s: r48(s), e: r48(e), kid: p.kid, title: `${p.kat.name}: ${p.arb.join(', ')}`, text: '', ok, pkk: p.kk, pj: p.y, pkw: p.w }, false);
