@@ -276,6 +276,8 @@ table.bp td{padding:4px;border-top:1px solid var(--soft);white-space:nowrap;}
 .greys .stp{background:repeating-linear-gradient(135deg,#A6ADB4 0 4px,#fff 4px 7px);}
 .prev{border-radius:4px;padding:3px 8px;font-size:11px;font-weight:600;justify-self:start;border:1px solid rgba(35,43,53,.2);}
 @media (max-width:640px){ .abrow{grid-template-columns:18px 1fr;} }
+.offbadge{display:inline-block;vertical-align:3px;margin-left:8px;font-size:10.5px;font-weight:700;color:#5B6420;padding:1px 7px;border-radius:10px;border:1px dashed #9CA43A;background:repeating-linear-gradient(135deg,#E9EDB8 0 4px,#fff 4px 8px);}
+.hdbtn{padding:5px 10px;font-size:12px;flex:none;align-self:flex-start;}
 .erl{display:flex;justify-content:space-between;align-items:center;gap:8px;background:var(--soft);border-radius:8px;padding:8px 10px;}
 .btn-ok{background:var(--accent-lime);color:var(--primary);}
 .atabs{display:flex;gap:2px;}
@@ -512,7 +514,7 @@ async function fetchAll(mk){ let out = [], i = 0; for(;;){ const { data, error }
 async function ladeAlles(){
   try{
     const von = fromU(0), bis = fromU(NDAYS);
-    const [g, p, e, s, f, k, r, z, au, pz, at] = await Promise.all([
+    const [g, p, e, s, f, k, r, z, au, pz, at, vn] = await Promise.all([
       fetchAll(() => sb.from('planer_gruppe').select('*').order('sortierung')),
       fetchAll(() => sb.from('planer_person').select('*').order('sortierung')),
       fetchAll(() => sb.from('planer_einsatz').select('*, planer_datei(id,art,name,storage_pfad)').lt('beginn', bis).gt('ende', von)),
@@ -523,9 +525,10 @@ async function ladeAlles(){
       fetchAll(() => sb.from('planer_ressource_einsatz').select('*')),
       fetchAll(() => sb.from('planer_auftrag').select('*').order('erstellt_am')),
       fetchAll(() => sb.from('planer_pendenz').select('*').eq('erledigt', false)),
-      fetchAll(() => sb.from('planer_absenz_typ').select('*').order('sortierung'))
+      fetchAll(() => sb.from('planer_absenz_typ').select('*').order('sortierung')),
+      fetchAll(() => sb.from('planer_vorschlag_notiz').select('*'))
     ]);
-    AUF = au; PZ = pz; ABST = at;
+    AUF = au; PZ = pz; ABST = at; VNOT = {}; vn.forEach(x => VNOT[`${x.kunde_kategorie_id}_${x.jahr}_${x.kw}`] = x.notiz);
     RES = r; RESE = z.map(x => ({ id: x.id, rid: x.ressource_id, art: x.art, eid: x.einsatz_id, mid: x.person_id, s: x.beginn ? toU(x.beginn) : null, e: x.ende ? toU(x.ende) : null }));
     GRUPPEN = g; PERSONEN = p; P = {}; p.forEach(x => P[x.id] = x);
     EINS = e.map(rowToItem); SERIEN = s;
@@ -1149,6 +1152,7 @@ function renderBoard(){
 // nach KW → Ortschaft → Name, um feste Einsätze, Wochenenden und Feiertage herum.
 // Zuständige Person = ihre Zeile, sonst Teamzeile (Gruppe Pflege/Service).
 // ---------------------------------------------------------------------------
+let VNOT = {};
 let PF = null, PROV = [], PROVLAY = {}, showProv = lsGet('prov', true);
 async function ladePflege(){
   try{
@@ -1211,11 +1215,12 @@ function computeProv(){
   });
 }
 function provBars(key){ return (PROVLAY[key] || []).map(x => { const p = x.p, k = KUNDEN[p.kid]; const l = x.s * dayW + 1, w = Math.max(4, (x.e - x.s) * dayW - 2);
-  const tip = `${kName(k)} · ${p.kat.name}\n${k?.ort || ''} · KW ${p.w} · ${fmtN(p.min / 60)} Std.\n${p.arb.join(', ')}\nNoch nicht abgemacht${p.fehlt ? '\nZeit fehlt im Pflege-Tool – 1 Std. angenommen' : ''}${x.alt ? '\nOffen seit KW ' + p.w : ''}`;
+  const tip = `${kName(k)} · ${p.kat.name}\n${k?.ort || ''} · KW ${p.w} · ${fmtN(p.min / 60)} Std.\n${p.arb.join(', ')}\nNoch nicht abgemacht${p.fehlt ? '\nZeit fehlt im Pflege-Tool – 1 Std. angenommen' : ''}${x.alt ? '\nOffen seit KW ' + p.w : ''}${VNOT[p.id] ? '\nNotiz: ' + VNOT[p.id] : ''}`;
   return `<div class="bar prov${x.alt ? ' over' : ''}${p.fehlt ? ' nozeit' : ''}" data-prov="${p.id}" style="left:${l}px;width:${w}px" title="${esc(tip)}">${w > 16 ? `<span class="t" style="left:3px;width:${w - 6}px">${x.alt && w > 60 ? `seit KW ${p.w} · ` : ''}${esc(kShort(k))}</span>` : ''}</div>`; }).join(''); }
 async function provToEinsatz(pid, mid, s, e, ok){
   const p = PROV.find(x => x.id === pid); if(!p) return;
-  const neu = await neuerEinsatz({ mid, kind: 'termin', s: r48(s), e: r48(e), kid: p.kid, title: `${p.kat.name}: ${p.arb.join(', ')}`, text: '', ok, pkk: p.kk, pj: p.y, pkw: p.w }, false);
+  const neu = await neuerEinsatz({ mid, kind: 'termin', s: r48(s), e: r48(e), kid: p.kid, title: `${p.kat.name}: ${p.arb.join(', ')}`, text: VNOT[p.id] || '', ok, pkk: p.kk, pj: p.y, pkw: p.w }, false);
+  if(neu && VNOT[p.id]){ await sb.from('planer_vorschlag_notiz').delete().eq('kunde_kategorie_id', p.kk).eq('jahr', p.y).eq('kw', p.w); delete VNOT[p.id]; }
   if(neu){ renderRows(); toast(`${kShort(KUNDEN[p.kid])}: ${ok ? 'abgemacht' : 'angeheftet'} bei ${P[mid].name}`, () => loescheEinsatz(neu)); }
 }
 
@@ -1600,8 +1605,8 @@ function openPanel(id, isNew){
   if(it.kind !== 'absenz') secs += accHTML('files', 'Fotos und PDF', 'image', (it.files || []).length, `<div class="files" id="pFiles"></div>${ed ? `<label class="btn btn-ghost" style="align-self:flex-start;margin-top:4px">${I('plus')}Datei hinzufügen<input type="file" id="pUp" accept="image/*,application/pdf" multiple hidden></label>` : ''}`, false);
   const pflege = it.kid ? pflegeHTML(it.kid, it.pkk, d0) : '';
   $('side').innerHTML = `<aside class="sidepanel">
-    <div class="sd-head"><div style="min-width:0"><h3>${esc(it.kind === 'absenz' ? (it.title || 'Absenz') : titleOf(it))}</h3>${k && kOrt(k) ? `<div class="small muted">${I('pin').replace('class="i"', 'class="i" style="width:12px;height:12px;vertical-align:-2px"')} ${esc(kOrt(k))}</div>` : ''}<div class="when">${esc(spanLabel(it))} · ${esc(wer)}</div></div><button class="icon-btn" id="pX" aria-label="Schliessen">${I('x')}</button></div>
-    ${offen ? `<div class="banner vor"><b>Offener Auftrag · noch nicht abgemacht</b>${ed ? (panelAbm ? abmHTML(it.s, it.e, false) : `<button class="btn btn-primary" id="pAbm" style="align-self:flex-start">${I('check')}Termin ist abgemacht</button>`) : ''}</div>` : ''}
+    <div class="sd-head"><div style="min-width:0"><h3>${esc(it.kind === 'absenz' ? (it.title || 'Absenz') : titleOf(it))}${offen ? `<span class="offbadge" title="Offener Auftrag – noch nicht abgemacht, wandert mit">offen</span>` : ''}</h3>${k && kOrt(k) ? `<div class="small muted">${I('pin').replace('class="i"', 'class="i" style="width:12px;height:12px;vertical-align:-2px"')} ${esc(kOrt(k))}</div>` : ''}<div class="when">${it._alt ? `<b style="color:var(--red)">seit ${esc(dLab(Math.floor(it._alt.s)))}</b> · ` : ''}${esc(spanLabel(it))} · ${esc(wer)}</div></div>${offen && ed && !panelAbm ? `<button class="btn btn-primary hdbtn" id="pAbm" title="Mit dem Kunden abgemacht">${I('check')}Abgemacht</button>` : ''}<button class="icon-btn" id="pX" aria-label="Schliessen">${I('x')}</button></div>
+    ${offen && ed && panelAbm ? abmHTML(it.s, it.e, false) : ''}
     ${!offen && it.kind !== 'absenz' && ed ? `<div class="erl"><span class="small muted">${it.erledigt ? 'Erledigt' + (it.pkk ? ' · auch im Pflege-Tool abgehakt' : '') : 'Nach dem Einsatz abhaken' + (it.pkk ? ' (zählt auch fürs Pflege-Tool)' : '')}</span><button class="btn ${it.erledigt ? 'btn-ghost' : 'btn-ok'}" id="pErl">${I('check')}${it.erledigt ? 'Rückgängig' : 'Erledigt'}</button></div>` : ''}
     ${it.soll && L.n < it.soll - .01 ? `<div class="info">Geplant waren ${fmtN(it.soll)} Tage, durch Unterbrüche jetzt ${fmtN(L.n)}. ${ed ? `<button class="btn btn-ghost" id="pExt" style="padding:2px 8px;margin-top:4px">Ende verschieben</button>` : ''}</div>` : ''}
     ${it.kind === 'absenz' ? `<div class="abs-chips">${ABST.map(t => `<button data-pabs="${esc(t.name)}" class="${t.name === it.title ? 'on' : ''}" ${dis}><i style="background:${absStyle(t.name).bg}"></i>${esc(t.name)}</button>`).join('')}</div>` : ''}
@@ -1678,13 +1683,17 @@ function openProvPanel(pid){
   const wer = team ? 'Team ' + (GRUPPEN.find(g => g.id === gid)?.name || '') : P[p.lane.slice(2)]?.name;
   const darf = team ? PERSONEN.some(x => x.aktiv && canEdit(x.id) && x.gruppe_id === gid) : canEdit(p.lane.slice(2));
   $('side').innerHTML = `<aside class="sidepanel">
-    <div class="sd-head"><div style="min-width:0"><h3>${esc(kName(k))}</h3>${kOrt(k) ? `<div class="small muted">${I('pin').replace('class="i"', 'class="i" style="width:12px;height:12px;vertical-align:-2px"')} ${esc(kOrt(k))}</div>` : ''}<div class="when">Vorschlag ${esc(spanLabel({ s: L.s, e: L.e }))} · ${esc(wer)}</div></div><button class="icon-btn" id="pX" aria-label="Schliessen">${I('x')}</button></div>
-    <div class="banner vor"><b>Offener Auftrag · noch nicht abgemacht</b><span class="small">${esc(p.kat.name)} · Startwoche KW ${p.w} · ${fmtN(p.min / 60)} Std.${p.fehlt ? ' (Zeit fehlt im Pflege-Tool)' : ''}<br>Wandert automatisch in die nächste freie Lücke, bis er abgemacht ist.</span>
-      ${darf ? (panelAbm ? abmHTML(L.s, L.e, team, gid) : `<button class="btn btn-primary" id="pAbm" style="align-self:flex-start">${I('check')}Termin ist abgemacht</button>`) : ''}</div>
+    <div class="sd-head"><div style="min-width:0"><h3>${esc(kName(k))}<span class="offbadge" title="Offener Auftrag – noch nicht abgemacht, wandert mit">offen</span></h3>${kOrt(k) ? `<div class="small muted">${I('pin').replace('class="i"', 'class="i" style="width:12px;height:12px;vertical-align:-2px"')} ${esc(kOrt(k))}</div>` : ''}<div class="when">${L.alt ? `<b style="color:var(--red)">seit KW ${p.w}</b> · ` : ''}Vorschlag ${esc(spanLabel({ s: L.s, e: L.e }))} · ${esc(wer)}</div><div class="when">${esc(p.kat.name)} · Startwoche KW ${p.w} · ${fmtN(p.min / 60)} Std.${p.fehlt ? ' (Zeit fehlt im Pflege-Tool)' : ''}</div></div>${darf && !panelAbm ? `<button class="btn btn-primary hdbtn" id="pAbm" title="Mit dem Kunden abgemacht">${I('check')}Abgemacht</button>` : ''}<button class="icon-btn" id="pX" aria-label="Schliessen">${I('x')}</button></div>
+    ${darf && panelAbm ? abmHTML(L.s, L.e, team, gid) : ''}
+    <div class="fld"><label>Notiz</label><textarea id="vNotiz" placeholder="z. B. Kunde ruft zurück, nur vormittags, Schlüssel holen …">${esc(VNOT[p.id] || '')}</textarea><span class="small muted" id="vSave"></span></div>
     ${pflegeHTML(p.kid, p.kk, p.mon)}
   </aside>`;
   $('pX').onclick = () => { selProv = null; $('side').innerHTML = ''; };
   bindAcc(); pflegeMedien(p.kid);
+  // Notiz zum Vorschlag (eigene Tabelle, geht beim Abmachen in den Einsatz)
+  let vt; $('vNotiz').oninput = e => { clearTimeout(vt); const v = e.target.value.trim(); vt = setTimeout(async () => { $('vSave').textContent = 'Speichere …';
+    const { error } = v ? await sb.from('planer_vorschlag_notiz').upsert({ kunde_kategorie_id: p.kk, jahr: p.y, kw: p.w, notiz: v, geaendert_am: new Date().toISOString() }) : await sb.from('planer_vorschlag_notiz').delete().eq('kunde_kategorie_id', p.kk).eq('jahr', p.y).eq('kw', p.w);
+    if(error){ fehler(error); $('vSave').textContent = ''; return; } if(v) VNOT[p.id] = v; else delete VNOT[p.id]; $('vSave').textContent = 'Gespeichert'; }, 700); };
   const ab = $('pAbm'); if(ab) ab.onclick = () => { panelAbm = true; openProvPanel(pid); };
   const no = $('aNo'); if(no) no.onclick = () => { panelAbm = false; openProvPanel(pid); };
   const ok = $('aOk'); if(ok) ok.onclick = async () => { const v = leseAbm(); if(!v){ toast('«Bis» muss nach «Von» liegen.', null, true); return; }
@@ -1997,7 +2006,7 @@ async function starteLive(){
   const { data: { session } } = await sb.auth.getSession(); if(session) await sb.realtime.setAuth(session.access_token);
   sb.auth.onAuthStateChange((ev, s) => { if(s && (ev === 'TOKEN_REFRESHED' || ev === 'SIGNED_IN')) sb.realtime.setAuth(s.access_token); });
   const ch = sb.channel('einsatzplaner');
-  ['planer_einsatz', 'planer_serie', 'planer_person', 'planer_gruppe', 'planer_feiertag', 'planer_ressource', 'planer_ressource_einsatz', 'planer_auftrag', 'planer_pendenz', 'planer_absenz_typ'].forEach(t =>
+  ['planer_einsatz', 'planer_serie', 'planer_person', 'planer_gruppe', 'planer_feiertag', 'planer_ressource', 'planer_ressource_einsatz', 'planer_auftrag', 'planer_pendenz', 'planer_absenz_typ', 'planer_vorschlag_notiz'].forEach(t =>
     ch.on('postgres_changes', { event: '*', schema: 'public', table: t }, () => { clearTimeout(reloadT); reloadT = setTimeout(() => { if(drag){ reloadT = setTimeout(neuLaden, 800); return; } if(document.activeElement && $('side').contains(document.activeElement)) return; neuLaden(); }, 500); }));
   ch.subscribe();
   // Beim Zurückkommen auf die Seite (Handy entsperrt) frisch laden
