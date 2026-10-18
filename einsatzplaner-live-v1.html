@@ -151,6 +151,15 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 .dropline{position:fixed;height:3px;background:var(--primary);z-index:96;pointer-events:none;border-radius:2px;}
 .tl.sortable .row .nm{cursor:grab;}
 .tl.sortable .row .nm button{cursor:pointer;}
+.vchip{position:absolute;height:15px;border-radius:3px;font-size:10px;line-height:13px;padding:0 4px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;background:#fff;border:1px solid #8B9097;color:var(--ink);z-index:2;user-select:none;touch-action:none;}
+.vchip.ed{cursor:grab;}
+.vchip.ed:hover{border-color:var(--primary);box-shadow:0 1px 4px rgba(30,37,48,.18);}
+.vchip.ev{background:repeating-linear-gradient(135deg,#EEF1F3 0 4px,#fff 4px 8px);border-style:dashed;color:#5E646B;}
+.vmore{position:absolute;font-size:10px;color:var(--primary);cursor:pointer;font-weight:600;z-index:2;}
+.vwk{position:absolute;top:4px;height:15px;font-size:10px;color:var(--primary);text-align:center;font-weight:600;}
+.row.vpool .lane{background-color:#F7F9FA;}
+.lane.vown.drop{background:#F2F5D6 !important;}
+.nm .lk{all:unset;cursor:pointer;color:var(--primary);font-size:10.5px;margin-left:4px;}
 .mab{all:unset;cursor:pointer;width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;border-radius:4px;color:#9AA1A8;flex:none;margin-left:auto;}
 .mab .i{width:14px;height:14px;}
 .mab:hover{color:var(--primary);background:var(--soft);}
@@ -716,7 +725,7 @@ function renderRows(){
     const ps = act.filter(p => (p.gruppe_id || '_ohne') === g.id).sort((a, b) => a.sortierung - b.sortierung || a.name.localeCompare(b.name));
     if(!ps.length) return; const zu = collapsed.has(g.id);
     h += `<div class="row grp${zu ? ' zu' : ''}" data-g="${g.id}"><div class="nm">${I('chev')}${esc(g.name)} <span style="opacity:.6;font-weight:400">(${ps.length})</span>${isBuero() && g.id !== '_ohne' ? `<button class="gadd" data-gadd="${g.id}" title="Zeile hinzufügen" aria-label="Zeile hinzufügen">${I('plus')}</button>` : ''}${g.id !== '_ohne' ? pzBtn('gruppe', g.id) : ''}</div><div class="lane" style="width:${W}px;height:20px">${provBars('g:' + g.id)}</div></div>`;
-    if(!zu) ps.forEach(p => { h += personRow(p, W, bgx); if(openMid === p.id) h += openTyp === 'maschine' ? ovRows(W, bgx, 'maschine', p.id) : ovRows(W, bgx, 'fahrzeug', p.id) + ovRows(W, bgx, 'anhaenger', p.id); });
+    if(!zu) ps.forEach(p => { h += personRow(p, W, bgx); if(openMid === p.id) h += openTyp === 'maschine' ? ovRows(W, bgx, 'maschine', p.id) : vehFocusRows(W, bgx, p.id) + ovRows(W, bgx, 'anhaenger', p.id); });
   });
   const sl = t.scrollLeft, stp = t.scrollTop;
   t.innerHTML = `<div class="grid" style="width:${W + NAMEW}px">${h}</div>`;
@@ -802,6 +811,57 @@ function maschHTML(it){
   const frei = r => !slots.some(k => (RU[r.id]?.cnt[k] || 0) > 0);
   return `<div class="fld"><label>Maschinen</label><div class="mchips">${chips || '<span class="small muted">Keine</span>'}</div>
     ${isBuero() ? `<select id="pMa"><option value="">+ Maschine hinzufügen</option>${ms.filter(r => !used.has(r.id)).map(r => `<option value="${r.id}">${esc(resName(r))}${frei(r) ? '' : ' – belegt'}</option>`).join('')}</select>` : ''}</div>`;
+}
+// Lieferwagen unter einer Person: oben ihre Fahrzeuge (+ leere Zeilen), unten die Ablage
+// mit freien Wagen pro Tag. Sicher frei = kein Stamm-Fahrer oder freigegeben; vielleicht
+// frei = Stamm-Fahrer abwesend (Ferien, krank, frei). Belegte Wagen erscheinen nicht.
+let poolAll = false, POOLR = [0, 0];
+function vehFocusRows(W, bgx, mid){
+  const hl = EINS.filter(i => i.kind === 'baustelle' && i.mid === mid).map(i => `<div class="fhl" style="left:${i.s * dayW}px;width:${(i.e - i.s) * dayW}px"></div>`).join('');
+  const ed = canEditRes('fahrzeug'); let h = '';
+  const veh = RES.filter(r => r.typ === 'fahrzeug' && r.aktiv);
+  // 1) eigene Fahrzeuge der Person, gestapelt; mindestens 3 Zeilen (Stamm + 2 leere)
+  const own = []; veh.forEach(r => (RU[r.id]?.list || []).forEach(x => { if(x.mid === mid && x.slots.length) own.push({ r, x, first: Math.min(...x.slots) }); }));
+  own.sort((a, b) => (b.x.stamm - a.x.stamm) || a.first - b.first);
+  const lanes = []; own.forEach(o => { let l = lanes.findIndex(L => !o.x.slots.some(k => L.has(k))); if(l < 0){ l = lanes.length; lanes.push(new Set()); } o.x.slots.forEach(k => lanes[l].add(k)); o.ln = l; });
+  const nRows = Math.max(3, lanes.length + 1);
+  for(let ln = 0; ln < nRows; ln++){
+    let bars = '';
+    own.filter(o => o.ln === ln).forEach(({ r, x }) => { const u = RU[r.id]; const bg = resCol(x.mid);
+      const cf = new Set(x.slots.filter(k => (u.cnt[k] || 0) > 1)); const ev = x.evtl || new Set();
+      [[x.slots.filter(k => !cf.has(k) && !ev.has(k)), ''], [[...cf].filter(k => !ev.has(k)), ' cf'], [x.slots.filter(k => ev.has(k)), ' ev']].forEach(([sl, cls]) => segsOf(sl).forEach(sg => {
+        const l = sg[0] * dayW + 1, w = Math.max(3, (sg[1] - sg[0]) * dayW - 2); const mv = ed && !x.stamm;
+        bars += `<div class="band${cls}${mv ? ' ed' : ''}" data-rz="${x.id}" data-rid="${r.id}" style="left:${l}px;width:${w}px;top:3px;height:17px;--c:${bg};color:${txtOn(bg)}" title="${esc(resName(r) + (x.stamm ? ' · Stammfahrzeug' : '') + (cls === ' cf' ? '\nDoppelt verplant!' : ''))}">${mv ? '<span class="hl"></span>' : ''}${w > 24 ? `<span>${esc(resName(r))}${x.stamm ? ' (Stamm)' : ''}</span>` : ''}${mv ? '<span class="hr"></span>' : ''}</div>`; })); });
+    h += `<div class="row ov fov" data-vfocus="${mid}"><div class="nm small muted">${ln === 0 ? I('truck').replace('class="i"', 'class="i" style="width:14px;height:14px"') + ' Fahrzeuge' : ''}</div><div class="lane vown" style="width:${W}px;height:24px;${bgx}">${feierHTML()}${hl}${bars}</div></div>`;
+  }
+  // 2) Ablage: freie Wagen pro Tag (nur um den sichtbaren Bereich)
+  const t = tlEl(); const c0 = Math.floor((t?.scrollLeft || TODAY * dayW) / dayW); const span = Math.ceil(visW() / dayW);
+  POOLR = [Math.max(0, c0 - 14), Math.min(NDAYS, c0 + span + 14)];
+  const ABS = {}; ALL.forEach(i => { if(i.kind === 'absenz' && LAY[i.id]) LAY[i.id].free.forEach(k => { (ABS[i.mid] ??= {})[k] = i.title || 'Absenz'; }); });
+  const WEG = {}; RESE.forEach(z => { if(z.art === 'stamm_weg') rSlots(z.s, z.e).forEach(k => (WEG[z.rid] ??= new Set()).add(k)); });
+  const stat = (r, k) => { const u = RU[r.id] || { list: [] };
+    if(u.list.some(x => x.mid === mid && x.slots.includes(k) && !x.evtl?.has(k))) return null;
+    if(u.list.some(x => !x.stamm && x.slots.includes(k))) return null;
+    const sp = r.stamm_person_id && P[r.stamm_person_id]?.aktiv ? r.stamm_person_id : null;
+    if(!sp || WEG[r.id]?.has(k)) return { s: 'frei' };
+    if(sp === mid) return null;
+    const ab = ABS[sp]?.[k]; return ab ? { s: 'ev', why: `${first(P[sp].name)} · ${ab}` } : null; };
+  const days = {}; let maxN = 0;
+  for(let d = POOLR[0]; d < POOLR[1]; d++){ if(isOff(d)) continue; const l = [];
+    veh.forEach(r => { const a = stat(r, d * 2), b = stat(r, d * 2 + 1); if(!a && !b) return;
+      const ev = (a && a.s === 'ev') || (b && b.s === 'ev'); l.push({ r, a: a ? d : d + .5, b: b ? d + 1 : d + .5, ev, why: (a || b).why }); });
+    l.sort((x, y) => (x.ev - y.ev) || resName(x.r).localeCompare(resName(y.r))); days[d] = l; maxN = Math.max(maxN, l.length); }
+  const cap = poolAll ? maxN : Math.min(4, maxN); const ph = Math.max(1, cap) * 17 + 6 + (maxN > cap ? 12 : 0);
+  let chips = '';
+  if(dayW < 20){ // Jahr / Quartal: nur Anzahl pro Woche
+    for(let d = POOLR[0]; d < POOLR[1]; d++){ if(dDate(d).getDay() !== 1) continue; const s = new Set(); for(let i = 0; i < 5; i++) (days[d + i] || []).forEach(x => s.add(x.r.id)); if(s.size) chips += `<div class="vwk" style="left:${d * dayW}px;width:${7 * dayW}px">${s.size} frei</div>`; }
+  } else Object.entries(days).forEach(([d, l]) => { d = +d;
+    l.slice(0, cap).forEach((x, i) => { const left = x.a * dayW + 2, w = (x.b - x.a) * dayW - 4; const nm = x.r.stamm_person_id ? first(P[x.r.stamm_person_id]?.name) : '';
+      const lab = w > 95 ? `${resName(x.r)}${x.ev ? ' · ' + x.why : nm ? ' · ' + nm : ''}` : w > 46 ? resName(x.r) : w > 22 ? resName(x.r).slice(-3) : '';
+      chips += `<div class="vchip${x.ev ? ' ev' : ''}${ed ? ' ed' : ''}" data-vrid="${x.r.id}" data-a="${x.a}" data-b="${x.b}" style="left:${left}px;width:${w}px;top:${3 + i * 17}px" title="${esc(resName(x.r) + (x.ev ? '\nVielleicht frei: ' + x.why : '\nFrei') + (ed ? '\nHochziehen oder anklicken = für diesen Tag zuteilen' : ''))}">${esc(lab)}</div>`; });
+    if(l.length > cap) chips += `<div class="vmore" data-vmore="1" style="left:${d * dayW + 3}px;top:${3 + cap * 17}px">+${l.length - cap} weitere</div>`; });
+  h += `<div class="row ov fov vpool" data-vfocus="${mid}"><div class="nm small muted" title="Freie Lieferwagen pro Tag">Frei / evtl. frei${poolAll && maxN > 4 ? ' <button class="lk" data-vmore="0">weniger</button>' : ''}</div><div class="lane" style="width:${W}px;height:${ph}px;${bgx}">${feierHTML()}${chips || ''}</div></div>`;
+  return h;
 }
 async function resInsert(row){ const { data, error } = await sb.from('planer_ressource_einsatz').insert(row).select().single(); if(error){ fehler(error, 'Zuteilen'); return null; } await neuLaden(); return data; }
 async function resDelete(id){ const { error } = await sb.from('planer_ressource_einsatz').delete().eq('id', id); if(error){ fehler(error, 'Entfernen'); return false; } await neuLaden(); return true; }
@@ -1087,7 +1147,8 @@ function stickLabels(){ const t = tlEl(); if(!t) return; const v0 = t.scrollLeft
 function uAt(x){ const t = tlEl(); const r = t.getBoundingClientRect(); return (x - r.left - NAMEW + t.scrollLeft) / dayW; }
 function bindTimeline(t){
   let stT = 0; t.addEventListener('scroll', () => { if(!stT) stT = requestAnimationFrame(() => { stT = 0; stickLabels(); }); }, { passive: true });
-  let scT; t.addEventListener('scroll', () => { updateRange(); closePop(); if(zoom === 'tag'){ clearTimeout(scT); scT = setTimeout(() => { const c = Math.floor(t.scrollLeft / dayW); if(c < HR[0] + 3 || c > HR[1] - 4) renderRows(); }, 120); } }, { passive: true });
+  let scT; t.addEventListener('scroll', () => { updateRange(); closePop(); if(zoom === 'tag'){ clearTimeout(scT); scT = setTimeout(() => { const c = Math.floor(t.scrollLeft / dayW); if(c < HR[0] + 3 || c > HR[1] - 4) renderRows(); }, 120); }
+    if(openMid && openTyp === 'fahrzeug'){ clearTimeout(t._pT); t._pT = setTimeout(() => { const c = Math.floor(t.scrollLeft / dayW), e2 = c + Math.ceil(visW() / dayW); if(c < POOLR[0] + 3 || e2 > POOLR[1] - 3) renderRows(); }, 150); } }, { passive: true });
   t.addEventListener('pointerdown', e => {
     if(e.button !== 0) return; closePop();
     const mb = e.target.closest('[data-mab]'); if(mb){ e.stopPropagation(); const same = openMid === mb.dataset.mab && openTyp === mb.dataset.typ; openMid = same ? null : mb.dataset.mab; openTyp = mb.dataset.typ; renderRows(); return; }
@@ -1101,6 +1162,10 @@ function bindTimeline(t){
     // Büro: Person am Namen ziehen = umsortieren / andere Gruppe (kurzer Klick = bearbeiten)
     const pn = e.target.closest('.row[data-mid] > .nm'); if(pn && isBuero() && layer === 'p'){ drag = { kind: 'prow', mid: pn.parentElement.dataset.mid, x0: e.clientX, y0: e.clientY, moved: false }; e.preventDefault(); return; }
     const tgp = e.target.closest('.tgrp'); if(tgp){ const d = +tgp.dataset.tday; drag = { kind: 'click', fn: () => { zoom = 'tag'; lsSet('zoom', 'tag'); dayW = calcDayW(); renderRows(); scrollToU(d, 'left'); renderPlan(); } }; return; }
+    // Ablage freier Lieferwagen: Kärtchen hochziehen oder anklicken = zuteilen
+    const vm = e.target.closest('[data-vmore]'); if(vm){ poolAll = vm.dataset.vmore === '1'; renderRows(); return; }
+    const vc = e.target.closest('.vchip'); if(vc){ if(!vc.classList.contains('ed')) return; drag = { kind: 'vchip', rid: vc.dataset.vrid, a: +vc.dataset.a, b: +vc.dataset.b, x0: e.clientX, y0: e.clientY, moved: false }; e.preventDefault(); return; }
+    if(e.target.closest('.lane.vown') && !e.target.closest('.band')) return;
     // Übersicht Maschinen / Fahrzeuge / Anhänger
     const band = e.target.closest('.band[data-rz]'), rl = e.target.closest('.lane[data-rid]');
     if(band){ const zid = band.dataset.rz, rid = band.dataset.rid, u = uAt(e.clientX); const z = RESE.find(o => o.id === zid);
@@ -1139,6 +1204,11 @@ function bindWindow(){
       else if(drag.mode === 'l') it.s = r48(Math.min(drag.e0 - sn, drag.s0 + du));
       else it.e = r48(Math.max(drag.s0 + sn, drag.e0 + du));
       if(!drag.raf){ drag.raf = requestAnimationFrame(() => { if(drag) drag.raf = 0; renderRows(); }); }
+    } else if(drag.kind === 'vchip'){
+      if(!drag.moved && Math.abs(e.clientX - drag.x0) < 5 && Math.abs(e.clientY - drag.y0) < 5) return;
+      if(!drag.moved){ drag.moved = true; drag.gh = document.createElement('div'); drag.gh.className = 'aghost'; drag.gh.textContent = resName(resById(drag.rid)); document.body.appendChild(drag.gh); }
+      drag.gh.style.left = e.clientX + 10 + 'px'; drag.gh.style.top = e.clientY + 8 + 'px';
+      document.querySelectorAll('.lane.vown.drop').forEach(l => l.classList.remove('drop')); const ln = document.elementFromPoint(e.clientX, e.clientY)?.closest('.lane.vown'); if(ln) ln.classList.add('drop');
     } else if(drag.kind === 'grow' || drag.kind === 'prow'){
       if(!drag.moved && Math.abs(e.clientY - drag.y0) < 5) return;
       if(!drag.moved){ drag.moved = true; drag.gh = document.createElement('div'); drag.gh.className = 'aghost'; drag.gh.textContent = drag.kind === 'grow' ? GRUPPEN.find(x => x.id === drag.gid)?.name : P[drag.mid]?.name; document.body.appendChild(drag.gh);
@@ -1173,6 +1243,11 @@ function bindWindow(){
   addEventListener('pointerup', async e => {
     const d = drag; drag = null; if(!d) return;
     if(d.kind === 'click'){ d.fn(); return; }
+    if(d.kind === 'vchip'){
+      d.gh?.remove(); document.querySelectorAll('.lane.vown.drop').forEach(l => l.classList.remove('drop'));
+      if(d.moved && !document.elementFromPoint(e.clientX, e.clientY)?.closest('.lane.vown')) return;
+      if(openMid) await assignVeh(resById(d.rid), d.a, d.b, openMid); return;
+    }
     if(d.kind === 'grow' || d.kind === 'prow'){
       d.gh?.remove(); d.line?.remove();
       if(!d.moved){ if(d.kind === 'grow') d.toggle(d.gid); else personDlg(P[d.mid]); return; }
