@@ -156,6 +156,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 .mab:hover{color:var(--primary);background:var(--soft);}
 .mab.on{color:#fff;background:var(--primary);}
 .mab + .pzb{margin-left:2px;}
+.mab + .mab{margin-left:1px;}
 .row.ov.fov .nm{background:#F7F9FA;padding-left:22px;}
 .row.ov.fov{background:#FBFCFC;}
 .fhl{position:absolute;top:0;bottom:0;background:rgba(209,219,95,.22);pointer-events:none;}
@@ -685,7 +686,7 @@ function personRow(p, W, bgx){
     // Beschriftung läuft über Wochenenden weiter
     const x0 = L.segs[0][0] * dayW + 5, tw = Math.max(0, (L.segs[L.segs.length - 1][1] - L.segs[0][0]) * dayW - 9);
     const prov = it.ok === false;
-    const txt = left => tw > 14 ? `<span class="t" style="left:${x0 - left}px;width:${tw}px">${esc(lab)}</span>` : '';
+    const txt = left => tw > 14 ? `<span class="t" data-x0="${x0}" data-x1="${x0 + tw}" data-l="${left}" style="left:${x0 - left}px;width:${tw}px">${esc(lab)}</span>` : '';
     const bgS = prov ? `background:repeating-linear-gradient(135deg,${st.bg}99 0 5px,#FFFFFF 5px 10px);color:#232B35` : `background:${st.bg};color:${st.fg}`;
     L.segs.forEach((sg, i) => {
       const l = sg[0] * dayW + 1, w = Math.max(3, (sg[1] - sg[0]) * dayW - 2);
@@ -700,7 +701,7 @@ function personRow(p, W, bgx){
     }
   });
   const mine = p.benutzer_id === ME;
-  return `<div class="row" data-mid="${p.id}"><div class="nm" title="${esc(p.name + (p.zusatz ? ' · ' + p.zusatz : ''))}"><span class="dot" style="background:${p.farbe || '#fff'}"></span><span class="n">${esc(p.name)}</span>${p.zusatz ? `<span class="z">${esc(p.zusatz)}</span>` : ''}${mine ? '<span class="me">Ich</span>' : ''}${p.ist_vorarbeiter ? `<button class="mab${openMid === p.id ? ' on' : ''}" data-mab="${p.id}" title="Maschinen einteilen (aufklappen)" aria-label="Maschinen einteilen">${I('digger')}</button>` : ''}${pzBtn('person', p.id)}</div><div class="lane${ed ? ' ed' : ''}" data-mid="${p.id}" style="width:${W}px;${bgx}">${feierHTML()}${bars}${provBars('p:' + p.id)}${vehLine(p)}</div></div>`;
+  return `<div class="row" data-mid="${p.id}"><div class="nm" title="${esc(p.name + (p.zusatz ? ' · ' + p.zusatz : ''))}"><span class="dot" style="background:${p.farbe || '#fff'}"></span><span class="n">${esc(p.name)}</span>${p.zusatz ? `<span class="z">${esc(p.zusatz)}</span>` : ''}${mine ? '<span class="me">Ich</span>' : ''}${p.farbe && !p.ist_projektleiter ? `<button class="mab${openMid === p.id && openTyp === 'maschine' ? ' on' : ''}" data-mab="${p.id}" data-typ="maschine" title="Maschinen einteilen (aufklappen)" aria-label="Maschinen einteilen">${I('digger')}</button><button class="mab mab2${openMid === p.id && openTyp === 'fahrzeug' ? ' on' : ''}" data-mab="${p.id}" data-typ="fahrzeug" title="Lieferwagen und Anhänger einteilen (aufklappen)" aria-label="Lieferwagen einteilen">${I('truck')}</button>` : ''}${pzBtn('person', p.id)}</div><div class="lane${ed ? ' ed' : ''}" data-mid="${p.id}" style="width:${W}px;${bgx}">${feierHTML()}${bars}${provBars('p:' + p.id)}${vehLine(p)}</div></div>`;
 }
 function renderRows(){
   const t = tlEl(); if(!t) return; compute();
@@ -714,11 +715,11 @@ function renderRows(){
     const ps = act.filter(p => (p.gruppe_id || '_ohne') === g.id).sort((a, b) => a.sortierung - b.sortierung || a.name.localeCompare(b.name));
     if(!ps.length) return; const zu = collapsed.has(g.id);
     h += `<div class="row grp${zu ? ' zu' : ''}" data-g="${g.id}"><div class="nm">${I('chev')}${esc(g.name)} <span style="opacity:.6;font-weight:400">(${ps.length})</span>${isBuero() && g.id !== '_ohne' ? `<button class="gadd" data-gadd="${g.id}" title="Zeile hinzufügen" aria-label="Zeile hinzufügen">${I('plus')}</button>` : ''}${g.id !== '_ohne' ? pzBtn('gruppe', g.id) : ''}</div><div class="lane" style="width:${W}px;height:20px">${provBars('g:' + g.id)}</div></div>`;
-    if(!zu) ps.forEach(p => { h += personRow(p, W, bgx); if(openMid === p.id) h += ovRows(W, bgx, 'maschine', p.id); });
+    if(!zu) ps.forEach(p => { h += personRow(p, W, bgx); if(openMid === p.id) h += openTyp === 'maschine' ? ovRows(W, bgx, 'maschine', p.id) : ovRows(W, bgx, 'fahrzeug', p.id) + ovRows(W, bgx, 'anhaenger', p.id); });
   });
   const sl = t.scrollLeft, stp = t.scrollTop;
   t.innerHTML = `<div class="grid" style="width:${W + 190}px">${h}</div>`;
-  t.scrollLeft = sl; t.scrollTop = stp; updateRange();
+  t.scrollLeft = sl; t.scrollTop = stp; updateRange(); stickLabels();
 }
 
 // ---------------------------------------------------------------------------
@@ -727,7 +728,7 @@ function renderRows(){
 // mit, wenn sein Fahrer eine Baustelle hat. Doppelt verplant = rot.
 // ---------------------------------------------------------------------------
 let layer = lsGet('layer', 'p'), RU = {}, NEED = {};
-let openMid = null;
+let openMid = null, openTyp = 'maschine';
 const LAYERS = { p: 'Plan', maschine: 'Maschinen', fahrzeug: 'Fahrzeuge', anhaenger: 'Anhänger' };
 const RTYP = { maschine: 'Maschine', fahrzeug: 'Fahrzeug', anhaenger: 'Anhänger' };
 // Fahrzeuge und Maschinen mindestens halbtags
@@ -805,6 +806,9 @@ async function resDelete(id){ const { error } = await sb.from('planer_ressource_
 function popAt(anchorRect, html){ $('popwrap').innerHTML = `<div class="pop" style="left:${Math.max(8, Math.min(innerWidth - 310, anchorRect.left))}px;top:${Math.min(innerHeight - 260, anchorRect.bottom + 6)}px">${html}</div>`; return $('popwrap').firstChild; }
 function openResChooser(rid, a, b, rect){
   const r = resById(rid); const span = `${spanLabel({ s: a, e: b })}`;
+  // Aufgeklappt unter einer Person: direkt ihr zuteilen, ohne Rückfrage
+  if(openMid && r.typ !== 'maschine' && openTyp === 'fahrzeug' && (isBuero() || openMid === myPerson()?.id)){ assignVeh(r, a, b, openMid); return; }
+  if(openMid && r.typ === 'maschine' && openTyp === 'maschine'){ const eig = EINS.filter(x => x.kind === 'baustelle' && x.mid === openMid && x.s < b && x.e > a); if(eig.length === 1){ resInsert({ ressource_id: rid, einsatz_id: eig[0].id }).then(ok => { if(ok) toast(`${resName(r)} → ${labOf(eig[0])}`, () => resDelete(ok.id)); }); return; } }
   if(r.typ === 'maschine'){
     const baus = EINS.filter(x => x.kind === 'baustelle' && x.s < b && x.e > a).sort((x, y) => ((y.mid === openMid) - (x.mid === openMid)) || x.s - y.s);
     const pop = popAt(rect, `<b>${esc(resName(r))}</b><span class="muted small">Für welche Baustelle? Die Maschine bleibt dann für die ganze Baustelle eingeteilt und wandert mit.</span>${baus.map(x => `<button class="btn btn-ghost" data-pick="${x.id}" style="justify-content:flex-start"><i class="sw" style="width:10px;height:10px;border-radius:2px;background:${barStyle(x).bg}"></i>${esc(labOf(x))} · ${esc(first(P[x.mid]?.name))}</button>`).join('') || '<span class="small">Keine Baustelle in diesem Zeitraum.</span>'}`);
@@ -815,11 +819,13 @@ function openResChooser(rid, a, b, rect){
   const braucht = p => { const need = NEED[p.id]; if(!need) return false; const per = vehOn(p.id); return rSlots(a, b).some(k => need.has(k) && !(per[k] || []).length); };
   pers.sort((x, y) => (braucht(y) - braucht(x)) || x.name.localeCompare(y.name));
   const pop = popAt(rect, `<b>${esc(resName(r))}</b><span class="muted small">${esc(span)} · für wen?</span><div style="display:flex;flex-direction:column;gap:4px;max-height:260px;overflow:auto">${pers.map(p => `<button class="btn btn-ghost" data-pick="${p.id}" style="justify-content:flex-start"><i style="width:10px;height:10px;border-radius:2px;display:inline-block;background:${resCol(p.id)}"></i>${esc(p.name)}${braucht(p) ? ' <span class="small" style="color:var(--red)">braucht Fahrzeug</span>' : ''}</button>`).join('')}</div>`);
-  pop.querySelectorAll('[data-pick]').forEach(bt => bt.onclick = async () => { closePop(); const mid = bt.dataset.pick;
-    const ok = await resInsert({ ressource_id: rid, person_id: mid, beginn: fromU(a), ende: fromU(b, true) });
-    // Stammfahrzeug an jemand anderen: beim Stamm-Fahrer für diese Zeit freigeben
-    if(ok && r.stamm_person_id && r.stamm_person_id !== mid) await resInsert({ ressource_id: rid, art: 'stamm_weg', person_id: r.stamm_person_id, beginn: fromU(a), ende: fromU(b, true) });
-    if(ok) toast(`${resName(r)} → ${P[mid].name}`, () => resDelete(ok.id)); });
+  pop.querySelectorAll('[data-pick]').forEach(bt => bt.onclick = () => { closePop(); assignVeh(r, a, b, bt.dataset.pick); });
+}
+async function assignVeh(r, a, b, mid){
+  const ok = await resInsert({ ressource_id: r.id, person_id: mid, beginn: fromU(a), ende: fromU(b, true) });
+  // Stammfahrzeug an jemand anderen: beim Stamm-Fahrer für diese Zeit freigeben
+  if(ok && r.stamm_person_id && r.stamm_person_id !== mid) await resInsert({ ressource_id: r.id, art: 'stamm_weg', person_id: r.stamm_person_id, beginn: fromU(a), ende: fromU(b, true) });
+  if(ok) toast(`${resName(r)} → ${P[mid].name}`, () => resDelete(ok.id));
 }
 function openResPop(zid, rid, rect, u){
   const r = resById(rid); const ed = canEditRes(r.typ);
@@ -1072,13 +1078,17 @@ async function sortApply(d){
   await neuLaden();
 }
 
+// Beschriftung wandert beim Scrollen mit: steht immer am linken Rand des sichtbaren Bereichs
+function stickLabels(){ const t = tlEl(); if(!t) return; const v0 = t.scrollLeft + 6;
+  t.querySelectorAll('.t[data-x0]').forEach(s => { const x0 = +s.dataset.x0, x1 = +s.dataset.x1, l = +s.dataset.l; const st = Math.max(x0, Math.min(v0, x1 - Math.min(140, x1 - x0))); s.style.left = (st - l) + 'px'; s.style.width = (x1 - st) + 'px'; }); }
 // Ziehen, Verschieben, Verlängern, neu Aufziehen
 function uAt(x){ const t = tlEl(); const r = t.getBoundingClientRect(); return (x - r.left - 190 + t.scrollLeft) / dayW; }
 function bindTimeline(t){
+  let stT = 0; t.addEventListener('scroll', () => { if(!stT) stT = requestAnimationFrame(() => { stT = 0; stickLabels(); }); }, { passive: true });
   let scT; t.addEventListener('scroll', () => { updateRange(); closePop(); if(zoom === 'tag'){ clearTimeout(scT); scT = setTimeout(() => { const c = Math.floor(t.scrollLeft / dayW); if(c < HR[0] + 3 || c > HR[1] - 4) renderRows(); }, 120); } }, { passive: true });
   t.addEventListener('pointerdown', e => {
     if(e.button !== 0) return; closePop();
-    const mb = e.target.closest('[data-mab]'); if(mb){ e.stopPropagation(); openMid = openMid === mb.dataset.mab ? null : mb.dataset.mab; renderRows(); return; }
+    const mb = e.target.closest('[data-mab]'); if(mb){ e.stopPropagation(); const same = openMid === mb.dataset.mab && openTyp === mb.dataset.typ; openMid = same ? null : mb.dataset.mab; openTyp = mb.dataset.typ; renderRows(); return; }
     const ga = e.target.closest('[data-gadd]'); if(ga){ e.stopPropagation(); personDlg(null, ga.dataset.gadd); return; }
     const pzb = e.target.closest('[data-pz]'); if(pzb){ e.stopPropagation(); const [eb, ref] = pzb.dataset.pz.split(':'); openBoard(eb, ref || null); return; }
     const pv = e.target.closest('.bar.prov[data-prov]'); if(pv){ drag = { kind: 'prov', pid: pv.dataset.prov, x0: e.clientX, y0: e.clientY, moved: false, rect: pv.getBoundingClientRect() }; e.preventDefault(); return; }
