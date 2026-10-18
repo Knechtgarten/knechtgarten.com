@@ -141,6 +141,8 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 .aleer{padding:4px 10px;color:var(--muted);}
 .bar.prov{background:repeating-linear-gradient(135deg,#E9EDB8 0 4px,#FFFFFF 4px 8px);border:1px dashed #9CA43A;color:#323E4E;cursor:grab;}
 .bar.prov.over{border:1.5px solid var(--red);}
+.bar.altb{border:1.5px solid var(--red) !important;}
+.bar.done{opacity:.55;}
 .bar.prov.nozeit{background:repeating-linear-gradient(135deg,#E9EDB8 0 4px,#FFFFFF 4px 8px);border:1px dashed #C08A2E;}
 .row.grp .lane .bar{top:2px;height:15px;}
 .aghost{position:fixed;z-index:95;background:var(--primary);color:#fff;font-size:11.5px;padding:4px 8px;border-radius:5px;pointer-events:none;box-shadow:0 4px 12px rgba(0,0,0,.2);}
@@ -274,6 +276,15 @@ table.bp td{padding:4px;border-top:1px solid var(--soft);white-space:nowrap;}
 .greys .stp{background:repeating-linear-gradient(135deg,#A6ADB4 0 4px,#fff 4px 7px);}
 .prev{border-radius:4px;padding:3px 8px;font-size:11px;font-weight:600;justify-self:start;border:1px solid rgba(35,43,53,.2);}
 @media (max-width:640px){ .abrow{grid-template-columns:18px 1fr;} }
+.erl{display:flex;justify-content:space-between;align-items:center;gap:8px;background:var(--soft);border-radius:8px;padding:8px 10px;}
+.btn-ok{background:var(--accent-lime);color:var(--primary);}
+.atabs{display:flex;gap:2px;}
+.atabs button{all:unset;cursor:pointer;font-size:11.5px;font-weight:700;color:var(--muted);padding:4px 6px;border-bottom:2px solid transparent;}
+.atabs button.on{color:var(--primary);border-bottom-color:var(--primary);}
+.arow .w{margin-left:auto;color:var(--muted);font-size:10.5px;white-space:nowrap;flex:none;}
+.arow .w.od{color:var(--red);font-weight:700;}
+.arow.ofr{cursor:pointer;}
+.ofdot{background:repeating-linear-gradient(135deg,#C9CF7A 0 2px,#fff 2px 4px) !important;border:1px dashed #9CA43A;}
 .leiste{position:fixed;z-index:65;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 28px rgba(30,37,48,.18);padding:10px;display:flex;flex-direction:column;gap:8px;width:min(380px,calc(100vw - 16px));}
 .leiste .lh{display:flex;flex-direction:column;gap:1px;color:var(--primary);font-size:12.5px;}
 .leiste .lb{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;}
@@ -524,8 +535,8 @@ async function ladeAlles(){
     if(!PF || Date.now() - (PF.t || 0) > 300000){ await ladePflege(); if(PF) PF.t = Date.now(); }
   }catch(err){ fehler(err, 'Laden'); }
 }
-function rowToItem(r){ return { id: r.id, mid: r.person_id, kind: r.art, s: toU(r.beginn), e: toU(r.ende), kid: r.kunde_id, title: r.titel || '', text: r.notiz || '', pl: r.projektleiter_id, link: r.mit_einsatz_id, allein: r.allein, ok: r.abgemacht, soll: r.soll_tage, files: r.planer_datei || [], pkk: r.pflege_kunde_kategorie_id, pj: r.pflege_jahr, pkw: r.pflege_kw }; }
-function itemToRow(it){ return { person_id: it.mid, art: it.kind, beginn: fromU(it.s), ende: fromU(it.e, true), kunde_id: it.kid || null, titel: it.title || null, notiz: it.text || null, projektleiter_id: it.pl || null, mit_einsatz_id: it.link || null, allein: !!it.allein, abgemacht: it.ok !== false, soll_tage: it.soll ?? null, pflege_kunde_kategorie_id: it.pkk || null, pflege_jahr: it.pj || null, pflege_kw: it.pkw || null }; }
+function rowToItem(r){ return { id: r.id, mid: r.person_id, kind: r.art, s: toU(r.beginn), e: toU(r.ende), kid: r.kunde_id, title: r.titel || '', text: r.notiz || '', pl: r.projektleiter_id, link: r.mit_einsatz_id, allein: r.allein, ok: r.abgemacht, soll: r.soll_tage, files: r.planer_datei || [], erledigt: !!r.erledigt, pkk: r.pflege_kunde_kategorie_id, pj: r.pflege_jahr, pkw: r.pflege_kw }; }
+function itemToRow(it){ return { person_id: it.mid, art: it.kind, beginn: fromU(it.s), ende: fromU(it.e, true), kunde_id: it.kid || null, titel: it.title || null, notiz: it.text || null, projektleiter_id: it.pl || null, mit_einsatz_id: it.link || null, allein: !!it.allein, abgemacht: it.ok !== false, soll_tage: it.soll ?? null, erledigt: !!it.erledigt, pflege_kunde_kategorie_id: it.pkk || null, pflege_jahr: it.pj || null, pflege_kw: it.pkw || null }; }
 const kName = k => k ? (k.firma || [k.nachname, k.vorname].filter(Boolean).join(' ') || k.name) : '';
 const kShort = k => k ? (k.firma || k.nachname || k.name || '') : '';
 const kOrt = k => k ? [k.strasse, [k.plz, k.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ') : '';
@@ -586,7 +597,29 @@ function occs(){
   return out;
 }
 let ALL = [], LAY = {};
+// Offene Aufträge (noch nicht abgemacht) sind nie fix: was vergangen ist, rutscht in die nächste
+// freie Lücke ab jetzt (Arbeitstage 07–17 Uhr). In der Datenbank bleibt der ursprüngliche Wunschtermin.
+function floatOffene(){
+  const jetzt = toU(new Date()); const start0 = Math.max(jetzt, TODAY + 1 / 12);
+  const byMid = {}; EINS.forEach(it => { if(it.ok === false && !it.erledigt && it.kind !== 'absenz' && (it._alt || it.e <= jetzt + 1e-6)) (byMid[it.mid] ??= []).push(it); });
+  Object.entries(byMid).forEach(([mid, list]) => {
+    const bl = EINS.filter(i => i.mid === mid && i.ok !== false).map(i => [i.s, i.e]);
+    let cur = start0;
+    list.sort((a, b) => (a._alt || a).s - (b._alt || b).s).forEach(it => {
+      if(!it._alt) it._alt = { s: it.s, e: it.e };
+      const len = Math.min(it._alt.e - it._alt.s, 10 / 12);
+      for(let g = 0; g < 400; g++){ const d = Math.floor(cur);
+        if(isOff(d)){ cur = d + 1 + 1 / 12; continue; }
+        if(cur < d + 1 / 12) cur = d + 1 / 12;
+        if(cur + len > d + 11 / 12 + 1e-6){ cur = d + 1 + 1 / 12; continue; }
+        const c = bl.find(([a, b]) => a < cur + len - 1e-6 && b > cur + 1e-6); if(c){ cur = c[1]; continue; }
+        break; }
+      it.s = r48(cur); it.e = r48(cur + len); bl.push([it.s, it.e]); cur = it.e;
+    });
+  });
+}
 function compute(){
+  floatOffene();
   ALL = EINS.concat(occs()); LAY = {};
   const rows = {}; ALL.forEach(it => (rows[it.mid] ??= []).push(it));
   Object.values(rows).forEach(list => {
@@ -757,7 +790,7 @@ function personRow(p, W, bgx){
   its.forEach(it => {
     const L = LAY[it.id]; if(!L || !L.segs.length || grpd.has(it.id)) return;
     const st = barStyle(it), hit = hitOf(it), isOcc = !!it.ser;
-    const lab = labOf(it) + (it.e - it.s > 1 + 1e-6 && !isOcc && it.kind !== 'hilfe' && L.n >= 1 ? ` · ${fmtN(L.n)} T` : '') + (it.soll && L.n < it.soll - .01 ? ` (−${fmtN(it.soll - L.n)})` : '');
+    const lab = (it._alt ? `seit ${dLab(Math.floor(it._alt.s))} · ` : '') + (it.erledigt ? 'erledigt · ' : '') + labOf(it) + (it.e - it.s > 1 + 1e-6 && !isOcc && it.kind !== 'hilfe' && L.n >= 1 ? ` · ${fmtN(L.n)} T` : '') + (it.soll && L.n < it.soll - .01 ? ` (−${fmtN(it.soll - L.n)})` : '');
     const tip = `${titleOf(it)}\n${spanLabel(it)}\n${p.name}${it.e - it.s > 1 + 1e-6 ? `\n${fmtN(L.n)} Arbeitstage` : ''}${it.pl && P[it.pl] ? `\nZuständig: ${P[it.pl].name}` : ''}${it.allein ? '\nArbeitet allein' : ''}${L.miss.length ? '\nPersonal fehlt!' : ''}${it.ok === false ? '\nNoch nicht abgemacht' : ''}${isOcc ? '\nWiederkehrend' : ''}`;
     // Beschriftung läuft über Wochenenden weiter
     const x0 = L.segs[0][0] * dayW + 5, tw = Math.max(0, (L.segs[L.segs.length - 1][1] - L.segs[0][0]) * dayW - 9);
@@ -767,7 +800,7 @@ function personRow(p, W, bgx){
     L.segs.forEach((sg, i) => {
       const l = sg[0] * dayW + 1, w = Math.max(3, (sg[1] - sg[0]) * dayW - 2);
       if(i > 0){ const pe = L.segs[i - 1][1] * dayW - 1, gw = l - pe; if(gw > 0) bars += `<div class="brg${hit ? '' : ' dim'}" style="left:${pe}px;width:${gw}px;background:${st.bg};color:${st.fg === '#FFFFFF' ? '#232B35' : st.fg}">${txt(pe)}</div>`; }
-      const cls = ['bar', ed && !isOcc ? 'ed' : '', isOcc ? 'occ' : '', prov ? 'provi' : '', L.mini ? 'mini' : '', selId === it.id ? 'sel' : '', hit ? '' : 'dim'].join(' ');
+      const cls = ['bar', ed && !isOcc ? 'ed' : '', isOcc ? 'occ' : '', prov ? 'provi' : '', it._alt ? 'altb' : '', it.erledigt ? 'done' : '', L.mini ? 'mini' : '', selId === it.id ? 'sel' : '', hit ? '' : 'dim'].join(' ');
       bars += `<div class="${cls}" data-id="${it.id}" style="left:${l}px;width:${w}px;${bgS};border-color:${st.bd}" title="${esc(tip)}">${i === 0 && !isOcc ? '<span class="hl"></span>' : ''}${txt(l + 1)}${i === L.segs.length - 1 && !isOcc ? '<span class="hr"></span>' : ''}</div>`;
     });
     if(it.allein && L.segs.length) bars += `<span class="bdot" style="left:${L.segs[0][0] * dayW + 3}px" title="Arbeitet allein"></span>`;
@@ -986,6 +1019,13 @@ const personOf = uid => PERSONEN.find(p => p.benutzer_id === uid);
 const creatorCol = uid => personOf(uid)?.farbe || '#8B9097';
 const creatorName = uid => personOf(uid)?.name || BENUTZER.find(b => b.id === uid)?.email || '';
 const aufLab = a => [kShort(KUNDEN[a.kunde_id]), a.titel].filter(Boolean).join(' · ') || 'Auftrag';
+let aufTab2 = lsGet('aufTab2', 'auf');
+function offeneListe(){
+  const l = [];
+  EINS.filter(it => it.ok === false && !it.erledigt).forEach(it => l.push({ id: it.id, s: it.s, lab: labOf(it), alt: !!it._alt, wo: it._alt ? 'seit ' + dLab(Math.floor(it._alt.s)) : first(P[it.mid]?.name), tip: `${titleOf(it)}\n${spanLabel(it)} · ${P[it.mid]?.name || ''}` }));
+  Object.values(PROVLAY).flat().forEach(x => l.push({ pid: x.p.id, s: x.s, lab: kShort(KUNDEN[x.p.kid]), alt: x.alt, wo: x.alt ? 'seit KW ' + x.p.w : 'KW ' + x.p.w, tip: `${kName(KUNDEN[x.p.kid])} · ${x.p.kat.name}\nVorschlag ${spanLabel({ s: x.s, e: x.e })}` }));
+  return l.sort((a, b) => a.s - b.s);
+}
 function renderAuf(){
   const box = $('aufp'); if(!box) return;
   if(!aufOpen){ box.className = 'aufp zu'; box.innerHTML = `<button class="auftab" id="aufTog" title="Aufträge öffnen">Aufträge (${AUF.length})</button>`; $('aufTog').onclick = () => { aufOpen = true; lsSet('aufOpen', true); renderAuf(); recalc(); }; return; }
@@ -993,12 +1033,24 @@ function renderAuf(){
   const sec = (key, title, list, add) => { const zu = aufZu.has(key);
     return `<div class="asec${zu ? ' zu' : ''}"><div class="ash" data-ak="${key}">${I('chev')}<span>${esc(title)}</span><span class="n">${list.length}</span>${add ? `<button class="icon-btn" data-aadd="${add}" aria-label="Auftrag hinzufügen">${I('plus')}</button>` : ''}</div>
       ${zu ? '' : list.map(a => `<div class="arow" data-auf="${a.id}" title="${esc(aufLab(a) + '\n' + DAUER[a.dauer] + (a.dauer === 'mehr' && a.dauer_tage ? ' (' + fmtN(a.dauer_tage) + ' Tage)' : '') + (a.notiz ? '\n' + a.notiz : '') + '\nErfasst: ' + creatorName(a.erstellt_von))}"><i style="background:${creatorCol(a.erstellt_von)}"></i><span>${esc(aufLab(a))}</span></div>`).join('')}</div>`; };
-  let h = `<div class="ahead"><b>Aufträge</b><button class="icon-btn" id="aufX" aria-label="Einklappen">${I('next')}</button></div><div class="ahint">Auf eine Zeile im Plan ziehen = einplanen. Balken hierher ziehen = wieder offen.</div>`;
+  // Reiter: «Aufträge» (noch ohne wer/wann) und «Offene Aufträge» (im Plan, noch nicht abgemacht, wandern mit)
+  const offene = offeneListe();
+  const kopf = `<div class="ahead"><div class="atabs"><button data-at="auf" class="${aufTab2 === 'auf' ? 'on' : ''}">Aufträge (${AUF.length})</button><button data-at="offen" class="${aufTab2 === 'offen' ? 'on' : ''}">Offene Aufträge (${offene.length})</button></div><button class="icon-btn" id="aufX" aria-label="Einklappen">${I('next')}</button></div>`;
+  if(aufTab2 === 'offen'){
+    box.innerHTML = kopf + `<div class="ahint">Wer und ungefähr wann ist klar, Kunde hat noch nicht bestätigt. Wandern im Plan mit, bis sie abgemacht sind. Klick = im Plan zeigen.</div>`
+      + (offene.map((o, i) => `<div class="arow ofr" data-of="${i}" title="${esc(o.tip)}"><i class="ofdot"></i><span>${esc(o.lab)}</span><span class="w${o.alt ? ' od' : ''}">${esc(o.wo)}</span></div>`).join('') || '<div class="aleer">Keine offenen Aufträge</div>');
+    box.querySelectorAll('[data-at]').forEach(b => b.onclick = () => { aufTab2 = b.dataset.at; lsSet('aufTab2', aufTab2); renderAuf(); });
+    $('aufX').onclick = () => { aufOpen = false; lsSet('aufOpen', false); renderAuf(); recalc(); };
+    box.querySelectorAll('[data-of]').forEach(el => el.onclick = () => { const o = offene[+el.dataset.of]; scrollToU(o.s, 'center'); if(o.pid) openProvPanel(o.pid); else openPanel(o.id); });
+    return;
+  }
+  let h = kopf + `<div class="ahint">Was zu tun ist, noch ohne wer und wann. Auf eine Zeile im Plan ziehen = einplanen. Balken hierher ziehen = wieder Auftrag.</div>`;
   h += sec('sammel', 'Alle · ganzes Team', AUF.filter(a => a.scope === 'sammel'), 'sammel');
   GRUPPEN.forEach(g => { h += sec('g' + g.id, g.name, AUF.filter(a => a.scope === 'team' && a.gruppe_id === g.id), 'team:' + g.id); });
   PERSONEN.filter(p => AUF.some(a => a.scope === 'person' && a.person_id === p.id)).forEach(p => { h += sec('p' + p.id, p.name, AUF.filter(a => a.scope === 'person' && a.person_id === p.id), 'person:' + p.id); });
   h += `<div style="padding:8px"><button class="btn btn-ghost" data-aadd="person:${myPerson()?.id || ''}">${I('plus')}Auftrag für eine Person</button></div>`;
   box.innerHTML = h;
+  box.querySelectorAll('[data-at]').forEach(b => b.onclick = () => { aufTab2 = b.dataset.at; lsSet('aufTab2', aufTab2); renderAuf(); });
   $('aufX').onclick = () => { aufOpen = false; lsSet('aufOpen', false); renderAuf(); recalc(); };
   box.querySelectorAll('[data-ak]').forEach(el => el.onclick = e => { if(e.target.closest('[data-aadd]')) return; const k = el.dataset.ak; aufZu.has(k) ? aufZu.delete(k) : aufZu.add(k); lsSet('aufZu', [...aufZu]); renderAuf(); });
   box.querySelectorAll('[data-aadd]').forEach(b => b.onclick = e => { e.stopPropagation(); const [sc, id] = b.dataset.aadd.split(':');
@@ -1121,7 +1173,8 @@ function computeProv(){
   PROV = []; PROVLAY = {}; if(!PF || !showProv) return;
   let base = TODAY; while(dDate(base).getDay() === 0 || dDate(base).getDay() === 6) base++; const y0 = dDate(base + 3 - ((dDate(base).getDay() + 6) % 7)).getFullYear(), k0 = kw(base);
   const linked = new Set(EINS.filter(e => e.pkk).map(e => `${e.pkk}_${e.pj}_${e.pkw}`));
-  const weeks = []; for(let i = 0; i < 12; i++){ const mon = kwMonday(y0, k0) + i * 7; if(mon >= NDAYS) break; const x = dDate(mon + 3); weeks.push({ y: x.getFullYear(), w: kw(mon), mon }); }
+  // KW = Startwoche. Offene aus bis zu 8 Wochen zurück reihen sich ab heute zuerst ein (rot «seit KW …»).
+  const weeks = []; for(let i = -8; i < 12; i++){ const mon = kwMonday(y0, k0) + i * 7; if(mon < 0) continue; if(mon >= NDAYS) break; const x = dDate(mon + 3); weeks.push({ y: x.getFullYear(), w: kw(mon), mon }); }
   const byKk = {}; PF.ka.forEach(a => (byKk[a.kunde_kategorie_id] ??= []).push(a));
   PF.kk.forEach(kk => {
     const ku = PF.ku[kk.kunde_id]; if(!ku || ku.abo_typ === 'kein_abo') return; const kat = PF.kat[kk.kategorie_id]; const k = KUNDEN[kk.kunde_id]; if(!kat || !k) return;
@@ -1152,14 +1205,14 @@ function computeProv(){
         const c = bl.find(([a, b]) => a < cur + len - 1e-6 && b > cur + 1e-6); if(c){ cur = c[1] - Math.floor(c[1]) < 1e-6 ? c[1] + 1 / 12 : c[1]; continue; }
         break;
       }
-      out.push({ p, s: cur, e: cur + len, over: Math.floor(cur) >= p.mon + 5 }); cur += len;
+      out.push({ p, s: cur, e: cur + len, alt: Math.floor(cur) >= p.mon + 7 }); cur += len;
     });
     PROVLAY[key] = out;
   });
 }
 function provBars(key){ return (PROVLAY[key] || []).map(x => { const p = x.p, k = KUNDEN[p.kid]; const l = x.s * dayW + 1, w = Math.max(4, (x.e - x.s) * dayW - 2);
-  const tip = `${kName(k)} · ${p.kat.name}\n${k?.ort || ''} · KW ${p.w} · ${fmtN(p.min / 60)} Std.\n${p.arb.join(', ')}\nNoch nicht abgemacht${p.fehlt ? '\nZeit fehlt im Pflege-Tool – 1 Std. angenommen' : ''}${x.over ? '\nPasst nicht mehr in die KW!' : ''}`;
-  return `<div class="bar prov${x.over ? ' over' : ''}${p.fehlt ? ' nozeit' : ''}" data-prov="${p.id}" style="left:${l}px;width:${w}px" title="${esc(tip)}">${w > 16 ? `<span class="t" style="left:3px;width:${w - 6}px">${esc(kShort(k))}</span>` : ''}</div>`; }).join(''); }
+  const tip = `${kName(k)} · ${p.kat.name}\n${k?.ort || ''} · KW ${p.w} · ${fmtN(p.min / 60)} Std.\n${p.arb.join(', ')}\nNoch nicht abgemacht${p.fehlt ? '\nZeit fehlt im Pflege-Tool – 1 Std. angenommen' : ''}${x.alt ? '\nOffen seit KW ' + p.w : ''}`;
+  return `<div class="bar prov${x.alt ? ' over' : ''}${p.fehlt ? ' nozeit' : ''}" data-prov="${p.id}" style="left:${l}px;width:${w}px" title="${esc(tip)}">${w > 16 ? `<span class="t" style="left:3px;width:${w - 6}px">${x.alt && w > 60 ? `seit KW ${p.w} · ` : ''}${esc(kShort(k))}</span>` : ''}</div>`; }).join(''); }
 async function provToEinsatz(pid, mid, s, e, ok){
   const p = PROV.find(x => x.id === pid); if(!p) return;
   const neu = await neuerEinsatz({ mid, kind: 'termin', s: r48(s), e: r48(e), kid: p.kid, title: `${p.kat.name}: ${p.arb.join(', ')}`, text: '', ok, pkk: p.kk, pj: p.y, pkw: p.w }, false);
@@ -1423,6 +1476,7 @@ function bindWindow(){
   });
 }
 async function speichere(it, patch){
+  if(patch.beginn) delete it._alt; // neu gesetzte Zeit = neuer Wunschtermin
   const { error } = await sb.from('planer_einsatz').update(patch).eq('id', it.id);
   if(error){ fehler(error, 'Speichern'); return false; }
   return true;
@@ -1548,6 +1602,7 @@ function openPanel(id, isNew){
   $('side').innerHTML = `<aside class="sidepanel">
     <div class="sd-head"><div style="min-width:0"><h3>${esc(it.kind === 'absenz' ? (it.title || 'Absenz') : titleOf(it))}</h3>${k && kOrt(k) ? `<div class="small muted">${I('pin').replace('class="i"', 'class="i" style="width:12px;height:12px;vertical-align:-2px"')} ${esc(kOrt(k))}</div>` : ''}<div class="when">${esc(spanLabel(it))} · ${esc(wer)}</div></div><button class="icon-btn" id="pX" aria-label="Schliessen">${I('x')}</button></div>
     ${offen ? `<div class="banner vor"><b>Offener Auftrag · noch nicht abgemacht</b>${ed ? (panelAbm ? abmHTML(it.s, it.e, false) : `<button class="btn btn-primary" id="pAbm" style="align-self:flex-start">${I('check')}Termin ist abgemacht</button>`) : ''}</div>` : ''}
+    ${!offen && it.kind !== 'absenz' && ed ? `<div class="erl"><span class="small muted">${it.erledigt ? 'Erledigt' + (it.pkk ? ' · auch im Pflege-Tool abgehakt' : '') : 'Nach dem Einsatz abhaken' + (it.pkk ? ' (zählt auch fürs Pflege-Tool)' : '')}</span><button class="btn ${it.erledigt ? 'btn-ghost' : 'btn-ok'}" id="pErl">${I('check')}${it.erledigt ? 'Rückgängig' : 'Erledigt'}</button></div>` : ''}
     ${it.soll && L.n < it.soll - .01 ? `<div class="info">Geplant waren ${fmtN(it.soll)} Tage, durch Unterbrüche jetzt ${fmtN(L.n)}. ${ed ? `<button class="btn btn-ghost" id="pExt" style="padding:2px 8px;margin-top:4px">Ende verschieben</button>` : ''}</div>` : ''}
     ${it.kind === 'absenz' ? `<div class="abs-chips">${ABST.map(t => `<button data-pabs="${esc(t.name)}" class="${t.name === it.title ? 'on' : ''}" ${dis}><i style="background:${absStyle(t.name).bg}"></i>${esc(t.name)}</button>`).join('')}</div>` : ''}
     <div class="fld"><label>${it.kind === 'absenz' ? 'Grund / Notiz' : 'Notiz'}</label><textarea id="pNotiz" placeholder="${it.kind === 'absenz' ? 'z. B. Arztzeugnis bis …' : 'Was ist zu tun, Zufahrt, Material …'}" ${dis}>${esc(it.text)}</textarea></div>
@@ -1578,6 +1633,13 @@ function openPanel(id, isNew){
   if(!ed) return;
   const save = async (patch, local) => { Object.assign(it, local); $('pSave').textContent = 'Speichere …'; const ok = await speichere(it, patch); $('pSave').textContent = ok ? 'Gespeichert' : ''; if(VIEW === 'plan') renderRows(); else render(); return ok; };
   $('side').querySelectorAll('[data-pabs]').forEach(b => b.onclick = () => save({ titel: b.dataset.pabs }, { title: b.dataset.pabs }).then(() => openPanel(id)));
+  on('#pErl', 'onclick', async () => { const v = !it.erledigt;
+    if(!await save({ erledigt: v, erledigt_am: v ? new Date().toISOString() : null }, { erledigt: v })) return;
+    // Pflege-Termin: Erledigt gilt auch im Pflege-Tool (ersetzt das Abhaken im Jahresplan)
+    if(it.pkk && it.pj && it.pkw){ const key = `${it.pkk}_${it.pj}_${it.pkw}`;
+      const { error } = v ? await sb.from('pflege_einsatz_status').upsert({ kunde_kategorie_id: it.pkk, jahr: it.pj, kw: it.pkw, erledigt_von: ME }) : await sb.from('pflege_einsatz_status').delete().eq('kunde_kategorie_id', it.pkk).eq('jahr', it.pj).eq('kw', it.pkw);
+      if(error) fehler(error, 'Pflege-Tool'); else if(PF) v ? PF.st.add(key) : PF.st.delete(key); }
+    openPanel(id); toast(v ? 'Erledigt' : 'Wieder offen'); });
   on('#pAbm', 'onclick', () => { panelAbm = true; openPanel(id); });
   on('#aNo', 'onclick', () => { panelAbm = false; openPanel(id); });
   on('#aOk', 'onclick', async () => { const v = leseAbm(); if(!v){ toast('«Bis» muss nach «Von» liegen.', null, true); return; } panelAbm = false;
