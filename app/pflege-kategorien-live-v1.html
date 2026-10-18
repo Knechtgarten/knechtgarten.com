@@ -95,6 +95,11 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 .grip:active{cursor:grabbing;}
 .grip .i{width:16px;height:16px;}
 [data-drag].dragging{opacity:.4;}
+/* Pflegekategorien links per Drag & Drop sortieren (= Spaltenreihenfolge in der Kundenliste) */
+.nv[data-kat]{cursor:grab;}
+.nv[data-kat].dragging{opacity:.4;}
+.nv[data-kat].dz-top{box-shadow:inset 0 2px 0 var(--primary);}
+.nv[data-kat].dz-bot{box-shadow:inset 0 -2px 0 var(--primary);}
 [data-drag].dz-top{box-shadow:inset 0 2px 0 var(--primary);}
 [data-drag].dz-bot{box-shadow:inset 0 -2px 0 var(--primary);}
 
@@ -444,7 +449,7 @@ function render(){ renderNav(); renderInhalt(); }
 function renderNav(){
   $('nav').innerHTML = `
     <div class="grp">Pflegekategorien</div>
-    ${S.kategorien.map(k => `<button class="nv" data-kat="${k.id}" aria-current="${S.ansicht === 'kat' && k.id === S.katId}">
+    ${S.kategorien.map(k => `<button class="nv" data-kat="${k.id}" draggable="true" title="Ziehen zum Verschieben (Reihenfolge der Spalten in der Kundenliste)" aria-current="${S.ansicht === 'kat' && k.id === S.katId}">
       <span class="nvl"><span class="kdot" style="background:${esc(k.farbe)}"></span>${esc(k.name)}</span><span class="muted small">${esc(k.kuerzel)}</span></button>`).join('')}
     <button class="addrow" id="katNeu" style="padding:8px 10px;">${I('plus')}Neue Kategorie</button>
     <div class="grp">Stammdaten</div>
@@ -1061,6 +1066,38 @@ const DRAG_LISTE = {
   arbeit: { tabelle: 'pflege_arbeit',         liste: () => arbeitenVon(S.katId) },
   spalte: { tabelle: 'pflege_tabelle_spalte', liste: () => spaltenVon(tabelleVon(S.katId)?.id) }
 };
+// Kategorien in der linken Liste verschieben -> pflege_kategorie.reihenfolge
+let navVon = null;
+$('nav').addEventListener('dragstart', e => {
+  const b = e.target.closest('.nv[data-kat]'); if(!b) return;
+  navVon = b.dataset.kat; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', ''); b.classList.add('dragging');
+});
+$('nav').addEventListener('dragend', () => { navVon = null; $('nav').querySelectorAll('.nv[data-kat]').forEach(x => x.classList.remove('dragging', 'dz-top', 'dz-bot')); });
+$('nav').addEventListener('dragover', e => {
+  const b = e.target.closest('.nv[data-kat]'); if(!b || !navVon) return;
+  e.preventDefault();
+  const r = b.getBoundingClientRect(), oben = e.clientY < r.top + r.height / 2;
+  $('nav').querySelectorAll('.nv[data-kat]').forEach(x => x.classList.remove('dz-top', 'dz-bot'));
+  b.classList.add(oben ? 'dz-top' : 'dz-bot');
+});
+$('nav').addEventListener('drop', async e => {
+  const b = e.target.closest('.nv[data-kat]'); if(!b || !navVon) return;
+  e.preventDefault();
+  const liste = S.kategorien, vonI = liste.findIndex(x => x.id === navVon);
+  let ziel = liste.findIndex(x => x.id === b.dataset.kat) + (b.classList.contains('dz-bot') ? 1 : 0);
+  if(vonI < ziel) ziel--;
+  navVon = null;
+  if(ziel === vonI){ renderNav(); return; }
+  const [x] = liste.splice(vonI, 1); liste.splice(ziel, 0, x);
+  const geaendert = liste.map((o, i) => ({ o, neu: i + 1 })).filter(({ o, neu }) => o.reihenfolge !== neu);
+  geaendert.forEach(({ o, neu }) => o.reihenfolge = neu);
+  renderNav();
+  const res = await Promise.all(geaendert.map(({ o, neu }) => sb.from('pflege_kategorie').update({ reihenfolge: neu }).eq('id', o.id)));
+  const fehler = res.find(r => r.error);
+  if(fehler){ showToast(friendlyError(fehler.error), true); await ladeAlles(); return; }
+  showToast('Reihenfolge gespeichert.');
+});
+
 function bindDrag(){
   let von = null;
   const rows = $('inhalt').querySelectorAll('[data-drag]');
