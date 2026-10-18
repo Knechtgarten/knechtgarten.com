@@ -764,7 +764,7 @@ function computeRU(){
 }
 const LAYS = it => LAY[it.id] && LAY[it.id].free;
 const resById = id => RES.find(r => r.id === id);
-const resName = r => r ? [r.nummer, r.name].filter(Boolean).join(' ') : '';
+const resName = r => r ? [r.nummer, r.name].filter(Boolean).join(r.typ === 'fahrzeug' ? ' · ' : ' ') : '';
 const resCol = mid => P[mid]?.ist_vorarbeiter ? (P[mid].farbe || '#5B8C6A') : '#2F6F9F';
 const canEditRes = typ => isBuero() || (typ === 'anhaenger' && !!myPerson());
 function vehOn(mid){ const per = {}; RES.forEach(r => { if(r.typ !== 'fahrzeug' || !RU[r.id]) return; RU[r.id].list.forEach(x => { if(x.mid !== mid) return; x.slots.forEach(k => { if(x.evtl?.has(k)) return; (per[k] ??= []).push({ rid: r.id, cf: (RU[r.id].cnt[k] || 0) > 1 }); }); }); }); return per; }
@@ -797,7 +797,7 @@ function ovRows(W, bgx, typ = layer, focusMid = null){
       const parts = [[x.slots.filter(k => !cf.has(k) && !ev.has(k)), ''], [[...cf].filter(k => !ev.has(k)), ' cf'], [x.slots.filter(k => ev.has(k)), ' ev']];
       parts.forEach(([sl, cls]) => segsOf(sl).forEach(sg => { const l = sg[0] * dayW + 1, w = Math.max(3, (sg[1] - sg[0]) * dayW - 2);
         bars += `<div class="band${cls}${ed && !x.stamm && (x.own || typ !== 'maschine') ? ' ed' : ''}" data-rz="${x.id}" data-rid="${r.id}" style="left:${l}px;width:${w}px;top:${top0 + ln * (bh + 1)}px;height:${bh}px;--c:${bg};color:${txtOn(bg)}" title="${esc(tip + (cls === ' cf' ? '\nDoppelt verplant!' : cls === ' ev' ? '\nFahrer abwesend: evtl. verfügbar' : ''))}">${ed && !x.stamm && x.own !== false ? '<span class="hl"></span>' : ''}${w > 24 && bh > 9 ? `<span>${esc(lab)}</span>` : ''}${ed && !x.stamm && x.own !== false ? '<span class="hr"></span>' : ''}</div>`; })); });
-    h += `<div class="row ov${focusMid ? ' fov' : ''}"><div class="nm" title="${esc(resName(r))}">${I(typ === 'maschine' ? 'digger' : 'truck').replace('class="i"', 'class="i" style="width:14px;height:14px;color:var(--muted)"')}${r.nummer ? `<span class="z" style="font-weight:700;color:var(--primary)">${esc(r.nummer)}</span>` : ''}<span class="n">${esc(r.name)}</span>${r.stamm_person_id && P[r.stamm_person_id] ? `<span class="z">${esc(first(P[r.stamm_person_id].name))}</span>` : ''}</div><div class="lane${ed ? ' ed' : ''}" data-rid="${r.id}" style="width:${W}px;height:${rowH}px;${bgx}">${feierHTML()}${hl}${bars}</div></div>`;
+    h += `<div class="row ov${focusMid ? ' fov' : ''}"><div class="nm" title="${esc(resName(r))}">${I(typ === 'maschine' ? 'digger' : 'truck').replace('class="i"', 'class="i" style="width:14px;height:14px;color:var(--muted)"')}${r.nummer ? `<span class="z" style="font-weight:700;color:var(--primary)">${esc(r.nummer)}</span>` : ''}<span class="n">${esc(r.name)}</span>${r.stamm_person_id && P[r.stamm_person_id] && first(P[r.stamm_person_id].name) !== r.name ? `<span class="z">${esc(first(P[r.stamm_person_id].name))}</span>` : ''}</div><div class="lane${ed ? ' ed' : ''}" data-rid="${r.id}" style="width:${W}px;height:${rowH}px;${bgx}">${feierHTML()}${hl}${bars}</div></div>`;
   });
   return h;
 }
@@ -845,11 +845,11 @@ function vehFocusRows(W, bgx, mid){
     const sp = r.stamm_person_id && P[r.stamm_person_id]?.aktiv ? r.stamm_person_id : null;
     if(!sp || WEG[r.id]?.has(k)) return { s: 'frei' };
     if(sp === mid) return null;
-    const ab = ABS[sp]?.[k]; return ab ? { s: 'ev', why: `${first(P[sp].name)} · ${ab}` } : null; };
+    const ab = ABS[sp]?.[k]; return ab ? { s: 'ev', why: `${first(P[sp].name)} · ${ab}`, abs: ab } : null; };
   const days = {}; let maxN = 0;
   for(let d = POOLR[0]; d < POOLR[1]; d++){ if(isOff(d)) continue; const l = [];
     veh.forEach(r => { const a = stat(r, d * 2), b = stat(r, d * 2 + 1); if(!a && !b) return;
-      const ev = (a && a.s === 'ev') || (b && b.s === 'ev'); l.push({ r, a: a ? d : d + .5, b: b ? d + 1 : d + .5, ev, why: (a || b).why }); });
+      const ev = (a && a.s === 'ev') || (b && b.s === 'ev'); l.push({ r, a: a ? d : d + .5, b: b ? d + 1 : d + .5, ev, why: (a || b).why, abs: (a || b).abs }); });
     l.sort((x, y) => (x.ev - y.ev) || resName(x.r).localeCompare(resName(y.r))); days[d] = l; maxN = Math.max(maxN, l.length); }
   const cap = poolAll ? maxN : Math.min(4, maxN); const ph = Math.max(1, cap) * 17 + 6 + (maxN > cap ? 12 : 0);
   let chips = '';
@@ -857,7 +857,7 @@ function vehFocusRows(W, bgx, mid){
     for(let d = POOLR[0]; d < POOLR[1]; d++){ if(dDate(d).getDay() !== 1) continue; const s = new Set(); for(let i = 0; i < 5; i++) (days[d + i] || []).forEach(x => s.add(x.r.id)); if(s.size) chips += `<div class="vwk" style="left:${d * dayW}px;width:${7 * dayW}px">${s.size} frei</div>`; }
   } else Object.entries(days).forEach(([d, l]) => { d = +d;
     l.slice(0, cap).forEach((x, i) => { const left = x.a * dayW + 2, w = (x.b - x.a) * dayW - 4; const nm = x.r.stamm_person_id ? first(P[x.r.stamm_person_id]?.name) : '';
-      const lab = w > 95 ? `${resName(x.r)}${x.ev ? ' · ' + x.why : nm ? ' · ' + nm : ''}` : w > 46 ? resName(x.r) : w > 22 ? resName(x.r).slice(-3) : '';
+      const lab = w > 46 ? `${resName(x.r)}${x.ev ? ' · ' + x.abs : ''}` : w > 22 ? (x.r.nummer || x.r.name).slice(-3) : '';
       chips += `<div class="vchip${x.ev ? ' ev' : ''}${ed ? ' ed' : ''}" data-vrid="${x.r.id}" data-a="${x.a}" data-b="${x.b}" style="left:${left}px;width:${w}px;top:${3 + i * 17}px" title="${esc(resName(x.r) + (x.ev ? '\nVielleicht frei: ' + x.why : '\nFrei') + (ed ? '\nHochziehen oder anklicken = für diesen Tag zuteilen' : ''))}">${esc(lab)}</div>`; });
     if(l.length > cap) chips += `<div class="vmore" data-vmore="1" style="left:${d * dayW + 3}px;top:${3 + cap * 17}px">+${l.length - cap} weitere</div>`; });
   h += `<div class="row ov fov vpool" data-vfocus="${mid}"><div class="nm small muted" title="Freie Lieferwagen pro Tag">Frei / evtl. frei${poolAll && maxN > 4 ? ' <button class="lk" data-vmore="0">weniger</button>' : ''}</div><div class="lane" style="width:${W}px;height:${ph}px;${bgx}">${feierHTML()}${chips || ''}</div></div>`;
@@ -1638,7 +1638,7 @@ function renderRessourcen(){
   $('appMain').innerHTML = `<div class="page"><h2>Fahrzeuge &amp; Maschinen</h2><p class="hint">Eingeteilt wird im Planer über den Umschalter «Maschinen / Fahrzeuge / Anhänger»: in einer Zeile ziehen, dann Baustelle oder Person wählen.</p>
     ${typen.map(([t, n, h]) => { const rs = RES.filter(r => r.typ === t).sort((a, b) => a.sortierung - b.sortierung || resName(a).localeCompare(resName(b)));
       return `<div class="card gcard"><div class="ghead"><b>${n}</b><span class="muted small">${esc(h)}</span><button class="btn btn-ghost" data-radd="${t}" style="margin-left:auto">${I('plus')}${RTYP[t]}</button></div>
-        ${rs.map((r, i) => `<div class="prow${r.aktiv ? '' : ' off'}" style="grid-template-columns:60px minmax(0,1.6fr) minmax(0,1.4fr) auto"><b>${esc(r.nummer || '')}</b><span>${esc(r.name)}${r.aktiv ? '' : ' <span class="tag">inaktiv</span>'}</span><span class="small muted">${r.stamm_person_id ? 'Stamm: ' + esc(P[r.stamm_person_id]?.name || '?') : ''}</span>
+        ${rs.map((r, i) => `<div class="prow${r.aktiv ? '' : ' off'}" style="grid-template-columns:100px minmax(0,1.6fr) minmax(0,1.4fr) auto"><b>${esc(r.nummer || '')}</b><span>${esc(r.name)}${r.aktiv ? '' : ' <span class="tag">inaktiv</span>'}</span><span class="small muted">${r.stamm_person_id ? 'Stamm: ' + esc(P[r.stamm_person_id]?.name || '?') : ''}</span>
           <span class="acts"><button class="icon-btn" data-ru="${r.id}" aria-label="Nach oben" ${i === 0 ? 'disabled' : ''}>${I('up')}</button><button class="icon-btn" data-rd="${r.id}" aria-label="Nach unten" ${i === rs.length - 1 ? 'disabled' : ''}>${I('down')}</button><button class="icon-btn" data-re="${r.id}" aria-label="Bearbeiten">${I('edit')}</button></span></div>`).join('') || '<div class="prow"><span></span><span class="muted small">Noch keine erfasst</span></div>'}</div>`; }).join('')}</div>`;
   const q = s => $('appMain').querySelectorAll(s);
   q('[data-radd]').forEach(b => b.onclick = () => resDlg({ typ: b.dataset.radd, nummer: '', name: '', stamm_person_id: null, aktiv: true }, true));
@@ -1649,7 +1649,7 @@ function renderRessourcen(){
 function resDlg(r, neu){
   const d = document.createElement('div'); d.className = 'dlg';
   d.innerHTML = `<div class="in"><div style="display:flex;align-items:center"><b style="font-size:15px">${neu ? 'Neu: ' + RTYP[r.typ] : esc(resName(r))}</b><button class="icon-btn" id="rX" style="margin-left:auto" aria-label="Schliessen">${I('x')}</button></div>
-    <div class="two"><div class="fld"><label>Nummer</label><input type="text" id="rN" value="${esc(r.nummer || '')}" placeholder="z. B. B4, F03"></div><div class="fld"><label>Name</label><input type="text" id="rName" value="${esc(r.name)}" placeholder="z. B. Mitsubishi Canter"></div></div>
+    <div class="two"><div class="fld"><label>${r.typ === 'maschine' ? 'Nummer' : 'Kontrollschild'}</label><input type="text" id="rN" value="${esc(r.nummer || '')}" placeholder="${r.typ === 'maschine' ? 'z. B. 2.1' : 'z. B. BE-464602'}"></div><div class="fld"><label>Bezeichnung</label><input type="text" id="rName" value="${esc(r.name)}" placeholder="${r.typ === 'fahrzeug' ? 'z. B. Dominic oder Lieferwagen 1' : 'z. B. Bagger 2.1'}"></div></div>
     ${r.typ === 'fahrzeug' ? `<div class="fld"><label>Stamm-Fahrer</label><select id="rS"><option value="">Kein Stamm-Fahrer (Pool)</option>${PERSONEN.filter(p => p.aktiv).map(p => `<option value="${p.id}"${p.id === r.stamm_person_id ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select></div>` : ''}
     <label class="chk"><input type="checkbox" id="rA" ${r.aktiv ? 'checked' : ''}>Aktiv</label>
     <div style="display:flex;gap:8px;justify-content:flex-end">${neu ? '' : `<button class="btn btn-danger" id="rDel" style="margin-right:auto">${I('trash')}Löschen</button>`}<button class="btn btn-ghost" id="rNo">Abbrechen</button><button class="btn btn-primary" id="rOk">Speichern</button></div></div>`;
