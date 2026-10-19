@@ -1794,7 +1794,19 @@ async function ladeLieferwagenKonfiguration(){
   };
 }
 
-async function holeLieferwagenDistanz(plz){
+// Entfernungsabfragen (Edge Function -> Google) laufen bei jeder Neuberechnung
+// mit. Solange die erste Antwort noch aussteht, ist der Cache leer - ohne
+// Absicherung startete darum jeder weitere Tastendruck eine eigene, gleiche
+// Abfrage. Gleiche Abfragen teilen sich jetzt die laufende Anfrage.
+const DISTANZ_INFLIGHT = {};
+function distanzEinmalig(schluessel, start){
+  return DISTANZ_INFLIGHT[schluessel] || (DISTANZ_INFLIGHT[schluessel] = start().finally(() => { delete DISTANZ_INFLIGHT[schluessel]; }));
+}
+function holeLieferwagenDistanz(plz){ return distanzEinmalig('lw::' + plz, () => holeLieferwagenDistanzRoh(plz)); }
+function holeDistanzUndZeit(adresse, plz){ return distanzEinmalig('dz::' + adresse + '::' + plz, () => holeDistanzUndZeitRoh(adresse, plz)); }
+function holeKieswerkDistanzKm(adresse, plz){ return distanzEinmalig('kw::' + adresse + '::' + plz, () => holeKieswerkDistanzKmRoh(adresse, plz)); }
+
+async function holeLieferwagenDistanzRoh(plz){
   if(lieferwagenDistanzCache.hasOwnProperty(plz)) return lieferwagenDistanzCache[plz];
   try{
     // Direkter Browser-Aufruf an Google wird per CORS blockiert (Google
@@ -2297,7 +2309,7 @@ document.addEventListener('paste', async (e) => {
 // Std"-Artikels (Einstellungen -> Sonderpositionen). Gleiche Distance-Matrix-
 // Abfrage wie holeKieswerkDistanzKm(), zusaetzlich mit Fahrzeit.
 let lieferwagenTransportDistanzCache = {}; // "adresse::plz" -> {km, std} | null
-async function holeDistanzUndZeit(adresse, plz){
+async function holeDistanzUndZeitRoh(adresse, plz){
   const key = adresse + '::' + plz;
   if(lieferwagenTransportDistanzCache.hasOwnProperty(key)) return lieferwagenTransportDistanzCache[key];
   try{
@@ -2334,7 +2346,7 @@ function lieferwagenTransportAdressliste(ort){
   return null;
 }
 
-async function holeKieswerkDistanzKm(adresse, plz){
+async function holeKieswerkDistanzKmRoh(adresse, plz){
   const key = adresse + '::' + plz;
   if(kiesBetonDistanzCache.hasOwnProperty(key)) return kiesBetonDistanzCache[key];
   try{
@@ -3511,15 +3523,25 @@ function aktualisiereTabellenSumme(efId, spalteId, summe, anzahlZeilen){
 // alle UEBRIGEN Formeln (Ressourcenzeile/Term) unter der Spalten-Id sehen.
 // Reihenfolge der Spalten = DB-Reihenfolge, eine Berechnungsspalte kann daher
 // nur auf eine WEITER OBEN stehende Spalte derselben Zeile verweisen.
-async function berechneAlleTabellenwerte(systemwerteMap){
+// meineGeneration = recalcGeneration des aufrufenden recalc(): Tippt jemand
+// schnell weiter, laufen mehrere recalc() ueberlappend - ein aelterer Lauf,
+// der erst NACH dem neueren fertig wird, schrieb sonst seine veralteten Werte
+// (z.B. Flaeche 0) in die Zellen zurueck, bis der naechste Klick eine neue
+// Berechnung ausloeste. Ein ueberholter Lauf bricht darum nach jedem
+// Datenbank-Aufruf ab und liefert null (recalc() steigt dann ebenfalls aus).
+// Zeilen sind voneinander unabhaengig und werden parallel ausgewertet (nur
+// die Spalten einer Zeile bauen aufeinander auf), das haelt die Reaktionszeit
+// auch bei mehreren Berechnungsspalten kurz.
+async function berechneAlleTabellenwerte(systemwerteMap, meineGeneration){
   const tabelleSummenMap = {};
+  const ueberholt = () => meineGeneration !== undefined && meineGeneration !== recalcGeneration;
   for(const ef of eingabefelder){
     if(!ef.ist_tabelle) continue;
     const spalten = TABELLEN_SPALTEN[ef.id] || [];
     const zeilen = bereichTabelleZeilen[ef.id] || [];
-    for(const zeile of zeilen){
+    await Promise.all(zeilen.map(async zeile => {
       const zeilenWerte = {};
-      spalten.forEach(s => { if(!s.ist_berechnung) zeilenWerte[s.id] = zeile.werte[s.id]?.wert ?? 0; });
+      spalten.forEach(s => { if(!s.ist_berechnung && !s.ist_dropdown) zeilenWerte[s.id] = zeile.werte[s.id]?.wert ?? 0; });
       for(const s of spalten){
         if(!s.ist_berechnung) continue;
         let wert = 0;
@@ -3528,12 +3550,14 @@ async function berechneAlleTabellenwerte(systemwerteMap){
           if(error) throw error;
           wert = data ?? 0;
         }catch(e){ wert = 0; }
+        if(ueberholt()) return;
         zeile.werte[s.id] = { wert, notiz: zeile.werte[s.id]?.notiz || '' };
         zeilenWerte[s.id] = wert;
         const input = $teilbereiche.querySelector(`.tabellenberechnet[data-zeile="${zeile._key}"][data-spalte="${s.id}"]`);
         if(input) input.value = wert;
       }
-    }
+    }));
+    if(ueberholt()) return null;
     spalten.filter(s => !s.ist_dropdown).forEach(s => {
       const summe = zeilen.reduce((summe, z) => summe + (z.werte[s.id]?.wert ?? 0), 0);
       tabelleSummenMap[s.id] = summe;
@@ -5290,12 +5314,26 @@ async function recalc(){
       // Systemwerte (z.B. Lieferwagen-Fahrzeit/-Distanz Hin+Rueck) haengen nur
       // von der Kunde-PLZ ab, nicht von der Teilflaeche - daher einmal pro
       // Neuberechnung ermitteln, nicht pro Teilflaeche/Zeile.
-      const systemwerteMap = await berechneSystemwerteMap();
+      const systemwertePromise = berechneSystemwerteMap();
+      // Die Entfernungen kommen bei der ersten Berechnung pro PLZ per Netz-
+      // abfrage (kann Sekunden dauern). Die Tabelle (Flaeche, Volumen, Summen)
+      // soll aber sofort nach dem Tippen rechnen und nicht darauf warten:
+      // Dauert es laenger als einen Moment, wird sie vorab mit den Belag-
+      // Werten berechnet (Berechnungsspalten brauchen keine Entfernungen) und
+      // danach mit den vollstaendigen Systemwerten nochmals, siehe unten.
+      let systemwerteMap = await Promise.race([systemwertePromise, new Promise(r => setTimeout(() => r(null), 120))]);
+      if(systemwerteMap === null){
+        const vorlaeufig = await berechneAlleTabellenwerte({ ...belagSystemwerte(null) }, meineGeneration);
+        if(vorlaeufig === null) return; // inzwischen ueberholt, siehe recalcGeneration oben
+        systemwerteMap = await systemwertePromise;
+        if(meineGeneration !== recalcGeneration) return; // inzwischen ueberholt, siehe recalcGeneration oben
+      }
       // Tabellen-Eingabefelder: Berechnungsspalten (z.B. Volumen = Flaeche x
       // Hoehe) pro Zeile neu auswerten und gleich die Summen je Spalte bilden
       // - diese Summen stehen danach wie ein ganz normaler Eingabefeld-Wert
       // fuer alle Formeln unten zur Verfuegung (siehe tabelleSummenMap unten).
-      const tabelleSummenMap = await berechneAlleTabellenwerte(systemwerteMap);
+      const tabelleSummenMap = await berechneAlleTabellenwerte(systemwerteMap, meineGeneration);
+      if(tabelleSummenMap === null) return; // inzwischen ueberholt, siehe recalcGeneration oben
       // Belag-Flaechen NACH den Tabellen-Berechnungsspalten neu bilden (die
       // Flaeche ist meist eine Berechnungsspalte Laenge x Breite und waere
       // vorher noch veraltet) - belagSystemwerte() liest den Stand erst
