@@ -214,9 +214,6 @@ main.wrap{padding-top:48px;padding-bottom:60px;}
 .tabellenzeilenname{width:100%;box-sizing:border-box;border:1px solid transparent;border-radius:6px;padding:6px 4px;font:inherit;font-size:12.5px;font-weight:600;color:var(--ink);background:transparent;}
 .tabellenzeilenname:hover,.tabellenzeilenname:focus{outline:none;border-color:var(--line);background:#fff;}
 .tabellenspaltenzelle{width:var(--feldbreite);flex:0 0 auto;}
-.tabellekopflabel.dropdown,.tabellenspaltenzelle.dropdown,.tabellensumme.dropdown{width:calc(2 * var(--feldbreite) + 10px);}
-.tabellendropdown{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:6px;padding:6px 6px;font:inherit;font-size:12.5px;color:var(--ink);background:#fff;}
-.tabellendropdown:focus{outline:none;border-color:var(--primary);}
 /* Tabellenverweis bei Optionen (z.B. Belag): Flaechen der Tabelle anhaken */
 .verweisblock{margin:6px 0 4px 0;padding:8px 10px;border-left:3px solid var(--accent-blue);background:var(--soft);border-radius:0 6px 6px 0;}
 .verweistabelle + .verweistabelle{margin-top:8px;}
@@ -231,11 +228,6 @@ main.wrap{padding-top:48px;padding-bottom:60px;}
 .verweissumme{margin-top:8px;font-size:11.5px;color:var(--muted);}
 .verweissumme.warn{color:var(--danger);}
 .verweishinweis{font-size:11.5px;color:var(--muted);}
-.tabellenhinweis{margin-top:8px;font-size:11.5px;color:var(--muted);}
-.tabellenhinweis.pflicht{color:var(--danger);font-weight:600;}
-.tabellenhinweis.hidden{display:none;}
-.flabel.belagwarn{color:var(--danger);}
-.belagwarnmarke{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;margin-left:6px;border-radius:50%;background:var(--danger);color:#fff;font-size:11px;font-weight:700;cursor:help;}
 .tbdim.tabellenzelle{width:100%;flex:none;}
 .tabellenberechnet{width:100%;box-sizing:border-box;border:1px dashed var(--line);border-radius:6px;padding:6px 7px;font:inherit;font-size:12.5px;color:var(--muted);background:var(--soft);}
 .tabellenzeilendel{width:24px;flex:0 0 auto;color:var(--muted);cursor:pointer;display:flex;align-items:center;justify-content:center;padding-top:8px;}
@@ -1670,10 +1662,7 @@ async function ladeSystemwertTerms(){
   SYSTEMWERT_TERMS = data || [];
 }
 async function berechneSystemwerteMap(){
-  // Belag-Flaechen (Dropdown-Spalte der Flaechentabelle) zuerst und ohne PLZ-
-  // Abhaengigkeit - die beiden Belag-Terms duerfen in eval_ausdruck nie fehlen.
-  BELAG_FLAECHEN = berechneBelagFlaechen();
-  const map = { ...belagSystemwerte(null) };
+  const map = {};
   if(!SYSTEMWERT_TERMS.length) return map;
   const plz = $('kundePlz').value.trim();
   if(!plz) return map;
@@ -2652,16 +2641,9 @@ async function ladeFormelDaten(otId){
   const tabellenIds = eingabefelder.filter(ef => ef.ist_tabelle).map(ef => ef.id);
   TABELLEN_SPALTEN = {};
   if(tabellenIds.length){
-    const spaltenBasis = 'id,eingabefeld_id,name,einheit,reihenfolge,ist_berechnung,ausdruck,zusatztext_moeglich,flaechenformel_moeglich,vorschlagswert';
-    // Dropdown-Spalten (Migration 20260928110000) - solange die noch nicht
-    // eingespielt ist, ohne die neuen Spalten nachladen statt abzubrechen.
-    let { data: spalten, error: spErr } = await sb.from('eingabefeld_tabelle_spalte')
-      .select(spaltenBasis + ',ist_dropdown,dropdown_leer_label,dropdown_pflicht')
+    const { data: spalten, error: spErr } = await sb.from('eingabefeld_tabelle_spalte')
+      .select('id,eingabefeld_id,name,einheit,reihenfolge,ist_berechnung,ausdruck,zusatztext_moeglich,flaechenformel_moeglich,vorschlagswert')
       .in('eingabefeld_id', tabellenIds).order('reihenfolge');
-    if(spErr && /ist_dropdown|dropdown_/.test(spErr.message || '')){
-      ({ data: spalten, error: spErr } = await sb.from('eingabefeld_tabelle_spalte')
-        .select(spaltenBasis).in('eingabefeld_id', tabellenIds).order('reihenfolge'));
-    }
     if(spErr) throw spErr;
     (spalten || []).forEach(s => { (TABELLEN_SPALTEN[s.eingabefeld_id] ||= []).push(s); });
   }
@@ -2819,23 +2801,8 @@ async function ladeFormelDaten(otId){
     });
   });
   baueOptionVerweis();
-  // Belag-Teilschritte (Tool B: Zahnrad -> "Als Belag fuer Flaechen anbieten")
-  // - eigene kleine Abfrage mit Fallback, damit Tool A auch vor der Migration
-  // 20260928100000 laeuft. Sie sind die Auswahl der Dropdown-Spalten.
-  BELAG_TEILSCHRITTE = [];
-  try{
-    const { data: belagRows, error: belagErr } = await sb.from('teilschritt').select('id,ist_belag').eq('ist_belag', true);
-    if(belagErr) throw belagErr;
-    const belagIds = new Set((belagRows || []).map(r => r.id));
-    teilschritte.forEach(t => { t.istBelag = belagIds.has(t.id); });
-    (arbeitsschritte || []).forEach(as => (as.teilschritt || []).filter(ts => !ts.ausgeblendet && belagIds.has(ts.id))
-      .forEach(ts => BELAG_TEILSCHRITTE.push({ id: ts.id, name: ts.name })));
-  }catch(e){ /* Spalte ist_belag noch nicht vorhanden - keine Belaege */ }
   await ladeVorauswahlen(otId);
 }
-
-// Belag-Teilschritte dieses Offertentyps (Auswahl der Dropdown-Spalten)
-let BELAG_TEILSCHRITTE = []; // [{id, name}]
 
 // Vorauswahlen: benannte Buendel von Options-Klicks fuer Formel-Offertentypen
 // (siehe Einstellungen -> Vorauswahlen), ersetzen das frueher pro Option
@@ -3186,7 +3153,7 @@ function renderBereich(){
     // Platzhalter vorbereitet (nichts Standardmaessiges, nur wenn in Tool B
     // explizit zugeordnet).
     const zugehoerigerTs = teilschritte.find(t => t.id === af.teilschrittId);
-    const hatAnzeige = !!(zugehoerigerTs?.anzeigeEingabefeldId || zugehoerigerTs?.anzeigeTermId || zugehoerigerTs?.istBelag);
+    const hatAnzeige = !!(zugehoerigerTs?.anzeigeEingabefeldId || zugehoerigerTs?.anzeigeTermId);
     // Mengenoption (Tool B): Anzahl-Feld nur zeigen, solange die Option
     // aktiv ist - multipliziert in recalc() die Menge aller Ressourcenzeilen
     // dieser Option (z.B. "Poolskimmer einbauen" x2), wirkt sich dadurch
@@ -3375,25 +3342,6 @@ function renderTabelleZeileZelle(spalte, zeile, tdEl){
   // eigenen Wert hatte - eine bereits gespeicherte Zeile (auch 0) wird nie
   // ueberschrieben, siehe zeile.werte[spalte.id] Fallback unten.
   const wertObj = zeile.werte[spalte.id] || (zeile.werte[spalte.id] = { wert: spalte.vorschlagswert ?? 0, notiz: '' });
-  if(spalte.ist_dropdown){
-    // Dropdown-Spalte (z.B. "Belag"): gewaehlt wird ein Belag-Teilschritt,
-    // gespeichert wird seine Id als Text (wertObj.text). Leer ist erlaubt
-    // (ausser "Zuordnung ist Pflicht", dann nur Warnhinweis unter der Tabelle).
-    const sel = document.createElement('select');
-    sel.className = 'tabellendropdown';
-    const leerLabel = spalte.dropdown_leer_label || '– nicht zugeordnet –';
-    sel.innerHTML = `<option value="">${escHtml(leerLabel)}</option>` +
-      BELAG_TEILSCHRITTE.map(b => `<option value="${b.id}">${escHtml(b.name)}</option>`).join('');
-    // Gespeicherter Belag, der inzwischen nicht mehr angeboten wird
-    // (ausgeblendet/Schalter weg): sichtbar lassen statt still zu verlieren.
-    if(wertObj.text && !BELAG_TEILSCHRITTE.some(b => b.id === wertObj.text)){
-      sel.insertAdjacentHTML('beforeend', `<option value="${escHtml(wertObj.text)}">(nicht mehr verfügbar)</option>`);
-    }
-    sel.value = wertObj.text || '';
-    sel.addEventListener('change', () => { wertObj.text = sel.value || null; recalc(); planAutosave(); });
-    tdEl.appendChild(sel);
-    return;
-  }
   if(spalte.ist_berechnung){
     tdEl.innerHTML = `<input type="number" class="tabellenberechnet" data-zeile="${zeile._key}" data-spalte="${spalte.id}" value="${wertObj.wert ?? 0}" readonly tabindex="-1">`;
     return;
@@ -3463,13 +3411,13 @@ function renderTabelle(ef, container){
   wrap.innerHTML = `
     <div class="tabellezeile tabellekopfrow">
       <div class="tabellentitelzelle">${titelZelleHtml}</div>
-      ${spalten.map(s => `<div class="tabellekopflabel${s.ist_berechnung ? ' berechnet' : ''}${s.ist_dropdown ? ' dropdown' : ''}">${escHtml(s.name)}${s.einheit && !s.ist_dropdown ? ` (${escHtml(s.einheit)})` : ''}</div>`).join('')}
+      ${spalten.map(s => `<div class="tabellekopflabel${s.ist_berechnung ? ' berechnet' : ''}">${escHtml(s.name)} (${escHtml(s.einheit)})</div>`).join('')}
       <div class="tabellekopfspacer"></div>
     </div>
     <div class="tabellezeilen"></div>
     <div class="tabellezeile tabellefuss">
       <div class="tabellezeilenname-wrap"><span class="tabellenaddzeile">+ Zeile hinzufügen</span></div>
-      ${spalten.map(s => `<div class="tabellensumme${s.ist_dropdown ? ' dropdown' : ''}" data-tabelle="${ef.id}" data-spalte="${s.id}"></div>`).join('')}
+      ${spalten.map(s => `<div class="tabellensumme" data-tabelle="${ef.id}" data-spalte="${s.id}"></div>`).join('')}
       <div class="tabellekopfspacer"></div>
     </div>`;
   container.appendChild(wrap);
@@ -3488,7 +3436,7 @@ function renderTabelle(ef, container){
     row.appendChild(nameWrap);
     spalten.forEach(s => {
       const zelle = document.createElement('div');
-      zelle.className = 'tabellenspaltenzelle' + (s.ist_dropdown ? ' dropdown' : '');
+      zelle.className = 'tabellenspaltenzelle';
       renderTabelleZeileZelle(s, zeile, zelle);
       row.appendChild(zelle);
     });
@@ -3513,15 +3461,7 @@ function renderTabelle(ef, container){
   // Direkt beim Rendern schon mit dem aktuellen Stand befuellen (nicht erst
   // nach dem naechsten recalc()/berechneAlleTabellenwerte()) - sonst waere
   // die Summenzeile beim ersten Anzeigen kurz leer.
-  spalten.filter(s => !s.ist_dropdown).forEach(s => aktualisiereTabellenSumme(ef.id, s.id, zeilen.reduce((sum, z) => sum + (z.werte[s.id]?.wert ?? 0), 0), zeilen.length));
-  // Hinweis unter der Tabelle (nur bei Tabellen mit Dropdown-Spalte), wird
-  // in recalc() laufend aktualisiert, siehe aktualisiereTabellenHinweise().
-  if(spalten.some(s => s.ist_dropdown)){
-    const hinweis = document.createElement('div');
-    hinweis.className = 'tabellenhinweis hidden';
-    hinweis.dataset.tabelle = ef.id;
-    wrap.appendChild(hinweis);
-  }
+  spalten.forEach(s => aktualisiereTabellenSumme(ef.id, s.id, zeilen.reduce((sum, z) => sum + (z.werte[s.id]?.wert ?? 0), 0), zeilen.length));
 }
 // Summenzeile unter jeder Eingabefeld-Tabelle (ein Wert pro Spalte, ganz
 // kompakt in der Fusszeile neben "+ Zeile hinzufuegen" statt einer eigenen
@@ -3560,7 +3500,7 @@ async function berechneAlleTabellenwerte(systemwerteMap, meineGeneration){
     const zeilen = bereichTabelleZeilen[ef.id] || [];
     await Promise.all(zeilen.map(async zeile => {
       const zeilenWerte = {};
-      spalten.forEach(s => { if(!s.ist_berechnung && !s.ist_dropdown) zeilenWerte[s.id] = zeile.werte[s.id]?.wert ?? 0; });
+      spalten.forEach(s => { if(!s.ist_berechnung) zeilenWerte[s.id] = zeile.werte[s.id]?.wert ?? 0; });
       for(const s of spalten){
         if(!s.ist_berechnung) continue;
         let wert = 0;
@@ -3577,7 +3517,7 @@ async function berechneAlleTabellenwerte(systemwerteMap, meineGeneration){
       }
     }));
     if(ueberholt()) return null;
-    spalten.filter(s => !s.ist_dropdown).forEach(s => {
+    spalten.forEach(s => {
       const summe = zeilen.reduce((summe, z) => summe + (z.werte[s.id]?.wert ?? 0), 0);
       tabelleSummenMap[s.id] = summe;
       aktualisiereTabellenSumme(ef.id, s.id, summe, zeilen.length);
@@ -3586,59 +3526,6 @@ async function berechneAlleTabellenwerte(systemwerteMap, meineGeneration){
   return tabelleSummenMap;
 }
 
-// ---------------------------------------------------------------------------
-// Belag-Flaechen (Dropdown-Spalte in Flaechentabellen)
-// ---------------------------------------------------------------------------
-// "Flaeche" einer Tabelle mit Dropdown-Spalte = die Spalte, deren Name "Flaeche"
-// enthaelt (auch Berechnungsspalte Laenge x Breite), sonst die erste Spalte mit
-// Einheit m2/m² (sonst die erste Nicht-Dropdown-Spalte). Pro Belag-
-// Teilschritt wird die Flaeche aller Zeilen summiert, die ihn im Dropdown
-// gewaehlt haben; "alle Belaege" = Summe aller Zeilen MIT gewaehltem Belag.
-function belagFlaechenSpalten(ef){
-  const spalten = TABELLEN_SPALTEN[ef.id] || [];
-  const dropdown = spalten.find(s => s.ist_dropdown);
-  if(!dropdown) return null;
-  const eingaben = spalten.filter(s => !s.ist_dropdown);
-  const flaeche = eingaben.find(s => /fl(ä|ae)che/i.test(s.name))
-    || eingaben.find(s => /^m\s*[²2]$/i.test((s.einheit || '').trim()))
-    || eingaben[0];
-  return flaeche ? { dropdown, flaeche } : null;
-}
-function berechneBelagFlaechen(){
-  const proBelag = {}; // teilschrittId -> m2
-  let alle = 0;
-  let hatDropdownTabelle = false;
-  const hinweise = {}; // efId -> {ohneZuordnung, flaecheOhne, pflichtOhne}
-  eingabefelder.forEach(ef => {
-    if(!ef.ist_tabelle) return;
-    const sp = belagFlaechenSpalten(ef);
-    if(!sp) return;
-    hatDropdownTabelle = true;
-    const h = hinweise[ef.id] = { ohneZuordnung: 0, flaecheOhne: 0, pflicht: !!sp.dropdown.dropdown_pflicht };
-    (bereichTabelleZeilen[ef.id] || []).forEach(z => {
-      const m2 = z.werte[sp.flaeche.id]?.wert ?? 0;
-      const belag = z.werte[sp.dropdown.id]?.text || null;
-      // "Fläche aller Beläge" = nur Zeilen mit gewähltem Belag (Fugen o.ä.); Zeilen
-      // ohne Zuordnung (z.B. Kies) zählen dort nicht - ihr Volumen steckt in den
-      // Volumen-Spalten der Tabelle.
-      if(belag){ proBelag[belag] = (proBelag[belag] || 0) + m2; alle += m2; }
-      else if(m2 > 0 || sp.dropdown.dropdown_pflicht){ h.ohneZuordnung++; h.flaecheOhne += m2; }
-    });
-  });
-  return { proBelag, alle, hatDropdownTabelle, hinweise };
-}
-// Gibt die Term-Ids der beiden Belag-Systemwerte (Tool B, Formelbausteine
-// "Fläche dieses Belags"/"Fläche aller Beläge") mit ihren Werten zurueck.
-// teilschrittId = Teilschritt der gerade berechneten Ressourcenzeile.
-let BELAG_FLAECHEN = { proBelag: {}, alle: 0, hatDropdownTabelle: false, hinweise: {} };
-function belagSystemwerte(teilschrittId){
-  const w = {};
-  SYSTEMWERT_TERMS.forEach(t => {
-    if(t.systemwert_key === 'belag_flaeche') w[t.id] = (teilschrittId && BELAG_FLAECHEN.proBelag[teilschrittId]) || 0;
-    else if(t.systemwert_key === 'belag_flaeche_alle') w[t.id] = BELAG_FLAECHEN.alle;
-  });
-  return w;
-}
 // ---------------------------------------------------------------------------
 // Tabellenverweis bei Optionen (Tool B: Option bearbeiten -> "Tabellenverweis")
 // ---------------------------------------------------------------------------
@@ -3737,19 +3624,6 @@ function aktualisiereVerweisBloecke(){
   $teilbereiche.querySelectorAll('.verweisblock').forEach(el => {
     const opt = findeOptionPerId(el.dataset.opt);
     if(opt) renderVerweisBlock(el, opt);
-  });
-}
-
-function aktualisiereTabellenHinweise(){
-  $teilbereiche.querySelectorAll('.tabellenhinweis').forEach(el => {
-    const h = BELAG_FLAECHEN.hinweise[el.dataset.tabelle];
-    if(!h || !h.ohneZuordnung){ el.classList.add('hidden'); return; }
-    const n = h.ohneZuordnung;
-    el.textContent = h.pflicht
-      ? `${n} Zeile${n === 1 ? '' : 'n'} ohne Zuordnung – bitte einen Belag wählen.`
-      : `${n} Zeile${n === 1 ? '' : 'n'} (${h.flaecheOhne.toLocaleString('de-CH', { maximumFractionDigits: 2 })} m²) ohne Zuordnung – wird bei keinem Belag mitgerechnet (Aushub/Fundation zählt trotzdem).`;
-    el.classList.toggle('pflicht', !!h.pflicht);
-    el.classList.remove('hidden');
   });
 }
 
@@ -5438,12 +5312,12 @@ async function recalc(){
       // Die Entfernungen kommen bei der ersten Berechnung pro PLZ per Netz-
       // abfrage (kann Sekunden dauern). Die Tabelle (Flaeche, Volumen, Summen)
       // soll aber sofort nach dem Tippen rechnen und nicht darauf warten:
-      // Dauert es laenger als einen Moment, wird sie vorab mit den Belag-
-      // Werten berechnet (Berechnungsspalten brauchen keine Entfernungen) und
+      // Dauert es laenger als einen Moment, wird sie vorab ohne diese Systemwerte
+      // berechnet (Berechnungsspalten brauchen keine Entfernungen) und
       // danach mit den vollstaendigen Systemwerten nochmals, siehe unten.
       let systemwerteMap = await Promise.race([systemwertePromise, new Promise(r => setTimeout(() => r(null), 120))]);
       if(systemwerteMap === null){
-        const vorlaeufig = await berechneAlleTabellenwerte({ ...belagSystemwerte(null) }, meineGeneration);
+        const vorlaeufig = await berechneAlleTabellenwerte({}, meineGeneration);
         if(vorlaeufig === null) return; // inzwischen ueberholt, siehe recalcGeneration oben
         systemwerteMap = await systemwertePromise;
         if(meineGeneration !== recalcGeneration) return; // inzwischen ueberholt, siehe recalcGeneration oben
@@ -5454,12 +5328,6 @@ async function recalc(){
       // fuer alle Formeln unten zur Verfuegung (siehe tabelleSummenMap unten).
       const tabelleSummenMap = await berechneAlleTabellenwerte(systemwerteMap, meineGeneration);
       if(tabelleSummenMap === null) return; // inzwischen ueberholt, siehe recalcGeneration oben
-      // Belag-Flaechen NACH den Tabellen-Berechnungsspalten neu bilden (die
-      // Flaeche ist meist eine Berechnungsspalte Laenge x Breite und waere
-      // vorher noch veraltet) - belagSystemwerte() liest den Stand erst
-      // beim Auswerten der Formeln unten.
-      BELAG_FLAECHEN = berechneBelagFlaechen();
-      aktualisiereTabellenHinweise();
       // Tabellenverweis-Optionen (Belag): Menge = Summe der angehakten Zeilen
       berechneVerweisMengen();
       aktualisiereVerweisBloecke();
@@ -5513,7 +5381,7 @@ async function recalc(){
             // Pauschale, zum Schluss die Marge (siehe Nutzer-Vorgabe).
             let mengeRoh;
             try {
-              const { data, error } = await sb.rpc('eval_ausdruck', { node: rz.menge_ausdruck, werte: { ...bereichWerteMap, ...systemwerteMap, ...belagSystemwerte(rz.teilschrittId), ...tabelleSummenMap } });
+              const { data, error } = await sb.rpc('eval_ausdruck', { node: rz.menge_ausdruck, werte: { ...bereichWerteMap, ...systemwerteMap, ...tabelleSummenMap } });
               if(error) throw error;
               mengeRoh = data;
             } catch(e) {
@@ -5554,7 +5422,7 @@ async function recalc(){
             }
             let mengeRoh;
             try {
-              const { data, error } = await sb.rpc('eval_ausdruck', { node: rz.menge_ausdruck, werte: { ...bereichWerteMap, ...systemwerteMap, ...belagSystemwerte(rz.teilschrittId), ...tabelleSummenMap } });
+              const { data, error } = await sb.rpc('eval_ausdruck', { node: rz.menge_ausdruck, werte: { ...bereichWerteMap, ...systemwerteMap, ...tabelleSummenMap } });
               if(error) throw error;
               mengeRoh = data;
             } catch(e) {
@@ -5588,7 +5456,7 @@ async function recalc(){
             }
             let mengeRoh;
             try {
-              const { data, error } = await sb.rpc('eval_ausdruck', { node: rz.menge_ausdruck, werte: { ...bereichWerteMap, ...systemwerteMap, ...belagSystemwerte(rz.teilschrittId), ...tabelleSummenMap } });
+              const { data, error } = await sb.rpc('eval_ausdruck', { node: rz.menge_ausdruck, werte: { ...bereichWerteMap, ...systemwerteMap, ...tabelleSummenMap } });
               if(error) throw error;
               mengeRoh = data;
             } catch(e) {
@@ -5610,7 +5478,7 @@ async function recalc(){
           }
           let mengeRoh;
           try {
-            const { data, error } = await sb.rpc('eval_ausdruck', { node: rz.menge_ausdruck, werte: { ...bereichWerteMap, ...systemwerteMap, ...belagSystemwerte(rz.teilschrittId), ...tabelleSummenMap } });
+            const { data, error } = await sb.rpc('eval_ausdruck', { node: rz.menge_ausdruck, werte: { ...bereichWerteMap, ...systemwerteMap, ...tabelleSummenMap } });
             if(error) throw error;
             mengeRoh = data;
           } catch(e) {
@@ -5733,38 +5601,16 @@ async function recalc(){
       // bereichWerteMap, Formel-Wert ueber dieselbe eval_ausdruck-RPC wie
       // Menge-Formeln (mit denselben Eingabefeld-/Systemwerten).
       for(const ts of teilschritte){
-        if(!ts.anzeigeEingabefeldId && !ts.anzeigeTermId && !ts.istBelag) continue;
+        if(!ts.anzeigeEingabefeldId && !ts.anzeigeTermId) continue;
         const el = $teilbereiche.querySelector(`.tsanzeigewert[data-ts="${ts.id}"]`);
         if(!el) continue;
         let wert = null, einheit = '';
-        if(ts.istBelag){
-          // Belag-Teilschritt: Anzeige ist immer die zugeordnete Flaeche. Stimmen
-          // Tabelle und Button-Wahl nicht ueberein, Titel rot + "!" mit Tooltip
-          // (kein Sperren - die Offerte laesst sich trotzdem weiterbearbeiten).
-          const m2 = BELAG_FLAECHEN.proBelag[ts.id] || 0;
-          wert = m2;
-          einheit = 'm²';
-          const gewaehlt = (ts.optionIds || []).some(id => bereichSelectedOptions.has(id));
-          let warnung = '';
-          if(BELAG_FLAECHEN.hatDropdownTabelle && ts.optionIds){
-            if(m2 > 0 && !gewaehlt) warnung = 'Diese Variante ist in der Tabelle erfasst, aber hier ist noch kein Button ausgewählt.';
-            else if(m2 === 0 && gewaehlt) warnung = 'Diese Variante ist hier gewählt, aber in der Tabelle noch keine Fläche erfasst.';
-          }
-          const label = el.closest('label');
-          if(label){
-            label.classList.toggle('belagwarn', !!warnung);
-            let marke = label.querySelector('.belagwarnmarke');
-            if(warnung){
-              if(!marke){ marke = document.createElement('span'); marke.className = 'belagwarnmarke'; marke.textContent = '!'; label.appendChild(marke); }
-              marke.title = warnung;
-            }else if(marke) marke.remove();
-          }
-        }else if(ts.anzeigeEingabefeldId){
+        if(ts.anzeigeEingabefeldId){
           wert = bereichWerteMap[ts.anzeigeEingabefeldId];
           einheit = ts.anzeigeEingabefeldEinheit || '';
         }else{
           try{
-            const { data, error } = await sb.rpc('eval_ausdruck', { node: ts.anzeigeTermAusdruck, werte: { ...bereichWerteMap, ...systemwerteMap, ...belagSystemwerte(null), ...tabelleSummenMap } });
+            const { data, error } = await sb.rpc('eval_ausdruck', { node: ts.anzeigeTermAusdruck, werte: { ...bereichWerteMap, ...systemwerteMap, ...tabelleSummenMap } });
             if(error) throw error;
             wert = data;
             einheit = ts.anzeigeTermEinheit || '';
