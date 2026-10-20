@@ -860,7 +860,8 @@ function personRow(p, W, bgx){
   its.forEach(it => {
     const L = LAY[it.id]; if(!L || !L.segs.length || grpd.has(it.id)) return;
     const st = barStyle(it), hit = hitOf(it), isOcc = !!it.ser;
-    const lab = (it._alt ? `seit ${dLab(Math.floor(it._alt.s))} · ` : '') + labOf(it) + (it.e - it.s > 1 + 1e-6 && !isOcc && it.kind !== 'hilfe' && L.n >= 1 ? ` · ${fmtN(L.n)} T` : '');
+    const ohneKunde = istAuftrag(it) && !it.kid && !it.title; // rot umrandet, bis Kunde oder Titel erfasst ist
+    const lab = (it._alt ? `seit ${dLab(Math.floor(it._alt.s))} · ` : '') + (ohneKunde ? 'Ohne Kunde' : labOf(it)) + (it.e - it.s > 1 + 1e-6 && !isOcc && it.kind !== 'hilfe' && L.n >= 1 ? ` · ${fmtN(L.n)} T` : '');
     const abw = it.soll && Math.abs(L.n - it.soll) > .01; // Arbeitstage fix, aber Plan weicht ab
     const tip = `${titleOf(it)}\n${p.name}${it.e - it.s > 1 + 1e-6 ? `\n${fmtN(L.n)} Arbeitstage` : ''}${it.allein ? '\nArbeitet allein' : ''}${it.ok === false ? '\nNoch nicht abgemacht' : ''}${isOcc ? '\nWiederkehrend' : ''}${it.fix ? '\nStart fix' : ''}${abw ? `\nGeplant ${fmtN(it.soll)} Tage, aktuell ${fmtN(L.n)} Tage` : ''}`;
     // Beschriftung läuft über Wochenenden weiter
@@ -871,7 +872,7 @@ function personRow(p, W, bgx){
     L.segs.forEach((sg, i) => {
       const l = sg[0] * dayW + 1, w = Math.max(3, (sg[1] - sg[0]) * dayW - 2);
       if(i > 0){ const pe = L.segs[i - 1][1] * dayW - 1, gw = l - pe; if(gw > 0) bars += `<div class="brg${hit ? '' : ' dim'}" style="left:${pe}px;width:${gw}px;background:${st.bg};color:${st.fg === '#FFFFFF' ? '#232B35' : st.fg}">${txt(pe)}</div>`; }
-      const cls = ['bar', ed && !isOcc ? 'ed' : '', isOcc ? 'occ' : '', prov ? 'provi' : '', it._alt ? 'altb' : '', L.mini ? 'mini' : '', selId === it.id ? 'sel' : '', hit ? '' : 'dim'].join(' ');
+      const cls = ['bar', ed && !isOcc ? 'ed' : '', isOcc ? 'occ' : '', prov ? 'provi' : '', it._alt || ohneKunde ? 'altb' : '', L.mini ? 'mini' : '', selId === it.id ? 'sel' : '', hit ? '' : 'dim'].join(' ');
       bars += `<div class="${cls}" data-id="${it.id}" style="left:${l}px;width:${w}px;${bgS};border-color:${st.bd}" title="${esc(tip)}">${i === 0 && !isOcc && !it.fix && w >= 30 ? '<span class="hl"></span>' : ''}${txt(l + 1)}${i === L.segs.length - 1 && !isOcc && w >= 30 ? '<span class="hr"></span>' : ''}${i === L.segs.length - 1 && abw ? `<span class="bwarn" title="Geplant ${fmtN(it.soll)} Tage, aktuell ${fmtN(L.n)} Tage">!</span>` : ''}</div>`;
     });
     if(it.allein && L.segs.length) bars += `<span class="bdot" style="left:${L.segs[0][0] * dayW + 3}px" title="Arbeitet allein"></span>`;
@@ -1460,15 +1461,21 @@ function stickLabels(){ const t = tlEl(); if(!t) return; const v0 = t.scrollLeft
 function uAt(x){ const t = tlEl(); const r = t.getBoundingClientRect(); return (x - r.left - NAMEW + t.scrollLeft) / dayW; }
 // Doppelklick auf einen Balken = an dieser Stelle etwas einfügen (Leiste 1–4 wie beim Zeichnen)
 let lastBarClick = null;
-function einfuegen(lane, x){ const mid = lane.dataset.mid; if(!canEdit(mid)) return;
-  const a = snapU(uAt(x) - (zoom === 'tag' ? 2 / 48 : zoom === 'woche' ? 1 / 12 : .25)), b = a + (zoom === 'tag' ? 4 / 48 : zoom === 'woche' ? 1 / 6 : .5);
-  closePanel(); openNeuLeiste(lane, mid, r48(a), r48(b)); }
+function einfuegen(lane, x, it){ const mid = lane.dataset.mid; if(!canEdit(mid)) return;
+  const len = zoom === 'tag' ? 4 / 48 : zoom === 'woche' ? 1 / 6 : .5, u = uAt(x);
+  let a = snapU(u - (zoom === 'tag' ? 2 / 48 : zoom === 'woche' ? 1 / 12 : .25));
+  // Balken bis 1 Tag: nicht mitten hinein, sondern davor (linke Hälfte) oder danach (rechte Hälfte)
+  if(it && it.e - it.s <= 1 + 1e-6) a = u < (it.s + it.e) / 2 ? it.s - len : it.e;
+  closePanel();
+  // Nach dem Schliessen ist der Plan neu gezeichnet: Zeile frisch suchen, sonst landet die Leiste oben links
+  const ln = document.querySelector(`.row[data-mid="${mid}"] > .lane[data-mid="${mid}"]`) || document.querySelector(`.lane[data-mid="${mid}"]`);
+  if(ln) openNeuLeiste(ln, mid, r48(a), r48(a + len)); }
 function bindTimeline(t){
   // Rechtsklick auf einen Balken = kleines Menü
   t.addEventListener('contextmenu', e => { const bar = e.target.closest('.bar[data-id]'), lane = e.target.closest('.lane[data-mid]'); if(!bar || !lane || bar.dataset.id.startsWith('S')) return;
     e.preventDefault(); const it = byId(bar.dataset.id); if(!it) return; const x = e.clientX, ed = canEdit(it.mid);
     const pop = popAt({ left: x, bottom: e.clientY }, `<b>${esc(labOf(it))}</b><button class="btn btn-ghost" data-cm="det" style="justify-content:flex-start">${I('file')}Details</button>${ed ? `<button class="btn btn-ghost" data-cm="ein" style="justify-content:flex-start">${I('plus')}Hier einfügen</button><button class="btn btn-ghost" data-cm="del" style="justify-content:flex-start;color:var(--danger)">${I('trash')}Löschen</button>` : ''}`);
-    pop.querySelectorAll('[data-cm]').forEach(b => b.onclick = () => { closePop(); const c = b.dataset.cm; if(c === 'det') openPanel(it.id); else if(c === 'ein') einfuegen(lane, x); else loescheEinsatz(it); }); });
+    pop.querySelectorAll('[data-cm]').forEach(b => b.onclick = () => { closePop(); const c = b.dataset.cm; if(c === 'det') openPanel(it.id); else if(c === 'ein') einfuegen(lane, x, it); else loescheEinsatz(it); }); });
   let stT = 0; t.addEventListener('scroll', () => { if(!stT) stT = requestAnimationFrame(() => { stT = 0; stickLabels(); }); }, { passive: true });
   let scT; t.addEventListener('scroll', () => { updateRange(); closePop(); if(zoom === 'tag'){ clearTimeout(scT); scT = setTimeout(() => { const c = Math.floor(t.scrollLeft / dayW); if(c < HR[0] + 3 || c > HR[1] - 4) renderRows(); }, 120); }
     if(openMid && openTyp === 'fahrzeug'){ clearTimeout(t._pT); t._pT = setTimeout(() => { const c = Math.floor(t.scrollLeft / dayW), e2 = c + Math.ceil(visW() / dayW); if(c < POOLR[0] + 3 || e2 > POOLR[1] - 3) renderRows(); }, 150); } }, { passive: true });
@@ -1626,7 +1633,7 @@ function bindWindow(){
     if(d.kind === 'bar'){
       const it = byId(d.id);
       if(!d.moved){ const now = Date.now();
-        if(lastBarClick && lastBarClick.id === d.id && now - lastBarClick.t < 400){ lastBarClick = null; const ln = document.querySelector(`.bar[data-id="${d.id}"]`)?.closest('.lane[data-mid]'); if(ln) einfuegen(ln, e.clientX); return; }
+        if(lastBarClick && lastBarClick.id === d.id && now - lastBarClick.t < 400){ lastBarClick = null; const ln = document.querySelector(`.bar[data-id="${d.id}"]`)?.closest('.lane[data-mid]'); if(ln) einfuegen(ln, e.clientX, it); return; }
         lastBarClick = { id: d.id, t: now }; openPanel(d.id); return; }
       if(d.fixHit) toast('Start ist fix. Zum Verschieben im Detailfeld das Schloss öffnen.');
       if(it.s === d.s0 && it.e === d.e0 && it.mid === d.mid0) return;
@@ -1676,7 +1683,18 @@ async function loescheEinsatz(it){
 // Detailfenster
 // ---------------------------------------------------------------------------
 const qOpts = sel => [...Array(49)].map((_, q) => `<option value="${q}"${q === sel ? ' selected' : ''}>${tStr(6 + q / 4)}</option>`).join('');
-function closePanel(){ selProv = null; $('side').innerHTML = ''; if(selId){ selId = null; if(VIEW === 'plan') renderRows(); } }
+// Leerer Auftrag (kein Kunde, Titel, Notiz, keine Dateien) = meist ein Versehen: beim Schliessen löschen, mit Rückgängig
+const istAuftrag = it => it && (it.kind === 'baustelle' || it.kind === 'termin' || it.kind === 'intern');
+function istLeer(it){ return istAuftrag(it) && !it.kid && !it.title && !it.text && !(it.files || []).length
+  && !$('pKunde')?.value.trim() && !$('pTitel')?.value.trim() && !$('pNotiz')?.value.trim(); }
+async function leerWeg(id){
+  const it = byId(id); if(!it) return; const kopie = { ...it };
+  const { error } = await sb.from('planer_einsatz').delete().eq('id', id); if(error){ fehler(error, 'Löschen'); return; }
+  EINS = EINS.filter(x => x.id !== id); render();
+  toast('Leerer Auftrag gelöscht', async () => { const row = itemToRow(kopie); row.id = kopie.id; row.erstellt_von = ME;
+    const { error } = await sb.from('planer_einsatz').insert(row); if(error){ fehler(error); return; } EINS.push(kopie); render(); });
+}
+function closePanel(){ const leer = selId && istLeer(byId(selId)) ? selId : null; selProv = null; $('side').innerHTML = ''; if(selId){ selId = null; if(VIEW === 'plan') renderRows(); } if(leer) leerWeg(leer); }
 // ---------------------------------------------------------------------------
 // Detailfeld rechts – gleicher Aufbau für Baustelle, Termin, Mithilfe, Absenz und
 // Pflege-Vorschlag: oben Titel + Zeit, dann Notiz, dann aufklappbare Abschnitte
@@ -1747,7 +1765,8 @@ function abmHTML(s, e, team, gid){
 const leseAbm = () => { const d = fromIso($('aD').value), s = d + (+$('aQ0').value) / 48, e = d + (+$('aQ1').value) / 48; return e > s ? { s, e, mid: $('aP') ? $('aP').value : null } : null; };
 
 function openPanel(id, isNew){
-  const it = byId(id); if(!it) return; if(selId !== id){ panelAbm = false; panelOpen = {}; panelKunde = false; } selId = id; if(VIEW === 'plan') renderRows();
+  const it = byId(id); if(!it) return; if(selId && selId !== id && istLeer(byId(selId))) leerWeg(selId);
+  if(selId !== id){ panelAbm = false; panelOpen = {}; panelKunde = false; } selId = id; if(VIEW === 'plan') renderRows();
   const ed = canEdit(it.mid), dis = ed ? '' : 'disabled';
   const L = LAY[it.id] || { n: 0, miss: [] };
   const k = KUNDEN[it.kid] || (it.kind === 'hilfe' ? KUNDEN[byId(it.link)?.kid] : null);
