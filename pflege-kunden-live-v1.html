@@ -1128,27 +1128,34 @@ function bpGeraetHtml(kk, sys, seg){
   const opt = (liste, v) => `<option value="">–</option>` + (v && !liste.includes(v) ? [...liste, v] : liste).map(o => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('');
   const a = (ri, f) => `data-act="bg-feld" data-ri="${ri}" data-f="${f}"`;
   const zeit = (ri, f, v, l) => `<input class="zeit" ${a(ri, f)} inputmode="numeric" maxlength="5" value="${esc(v)}" placeholder="hh:mm" aria-label="${l}">`;
-  const zeile = (r, ri) => `<tbody class="v"><tr data-ri="${ri}">
+  // Unten immer eine leere Zeile zum Ausfuellen (wird erst mit dem ersten Eintrag gespeichert)
+  const zeile = (r, ri) => `<tbody class="v${ri === rows.length ? ' neu' : ''}"><tr data-ri="${ri}">
       <td class="vn"><input class="n" ${a(ri, 'name')} value="${esc(r.name)}" placeholder="${rb ? 'Zone / Bereich' : 'Gerät / Bereich'}" aria-label="Bereich"></td>
       ${rb ? `<td><div class="zz">${zeit(ri, 'von', r.von, 'Start')}–${zeit(ri, 'bis', r.bis, 'Ende')}<small>${dauer(r.von, r.bis)}</small></div></td>
       <td><div class="days">${BP_TAGE.map((t, i) => `<button type="button" class="chip" data-act="bg-tag" data-tag="${i}" aria-pressed="${(r.tage || []).includes(i)}" aria-label="${t}">${t}</button>`).join('')}</div></td>`
       : `<td>${zeit(ri, 'start', r.start, 'Startzeit ungefähr')}</td>
       <td><select ${a(ri, 'freq')} aria-label="${cl ? 'Frequenz' : 'Intervall'}">${opt(cl ? CLABER_FREQ : GEKA_FREQ, r.freq)}</select></td>
       <td><select ${a(ri, 'dauer')} aria-label="${cl ? 'Bewässerungszeit' : 'Laufzeit'}">${opt(cl ? CLABER_DAUER : GEKA_DAUER, r.dauer)}</select></td>`}
-      <td><button type="button" class="icon-btn" data-act="bg-rm" title="Zeile entfernen" aria-label="Zeile entfernen">${I('x')}</button></td></tr></tbody>`;
+      <td>${ri < rows.length ? `<button type="button" class="icon-btn" data-act="bg-rm" title="Zeile entfernen" aria-label="Zeile entfernen">${I('x')}</button>` : ''}</td></tr></tbody>`;
   const kopf = rb ? '<th>Zone / Bereich</th><th>Zeit</th><th>Tage</th>' : `<th>Gerät / Bereich</th><th>Start ca.</th><th>${cl ? 'Frequenz' : 'Intervall'}</th><th>${cl ? 'Bewässerungszeit' : 'Laufzeit'}</th>`;
   return `<section class="card panel">
     <div class="panel-h"><div class="bp-kopf"><h3>Bewässerungsplan</h3>${seg}</div><span class="bp-stand">Von Hand erfasst</span></div>
     <div class="bp-w"><table class="bp bp-g"><thead><tr>${kopf}<th style="width:28px"></th></tr></thead>
-      ${rows.map(zeile).join('') || `<tbody><tr><td colspan="${rb ? 4 : 5}" class="leer" style="padding:10px">Noch nichts erfasst.</td></tr></tbody>`}
+      ${[...rows, {}].map(zeile).join('')}
     </table></div>
-    <div><button class="addrow" data-act="bg-add">${I('plus')}${rb ? 'Zone hinzufügen' : 'Gerät hinzufügen'}</button></div>
   </section>`;
 }
+const bgLeer = sys => sys === 'rainbird' ? { name: '', von: '', bis: '', tage: [] } : { name: '', start: '', freq: '', dauer: '' };
 async function speichereBg(kk, sys, rows, neuZeichnen = true){
   const bg = { ...(kk.bewaesserung_geraete || {}), [sys]: rows };
+  S.bpSys[kk.id] = sys;   // beim System bleiben, auch wenn es vorher leer war
   if(await speichere('pflege_kunde_kategorie', { id: kk.id }, { bewaesserung_geraete: bg })) kk.bewaesserung_geraete = bg;
-  if(neuZeichnen) render();
+  if(!neuZeichnen) return;
+  // Fokus behalten (mit Tab ins naechste Feld gesprungen, waehrend gespeichert wurde)
+  const f = document.activeElement?.closest?.('.bp-g') && document.activeElement;
+  const sel = f && (f.dataset.f ? `.bp-g tr[data-ri="${f.closest('tr').dataset.ri}"] [data-f="${f.dataset.f}"]` : f.dataset.tag ? `.bp-g tr[data-ri="${f.closest('tr').dataset.ri}"] [data-tag="${f.dataset.tag}"]` : null);
+  render();
+  if(sel) document.querySelector(sel)?.focus();
 }
 const bgKopie = (kk, sys) => JSON.parse(JSON.stringify(bgDaten(kk, sys)));
 async function speichereBp(kk, vl, neuZeichnen = true){
@@ -1839,10 +1846,11 @@ $('app').addEventListener('change', async e => {
     await speichereBp(kk, vl, false);
   }
   else if(act === 'bg-feld'){
-    const sys = bpSystem(kk), rows = bgKopie(kk, sys), r = rows[+el.closest('tr').dataset.ri], f = el.dataset.f;
+    const sys = bpSystem(kk), rows = bgKopie(kk, sys), ri = +el.closest('tr').dataset.ri, f = el.dataset.f, neu = !rows[ri];
     if(f === 'von' || f === 'bis' || f === 'start') el.value = normZeit(el.value);
-    r[f] = el.value.trim();
-    await speichereBg(kk, sys, rows, f === 'von' || f === 'bis');   // Dauer neu anzeigen
+    if(neu){ if(!el.value.trim()) return; rows.push(bgLeer(sys)); }   // leere Zeile unten: erst mit dem ersten Eintrag speichern
+    rows[ri][f] = el.value.trim();
+    await speichereBg(kk, sys, rows, neu || f === 'von' || f === 'bis');   // neue leere Zeile bzw. Dauer anzeigen
   }
   else if(act === 'bp-m'){
     const tr = el.closest('tr'), vl = bpKopie(kk), m = vl[+tr.dataset.vi].muster[+tr.dataset.mi], f = el.dataset.f;
@@ -1972,16 +1980,11 @@ $('app').addEventListener('click', async e => {
   }
   else if(act === 'bp-sys'){ S.bpSys[kk.id] = b.dataset.sys; render(); }
   else if(act === 'bg-tag'){
-    const sys = bpSystem(kk), rows = bgKopie(kk, sys), r = rows[+b.closest('tr').dataset.ri], t = +b.dataset.tag;
+    const sys = bpSystem(kk), rows = bgKopie(kk, sys), ri = +b.closest('tr').dataset.ri, t = +b.dataset.tag;
+    if(!rows[ri]) rows.push(bgLeer(sys));
+    const r = rows[ri];
     r.tage = (r.tage || []).includes(t) ? r.tage.filter(x => x !== t) : [...(r.tage || []), t].sort((x, y) => x - y);
     await speichereBg(kk, sys, rows);
-  }
-  else if(act === 'bg-add'){
-    const sys = bpSystem(kk), rows = bgKopie(kk, sys);
-    rows.push(sys === 'rainbird' ? { name: '', von: '', bis: '', tage: [] } : { name: '', start: '', freq: '', dauer: '' });
-    S.bpSys[kk.id] = sys;
-    await speichereBg(kk, sys, rows);
-    [...document.querySelectorAll('.bp-g input.n')].pop()?.focus();
   }
   else if(act === 'bg-rm'){
     const sys = bpSystem(kk), rows = bgKopie(kk, sys), ri = +b.closest('tr').dataset.ri;
