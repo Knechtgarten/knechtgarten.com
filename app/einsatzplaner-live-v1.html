@@ -82,6 +82,19 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 .cpychip{display:inline-flex;align-items:center;gap:5px;color:var(--primary);font-weight:700;font-size:12px;}
 .cpychip .i{width:13px;height:13px;}
 .cpychip .icon-btn{width:18px;height:18px;}
+.wdhp{display:flex;flex-direction:column;gap:7px;width:260px;}
+.wdhp select{width:100%;}
+.wdhp .wrow{display:flex;align-items:center;gap:6px;}
+.wdhp .wrow input{width:54px;}
+.wdhp .wtage{display:flex;gap:3px;}
+.wdhp .wtage button{all:unset;cursor:pointer;width:26px;height:26px;border-radius:50%;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--muted);}
+.wdhp .wtage button.on{background:var(--primary);border-color:var(--primary);color:#fff;}
+.wdhp .wrad{display:flex;flex-direction:column;gap:4px;font-size:12.5px;}
+.wdhp .wrad label{display:flex;align-items:center;gap:6px;}
+.wdhp .wrad input[type=radio]{accent-color:var(--primary);}
+.wdhp .wrad input[type=number]{width:56px;}
+.wdhp .wlab{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700;margin-top:2px;}
+.wdhp .wsum{font-size:12px;color:var(--primary);}
 .infop{display:flex;flex-direction:column;gap:5px;max-height:72vh;overflow:auto;}
 .infop > b{margin-top:6px;color:var(--primary);}
 .infop > b:first-child{margin-top:0;}
@@ -378,7 +391,6 @@ table.bp td{padding:4px;border-top:1px solid var(--soft);white-space:nowrap;}
 .pal{display:flex;gap:5px;flex-wrap:wrap;}
 .pal button{all:unset;cursor:pointer;width:24px;height:24px;border-radius:5px;border:2px solid transparent;}
 .pal button[aria-pressed="true"]{border-color:var(--ink);}
-.ser{display:flex;gap:8px;align-items:center;font-size:12px;padding:5px 0;border-bottom:1px solid var(--soft);}
 table.ft{border-collapse:collapse;width:100%;font-size:12.5px;}
 table.ft td{padding:7px 10px;border-bottom:1px solid var(--soft);}
 
@@ -591,7 +603,7 @@ const r48 = u => Math.round(u * 48) / 48;
 // ---------------------------------------------------------------------------
 // Daten
 // ---------------------------------------------------------------------------
-let RES = [], RESE = [], GRUPPEN = [], PERSONEN = [], P = {}, EINS = [], SERIEN = [], FEIER = new Map(), KUNDEN = {}, KLIST = [], BENUTZER = [];
+let RES = [], RESE = [], GRUPPEN = [], PERSONEN = [], P = {}, EINS = [], FEIER = new Map(), KUNDEN = {}, KLIST = [], BENUTZER = [];
 async function fetchAll(mk){ let out = [], i = 0; for(;;){ const { data, error } = await mk().range(i, i + 999); if(error) throw error; out = out.concat(data); if(data.length < 1000) break; i += 1000; } return out; }
 async function ladeAlles(){
   try{
@@ -600,7 +612,7 @@ async function ladeAlles(){
       fetchAll(() => sb.from('planer_gruppe').select('*').order('sortierung')),
       fetchAll(() => sb.from('planer_person').select('*').order('sortierung')),
       fetchAll(() => sb.from('planer_einsatz').select('*, planer_datei(id,art,name,storage_pfad)').lt('beginn', bis).gt('ende', von)),
-      fetchAll(() => sb.from('planer_serie').select('*')),
+      fetchAll(() => sb.from('planer_einsatz').select('*, planer_datei(id,art,name,storage_pfad)').not('wdh', 'is', null).lt('beginn', bis)),
       fetchAll(() => sb.from('planer_feiertag').select('*')),
       Object.keys(KUNDEN).length ? Promise.resolve(null) : fetchAll(() => sb.from('kunde').select('id,name,firma,vorname,nachname,strasse,plz,ort').order('name')),
       fetchAll(() => sb.from('planer_ressource').select('*').order('sortierung')),
@@ -613,7 +625,7 @@ async function ladeAlles(){
     MAG = au; PZ = pz; ABST = at; VNOT = {}; vn.forEach(x => VNOT[`${x.kunde_kategorie_id}_${x.jahr}_${x.kw}`] = { n: x.notiz || '', pl: x.projektleiter_id });
     RES = r; RESE = z.map(x => ({ id: x.id, rid: x.ressource_id, art: x.art, eid: x.einsatz_id, mid: x.person_id, s: x.beginn ? toU(x.beginn) : null, e: x.ende ? toU(x.ende) : null }));
     GRUPPEN = g; PERSONEN = p; P = {}; p.forEach(x => P[x.id] = x);
-    EINS = e.map(rowToItem); SERIEN = s;
+    EINS = e.concat(s.filter(x => !e.some(y => y.id === x.id))).map(rowToItem); // s = wiederkehrende, auch wenn der erste Termin vor dem Bereich liegt
     FEIER = new Map(); f.forEach(x => FEIER.set(fromIso(x.datum), x.name));
     if(k){ KUNDEN = {}; k.forEach(x => KUNDEN[x.id] = x); KLIST = k.map(x => ({ id: x.id, lab: kLabel(x) })); }
     if(isBuero() && !BENUTZER.length){ const { data } = await sb.rpc('pflege_zustaendige'); BENUTZER = data || []; }
@@ -621,13 +633,13 @@ async function ladeAlles(){
     syncPflegeErledigt();
   }catch(err){ fehler(err, 'Laden'); }
 }
-function rowToItem(r){ return { id: r.id, mid: r.person_id, kind: r.art, s: toU(r.beginn), e: toU(r.ende), kid: r.kunde_id, title: r.titel || '', text: r.notiz || '', pl: r.projektleiter_id, link: r.mit_einsatz_id, allein: r.allein, ok: r.abgemacht, soll: r.soll_tage, files: r.planer_datei || [], pkk: r.pflege_kunde_kategorie_id, pj: r.pflege_jahr, pkw: r.pflege_kw, fix: !!r.start_fix, fixg: r.start_fix_grund || '', kv: r.kopie_von }; }
-function itemToRow(it){ return { person_id: it.mid, art: it.kind, beginn: fromU(it.s), ende: fromU(it.e, true), kunde_id: it.kid || null, titel: it.title || null, notiz: it.text || null, projektleiter_id: it.pl || null, mit_einsatz_id: it.link || null, allein: !!it.allein, abgemacht: it.ok !== false, soll_tage: it.soll ?? null, pflege_kunde_kategorie_id: it.pkk || null, pflege_jahr: it.pj || null, pflege_kw: it.pkw || null, start_fix: !!it.fix, start_fix_grund: it.fixg || null, kopie_von: it.kv || null }; }
+function rowToItem(r){ return { id: r.id, mid: r.person_id, kind: r.art, s: toU(r.beginn), e: toU(r.ende), kid: r.kunde_id, title: r.titel || '', text: r.notiz || '', pl: r.projektleiter_id, link: r.mit_einsatz_id, allein: r.allein, ok: r.abgemacht, soll: r.soll_tage, files: r.planer_datei || [], pkk: r.pflege_kunde_kategorie_id, pj: r.pflege_jahr, pkw: r.pflege_kw, fix: !!r.start_fix, fixg: r.start_fix_grund || '', kv: r.kopie_von, wdh: r.wdh || null }; }
+function itemToRow(it){ return { person_id: it.mid, art: it.kind, beginn: fromU(it.s), ende: fromU(it.e, true), kunde_id: it.kid || null, titel: it.title || null, notiz: it.text || null, projektleiter_id: it.pl || null, mit_einsatz_id: it.link || null, allein: !!it.allein, abgemacht: it.ok !== false, soll_tage: it.soll ?? null, pflege_kunde_kategorie_id: it.pkk || null, pflege_jahr: it.pj || null, pflege_kw: it.pkw || null, start_fix: !!it.fix, start_fix_grund: it.fixg || null, kopie_von: it.kv || null, wdh: it.wdh || null }; }
 const kName = k => k ? (k.firma || [k.nachname, k.vorname].filter(Boolean).join(' ') || k.name) : '';
 const kShort = k => k ? (k.firma || k.nachname || k.name || '') : '';
 const kOrt = k => k ? [k.strasse, [k.plz, k.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ') : '';
 const kLabel = k => `${kName(k)}${k.ort ? ' · ' + k.ort : ''}`;
-const byId = id => EINS.find(x => x.id === id);
+const byId = id => EINS.find(x => x.id === id) || (String(id).startsWith('R') ? ALL.find(x => x.id === id) : undefined); // R… = berechnete Wiederholung
 const first = n => String(n || '').split(' ')[0];
 const canEdit = mid => isBuero() || (P[mid] && P[mid].benutzer_id === ME);
 const myPerson = () => PERSONEN.find(p => p.benutzer_id === ME && p.aktiv);
@@ -666,27 +678,46 @@ function barStyle(it){
 const isOff = d => { const w = dDate(d).getDay(); return w === 0 || w === 6 || FEIER.has(d); };
 const isShort = o => o.e - o.s < .5 - 1e-6;
 function covered(list, a, b){ const iv = list.map(o => [Math.max(a, o.s), Math.min(b, o.e)]).filter(x => x[1] > x[0]).sort((x, y) => x[0] - y[0]); let t = 0, ce = a; iv.forEach(([s, e]) => { s = Math.max(s, ce); if(e > s){ t += e - s; ce = e; } }); return t; }
-function occs(){
-  const out = [];
-  SERIEN.forEach(sr => {
-    const von = Math.max(0, fromIso(sr.von)), bis = Math.min(NDAYS - 1, sr.bis ? fromIso(sr.bis) : NDAYS - 1);
-    const ex = new Set((sr.ausnahmen || []).map(fromIso));
-    for(let d = von; d <= bis; d++){
-      const wd = dDate(d).getDay() || 7;
-      if(wd !== sr.wochentag || ex.has(d) || FEIER.has(d)) continue;
-      if(sr.alle_zwei_wochen && Math.floor((d - von) / 7) % 2) continue;
-      const [a, b] = sr.teil === 'vm' ? [0, .5] : sr.teil === 'nm' ? [.5, 1] : [0, 1];
-      out.push({ id: 'S' + sr.id + '_' + d, ser: sr.id, d, mid: sr.person_id, kind: sr.art, s: d + a, e: d + b, title: sr.titel, files: [] });
-    }
-  });
+// Wiederholungen (wie Google Kalender): der Eintrag ist der erste Termin, die weiteren werden hier
+// berechnet (nicht gespeichert). Regel in it.wdh, siehe Migration 20261021000000.
+function wdhTreffer(r, d0, d){
+  const a = dDate(d0), x = dDate(d);
+  if(r.u === 'w'){ const wk = Math.round(((d - (x.getDay() + 6) % 7) - (d0 - (a.getDay() + 6) % 7)) / 7);
+    return wk % (r.n || 1) === 0 && (r.days || [a.getDay()]).includes(x.getDay()); }
+  const mon = (x.getFullYear() - a.getFullYear()) * 12 + x.getMonth() - a.getMonth();
+  if(r.u === 'm'){ if(mon % (r.n || 1)) return false;
+    if(r.mm === 'nth') return x.getDay() === a.getDay() && Math.ceil(x.getDate() / 7) === Math.ceil(a.getDate() / 7);
+    if(r.mm === 'last') return x.getDay() === a.getDay() && dDate(d + 7).getMonth() !== x.getMonth();
+    return x.getDate() === a.getDate(); }
+  if(r.u === 'y') return mon % (12 * (r.n || 1)) === 0 && x.getDate() === a.getDate();
+  return false;
+}
+// Alle weiteren Termine eines Eintrags: d = Regel-Tag, z = Tag im Plan (Feiertag evtl. verschoben)
+function wdhTage(it, alle){
+  const r = it.wdh; if(!r) return []; const d0 = Math.floor(it.s + 1e-9);
+  const aus = new Set((r.aus || []).map(fromIso)), bis = r.ende === 'bis' && r.bis ? fromIso(r.bis) : Infinity;
+  const out = []; let n = 1; // das Original zählt als erster Termin
+  for(let d = d0 + 1; d < NDAYS && d <= bis; d++){
+    if(r.ende === 'anzahl' && n >= (r.anzahl || 1)) break;
+    if(!wdhTreffer(r, d0, d)) continue;
+    let z = d; if(FEIER.has(d)){ if((r.fe || 'skip') === 'skip') continue; if(r.fe === 'next') while(isOff(z)) z++; }
+    n++; if(alle || !aus.has(d)) out.push({ d, z });
+  }
   return out;
 }
+function occs(){
+  const out = [];
+  EINS.forEach(it => { if(!it.wdh) return; const d0 = Math.floor(it.s + 1e-9);
+    wdhTage(it).forEach(({ d, z }) => { if(z + (it.e - d0) > 0) out.push({ ...it, id: `R${it.id}_${d}`, rep: it.id, d, s: z + (it.s - d0), e: z + (it.e - d0), wdh: null, files: [], fix: false, soll: null, _alt: undefined }); }); });
+  return out;
+}
+const wdhAusSelbst = it => it.wdh && (it.wdh.aus || []).includes(isoDate(Math.floor(it.s + 1e-9))); // Original selbst gelöscht
 let ALL = [], LAY = {};
 // Offene Aufträge (noch nicht abgemacht) sind nie fix: was vergangen ist, rutscht in die nächste
 // freie Lücke ab jetzt (Arbeitstage 07–17 Uhr). In der Datenbank bleibt der ursprüngliche Wunschtermin.
 function floatOffene(){
   const jetzt = toU(new Date()); const start0 = Math.max(jetzt, TODAY + 1 / 12);
-  const byMid = {}; EINS.forEach(it => { if(it.ok === false && it.kind !== 'absenz' && (it._alt || it.e <= jetzt + 1e-6)) (byMid[it.mid] ??= []).push(it); });
+  const byMid = {}; EINS.forEach(it => { if(it.ok === false && !it.wdh && it.kind !== 'absenz' && (it._alt || it.e <= jetzt + 1e-6)) (byMid[it.mid] ??= []).push(it); });
   Object.entries(byMid).forEach(([mid, list]) => {
     const bl = EINS.filter(i => i.mid === mid && i.ok !== false).map(i => [i.s, i.e]);
     let cur = start0;
@@ -705,7 +736,7 @@ function floatOffene(){
 }
 function compute(){
   floatOffene();
-  ALL = EINS.concat(occs()); LAY = {};
+  ALL = EINS.filter(it => !wdhAusSelbst(it)).concat(occs()); LAY = {};
   const rows = {}; ALL.forEach(it => (rows[it.mid] ??= []).push(it));
   Object.values(rows).forEach(list => {
     list.forEach((it, i) => it._o = i);
@@ -814,7 +845,7 @@ function renderChips(){
   const cx = $('cpyX'); if(cx) cx.onclick = kopieWeg;
 }
 // Klick daneben schliesst kleine Fenster (Info, Rechtsklick-Menü …)
-addEventListener('pointerdown', e => { if($('popwrap')?.firstChild && !e.target.closest('.pop, #infoB')) closePop(); }, true);
+addEventListener('pointerdown', e => { if($('popwrap')?.firstChild && !e.target.closest('.pop, #infoB, #pWdh')) closePop(); }, true);
 // Info: Bedeutung von Farben und Zeichen, Anzeige-Schalter, Bedienung
 function openInfo(btn){
   if($('popwrap').querySelector('.infop')){ closePop(); return; }
@@ -901,21 +932,21 @@ function personRow(p, W, bgx){
   }
   its.forEach(it => {
     const L = LAY[it.id]; if(!L || !L.segs.length || grpd.has(it.id)) return;
-    const st = barStyle(it), hit = hitOf(it), isOcc = !!it.ser;
+    const st = barStyle(it), hit = hitOf(it), isRep = !!(it.rep || it.wdh); // wiederkehrend: kleines Pfeil-Symbol vorne
     const ohneKunde = istAuftrag(it) && !it.kid && !it.title; // rot umrandet, bis Kunde oder Titel erfasst ist
-    const lab = (it._alt ? `seit ${dLab(Math.floor(it._alt.s))} · ` : '') + (ohneKunde ? 'Ohne Kunde' : labOf(it)) + (it.e - it.s > 1 + 1e-6 && !isOcc && it.kind !== 'hilfe' && L.n >= 1 ? ` · ${fmtN(L.n)} T` : '');
+    const lab = (it._alt ? `seit ${dLab(Math.floor(it._alt.s))} · ` : '') + (ohneKunde ? 'Ohne Kunde' : labOf(it)) + (it.e - it.s > 1 + 1e-6 && it.kind !== 'hilfe' && L.n >= 1 ? ` · ${fmtN(L.n)} T` : '');
     const abw = it.soll && Math.abs(L.n - it.soll) > .01; // Arbeitstage fix, aber Plan weicht ab
-    const tip = `${titleOf(it)}\n${p.name}${it.e - it.s > 1 + 1e-6 ? `\n${fmtN(L.n)} Arbeitstage` : ''}${it.allein ? '\nArbeitet allein' : ''}${it.ok === false ? '\nNoch nicht abgemacht' : ''}${isOcc ? '\nWiederkehrend' : ''}${it.fix ? `\nStart fix${it.fixg ? ': ' + it.fixg : ''}` : ''}${abw ? `\nGeplant ${tageTxt(it.soll)}, aktuell ${tageTxt(L.n)}` : ''}`;
+    const tip = `${titleOf(it)}\n${p.name}${it.e - it.s > 1 + 1e-6 ? `\n${fmtN(L.n)} Arbeitstage` : ''}${it.allein ? '\nArbeitet allein' : ''}${it.ok === false ? '\nNoch nicht abgemacht' : ''}${isRep ? '\nWiederkehrend' : ''}${it.fix ? `\nStart fix${it.fixg ? ': ' + it.fixg : ''}` : ''}${abw ? `\nGeplant ${tageTxt(it.soll)}, aktuell ${tageTxt(L.n)}` : ''}`;
     // Beschriftung läuft über Wochenenden weiter
     const x0 = L.segs[0][0] * dayW + 5, tw = Math.max(0, (L.segs[L.segs.length - 1][1] - L.segs[0][0]) * dayW - 9);
     const prov = it.ok === false;
-    const txt = left => tw > 14 ? `<span class="t" data-x0="${x0}" data-x1="${x0 + tw}" data-l="${left}" style="left:${x0 - left}px;width:${tw}px">${it.fix ? I('lock') : ''}${esc(lab)}</span>` : '';
+    const txt = left => tw > 14 ? `<span class="t" data-x0="${x0}" data-x1="${x0 + tw}" data-l="${left}" style="left:${x0 - left}px;width:${tw}px">${it.fix ? I('lock') : ''}${isRep ? I('repeat') : ''}${esc(lab)}</span>` : '';
     const bgS = prov ? `background:repeating-linear-gradient(135deg,${st.bg}99 0 5px,#FFFFFF 5px 10px);color:#232B35` : `background:${st.bg};color:${st.fg}`;
     L.segs.forEach((sg, i) => {
       const l = sg[0] * dayW + 1, w = Math.max(3, (sg[1] - sg[0]) * dayW - 2);
       if(i > 0){ const pe = L.segs[i - 1][1] * dayW - 1, gw = l - pe; if(gw > 0) bars += `<div class="brg${hit ? '' : ' dim'}" style="left:${pe}px;width:${gw}px;background:${st.bg};color:${st.fg === '#FFFFFF' ? '#232B35' : st.fg}">${txt(pe)}</div>`; }
-      const cls = ['bar', ed && !isOcc ? 'ed' : '', isOcc ? 'occ' : '', prov ? 'provi' : '', it._alt || ohneKunde ? 'altb' : '', L.mini ? 'mini' : '', selId === it.id ? 'sel' : '', hit ? '' : 'dim'].join(' ');
-      bars += `<div class="${cls}" data-id="${it.id}" style="left:${l}px;width:${w}px;${bgS};border-color:${st.bd}" title="${esc(tip)}">${i === 0 && !isOcc && !it.fix && w >= 30 ? '<span class="hl"></span>' : ''}${txt(l + 1)}${i === L.segs.length - 1 && !isOcc && w >= 30 ? '<span class="hr"></span>' : ''}${i === L.segs.length - 1 && abw ? `<span class="bwarn" title="Geplant ${tageTxt(it.soll)}, aktuell ${tageTxt(L.n)}">!</span>` : ''}</div>`;
+      const cls = ['bar', ed ? 'ed' : '', prov ? 'provi' : '', it._alt || ohneKunde ? 'altb' : '', L.mini ? 'mini' : '', selId === it.id ? 'sel' : '', hit ? '' : 'dim'].join(' ');
+      bars += `<div class="${cls}" data-id="${it.id}" style="left:${l}px;width:${w}px;${bgS};border-color:${st.bd}" title="${esc(tip)}">${i === 0 && !it.fix && w >= 30 ? '<span class="hl"></span>' : ''}${txt(l + 1)}${i === L.segs.length - 1 && w >= 30 ? '<span class="hr"></span>' : ''}${i === L.segs.length - 1 && abw ? `<span class="bwarn" title="Geplant ${tageTxt(it.soll)}, aktuell ${tageTxt(L.n)}">!</span>` : ''}</div>`;
     });
     if(it.allein && L.segs.length) bars += `<span class="bdot" style="left:${L.segs[0][0] * dayW + 3}px" title="Arbeitet allein"></span>`;
     if(L.miss.length){ const slotW = dayW / 2;
@@ -1531,10 +1562,16 @@ function einfuegen(lane, x, it){ const mid = lane.dataset.mid; if(!canEdit(mid))
   if(ln) openNeuLeiste(ln, mid, r48(a), r48(a + len)); }
 function bindTimeline(t){
   // Rechtsklick auf einen Balken = kleines Menü
-  t.addEventListener('contextmenu', e => { const bar = e.target.closest('.bar[data-id]'), lane = e.target.closest('.lane[data-mid]'); if(!bar || !lane || bar.dataset.id.startsWith('S')) return;
+  t.addEventListener('contextmenu', e => { const bar = e.target.closest('.bar[data-id]'), lane = e.target.closest('.lane[data-mid]'); if(!bar || !lane) return;
     e.preventDefault(); const it = byId(bar.dataset.id); if(!it) return; const x = e.clientX, ed = canEdit(it.mid);
-    const pop = popAt({ left: x, bottom: e.clientY }, `<b>${esc(labOf(it))}</b><button class="btn btn-ghost" data-cm="det" style="justify-content:flex-start">${I('file')}Details</button>${ed ? `<button class="btn btn-ghost" data-cm="ein" style="justify-content:flex-start">${I('plus')}Auftrag zwischenfügen</button>${istAuftrag(it) ? `<button class="btn btn-ghost" data-cm="cpy" style="justify-content:flex-start">${I('copy')}Auftrag kopieren</button>` : ''}<button class="btn btn-ghost" data-cm="del" style="justify-content:flex-start;color:var(--danger)">${I('trash')}Löschen</button>` : ''}`);
-    pop.querySelectorAll('[data-cm]').forEach(b => b.onclick = () => { closePop(); const c = b.dataset.cm; if(c === 'det') openPanel(it.id); else if(c === 'ein') einfuegen(lane, x, it); else if(c === 'cpy') kopiere(it); else loescheEinsatz(it); }); });
+    const m = it.rep ? byId(it.rep) : it, rep = !!(m && m.wdh); // wiederkehrend: Original m
+    const b = (k, ic, l, st = '') => `<button class="btn btn-ghost" data-cm="${k}" style="justify-content:flex-start;${st}">${I(ic)}${l}</button>`;
+    const pop = popAt({ left: x, bottom: e.clientY }, `<b>${esc(labOf(it))}</b>${b('det', 'file', 'Details')}${ed ? b('ein', 'plus', 'Auftrag zwischenfügen') + (istAuftrag(it) ? b('cpy', 'copy', 'Auftrag kopieren') : '')
+      + (rep ? b('del1', 'trash', 'Nur diesen löschen', 'color:var(--danger)') + b('delf', 'trash', 'Diesen und alle folgenden löschen', 'color:var(--danger)') + b('dela', 'trash', 'Alle löschen', 'color:var(--danger)')
+        : b('del', 'trash', 'Löschen', 'color:var(--danger)')) : ''}`);
+    pop.querySelectorAll('[data-cm]').forEach(bt => bt.onclick = () => { closePop(); const c = bt.dataset.cm;
+      if(c === 'det') openPanel(m.id); else if(c === 'ein') einfuegen(lane, x, it); else if(c === 'cpy') kopiere(m);
+      else if(c === 'del1') wdhLoeschen(it, 'nur'); else if(c === 'delf') wdhLoeschen(it, 'folgende'); else loescheEinsatz(m); }); });
   let stT = 0; t.addEventListener('scroll', () => { if(!stT) stT = requestAnimationFrame(() => { stT = 0; stickLabels(); }); }, { passive: true });
   let scT; t.addEventListener('scroll', () => { closePop(); if(zoom === 'tag'){ clearTimeout(scT); scT = setTimeout(() => { const c = Math.floor(t.scrollLeft / dayW); if(c < HR[0] + 3 || c > HR[1] - 4) renderRows(); }, 120); }
     if(openMid && openTyp === 'fahrzeug'){ clearTimeout(t._pT); t._pT = setTimeout(() => { const c = Math.floor(t.scrollLeft / dayW), e2 = c + Math.ceil(visW() / dayW); if(c < POOLR[0] + 3 || e2 > POOLR[1] - 3) renderRows(); }, 150); } }, { passive: true });
@@ -1565,7 +1602,6 @@ function bindTimeline(t){
     const bar = e.target.closest('.bar[data-id]'), lane = e.target.closest('.lane[data-mid]');
     if(bar){
       const id = bar.dataset.id;
-      if(id.startsWith('S')){ const o = ALL.find(x => x.id === id); drag = { kind: 'click', fn: () => openOccPop(o, bar) }; return; }
       const it = byId(id); if(!it) return;
       const ed = canEdit(it.mid);
       const mode = e.target.classList.contains('hl') ? 'l' : e.target.classList.contains('hr') ? 'r' : 'move';
@@ -1587,6 +1623,9 @@ function bindWindow(){
     if(drag.kind === 'bar'){
       if(!drag.ed) return;
       if(!drag.moved && Math.abs(e.clientX - drag.x0) < 4 && Math.abs(e.clientY - drag.y0) < 4) return;
+      // Wiederholung ziehen: berechneten Termin ausblenden und eine Arbeitskopie bewegen (Rückfrage beim Loslassen)
+      if(!drag.moved && drag.id.startsWith('R')){ const o = byId(drag.id), m = o && byId(o.rep); if(!m) return;
+        (m.wdh.aus ||= []).push(isoDate(o.d)); const tmp = { ...o, id: 'T' + o.id }; EINS.push(tmp); drag.occ = { o: { ...o }, m }; drag.id = tmp.id; }
       drag.moved = true; const it = byId(drag.id); const du = snapU(uAt(e.clientX) - drag.u0); const sn = SNAP[zoom];
       if(drag.mode === 'move'){ if(it.fix){ if(du) drag.fixHit = true; } else { it.s = r48(drag.s0 + du); it.e = r48(drag.e0 + du); } // Start fix: nur auf andere Person
         const el = document.elementFromPoint(e.clientX, e.clientY)?.closest('.lane[data-mid]'); if(el && canEdit(el.dataset.mid)) it.mid = el.dataset.mid; }
@@ -1693,7 +1732,11 @@ function bindWindow(){
       const it = byId(d.id);
       if(!d.moved){ const now = Date.now();
         if(lastBarClick && lastBarClick.id === d.id && now - lastBarClick.t < 400){ lastBarClick = null; const ln = document.querySelector(`.bar[data-id="${d.id}"]`)?.closest('.lane[data-mid]'); if(ln) einfuegen(ln, e.clientX, it); return; }
-        lastBarClick = { id: d.id, t: now }; openPanel(d.id); return; }
+        lastBarClick = { id: d.id, t: now }; openPanel(it.rep || d.id); return; }
+      if(d.occ){ // Wiederholung verschoben: Arbeitskopie weg, dann fragen
+        EINS = EINS.filter(x => x !== it); d.occ.m.wdh.aus.pop(); const neu = { s: it.s, e: it.e, mid: it.mid }; renderRows();
+        if(neu.s !== d.s0 || neu.e !== d.e0 || neu.mid !== d.mid0) wdhVerschieben(d.occ.o, neu); return; }
+      if(it.wdh && (it.s !== d.s0 || it.e !== d.e0 || it.mid !== d.mid0)){ const neu = { s: it.s, e: it.e, mid: it.mid }; Object.assign(it, { s: d.s0, e: d.e0, mid: d.mid0 }); renderRows(); wdhVerschieben(it, neu); return; }
       if(d.fixHit) toast('Start ist fix. Zum Verschieben im Detailfeld das Schloss öffnen.');
       if(it.s === d.s0 && it.e === d.e0 && it.mid === d.mid0) return;
       const vorher = { s: d.s0, e: d.e0, mid: d.mid0 };
@@ -1863,7 +1906,7 @@ function openPanel(id, isNew){
   // Pflege-Infos nur bei Terminen aus dem Pflege-Jahresplan (normale Aufträge haben eigene Fotos/Dokumente)
   const pflege = it.kid && it.pkk ? pflegeHTML(it.kid, it.pkk, Math.floor(it.s + 1e-9)) : '';
   $('side').innerHTML = `<aside class="sidepanel">
-    <div class="sd-head"><div${offen ? ' class="offenhd" title="Offener Auftrag – noch nicht abgemacht, wandert mit"' : ' style="min-width:0"'}><h3>${esc(it.kind === 'absenz' ? (it.title || 'Absenz') : titleOf(it))}${auftrag && ed && !kundeNeu ? `<button class="kedit" id="pKEdit" title="Kunde oder Titel ändern" aria-label="Kunde oder Titel ändern">${I('edit')}</button>` : ''}</h3>${k && kOrt(k) ? `<div class="small muted">${I('pin').replace('class="i"', 'class="i" style="width:12px;height:12px;vertical-align:-2px"')} ${esc(kOrt(k))}</div>` : ''}</div>${offen && ed && !panelAbm ? `<button class="btn btn-primary hdbtn" id="pAbm" title="Mit dem Kunden abgemacht">${I('check')}Abgemacht</button>` : ''}${punkte}<button class="icon-btn" id="pX" aria-label="Schliessen">${I('x')}</button></div>
+    <div class="sd-head"><div${offen ? ' class="offenhd" title="Offener Auftrag – noch nicht abgemacht, wandert mit"' : ' style="min-width:0"'}><h3>${esc(it.kind === 'absenz' ? (it.title || 'Absenz') : titleOf(it))}${auftrag && ed && !kundeNeu ? `<button class="kedit" id="pKEdit" title="Kunde oder Titel ändern" aria-label="Kunde oder Titel ändern">${I('edit')}</button>` : ''}</h3>${k && kOrt(k) ? `<div class="small muted">${I('pin').replace('class="i"', 'class="i" style="width:12px;height:12px;vertical-align:-2px"')} ${esc(kOrt(k))}</div>` : ''}</div>${offen && ed && !panelAbm ? `<button class="btn btn-primary hdbtn" id="pAbm" title="Mit dem Kunden abgemacht">${I('check')}Abgemacht</button>` : ''}${punkte}${ed ? `<button class="icon-btn${it.wdh ? ' on' : ''}" id="pWdh" aria-pressed="${!!it.wdh}" title="Wiederkehrend" aria-label="Wiederkehrend">${I('repeat')}</button>` : ''}<button class="icon-btn" id="pX" aria-label="Schliessen">${I('x')}</button></div>
     ${kundeNeu ? `<div class="kneu"><input type="text" id="pKunde" list="kList" value="${esc(KUNDEN[it.kid] ? kLabel(KUNDEN[it.kid]) : '')}" placeholder="Kunde suchen"><input type="text" id="pTitel" value="${esc(it.title)}" placeholder="${it.kid ? 'Zusatz, z. B. Hecke schneiden' : 'oder Titel, z. B. Werkhof, Besichtigung'}"></div>` : ''}
     ${zeile}${kopie}${zust}
     ${offen && ed && panelAbm ? abmHTML(it.s, it.e, false) : ''}
@@ -1894,6 +1937,7 @@ function openPanel(id, isNew){
     panelKunde = false; openPanel(id); });
   on('#pTitel', 'onchange', e => save({ titel: e.target.value.trim() || null }, { title: e.target.value.trim() }).then(() => { panelKunde = false; openPanel(id); }));
   on('#pPl', 'onchange', e => save({ projektleiter_id: e.target.value || null }, { pl: e.target.value || null }).then(() => openPanel(id)));
+  on('#pWdh', 'onclick', () => openWdh(it, $('pWdh')));
   on('#pAllein', 'onclick', () => save({ allein: !it.allein }, { allein: !it.allein }).then(() => openPanel(id)));
   on('#pFixS', 'onclick', () => save({ start_fix: !it.fix }, { fix: !it.fix }).then(() => { openPanel(id); toast(it.fix ? 'Start fix: lässt sich nicht mehr nach links/rechts ziehen' : 'Start wieder frei'); }));
   on('#pFixT', 'onclick', () => { const v = it.soll ? null : Math.round(L.n * 2) / 2; save({ soll_tage: v }, { soll: v }).then(() => openPanel(id)); });
@@ -1974,19 +2018,90 @@ async function ladeHoch(it, files){
   renderFiles(it);
 }
 
-// Popup für wiederkehrende Termine
+// Kleine Fenster (Info, Rechtsklick-Menü, Wiederholung …)
 function closePop(){ $('popwrap').innerHTML = ''; }
-function openOccPop(o, anchor){
-  const sr = SERIEN.find(s => s.id === o.ser); if(!sr) return; const ed = canEdit(sr.person_id);
-  const r = anchor.getBoundingClientRect();
-  $('popwrap').innerHTML = `<div class="pop" style="left:${Math.min(innerWidth - 310, r.left)}px;top:${r.bottom + 6}px"><b>${esc(sr.titel)}</b><span class="muted small">${esc(P[sr.person_id]?.name)} · ${esc(spanLabel(o))}<br>Wiederkehrend jeden ${WDL[sr.wochentag % 7]}${sr.alle_zwei_wochen ? ' (alle 2 Wochen)' : ''}</span>
-    ${ed ? `<button class="btn btn-ghost" id="occDel">${I('trash')}Nur diesen Eintrag löschen</button>${isBuero() ? `<a class="small" href="#personen" style="color:var(--primary)">Ganze Serie bearbeiten (Personen)</a>` : ''}` : ''}</div>`;
-  const b = $('occDel'); if(b) b.onclick = async () => {
-    const neu = [...(sr.ausnahmen || []), isoDate(o.d)]; const alt = sr.ausnahmen || [];
-    const { error } = await sb.from('planer_serie').update({ ausnahmen: neu }).eq('id', sr.id); if(error){ fehler(error); return; }
-    sr.ausnahmen = neu; closePop(); render();
-    toast(`${sr.titel} am ${dLab(o.d)} gelöscht`, async () => { await sb.from('planer_serie').update({ ausnahmen: alt }).eq('id', sr.id); sr.ausnahmen = alt; render(); });
+
+// ---------------------------------------------------------------------------
+// WIEDERKEHREND: Rückfrage, Verschieben, Löschen und das kleine Regel-Feld
+// ---------------------------------------------------------------------------
+const wdhFelder = m => ({ kind: m.kind, kid: m.kid, title: m.title, text: m.text, pl: m.pl, ok: m.ok, link: m.link, allein: m.allein });
+const wdhTag = o => o.rep ? o.d : Math.floor(o.s + 1e-9);
+async function wdhSpeichern(m, wdh){ const { error } = await sb.from('planer_einsatz').update({ wdh }).eq('id', m.id); if(error){ fehler(error, 'Speichern'); return false; } m.wdh = wdh; return true; }
+function wdhFrage(titel, fn){
+  const d = document.createElement('div'); d.className = 'dlg';
+  d.innerHTML = `<div class="in" style="max-width:360px" role="dialog" aria-modal="true" aria-label="${esc(titel)}"><b style="font-size:15px">${esc(titel)}</b><span class="small muted">Das ist ein wiederkehrender Eintrag.</span>
+    <button class="btn btn-ghost" data-w="nur" style="justify-content:flex-start">Nur diesen</button><button class="btn btn-ghost" data-w="folgende" style="justify-content:flex-start">Diesen und alle folgenden</button>
+    <div style="display:flex;justify-content:flex-end"><button class="btn btn-ghost" data-w="">Abbrechen</button></div></div>`;
+  document.body.appendChild(d); const zu = () => d.remove();
+  d.querySelectorAll('[data-w]').forEach(b => b.onclick = () => { zu(); if(b.dataset.w) fn(b.dataset.w); });
+  d.onclick = e => { if(e.target === d) zu(); }; d.onkeydown = e => { if(e.key === 'Escape') zu(); };
+  d.querySelector('[data-w="nur"]').focus();
+}
+function wdhVerschieben(o, neu){
+  const m = o.rep ? byId(o.rep) : o; if(!m || !m.wdh) return; const tag = wdhTag(o), d0 = Math.floor(m.s + 1e-9);
+  wdhFrage('Verschieben', async art => {
+    if(art === 'nur'){ // Termin aus der Serie nehmen, an der neuen Stelle als normaler Eintrag
+      if(!await wdhSpeichern(m, { ...m.wdh, aus: [...(m.wdh.aus || []), isoDate(tag)] })) return;
+      await neuerEinsatz({ ...wdhFelder(m), mid: neu.mid, s: neu.s, e: neu.e }, false); await neuLaden(); toast('Nur dieser Termin verschoben'); return; }
+    const delta = Math.floor(neu.s + 1e-9) - tag;
+    const r = { ...m.wdh, aus: (m.wdh.aus || []).filter(x => fromIso(x) > tag).map(x => isoDate(fromIso(x) + delta)) };
+    if(r.u === 'w' && r.days) r.days = r.days.map(x => ((x + delta) % 7 + 7) % 7);
+    if(tag === d0){ // ab dem ersten Termin = ganze Serie verschieben
+      const { error } = await sb.from('planer_einsatz').update({ beginn: fromU(neu.s), ende: fromU(neu.e, true), person_id: neu.mid, wdh: r }).eq('id', m.id);
+      if(error) return fehler(error, 'Verschieben'); await neuLaden(); toast('Ganze Serie verschoben'); return; }
+    if(r.ende === 'anzahl'){ const vorher = 1 + wdhTage(m, true).filter(x => x.d < tag).length; r.anzahl = Math.max(1, (m.wdh.anzahl || 1) - vorher); }
+    if(!await wdhSpeichern(m, { ...m.wdh, ende: 'bis', bis: isoDate(tag - 1), anzahl: null })) return;
+    await neuerEinsatz({ ...wdhFelder(m), mid: neu.mid, s: neu.s, e: neu.e, wdh: r }, false); await neuLaden(); toast('Ab diesem Termin verschoben');
+  });
+}
+async function wdhLoeschen(o, art){
+  const m = o.rep ? byId(o.rep) : o; if(!m || !m.wdh) return; const tag = wdhTag(o), d0 = Math.floor(m.s + 1e-9), alt = m.wdh;
+  if(art === 'folgende' && tag === d0) return loescheEinsatz(m);
+  const neu = art === 'nur' ? { ...alt, aus: [...(alt.aus || []), isoDate(tag)] } : { ...alt, ende: 'bis', bis: isoDate(tag - 1), anzahl: null };
+  if(!await wdhSpeichern(m, neu)) return; renderRows();
+  toast(art === 'nur' ? `Termin am ${dLab(tag)} gelöscht` : `Ab ${dLab(tag)} gelöscht`, async () => { if(await wdhSpeichern(m, alt)) renderRows(); });
+}
+// Das kleine Feld hinter dem Pfeil-Symbol im Detailfeld: Vorlage, Benutzerdefiniert, Ende, Feiertage
+function openWdh(it, btn){
+  if($('popwrap').querySelector('.wdhp')){ closePop(); return; }
+  const d0 = Math.floor(it.s + 1e-9), a = dDate(d0), wd = a.getDay(), nth = Math.ceil(a.getDate() / 7);
+  const PR = [['none', 'Nicht wiederholen'], ['w1', `Jede Woche am ${WDL[wd]}`], ['w2', `Alle 2 Wochen am ${WDL[wd]}`], ['mn', `Jeden Monat am ${nth}. ${WDL[wd]}`], ['ml', `Jeden Monat am letzten ${WDL[wd]}`],
+    ['md', `Jeden Monat am ${a.getDate()}.`], ['y', `Jedes Jahr am ${a.getDate()}. ${MONL[a.getMonth()]}`], ['wt', 'Jeden Werktag (Mo–Fr)'], ['custom', 'Benutzerdefiniert …']];
+  const VOR = { w1: { u: 'w', n: 1, days: [wd] }, w2: { u: 'w', n: 2, days: [wd] }, mn: { u: 'm', n: 1, mm: 'nth' }, ml: { u: 'm', n: 1, mm: 'last' }, md: { u: 'm', n: 1, mm: 'date' }, y: { u: 'y', n: 1 }, wt: { u: 'w', n: 1, days: [1, 2, 3, 4, 5] } };
+  let r = it.wdh ? JSON.parse(JSON.stringify(it.wdh)) : { p: 'none', u: 'w', n: 1, days: [wd], mm: 'date', ende: 'nie', fe: 'skip', aus: [] };
+  const pop = popAt(btn.getBoundingClientRect(), '<div class="wdhp"></div>'), box = pop.querySelector('.wdhp');
+  const WDK = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+  const zus = () => { if(r.p === 'none') return 'Einmaliger Eintrag';
+    const n = 1 + wdhTage({ ...it, wdh: r }, true).length; return r.ende === 'nie' ? 'Ohne Ende' : `${n} ${n === 1 ? 'Termin' : 'Termine'}${r.ende === 'bis' ? ' bis ' + r.bis.split('-').reverse().join('.') : ''}`; };
+  const draw = () => {
+    const c = r.p === 'custom', on = r.p !== 'none';
+    box.innerHTML = `<select id="wP" aria-label="Wiederholung">${PR.map(([k, l]) => `<option value="${k}"${r.p === k ? ' selected' : ''}>${l}</option>`).join('')}</select>
+      ${c ? `<div class="wrow">Alle <input type="number" id="wN" min="1" max="12" value="${r.n || 1}" aria-label="Anzahl"><select id="wU" aria-label="Einheit"><option value="w"${r.u === 'w' ? ' selected' : ''}>Wochen</option><option value="m"${r.u === 'm' ? ' selected' : ''}>Monate</option><option value="y"${r.u === 'y' ? ' selected' : ''}>Jahre</option></select></div>
+        ${r.u === 'w' ? `<div class="wtage">${[1, 2, 3, 4, 5, 6, 0].map(x => `<button data-t="${x}" class="${(r.days || []).includes(x) ? 'on' : ''}" aria-pressed="${(r.days || []).includes(x)}" title="${WDL[x]}">${WDK[x]}</button>`).join('')}</div>` : ''}
+        ${r.u === 'm' ? `<div class="wrad">${[['date', `am ${a.getDate()}.`], ['nth', `am ${nth}. ${WDL[wd]}`], ['last', `am letzten ${WDL[wd]}`]].map(([k, l]) => `<label><input type="radio" name="wM" value="${k}"${r.mm === k ? ' checked' : ''}>${l}</label>`).join('')}</div>` : ''}` : ''}
+      ${on ? `<span class="wlab">Ende</span><div class="wrad">
+        <label><input type="radio" name="wE" value="nie"${r.ende === 'nie' ? ' checked' : ''}>Ohne Ende</label>
+        <label><input type="radio" name="wE" value="bis"${r.ende === 'bis' ? ' checked' : ''}>Bis <input type="date" id="wB" value="${r.bis || isoDate(d0 + 91)}"></label>
+        <label><input type="radio" name="wE" value="anzahl"${r.ende === 'anzahl' ? ' checked' : ''}>Nach <input type="number" id="wA" min="1" max="200" value="${r.anzahl || 10}"> Terminen</label></div>
+        <span class="wlab">An Feiertagen</span><select id="wF" aria-label="An Feiertagen"><option value="skip"${r.fe === 'skip' ? ' selected' : ''}>Auslassen</option><option value="next"${r.fe === 'next' ? ' selected' : ''}>Auf nächsten Werktag verschieben</option><option value="keep"${r.fe === 'keep' ? ' selected' : ''}>Trotzdem eintragen</option></select>` : ''}
+      <b class="wsum">${esc(zus())}</b>`;
+    const q = s => box.querySelector(s);
+    q('#wP').onchange = e => { r.p = e.target.value; if(VOR[r.p]) Object.assign(r, VOR[r.p]); if(r.p === 'custom' && !r.u) Object.assign(r, VOR.w1); speichern(); };
+    if(q('#wN')) q('#wN').onchange = e => { r.n = Math.max(1, +e.target.value || 1); speichern(); };
+    if(q('#wU')) q('#wU').onchange = e => { r.u = e.target.value; if(r.u === 'w' && !(r.days || []).length) r.days = [wd]; if(r.u === 'm' && !r.mm) r.mm = 'date'; speichern(); };
+    box.querySelectorAll('[data-t]').forEach(b => b.onclick = () => { const x = +b.dataset.t, s = new Set(r.days || []); s.has(x) ? s.delete(x) : s.add(x); if(!s.size) s.add(wd); r.days = [...s]; speichern(); });
+    box.querySelectorAll('[name=wM]').forEach(x => x.onchange = () => { r.mm = x.value; speichern(); });
+    box.querySelectorAll('[name=wE]').forEach(x => x.onchange = () => { r.ende = x.value; if(r.ende === 'bis' && !r.bis) r.bis = q('#wB').value; if(r.ende === 'anzahl' && !r.anzahl) r.anzahl = +q('#wA').value || 10; speichern(); });
+    if(q('#wB')) q('#wB').onchange = e => { r.bis = e.target.value || isoDate(d0 + 91); r.ende = 'bis'; speichern(); };
+    if(q('#wA')) q('#wA').onchange = e => { r.anzahl = Math.max(1, +e.target.value || 1); r.ende = 'anzahl'; speichern(); };
+    if(q('#wF')) q('#wF').onchange = e => { r.fe = e.target.value; speichern(); };
   };
+  const speichern = async () => { const v = r.p === 'none' ? null : { ...r };
+    if(v && v.ende === 'bis' && !v.bis) v.bis = isoDate(d0 + 91);
+    if(!await wdhSpeichern(it, v)) return; const cur = byId(it.id); if(cur && cur !== it) cur.wdh = v;
+    draw(); renderRows(); const b = $('pWdh'); if(b){ b.classList.toggle('on', !!v); b.setAttribute('aria-pressed', !!v); } };
+  draw();
+  pop.style.left = Math.max(8, btn.getBoundingClientRect().right - pop.offsetWidth) + 'px';
 }
 document.addEventListener('keydown', e => { if(e.key === 'Escape'){ closePop(); closePanel(); } });
 
@@ -2143,7 +2258,6 @@ function frage(titel, wert){
 }
 function personDlg(p, gid){
   const neu = !p; p = p || { name: '', kuerzel: '', zusatz: '', farbe: null, gruppe_id: gid || GRUPPEN[0]?.id || null, ist_vorarbeiter: false, ist_projektleiter: false, benutzer_id: null, aktiv: true };
-  const sers = neu ? [] : SERIEN.filter(s => s.person_id === p.id);
   const vergeben = new Set(PERSONEN.filter(x => x.benutzer_id && x.id !== p.id).map(x => x.benutzer_id));
   const d = document.createElement('div'); d.className = 'dlg';
   d.innerHTML = `<div class="in">
@@ -2155,11 +2269,6 @@ function personDlg(p, gid){
     <label class="chk"><input type="checkbox" id="dP" ${p.ist_projektleiter ? 'checked' : ''}>Projektleiter (Baustellen bekommen seine Farbe)</label>
     <div class="fld"><label>Login</label><select id="dB"><option value="">Kein Login (z. B. Lernende, Temporäre)</option>${BENUTZER.filter(b => (b.email || b.id === p.benutzer_id) && !vergeben.has(b.id)).map(b => `<option value="${b.id}"${b.id === p.benutzer_id ? ' selected' : ''}>${esc(b.email || (p.name + ' (Benutzer ohne Login)'))} (${esc(ROLLE_LABEL[b.rolle] || b.rolle)})</option>`).join('')}</select></div>
     <label class="chk"><input type="checkbox" id="dA" ${p.aktiv ? 'checked' : ''}>Aktiv (im Planer sichtbar)</label>
-    ${neu ? '' : `<div class="fld"><label>Wiederkehrend (Schule, Teilzeit-Frei …)</label>
-      <div>${sers.map(s => `<div class="ser"><span style="flex:1">${esc(s.titel)} · jeden ${WDL[s.wochentag % 7]}${s.teil === 'vm' ? ' Vormittag' : s.teil === 'nm' ? ' Nachmittag' : ''}${s.alle_zwei_wochen ? ', alle 2 Wochen' : ''} · ab ${esc(s.von.split('-').reverse().join('.'))}${s.bis ? ' bis ' + esc(s.bis.split('-').reverse().join('.')) : ''}</span><button class="icon-btn danger" data-sx="${s.id}" aria-label="Serie löschen">${I('trash')}</button></div>`).join('') || '<span class="small muted">Keine</span>'}</div>
-      <div style="display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:6px;margin-top:6px"><input type="text" id="sT" placeholder="Titel, z. B. Schule"><select id="sW">${[1,2,3,4,5].map(w => `<option value="${w}">${WDL[w]}</option>`).join('')}</select><select id="sTe"><option value="tag">ganzer Tag</option><option value="vm">Vormittag</option><option value="nm">Nachmittag</option></select></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:6px;align-items:center"><select id="sArt"><option value="absenz">Absenz</option><option value="termin">Auftrag</option><option value="intern">Werkhof / intern</option></select><input type="date" id="sBis" title="Bis (leer = offen)"><label class="chk small"><input type="checkbox" id="s2">alle 2 Wo.</label></div>
-      <button class="btn btn-ghost" id="sAdd" style="align-self:flex-start">${I('plus')}Wiederkehrend hinzufügen</button></div>`}
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px">${neu ? '' : `<span class="small muted" style="margin-right:auto;align-self:center">Löschen geht nicht, damit alte Einsätze erhalten bleiben – «Aktiv» abwählen.</span>`}<button class="btn btn-ghost" id="dNo">Abbrechen</button><button class="btn btn-primary" id="dOk">Speichern</button></div>
   </div>`;
   document.body.appendChild(d);
@@ -2173,13 +2282,6 @@ function personDlg(p, gid){
     const { error } = neu ? await sb.from('planer_person').insert(row) : await sb.from('planer_person').update(row).eq('id', p.id);
     if(error) return fehler(error, 'Speichern');
     d.remove(); await neuLaden(); toast(neu ? 'Person erfasst' : 'Gespeichert');
-  };
-  d.querySelectorAll('[data-sx]').forEach(b => b.onclick = async () => { const { error } = await sb.from('planer_serie').delete().eq('id', b.dataset.sx); if(error) return fehler(error); d.remove(); await neuLaden(); personDlg(P[p.id]); });
-  const sa = d.querySelector('#sAdd'); if(sa) sa.onclick = async () => {
-    const t = d.querySelector('#sT').value.trim(); if(!t){ toast('Bitte einen Titel eingeben.', null, true); return; }
-    const row = { person_id: p.id, titel: t, art: d.querySelector('#sArt').value, wochentag: +d.querySelector('#sW').value, teil: d.querySelector('#sTe').value, alle_zwei_wochen: d.querySelector('#s2').checked, von: isoDate(TODAY), bis: d.querySelector('#sBis').value || null };
-    const { error } = await sb.from('planer_serie').insert(row); if(error) return fehler(error);
-    d.remove(); await neuLaden(); personDlg(P[p.id]);
   };
 }
 
@@ -2261,7 +2363,7 @@ async function starteLive(){
   const { data: { session } } = await sb.auth.getSession(); if(session) await sb.realtime.setAuth(session.access_token);
   sb.auth.onAuthStateChange((ev, s) => { if(s && (ev === 'TOKEN_REFRESHED' || ev === 'SIGNED_IN')) sb.realtime.setAuth(s.access_token); });
   const ch = sb.channel('einsatzplaner');
-  ['planer_einsatz', 'planer_serie', 'planer_person', 'planer_gruppe', 'planer_feiertag', 'planer_ressource', 'planer_ressource_einsatz', 'planer_magazin', 'planer_pendenz', 'planer_absenz_typ', 'planer_vorschlag_notiz'].forEach(t =>
+  ['planer_einsatz', 'planer_person', 'planer_gruppe', 'planer_feiertag', 'planer_ressource', 'planer_ressource_einsatz', 'planer_magazin', 'planer_pendenz', 'planer_absenz_typ', 'planer_vorschlag_notiz'].forEach(t =>
     ch.on('postgres_changes', { event: '*', schema: 'public', table: t }, () => { clearTimeout(reloadT); reloadT = setTimeout(() => { if(drag){ reloadT = setTimeout(neuLaden, 800); return; } if(document.activeElement && ($('side').contains(document.activeElement) || document.activeElement.closest?.('.mdet,.maddln'))) return; neuLaden(); }, 500); }));
   ch.subscribe();
   // Beim Zurückkommen auf die Seite (Handy entsperrt) frisch laden
