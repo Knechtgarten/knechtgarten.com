@@ -161,6 +161,10 @@ tbody tr:last-child td{border-bottom:none;}
 .meta .i{color:var(--muted);width:16px;height:16px;}
 .meta a{color:inherit;text-decoration:none;}
 .meta a:hover{text-decoration:underline;}
+.kh-reg{gap:6px !important;}
+.reg-sel{font:inherit;font-size:12.5px;padding:3px 6px;border:1px solid #8B9097;border-radius:6px;background:#fff;color:var(--primary);max-width:280px;}
+.ms-lang{max-height:420px;overflow-y:auto;min-width:280px;}
+.ms-panel label .kdot{width:10px;height:10px;}
 .field{display:flex;flex-direction:column;gap:4px;min-width:0;}
 .field > label{font-size:11px;color:var(--muted);}
 .kh-rechts{display:flex;flex-direction:column;gap:10px;min-width:0;}
@@ -438,6 +442,7 @@ table.au tr.sto td{color:var(--muted);text-decoration:line-through;}
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></symbol>
   <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
   <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+  <symbol id="i-map" viewBox="0 0 24 24"><path d="M3 6.5l6-2.5 6 2.5 6-2.5v13.5l-6 2.5-6-2.5-6 2.5z"/><path d="M9 4v13.5M15 6.5V20"/></symbol>
   <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s-6.5-6-6.5-11a6.5 6.5 0 0 1 13 0c0 5-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/></symbol>
 ${SYM}
   <symbol id="i-finger" viewBox="0 0 24 24"><path d="M8 13V4.5a1.5 1.5 0 0 1 3 0V12M11 11.5v-2a1.5 1.5 0 1 1 3 0V12M14 10.5a1.5 1.5 0 0 1 3 0V12M17 11.5a1.5 1.5 0 0 1 3 0V16a6 6 0 0 1-6 6h-2 .2a6 6 0 0 1-5-2.7l-.2-.3c-.3-.5-1.4-2.4-3.3-5.7a1.5 1.5 0 0 1 .5-2 1.9 1.9 0 0 1 2.3.3L8 13"/></symbol>
@@ -622,7 +627,7 @@ const zustAuswahl = (schon = []) => S.zust.filter(b => b.pflege_zustaendig || sc
 const S = {
   kat: [], felder: [], arbeiten: [], tabellen: [], spalten: [], zust: [],
   kunden: [], obj: [], kk: [], kz: [], ka: [], fotos: [], fk: [], urls: {}, dok: [], dk: [], eb: {}, auNur: true, auZeigen: 20, auVon: '',
-  f: { q: '', abo: [], ma: [], kat: '', tags: [], kanal: [] }, tags: [],
+  f: { q: '', abo: [], ma: [], kat: '', tags: [], kanal: [], reg: [] }, tags: [], reg: [], regPlz: {},
   ktab: null, kwAsk: null, modal: null, fotoTag: '', hochladen: 0, lb: null, bpOffen: new Set(), bpLaeuft: false
 };
 const katById = id => S.kat.find(k => k.id === id);
@@ -639,6 +644,25 @@ const objektName = o => [o.strasse, o.ort].filter(Boolean).join(', ') || 'Neues 
 // Kundenliste: nur die erste Telefonnummer (Rest steht im Tooltip)
 const telKurz = t => { const m = String(t || '').match(/\+?\d[\d ]{7,}\d/); return m ? m[0].trim() : String(t || '').slice(0, 16); };
 const telVon = k => { const c = k.kunde?.kontaktdaten || {}; return c.telefon1 || c.mobil || c.telefon2 || ''; };
+
+// Regionen: von Hand gesetzt (region_id) geht vor, sonst ueber die PLZ, sonst Rest-Region «Diverse»
+const plzZahl = (...s) => { for(const x of s){ const m = String(x || '').match(/(d{4})/); if(m) return +m[1]; } return null; };
+const regById = id => S.reg.find(r => r.id === id);
+const regionAusPlz = plz => (plz && S.regPlz[plz]) || S.reg.find(r => r.ist_rest)?.id || null;
+const plzVonKunde = k => plzZahl(k.kunde?.plz, k.kunde?.ort);
+const plzVonObjekt = o => plzZahl(o.plz, o.ort);
+const regionVonKunde = k => k.region_id || regionAusPlz(plzVonKunde(k));
+const regionVonObjekt = o => o.region_id || (plzVonObjekt(o) ? regionAusPlz(plzVonObjekt(o)) : null);
+const regionenVonKunde = k => new Set([regionVonKunde(k), ...objekteVon(k.kunde_id).map(regionVonObjekt)].filter(Boolean));
+const regDot = r => r ? `<span class="kdot" style="background:${esc(r.farbe)}"></span>` : '';
+// Auswahl beim Kunden / Objekt: leer = automatisch ueber die PLZ
+function regionSelectHtml(id, act, gesetzt, autoId){
+  const auto = regById(autoId);
+  return `<select id="${id}" class="reg-sel" data-act="${act}" aria-label="Region">
+    <option value="">${auto ? 'Automatisch: ' + esc(auto.name) : 'Automatisch (keine PLZ)'}</option>
+    ${S.reg.map(r => `<option value="${r.id}" ${gesetzt === r.id ? 'selected' : ''}>${esc(r.name)}</option>`).join('')}
+  </select>`;
+}
 
 async function ladeAlles(){
   const r = await Promise.all([
@@ -657,11 +681,14 @@ async function ladeAlles(){
     sb.from('pflege_foto_kategorie').select('*'),
     sb.from('pflege_dokument').select('*').order('datum', { ascending: false, nullsFirst: false }),
     sb.from('pflege_dokument_kategorie').select('*'),
-    sb.from('pflege_tag').select('*').order('name')
+    sb.from('pflege_tag').select('*').order('name'),
+    sb.from('pflege_region').select('*').order('reihenfolge'),
+    sb.from('pflege_region_plz').select('*')
   ]);
   const fehler = r.find(x => x.error);
   if(fehler){ showToast(friendlyError(fehler.error), true); return; }
-  [S.kat, S.felder, S.arbeiten, S.tabellen, S.spalten, S.zust, S.kunden, S.obj, S.kk, S.kz, S.ka, S.fotos, S.fk, S.dok, S.dk, S.tags] = r.map(x => x.data || []);
+  [S.kat, S.felder, S.arbeiten, S.tabellen, S.spalten, S.zust, S.kunden, S.obj, S.kk, S.kz, S.ka, S.fotos, S.fk, S.dok, S.dk, S.tags, S.reg] = r.map(x => x.data || []);
+  S.regPlz = Object.fromEntries((r[17].data || []).map(x => [x.plz, x.region_id]));
   S.kunden.sort((a, b) => (a.kunde?.name || '').localeCompare(b.kunde?.name || '', 'de'));
   render();
 }
@@ -697,6 +724,18 @@ function render(){
 // Kundenliste
 // ---------------------------------------------------------------------------
 const zustPass = (zust, sel) => !sel.length || sel.some(s => s === '-' ? zust.length === 0 : zust.includes(s));
+// Filter Region (Mehrfachauswahl = oder; zaehlt Hauptadresse und Objekte)
+function regFilterHtml(){
+  const sel = S.f.reg;
+  const label = !sel.length ? 'Region' : S.reg.filter(r => sel.includes(r.id)).map(r => r.name).join(', ');
+  return `<details class="ms msf" id="freg">
+    <summary>${I('pin')}<span class="msf-l">${esc(label)}</span>${I('chev')}</summary>
+    <div class="ms-panel ms-lang">
+      ${S.reg.map(r => `<label><input type="checkbox" data-act="f-reg" value="${r.id}" ${sel.includes(r.id) ? 'checked' : ''}>${regDot(r)}${esc(r.name)}</label>`).join('')}
+      <button type="button" class="ms-none" data-act="f-reg-alle">Alle Regionen</button>
+    </div>
+  </details>`;
+}
 // Filter Kontaktweg (nur fuer Kunden mit Voranmeldung, Mehrfachauswahl = oder)
 function kanalFilterHtml(){
   const sel = S.f.kanal;
@@ -763,6 +802,7 @@ function gefilterteKunden(){
       && (!f.kanal.length || k.abo_typ !== 'mit_voranmeldung' || f.kanal.some(c => (k.voranmeldung_kanaele || []).includes(c)))
       && (!f.kat || kks.some(x => x.kategorie_id === f.kat))
       && (!f.ma.length || kks.some(x => zustPass(zustVon(x.id), f.ma)))
+      && (!f.reg.length || [...regionenVonKunde(k)].some(r => f.reg.includes(r)))
       && (!f.tags.length || (t => f.tags.every(x => t.has(x)))(tagsVonKunde(k.kunde_id)));
   });
 }
@@ -778,6 +818,7 @@ function renderListe(){
       <div class="abof" role="group" aria-label="Abo-Typ"><span class="muted small">Abo</span>${ABO.map(a =>
         `<button class="abob${f.abo.length && !f.abo.includes(a.id) ? ' off' : ''}" data-act="f-abo" data-abo="${a.id}" aria-pressed="${f.abo.includes(a.id)}">${aboIcon(a.id)}</button>`).join('')}</div>
       ${kanalFilterHtml()}
+      ${regFilterHtml()}
       ${zustFilterHtml()}
       ${tagFilterHtml()}
       <select data-act="f-kat" aria-label="Pflegekategorie"><option value="">Alle Pflegekategorien</option>${S.kat.map(k => `<option value="${k.id}" ${f.kat === k.id ? 'selected' : ''}>${esc(k.name)}</option>`).join('')}</select>
@@ -796,6 +837,7 @@ function druckeListe(){
   if(f.abo.length) teile.push(ABO.filter(a => f.abo.includes(a.id)).map(a => a.n).join(', '));
   if(f.kanal.length) teile.push('Voranmeldung per ' + f.kanal.map(c => KANAELE.find(x => x.id === c)?.n).join(', '));
   if(f.ma.length) teile.push('Zuständig: ' + f.ma.map(id => id === '-' ? 'niemand' : zustName(id)).join(', '));
+  if(f.reg.length) teile.push('Region: ' + S.reg.filter(r => f.reg.includes(r.id)).map(r => r.name).join(', '));
   if(f.tags.length) teile.push('Tags: ' + S.tags.filter(t => f.tags.includes(t.id)).map(t => t.name).join(' + '));
   if(f.kat) teile.push('Kategorie: ' + (S.kat.find(k => k.id === f.kat)?.name || ''));
   if(f.q) teile.push('Suche: «' + f.q + '»');
@@ -1083,6 +1125,7 @@ function renderDetail(kundeId){
         <div class="meta">
           <div>${I('pin')}${esc([ku.strasse, [ku.plz, ku.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ')) || '<span class="muted">Keine Adresse</span>'}</div>
           <div>${I('phone')}${telVon(k) ? `<a href="tel:${esc(telVon(k).replace(/\s+/g, ''))}">${esc(telVon(k))}</a>` : '<span class="muted">Kein Telefon</span>'}</div>
+          <div class="kh-reg">${I('map')}<span class="muted small">Region</span>${regionSelectHtml('kRegion', 'region', k.region_id, regionAusPlz(plzVonKunde(k)))}</div>
           <div class="muted small">${I('link')}${ku.easybill_id ? `Easybill-Kunde ${esc(ku.kundennummer || ku.easybill_id)} · Adresse und Telefon kommen aus Easybill` : 'Nicht mit Easybill verknüpft'}</div>
         </div>
         <div class="kh-unten">
@@ -1109,6 +1152,7 @@ function renderDetail(kundeId){
           <div class="field"><label for="oPlz">PLZ</label><input id="oPlz" type="text" data-act="obj-feld" data-f="plz" value="${esc(obj.plz || '')}" inputmode="numeric"></div>
           <div class="field"><label for="oOrt">Ort</label><input id="oOrt" type="text" data-act="obj-feld" data-f="ort" value="${esc(obj.ort || '')}"></div>
         </div>
+        <div class="meta"><div class="kh-reg" id="oRegionBox">${I('map')}<span class="muted small">Region</span>${regionSelectHtml('oRegion', 'obj-region', obj.region_id, plzVonObjekt(obj) ? regionAusPlz(plzVonObjekt(obj)) : null)}</div></div>
         <button class="addrow danger" data-act="objekt-entfernen">Objekt entfernen</button>
       </div>
       <div class="field kh-notiz"><label for="oNotiz">Notiz zum Objekt</label><textarea id="oNotiz" class="autogrow" rows="3" data-act="obj-feld" data-f="notiz" placeholder="Kontakt vor Ort, Zugang, Schlüssel, Parkplatz">${esc(obj.notiz || '')}</textarea></div>
@@ -1656,6 +1700,18 @@ $('app').addEventListener('change', async e => {
     S.f.tags = el.checked ? [...S.f.tags, el.value] : S.f.tags.filter(v => v !== el.value);
     $('ftag').outerHTML = tagFilterHtml(); $('ftag').open = true; renderListeZeilen();
   }
+  else if(act === 'f-reg'){
+    S.f.reg = el.checked ? [...S.f.reg, el.value] : S.f.reg.filter(v => v !== el.value);
+    $('freg').outerHTML = regFilterHtml(); $('freg').open = true; renderListeZeilen();
+  }
+  else if(act === 'region'){
+    const region_id = el.value || null;
+    if(await speichere('pflege_kunde', { kunde_id: kundeId }, { region_id, aktualisiert_am: new Date().toISOString() })) k.region_id = region_id;
+  }
+  else if(act === 'obj-region'){
+    const o = S.obj.find(x => x.id === aktObjektId()), region_id = el.value || null;
+    if(o && await speichere('pflege_objekt', { id: o.id }, { region_id })) o.region_id = region_id;
+  }
   else if(act === 'f-kanal'){
     S.f.kanal = el.checked ? [...S.f.kanal, el.value] : S.f.kanal.filter(v => v !== el.value);
     if(S.f.kanal.length && !S.f.abo.includes('mit_voranmeldung')) S.f.abo = [...S.f.abo, 'mit_voranmeldung'];   // Kontaktweg gilt nur fuer «mit Voranmeldung»
@@ -1672,6 +1728,7 @@ $('app').addEventListener('change', async e => {
     // Name auf Knopf und Titel nachfuehren, ohne neu aufzubauen (Fokus im naechsten Feld bleibt)
     const btn = document.querySelector(`.objs [data-o="${o.id}"]`); if(btn) btn.textContent = objektName(o);
     const h = document.querySelector('.o-head h2'); if(h) h.textContent = objektName(o);
+    if(feld === 'plz' || feld === 'ort') $('oRegion').outerHTML = regionSelectHtml('oRegion', 'obj-region', o.region_id, plzVonObjekt(o) ? regionAusPlz(plzVonObjekt(o)) : null);
   }
   else if(act === 'notiz'){
     const notiz = el.value.trim() || null;
@@ -1759,6 +1816,7 @@ $('app').addEventListener('click', async e => {
   }
   else if(act === 'f-ma-alle'){ S.f.ma = []; renderListe(); }
   else if(act === 'f-kanal-alle'){ S.f.kanal = []; renderListe(); }
+  else if(act === 'f-reg-alle'){ S.f.reg = []; renderListe(); }
   else if(act === 'f-tag-alle'){ S.f.tags = []; renderListe(); }
   else if(act === 'f-kat-spalte'){ S.f.kat = S.f.kat === b.dataset.kat ? '' : b.dataset.kat; renderListe(); }
   else if(act === 'zurueck') location.hash = '';
