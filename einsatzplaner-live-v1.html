@@ -82,6 +82,9 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 .cpychip{display:inline-flex;align-items:center;gap:5px;color:var(--primary);font-weight:700;font-size:12px;}
 .cpychip .i{width:13px;height:13px;}
 .cpychip .icon-btn{width:18px;height:18px;}
+.rgrip{color:#A9AFB5;display:inline-flex;cursor:pointer;touch-action:none;}
+.rgrip .i{width:14px;height:14px;}
+.prow.rdrag{opacity:.5;}
 .wdhp{display:flex;flex-direction:column;gap:7px;width:260px;}
 .wdhp select{width:100%;}
 .wdhp .wrow{display:flex;align-items:center;gap:6px;}
@@ -2332,13 +2335,25 @@ function renderRessourcen(){
   $('appMain').innerHTML = `<div class="page"><h2>Fahrzeuge &amp; Maschinen</h2><p class="hint">Eingeteilt wird im Planer über den Umschalter «Maschinen / Fahrzeuge / Anhänger»: in einer Zeile ziehen, dann Baustelle oder Person wählen.</p>
     ${typen.map(([t, n, h]) => { const rs = RES.filter(r => r.typ === t).sort((a, b) => a.sortierung - b.sortierung || resName(a).localeCompare(resName(b)));
       return `<div class="card gcard"><div class="ghead"><b>${n}</b><span class="muted small">${esc(h)}</span><button class="btn btn-ghost" data-radd="${t}" style="margin-left:auto">${I('plus')}${RTYP[t]}</button></div>
-        ${rs.map((r, i) => `<div class="prow${r.aktiv ? '' : ' off'}" style="grid-template-columns:100px minmax(0,1.6fr) minmax(0,1.4fr) auto"><b>${esc(r.nummer || '')}</b><span>${esc(r.name)}${r.aktiv ? '' : ' <span class="tag">inaktiv</span>'}</span><span class="small muted">${r.stamm_person_id ? 'Stamm: ' + esc(P[r.stamm_person_id]?.name || '?') : ''}</span>
-          <span class="acts"><button class="icon-btn" data-ru="${r.id}" aria-label="Nach oben" ${i === 0 ? 'disabled' : ''}>${I('up')}</button><button class="icon-btn" data-rd="${r.id}" aria-label="Nach unten" ${i === rs.length - 1 ? 'disabled' : ''}>${I('down')}</button><button class="icon-btn" data-re="${r.id}" aria-label="Bearbeiten">${I('edit')}</button></span></div>`).join('') || '<div class="prow"><span></span><span class="muted small">Noch keine erfasst</span></div>'}</div>`; }).join('')}</div>`;
+        ${rs.map((r, i) => `<div class="prow${r.aktiv ? '' : ' off'}" data-rrow="${r.id}" style="grid-template-columns:18px 100px minmax(0,1.6fr) minmax(0,1.4fr) auto"><span class="rgrip" title="Ziehen zum Sortieren">${I('grip')}</span><b>${esc(r.nummer || '')}</b><span>${esc(r.name)}${r.aktiv ? '' : ' <span class="tag">inaktiv</span>'}</span><span class="small muted">${r.stamm_person_id ? 'Stamm: ' + esc(P[r.stamm_person_id]?.name || '?') : ''}</span>
+          <span class="acts"><button class="icon-btn" data-re="${r.id}" aria-label="Bearbeiten">${I('edit')}</button></span></div>`).join('') || '<div class="prow"><span></span><span class="muted small">Noch keine erfasst</span></div>'}</div>`; }).join('')}</div>`;
   const q = s => $('appMain').querySelectorAll(s);
   q('[data-radd]').forEach(b => b.onclick = () => resDlg({ typ: b.dataset.radd, nummer: '', name: '', stamm_person_id: null, aktiv: true }, true));
   q('[data-re]').forEach(b => b.onclick = () => resDlg(resById(b.dataset.re), false));
-  const move = async (id, dir) => { const r = resById(id); const l = RES.filter(x => x.typ === r.typ).sort((a, b) => a.sortierung - b.sortierung || resName(a).localeCompare(resName(b))); const i = l.findIndex(x => x.id === id), j = i + dir; if(j < 0 || j >= l.length) return; [l[i], l[j]] = [l[j], l[i]]; await Promise.all(l.map((x, k) => sb.from('planer_ressource').update({ sortierung: (k + 1) * 10 }).eq('id', x.id))); await neuLaden(); };
-  q('[data-ru]').forEach(b => b.onclick = () => move(b.dataset.ru, -1)); q('[data-rd]').forEach(b => b.onclick = () => move(b.dataset.rd, 1));
+  // Reihenfolge per Ziehen am Griff, nur innerhalb der Kategorie (gilt dann auch im Planer)
+  q('.rgrip').forEach(g => g.addEventListener('pointerdown', e => { if(e.button !== 0) return; e.preventDefault();
+    const row = g.closest('[data-rrow]'), r = resById(row.dataset.rrow), card = row.closest('.card');
+    const line = document.createElement('div'); line.className = 'dropline'; line.hidden = true; document.body.appendChild(line); row.classList.add('rdrag'); let ziel = null;
+    const mv = ev => { ziel = null; line.hidden = true;
+      const t = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('[data-rrow]'); if(!t || t === row || t.closest('.card') !== card) return;
+      const rc = t.getBoundingClientRect(), vor = ev.clientY < rc.top + rc.height / 2; ziel = { id: t.dataset.rrow, vor };
+      line.style.cssText = `left:${rc.left}px;width:${rc.width}px;top:${(vor ? rc.top : rc.bottom) - 1}px`; line.hidden = false; };
+    const up = async () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); line.remove(); row.classList.remove('rdrag'); if(!ziel) return;
+      const l = RES.filter(x => x.typ === r.typ && x.id !== r.id).sort((a, b) => a.sortierung - b.sortierung || resName(a).localeCompare(resName(b)));
+      const i = l.findIndex(x => x.id === ziel.id); l.splice(ziel.vor ? i : i + 1, 0, r);
+      const { error } = (await Promise.all(l.map((x, k) => sb.from('planer_ressource').update({ sortierung: (k + 1) * 10 }).eq('id', x.id)))).find(x => x.error) || {};
+      if(error) fehler(error, 'Sortieren'); await neuLaden(); };
+    addEventListener('pointermove', mv); addEventListener('pointerup', up); }));
 }
 function resDlg(r, neu){
   const d = document.createElement('div'); d.className = 'dlg';
