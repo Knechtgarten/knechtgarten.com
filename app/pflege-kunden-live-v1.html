@@ -289,6 +289,17 @@ tbody tr:last-child td{border-bottom:none;}
 .bp .icon-btn .i{width:14px;height:14px;}
 .bp .leer{color:var(--muted);font-style:italic;}
 .bp-stand{font-size:11.5px;color:var(--muted);}
+.bp-kopf{display:flex;align-items:center;gap:14px;flex-wrap:wrap;}
+.bp-sys{display:inline-flex;border:1px solid #8B9097;border-radius:7px;overflow:hidden;}
+.bp-sys button{all:unset;cursor:pointer;padding:4px 12px;font-size:12px;font-weight:600;color:var(--primary);display:inline-flex;align-items:center;gap:6px;}
+.bp-sys button+button{border-left:1px solid var(--line);}
+.bp-sys button:hover{background:var(--soft);}
+.bp-sys button[aria-pressed="true"]{background:var(--primary);color:#fff;}
+.bp-sys button:focus-visible{outline:2px solid var(--primary);outline-offset:-2px;}
+.bp-dot{width:7px;height:7px;border-radius:50%;background:#D1DB5F;display:inline-block;}
+.bp.bp-g{min-width:620px;}
+.bp-g td.vn{width:280px;}
+.bp-g select{font:inherit;font-size:12px;height:24px;border:1px solid var(--line);border-radius:5px;background:#fff;color:var(--ink);min-width:150px;}
 .bp-rt{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end;}
 .bp-kn{padding:3px 9px;font-size:12px;}
 .bp-kn .i{width:14px;height:14px;}
@@ -633,7 +644,7 @@ const S = {
   kat: [], felder: [], arbeiten: [], tabellen: [], spalten: [], zust: [],
   kunden: [], obj: [], kk: [], kz: [], ka: [], fotos: [], fk: [], urls: {}, dok: [], dk: [], eb: {}, auNur: true, auZeigen: 20, auVon: '',
   f: { q: '', abo: [], ma: [], kat: '', tags: [], kanal: [], reg: [] }, tags: [], reg: [], regPlz: {},
-  ktab: null, kwAsk: null, modal: null, fotoTag: '', hochladen: 0, lb: null, bpOffen: new Set(), bpLaeuft: false
+  ktab: null, kwAsk: null, modal: null, fotoTag: '', hochladen: 0, lb: null, bpOffen: new Set(), bpLaeuft: false, bpSys: {}
 };
 const katById = id => S.kat.find(k => k.id === id);
 const felderVon = katId => S.felder.filter(f => f.kategorie_id === katId).sort(nachReihe);
@@ -1059,7 +1070,7 @@ const BP_TAGE = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
 // Rohnertec-Kunden (Hauptadresse): gesperrt, Schloss oeffnet fuer Handaenderungen (bis zum naechsten Abgleich)
 const bpRohnertec = kk => !kk.objekt_id && !!kundeById(kk.kunde_id)?.rohnertec_id;
 const bpGesperrt = kk => bpRohnertec(kk) && !S.bpOffen.has(kk.id);
-function bpHtml(kk){
+function bpRohnertecHtml(kk, seg){
   const vl = kk.bewaesserung || [], rt = bpRohnertec(kk), zu = bpGesperrt(kk);
   const gruppe = (v, vi) => {
     const kopf = `<td class="vn" rowspan="${Math.max(v.muster.length, 1)}">
@@ -1077,7 +1088,7 @@ function bpHtml(kk){
       <td><button type="button" class="icon-btn" data-act="bp-muster-rm" title="Muster entfernen" aria-label="Muster entfernen">${I('x')}</button></td></tr>`).join('')}</tbody>`;
   };
   return `<section class="card panel">
-    <div class="panel-h"><h3>Bewässerungsplan</h3>
+    <div class="panel-h"><div class="bp-kopf"><h3>Bewässerungsplan</h3>${seg}</div>
       ${rt ? `<div class="bp-rt"><span class="bp-stand">Aus Rohnertec${kk.bewaesserung_stand ? ', Stand ' + datumCh(kk.bewaesserung_stand) : ''}</span>
         <button class="btn btn-ghost bp-kn" data-act="bp-abgleich" ${S.bpLaeuft ? 'disabled' : ''}>${I('repeat')}${S.bpLaeuft ? 'Gleiche ab …' : 'Neu abgleichen'}</button>
         <button class="btn btn-ghost bp-kn" data-act="bp-schloss" title="${zu ? 'Zum Ändern von Hand entsperren' : 'Wieder sperren'}">${I(zu ? 'lock' : 'unlock')}${zu ? 'Gesperrt' : 'Entsperrt'}</button></div>`
@@ -1090,6 +1101,56 @@ function bpHtml(kk){
     ${zu ? '' : `<div><button class="addrow" data-act="bp-ventil-add">${I('plus')}Ventil hinzufügen</button></div>`}
   </section>`;
 }
+// Bewaesserungssysteme: Rohnertec (kk.bewaesserung) oder einfache Steuergeraete (kk.bewaesserung_geraete[sys])
+const BP_SYS = [{ id: 'rohnertec', n: 'Rohnertec' }, { id: 'rainbird', n: 'Rain Bird' }, { id: 'claber', n: 'Claber' }, { id: 'geka', n: 'GEKA' }];
+// Werte wie am Geraet angeschrieben (Claber Tempo Select, GEKA plus Drehknopf)
+const CLABER_FREQ = ['Off', 'alle 8 Stunden', 'alle 12 Stunden', 'alle 24 Stunden', 'alle 2 Tage', 'alle 3 Tage', 'alle 5 Tage', 'alle 7 Tage'];
+const CLABER_DAUER = [1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 30, 60, 90].map(m => m + ' min');
+const GEKA_FREQ = ['alle 1 Stunde', 'alle 2 Stunden', 'alle 4 Stunden', 'alle 6 Stunden', 'alle 8 Stunden', 'alle 12 Stunden', 'alle 24 Stunden', 'alle 48 Stunden', 'alle 72 Stunden', '1 Woche'];
+const GEKA_DAUER = ['Off', 'On', ...[1, 3, 5, 10, 15, 20, 30, 60, 90, 120].map(m => m + ' min')];
+const bgDaten = (kk, sys) => (kk.bewaesserung_geraete || {})[sys] || [];
+const bpHatDaten = (kk, sys) => sys === 'rohnertec' ? (kk.bewaesserung || []).length > 0 : bgDaten(kk, sys).length > 0;
+// Angezeigtes System: Umschalter > Rohnertec-Kunde > System mit Daten > Feld «Steuergeraet» > Rohnertec
+function bpSystem(kk){
+  if(S.bpSys[kk.id]) return S.bpSys[kk.id];
+  if(bpRohnertec(kk)) return 'rohnertec';
+  const mit = BP_SYS.find(s => bpHatDaten(kk, s.id)); if(mit) return mit.id;
+  const sg = String(Object.entries(kk.werte || {}).find(([fid]) => S.felder.find(f => f.id === fid)?.name === 'Steuergerät')?.[1] || '').toLowerCase();
+  return sg.includes('rain bird') ? 'rainbird' : sg.includes('claber') ? 'claber' : sg.includes('geka') ? 'geka' : 'rohnertec';
+}
+function bpHtml(kk){
+  const sys = bpSystem(kk);
+  const seg = `<div class="bp-sys" role="group" aria-label="Bewässerungssystem">${BP_SYS.map(s => `<button type="button" data-act="bp-sys" data-sys="${s.id}" aria-pressed="${s.id === sys}">${esc(s.n)}${bpHatDaten(kk, s.id) ? '<span class="bp-dot" title="Daten erfasst"></span>' : ''}</button>`).join('')}</div>`;
+  return sys === 'rohnertec' ? bpRohnertecHtml(kk, seg) : bpGeraetHtml(kk, sys, seg);
+}
+function bpGeraetHtml(kk, sys, seg){
+  const rows = bgDaten(kk, sys), rb = sys === 'rainbird', cl = sys === 'claber';
+  const opt = (liste, v) => `<option value="">–</option>` + (v && !liste.includes(v) ? [...liste, v] : liste).map(o => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('');
+  const a = (ri, f) => `data-act="bg-feld" data-ri="${ri}" data-f="${f}"`;
+  const zeit = (ri, f, v, l) => `<input class="zeit" ${a(ri, f)} inputmode="numeric" maxlength="5" value="${esc(v)}" placeholder="hh:mm" aria-label="${l}">`;
+  const zeile = (r, ri) => `<tbody class="v"><tr data-ri="${ri}">
+      <td class="vn"><input class="n" ${a(ri, 'name')} value="${esc(r.name)}" placeholder="${rb ? 'Zone / Bereich' : 'Gerät / Bereich'}" aria-label="Bereich"></td>
+      ${rb ? `<td><div class="zz">${zeit(ri, 'von', r.von, 'Start')}–${zeit(ri, 'bis', r.bis, 'Ende')}<small>${dauer(r.von, r.bis)}</small></div></td>
+      <td><div class="days">${BP_TAGE.map((t, i) => `<button type="button" class="chip" data-act="bg-tag" data-tag="${i}" aria-pressed="${(r.tage || []).includes(i)}" aria-label="${t}">${t}</button>`).join('')}</div></td>`
+      : `<td>${zeit(ri, 'start', r.start, 'Startzeit ungefähr')}</td>
+      <td><select ${a(ri, 'freq')} aria-label="${cl ? 'Frequenz' : 'Intervall'}">${opt(cl ? CLABER_FREQ : GEKA_FREQ, r.freq)}</select></td>
+      <td><select ${a(ri, 'dauer')} aria-label="${cl ? 'Bewässerungszeit' : 'Laufzeit'}">${opt(cl ? CLABER_DAUER : GEKA_DAUER, r.dauer)}</select></td>`}
+      <td><button type="button" class="icon-btn" data-act="bg-rm" title="Zeile entfernen" aria-label="Zeile entfernen">${I('x')}</button></td></tr></tbody>`;
+  const kopf = rb ? '<th>Zone / Bereich</th><th>Zeit</th><th>Tage</th>' : `<th>Gerät / Bereich</th><th>Start ca.</th><th>${cl ? 'Frequenz' : 'Intervall'}</th><th>${cl ? 'Bewässerungszeit' : 'Laufzeit'}</th>`;
+  return `<section class="card panel">
+    <div class="panel-h"><div class="bp-kopf"><h3>Bewässerungsplan</h3>${seg}</div><span class="bp-stand">Von Hand erfasst</span></div>
+    <div class="bp-w"><table class="bp bp-g"><thead><tr>${kopf}<th style="width:28px"></th></tr></thead>
+      ${rows.map(zeile).join('') || `<tbody><tr><td colspan="${rb ? 4 : 5}" class="leer" style="padding:10px">Noch nichts erfasst.</td></tr></tbody>`}
+    </table></div>
+    <div><button class="addrow" data-act="bg-add">${I('plus')}${rb ? 'Zone hinzufügen' : 'Gerät hinzufügen'}</button></div>
+  </section>`;
+}
+async function speichereBg(kk, sys, rows, neuZeichnen = true){
+  const bg = { ...(kk.bewaesserung_geraete || {}), [sys]: rows };
+  if(await speichere('pflege_kunde_kategorie', { id: kk.id }, { bewaesserung_geraete: bg })) kk.bewaesserung_geraete = bg;
+  if(neuZeichnen) render();
+}
+const bgKopie = (kk, sys) => JSON.parse(JSON.stringify(bgDaten(kk, sys)));
 async function speichereBp(kk, vl, neuZeichnen = true){
   if(await speichere('pflege_kunde_kategorie', { id: kk.id }, { bewaesserung: vl })) kk.bewaesserung = vl;
   if(neuZeichnen) render();
@@ -1777,6 +1838,12 @@ $('app').addEventListener('change', async e => {
     const vl = bpKopie(kk); vl[+el.dataset.vi][el.dataset.f] = el.value.trim();
     await speichereBp(kk, vl, false);
   }
+  else if(act === 'bg-feld'){
+    const sys = bpSystem(kk), rows = bgKopie(kk, sys), r = rows[+el.closest('tr').dataset.ri], f = el.dataset.f;
+    if(f === 'von' || f === 'bis' || f === 'start') el.value = normZeit(el.value);
+    r[f] = el.value.trim();
+    await speichereBg(kk, sys, rows, f === 'von' || f === 'bis');   // Dauer neu anzeigen
+  }
   else if(act === 'bp-m'){
     const tr = el.closest('tr'), vl = bpKopie(kk), m = vl[+tr.dataset.vi].muster[+tr.dataset.mi], f = el.dataset.f;
     if(f === 'von' || f === 'bis'){ el.value = normZeit(el.value); m[f] = el.value; }
@@ -1902,6 +1969,25 @@ $('app').addEventListener('click', async e => {
     const { data: neu } = await sb.from('pflege_kunde_kategorie').select('bewaesserung,bewaesserung_stand').eq('id', kk.id).single();
     if(neu) Object.assign(kk, neu);
     render();
+  }
+  else if(act === 'bp-sys'){ S.bpSys[kk.id] = b.dataset.sys; render(); }
+  else if(act === 'bg-tag'){
+    const sys = bpSystem(kk), rows = bgKopie(kk, sys), r = rows[+b.closest('tr').dataset.ri], t = +b.dataset.tag;
+    r.tage = (r.tage || []).includes(t) ? r.tage.filter(x => x !== t) : [...(r.tage || []), t].sort((x, y) => x - y);
+    await speichereBg(kk, sys, rows);
+  }
+  else if(act === 'bg-add'){
+    const sys = bpSystem(kk), rows = bgKopie(kk, sys);
+    rows.push(sys === 'rainbird' ? { name: '', von: '', bis: '', tage: [] } : { name: '', start: '', freq: '', dauer: '' });
+    S.bpSys[kk.id] = sys;
+    await speichereBg(kk, sys, rows);
+    [...document.querySelectorAll('.bp-g input.n')].pop()?.focus();
+  }
+  else if(act === 'bg-rm'){
+    const sys = bpSystem(kk), rows = bgKopie(kk, sys), ri = +b.closest('tr').dataset.ri;
+    if(Object.values(rows[ri]).some(v => Array.isArray(v) ? v.length : v) && !await kgBestaetigen('Diese Zeile entfernen?', 'Zeile entfernen?', 'Entfernen')) return;
+    rows.splice(ri, 1);
+    await speichereBg(kk, sys, rows);
   }
   else if(act === 'bp-tag'){
     const tr = b.closest('tr'), vl = bpKopie(kk), m = vl[+tr.dataset.vi].muster[+tr.dataset.mi], t = +b.dataset.tag;
