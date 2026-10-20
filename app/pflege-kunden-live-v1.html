@@ -790,6 +790,8 @@ function tagsVonKunde(kundeId){
     });
     S.ka.forEach(ka => { if(ka.kunde_kategorie_id === kk.id && ka.arbeit_id){ const a = S.arbeiten.find(x => x.id === ka.arbeit_id); if(a?.tag_id) t.add(a.tag_id); } });
   });
+  // Automatische Tags (z. B. Rohnertec fuer alle mit Rohnertec verknuepften Kunden)
+  if(kundeById(kundeId)?.rohnertec_id) S.tags.filter(x => x.automatisch === 'rohnertec').forEach(x => t.add(x.id));
   return new Set([...t].filter(id => S.tags.some(x => x.id === id)));
 }
 const tagChips = kundeId => [...tagsVonKunde(kundeId)].map(id => S.tags.find(x => x.id === id)).sort((a, b) => a.name.localeCompare(b.name, 'de'))
@@ -1103,7 +1105,9 @@ function bpRohnertecHtml(kk, seg){
   </section>`;
 }
 // Bewaesserungssysteme: Rohnertec (kk.bewaesserung) oder einfache Steuergeraete (kk.bewaesserung_geraete[sys])
-const BP_SYS = [{ id: 'rohnertec', n: 'Rohnertec' }, { id: 'rainbird', n: 'Rain Bird' }, { id: 'claber', n: 'Claber' }, { id: 'geka', n: 'GEKA' }];
+const BP_SYS = [{ id: 'rohnertec', n: 'Rohnertec' }, { id: 'rainbird', n: 'Rain Bird' }, { id: 'hunter', n: 'Hunter' }, { id: 'gardena', n: 'Gardena' }, { id: 'claber', n: 'Claber' }, { id: 'geka', n: 'GEKA' }];
+// Systeme mit Zeitfenster (Start-Ende + Wochentage); Claber/GEKA haben Frequenz + Dauer
+const BP_ZEITFENSTER = ['rainbird', 'hunter', 'gardena'];
 // Werte wie am Geraet angeschrieben (Claber Tempo Select, GEKA plus Drehknopf)
 const CLABER_FREQ = ['Off', 'alle 8 Stunden', 'alle 12 Stunden', 'alle 24 Stunden', 'alle 2 Tage', 'alle 3 Tage', 'alle 5 Tage', 'alle 7 Tage'];
 const CLABER_DAUER = [1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 30, 60, 90].map(m => m + ' min');
@@ -1111,13 +1115,11 @@ const GEKA_FREQ = ['alle 1 Stunde', 'alle 2 Stunden', 'alle 4 Stunden', 'alle 6 
 const GEKA_DAUER = ['Off', 'On', ...[1, 3, 5, 10, 15, 20, 30, 60, 90, 120].map(m => m + ' min')];
 const bgDaten = (kk, sys) => (kk.bewaesserung_geraete || {})[sys] || [];
 const bpHatDaten = (kk, sys) => sys === 'rohnertec' ? (kk.bewaesserung || []).length > 0 : bgDaten(kk, sys).length > 0;
-// Angezeigtes System: Umschalter > Rohnertec-Kunde > System mit Daten > Feld «Steuergeraet» > Rohnertec
+// Angezeigtes System: Umschalter > Rohnertec-Kunde > System mit Daten > Rohnertec
 function bpSystem(kk){
   if(S.bpSys[kk.id]) return S.bpSys[kk.id];
   if(bpRohnertec(kk)) return 'rohnertec';
-  const mit = BP_SYS.find(s => bpHatDaten(kk, s.id)); if(mit) return mit.id;
-  const sg = String(Object.entries(kk.werte || {}).find(([fid]) => S.felder.find(f => f.id === fid)?.name === 'Steuergerät')?.[1] || '').toLowerCase();
-  return sg.includes('rain bird') ? 'rainbird' : sg.includes('claber') ? 'claber' : sg.includes('geka') ? 'geka' : 'rohnertec';
+  return BP_SYS.find(s => bpHatDaten(kk, s.id))?.id || 'rohnertec';
 }
 function bpHtml(kk){
   const sys = bpSystem(kk);
@@ -1125,7 +1127,7 @@ function bpHtml(kk){
   return sys === 'rohnertec' ? bpRohnertecHtml(kk, seg) : bpGeraetHtml(kk, sys, seg);
 }
 function bpGeraetHtml(kk, sys, seg){
-  const rows = bgDaten(kk, sys), rb = sys === 'rainbird', cl = sys === 'claber';
+  const rows = bgDaten(kk, sys), rb = BP_ZEITFENSTER.includes(sys), cl = sys === 'claber';
   const opt = (liste, v) => `<option value="">–</option>` + (v && !liste.includes(v) ? [...liste, v] : liste).map(o => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('');
   const a = (ri, f) => `data-act="bg-feld" data-ri="${ri}" data-f="${f}"`;
   const zeit = (ri, f, v, l) => `<input class="zeit" ${a(ri, f)} inputmode="numeric" maxlength="5" value="${esc(v)}" placeholder="hh:mm" aria-label="${l}">`;
@@ -1146,7 +1148,7 @@ function bpGeraetHtml(kk, sys, seg){
     </table></div>
   </section>`;
 }
-const bgLeer = sys => sys === 'rainbird' ? { name: '', von: '', bis: '', tage: [] } : { name: '', start: '', freq: '', dauer: '' };
+const bgLeer = sys => BP_ZEITFENSTER.includes(sys) ? { name: '', von: '', bis: '', tage: [] } : { name: '', start: '', freq: '', dauer: '' };
 async function speichereBg(kk, sys, rows, neuZeichnen = true){
   const bg = { ...(kk.bewaesserung_geraete || {}), [sys]: rows };
   S.bpSys[kk.id] = sys;   // beim System bleiben, auch wenn es vorher leer war
