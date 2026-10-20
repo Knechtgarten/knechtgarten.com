@@ -110,6 +110,7 @@ textarea{resize:vertical;line-height:1.45;}
 .ms-panel{position:absolute;top:calc(100% + 4px);left:0;z-index:30;min-width:200px;background:#fff;border:1px solid var(--line);border-radius:7px;box-shadow:0 6px 20px rgba(30,37,48,.14);padding:6px;display:flex;flex-direction:column;}
 .ms-panel label{display:flex;gap:8px;align-items:center;padding:7px 8px;border-radius:5px;cursor:pointer;font-size:12.5px;}
 .ms-panel label:hover{background:var(--soft);}
+.ms-panel label .i{width:15px;height:15px;flex:none;}
 .ms-panel input{accent-color:var(--primary);width:15px;height:15px;}
 .ms-panel .ms-none{all:unset;cursor:pointer;padding:7px 8px;font-size:12px;color:var(--muted);border-top:1px solid var(--line);margin-top:4px;}
 .msf summary{padding:7px 10px;max-width:260px;}
@@ -689,6 +690,18 @@ function render(){
 // Kundenliste
 // ---------------------------------------------------------------------------
 const zustPass = (zust, sel) => !sel.length || sel.some(s => s === '-' ? zust.length === 0 : zust.includes(s));
+// Filter Kontaktweg (nur fuer Kunden mit Voranmeldung, Mehrfachauswahl = oder)
+function kanalFilterHtml(){
+  const sel = S.f.kanal;
+  const label = !sel.length ? 'Alle Kontaktwege' : KANAELE.filter(c => sel.includes(c.id)).map(c => c.n).join(', ');
+  return `<details class="ms msf" id="fkanal" title="Kontaktweg für die Voranmeldung">
+    <summary>${I('finger')}<span class="msf-l">${esc(label)}</span>${I('chev')}</summary>
+    <div class="ms-panel">
+      ${KANAELE.map(c => `<label><input type="checkbox" data-act="f-kanal" value="${c.id}" ${sel.includes(c.id) ? 'checked' : ''}>${I(c.ic)}${c.n}</label>`).join('')}
+      <button type="button" class="ms-none" data-act="f-kanal-alle">Alle Kontaktwege</button>
+    </div>
+  </details>`;
+}
 function zustFilterHtml(){
   const sel = S.f.ma;
   const opts = [['-', 'Niemand zuständig'], ...zustAuswahl([...new Set(S.kz.map(z => z.benutzer_id))]).map(b => [b.id, zustName(b.id)])];
@@ -740,7 +753,7 @@ function gefilterteKunden(){
     return (!q || text.includes(q))
       && (!f.abo.length || f.abo.includes(k.abo_typ))
       // Unterfilter Kanal gilt nur fuer Kunden mit Voranmeldung (mehrere Kanaele = oder)
-      && (!f.kanal.length || k.abo_typ !== 'mit_voranmeldung' || f.kanal.some(c => c === 'offen' ? !(k.voranmeldung_kanaele || []).length : (k.voranmeldung_kanaele || []).includes(c)))
+      && (!f.kanal.length || k.abo_typ !== 'mit_voranmeldung' || f.kanal.some(c => (k.voranmeldung_kanaele || []).includes(c)))
       && (!f.kat || kks.some(x => x.kategorie_id === f.kat))
       && (!f.ma.length || kks.some(x => zustPass(zustVon(x.id), f.ma)))
       && (!f.tags.length || (t => f.tags.every(x => t.has(x)))(tagsVonKunde(k.kunde_id)));
@@ -757,8 +770,7 @@ function renderListe(){
     <div class="filters">
       <div class="abof" role="group" aria-label="Abo-Typ"><span class="muted small">Abo</span>${ABO.map(a =>
         `<button class="abob${f.abo.length && !f.abo.includes(a.id) ? ' off' : ''}" data-act="f-abo" data-abo="${a.id}" aria-pressed="${f.abo.includes(a.id)}">${aboIcon(a.id)}</button>`).join('')}</div>
-      ${`<div class="kanaele f${f.abo.includes('mit_voranmeldung') ? '' : ' aus'}" role="group" aria-label="Voranmeldung per">${[...KANAELE, { id: 'offen', n: 'offen', ic: 'finger' }].map(c =>
-        `<button type="button" class="kanal-b" data-act="f-kanal" data-k="${c.id}" aria-pressed="${f.kanal.includes(c.id)}" title="${c.id === 'offen' ? 'Kanal noch offen' : 'Voranmeldung per ' + c.n}">${I(c.ic)}${c.n}</button>`).join('')}</div>`}
+      ${kanalFilterHtml()}
       ${zustFilterHtml()}
       ${tagFilterHtml()}
       <select data-act="f-kat" aria-label="Pflegekategorie"><option value="">Alle Pflegekategorien</option>${S.kat.map(k => `<option value="${k.id}" ${f.kat === k.id ? 'selected' : ''}>${esc(k.name)}</option>`).join('')}</select>
@@ -775,7 +787,7 @@ function renderListe(){
 function druckeListe(){
   const f = S.f, teile = [];
   if(f.abo.length) teile.push(ABO.filter(a => f.abo.includes(a.id)).map(a => a.n).join(', '));
-  if(f.kanal.length) teile.push('Voranmeldung per ' + f.kanal.map(c => c === 'offen' ? 'offen' : KANAELE.find(x => x.id === c)?.n).join(', '));
+  if(f.kanal.length) teile.push('Voranmeldung per ' + f.kanal.map(c => KANAELE.find(x => x.id === c)?.n).join(', '));
   if(f.ma.length) teile.push('Zuständig: ' + f.ma.map(id => id === '-' ? 'niemand' : zustName(id)).join(', '));
   if(f.tags.length) teile.push('Tags: ' + S.tags.filter(t => f.tags.includes(t.id)).map(t => t.name).join(' + '));
   if(f.kat) teile.push('Kategorie: ' + (S.kat.find(k => k.id === f.kat)?.name || ''));
@@ -1633,6 +1645,11 @@ $('app').addEventListener('change', async e => {
     S.f.tags = el.checked ? [...S.f.tags, el.value] : S.f.tags.filter(v => v !== el.value);
     $('ftag').outerHTML = tagFilterHtml(); $('ftag').open = true; renderListeZeilen();
   }
+  else if(act === 'f-kanal'){
+    S.f.kanal = el.checked ? [...S.f.kanal, el.value] : S.f.kanal.filter(v => v !== el.value);
+    if(S.f.kanal.length && !S.f.abo.includes('mit_voranmeldung')) S.f.abo = [...S.f.abo, 'mit_voranmeldung'];   // Kontaktweg gilt nur fuer «mit Voranmeldung»
+    renderListe(); $('fkanal').open = true;
+  }
   else if(act === 'f-ma'){
     S.f.ma = el.checked ? [...S.f.ma, el.value] : S.f.ma.filter(v => v !== el.value);
     const d = $('fma'); d.outerHTML = zustFilterHtml(); $('fma').open = true; renderListeZeilen();
@@ -1725,13 +1742,12 @@ $('app').addEventListener('click', async e => {
     if(!f.abo.includes('mit_voranmeldung')) f.kanal = [];   // Unterfilter nur sichtbar/aktiv mit «Voranmeldung»
     renderListe();
   }
-  else if(act === 'f-kanal'){ const c = b.dataset.k; if(!S.f.abo.includes('mit_voranmeldung')) S.f.abo = [...S.f.abo, 'mit_voranmeldung']; // Kanal waehlen aktiviert «Voranmeldung»
-    S.f.kanal = S.f.kanal.includes(c) ? S.f.kanal.filter(x => x !== c) : [...S.f.kanal, c]; renderListe(); }
   else if(act === 'kanal'){
     const c = b.dataset.k, alt = k.voranmeldung_kanaele || [], neu = alt.includes(c) ? alt.filter(x => x !== c) : [...alt, c];
     if(await speichere('pflege_kunde', { kunde_id: kundeId }, { voranmeldung_kanaele: neu, aktualisiert_am: new Date().toISOString() })){ k.voranmeldung_kanaele = neu; render(); }
   }
   else if(act === 'f-ma-alle'){ S.f.ma = []; renderListe(); }
+  else if(act === 'f-kanal-alle'){ S.f.kanal = []; renderListe(); }
   else if(act === 'f-tag-alle'){ S.f.tags = []; renderListe(); }
   else if(act === 'f-kat-spalte'){ S.f.kat = S.f.kat === b.dataset.kat ? '' : b.dataset.kat; renderListe(); }
   else if(act === 'zurueck') location.hash = '';
