@@ -86,6 +86,10 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 .zt input{width:52px;text-align:right;}
 .zt span{font-size:11.5px;color:var(--muted);}
 .def.tg{grid-template-columns:minmax(0,1fr) 150px 28px;}
+.def.rg{grid-template-columns:34px minmax(0,260px) minmax(0,1fr) 28px;align-items:start;}
+.def.rg input[type=color]{width:30px;height:30px;padding:0;border:1px solid var(--line);border-radius:6px;background:none;cursor:pointer;}
+.def.rg textarea{width:100%;font:inherit;font-size:12.5px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;resize:vertical;}
+.def.rg > span.muted{padding-top:7px;}
 .tagsel{font-size:12px;}
 .tagsel.hat{background:var(--accent-blue, #D6E7F4);border-color:transparent;font-weight:700;color:var(--primary);}
 .ja-fix{padding:6px 8px;background:var(--soft);border-radius:6px;font-weight:600;}
@@ -396,7 +400,7 @@ function txtOn(hex){
 }
 
 const S = {
-  kategorien: [], felder: [], arbeiten: [], tabellen: [], spalten: [], einheiten: [], zustaendige: [], tags: [],
+  kategorien: [], felder: [], arbeiten: [], tabellen: [], spalten: [], einheiten: [], zustaendige: [], tags: [], reg: [], regPlz: [],
   ansicht: 'kat', katId: null, typAsk: null, tabEntfernenAsk: false, modal: null
 };
 const nachReihe = (a, b) => (a.reihenfolge ?? 0) - (b.reihenfolge ?? 0);
@@ -416,11 +420,13 @@ async function ladeAlles(){
     sb.from('pflege_tabelle_spalte').select('*'),
     sb.from('einheit').select('*').order('code'),
     sb.rpc('pflege_zustaendige'),
-    sb.from('pflege_tag').select('*').order('name')
+    sb.from('pflege_tag').select('*').order('name'),
+    sb.from('pflege_region').select('*').order('reihenfolge'),
+    sb.from('pflege_region_plz').select('*')
   ]);
   const fehler = abfragen.find(r => r.error);
   if(fehler){ showToast(friendlyError(fehler.error), true); return; }
-  [S.kategorien, S.felder, S.arbeiten, S.tabellen, S.spalten, S.einheiten, S.zustaendige, S.tags] = abfragen.map(r => r.data || []);
+  [S.kategorien, S.felder, S.arbeiten, S.tabellen, S.spalten, S.einheiten, S.zustaendige, S.tags, S.reg, S.regPlz] = abfragen.map(r => r.data || []);
   if(!S.katId || !kat()) S.katId = S.kategorien[0]?.id || null;
   render();
 }
@@ -458,7 +464,8 @@ function renderNav(){
     <div class="grp">Stammdaten</div>
     <button class="nv" data-ansicht="zustaendige" aria-current="${S.ansicht === 'zustaendige'}">Zuständige<span class="muted small">${S.zustaendige.filter(b => b.pflege_zustaendig).length}</span></button>
     <button class="nv" data-ansicht="einheiten" aria-current="${S.ansicht === 'einheiten'}">Einheiten<span class="muted small">${pflegeEinheiten().length}</span></button>
-    <button class="nv" data-ansicht="tags" aria-current="${S.ansicht === 'tags'}">Tags<span class="muted small">${S.tags.length}</span></button>`;
+    <button class="nv" data-ansicht="tags" aria-current="${S.ansicht === 'tags'}">Tags<span class="muted small">${S.tags.length}</span></button>
+    <button class="nv" data-ansicht="regionen" aria-current="${S.ansicht === 'regionen'}">Regionen<span class="muted small">${S.reg.length}</span></button>`;
 }
 // Tag-Auswahl (Verknuepfung zur zentralen Tag-Liste)
 function tagSelect(act, wert, extra = ''){
@@ -486,6 +493,23 @@ function tagsHtml(){
         <button class="icon-btn" data-act="tag-loeschen" title="Tag löschen" aria-label="Tag löschen">${I('x')}</button></div>`; }).join('') || '<div class="muted small" style="padding:8px 0">Noch keine Tags.</div>'}
     </div>
     <div><button class="addrow" data-act="tag-neu">${I('plus')}Tag hinzufügen</button></div>
+  </section>`;
+}
+// Regionen: PLZ-Liste pro Region (eine PLZ gehoert genau zu einer Region); Rest-Region = alle uebrigen PLZ
+const plzVonRegion = id => S.regPlz.filter(p => p.region_id === id).map(p => p.plz).sort((a, b) => a - b);
+function regionenHtml(){
+  return `<section class="card panel">
+    <div class="panel-h"><h3>Regionen</h3><span class="muted small">Gelten für alle Kategorien. Beim Kunden automatisch über die PLZ, von Hand änderbar.</span></div>
+    <div class="hint">PLZ mit Komma oder Leerzeichen trennen. Eine PLZ gehört immer zu genau einer Region: Trägst du sie hier ein, wird sie bei einer anderen Region entfernt. Alle PLZ, die nirgends stehen, kommen zur Region «${esc(S.reg.find(r => r.ist_rest)?.name || 'Diverse')}».</div>
+    <div>
+      <div class="def rg hdr"><span></span><span>Region</span><span>PLZ</span><span></span></div>
+      ${S.reg.map(r => `<div class="def rg" data-id="${r.id}">
+        <input type="color" data-act="reg-farbe" value="${esc(r.farbe)}" aria-label="Farbe" title="Farbe">
+        <input type="text" data-act="reg-name" value="${esc(r.name)}" aria-label="Name der Region">
+        ${r.ist_rest ? '<span class="muted small">alle übrigen PLZ</span>' : `<textarea data-act="reg-plz" rows="${Math.min(6, Math.max(1, Math.ceil(plzVonRegion(r.id).length / 14)))}" aria-label="PLZ der Region">${plzVonRegion(r.id).join(', ')}</textarea>`}
+        ${r.ist_rest ? '<span></span>' : `<button class="icon-btn" data-act="reg-loeschen" title="Region löschen" aria-label="Region löschen">${I('x')}</button>`}</div>`).join('')}
+    </div>
+    <div><button class="addrow" data-act="reg-neu">${I('plus')}Region hinzufügen</button></div>
   </section>`;
 }
 // Neuen Tag direkt aus einer Auswahl anlegen; gibt die id zurueck (oder null)
@@ -557,6 +581,7 @@ function renderInhalt(){
   if(S.ansicht === 'zustaendige'){ el.innerHTML = zustaendigeHtml(); return; }
   if(S.ansicht === 'einheiten'){ el.innerHTML = einheitenHtml(); return; }
   if(S.ansicht === 'tags'){ el.innerHTML = tagsHtml(); return; }
+  if(S.ansicht === 'regionen'){ el.innerHTML = regionenHtml(); return; }
   const k = kat();
   if(!k){ el.innerHTML = `<section class="card panel"><div class="hint">Noch keine Pflegekategorie erfasst.</div></section>`; return; }
 
@@ -871,6 +896,31 @@ $('inhalt').addEventListener('change', async e => {
     if(!name){ el.value = t.name; return; }
     if(await speichere('pflege_tag', id, { name })){ t.name = name; S.tags.sort((x, y) => x.name.localeCompare(y.name, 'de')); }
   }
+  else if(act === 'reg-name'){
+    const r = S.reg.find(x => x.id === id), name = el.value.trim();
+    if(!name){ el.value = r.name; return; }
+    if(await speichere('pflege_region', id, { name })) r.name = name;
+  }
+  else if(act === 'reg-farbe'){
+    const r = S.reg.find(x => x.id === id);
+    if(await speichere('pflege_region', id, { farbe: el.value })) r.farbe = el.value;
+  }
+  else if(act === 'reg-plz'){
+    const neu = [...new Set((el.value.match(/\d{4}/g) || []).map(Number))].sort((a, b) => a - b);
+    const alt = plzVonRegion(id), weg = alt.filter(p => !neu.includes(p)), dazu = neu.filter(p => !alt.includes(p));
+    const verschoben = dazu.map(p => S.regPlz.find(x => x.plz === p)).filter(Boolean);
+    if(weg.length){
+      const { error } = await sb.from('pflege_region_plz').delete().eq('region_id', id).in('plz', weg);
+      if(error){ showToast(friendlyError(error), true); return; }
+    }
+    if(dazu.length){
+      const { error } = await sb.from('pflege_region_plz').upsert(dazu.map(plz => ({ plz, region_id: id })), { onConflict: 'plz' });
+      if(error){ showToast(friendlyError(error), true); return; }
+    }
+    S.regPlz = S.regPlz.filter(x => !weg.includes(x.plz) && !dazu.includes(x.plz)).concat(dazu.map(plz => ({ plz, region_id: id })));
+    showToast(verschoben.length ? `Gespeichert. Verschoben: ${verschoben.map(x => x.plz + ' (vorher ' + (S.reg.find(r => r.id === x.region_id)?.name || '?') + ')').join(', ')}` : 'Gespeichert.');
+    renderInhalt();
+  }
   else if(act === 'arbeit-zeit'){
     const m = parseZeit(el.value);
     if(m === undefined){ showToast('Zeit in Stunden eingeben, z. B. 1,5', true); el.value = zeitText(a.dauer_min); return; }
@@ -991,6 +1041,23 @@ $('inhalt').addEventListener('click', async e => {
   else if(act === 'feld-optionen'){ oeffneOptionen('pflege_feld', S.felder.find(x => x.id === id)); }
   else if(act === 'feld-jatag'){ const f = S.felder.find(x => x.id === id); S.modal = { art: 'jatag', id, titel: f.name, tags: [(f.tags || {}).ja || ''] }; renderModal(); }
   else if(act === 'tag-neu'){ if(await neuerTag()) renderInhalt(); }
+  else if(act === 'reg-neu'){
+    const name = await kgEingabe('Neue Region', 'z. B. Emmental');
+    if(!name) return;
+    const reihenfolge = Math.max(0, ...S.reg.filter(r => !r.ist_rest).map(r => r.reihenfolge)) + 1;
+    const { data, error } = await sb.from('pflege_region').insert({ name, reihenfolge }).select().single();
+    if(error){ showToast(friendlyError(error), true); return; }
+    S.reg.push(data); S.reg.sort((a, b) => a.ist_rest - b.ist_rest || a.reihenfolge - b.reihenfolge);
+    render();
+  }
+  else if(act === 'reg-loeschen'){
+    const r = S.reg.find(x => x.id === id), n = plzVonRegion(id).length;
+    if(!await kgBestaetigen(`Region «${r.name}» löschen?${n ? ` Ihre ${n} PLZ kommen zur Rest-Region.` : ''} Kunden, bei denen sie von Hand gesetzt ist, werden wieder automatisch zugeordnet.`, 'Region löschen?')) return;
+    const { error } = await sb.from('pflege_region').delete().eq('id', id);
+    if(error){ showToast(friendlyError(error), true); return; }
+    S.reg = S.reg.filter(x => x.id !== id); S.regPlz = S.regPlz.filter(x => x.region_id !== id);
+    render();
+  }
   else if(act === 'tag-loeschen'){
     const t = S.tags.find(x => x.id === id), v = tagVerwendung(id);
     if(!await kgBestaetigen(`Tag «${t.name}» löschen?${v.length ? ` Er ist an ${v.length} ${v.length === 1 ? 'Stelle' : 'Stellen'} verknüpft; die Verknüpfungen fallen weg.` : ''}`, 'Tag löschen?')) return;
