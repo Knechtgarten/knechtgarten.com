@@ -421,6 +421,17 @@ table.au tr.sto td{color:var(--muted);text-decoration:line-through;}
 .ovlbox.breit{max-width:1000px;}
 @media (max-width:760px){ .ws{display:none;} .ws-q{display:grid;grid-template-columns:auto repeat(13,minmax(0,1fr));gap:3px;align-items:center;} .ws-q .ql{font-size:10.5px;color:var(--muted);padding-right:4px;} }
 .head-b{display:grid;grid-template-columns:auto 1fr;gap:8px;width:420px;max-width:100%;}
+/* Kunden ohne Easybill-Verknuepfung */
+.eb-off{display:inline-flex;vertical-align:-2px;margin-right:5px;color:#B45309;}
+.eb-off .i{width:14px;height:14px;}
+.eb-warn{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12.5px;color:#B45309;font-weight:600;}
+.eb-warn > .i{width:16px;height:16px;}
+.ebf{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:6px;padding:6px 11px;border:1px solid #B45309;border-radius:6px;font-size:12.5px;color:#B45309;background:#fff;}
+.ebf .i{width:15px;height:15px;}
+.ebf[aria-pressed="true"]{background:#B45309;color:#fff;}
+.eb-hinweis{display:flex;gap:5px;align-items:center;font-size:12px;color:#B45309;margin-top:4px;}
+.eb-hinweis .i{width:14px;height:14px;}
+.eb-zwei{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;}
 .print-kopf{display:none;}
 /* Druck / PDF der Kundenliste: nur Tabelle, Querformat, Texte nicht abschneiden, Farbpunkte mitdrucken */
 @media print{
@@ -477,6 +488,7 @@ ${SYM}
   <symbol id="i-file" viewBox="0 0 24 24"><path d="M6.5 3.5h7l4 4v13h-11z"/><path d="M13.5 3.5v4h4M9 12.5h6M9 16h6"/></symbol>
   <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M4 16v3.5h16V16"/></symbol>
   <symbol id="i-more" viewBox="0 0 24 24"><circle cx="6" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="18" cy="12" r="1" fill="currentColor"/></symbol>
+  <symbol id="i-link-off" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1M4 4l16 16"/></symbol>
   <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></symbol>
 </svg>
 
@@ -644,7 +656,7 @@ const zustAuswahl = (schon = []) => S.zust.filter(b => b.pflege_zustaendig || sc
 const S = {
   kat: [], felder: [], arbeiten: [], tabellen: [], spalten: [], zust: [],
   kunden: [], obj: [], kk: [], kz: [], ka: [], fotos: [], fk: [], urls: {}, dok: [], dk: [], eb: {}, auNur: true, auZeigen: 20, auVon: '',
-  f: { q: '', abo: [], ma: [], kat: '', tags: [], kanal: [], reg: [] }, tags: [], reg: [], regPlz: {},
+  f: { q: '', abo: [], ma: [], kat: '', tags: [], kanal: [], reg: [], ohneEb: false }, tags: [], reg: [], regPlz: {},
   ktab: null, kwAsk: null, modal: null, fotoTag: '', hochladen: 0, lb: null, bpOffen: new Set(), bpLaeuft: false, bpSys: {}
 };
 const katById = id => S.kat.find(k => k.id === id);
@@ -822,6 +834,7 @@ function gefilterteKunden(){
       && (!f.kat || kks.some(x => x.kategorie_id === f.kat))
       && (!f.ma.length || kks.some(x => zustPass(zustVon(x.id), f.ma)))
       && (!f.reg.length || [...regionenVonKunde(k)].some(r => f.reg.includes(r)))
+      && (!f.ohneEb || !k.kunde?.easybill_id)
       && (!f.tags.length || (t => f.tags.every(x => t.has(x)))(tagsVonKunde(k.kunde_id)));
   });
 }
@@ -838,6 +851,7 @@ function renderListe(){
         `<button class="abob${f.abo.length && !f.abo.includes(a.id) ? ' off' : ''}" data-act="f-abo" data-abo="${a.id}" aria-pressed="${f.abo.includes(a.id)}">${aboIcon(a.id)}</button>`).join('')}</div>
       ${kanalFilterHtml()}
       ${regFilterHtml()}
+      ${(n => n ? `<button type="button" class="ebf" data-act="f-ohne-eb" aria-pressed="${f.ohneEb}" title="Kunden, die noch nicht mit Easybill verknüpft sind">${I('link-off')}Nicht verknüpft (${n})</button>` : '')(S.kunden.filter(k => !k.kunde?.easybill_id).length)}
       ${zustFilterHtml()}
       ${tagFilterHtml()}
       <select data-act="f-kat" aria-label="Pflegekategorie"><option value="">Alle Pflegekategorien</option>${S.kat.map(k => `<option value="${k.id}" ${f.kat === k.id ? 'selected' : ''}>${esc(k.name)}</option>`).join('')}</select>
@@ -869,7 +883,7 @@ function renderListeZeilen(){
     const kks = kkVonKunde(k.kunde_id);
     const zust = [...new Set(kks.flatMap(x => zustVon(x.id)))].map(zustName);
     return `<tr data-act="kunde-oeffnen" data-id="${k.kunde_id}" tabindex="0">
-      <td class="kn"><span class="name" title="${esc(k.kunde?.name)}">${esc(k.kunde?.name)}</span>${objekteVon(k.kunde_id).length ? `<span class="obj-l">${objekteVon(k.kunde_id).map(o => esc(objektName(o))).join(' · ')}</span>` : ''}</td>
+      <td class="kn"><span class="name" title="${esc(k.kunde?.name)}">${k.kunde?.easybill_id ? '' : `<span class="eb-off" title="Nicht mit Easybill verknüpft">${I('link-off')}</span>`}${esc(k.kunde?.name)}</span>${objekteVon(k.kunde_id).length ? `<span class="obj-l">${objekteVon(k.kunde_id).map(o => esc(objektName(o))).join(' · ')}</span>` : ''}</td>
       <td class="ka" title="${esc(k.kunde?.strasse)}">${esc(k.kunde?.strasse)}</td>
       <td class="ko" title="${esc(k.kunde?.ort)}">${esc(k.kunde?.ort)}</td>
       <td class="tel" title="${esc(telVon(k))}">${esc(telKurz(telVon(k)))}</td>
@@ -885,15 +899,39 @@ function renderListeZeilen(){
 // Kunde aus Easybill hinzufuegen (Edge Function easybill-kunden-suche, nur lesen)
 // ---------------------------------------------------------------------------
 let ebTreffer = [], ebTimer = null;
-function oeffneEasybill(){
-  S.modal = { art: 'easybill' };
+// verknuepfen = kunde_id eines Kunden ohne Easybill: Treffer verknuepfen statt neu anlegen
+function oeffneEasybill(verknuepfen = null){
+  const lokal = verknuepfen && kundeById(verknuepfen)?.kunde;
+  S.modal = { art: 'easybill', verknuepfen };
   $('modalBox').innerHTML = `
-    <div class="ovl-h"><h3>Kunde aus Easybill hinzufügen</h3><button class="icon-btn" data-m="zu" aria-label="Schliessen">${I('x')}</button></div>
-    <p class="muted small">Nur Kunden, die in Easybill erfasst sind. Neue Kunden zuerst in Easybill anlegen.</p>
-    <label class="search">${I('search')}<input id="ebQ" type="text" placeholder="Name oder Kundennummer (mind. 3 Zeichen)" aria-label="Easybill durchsuchen" style="width:100%"></label>
+    <div class="ovl-h"><h3>${lokal ? 'Mit Easybill verknüpfen' : 'Kunde aus Easybill hinzufügen'}</h3><button class="icon-btn" data-m="zu" aria-label="Schliessen">${I('x')}</button></div>
+    <p class="muted small">${lokal ? `«${esc(lokal.name)}» mit dem passenden Easybill-Kunden verknüpfen. Alles im Pflege-Tool bleibt erhalten, Name, Adresse und Telefon kommen danach aus Easybill.` : 'Nur Kunden, die in Easybill erfasst sind. Neue Kunden zuerst in Easybill anlegen.'}</p>
+    <label class="search">${I('search')}<input id="ebQ" type="text" placeholder="Name oder Kundennummer (mind. 3 Zeichen)" aria-label="Easybill durchsuchen" style="width:100%" value="${lokal ? esc((lokal.name || '').split(/\s+/).pop()) : ''}"></label>
     <div class="eb-list" id="ebListe"><div class="muted small">Suchbegriff eingeben.</div></div>`;
   $('modalOvl').classList.add('show');
   $('ebQ').focus();
+  if(lokal) sucheEasybill($('ebQ').value);
+}
+// Doppelt-Schutz: Kunde ohne Easybill mit gleichem Namen oder gleicher Adresse
+const ebNorm = s => String(s || '').toLowerCase().replace(/str\.?\b/g, 'strasse').replace(/[^a-zäöüéèà0-9]/g, '');
+const lokalerTreffer = e => S.kunden.find(k => !k.kunde?.easybill_id && (
+  (ebNorm(k.kunde?.name) && ebNorm(k.kunde?.name) === ebNorm(e.name)) ||
+  (ebNorm(k.kunde?.strasse) && ebNorm(k.kunde?.strasse) === ebNorm(e.strasse) && String(k.kunde?.plz || '') === String(e.plz || ''))));
+// Bestehenden Kunden ohne Easybill mit einem Easybill-Kunden verknuepfen (Datensatz bleibt, nur Stammdaten kommen neu aus Easybill)
+async function verknuepfeEasybill(ek, kundeId){
+  const { data: schon } = await sb.from('kunde').select('id,name').eq('easybill_id', ek.easybill_id).maybeSingle();
+  if(schon && schon.id !== kundeId){ showToast(`Dieser Easybill-Kunde ist schon als «${schon.name}» erfasst (z. B. im Offertentool). Bitte Claude melden, damit die beiden zusammengeführt werden.`, true); return; }
+  const landMap = { CH: 'Schweiz', DE: 'Deutschland', AT: 'Österreich' };
+  const { error } = await sb.from('kunde').update({
+    easybill_id: ek.easybill_id, name: ek.name, firma: ek.firma, vorname: ek.vorname, nachname: ek.nachname,
+    kundennummer: ek.kundennummer, strasse: ek.strasse, plz: ek.plz, ort: ek.ort, land: landMap[ek.land] || ek.land || null,
+    kontaktdaten: { telefon1: ek.telefon1, telefon2: ek.telefon2, fax: ek.fax, mobil: ek.mobil, emails: ek.emails || [] }
+  }).eq('id', kundeId);
+  if(error){ showToast(friendlyError(error), true); return; }
+  showToast('Mit Easybill verknüpft.');
+  schliesseModal();
+  await ladeAlles();
+  location.hash = 'k=' + kundeId;
 }
 async function sucheEasybill(text){
   if(text.trim().length < 3){ $('ebListe').innerHTML = '<div class="muted small">Suchbegriff eingeben (mind. 3 Zeichen).</div>'; return; }
@@ -903,12 +941,16 @@ async function sucheEasybill(text){
   if(error || data?.error){ $('ebListe').innerHTML = `<div class="muted small">Fehler bei der Suche: ${esc(error?.message || data.error)}</div>`; return; }
   ebTreffer = data?.kunden || [];
   const imTool = new Set(S.kunden.map(k => k.kunde?.easybill_id).filter(Boolean));
-  $('ebListe').innerHTML = ebTreffer.map(e => `
-    <div class="eb-row"><div><strong>${esc(e.name)}</strong><div class="muted small">${esc([e.strasse, [e.plz, e.ort].filter(Boolean).join(' ')].filter(Boolean).join(', '))} · Nr. ${esc(e.kundennummer)}</div></div>
+  const ziel = S.modal?.verknuepfen;
+  $('ebListe').innerHTML = ebTreffer.map(e => { const lok = !ziel && lokalerTreffer(e); return `
+    <div class="eb-row"><div><strong>${esc(e.name)}</strong><div class="muted small">${esc([e.strasse, [e.plz, e.ort].filter(Boolean).join(' ')].filter(Boolean).join(', '))} · Nr. ${esc(e.kundennummer)}</div>
+      ${lok ? `<div class="eb-hinweis">${I('link-off')}Im Tool gibt es «${esc(lok.kunde.name)}» ohne Easybill. Verknüpfen statt doppelt anlegen?</div>` : ''}</div>
       ${imTool.has(e.easybill_id)
         ? `<button class="btn btn-ghost" data-m="eb-oeffnen" data-eb="${e.easybill_id}">Schon im Pflege-Tool – öffnen</button>`
+        : ziel ? `<button class="btn btn-primary" data-m="eb-link" data-eb="${e.easybill_id}" data-k="${ziel}">Verknüpfen</button>`
+        : lok ? `<div class="eb-zwei"><button class="btn btn-primary" data-m="eb-link" data-eb="${e.easybill_id}" data-k="${lok.kunde_id}">Verknüpfen</button><button class="btn btn-ghost" data-m="eb-add" data-eb="${e.easybill_id}">Trotzdem neu</button></div>`
         : `<button class="btn btn-ghost" data-m="eb-add" data-eb="${e.easybill_id}">Hinzufügen</button>`}
-    </div>`).join('') || '<div class="muted small">Kein Easybill-Kunde gefunden.</div>';
+    </div>`; }).join('') || '<div class="muted small">Kein Easybill-Kunde gefunden.</div>';
 }
 // Kunde in der gemeinsamen Tabelle kunde suchen (gleicher Easybill-Kunde = gleicher Datensatz wie im Offertentool) oder neu anlegen
 async function uebernehmeEasybillKunde(ek){
@@ -1202,7 +1244,8 @@ function renderDetail(kundeId){
           <div>${I('pin')}${esc([ku.strasse, [ku.plz, ku.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ')) || '<span class="muted">Keine Adresse</span>'}</div>
           <div>${I('phone')}${telVon(k) ? `<a href="tel:${esc(telVon(k).replace(/\s+/g, ''))}">${esc(telVon(k))}</a>` : '<span class="muted">Kein Telefon</span>'}</div>
           <div class="kh-reg">${I('map')}<span class="muted small">Region</span>${regionSelectHtml('kRegion', 'region', k.region_id, regionAusPlz(plzVonKunde(k)))}</div>
-          <div class="muted small">${I('link')}${ku.easybill_id ? `Easybill-Kunde ${esc(ku.kundennummer || ku.easybill_id)} · Adresse und Telefon kommen aus Easybill` : 'Nicht mit Easybill verknüpft'}</div>
+          ${ku.easybill_id ? `<div class="muted small">${I('link')}Easybill-Kunde ${esc(ku.kundennummer || ku.easybill_id)} · Adresse und Telefon kommen aus Easybill</div>`
+            : `<div class="eb-warn">${I('link-off')}<span>Nicht mit Easybill verknüpft</span><button type="button" class="btn btn-ghost bp-kn" data-act="eb-verknuepfen">${I('link')}Mit Easybill verknüpfen</button></div>`}
         </div>
         <div class="kh-unten">
         <div class="objs" role="group" aria-label="Hauptadresse oder Objekt">
@@ -1698,6 +1741,12 @@ $('modalOvl').addEventListener('click', async e => {
     await uebernehmeEasybillKunde(ebTreffer.find(x => x.easybill_id === +b.dataset.eb));
     return;
   }
+  if(m === 'eb-link'){
+    b.disabled = true; b.textContent = 'Wird verknüpft …';
+    await verknuepfeEasybill(ebTreffer.find(x => x.easybill_id === +b.dataset.eb), b.dataset.k);
+    if(S.modal) { b.disabled = false; b.textContent = 'Verknüpfen'; }
+    return;
+  }
   if(m === 'eb-oeffnen'){
     const k = S.kunden.find(x => x.kunde?.easybill_id === +b.dataset.eb);
     schliesseModal(); if(k) location.hash = 'k=' + k.kunde_id;
@@ -1885,6 +1934,8 @@ $('app').addEventListener('click', async e => {
 
   if(act === 'kunde-oeffnen') location.hash = 'k=' + b.dataset.id;
   else if(act === 'eb-oeffnen') oeffneEasybill();
+  else if(act === 'eb-verknuepfen') oeffneEasybill(kundeId);
+  else if(act === 'f-ohne-eb'){ S.f.ohneEb = !S.f.ohneEb; renderListe(); }
   else if(act === 'drucken') druckeListe();
   else if(act === 'f-abo'){
     const a = b.dataset.abo, f = S.f;
