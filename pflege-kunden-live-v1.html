@@ -168,15 +168,6 @@ tbody tr:last-child td{border-bottom:none;}
 .meta a:hover{text-decoration:underline;}
 .kh-reg{gap:6px !important;}
 .karte-b{padding:6px 12px;}
-.karte-ovl{position:fixed;inset:0;z-index:80;background:#fff;display:none;flex-direction:column;}
-.karte-ovl.show{display:flex;}
-.karte-kopf{display:flex;align-items:center;gap:14px;padding:10px 16px;border-bottom:1px solid var(--line);}
-.karte-kopf h3{font-size:16px;color:var(--primary);}
-.karte-kopf .icon-btn{margin-left:auto;}
-#karteInfo{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.karte-map{flex:1;}
-.karte-iw{font-size:12.5px;line-height:1.45;color:#323E4E;}
-.karte-reg{text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff;}
 .maps-l{display:inline-flex;gap:10px;margin-left:12px;font-size:12px;}
 .maps-l a{color:var(--primary);text-decoration:underline;text-underline-offset:2px;}
 #oMaps .maps-l{margin-left:24px;}
@@ -917,22 +908,17 @@ function renderListeZeilen(){
 // Regionsname in der Mitte ihrer Nadeln. Es gelten die Filter der Kundenliste.
 // Koordinaten rechnet die Edge Function pflege-geocode aus (fehlende bzw. geaenderte Adressen).
 // ---------------------------------------------------------------------------
-let gmLaden = null;
-function ladeGoogleMaps(){
-  if(window.google?.maps) return Promise.resolve();
-  if(gmLaden) return gmLaden;
-  gmLaden = (async () => {
-    const { data, error } = await sb.from('app_einstellung').select('wert').eq('schluessel', 'google_maps_browser_key').maybeSingle();
-    if(error || !data?.wert) throw new Error('Kein Google-Maps-Schlüssel hinterlegt.');
-    await new Promise((ok, nein) => {
-      const s = document.createElement('script');
-      s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(data.wert)}&v=weekly&language=de&region=CH`;
-      s.onload = ok; s.onerror = () => nein(new Error('Google Maps konnte nicht geladen werden.'));
-      document.head.appendChild(s);
-    });
-  })();
-  gmLaden.catch(() => { gmLaden = null; });
-  return gmLaden;
+// Google Maps im Kartenfenster laden (Schluessel aus app_einstellung, nur fuer eingeloggte Benutzer lesbar)
+async function ladeGoogleMapsIn(w){
+  if(w.google?.maps) return;
+  const { data, error } = await sb.from('app_einstellung').select('wert').eq('schluessel', 'google_maps_browser_key').maybeSingle();
+  if(error || !data?.wert) throw new Error('Kein Google-Maps-Schlüssel hinterlegt.');
+  await new Promise((ok, nein) => {
+    const s = w.document.createElement('script');
+    s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(data.wert)}&v=weekly&language=de&region=CH`;
+    s.onload = ok; s.onerror = () => nein(new Error('Google Maps konnte nicht geladen werden.'));
+    w.document.head.appendChild(s);
+  });
 }
 async function rechneKoordinaten(status){
   let fehler = null;
@@ -978,46 +964,79 @@ function huelle(p){
   return l.slice(0, -1).concat(u.slice(0, -1));
 }
 const NADEL = 'M12 2C8.1 2 5 5.1 5 9c0 5.2 7 13 7 13s7-7.8 7-13c0-3.9-3.1-7-7-7z';
+// Ab diesem Zoom einzelne Nadeln, darunter pro Region ein Kreis mit Name und Anzahl
+const KARTE_NADEL_ZOOM = 11;
+// Startausschnitt: Hauptgebiet Biel - Bern - Thun - Interlaken
+const KARTE_START = { south: 46.66, west: 7.22, north: 47.16, east: 7.90 };
+let karteFenster = null;
+// Kartenfenster: eigenes schlankes Browserfenster, gezeichnet von hier aus (gleiche Daten und Filter wie die Liste)
 async function oeffneKarte(){
-  let ovl = $('karteOvl');
-  if(!ovl){
-    ovl = document.createElement('div'); ovl.id = 'karteOvl'; ovl.className = 'karte-ovl';
-    ovl.innerHTML = `<div class="karte-kopf"><h3>Kundenkarte</h3><span class="muted small" id="karteInfo"></span>
-      <button class="icon-btn" data-karte="zu" aria-label="Karte schliessen">${I('x')}</button></div><div id="karteMap" class="karte-map"></div>`;
-    document.body.appendChild(ovl);
-    ovl.addEventListener('click', e => { if(e.target.closest('[data-karte="zu"]')) schliesseKarte(); });
-  }
-  ovl.classList.add('show'); document.body.style.overflow = 'hidden';
-  const info = t => { $('karteInfo').textContent = t; };
-  info('Karte wird geladen …');
-  try { await ladeGoogleMaps(); } catch(e){ info(e.message); return; }
+  const w = window.open('', 'pflegeKarte', 'popup=yes,width=1280,height=860');
+  if(!w){ showToast('Das Kartenfenster wurde vom Browser blockiert. Bitte Popups für knechtgarten.com erlauben.', true); return; }
+  karteFenster = w;
+  w.document.open();
+  w.document.write(`<!doctype html><html lang="de-CH"><head><meta charset="utf-8"><title>Kundenkarte</title>
+    <style>html,body{margin:0;height:100%;font:13px system-ui,Segoe UI,Arial,sans-serif;color:#323E4E;}
+    body{display:flex;flex-direction:column;}#kopf{display:flex;align-items:center;gap:12px;padding:6px 12px;border-bottom:1px solid #DDE1E6;background:#F5F7F9;}
+    #kopf b{font-size:13.5px;}#info{color:#8B9097;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;}
+    #zu{all:unset;cursor:pointer;font-size:18px;line-height:1;padding:2px 6px;border-radius:5px;}#zu:hover{background:#DDE1E6;}
+    #map{flex:1;}.iw{font-size:12.5px;line-height:1.45;color:#323E4E;}.iw .m{color:#8B9097;}
+    .reg-l{text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff;}</style></head>
+    <body><div id="kopf"><b>Kundenkarte</b><span id="info">Karte wird geladen …</span><button id="zu" title="Schliessen" aria-label="Schliessen">✕</button></div><div id="map"></div></body></html>`);
+  w.document.close();
+  w.document.getElementById('zu').onclick = () => w.close();
+  w.focus();
+  const info = t => { const el = w.document.getElementById('info'); if(el) el.textContent = t; };
+  try { await ladeGoogleMapsIn(w); } catch(e){ info(e.message); return; }
   const geoFehler = await rechneKoordinaten(info);
+  zeichneKarte(w, geoFehler, info);
+}
+function zeichneKarte(w, geoFehler, info){
+  const gm = w.google.maps;
   const orte = kartenOrte(), mit = orte.filter(x => x.lat != null), ohne = orte.filter(x => x.lat == null);
-  const map = new google.maps.Map($('karteMap'), { center: { lat: 46.8, lng: 7.6 }, zoom: 9, mapTypeControl: true, streetViewControl: false, fullscreenControl: false, gestureHandling: 'greedy' });
-  const iw = new google.maps.InfoWindow(), grenzen = new google.maps.LatLngBounds();
-  mit.forEach(x => {
-    const pos = { lat: x.lat, lng: x.lon }; grenzen.extend(pos);
-    const m = new google.maps.Marker({ map, position: pos, title: x.k.kunde?.name,
-      icon: { path: NADEL, fillColor: x.reg?.farbe || '#8B9097', fillOpacity: 1, strokeColor: '#323E4E', strokeWeight: 1.2, scale: 1.25, anchor: new google.maps.Point(12, 22) } });
+  const map = new gm.Map(w.document.getElementById('map'), { mapTypeControl: true, streetViewControl: false, fullscreenControl: false, gestureHandling: 'greedy', clickableIcons: false });
+  map.fitBounds(KARTE_START, 0);
+  const iw = new gm.InfoWindow();
+  const nadeln = mit.map(x => {
+    const m = new gm.Marker({ position: { lat: x.lat, lng: x.lon }, title: x.k.kunde?.name,
+      icon: { path: NADEL, fillColor: x.reg?.farbe || '#8B9097', fillOpacity: 1, strokeColor: '#323E4E', strokeWeight: 1.2, scale: 1.25, anchor: new gm.Point(12, 22) } });
     const kw = x.k.abo_typ === 'ohne_voranmeldung' ? 'ohne Anmeldung' : KANAELE.filter(c => (x.k.voranmeldung_kanaele || []).includes(c.id)).map(c => c.n).join(', ') || (x.k.abo_typ === 'mit_voranmeldung' ? 'Voranmeldung, Kontaktweg offen' : '');
-    const html = `<div class="karte-iw"><b>${esc(x.k.kunde?.name)}</b>${x.o ? ' <span class="muted">· Objekt</span>' : ''}<br>${esc(x.adr)}${x.reg ? `<br><span class="muted">${esc(x.reg.name)}</span>` : ''}${kw ? `<br>${esc(kw)}` : ''}<br><span class="muted small">Klicken zum Öffnen</span></div>`;
+    const html = `<div class="iw"><b>${esc(x.k.kunde?.name)}</b>${x.o ? ' <span class="m">· Objekt</span>' : ''}<br>${esc(x.adr)}${x.reg ? `<br><span class="m">${esc(x.reg.name)}</span>` : ''}${kw ? `<br>${esc(kw)}` : ''}<br><span class="m">Klicken öffnet den Kunden in der Liste</span></div>`;
     m.addListener('mouseover', () => { iw.setContent(html); iw.open({ map, anchor: m }); });
-    m.addListener('click', () => { schliesseKarte(); location.hash = 'k=' + x.k.kunde_id + (x.o ? '&o=' + x.o.id : ''); });
+    m.addListener('click', () => { location.hash = 'k=' + x.k.kunde_id + (x.o ? '&o=' + x.o.id : ''); window.focus(); });
+    return m;
   });
-  // Regionen: leichte Flaeche um die Nadeln, Name in der Mitte
+  // Regionen: Flaeche um die Orte, Kreis mit Name + Anzahl (Klick zoomt hinein)
   const proReg = {};
   mit.forEach(x => { if(x.reg) (proReg[x.reg.id] = proReg[x.reg.id] || { r: x.reg, p: [] }).p.push({ lat: x.lat, lng: x.lon }); });
+  const kreise = [], namen = [];
   Object.values(proReg).forEach(({ r, p }) => {
-    if(p.length >= 3) new google.maps.Polygon({ map, paths: huelle(p), strokeColor: r.farbe, strokeOpacity: .7, strokeWeight: 1, fillColor: r.farbe, fillOpacity: .1, clickable: false });
+    if(p.length >= 3) new gm.Polygon({ map, paths: huelle(p), strokeColor: r.farbe, strokeOpacity: .7, strokeWeight: 1, fillColor: r.farbe, fillOpacity: .1, clickable: false });
     const mitte = { lat: p.reduce((s, x) => s + x.lat, 0) / p.length, lng: p.reduce((s, x) => s + x.lng, 0) / p.length };
-    new google.maps.Marker({ map, position: mitte, clickable: false, zIndex: 999,
-      icon: { path: google.maps.SymbolPath.CIRCLE, scale: 0 },
-      label: { text: r.name.replace(/\s*\(.*\)$/, ''), color: '#323E4E', fontSize: '13px', fontWeight: '700', className: 'karte-reg' } });
+    const kurz = r.name.replace(/\s*\(.*\)$/, '');
+    const k = new gm.Marker({ position: mitte, title: `${r.name}: ${p.length} – klicken zum Hineinzoomen`, zIndex: 900,
+      icon: { path: gm.SymbolPath.CIRCLE, scale: 9 + Math.sqrt(p.length) * 2.2, fillColor: r.farbe, fillOpacity: .9, strokeColor: '#323E4E', strokeWeight: 1.5 },
+      label: { text: String(p.length), color: '#fff', fontSize: '12px', fontWeight: '700' } });
+    k.addListener('click', () => { const b = new gm.LatLngBounds(); p.forEach(x => b.extend(x)); map.fitBounds(b, 60); if(map.getZoom() < KARTE_NADEL_ZOOM) map.setZoom(KARTE_NADEL_ZOOM); });
+    kreise.push(k);
+    namen.push(new gm.Marker({ position: mitte, clickable: false, zIndex: 901, icon: { path: gm.SymbolPath.CIRCLE, scale: 0, labelOrigin: new gm.Point(0, 3.2) },
+      label: { text: kurz, color: '#323E4E', fontSize: '12.5px', fontWeight: '700', className: 'reg-l' } }));
   });
-  if(mit.length) map.fitBounds(grenzen, 40);
-  info((geoFehler ? `Fehler beim Umrechnen der Adressen: ${geoFehler} · ` : '') + `${mit.length} Orte auf der Karte` +(ohne.length ? ` · ${ohne.length} ohne Koordinaten: ${ohne.map(x => x.k.kunde?.name + (x.adr ? ' (' + x.adr + ')' : ' (keine Adresse)')).join(', ')}` : ''));
+  // Je nach Zoom Regionskreise oder einzelne Nadeln zeigen (Regionsname bleibt immer sichtbar)
+  let modus = null;
+  const umschalten = () => {
+    const nah = map.getZoom() >= KARTE_NADEL_ZOOM;
+    if(nah === modus) return; modus = nah;
+    nadeln.forEach(m => m.setMap(nah ? map : null));
+    kreise.forEach(m => m.setMap(nah ? null : map));
+    namen.forEach(m => { m.setMap(map); const i = m.getIcon(); i.labelOrigin = new gm.Point(0, nah ? 3.2 : -3.4); m.setIcon(i); });
+    if(!nah) iw.close();
+  };
+  map.addListener('zoom_changed', umschalten);
+  gm.event.addListenerOnce(map, 'idle', umschalten);
+  info((geoFehler ? `Fehler beim Umrechnen der Adressen: ${geoFehler} · ` : '') + `${mit.length} Orte · Kreis anklicken oder hineinzoomen für die einzelnen Kunden`
+    + (ohne.length ? ` · ${ohne.length} ohne Koordinaten: ${ohne.map(x => x.k.kunde?.name + (x.adr ? ' (' + x.adr + ')' : ' (keine Adresse)')).join(', ')}` : ''));
 }
-function schliesseKarte(){ $('karteOvl')?.classList.remove('show'); document.body.style.overflow = ''; }
 
 // ---------------------------------------------------------------------------
 // Kunde aus Easybill hinzufuegen (Edge Function easybill-kunden-suche, nur lesen)
