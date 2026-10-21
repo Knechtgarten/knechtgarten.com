@@ -206,7 +206,7 @@ main.wrap{padding-top:48px;padding-bottom:60px;}
 .tabellezeile{display:flex;gap:10px;align-items:flex-start;}
 .tabellekopfrow{margin-bottom:8px;}
 .tabellentitelzelle{width:var(--feldbreite);flex:0 0 auto;display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;color:var(--ink);cursor:pointer;white-space:nowrap;}
-.tabellekopflabel{width:var(--feldbreite);flex:0 0 auto;font-size:11px;font-weight:600;color:var(--ink);}
+.tabellekopflabel{width:var(--feldbreite);flex:0 0 auto;font-size:11px;font-weight:600;color:var(--ink);overflow-wrap:break-word;hyphens:auto;min-width:0;}
 .tabellekopflabel.berechnet{color:var(--muted);}
 .tabellekopfspacer{width:24px;flex:0 0 auto;}
 .tabellezeilen{display:flex;flex-direction:column;gap:8px;}
@@ -2649,7 +2649,7 @@ async function ladeFormelDaten(otId){
   TABELLEN_SPALTEN = {};
   if(tabellenIds.length){
     const { data: spalten, error: spErr } = await sb.from('eingabefeld_tabelle_spalte')
-      .select('id,eingabefeld_id,name,einheit,reihenfolge,ist_berechnung,ausdruck,zusatztext_moeglich,flaechenformel_moeglich,vorschlagswert')
+      .select('id,eingabefeld_id,name,einheit,reihenfolge,ist_berechnung,ausdruck,zusatztext_moeglich,flaechenformel_moeglich,vorschlagswert,ausgeblendet')
       .in('eingabefeld_id', tabellenIds).order('reihenfolge');
     if(spErr) throw spErr;
     (spalten || []).forEach(s => { (TABELLEN_SPALTEN[s.eingabefeld_id] ||= []).push(s); });
@@ -3433,13 +3433,13 @@ function renderTabelle(ef, container){
   wrap.innerHTML = `
     <div class="tabellezeile tabellekopfrow">
       <div class="tabellentitelzelle">${titelZelleHtml}</div>
-      ${spalten.map(s => `<div class="tabellekopflabel${s.ist_berechnung ? ' berechnet' : ''}">${escHtml(s.name)} (${escHtml(s.einheit)})</div>`).join('')}
+      ${spalten.filter(s => !s.ausgeblendet).map(s => `<div class="tabellekopflabel${s.ist_berechnung ? ' berechnet' : ''}">${escHtml(s.name)} (${escHtml(s.einheit)})</div>`).join('')}
       <div class="tabellekopfspacer"></div>
     </div>
     <div class="tabellezeilen"></div>
     <div class="tabellezeile tabellefuss">
       <div class="tabellezeilenname-wrap"><span class="tabellenaddzeile">+ Zeile hinzufügen</span></div>
-      ${spalten.map(s => `<div class="tabellensumme" data-tabelle="${ef.id}" data-spalte="${s.id}"></div>`).join('')}
+      ${spalten.filter(s => !s.ausgeblendet).map(s => `<div class="tabellensumme" data-tabelle="${ef.id}" data-spalte="${s.id}"></div>`).join('')}
       <div class="tabellekopfspacer"></div>
     </div>`;
   container.appendChild(wrap);
@@ -3458,7 +3458,7 @@ function renderTabelle(ef, container){
     nameInp.dataset.key = zeile._key; nameInp.dataset.ef = ef.id;
     nameInp.addEventListener('input', e => { zeile.name = e.target.value; });
     row.appendChild(nameWrap);
-    spalten.forEach(s => {
+    spalten.filter(s => !s.ausgeblendet).forEach(s => {
       const zelle = document.createElement('div');
       zelle.className = 'tabellenspaltenzelle';
       renderTabelleZeileZelle(s, zeile, zelle);
@@ -5901,6 +5901,39 @@ $('supportChatInput').addEventListener('keydown', (e) => {
 
 (async () => {
   if(await pruefeAnmeldung()) await init();
+})();
+</script>
+<script>
+/* kgPasswortManagerSchutz: Passwort-Manager (Dashlane, 1Password, LastPass) sollen ausserhalb der
+   Anmeldung nichts in Eingabefelder schreiben. Gilt auch fuer spaeter eingefuegte Felder.
+   Anmelde-/Passwortfelder (type=password, autocomplete=username/current-password/new-password) bleiben unberuehrt. */
+(function(){
+  var AUSNAHMEN = ['username', 'current-password', 'new-password', 'one-time-code'];
+  function schuetze(el){
+    if(!el || el.nodeType !== 1 || el.dataset.kgPw) return;
+    var tag = el.tagName;
+    if(tag !== 'INPUT' && tag !== 'TEXTAREA') return;
+    var typ = (el.getAttribute('type') || 'text').toLowerCase();
+    if(typ === 'password' || typ === 'hidden' || typ === 'checkbox' || typ === 'radio' || typ === 'file' || typ === 'button' || typ === 'submit') return;
+    if(AUSNAHMEN.indexOf((el.getAttribute('autocomplete') || '').toLowerCase()) !== -1) return;
+    if(el.closest && el.closest('.logincard')) return;
+    el.dataset.kgPw = '1';
+    el.setAttribute('autocomplete', 'off');
+    el.setAttribute('data-lpignore', 'true');
+    el.setAttribute('data-1p-ignore', 'true');
+    el.setAttribute('data-dashlane-ignore', 'true');
+    el.setAttribute('data-form-type', 'other');
+  }
+  function alle(root){
+    if(root.nodeType !== 1) return;
+    schuetze(root);
+    var liste = root.querySelectorAll ? root.querySelectorAll('input, textarea') : [];
+    for(var i = 0; i < liste.length; i++) schuetze(liste[i]);
+  }
+  alle(document.documentElement);
+  new MutationObserver(function(ms){
+    for(var i = 0; i < ms.length; i++) for(var k = 0; k < ms[i].addedNodes.length; k++) alle(ms[i].addedNodes[k]);
+  }).observe(document.documentElement, { childList: true, subtree: true });
 })();
 </script>
 </body>
