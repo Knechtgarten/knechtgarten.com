@@ -954,15 +954,6 @@ function kartenOrte(){
   });
   return orte;
 }
-function huelle(p){
-  p = [...p].sort((a, b) => a.lng - b.lng || a.lat - b.lat);
-  if(p.length < 3) return p;
-  const kr = (o, a, b) => (a.lng - o.lng) * (b.lat - o.lat) - (a.lat - o.lat) * (b.lng - o.lng);
-  const u = [], l = [];
-  for(const x of p){ while(l.length >= 2 && kr(l[l.length - 2], l[l.length - 1], x) <= 0) l.pop(); l.push(x); }
-  for(const x of [...p].reverse()){ while(u.length >= 2 && kr(u[u.length - 2], u[u.length - 1], x) <= 0) u.pop(); u.push(x); }
-  return l.slice(0, -1).concat(u.slice(0, -1));
-}
 const NADEL = 'M12 2C8.1 2 5 5.1 5 9c0 5.2 7 13 7 13s7-7.8 7-13c0-3.9-3.1-7-7-7z';
 // Ab diesem Zoom einzelne Nadeln, darunter pro Region ein Kreis mit Name und Anzahl
 const KARTE_NADEL_ZOOM = 11;
@@ -981,7 +972,9 @@ async function oeffneKarte(){
     #kopf b{font-size:13.5px;}#info{color:#8B9097;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;}
     #zu{all:unset;cursor:pointer;font-size:18px;line-height:1;padding:2px 6px;border-radius:5px;}#zu:hover{background:#DDE1E6;}
     #map{flex:1;}.iw{font-size:12.5px;line-height:1.45;color:#323E4E;}.iw .m{color:#8B9097;}
-    .reg-l{text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff;}</style></head>
+    .reg-l{text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff;}
+    .iw-b{display:flex;gap:6px;margin-top:7px;}.iw-b button{font:inherit;font-size:12px;padding:4px 10px;border:1px solid #8B9097;border-radius:6px;background:#fff;color:#323E4E;cursor:pointer;}
+    .iw-b button:hover{border-color:#323E4E;background:#F5F7F9;}</style></head>
     <body><div id="kopf"><b>Kundenkarte</b><span id="info">Karte wird geladen …</span><button id="zu" title="Schliessen" aria-label="Schliessen">✕</button></div><div id="map"></div></body></html>`);
   w.document.close();
   w.document.getElementById('zu').onclick = () => w.close();
@@ -1006,21 +999,43 @@ function zeichneKarte(w, geoFehler, info){
     m.addListener('click', () => { location.hash = 'k=' + x.k.kunde_id + (x.o ? '&o=' + x.o.id : ''); window.focus(); });
     return m;
   });
-  // Regionen: Flaeche um die Orte, Kreis mit Name + Anzahl (Klick zoomt hinein)
+  // Regionen: berechnetes Gebiet (pflege_region.gebiet), Kreis mit Anzahl der gefilterten Orte.
+  // Klick auf Gebiet oder Kreis: Hineinzoomen oder die Region in der Kundenliste filtern.
   const proReg = {};
-  mit.forEach(x => { if(x.reg) (proReg[x.reg.id] = proReg[x.reg.id] || { r: x.reg, p: [] }).p.push({ lat: x.lat, lng: x.lon }); });
+  mit.forEach(x => { if(x.reg) (proReg[x.reg.id] = proReg[x.reg.id] || []).push({ lat: x.lat, lng: x.lon }); });
   const kreise = [], namen = [];
-  Object.values(proReg).forEach(({ r, p }) => {
-    if(p.length >= 3) new gm.Polygon({ map, paths: huelle(p), strokeColor: r.farbe, strokeOpacity: .7, strokeWeight: 1, fillColor: r.farbe, fillOpacity: .1, clickable: false });
-    const mitte = { lat: p.reduce((s, x) => s + x.lat, 0) / p.length, lng: p.reduce((s, x) => s + x.lng, 0) / p.length };
-    const kurz = r.name.replace(/\s*\(.*\)$/, '');
-    const k = new gm.Marker({ position: mitte, title: `${r.name}: ${p.length} – klicken zum Hineinzoomen`, zIndex: 900,
-      icon: { path: gm.SymbolPath.CIRCLE, scale: 9 + Math.sqrt(p.length) * 2.2, fillColor: r.farbe, fillOpacity: .9, strokeColor: '#323E4E', strokeWeight: 1.5 },
-      label: { text: String(p.length), color: '#fff', fontSize: '12px', fontWeight: '700' } });
-    k.addListener('click', () => { const b = new gm.LatLngBounds(); p.forEach(x => b.extend(x)); map.fitBounds(b, 60); if(map.getZoom() < KARTE_NADEL_ZOOM) map.setZoom(KARTE_NADEL_ZOOM); });
-    kreise.push(k);
+  const zoomeAuf = punkte => { const b = new gm.LatLngBounds(); punkte.forEach(x => b.extend(x)); map.fitBounds(b, 60); gm.event.addListenerOnce(map, 'idle', () => { if(map.getZoom() < KARTE_NADEL_ZOOM) map.setZoom(KARTE_NADEL_ZOOM); }); };
+  const regionFenster = (r, pfad, pos) => {
+    const p = proReg[r.id] || [], d = w.document.createElement('div');
+    d.className = 'iw';
+    d.innerHTML = `<b>${esc(r.name)}</b><br><span class="m">${p.length} ${p.length === 1 ? 'Ort' : 'Orte'} mit den aktuellen Filtern</span>
+      <div class="iw-b"><button data-a="zoom">Hineinzoomen</button><button data-a="liste">In der Liste filtern</button></div>`;
+    d.querySelector('[data-a="zoom"]').onclick = () => { iw.close(); zoomeAuf(p.length ? p : pfad); };
+    d.querySelector('[data-a="liste"]').onclick = () => {
+      S.f.reg = [r.id]; if(location.hash) location.hash = ''; renderListe();
+      showToast(`Kundenliste auf «${r.name}» gefiltert.`); iw.close(); window.focus();
+    };
+    iw.setContent(d); iw.setPosition(pos); iw.open({ map });
+  };
+  S.reg.filter(r => !r.ist_rest).forEach(r => {
+    const pfade = (r.gebiet || []).map(pf => pf.map(([la, ln]) => ({ lat: la, lng: ln })));
+    const p = proReg[r.id] || [], alle = pfade.flat();
+    if(pfade.length){
+      const poly = new gm.Polygon({ map, paths: pfade, strokeColor: r.farbe, strokeOpacity: .8, strokeWeight: 1.5, fillColor: r.farbe, fillOpacity: p.length ? .16 : .06 });
+      poly.addListener('click', e => regionFenster(r, alle, e.latLng));
+    }
+    if(!p.length && !pfade.length) return;
+    const quelle = p.length ? p : alle;
+    const mitte = { lat: quelle.reduce((s, x) => s + x.lat, 0) / quelle.length, lng: quelle.reduce((s, x) => s + x.lng, 0) / quelle.length };
+    if(p.length){
+      const k = new gm.Marker({ position: mitte, title: `${r.name}: ${p.length}`, zIndex: 900,
+        icon: { path: gm.SymbolPath.CIRCLE, scale: 9 + Math.sqrt(p.length) * 2.2, fillColor: r.farbe, fillOpacity: .9, strokeColor: '#323E4E', strokeWeight: 1.5 },
+        label: { text: String(p.length), color: '#fff', fontSize: '12px', fontWeight: '700' } });
+      k.addListener('click', () => regionFenster(r, alle, mitte));
+      kreise.push(k);
+    }
     namen.push(new gm.Marker({ position: mitte, clickable: false, zIndex: 901, icon: { path: gm.SymbolPath.CIRCLE, scale: 0, labelOrigin: new gm.Point(0, 3.2) },
-      label: { text: kurz, color: '#323E4E', fontSize: '12.5px', fontWeight: '700', className: 'reg-l' } }));
+      label: { text: r.name.replace(/\s*\(.*\)$/, ''), color: '#323E4E', fontSize: '12.5px', fontWeight: '700', className: 'reg-l' } }));
   });
   // Je nach Zoom Regionskreise oder einzelne Nadeln zeigen (Regionsname bleibt immer sichtbar)
   let modus = null;
