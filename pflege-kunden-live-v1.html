@@ -935,11 +935,12 @@ function ladeGoogleMaps(){
   return gmLaden;
 }
 async function rechneKoordinaten(status){
+  let fehler = null;
   for(let runde = 0; runde < 15; runde++){
     const { data, error } = await sb.functions.invoke('pflege-geocode', { body: {} });
-    let fehler = data?.error;
+    fehler = data?.error;
     if(error && !fehler){ try { fehler = (await error.context?.json())?.error; } catch {} fehler = fehler || error.message; }
-    if(fehler){ showToast('Adressen umrechnen: ' + fehler, true); break; }
+    if(fehler) break;
     if(!data.offen) break;
     status(`Adressen werden umgerechnet … noch ${data.offen}`);
   }
@@ -949,6 +950,7 @@ async function rechneKoordinaten(status){
   ]);
   (k.data || []).forEach(x => Object.assign(kundeById(x.kunde_id) || {}, x));
   (o.data || []).forEach(x => Object.assign(S.obj.find(y => y.id === x.id) || {}, x));
+  return fehler;
 }
 // Orte fuer die Karte: Hauptadresse und Objekte der gefilterten Kunden
 function kartenOrte(){
@@ -989,7 +991,7 @@ async function oeffneKarte(){
   const info = t => { $('karteInfo').textContent = t; };
   info('Karte wird geladen …');
   try { await ladeGoogleMaps(); } catch(e){ info(e.message); return; }
-  await rechneKoordinaten(info);
+  const geoFehler = await rechneKoordinaten(info);
   const orte = kartenOrte(), mit = orte.filter(x => x.lat != null), ohne = orte.filter(x => x.lat == null);
   const map = new google.maps.Map($('karteMap'), { center: { lat: 46.8, lng: 7.6 }, zoom: 9, mapTypeControl: true, streetViewControl: false, fullscreenControl: false, gestureHandling: 'greedy' });
   const iw = new google.maps.InfoWindow(), grenzen = new google.maps.LatLngBounds();
@@ -1013,7 +1015,7 @@ async function oeffneKarte(){
       label: { text: r.name.replace(/\s*\(.*\)$/, ''), color: '#323E4E', fontSize: '13px', fontWeight: '700', className: 'karte-reg' } });
   });
   if(mit.length) map.fitBounds(grenzen, 40);
-  info(`${mit.length} Orte auf der Karte` + (ohne.length ? ` · ${ohne.length} ohne Koordinaten: ${ohne.map(x => x.k.kunde?.name + (x.adr ? ' (' + x.adr + ')' : ' (keine Adresse)')).join(', ')}` : ''));
+  info((geoFehler ? `Fehler beim Umrechnen der Adressen: ${geoFehler} · ` : '') + `${mit.length} Orte auf der Karte` +(ohne.length ? ` · ${ohne.length} ohne Koordinaten: ${ohne.map(x => x.k.kunde?.name + (x.adr ? ' (' + x.adr + ')' : ' (keine Adresse)')).join(', ')}` : ''));
 }
 function schliesseKarte(){ $('karteOvl')?.classList.remove('show'); document.body.style.overflow = ''; }
 
