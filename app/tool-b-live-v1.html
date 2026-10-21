@@ -1520,7 +1520,7 @@ async function loadFormelBibliothek(){
   if(tabellenIds.length){
     const { data: spalten, error: spErr } = await selectSpalten(
       'id,eingabefeld_id,name,einheit,reihenfolge,ist_berechnung,ausdruck,zusatztext_moeglich,flaechenformel_moeglich,vorschlagswert,formel_modus,formel_text,formel_baukasten_ausdruck',
-      'ist_dropdown,dropdown_leer_label,dropdown_pflicht',
+      'ist_dropdown,dropdown_leer_label,dropdown_pflicht,ausgeblendet',
       q => q.in('eingabefeld_id', tabellenIds).order('reihenfolge'));
     if(spErr){ console.error(spErr); return; }
     (spalten || []).forEach(s => { (TABELLE_SPALTEN[s.eingabefeld_id] ||= []).push(s); });
@@ -1953,7 +1953,7 @@ let efTabelleSpalten = [];
 let efTabelleSpalteCounter = 0;
 
 function neueEfTabelleSpalte(){
-  return { id: null, name: '', einheit: '', ist_berechnung: false, ist_dropdown: false, dropdown_leer_label: '', dropdown_pflicht: false, zusatztext_moeglich: false, flaechenformel_moeglich: false, vorschlagswert: null, glieder: null, formelState: null, _key: ++efTabelleSpalteCounter };
+  return { id: null, name: '', einheit: '', ist_berechnung: false, ausgeblendet: false, ist_dropdown: false, dropdown_leer_label: '', dropdown_pflicht: false, zusatztext_moeglich: false, flaechenformel_moeglich: false, vorschlagswert: null, glieder: null, formelState: null, _key: ++efTabelleSpalteCounter };
 }
 function openNeueEingabefeldTabelleModal(){
   efTabelleId = null;
@@ -1974,7 +1974,7 @@ function openEingabefeldTabelleModal(id){
     const basis = s.ist_berechnung ? formelStateAusZeile(s, 'formel', s.ausdruck) : null;
     return {
       id: s.id, name: s.name, einheit: s.einheit, ist_berechnung: s.ist_berechnung,
-      ist_dropdown: !!s.ist_dropdown, dropdown_leer_label: s.dropdown_leer_label || '', dropdown_pflicht: !!s.dropdown_pflicht,
+      ausgeblendet: !!s.ausgeblendet, ist_dropdown: !!s.ist_dropdown, dropdown_leer_label: s.dropdown_leer_label || '', dropdown_pflicht: !!s.dropdown_pflicht,
       zusatztext_moeglich: s.zusatztext_moeglich, flaechenformel_moeglich: s.flaechenformel_moeglich,
       vorschlagswert: s.vorschlagswert,
       glieder: basis ? basis.glieder : [{ op: null, mode: 'lit', refKind: null, refId: null, text: '' }],
@@ -2024,6 +2024,7 @@ function renderEfTabelleSpalten(){
           ${!SPALTE_HAT_DROPDOWN ? '<div class="hint" style="margin-top:4px;color:var(--danger);">Noch nicht speicherbar: Die Datenbank-Migration für Dropdown-Spalten wurde noch nicht eingespielt.</div>' : ''}
         ` : s.ist_berechnung ? `
           <div id="efTabelleFormelWrap_${s._key}"></div>
+          <label class="spaltencheck" style="margin-top:6px;" title="Die Spalte rechnet weiter im Hintergrund (Summen, Formeln), erscheint aber nicht in der Tabelle."><input type="checkbox" data-k="ausgeblendet" ${s.ausgeblendet ? 'checked' : ''}> Nicht anzeigen (rechnet im Hintergrund)</label>
           ${!s.id ? '<div class="hint" style="margin-top:4px;">Andere Spalten dieser Tabelle stehen als Formel-Baustein erst nach dem ersten Speichern zur Auswahl.</div>' : ''}
         ` : `
           <div class="spaltensub-checks">
@@ -2052,6 +2053,7 @@ function renderEfTabelleSpalten(){
       }
       renderEfTabelleSpalten();
     });
+    card.querySelector('[data-k="ausgeblendet"]')?.addEventListener('change', e => { s.ausgeblendet = e.target.checked; });
     card.querySelector('[data-k="zusatztext_moeglich"]')?.addEventListener('change', e => { s.zusatztext_moeglich = e.target.checked; });
     card.querySelector('[data-k="flaechenformel_moeglich"]')?.addEventListener('change', e => { s.flaechenformel_moeglich = e.target.checked; });
     card.querySelector('[data-k="vorschlagswert"]')?.addEventListener('input', e => { const v = e.target.value.trim(); s.vorschlagswert = v === '' ? null : parseFloat(v); });
@@ -2127,7 +2129,8 @@ $('efTabelleSave').addEventListener('click', async () => {
       ...(SPALTE_HAT_DROPDOWN ? {
         ist_dropdown: !!s.ist_dropdown,
         dropdown_leer_label: s.ist_dropdown && !s.dropdown_pflicht ? (s.dropdown_leer_label || '').trim() || null : null,
-        dropdown_pflicht: !!s.ist_dropdown && !!s.dropdown_pflicht
+        dropdown_pflicht: !!s.ist_dropdown && !!s.dropdown_pflicht,
+        ausgeblendet: !!s.ist_berechnung && !!s.ausgeblendet
       } : {})
     };
     if(s.id){
@@ -5144,6 +5147,39 @@ $('supportChatInput').addEventListener('keydown', (e) => {
 
 (async () => {
   if(await pruefeAnmeldung()) await init();
+})();
+</script>
+<script>
+/* kgPasswortManagerSchutz: Passwort-Manager (Dashlane, 1Password, LastPass) sollen ausserhalb der
+   Anmeldung nichts in Eingabefelder schreiben. Gilt auch fuer spaeter eingefuegte Felder.
+   Anmelde-/Passwortfelder (type=password, autocomplete=username/current-password/new-password) bleiben unberuehrt. */
+(function(){
+  var AUSNAHMEN = ['username', 'current-password', 'new-password', 'one-time-code'];
+  function schuetze(el){
+    if(!el || el.nodeType !== 1 || el.dataset.kgPw) return;
+    var tag = el.tagName;
+    if(tag !== 'INPUT' && tag !== 'TEXTAREA') return;
+    var typ = (el.getAttribute('type') || 'text').toLowerCase();
+    if(typ === 'password' || typ === 'hidden' || typ === 'checkbox' || typ === 'radio' || typ === 'file' || typ === 'button' || typ === 'submit') return;
+    if(AUSNAHMEN.indexOf((el.getAttribute('autocomplete') || '').toLowerCase()) !== -1) return;
+    if(el.closest && el.closest('.logincard')) return;
+    el.dataset.kgPw = '1';
+    el.setAttribute('autocomplete', 'off');
+    el.setAttribute('data-lpignore', 'true');
+    el.setAttribute('data-1p-ignore', 'true');
+    el.setAttribute('data-dashlane-ignore', 'true');
+    el.setAttribute('data-form-type', 'other');
+  }
+  function alle(root){
+    if(root.nodeType !== 1) return;
+    schuetze(root);
+    var liste = root.querySelectorAll ? root.querySelectorAll('input, textarea') : [];
+    for(var i = 0; i < liste.length; i++) schuetze(liste[i]);
+  }
+  alle(document.documentElement);
+  new MutationObserver(function(ms){
+    for(var i = 0; i < ms.length; i++) for(var k = 0; k < ms[i].addedNodes.length; k++) alle(ms[i].addedNodes[k]);
+  }).observe(document.documentElement, { childList: true, subtree: true });
 })();
 </script>
 </body>
