@@ -1319,7 +1319,7 @@ async function speichereTabellenZeilen(offerteId){
   });
   if(!zeilenListe.length) return;
   const { data: neueZeilen, error: insErr } = await sb.from('offerte_tabelle_zeile')
-    .insert(zeilenListe.map(t => ({ offerte_id: offerteId, eingabefeld_id: t.eingabefeld_id, name: t.zeile.name, reihenfolge: t.reihenfolge, option_id: t.zeile.optionId || null })))
+    .insert(zeilenListe.map(t => ({ offerte_id: offerteId, eingabefeld_id: t.eingabefeld_id, name: t.zeile.name, reihenfolge: t.reihenfolge, option_id: (t.zeile.optionIds || [])[0] || null, option_ids: t.zeile.optionIds || [] })))
     .select();
   if(insErr) throw insErr;
   const werteRows = [];
@@ -3477,7 +3477,7 @@ function renderTabelle(ef, container){
     zeilenWrap.appendChild(row);
   });
   wrap.querySelector('.tabellenaddzeile').addEventListener('click', () => {
-    bereichTabelleZeilen[ef.id].push({ _key: ++tabelleZeileCounter, id: null, name: `${titelText} ${bereichTabelleZeilen[ef.id].length + 1}`, werte: {}, optionId: standardOptionFuerNeueZeile(ef.id) });
+    bereichTabelleZeilen[ef.id].push({ _key: ++tabelleZeileCounter, id: null, name: `${titelText} ${bereichTabelleZeilen[ef.id].length + 1}`, werte: {}, optionIds: standardOptionenFuerNeueZeile(ef.id) });
     renderBereich();
     recalc();
     planAutosave();
@@ -3576,8 +3576,20 @@ function verweisWert(zeile, spalte){ return Number(zeile.werte[spalte.id]?.wert)
 function alleTabellenZeilen(){ return Object.values(bereichTabelleZeilen).flat(); }
 function findeOptionPerId(optId){ return auswahlfelder.flatMap(af => af.optionen).find(o => o.id === optId); }
 // Zuordnungen zu Optionen, die nicht (mehr) gewaehlt sind, fallen weg
+// Eine Zeile kann mehreren Optionen zugeordnet sein (z.optionIds), aber hoechstens
+// einer pro "Gruppe" (Eintrag gruppe im Tabellenverweis, ohne Angabe = "standard"):
+// z.B. Fundation und Verputzen sind getrennte Gruppen, Kies/Beton/LKW/Lieferwagen
+// innerhalb der Fundation schliessen sich dagegen aus.
+function verweisGruppe(optId){ return (OPTION_VERWEIS[optId] && OPTION_VERWEIS[optId][0] && OPTION_VERWEIS[optId][0].gruppe) || 'standard'; }
+function zHat(z, optId){ return !!z.optionIds && z.optionIds.includes(optId); }
+function zInGruppe(z, gruppe){ return (z.optionIds || []).find(id => OPTION_VERWEIS[id] && verweisGruppe(id) === gruppe) || null; }
+function zSetze(z, optId, an){
+  const g = verweisGruppe(optId);
+  z.optionIds = (z.optionIds || []).filter(id => id !== optId && !(OPTION_VERWEIS[id] && verweisGruppe(id) === g && an));
+  if(an) z.optionIds.push(optId);
+}
 function bereinigeVerweisZuordnungen(){
-  alleTabellenZeilen().forEach(z => { if(z.optionId && !bereichSelectedOptions.has(z.optionId)) z.optionId = null; });
+  alleTabellenZeilen().forEach(z => { if(z.optionIds && z.optionIds.length) z.optionIds = z.optionIds.filter(id => bereichSelectedOptions.has(id)); });
 }
 function berechneVerweisMengen(){
   bereinigeVerweisZuordnungen();
@@ -3585,7 +3597,7 @@ function berechneVerweisMengen(){
   bereichSelectedOptions.forEach(optId => {
     if(!OPTION_VERWEIS[optId]) return;
     VERWEIS_MENGEN[optId] = verweisEintraege(optId).reduce((summe, e) =>
-      summe + e.zeilen.filter(z => z.optionId === optId).reduce((s, z) => s + verweisWert(z, e.spalte), 0), 0);
+      summe + e.zeilen.filter(z => zHat(z, optId)).reduce((s, z) => s + verweisWert(z, e.spalte), 0), 0);
   });
 }
 // Nach einem Klick auf einen Options-Button: Wechselt jemand z.B. von Piazentina
@@ -3597,30 +3609,34 @@ function uebernehmeVerweisZuordnung(af, vorher){
   const neu = af.optionen.find(o => OPTION_VERWEIS[o.id] && bereichSelectedOptions.has(o.id) && !vorher.has(o.id));
   const zeilen = alleTabellenZeilen();
   if(neu){
+    const gr = verweisGruppe(neu.id);
     const erlaubt = new Set(verweisEintraege(neu.id).flatMap(e => e.zeilen));
-    zeilen.forEach(z => { if(entfernt.includes(z.optionId)) z.optionId = erlaubt.has(z) ? neu.id : null; });
-    const hatSchon = zeilen.some(z => z.optionId === neu.id);
-    const andereBelegt = zeilen.some(z => z.optionId && z.optionId !== neu.id && bereichSelectedOptions.has(z.optionId));
+    zeilen.forEach(z => entfernt.forEach(id => { if(zHat(z, id)){ z.optionIds = z.optionIds.filter(x => x !== id); if(erlaubt.has(z)) zSetze(z, neu.id, true); } }));
+    const hatSchon = zeilen.some(z => zHat(z, neu.id));
+    const andereBelegt = zeilen.some(z => { const g = zInGruppe(z, gr); return g && g !== neu.id && bereichSelectedOptions.has(g); });
     if(!hatSchon && !andereBelegt){
-      verweisEintraege(neu.id).forEach(e => e.zeilen.forEach(z => { if(!z.optionId && verweisWert(z, e.spalte) > 0) z.optionId = neu.id; }));
+      verweisEintraege(neu.id).forEach(e => e.zeilen.forEach(z => { if(!zInGruppe(z, gr) && verweisWert(z, e.spalte) > 0) zSetze(z, neu.id, true); }));
     }
   }else{
-    zeilen.forEach(z => { if(entfernt.includes(z.optionId)) z.optionId = null; });
+    zeilen.forEach(z => { if(z.optionIds) z.optionIds = z.optionIds.filter(id => !entfernt.includes(id)); });
   }
 }
-// Neue Tabellenzeile: ist genau eine Verweis-Option gewaehlt, die diese Tabelle
-// nutzt, gehoert die Zeile gleich dazu (sonst muesste man sie extra anhaken).
-function standardOptionFuerNeueZeile(efId){
-  const kandidaten = [...bereichSelectedOptions].filter(id => OPTION_VERWEIS[id] && OPTION_VERWEIS[id].some(v => v.eingabefeld_id === efId));
-  return kandidaten.length === 1 ? kandidaten[0] : null;
+// Neue Tabellenzeile: ist pro Gruppe genau eine Verweis-Option gewaehlt, die diese
+// Tabelle nutzt, gehoert die Zeile gleich dazu (sonst muesste man sie extra anhaken).
+function standardOptionenFuerNeueZeile(efId){
+  const proGruppe = {};
+  [...bereichSelectedOptions].filter(id => OPTION_VERWEIS[id] && OPTION_VERWEIS[id].some(v => v.eingabefeld_id === efId))
+    .forEach(id => { (proGruppe[verweisGruppe(id)] ||= []).push(id); });
+  return Object.values(proGruppe).filter(l => l.length === 1).map(l => l[0]);
 }
 // Summe der angehakten Zeilen, uebrige freie Menge und Einheit einer Verweis-Option
 function verweisSummen(opt){
   const eintraege = verweisEintraege(opt.id);
+  const gr = verweisGruppe(opt.id);
   let summe = 0, offen = 0;
   eintraege.forEach(e => e.zeilen.forEach(z => {
     const w = verweisWert(z, e.spalte);
-    if(z.optionId === opt.id) summe += w; else if(!z.optionId) offen += w;
+    if(zHat(z, opt.id)) summe += w; else if(!zInGruppe(z, gr)) offen += w;
   }));
   return { eintraege, summe, offen, einheit: eintraege[0]?.spalte.einheit || '' };
 }
@@ -3628,7 +3644,7 @@ const verweisFmt = n => n.toLocaleString('de-CH', { maximumFractionDigits: 2 });
 // Kleiner Knopf neben dem Belag-Button: zeigt die Summe, Klick oeffnet das Pop-up
 function verweisKnopfText(opt){
   const { summe, einheit } = verweisSummen(opt);
-  return summe > 0 ? `${verweisFmt(summe)}${einheit ? ' ' + einheit : ''} ▾` : 'Flächen wählen ▾';
+  return summe > 0 ? `${verweisFmt(summe)}${einheit ? ' ' + einheit : ''} ▾` : (einheit === 'm²' ? 'Flächen wählen ▾' : 'Zeilen wählen ▾');
 }
 let verweisPopOptId = null;
 function schliesseVerweisPopup(){
@@ -3649,7 +3665,7 @@ async function versucheVerweisPopupZuSchliessen(){
     verweisPruefLaeuft = true;
     // OK: Pop-up schliessen (Belag bleibt gewaehlt, sein Feld bleibt rot);
     // Abbrechen: zurueck zu den Flaechen
-    const ok = await confirmDialog(`Für «${opt.name}» ist keine Fläche angehakt.`, 'OK');
+    const ok = await confirmDialog(`Für «${opt.name}» ist keine Zeile angehakt.`, 'OK');
     verweisPruefLaeuft = false;
     if(!ok) return; // Pop-up bleibt offen
   }
@@ -3660,17 +3676,18 @@ function fuelleVerweisPopup(){
   const opt = verweisPopOptId && findeOptionPerId(verweisPopOptId);
   if(!pop || !opt) return;
   const { eintraege, summe, offen, einheit } = verweisSummen(opt);
+  const gr = verweisGruppe(opt.id);
   if(!eintraege.length){
     pop.innerHTML = '<div class="vp-hint">Die verknüpfte Tabelle/Spalte gibt es nicht mehr – bitte in Tool B bei der Option prüfen.</div>';
     return;
   }
   const teile = eintraege.map(e => {
     // Freie und hier angehakte Flaechen zuoberst, die schon anderswo vergebenen (nur zur Info) unten
-    const zeilen = e.zeilen.filter(z => verweisWert(z, e.spalte) > 0 || z.optionId === opt.id)
-      .sort((a, b) => (a.optionId && a.optionId !== opt.id ? 1 : 0) - (b.optionId && b.optionId !== opt.id ? 1 : 0));
+    const zeilen = e.zeilen.filter(z => verweisWert(z, e.spalte) > 0 || zHat(z, opt.id))
+      .sort((a, b) => (zInGruppe(a, gr) && !zHat(a, opt.id) ? 1 : 0) - (zInGruppe(b, gr) && !zHat(b, opt.id) ? 1 : 0));
     const liste = zeilen.map(z => {
-      const meine = z.optionId === opt.id;
-      const fremd = z.optionId && !meine ? findeOptionPerId(z.optionId)?.name : null;
+      const meine = zHat(z, opt.id);
+      const fremdId = zInGruppe(z, gr); const fremd = fremdId && !meine ? findeOptionPerId(fremdId)?.name : null;
       const einheitTxt = e.spalte.einheit ? ' ' + escHtml(e.spalte.einheit) : '';
       const wertTxt = `${verweisFmt(verweisWert(z, e.spalte))}${einheitTxt}`;
       // Fläche gehört schon zu einem anderen Belag: nur zur Information, nicht anwählbar -
@@ -3678,15 +3695,15 @@ function fuelleVerweisPopup(){
       if(fremd) return `<div class="vp-zeile vp-gesperrt" title="Erst bei «${escHtml(fremd)}» abhaken, dann ist sie hier frei"><span class="vp-name">${escHtml(z.name || 'Zeile')} <span class="vp-bei">– ${escHtml(fremd)}</span></span><span class="vp-wert">${wertTxt}</span></div>`;
       return `<label class="vp-zeile"><input type="checkbox" data-ef="${e.ef.id}" data-zeile="${z._key}" ${meine ? 'checked' : ''}><span class="vp-name">${escHtml(z.name || 'Zeile')}</span><span class="vp-wert">${wertTxt}</span></label>`;
     }).join('');
-    return `<div class="vp-tabelle"><div class="vp-titel">${escHtml(e.ef.name)}</div>${liste || '<div class="vp-hint">Noch keine Fläche erfasst – bitte oben in der Tabelle eintragen.</div>'}</div>`;
+    return `<div class="vp-tabelle"><div class="vp-titel">${escHtml(e.ef.name)}</div>${liste || '<div class="vp-hint">Noch keine Zeile erfasst – bitte oben in der Tabelle eintragen.</div>'}</div>`;
   }).join('');
-  pop.innerHTML = `<div class="vp-kopf">Flächen für «${escHtml(opt.name)}»</div>${teile}
+  pop.innerHTML = `<div class="vp-kopf">Zeilen für «${escHtml(opt.name)}»</div>${teile}
     <div class="vp-fuss${summe <= 0 ? ' warn' : ''}"><span>Zugeordnet: <b>${verweisFmt(summe)}${einheit ? ' ' + escHtml(einheit) : ''}</b>${offen > 0 ? `<br>noch frei: ${verweisFmt(offen)}${einheit ? ' ' + escHtml(einheit) : ''}` : ''}</span><button type="button" class="vp-fertig">Fertig</button></div>`;
   pop.querySelector('.vp-fertig').addEventListener('click', versucheVerweisPopupZuSchliessen);
   pop.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.addEventListener('change', () => {
     const z = (bereichTabelleZeilen[cb.dataset.ef] || []).find(x => String(x._key) === cb.dataset.zeile);
     if(!z) return;
-    z.optionId = cb.checked ? opt.id : null;
+    zSetze(z, opt.id, cb.checked);
     aktualisiereVerweisBloecke();
     recalc();
     planAutosave();
@@ -3716,9 +3733,9 @@ function aktualisiereZeilenMarkierung(){
   const gewaehlte = [...bereichSelectedOptions].filter(id => OPTION_VERWEIS[id]);
   $teilbereiche.querySelectorAll('.tabellenzeilenname[data-key]').forEach(inp => {
     const z = (bereichTabelleZeilen[inp.dataset.ef] || []).find(r => String(r._key) === inp.dataset.key);
-    const rot = !!z && !z.optionId && gewaehlte.some(id => verweisEintraege(id).some(e => e.ef.id === inp.dataset.ef && verweisWert(z, e.spalte) > 0));
+    const rot = !!z && gewaehlte.some(id => verweisEintraege(id).some(e => e.ef.id === inp.dataset.ef && verweisWert(z, e.spalte) > 0) && !zInGruppe(z, verweisGruppe(id)));
     inp.classList.toggle('unzugeordnet', rot);
-    inp.title = rot ? 'Keinem Belag zugeordnet – zählt nur bei Aushub und Fundation.' : '';
+    inp.title = rot ? 'Noch keiner Option zugeordnet – bitte beim Button der Option anhaken.' : '';
   });
 }
 // Nach jeder Aenderung: Knopf-Texte und ein offenes Pop-up auffrischen
@@ -3833,7 +3850,7 @@ async function ladeBestehendeOfferte(offerteId){
       .from('offerte_eingabefeld_notiz').select('eingabefeld_id, notiz').eq('offerte_id', offerteId);
     if(notizErr){ console.error(notizErr); $saveStatus.textContent = 'Fehler beim Laden: ' + notizErr.message; $saveStatus.className='status err'; return; }
     const { data: tabZeilen, error: tabZeilenErr } = await sb
-      .from('offerte_tabelle_zeile').select('id, eingabefeld_id, name, reihenfolge, option_id').eq('offerte_id', offerteId).order('reihenfolge');
+      .from('offerte_tabelle_zeile').select('id, eingabefeld_id, name, reihenfolge, option_id, option_ids').eq('offerte_id', offerteId).order('reihenfolge');
     if(tabZeilenErr){ console.error(tabZeilenErr); $saveStatus.textContent = 'Fehler beim Laden: ' + tabZeilenErr.message; $saveStatus.className='status err'; return; }
     let tabWerte = [];
     if(tabZeilen && tabZeilen.length){
@@ -3866,7 +3883,7 @@ async function ladeBestehendeOfferte(offerteId){
     (tabZeilen || []).forEach(z => {
       const werte = {};
       tabWerte.filter(w => w.zeile_id === z.id).forEach(w => { werte[w.spalte_id] = { wert: w.wert, notiz: w.notiz || '', text: w.text_wert || null }; });
-      (bereichTabelleZeilen[z.eingabefeld_id] ||= []).push({ _key: ++tabelleZeileCounter, id: z.id, name: z.name, werte, optionId: z.option_id || null });
+      (bereichTabelleZeilen[z.eingabefeld_id] ||= []).push({ _key: ++tabelleZeileCounter, id: z.id, name: z.name, werte, optionIds: (z.option_ids && z.option_ids.length) ? z.option_ids : (z.option_id ? [z.option_id] : []) });
     });
     renderBereich();
   }
