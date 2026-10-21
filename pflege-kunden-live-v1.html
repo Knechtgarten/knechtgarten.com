@@ -167,6 +167,16 @@ tbody tr:last-child td{border-bottom:none;}
 .meta a{color:inherit;text-decoration:none;}
 .meta a:hover{text-decoration:underline;}
 .kh-reg{gap:6px !important;}
+.karte-b{padding:6px 12px;}
+.karte-ovl{position:fixed;inset:0;z-index:80;background:#fff;display:none;flex-direction:column;}
+.karte-ovl.show{display:flex;}
+.karte-kopf{display:flex;align-items:center;gap:14px;padding:10px 16px;border-bottom:1px solid var(--line);}
+.karte-kopf h3{font-size:16px;color:var(--primary);}
+.karte-kopf .icon-btn{margin-left:auto;}
+#karteInfo{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.karte-map{flex:1;}
+.karte-iw{font-size:12.5px;line-height:1.45;color:#323E4E;}
+.karte-reg{text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff;}
 .maps-l{display:inline-flex;gap:10px;margin-left:12px;font-size:12px;}
 .maps-l a{color:var(--primary);text-decoration:underline;text-underline-offset:2px;}
 #oMaps .maps-l{margin-left:24px;}
@@ -857,6 +867,7 @@ function renderListe(){
         `<button class="abob${f.abo.length && !f.abo.includes(a.id) ? ' off' : ''}" data-act="f-abo" data-abo="${a.id}" aria-pressed="${f.abo.includes(a.id)}">${aboIcon(a.id)}</button>`).join('')}</div>
       ${kanalFilterHtml()}
       ${regFilterHtml()}
+      <button type="button" class="btn btn-ghost karte-b" data-act="karte" title="Gefilterte Kunden auf der Karte zeigen">${I('map')}Karte</button>
       ${(n => n ? `<button type="button" class="ebf" data-act="f-ohne-eb" aria-pressed="${f.ohneEb}" title="Kunden, die noch nicht mit Easybill verknüpft sind">${I('link-off')}Nicht verknüpft (${n})</button>` : '')(S.kunden.filter(k => !k.kunde?.easybill_id).length)}
       ${zustFilterHtml()}
       ${tagFilterHtml()}
@@ -900,6 +911,111 @@ function renderListeZeilen(){
   }).join('') || `<tr><td colspan="${6 + S.kat.length}" class="muted">${S.kunden.length ? 'Keine Kunden für diese Filter.' : 'Noch keine Kunden im Pflege-Tool. Oben «Kunde aus Easybill hinzufügen».'}</td></tr>`;
   $('kundenCount').textContent = `${liste.length} von ${S.kunden.length} Kunden`;
 }
+
+// ---------------------------------------------------------------------------
+// Kundenkarte (Google Maps): eine Stecknadel pro Hauptadresse / Objekt in der Farbe der Region,
+// Regionsname in der Mitte ihrer Nadeln. Es gelten die Filter der Kundenliste.
+// Koordinaten rechnet die Edge Function pflege-geocode aus (fehlende bzw. geaenderte Adressen).
+// ---------------------------------------------------------------------------
+let gmLaden = null;
+function ladeGoogleMaps(){
+  if(window.google?.maps) return Promise.resolve();
+  if(gmLaden) return gmLaden;
+  gmLaden = (async () => {
+    const { data, error } = await sb.from('app_einstellung').select('wert').eq('schluessel', 'google_maps_browser_key').maybeSingle();
+    if(error || !data?.wert) throw new Error('Kein Google-Maps-Schlüssel hinterlegt.');
+    await new Promise((ok, nein) => {
+      const s = document.createElement('script');
+      s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(data.wert)}&v=weekly&language=de&region=CH`;
+      s.onload = ok; s.onerror = () => nein(new Error('Google Maps konnte nicht geladen werden.'));
+      document.head.appendChild(s);
+    });
+  })();
+  gmLaden.catch(() => { gmLaden = null; });
+  return gmLaden;
+}
+async function rechneKoordinaten(status){
+  for(let runde = 0; runde < 15; runde++){
+    const { data, error } = await sb.functions.invoke('pflege-geocode', { body: {} });
+    let fehler = data?.error;
+    if(error && !fehler){ try { fehler = (await error.context?.json())?.error; } catch {} fehler = fehler || error.message; }
+    if(fehler){ showToast('Adressen umrechnen: ' + fehler, true); break; }
+    if(!data.offen) break;
+    status(`Adressen werden umgerechnet … noch ${data.offen}`);
+  }
+  const [k, o] = await Promise.all([
+    sb.from('pflege_kunde').select('kunde_id,lat,lon,geo_ok'),
+    sb.from('pflege_objekt').select('id,lat,lon,geo_ok')
+  ]);
+  (k.data || []).forEach(x => Object.assign(kundeById(x.kunde_id) || {}, x));
+  (o.data || []).forEach(x => Object.assign(S.obj.find(y => y.id === x.id) || {}, x));
+}
+// Orte fuer die Karte: Hauptadresse und Objekte der gefilterten Kunden
+function kartenOrte(){
+  const f = S.f, orte = [];
+  const passt = (kundeId, objId, regId) =>
+    (!f.reg.length || f.reg.includes(regId)) &&
+    (!f.kat || S.kk.some(x => x.kunde_id === kundeId && (x.objekt_id || null) === objId && x.kategorie_id === f.kat));
+  gefilterteKunden().forEach(k => {
+    const objs = objekteVon(k.kunde_id);
+    const hauptRolle = !objs.length || kkVonKunde(k.kunde_id, null).length > 0;
+    if(hauptRolle && passt(k.kunde_id, null, regionVonKunde(k)))
+      orte.push({ k, o: null, lat: k.lat, lon: k.lon, ok: k.geo_ok, reg: regById(regionVonKunde(k)), adr: adrText(k.kunde || {}) });
+    objs.forEach(o => { if(passt(k.kunde_id, o.id, regionVonObjekt(o)))
+      orte.push({ k, o, lat: o.lat, lon: o.lon, ok: o.geo_ok, reg: regById(regionVonObjekt(o)), adr: adrText(o) }); });
+  });
+  return orte;
+}
+function huelle(p){
+  p = [...p].sort((a, b) => a.lng - b.lng || a.lat - b.lat);
+  if(p.length < 3) return p;
+  const kr = (o, a, b) => (a.lng - o.lng) * (b.lat - o.lat) - (a.lat - o.lat) * (b.lng - o.lng);
+  const u = [], l = [];
+  for(const x of p){ while(l.length >= 2 && kr(l[l.length - 2], l[l.length - 1], x) <= 0) l.pop(); l.push(x); }
+  for(const x of [...p].reverse()){ while(u.length >= 2 && kr(u[u.length - 2], u[u.length - 1], x) <= 0) u.pop(); u.push(x); }
+  return l.slice(0, -1).concat(u.slice(0, -1));
+}
+const NADEL = 'M12 2C8.1 2 5 5.1 5 9c0 5.2 7 13 7 13s7-7.8 7-13c0-3.9-3.1-7-7-7z';
+async function oeffneKarte(){
+  let ovl = $('karteOvl');
+  if(!ovl){
+    ovl = document.createElement('div'); ovl.id = 'karteOvl'; ovl.className = 'karte-ovl';
+    ovl.innerHTML = `<div class="karte-kopf"><h3>Kundenkarte</h3><span class="muted small" id="karteInfo"></span>
+      <button class="icon-btn" data-karte="zu" aria-label="Karte schliessen">${I('x')}</button></div><div id="karteMap" class="karte-map"></div>`;
+    document.body.appendChild(ovl);
+    ovl.addEventListener('click', e => { if(e.target.closest('[data-karte="zu"]')) schliesseKarte(); });
+  }
+  ovl.classList.add('show'); document.body.style.overflow = 'hidden';
+  const info = t => { $('karteInfo').textContent = t; };
+  info('Karte wird geladen …');
+  try { await ladeGoogleMaps(); } catch(e){ info(e.message); return; }
+  await rechneKoordinaten(info);
+  const orte = kartenOrte(), mit = orte.filter(x => x.lat != null), ohne = orte.filter(x => x.lat == null);
+  const map = new google.maps.Map($('karteMap'), { center: { lat: 46.8, lng: 7.6 }, zoom: 9, mapTypeControl: true, streetViewControl: false, fullscreenControl: false, gestureHandling: 'greedy' });
+  const iw = new google.maps.InfoWindow(), grenzen = new google.maps.LatLngBounds();
+  mit.forEach(x => {
+    const pos = { lat: x.lat, lng: x.lon }; grenzen.extend(pos);
+    const m = new google.maps.Marker({ map, position: pos, title: x.k.kunde?.name,
+      icon: { path: NADEL, fillColor: x.reg?.farbe || '#8B9097', fillOpacity: 1, strokeColor: '#323E4E', strokeWeight: 1.2, scale: 1.25, anchor: new google.maps.Point(12, 22) } });
+    const kw = x.k.abo_typ === 'ohne_voranmeldung' ? 'ohne Anmeldung' : KANAELE.filter(c => (x.k.voranmeldung_kanaele || []).includes(c.id)).map(c => c.n).join(', ') || (x.k.abo_typ === 'mit_voranmeldung' ? 'Voranmeldung, Kontaktweg offen' : '');
+    const html = `<div class="karte-iw"><b>${esc(x.k.kunde?.name)}</b>${x.o ? ' <span class="muted">· Objekt</span>' : ''}<br>${esc(x.adr)}${x.reg ? `<br><span class="muted">${esc(x.reg.name)}</span>` : ''}${kw ? `<br>${esc(kw)}` : ''}<br><span class="muted small">Klicken zum Öffnen</span></div>`;
+    m.addListener('mouseover', () => { iw.setContent(html); iw.open({ map, anchor: m }); });
+    m.addListener('click', () => { schliesseKarte(); location.hash = 'k=' + x.k.kunde_id + (x.o ? '&o=' + x.o.id : ''); });
+  });
+  // Regionen: leichte Flaeche um die Nadeln, Name in der Mitte
+  const proReg = {};
+  mit.forEach(x => { if(x.reg) (proReg[x.reg.id] = proReg[x.reg.id] || { r: x.reg, p: [] }).p.push({ lat: x.lat, lng: x.lon }); });
+  Object.values(proReg).forEach(({ r, p }) => {
+    if(p.length >= 3) new google.maps.Polygon({ map, paths: huelle(p), strokeColor: r.farbe, strokeOpacity: .7, strokeWeight: 1, fillColor: r.farbe, fillOpacity: .1, clickable: false });
+    const mitte = { lat: p.reduce((s, x) => s + x.lat, 0) / p.length, lng: p.reduce((s, x) => s + x.lng, 0) / p.length };
+    new google.maps.Marker({ map, position: mitte, clickable: false, zIndex: 999,
+      icon: { path: google.maps.SymbolPath.CIRCLE, scale: 0 },
+      label: { text: r.name.replace(/\s*\(.*\)$/, ''), color: '#323E4E', fontSize: '13px', fontWeight: '700', className: 'karte-reg' } });
+  });
+  if(mit.length) map.fitBounds(grenzen, 40);
+  info(`${mit.length} Orte auf der Karte` + (ohne.length ? ` · ${ohne.length} ohne Koordinaten: ${ohne.map(x => x.k.kunde?.name + (x.adr ? ' (' + x.adr + ')' : ' (keine Adresse)')).join(', ')}` : ''));
+}
+function schliesseKarte(){ $('karteOvl')?.classList.remove('show'); document.body.style.overflow = ''; }
 
 // ---------------------------------------------------------------------------
 // Kunde aus Easybill hinzufuegen (Edge Function easybill-kunden-suche, nur lesen)
@@ -1942,6 +2058,7 @@ $('app').addEventListener('click', async e => {
   if(act === 'kunde-oeffnen') location.hash = 'k=' + b.dataset.id;
   else if(act === 'eb-oeffnen') oeffneEasybill();
   else if(act === 'eb-verknuepfen') oeffneEasybill(kundeId);
+  else if(act === 'karte') oeffneKarte();
   else if(act === 'f-ohne-eb'){ S.f.ohneEb = !S.f.ohneEb; renderListe(); }
   else if(act === 'drucken') druckeListe();
   else if(act === 'f-abo'){
