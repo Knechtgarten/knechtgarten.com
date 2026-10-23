@@ -261,6 +261,11 @@ svg.i.mini{width:14px;height:14px;color:var(--muted);vertical-align:-2px;}
 .einst h3{font-size:16px;}
 .einst .xbtn[disabled]{opacity:.35;cursor:default;}
 .einst .xbtn .i{width:13px;height:13px;}
+.einst .tbl-wrap{overflow:hidden;}
+table.sttab{table-layout:fixed;}
+table.sttab td{padding:4px 6px;}
+table.sttab .svin{width:100%;}
+table.sttab td.nw .xbtn{margin-left:2px;}
 /* Merkmal / Wert / Hinweis */
 table.kvt{table-layout:fixed;}
 table.kvt th:nth-child(1){width:30%;} table.kvt th:nth-child(2){width:28%;} table.kvt th:nth-child(4){width:40px;}
@@ -497,7 +502,7 @@ function merke(k, v){ try{ localStorage.setItem('wissen_' + k, JSON.stringify(v)
 
 const S = {
   rolle: null, userId: null, buero: false,
-  kats: [], bereiche: [], merkmale: [], eintraege: [], exemplare: [], service: [], erledigt: [], lieferanten: [], benutzer: {}, planer: [],
+  kats: [], bereiche: [], merkmale: [], mmKat: '', eintraege: [], exemplare: [], service: [], erledigt: [], lieferanten: [], benutzer: {}, planer: [],
   view: 'suche', eid: null, xid: null, det: null, qr: false,
   q: '', ber: lies('ber', null), kat: lies('kat', null), typ: lies('typ', null), mode: lies('mode', 'foto'),
   open: new Set(), edit: null, kvNeu: null, kwEdit: null, ask: null, neuService: null, anl: new Set(),
@@ -896,23 +901,34 @@ function kopfForm(e){
 // Büro ändert direkt in der Zeile, gespeichert wird beim Verlassen des Feldes.
 // key: steckbrief = Eintrag, xsteck / xverw = Steckbrief / Verwaltung des Exemplars
 const KVFELD = { steckbrief: 'steckbrief', xsteck: 'steckbrief', xverw: 'verwaltung' };
-// Vorschläge: zuerst die Liste aus «Einstellungen» (in deren Reihenfolge), dann schon verwendete Merkmale
+// Vorschläge pro Kategorie des Eintrags (plus «für alle»), getrennt nach Tabelle:
+// steckbrief = Technische Daten, xsteck = Angaben Exemplar, xverw = Verwaltung
+const MZIEL = { steckbrief: 'technisch', xsteck: 'exemplar', xverw: 'verwaltung' };
+const merkmaleFuer = (e, ziel) => S.merkmale.filter(m => m.ziel === ziel && (!m.kategorie_id || m.kategorie_id === e.kategorie_id))
+  .sort((a, b) => (!a.kategorie_id - !b.kategorie_id) || a.sortierung - b.sortierung);
 function merkmalListe(){
-  const benutzt = [...new Set([...S.eintraege, ...S.exemplare].flatMap(x => [...(x.steckbrief || []), ...(x.verwaltung || [])].map(r => r.label)).filter(Boolean))].sort((a,b) => a.localeCompare(b, 'de'));
-  const l = [...new Set([...S.merkmale.map(m => m.name), ...benutzt])];
-  return `<datalist id="kvl">${l.map(v => `<option value="${esc(v)}">`).join('')}</datalist>`;
+  const e = byId(S.eid); if(!e) return '';
+  return Object.entries(MZIEL).map(([key, ziel]) => {
+    // dazu Merkmale, die in dieser Kategorie schon verwendet werden
+    const gleiche = S.eintraege.filter(x => x.kategorie_id === e.kategorie_id);
+    const benutzt = gleiche.flatMap(x => key === 'steckbrief' ? x.steckbrief || [] : exVon(x).flatMap(y => y[KVFELD[key]] || [])).map(r => r.label);
+    const l = [...new Set([...merkmaleFuer(e, ziel).map(m => m.name), ...benutzt.filter(Boolean).sort((a,b) => a.localeCompare(b, 'de'))])];
+    return `<datalist id="kvl-${key}">${l.map(v => `<option value="${esc(v)}">`).join('')}</datalist>`; }).join('');
 }
 function kvTab(key, rows, ed, hinweis){
   const kopf = `<thead><tr><th>Merkmal</th><th>Wert</th><th>Hinweis</th>${ed ? '<th></th>' : ''}</tr></thead>`;
   if(!ed) return rows.length ? `<div class="tbl-wrap"><table class="t kvt">${kopf}<tbody>${rows.map(r => `<tr><td class="m">${esc(r.label)}</td><td><b>${esc(r.wert)}</b></td><td class="muted">${esc(r.hinweis || '')}</td></tr>`).join('')}</tbody></table></div>`
     : `<div class="small muted">Noch keine Angaben.</div>`;
-  const inp = (i, f, r, ph) => `<input type="text" class="svin" data-kvk="${key}" data-i="${i}" data-f="${f}" value="${esc(r[f] || '')}" placeholder="${ph}"${f === 'label' ? ' list="kvl"' : ''}>`;
+  const inp = (i, f, r, ph) => `<input type="text" class="svin" data-kvk="${key}" data-i="${i}" data-f="${f}" value="${esc(r[f] || '')}" placeholder="${ph}"${f === 'label' ? ` list="kvl-${key}"` : ''}>`;
   const zeile = (r, i, neu) => `<tr><td class="m">${inp(i, 'label', r, neu ? 'Merkmal' : '')}</td><td>${inp(i, 'wert', r, neu ? 'Wert' : '')}</td><td>${inp(i, 'hinweis', r, '')}</td>
     <td class="nw">${neu ? '' : `<button class="xbtn" data-act="kvDel" data-key="${key}" data-i="${i}" title="Zeile löschen">${ic('x')}</button>`}</td></tr>`;
   const neu = S.kvNeu === key || !rows.length;
+  // noch nicht erfasste Merkmale der Kategorie: als leere Zeilen einfügen
+  const e = byId(S.eid), fehlen = e ? merkmaleFuer(e, MZIEL[key]).map(m => m.name).filter(n => !rows.some(r => r.label === n)) : [];
   return `<div class="tbl-wrap"><table class="t kvt">${kopf}<tbody>${rows.map((r, i) => zeile(r, i)).join('')}${neu ? zeile({}, rows.length, true) : ''}</tbody></table></div>
     ${!rows.length && hinweis ? `<div class="small muted">${esc(hinweis)}</div>` : ''}
-    <div><button class="addrow small" data-act="kvAdd" data-key="${key}">${ic('plus')}Merkmal</button></div>`;
+    <div class="addlinks"><button class="addrow small" data-act="kvAdd" data-key="${key}">${ic('plus')}Merkmal</button>
+      ${fehlen.length ? `<button class="addrow small" data-act="kvVorlage" data-key="${key}" title="${esc(fehlen.join(', '))}">${ic('list')}Merkmale der Kategorie einfügen (${fehlen.length})</button>` : ''}</div>`;
 }
 const kvZiel = (key, e) => key === 'steckbrief' ? e : exAktiv(e);
 async function kvSpeichern(key, e, rows){
@@ -1107,28 +1123,51 @@ function serviceBody(e){
     ${bu && !S.neuService ? `<div><button class="addrow" data-act="nsNeu">${ic('plus')}Service-Arbeit</button></div>` : ''}`;
 }
 
-// --- Einstellungen (nur Büro): Kategorien, Bereiche, Merkmal-Vorschläge ---
+// --- Einstellungen (nur Büro): Kategorien, Bereiche, Merkmal-Vorschläge pro Kategorie ---
+const ZIELNAME = { technisch: 'Technische Daten', exemplar: 'Angaben Exemplar', verwaltung: 'Verwaltung' };
+const mmGruppe = m => (m.kategorie_id || '') === (S.mmKat || '');
 const STAMM = {
   kat: { tab: 'wissen_kategorie', titel: 'Kategorien', text: 'Was ist es? Genau eine pro Eintrag (Filter «Kategorie» in der Übersicht).', neu: 'Neue Kategorie',
          liste: () => S.kats, setze: l => S.kats = l, gebraucht: id => S.eintraege.filter(e => e.kategorie_id === id).length },
   ber: { tab: 'wissen_bereich', titel: 'Bereiche', text: 'Wer braucht es? Mehrere pro Eintrag möglich (Filter «Bereich»).', neu: 'Neuer Bereich',
          liste: () => S.bereiche, setze: l => S.bereiche = l, gebraucht: id => S.eintraege.filter(e => e.bereich_ids.includes(id)).length },
-  mm:  { tab: 'wissen_merkmal', titel: 'Merkmal-Vorschläge', text: 'Erscheinen als Vorschlag beim Feld «Merkmal» (Technische Daten, Angaben, Verwaltung), damit überall gleich geschrieben wird.', neu: 'Neues Merkmal',
-         liste: () => S.merkmale, setze: l => S.merkmale = l, gebraucht: () => 0, nutzung: m => [...S.eintraege, ...S.exemplare].filter(x => [...(x.steckbrief || []), ...(x.verwaltung || [])].some(r => r.label === m.name)).length },
+  mm:  { tab: 'wissen_merkmal', neu: 'Neues Merkmal', extra: () => ({ kategorie_id: S.mmKat || null, ziel: 'technisch' }),
+         liste: () => S.merkmale.filter(mmGruppe).sort((a,b) => a.sortierung - b.sortierung),
+         setze: l => S.merkmale = [...S.merkmale.filter(m => !mmGruppe(m)), ...l], gebraucht: () => 0 },
 };
+// wie oft ein Merkmal in seiner Kategorie (bzw. überall) schon verwendet wird
+function mmNutzung(m){
+  const es = S.eintraege.filter(e => !m.kategorie_id || e.kategorie_id === m.kategorie_id);
+  const rows = m.ziel === 'technisch' ? es.flatMap(e => e.steckbrief || []) : es.flatMap(e => exVon(e).flatMap(x => (m.ziel === 'exemplar' ? x.steckbrief : x.verwaltung) || []));
+  return rows.filter(r => r.label === m.name).length;
+}
+function stZeilen(k, l, mitZiel){
+  const knoepfe = (z, i, n) => `<button class="xbtn" data-act="stUp" data-k="${k}" data-i="${i}" title="Nach oben" ${i ? '' : 'disabled'}>${ic('up')}</button>
+    <button class="xbtn" data-act="stDown" data-k="${k}" data-i="${i}" title="Nach unten" ${i < l.length - 1 ? '' : 'disabled'}>${ic('down')}</button>
+    <button class="xbtn" data-act="stDel" data-k="${k}" data-id="${z.id}" title="${n ? 'Wird noch verwendet' : 'Löschen'}" ${n ? 'disabled' : ''}>${ic('x')}</button>`;
+  return `<div class="tbl-wrap"><table class="t sttab"><colgroup><col>${mitZiel ? '<col style="width:170px">' : ''}<col style="width:96px"><col style="width:96px"></colgroup><tbody>${l.map((z, i) => {
+      const n = STAMM[k].gebraucht(z.id), u = k === 'mm' ? mmNutzung(z) : n;
+      return `<tr><td><input type="text" class="svin" data-stf="${k}" data-id="${z.id}" value="${esc(z.name)}"></td>
+        ${mitZiel ? `<td><select class="svin" data-stziel="${z.id}">${Object.entries(ZIELNAME).map(([v, t]) => `<option value="${v}" ${z.ziel === v ? 'selected' : ''}>${t}</option>`).join('')}</select></td>` : ''}
+        <td class="nw small muted">${u ? u + (k === 'mm' ? '× verwendet' : u === 1 ? ' Eintrag' : ' Einträge') : ''}</td>
+        <td class="nw">${knoepfe(z, i, n)}</td></tr>`; }).join('')}
+      <tr><td colspan="${mitZiel ? 4 : 3}"><input type="text" class="svin" data-stneu="${k}" placeholder="+ ${STAMM[k].neu} (Name eingeben, Enter)"></td></tr></tbody></table></div>`;
+}
 function vEinstellungen(){
   const block = k => { const c = STAMM[k], l = c.liste();
     return `<section class="card einst"><div class="exh"><h3>${c.titel}</h3><span class="small muted">${l.length}</span></div>
-      <div class="small muted">${c.text}</div>
-      <div class="tbl-wrap"><table class="t"><tbody>${l.map((z, i) => { const n = c.gebraucht(z.id), u = c.nutzung ? c.nutzung(z) : n;
-        return `<tr><td><input type="text" class="svin" data-stf="${k}" data-id="${z.id}" value="${esc(z.name)}"></td>
-          <td class="nw small muted">${u ? u + (k === 'mm' ? '× verwendet' : u === 1 ? ' Eintrag' : ' Einträge') : ''}</td>
-          <td class="nw"><button class="xbtn" data-act="stUp" data-k="${k}" data-i="${i}" title="Nach oben" ${i ? '' : 'disabled'}>${ic('up')}</button>
-            <button class="xbtn" data-act="stDown" data-k="${k}" data-i="${i}" title="Nach unten" ${i < l.length - 1 ? '' : 'disabled'}>${ic('down')}</button>
-            <button class="xbtn" data-act="stDel" data-k="${k}" data-id="${z.id}" title="${n ? 'Wird noch verwendet' : 'Löschen'}" ${n ? 'disabled' : ''}>${ic('x')}</button></td></tr>`; }).join('')}
-        <tr><td colspan="3"><input type="text" class="svin" data-stneu="${k}" placeholder="+ ${c.neu} (Name eingeben, Enter)"></td></tr></tbody></table></div></section>`; };
-  return `<h2 style="font-size:22px;margin-bottom:12px">Einstellungen</h2><div class="einstgrid">${block('kat')}${block('ber')}${block('mm')}</div>
-    <div class="small muted" style="margin-top:10px">Löschen geht nur, wenn kein Eintrag die Kategorie bzw. den Bereich mehr braucht. Namen ändern wirkt sofort bei allen Einträgen.</div>`;
+      <div class="small muted">${c.text}</div>${stZeilen(k, l)}</section>`; };
+  if(S.mmKat && !S.kats.some(k => k.id === S.mmKat)) S.mmKat = '';
+  const anz = id => S.merkmale.filter(m => (m.kategorie_id || '') === id).length;
+  return `<h2 style="font-size:22px;margin-bottom:12px">Einstellungen</h2><div class="einstgrid">${block('kat')}${block('ber')}</div>
+    <section class="card einst" style="margin-top:14px"><div class="exh"><h3>Merkmal-Vorschläge</h3></div>
+      <div class="small muted">Pro Kategorie, damit ein Kleber andere Vorschläge bekommt als ein Fahrzeug. «Für alle Kategorien» erscheint überall.
+        «Gehört zu» bestimmt die Tabelle: Technische Daten (gleich für alle Exemplare), Angaben Exemplar (z. B. Kontrollschild, Jahrgang) oder Verwaltung (nur Büro).
+        Im Eintrag setzt «Merkmale der Kategorie einfügen» sie als leere Zeilen ein.</div>
+      <div class="berchips"><button class="fchip ${!S.mmKat ? 'on' : ''}" data-act="mmKat" data-v="">Für alle Kategorien (${anz('')})</button>
+        ${S.kats.map(k => `<button class="fchip ${S.mmKat === k.id ? 'on' : ''}" data-act="mmKat" data-v="${k.id}">${esc(k.name)} (${anz(k.id)})</button>`).join('')}</div>
+      ${stZeilen('mm', STAMM.mm.liste(), true)}</section>
+    <div class="small muted" style="margin-top:10px">Löschen geht bei Kategorien und Bereichen nur, wenn kein Eintrag sie mehr braucht. Namen ändern wirkt sofort bei allen Einträgen.</div>`;
 }
 async function stFeld(el){
   const c = STAMM[el.dataset.stf], z = c.liste().find(x => x.id === el.dataset.id), v = el.value.trim();
@@ -1138,11 +1177,17 @@ async function stFeld(el){
   if(error){ el.value = z.name; return fehler(error.code === '23505' ? 'Diesen Namen gibt es schon.' : error, 'Speichern'); }
   z.name = v; toast('Gespeichert');
 }
+async function stZiel(el){
+  const m = S.merkmale.find(x => x.id === el.dataset.stziel);
+  const { error } = await sb.from('wissen_merkmal').update({ ziel: el.value }).eq('id', m.id);
+  if(error){ el.value = m.ziel; return fehler(error, 'Speichern'); }
+  m.ziel = el.value; toast('Gespeichert');
+}
 async function stNeu(el){
   const k = el.dataset.stneu, c = STAMM[k], v = el.value.trim(); if(!v) return;
-  const { data, error } = await sb.from(c.tab).insert({ name: v, sortierung: Math.max(0, ...c.liste().map(x => x.sortierung)) + 10 }).select().single();
+  const { data, error } = await sb.from(c.tab).insert({ name: v, sortierung: Math.max(0, ...c.liste().map(x => x.sortierung)) + 10, ...(c.extra ? c.extra() : {}) }).select().single();
   if(error) return fehler(error.code === '23505' ? 'Diesen Namen gibt es schon.' : error, 'Anlegen');
-  c.liste().push(data); render(); document.querySelector(`[data-stneu="${k}"]`)?.focus();
+  c.setze([...c.liste(), data]); render(); document.querySelector(`[data-stneu="${k}"]`)?.focus();
 }
 async function stSchieben(k, i, dir){
   const c = STAMM[k], l = [...c.liste()], j = i + dir; if(j < 0 || j >= l.length) return;
@@ -1520,6 +1565,7 @@ document.addEventListener('change', ev => {
   if(ev.target.dataset?.stf){ stFeld(ev.target); }
   if(S.lEdit && (ev.target.dataset?.lsp != null || ev.target.id === 'lArt' || ev.target.id === 'lQ')){ lisLesen(); render(); }
   if(ev.target.dataset?.stneu){ stNeu(ev.target); }
+  if(ev.target.dataset?.stziel){ stZiel(ev.target); }
 });
 document.addEventListener('focusout', ev => {
   const ed = ev.target.closest && ev.target.closest('.rte-ed');
@@ -1596,6 +1642,9 @@ document.addEventListener('click', async ev => {
   });
   // Merkmal-Tabellen (Technische Daten, Angaben / Verwaltung des Exemplars)
   else if(a === 'kvAdd'){ S.kvNeu = d.key; render(); const l = document.querySelectorAll(`[data-kvk="${d.key}"][data-f="label"]`); l[l.length - 1]?.focus(); }
+  else if(a === 'kvVorlage'){ const rows = JSON.parse(JSON.stringify(kvZiel(d.key, e)[KVFELD[d.key]] || []));
+    merkmaleFuer(e, MZIEL[d.key]).forEach(m => { if(!rows.some(r => r.label === m.name)) rows.push({ label: m.name, wert: '' }); });
+    if(await kvSpeichern(d.key, e, rows)){ render(); const l = [...document.querySelectorAll(`[data-kvk="${d.key}"][data-f="wert"]`)].find(i => !i.value); l?.focus(); } }
   else if(a === 'kvDel'){ const rows = JSON.parse(JSON.stringify(kvZiel(d.key, e)[KVFELD[d.key]] || [])); rows.splice(+d.i, 1); if(await kvSpeichern(d.key, e, rows)) render(); }
   // Notizen (data-x = nur dieses Exemplar)
   else if(a === 'notizNeu'){
@@ -1704,10 +1753,11 @@ document.addEventListener('click', async ev => {
   });
   // Einstellungen
   else if(a === 'stUp' || a === 'stDown') await stSchieben(d.k, +d.i, a === 'stUp' ? -1 : 1);
+  else if(a === 'mmKat'){ S.mmKat = d.v; render(); }
   else if(a === 'stDel'){ const c = STAMM[d.k], z = c.liste().find(x => x.id === d.id);
     bestaetige(`«${z.name}» löschen?`, 'Löschen', async () => {
       const { error } = await sb.from(c.tab).delete().eq('id', z.id); if(error) return fehler(error, 'Löschen');
-      c.setze(c.liste().filter(x => x.id !== z.id)); if(S.kat === z.id) S.kat = null; if(S.ber === z.id) S.ber = null; render();
+      c.setze(c.liste().filter(x => x.id !== z.id)); if(d.k === 'kat') S.merkmale = S.merkmale.filter(m => m.kategorie_id !== z.id); if(S.kat === z.id) S.kat = null; if(S.ber === z.id) S.ber = null; render();
     }); }
   // Listen
   else if(a === 'lTab'){ S.lid = d.id; merke('liste', d.id); S.lsort = null; S.lsortDir = 1; render(); }
