@@ -247,6 +247,12 @@ svg.i.mini{width:14px;height:14px;color:var(--muted);vertical-align:-2px;}
 .svin:focus{border-color:var(--primary) !important;background:#fff !important;}
 .svarb .svin{font-weight:600;flex:1;min-width:140px;}
 .svin::placeholder{color:#C5CAD0;}
+/* Einstellungen */
+.einstgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;align-items:start;}
+.einst{padding:16px 18px;display:flex;flex-direction:column;gap:10px;}
+.einst h3{font-size:16px;}
+.einst .xbtn[disabled]{opacity:.35;cursor:default;}
+.einst .xbtn .i{width:13px;height:13px;}
 /* Merkmal / Wert / Hinweis */
 table.kvt{table-layout:fixed;}
 table.kvt th:nth-child(1){width:30%;} table.kvt th:nth-child(2){width:28%;} table.kvt th:nth-child(4){width:40px;}
@@ -449,6 +455,9 @@ const ICONS = {
   ol:'<path d="M10 6h11M10 12h11M10 18h11"/><path d="M4 4.5h1.5V9M4 9h3"/><path d="M4 14.5a1.5 1.5 0 0 1 3 .5c0 1-3 2-3 4h3"/>',
   upload:'<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v4h16v-4"/>',
   archive:'<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v11h14V9M10 13h4"/>',
+  gear:'<circle cx="12" cy="12" r="3"/><path d="M12 2.5v2.5M12 19v2.5M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M2.5 12H5M19 12h2.5M4.6 19.4l1.8-1.8M17.6 6.4l1.8-1.8"/>',
+  up:'<path d="M6 15l6-6 6 6"/>',
+  down:'<path d="M6 9l6 6 6-6"/>',
 };
 const ic = (n, cls='') => `<svg class="i ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n]||''}</svg>`;
 function esc(s){ return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
@@ -478,7 +487,7 @@ function merke(k, v){ try{ localStorage.setItem('wissen_' + k, JSON.stringify(v)
 
 const S = {
   rolle: null, userId: null, buero: false,
-  kats: [], bereiche: [], eintraege: [], exemplare: [], service: [], erledigt: [], lieferanten: [], benutzer: {}, planer: [],
+  kats: [], bereiche: [], merkmale: [], eintraege: [], exemplare: [], service: [], erledigt: [], lieferanten: [], benutzer: {}, planer: [],
   view: 'suche', eid: null, xid: null, det: null, qr: false,
   q: '', ber: lies('ber', null), kat: lies('kat', null), typ: lies('typ', null), mode: lies('mode', 'foto'),
   open: new Set(), edit: null, kvNeu: null, kwEdit: null, ask: null, neuService: null, anl: new Set(),
@@ -533,6 +542,7 @@ async function ladeAlles(){
   ]);
   const err = r.find(x => x.error); if(err) return fehler(err.error, 'Laden');
   [S.kats, S.bereiche, S.eintraege, S.service, S.exemplare, S.erledigt, S.lieferanten, S.planer] = r.map(x => x.data || []);
+  { const { data: mm } = await sb.from('wissen_merkmal').select('*').order('sortierung'); S.merkmale = mm || []; }
   S.eintraege.sort((a,b) => a.titel.localeCompare(b.titel, 'de', {numeric:true}));
   S.exemplare.sort((a,b) => a.sortierung - b.sortierung || String(a.nummer || '').localeCompare(String(b.nummer || ''), 'de', {numeric:true}));
   await signiere(S.eintraege.map(e => e.titelfoto_pfad && vorschau(e.titelfoto_pfad)).filter(Boolean));
@@ -601,13 +611,14 @@ function starteAusUrl(){
   if(h && byId(h[1])) return oeffne(h[1], null, false, h[2]);
   if(location.hash === '#tabelle') S.view = 'tabelle';
   if(location.hash === '#etiketten') S.view = 'etiketten';
+  if(location.hash === '#einstellungen' && istBuero()) S.view = 'einstellungen';
   render();
 }
 window.addEventListener('popstate', () => {
   if(S.qr) return;
   const h = location.hash.match(/^#e-([0-9a-f-]{36})(?:\.([0-9a-f-]{36}))?$/);
   if(h && byId(h[1])){ if(S.eid !== h[1]) oeffne(h[1], null, true, h[2]); else if(h[2] && h[2] !== S.xid){ S.xid = h[2]; S.kvNeu = null; S.ask = null; render(); } return; }
-  S.view = location.hash === '#tabelle' ? 'tabelle' : location.hash === '#etiketten' ? 'etiketten' : 'suche';
+  S.view = location.hash === '#tabelle' ? 'tabelle' : location.hash === '#etiketten' ? 'etiketten' : location.hash === '#einstellungen' && istBuero() ? 'einstellungen' : 'suche';
   S.eid = null; render();
 });
 function geheZu(view){
@@ -637,10 +648,10 @@ function render(){
     const nav = [['suche','grid','Übersicht'],['tabelle','table','Fahrzeuge & Maschinen'],['etiketten','label','Etiketten']];
     $('subnavInner').innerHTML = nav.map(([k,i,n]) =>
       `<button data-act="nav" data-v="${k}" class="${S.view===k||(k==='suche'&&S.view==='eintrag')?'on':''}">${ic(i)}${n}</button>`).join('')
-      + (istBuero() ? `<button class="neu" data-act="neu">${ic('plus')}Neuer Eintrag</button>` : '');
+      + (istBuero() ? `<button class="neu" data-act="neu">${ic('plus')}Neuer Eintrag</button><button data-act="nav" data-v="einstellungen" class="${S.view === 'einstellungen' ? 'on' : ''}">${ic('gear')}Einstellungen</button>` : '');
   }
   const m = $('appMain');
-  m.innerHTML = S.view === 'eintrag' ? vEintrag() : S.view === 'tabelle' ? vTabelle() : S.view === 'etiketten' ? vEtiketten() : vSuche();
+  m.innerHTML = S.view === 'eintrag' ? vEintrag() : S.view === 'tabelle' ? vTabelle() : S.view === 'etiketten' ? vEtiketten() : S.view === 'einstellungen' ? vEinstellungen() : vSuche();
   medienLaden(m);
 }
 function icoFuer(e){
@@ -875,9 +886,10 @@ function kopfForm(e){
 // Büro ändert direkt in der Zeile, gespeichert wird beim Verlassen des Feldes.
 // key: steckbrief = Eintrag, xsteck / xverw = Steckbrief / Verwaltung des Exemplars
 const KVFELD = { steckbrief: 'steckbrief', xsteck: 'steckbrief', xverw: 'verwaltung' };
-const MERKMALE = ['Hersteller / Modell', 'Gewicht', 'Breite', 'Höhe', 'Länge', 'Leistung', 'Treibstoff', 'Anhängelast', 'Nutzlast', 'Arbeitsbreite', 'Akku', 'Anschaffungsjahr', 'Seriennummer', 'Kontrollschild', 'Fahrzeugprüfung'];
+// Vorschläge: zuerst die Liste aus «Einstellungen» (in deren Reihenfolge), dann schon verwendete Merkmale
 function merkmalListe(){
-  const l = [...new Set([...MERKMALE, ...[...S.eintraege, ...S.exemplare].flatMap(x => [...(x.steckbrief || []), ...(x.verwaltung || [])].map(r => r.label))].filter(Boolean))].sort((a,b) => a.localeCompare(b, 'de'));
+  const benutzt = [...new Set([...S.eintraege, ...S.exemplare].flatMap(x => [...(x.steckbrief || []), ...(x.verwaltung || [])].map(r => r.label)).filter(Boolean))].sort((a,b) => a.localeCompare(b, 'de'));
+  const l = [...new Set([...S.merkmale.map(m => m.name), ...benutzt])];
   return `<datalist id="kvl">${l.map(v => `<option value="${esc(v)}">`).join('')}</datalist>`;
 }
 function kvTab(key, rows, ed, hinweis){
@@ -1083,6 +1095,51 @@ function serviceBody(e){
       : '<div class="small muted">Noch keine Service-Arbeiten.</div>'}
     ${panel}${neu}
     ${bu && !S.neuService ? `<div><button class="addrow" data-act="nsNeu">${ic('plus')}Service-Arbeit</button></div>` : ''}`;
+}
+
+// --- Einstellungen (nur Büro): Kategorien, Bereiche, Merkmal-Vorschläge ---
+const STAMM = {
+  kat: { tab: 'wissen_kategorie', titel: 'Kategorien', text: 'Was ist es? Genau eine pro Eintrag (Filter «Kategorie» in der Übersicht).', neu: 'Neue Kategorie',
+         liste: () => S.kats, setze: l => S.kats = l, gebraucht: id => S.eintraege.filter(e => e.kategorie_id === id).length },
+  ber: { tab: 'wissen_bereich', titel: 'Bereiche', text: 'Wer braucht es? Mehrere pro Eintrag möglich (Filter «Bereich»).', neu: 'Neuer Bereich',
+         liste: () => S.bereiche, setze: l => S.bereiche = l, gebraucht: id => S.eintraege.filter(e => e.bereich_ids.includes(id)).length },
+  mm:  { tab: 'wissen_merkmal', titel: 'Merkmal-Vorschläge', text: 'Erscheinen als Vorschlag beim Feld «Merkmal» (Technische Daten, Angaben, Verwaltung), damit überall gleich geschrieben wird.', neu: 'Neues Merkmal',
+         liste: () => S.merkmale, setze: l => S.merkmale = l, gebraucht: () => 0, nutzung: m => [...S.eintraege, ...S.exemplare].filter(x => [...(x.steckbrief || []), ...(x.verwaltung || [])].some(r => r.label === m.name)).length },
+};
+function vEinstellungen(){
+  const block = k => { const c = STAMM[k], l = c.liste();
+    return `<section class="card einst"><div class="exh"><h3>${c.titel}</h3><span class="small muted">${l.length}</span></div>
+      <div class="small muted">${c.text}</div>
+      <div class="tbl-wrap"><table class="t"><tbody>${l.map((z, i) => { const n = c.gebraucht(z.id), u = c.nutzung ? c.nutzung(z) : n;
+        return `<tr><td><input type="text" class="svin" data-stf="${k}" data-id="${z.id}" value="${esc(z.name)}"></td>
+          <td class="nw small muted">${u ? u + (k === 'mm' ? '× verwendet' : u === 1 ? ' Eintrag' : ' Einträge') : ''}</td>
+          <td class="nw"><button class="xbtn" data-act="stUp" data-k="${k}" data-i="${i}" title="Nach oben" ${i ? '' : 'disabled'}>${ic('up')}</button>
+            <button class="xbtn" data-act="stDown" data-k="${k}" data-i="${i}" title="Nach unten" ${i < l.length - 1 ? '' : 'disabled'}>${ic('down')}</button>
+            <button class="xbtn" data-act="stDel" data-k="${k}" data-id="${z.id}" title="${n ? 'Wird noch verwendet' : 'Löschen'}" ${n ? 'disabled' : ''}>${ic('x')}</button></td></tr>`; }).join('')}
+        <tr><td colspan="3"><input type="text" class="svin" data-stneu="${k}" placeholder="+ ${c.neu} (Name eingeben, Enter)"></td></tr></tbody></table></div></section>`; };
+  return `<h2 style="font-size:22px;margin-bottom:12px">Einstellungen</h2><div class="einstgrid">${block('kat')}${block('ber')}${block('mm')}</div>
+    <div class="small muted" style="margin-top:10px">Löschen geht nur, wenn kein Eintrag die Kategorie bzw. den Bereich mehr braucht. Namen ändern wirkt sofort bei allen Einträgen.</div>`;
+}
+async function stFeld(el){
+  const c = STAMM[el.dataset.stf], z = c.liste().find(x => x.id === el.dataset.id), v = el.value.trim();
+  if(!z || z.name === v) return;
+  if(!v){ el.value = z.name; return toast('Name darf nicht leer sein.', true); }
+  const { error } = await sb.from(c.tab).update({ name: v }).eq('id', z.id);
+  if(error){ el.value = z.name; return fehler(error.code === '23505' ? 'Diesen Namen gibt es schon.' : error, 'Speichern'); }
+  z.name = v; toast('Gespeichert');
+}
+async function stNeu(el){
+  const k = el.dataset.stneu, c = STAMM[k], v = el.value.trim(); if(!v) return;
+  const { data, error } = await sb.from(c.tab).insert({ name: v, sortierung: Math.max(0, ...c.liste().map(x => x.sortierung)) + 10 }).select().single();
+  if(error) return fehler(error.code === '23505' ? 'Diesen Namen gibt es schon.' : error, 'Anlegen');
+  c.liste().push(data); render(); document.querySelector(`[data-stneu="${k}"]`)?.focus();
+}
+async function stSchieben(k, i, dir){
+  const c = STAMM[k], l = [...c.liste()], j = i + dir; if(j < 0 || j >= l.length) return;
+  [l[i], l[j]] = [l[j], l[i]];
+  const r = await Promise.all(l.map((z, n) => z.sortierung === (n + 1) * 10 ? null : sb.from(c.tab).update({ sortierung: (n + 1) * 10 }).eq('id', z.id)));
+  const err = r.find(x => x?.error); if(err) return fehler(err.error, 'Sortieren');
+  l.forEach((z, n) => z.sortierung = (n + 1) * 10); c.setze(l); render();
 }
 
 // --- Tabelle --- (eine Zeile pro Exemplar)
@@ -1351,6 +1408,8 @@ document.addEventListener('change', ev => {
   if(ev.target.dataset?.kvk){ kvFeld(ev.target); }
   if(ev.target.dataset?.xf){ xFeld(ev.target); }
   if(ev.target.id === 'xPlaner'){ xPlaner(ev.target); }
+  if(ev.target.dataset?.stf){ stFeld(ev.target); }
+  if(ev.target.dataset?.stneu){ stNeu(ev.target); }
 });
 document.addEventListener('focusout', ev => {
   const ed = ev.target.closest && ev.target.closest('.rte-ed');
@@ -1533,6 +1592,13 @@ document.addEventListener('click', async ev => {
     const { error } = await sb.from('wissen_service_erledigt').delete().eq('id', d.id); if(error) return fehler(error, 'Löschen');
     S.erledigt = S.erledigt.filter(x => x.id !== d.id); render();
   });
+  // Einstellungen
+  else if(a === 'stUp' || a === 'stDown') await stSchieben(d.k, +d.i, a === 'stUp' ? -1 : 1);
+  else if(a === 'stDel'){ const c = STAMM[d.k], z = c.liste().find(x => x.id === d.id);
+    bestaetige(`«${z.name}» löschen?`, 'Löschen', async () => {
+      const { error } = await sb.from(c.tab).delete().eq('id', z.id); if(error) return fehler(error, 'Löschen');
+      c.setze(c.liste().filter(x => x.id !== z.id)); if(S.kat === z.id) S.kat = null; if(S.ber === z.id) S.ber = null; render();
+    }); }
   // Tabelle
   else if(a === 'tbl'){ S.tblTab = d.v; S.sort = null; render(); }
   else if(a === 'sort'){ const i = +d.i; if(S.sort === i) S.sortDir *= -1; else { S.sort = i; S.sortDir = 1; } render(); }
