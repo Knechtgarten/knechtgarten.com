@@ -126,7 +126,9 @@ main.wrap{padding-top:22px;padding-bottom:70px;}
 .fld.voll{grid-column:1/-1;}
 .fld input,.fld select{width:100%;}
 .fld .chk input{width:auto;margin:0;}
-.qrtab .chk{margin:0;}
+.qrtab col.c-chk{width:80px;}
+.qrtab .mid{text-align:center;}
+.qrtab input[type=checkbox]{accent-color:var(--primary);width:16px;height:16px;cursor:pointer;}
 .qrtab .stat{margin-right:6px;}
 .stat.aus{background:var(--soft);color:var(--muted);}
 .svsym{display:inline-flex;width:24px;height:24px;border-radius:50%;align-items:center;justify-content:center;} .svsym .i{width:14px;height:14px;stroke-width:2;}
@@ -712,7 +714,7 @@ async function oeffne(id, sec, ohneHistory, xid){
   // gewuenschter Abschnitt leer (z.B. noch keine Anleitung) -> ersten vorhandenen oeffnen
   if(![...S.open].some(k => hatSec(e, k))){ const erster = SECS.find(([k]) => k !== 'notizen' && hatSec(e, k)) || SECS[0]; if(erster) S.open = new Set([erster[0]]); }
   // QR-Ansicht mit Auswahl der Kategorie: die gewählten Abschnitte gleich offen
-  if(S.qr && qrAuswahl(e)) S.open = new Set(qrAuswahl(e));
+  if(S.qr && katVon(e)?.qr_aus?.length) S.open = new Set(reiheVon(katVon(e)).filter(k => zeigt(e, k)));
   render();
 }
 
@@ -812,17 +814,18 @@ function zaehl(e, k){
   if(k === 'notizen') return d.notizen.filter(n => !n.exemplar_id).length || '';
   return '';
 }
-// QR-Ansicht (Handy nach dem Scannen): nur die Abschnitte, die bei der Kategorie gewählt sind (nichts gewählt = alles)
-const QR_ABSCHNITTE = [['x_angaben', 'Angaben zum Gerät (Nummer, Zuständig, Jahrgang …)'], ['x_service', 'Service dieses Geräts (abhaken)'], ['x_notizen', 'Notizen zu diesem Gerät'],
+// Anzeige pro Kategorie (Einstellungen): Reihenfolge aller Teile, je eine Ausblend-Liste für die normale Ansicht und die QR-Ansicht
+const ABSCHNITTE = [['x_angaben', 'Angaben zum Gerät (Nummer, Zuständig, Jahrgang …)'], ['x_service', 'Service dieses Geräts (abhaken)'], ['x_notizen', 'Notizen zu diesem Gerät'],
   ['notizen', 'Notizen für alle'], ['steck', 'Technische Daten'], ['anw', 'Anwendung'], ['service', 'Service-Arbeiten (Anleitungen)'], ['kontakte', 'Kontakte'], ['docs', 'Dokumente']];
-const qrAuswahl = e => S.kats.find(k => k.id === e.kategorie_id)?.qr_abschnitte || null;
-const qrZeigt = (e, k) => !S.qr || !qrAuswahl(e) || qrAuswahl(e).includes(k);
-// «Service & Wartung verwenden» pro Kategorie (Einstellungen): aus = nichts zum Service zeigen
-const mitService = e => e.typ === 'geraet' && S.kats.find(k => k.id === e.kategorie_id)?.mit_service !== false;
+const katVon = e => S.kats.find(k => k.id === e.kategorie_id);
+const reiheVon = k => { const alle = ABSCHNITTE.map(z => z[0]), r = (k?.abschnitt_reihe || []).filter(x => alle.includes(x)); return [...r, ...alle.filter(x => !r.includes(x))]; };
+const zeigt = (e, key, qr = S.qr) => !(katVon(e)?.[qr ? 'qr_aus' : 'normal_aus'] || []).includes(key);
+// Service gibt es, solange in der normalen Ansicht nicht beide Service-Teile aus sind (mit_service wird beim Speichern nachgeführt, der Einsatzplaner liest es)
+const mitService = e => e.typ === 'geraet' && katVon(e)?.mit_service !== false;
 function vEintrag(){
   const e = byId(S.eid); if(!e) return '<div class="card empty">Eintrag nicht gefunden.</div>';
   const geraet = e.typ === 'geraet', xs = exVon(e), x = exAktiv(e);
-  const secs = SECS.filter(([k]) => hatSec(e, k) && qrZeigt(e, k) && (k !== 'service' || mitService(e)));
+  const secs = reiheVon(katVon(e)).map(k => SECS.find(z => z[0] === k)).filter(s => s && hatSec(e, s[0]) && zeigt(e, s[0]) && (s[0] !== 'service' || mitService(e)));
   const alle = secs.every(([k]) => S.open.has(k));
   const kopf = S.edit ? kopfForm(e) : S.qr ? `
     <div style="min-width:0">
@@ -860,7 +863,7 @@ const secHTML = (e, [k, i, n]) => `<section class="card sec ${S.open.has(k) ? 'o
     <div class="sec-b">${S.open.has(k) ? secBody(e, k) : ''}</div></section>`;
 // QR-Ansicht (Handy): alles untereinander, in der Reihenfolge aus den Einstellungen der Kategorie
 function qrInhalt(e, xs, x){
-  const reihe = qrAuswahl(e) || QR_ABSCHNITTE.map(z => z[0]);
+  const reihe = reiheVon(katVon(e)).filter(k => zeigt(e, k));
   const svOk = x && mitService(e) && servicesVon(e).length && reihe.includes('x_service');
   const n = svOk ? svOffen(e, [x]) : 0;
   return `${svOk ? `<div class="qrknopf"><button class="btn ${n ? 'btn-primary' : 'btn-ghost'} btn-sm" data-act="svE" data-v="eins">${ic('check')}Service eintragen${n ? ` (${n})` : ''}</button></div>` : ''}
@@ -888,9 +891,8 @@ function exBlock(e, xs, x){
   if(!x) return `<div class="exwrap">${tabs}<div class="expanel"><div class="small muted">Noch kein Exemplar erfasst.</div></div></div>`;
   return `<div class="exwrap">${tabs}<div class="expanel">
     ${S.svE ? `<div class="excard voll sveintrag">${svEintragen(e, x)}</div>` : ''}
-    ${qrZeigt(e, 'x_angaben') ? `<div class="excard">${exAngaben(e, x)}</div>` : ''}
-    ${qrZeigt(e, 'x_service') && mitService(e) ? `<div class="excard">${exService(e, x)}</div>` : ''}
-    ${qrZeigt(e, 'x_notizen') ? `<div class="excard voll">${exNotizen(e, x)}</div>` : ''}
+    ${reiheVon(katVon(e)).filter(k => k.startsWith('x_') && zeigt(e, k) && (k !== 'x_service' || mitService(e))).map(k => k === 'x_angaben' ? `<div class="excard">${exAngaben(e, x)}</div>`
+      : k === 'x_service' ? `<div class="excard">${exService(e, x)}</div>` : `<div class="excard voll">${exNotizen(e, x)}</div>`).join('')}
     ${bu ? `<div class="exfuss">${xs.length > 1 ? `<button class="addrow small" data-act="exLoesen">${ic('link')}In eigenen Eintrag herauslösen</button>` : ''}
       <button class="addrow small" data-act="exArchiv" style="color:var(--danger)">${ic('archive')}«${esc(exName(x))}» archivieren</button></div>` : ''}
   </div></div>`;
@@ -1371,13 +1373,14 @@ function vKategorie(){
       ${einhListe()}
     </section>
     <section class="card einst">
-      ${k ? `<div class="exh"><h3>Beim Scannen des QR-Codes anzeigen</h3></div>
-        <div class="small muted">Was Mitarbeitende auf dem Handy sehen, wenn sie die Etikette eines Geräts dieser Kategorie scannen. Gewählte Teile erscheinen untereinander in dieser Reihenfolge (am Griff ziehen), die übrigen sind ausgeblendet. Nichts gewählt = alles.</div>
-        <div class="tbl-wrap"><table class="t sttab qrtab" data-stsort="qr"><colgroup><col class="c-grip"><col></colgroup><tbody>${qrListe(k).map(([key, t], i) => `<tr data-i="${i}"><td class="grip" title="Ziehen zum Verschieben">${ic('grip')}</td>
-          <td><label class="chk"><input type="checkbox" data-qrab="${key}" ${(k.qr_abschnitte || []).includes(key) ? 'checked' : ''}>${key.startsWith('x_') ? '<span class="stat">Exemplar</span>' : ''}${esc(t)}</label></td></tr>`).join('')}</tbody></table></div>
-        <div class="exh" style="margin-top:14px"><h3>Service &amp; Wartung</h3></div>
-        <label class="chk"><input type="checkbox" data-katsvc="${k.id}" ${k.mit_service !== false ? 'checked' : ''}>Service &amp; Wartung bei dieser Kategorie verwenden</label>
-        <div class="small muted">Aus = bei Einträgen dieser Kategorie erscheint nichts zum Service: keine Service-Karte beim Gerät, kein Knopf «Service alle», kein Abschnitt «Service &amp; Wartung» und keine Termine im Einsatzplaner. Bereits erfasste Arbeiten bleiben gespeichert.</div>`
+      ${k ? `<div class="exh"><h3>Anzeige</h3></div>
+        <div class="small muted">Was bei Einträgen dieser Kategorie erscheint: <b>Normal</b> = im Tool am PC oder Handy, <b>QR-Scan</b> = nach dem Scannen der Etikette. Reihenfolge am Griff ziehen
+          (Exemplar-Teile bleiben in der normalen Ansicht im Exemplar-Bereich). Sind in «Normal» beide Service-Teile aus, gibt es bei dieser Kategorie keinen Service – auch nicht im Einsatzplaner.
+          Ausgeblendetes bleibt gespeichert.</div>
+        <div class="tbl-wrap"><table class="t sttab qrtab" data-stsort="qr"><colgroup><col class="c-grip"><col><col class="c-chk"><col class="c-chk"></colgroup>
+          <thead><tr><th></th><th>Teil</th><th class="mid">Normal</th><th class="mid">QR-Scan</th></tr></thead><tbody>${reiheVon(k).map((key, i) => `<tr data-i="${i}"><td class="grip" title="Ziehen zum Verschieben">${ic('grip')}</td>
+          <td>${key.startsWith('x_') ? '<span class="stat">Exemplar</span>' : ''}${esc(ABSCHNITTE.find(z => z[0] === key)[1])}</td>
+          ${['normal', 'qr'].map(a => `<td class="mid"><input type="checkbox" data-ansicht="${a}" data-key="${key}" ${(k[a + '_aus'] || []).includes(key) ? '' : 'checked'}></td>`).join('')}</tr>`).join('')}</tbody></table></div>`
       : `<div class="exh"><h3>Für alle Kategorien</h3></div><div class="small muted">Merkmale, die überall passen (z. B. Hersteller / Modell, Anschaffungsjahr, Kaufpreis).</div>`}
     </section></div>`;
 }
@@ -1399,28 +1402,23 @@ function handyVorschau(){
   w.querySelector('.xbtn').onclick = zu; w.onmousedown = ev => { if(ev.target === w) zu(); };
   document.body.appendChild(w);
 }
-async function katService(el){
-  const k = S.kats.find(x => x.id === el.dataset.katsvc); if(!k) return;
-  const { error } = await sb.from('wissen_kategorie').update({ mit_service: el.checked }).eq('id', k.id);
-  if(error){ el.checked = !el.checked; return fehler(error, 'Speichern'); }
-  k.mit_service = el.checked; toast(el.checked ? 'Service & Wartung an' : 'Service & Wartung aus'); render();
-}
-// Liste für die Einstellungen: gewählte Teile in gespeicherter Reihenfolge, danach die übrigen
-function qrListe(k){
-  const alle = QR_ABSCHNITTE.filter(([key]) => k.mit_service !== false || !['x_service', 'service'].includes(key)), gew = k.qr_abschnitte || [];
-  return [...gew.map(key => alle.find(z => z[0] === key)).filter(Boolean), ...alle.filter(z => !gew.includes(z[0]))];
-}
-function qrVerschieben(von, nach){
-  const tb = document.querySelector('.qrtab tbody'), trs = [...tb.children]; if(von === nach || !trs[von]) return;
-  const [z] = trs.splice(von, 1); trs.splice(Math.min(nach, trs.length), 0, z); trs.forEach(t => tb.appendChild(t));
-  qrAbschnitt(z.querySelector('[data-qrab]'), true);
-}
-async function qrAbschnitt(el, verschoben){
+// Häkchen Normal / QR-Scan: ausgeblendete Teile speichern; in «Normal» beide Service-Teile aus = kein Service (mit_service)
+async function ansichtSetzen(el){
   const k = S.kats.find(x => x.id === S.katDetail); if(!k) return;
-  const neu = [...document.querySelectorAll('[data-qrab]')].filter(c => c.checked).map(c => c.dataset.qrab);
-  const { error } = await sb.from('wissen_kategorie').update({ qr_abschnitte: neu.length ? neu : null }).eq('id', k.id);
-  if(error){ if(!verschoben) el.checked = !el.checked; return fehler(error, 'Speichern'); }
-  k.qr_abschnitte = neu.length ? neu : null; toast('Gespeichert'); render();
+  const feld = el.dataset.ansicht + '_aus', key = el.dataset.key, alt = k[feld] || [];
+  const neu = el.checked ? alt.filter(x => x !== key) : [...alt, key];
+  const werte = { [feld]: neu, ...(feld === 'normal_aus' ? { mit_service: !(neu.includes('x_service') && neu.includes('service')) } : {}) };
+  const { error } = await sb.from('wissen_kategorie').update(werte).eq('id', k.id);
+  if(error){ el.checked = !el.checked; return fehler(error, 'Speichern'); }
+  Object.assign(k, werte); toast('Gespeichert'); render();
+}
+async function qrVerschieben(von, nach){
+  const k = S.kats.find(x => x.id === S.katDetail); if(!k || von === nach) return;
+  const r = reiheVon(k), [z] = r.splice(von, 1); r.splice(Math.min(nach, r.length), 0, z);
+  const alt = k.abschnitt_reihe; k.abschnitt_reihe = r; render();
+  const { error } = await sb.from('wissen_kategorie').update({ abschnitt_reihe: r }).eq('id', k.id);
+  if(error){ k.abschnitt_reihe = alt; render(); return fehler(error, 'Sortieren'); }
+  toast('Gespeichert');
 }
 async function stEinheit(el){
   const m = S.merkmale.find(x => x.id === el.dataset.steinh), v = el.value.trim();
@@ -1819,8 +1817,7 @@ document.addEventListener('change', ev => {
   if(S.lEdit && (ev.target.dataset?.lsp != null || ev.target.id === 'lArt' || ev.target.id === 'lQ')){ lisLesen(); render(); }
   if(ev.target.dataset?.stneu){ stNeu(ev.target); }
   if(ev.target.dataset?.steinh){ stEinheit(ev.target); }
-  if(ev.target.dataset?.qrab){ qrAbschnitt(ev.target); }
-  if(ev.target.dataset?.katsvc){ katService(ev.target); }
+  if(ev.target.dataset?.ansicht){ ansichtSetzen(ev.target); }
 });
 document.addEventListener('focusout', ev => {
   const ed = ev.target.closest && ev.target.closest('.rte-ed');
