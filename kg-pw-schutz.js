@@ -152,6 +152,25 @@
         fremdeEl.push(tag + (e.id ? '#' + e.id : '') + (e.shadowRoot ? ' (shadow)' : '') + ' in ' + (e.parentElement ? e.parentElement.tagName.toLowerCase() + (e.parentElement.id ? '#' + e.parentElement.id : '') : '-'));
     }
     z.push('Fremde Elemente: ' + (fremdeEl.join(' | ') || 'keine'));
+    // Wo zeichnet Dashlane sein Symbol? Alle Nicht-Feld-Elemente mit kw…/dashlane-Merkmalen,
+    // dazu das Umfeld des ersten betroffenen Feldes und alle direkten Kinder von <html>/<body>
+    var mitKw = [];
+    for(var q = 0; q < alle.length && mitKw.length < 15; q++){
+      var w = alle[q]; if(/^(INPUT|TEXTAREA|SELECT)$/.test(w.tagName)) continue;
+      var an = []; for(var t = 0; t < w.attributes.length; t++) if(/kw|dashlane/i.test(w.attributes[t].name + ' ' + w.attributes[t].value)) an.push(w.attributes[t].name + '=' + String(w.attributes[t].value).slice(0, 60));
+      if(an.length) mitKw.push(w.tagName.toLowerCase() + ' [' + an.join(' ') + '] in ' + (w.parentElement ? w.parentElement.tagName.toLowerCase() : '-'));
+    }
+    z.push('Elemente mit kw/dashlane: ' + (mitKw.join(' | ') || 'keine'));
+    var erstes = document.querySelector('[data-kwimpalastatus]');
+    if(erstes){
+      z.push('Feld-Stil: ' + (erstes.getAttribute('style') || '(kein style)'));
+      var cs2 = getComputedStyle(erstes);
+      z.push('Feld berechnet: hintergrund=' + cs2.backgroundImage.slice(0, 80) + ' / padding-right=' + cs2.paddingRight);
+      z.push('Umfeld: ' + erstes.parentElement.outerHTML.replace(/\s+/g, ' ').slice(0, 700));
+    }
+    var kinder = function(p){ var l = []; for(var c = 0; c < p.children.length; c++){ var k = p.children[c]; l.push(k.tagName.toLowerCase() + (k.id ? '#' + k.id : '') + (k.className && typeof k.className === 'string' ? '.' + k.className.split(' ')[0] : '') + (k.getAttribute('style') ? '{' + k.getAttribute('style').slice(0, 60) + '}' : '')); } return l.join(' '); };
+    z.push('Kinder html: ' + kinder(document.documentElement));
+    z.push('Kinder body: ' + kinder(document.body));
     var html = document.documentElement, ha = [];
     for(var m = 0; m < html.attributes.length; m++) ha.push(html.attributes[m].name);
     z.push('html-Merkmale: ' + ha.join(' '));
