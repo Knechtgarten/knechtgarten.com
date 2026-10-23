@@ -300,6 +300,9 @@ svg.i.mini{width:14px;height:14px;color:var(--muted);vertical-align:-2px;}
 /* Einstellungen */
 .einstgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;align-items:stretch;}
 .einstspalte{display:flex;flex-direction:column;gap:14px;}
+.mmwahl{display:flex;flex-wrap:wrap;gap:6px;}
+.mmwahl .chip{cursor:pointer;font-size:13px;padding:5px 11px;}
+.mmwahl .chip:hover{border-color:var(--primary);}
 .sttab tr.spez .grip{cursor:default;color:var(--muted);}
 .festname{display:inline-block;padding:6px 8px;font-weight:600;color:var(--primary);}
 .einst{padding:16px 18px;display:flex;flex-direction:column;gap:10px;}
@@ -904,10 +907,9 @@ function exAngaben(e, x){
   const lesen = bu ? x.steckbrief || [] : [x.nummer && { label: 'Nummer', wert: x.nummer }, x.zustaendig && { label: 'Zuständig', wert: x.zustaendig }, ...(x.steckbrief || [])].filter(Boolean);
   // Spezialfeld «Im Einsatzplaner»: steht als Zeile in der Tabelle, solange das Exemplar im Planer ist
   const planZeile = res && res.aktiv ? `<tr class="spez"><td class="m">${PLANER_FELD}</td><td colspan="2"><b>${esc([RTYP[res.typ] || res.typ, res.nummer, res.name].filter(Boolean).join(' · '))}</b></td>${bu ? `<td class="nw"><button class="xbtn" data-act="planAus" title="Aus dem Einsatzplaner nehmen">${ic('trash')}</button></td>` : ''}</tr>` : '';
-  const planLink = bu && !(res && res.aktiv) ? `<button class="addrow small" data-act="planAn">${ic('cal')}${PLANER_FELD}</button>` : '';
   return `<div class="exh"><h4>Angaben ${esc(exName(x))}</h4></div>
     ${fixe}
-    ${kvTab('xsteck', lesen, bu, 'Was nur dieses Exemplar betrifft: Anschaffungsjahr, Seriennummer, Fahrzeugprüfung, km-Stand …', planZeile, planLink)}
+    ${kvTab('xsteck', lesen, bu, 'Was nur dieses Exemplar betrifft: Anschaffungsjahr, Seriennummer, Fahrzeugprüfung, km-Stand …', planZeile)}
     ${S.qr ? '' : `<div class="acts" style="margin-top:0"><button class="btn btn-ghost btn-sm" data-act="qrKopie" data-v="${QR_BASIS + x.qr_nr}" title="Link kopieren">${ic('link')}knechtgarten.com/g/${x.qr_nr}</button><button class="btn btn-ghost btn-sm" data-act="etikette" data-id="${x.id}">${ic('label')}Etikette</button>
       <a class="btn btn-ghost btn-sm" href="?qr=${x.qr_nr}" style="text-decoration:none">${ic('phone')}QR-Ansicht</a></div>`}
     ${docs.length ? `<div class="grp-title">Belege</div><div class="docs">${docs.map(f => `<div class="doc">${ic(f.art === 'foto' ? 'image' : 'file')}<div class="grow"><a class="n" href="${esc(urls.get(f.storage_pfad) || '#')}" target="_blank" rel="noopener">${esc(f.name)}</a>
@@ -1052,7 +1054,7 @@ function merkmalListe(){
   const l = [...new Set([...merkmaleFuer(e).map(m => m.name), ...benutzt.filter(Boolean).sort((a,b) => a.localeCompare(b, 'de'))])];
   return `<datalist id="kvl">${[...(e.typ === 'geraet' ? [PLANER_FELD] : []), ...l].map(v => `<option value="${esc(v)}">`).join('')}</datalist>`;
 }
-function kvTab(key, rows, ed, hinweis, spez = '', spezLink = ''){
+function kvTab(key, rows, ed, hinweis, spez = ''){
   const e = byId(S.eid);
   const kopf = `<thead><tr><th>Merkmal</th><th>Wert</th><th>Hinweis</th>${ed ? '<th></th>' : ''}</tr></thead>`;
   if(!ed) return rows.length || spez ? `<div class="tbl-wrap"><table class="t kvt">${kopf}<tbody>${spez}${rows.map(r => `<tr><td class="m">${esc(r.label)}</td><td><b>${esc(mitEinheit(e, r))}</b></td><td class="muted">${esc(r.hinweis || '')}</td></tr>`).join('')}</tbody></table></div>`
@@ -1062,14 +1064,11 @@ function kvTab(key, rows, ed, hinweis, spez = '', spezLink = ''){
   const wertZelle = (r, i, neu) => { const u = einheitVon(e, r.label); return u && (!r.wert || /^[\d\s.,'’-]+$/.test(r.wert)) ?`<span class="mitein">${inp(i, 'wert', r, neu ? 'Wert' : '')}<span class="ein">${esc(u)}</span></span>` : inp(i, 'wert', r, neu ? 'Wert' : ''); };
   const zeile = (r, i, neu) => `<tr><td class="m">${inp(i, 'label', r, neu ? 'Merkmal' : '')}</td><td>${wertZelle(r, i, neu)}</td><td>${inp(i, 'hinweis', r, '')}</td>
     <td class="nw">${neu ? '' : `<button class="xbtn" data-act="kvDel" data-key="${key}" data-i="${i}" title="Zeile löschen">${ic('trash')}</button>`}</td></tr>`;
-  const neu = S.kvNeu === key || !rows.length;
-  // Merkmale der Kategorie, die weder in den Technischen Daten noch beim Exemplar schon stehen: als leere Zeilen einfügen
-  const schon = e ? [...(e.steckbrief || []), ...(exAktiv(e)?.steckbrief || [])].map(r => r.label) : [];
-  const fehlen = e ? merkmaleFuer(e).map(m => m.name).filter(n => !schon.includes(n)) : [];
-  return `<div class="tbl-wrap"><table class="t kvt">${kopf}<tbody>${spez}${rows.map((r, i) => zeile(r, i)).join('')}${neu ? zeile({}, rows.length, true) : ''}</tbody></table></div>
+  const neu = S.kvNeu === key;
+  return `${rows.length || spez || neu ? `<div class="tbl-wrap"><table class="t kvt">${kopf}<tbody>${spez}${rows.map((r, i) => zeile(r, i)).join('')}${neu ? zeile({}, rows.length, true) : ''}</tbody></table></div>` : ''}
     ${!rows.length && hinweis ? `<div class="small muted">${esc(hinweis)}</div>` : ''}
-    <div class="addlinks"><button class="addrow small" data-act="kvAdd" data-key="${key}">${ic('plus')}Merkmal</button>${spezLink}
-      ${fehlen.length ? `<button class="addrow small" data-act="kvVorlage" data-key="${key}" title="${esc(fehlen.join(', '))}">${ic('list')}Merkmale der Kategorie einfügen (${fehlen.length})</button>` : ''}</div>`;
+    <div class="addlinks"><button class="addrow small" data-act="kvAdd" data-key="${key}">${ic('plus')}Merkmal</button>
+      </div>`;
 }
 const kvZiel = (key, e) => key === 'steckbrief' ? e : exAktiv(e);
 async function kvSpeichern(key, e, rows){
@@ -1083,7 +1082,10 @@ async function kvFeld(el){
   if(f === 'label' && v.toLowerCase() === PLANER_FELD.toLowerCase()){ el.value = ''; S.kvNeu = null; return planSetzen(true); } // Spezialfeld
   if(neu){ if(!v) return; rows.push({ label: '', wert: '' }); }
   if((rows[i][f] || '') === v) return;
+  const alt = rows[i].label, x = exAktiv(e);
   rows[i][f] = v;
+  // Merkmal umbenannt: bei den anderen Exemplaren gleich mit
+  if(key === 'xsteck' && f === 'label' && !neu && alt && v) await exAlleZeilen(e, (r, y) => y.id !== x.id && r.some(q => q.label === alt) && !r.some(q => q.label === v) ? r.map(q => q.label === alt ? { ...q, label: v } : q) : null);
   const leer = !rows[i].label && !rows[i].wert && !rows[i].hinweis;
   if(await kvSpeichern(key, e, rows)){
     if(neu) S.kvNeu = null;
@@ -1092,6 +1094,44 @@ async function kvFeld(el){
   }
 }
 
+// Exemplar-Merkmale gelten als Zeilen für alle Exemplare des Eintrags (Werte pro Exemplar):
+// fn bekommt die Zeilen eines Exemplars und gibt die neuen zurück (null = unverändert)
+const kvSauber = rows => rows.filter(r => r.label || r.wert || r.hinweis).map(r => ({ label: r.label || '', wert: r.wert || '', ...(r.hinweis ? { hinweis: r.hinweis } : {}) }));
+async function exAlleZeilen(e, fn){
+  for(const y of exVon(e)){ const neu = fn(JSON.parse(JSON.stringify(y.steckbrief || [])), y); if(neu && !await speichereExemplar(y.id, { steckbrief: kvSauber(neu) })) return false; }
+  return true;
+}
+// «+ Merkmal»: Auswahl aus Kategorie-Merkmalen und Spezialfeldern, oder eigenes
+function merkmalWahl(key){
+  const e = byId(S.eid), x = exAktiv(e), n = exVon(e).length;
+  const schon = [...(e.steckbrief || []), ...(x?.steckbrief || [])].map(r => r.label);
+  const res = x && x.planer_ressource_id && S.planer.find(p => p.id === x.planer_ressource_id);
+  const spez = key === 'xsteck' && e.typ === 'geraet' && !(res && res.aktiv) ? [PLANER_FELD] : [];
+  const l = [...spez, ...merkmaleFuer(e).map(m => m.name).filter(v => !schon.includes(v))];
+  ovl(`<h3>Merkmal hinzufügen</h3>
+    ${key === 'xsteck' && n > 1 ? `<div class="small muted">Wird bei allen ${n} Exemplaren als Zeile eingefügt, der Wert gilt pro Exemplar.</div>` : ''}
+    ${l.length ? `<div class="mmwahl">${l.map(v => `<button class="chip ${spez.includes(v) ? 'planer' : ''}" data-act="kvWahl" data-key="${key}" data-v="${esc(v)}">${spez.includes(v) ? ic('cal') : ''}${esc(v)}</button>`).join('')}</div>` : ''}
+    <div class="row"><input type="text" id="kvEigen" placeholder="Eigenes Merkmal" style="flex:1"><button class="btn btn-primary" data-act="kvWahl" data-key="${key}">${ic('plus')}Hinzufügen</button></div>
+    <div class="ovlbtns"><button class="btn btn-ghost" data-act="ovlZu">Abbrechen</button></div>`);
+}
+async function merkmalDazu(key, label){
+  const e = byId(S.eid); if(!label) return;
+  if(label.toLowerCase() === PLANER_FELD.toLowerCase()) return planSetzen(true);
+  const fehlt = rows => rows.some(r => r.label === label) ? null : [...rows, { label, wert: '' }];
+  const ok = key === 'xsteck' ? await exAlleZeilen(e, fehlt) : await (async () => { const r = fehlt(JSON.parse(JSON.stringify(e.steckbrief || []))); return !r || kvSpeichern(key, e, r); })();
+  if(!ok) return;
+  render(); const i = (kvZiel(key, e).steckbrief || []).findIndex(r => r.label === label);
+  document.querySelector(`[data-kvk="${key}"][data-i="${i}"][data-f="wert"]`)?.focus();
+}
+// Zeile löschen: beim Exemplar bei allen Exemplaren (mit Warnung, wenn dabei Werte verloren gehen)
+function kvLoeschen(key, i){
+  const e = byId(S.eid), rows = JSON.parse(JSON.stringify(kvZiel(key, e).steckbrief || [])), z = rows[i]; if(!z) return;
+  if(key !== 'xsteck' || !z.label){ rows.splice(i, 1); return kvSpeichern(key, e, rows).then(ok => ok && render()); }
+  const xs = exVon(e), mitWert = xs.map(y => [y, (y.steckbrief || []).find(r => r.label === z.label)]).filter(([, r]) => r && (r.wert || r.hinweis));
+  bestaetige(`«${z.label}» ${xs.length > 1 ? `bei allen ${xs.length} Exemplaren ` : ''}löschen?`, 'Löschen', async () => {
+    if(await exAlleZeilen(e, r => r.some(q => q.label === z.label) ? r.filter(q => q.label !== z.label) : null)) render();
+  }, mitWert.length ? `Diese Werte gehen verloren: ${mitWert.map(([y, r]) => `<b>${esc(exName(y))}</b> ${esc(r.wert || r.hinweis)}`).join(' · ')}` : '');
+}
 function secBody(e, k){
   const d = S.det && S.det.id === e.id ? S.det : null;
   if(k === 'steck'){
@@ -1859,12 +1899,9 @@ document.addEventListener('click', async ev => {
   else if(a === 'planAn') await planSetzen(true);
   else if(a === 'planTyp'){ ovlZu(); await planSetzen(true, d.v); }
   else if(a === 'planAus') await planSetzen(false);
-  else if(a === 'kvAdd'){ S.kvNeu = d.key; render(); const l = document.querySelectorAll(`[data-kvk="${d.key}"][data-f="label"]`); l[l.length - 1]?.focus(); }
-  else if(a === 'kvVorlage'){ const rows = JSON.parse(JSON.stringify(kvZiel(d.key, e)[KVFELD[d.key]] || []));
-    const schon = [...(e.steckbrief || []), ...(exAktiv(e)?.steckbrief || [])].map(r => r.label);
-    merkmaleFuer(e).forEach(m => { if(!schon.includes(m.name)) rows.push({ label: m.name, wert: '' }); });
-    if(await kvSpeichern(d.key, e, rows)){ render(); const l = [...document.querySelectorAll(`[data-kvk="${d.key}"][data-f="wert"]`)].find(i => !i.value); l?.focus(); } }
-  else if(a === 'kvDel'){ const rows = JSON.parse(JSON.stringify(kvZiel(d.key, e)[KVFELD[d.key]] || [])); rows.splice(+d.i, 1); if(await kvSpeichern(d.key, e, rows)) render(); }
+  else if(a === 'kvAdd') merkmalWahl(d.key);
+  else if(a === 'kvWahl'){ const v = d.v || $('kvEigen').value.trim(); if(!v) return; ovlZu(); await merkmalDazu(d.key, v); }
+  else if(a === 'kvDel') kvLoeschen(d.key, +d.i);
   // Notizen (data-x = nur dieses Exemplar)
   else if(a === 'notizNeu'){
     const { data, error } = await sb.from('wissen_notiz').insert({ eintrag_id: e.id, exemplar_id: d.x || null, html: '', erstellt_von: S.userId }).select().single();
