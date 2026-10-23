@@ -127,6 +127,10 @@ main.wrap{padding-top:22px;padding-bottom:70px;}
 .fld .chk input{width:auto;margin:0;}
 .qrwahl{display:flex;flex-direction:column;gap:8px;}
 .stat.aus{background:var(--soft);color:var(--muted);}
+.svsym{display:inline-flex;width:24px;height:24px;border-radius:50%;align-items:center;justify-content:center;} .svsym .i{width:14px;height:14px;stroke-width:2;}
+.svsym.ok{background:var(--ok-soft);color:var(--ok);} .svsym.no{background:var(--danger-soft);color:var(--danger);} .svsym.aus{background:var(--soft);color:var(--muted);} .svsym.spaeter{color:#C5CAD0;}
+td.svsymz{width:34px;text-align:center;}
+.extabs .svalle{margin-left:auto;align-self:center;}
 table.svz td{padding:5px 8px;}
 .sveintrag{box-shadow:inset 0 0 0 1.5px var(--primary);}
 .svkopf{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
@@ -830,7 +834,8 @@ function exBlock(e, xs, x){
   const bu = istBuero() && !S.qr;
   const tabs = S.qr ? '' : `<div class="extabs" role="tablist">${xs.map((z, i) => `<button class="extab ${z === x ? 'on' : ''}" data-act="exTab" data-id="${z.id}" role="tab" aria-selected="${z === x}">
       <span class="dt"></span>${esc(exName(z, i))}${z.zustaendig ? `<span class="z">${esc(z.zustaendig)}</span>` : ''}</button>`).join('')}
-    ${bu ? `<button class="extab neu" data-act="exNeu">${ic('plus')}Exemplar</button>` : ''}</div>`;
+    ${bu ? `<button class="extab neu" data-act="exNeu">${ic('plus')}Exemplar</button>` : ''}
+    ${xs.length > 1 && servicesVon(e).length ? (n => `<button class="btn ${n ? 'btn-primary' : 'btn-ghost'} btn-sm svalle" data-act="svE" data-v="alle" title="Service für alle ${xs.length} Exemplare eintragen">${ic('check')}Service alle${n ? ` (${n})` : ''}</button>`)(svOffen(e, xs)) : ''}</div>`;
   if(!x) return `<div class="exwrap">${tabs}<div class="expanel"><div class="small muted">Noch kein Exemplar erfasst.</div></div></div>`;
   return `<div class="exwrap">${tabs}<div class="expanel">
     ${S.svE ? `<div class="excard voll sveintrag">${svEintragen(e, x)}</div>` : ''}
@@ -863,28 +868,36 @@ function exAngaben(e, x){
     ${docs.length ? `<div class="grp-title">Belege</div><div class="docs">${docs.map(f => `<div class="doc">${ic(f.art === 'foto' ? 'image' : 'file')}<div class="grow"><a class="n" href="${esc(urls.get(f.storage_pfad) || '#')}" target="_blank" rel="noopener">${esc(f.name)}</a>
       <div class="small muted">${esc([f.beschreibung, datumCH(f.erstellt_am.slice(0,10))].filter(Boolean).join(' · '))}</div></div></div>`).join('')}</div>` : ''}`;
 }
-// Service des Exemplars: eine Zeile pro Arbeit und Startwoche (dieses Jahr), Status direkt in der Zeile
+// Service des Exemplars: eine Zeile pro Arbeit und Startwoche (dieses Jahr), neutral dargestellt.
+// KW nur bei offenen / späteren (wann es fällig ist), Datum und Stand nur bei erledigten (wann gemacht).
+// Ganz hinten ein farbiges Symbol: rot = offen, grün = erledigt, grau = ausgelassen, blass = später.
 function svFaellig(x, s, w){ return !erledigtIn(x, s, w) && w <= NOW_KW; }
+const svOffen = (e, xs) => xs.reduce((n, y) => n + servicesVon(e).reduce((m, s) => m + wochen(s).filter(w => svFaellig(y, s, w)).length, 0), 0);
+function svSymbol(r, w){
+  return r ? (r.erledigt ? `<span class="svsym ok" title="erledigt">${ic('check')}</span>` : `<span class="svsym aus" title="ausgelassen">${ic('x')}</span>`)
+    : w <= NOW_KW ? `<span class="svsym no" title="${w < NOW_KW ? 'offen, überfällig' : 'offen, diese Woche'}">${ic('alert')}</span>` : `<span class="svsym spaeter" title="noch nicht fällig">${ic('cal')}</span>`;
+}
+function svZeile(arbeit, s, w, r, bu, mitJahr){
+  return `<tr><td>${s ? `<button class="lnk" data-act="anl" data-id="${s.id}" title="Anleitung zeigen">${esc(arbeit)}</button>${s.im_planer && s.wichtig ? ' <span class="stat wichtig">wichtig</span>' : ''}` : esc(arbeit)}</td>
+    <td class="nw muted">${r ? (mitJahr ? r.jahr : '') : 'KW ' + w}</td>
+    <td class="nw">${r && r.erledigt ? datumCH(r.datum) : ''}</td>
+    <td class="muted">${r ? esc([r.stand, r.bemerkung].filter(Boolean).join(' · ')) : ''}</td>
+    <td class="nw svsymz">${svSymbol(r, w)}</td>
+    <td class="nw" style="width:30px">${r && bu ? `<button class="xbtn" data-act="erlDel" data-id="${r.id}" title="Eintrag löschen">${ic('x')}</button>` : ''}</td></tr>`;
+}
 function exService(e, x){
   const svs = servicesVon(e), bu = istBuero() && !S.qr;
   const zeilen = svs.flatMap(s => wochen(s).map(w => ({ s, w, r: erledigtIn(x, s, w) }))).sort((a, b) => a.w - b.w || a.s.arbeit.localeCompare(b.s.arbeit, 'de'));
-  const status = ({ s, w, r }) => r ? (r.erledigt ? `<span class="stat ok">${ic('check')}${datumCH(r.datum)}</span>${r.stand || r.bemerkung ? ` <span class="small muted">${esc([r.stand, r.bemerkung].filter(Boolean).join(' · '))}</span>` : ''}`
-      : `<span class="stat aus">${ic('x')}ausgelassen</span>`)
-    : w < NOW_KW ? `<span class="stat no">${ic('alert')}offen</span>` : w === NOW_KW ? `<span class="stat no">${ic('alert')}diese Woche</span>` : `<span class="stat open">ab KW ${w}</span>`;
-  const rows = zeilen.map(z => `<tr><td><button class="lnk" data-act="anl" data-id="${z.s.id}" title="Anleitung zeigen">${esc(z.s.arbeit)}</button>${z.s.im_planer && z.s.wichtig ? ' <span class="stat wichtig">wichtig</span>' : ''}</td>
-      <td class="nw small muted">KW ${z.w}</td><td>${status(z)}</td>
-      <td class="nw" style="width:30px">${z.r && bu ? `<button class="xbtn" data-act="erlDel" data-id="${z.r.id}" title="Eintrag löschen">${ic('x')}</button>` : ''}</td></tr>
-      ${S.anl.has(z.s.id) && zeilen.find(y => y.s === z.s) === z ? `<tr><td colspan="4"><div class="anlbox">${z.s.anleitung_html ? `<div class="rte-ed">${z.s.anleitung_html}</div>` : '<div class="small muted">Noch keine Anleitung.</div>'}</div></td></tr>` : ''}`).join('');
+  const rows = zeilen.map(z => svZeile(z.s.arbeit, z.s, z.w, z.r, bu)
+    + (S.anl.has(z.s.id) && zeilen.find(y => y.s === z.s) === z ? `<tr><td colspan="6"><div class="anlbox">${z.s.anleitung_html ? `<div class="rte-ed">${z.s.anleitung_html}</div>` : '<div class="small muted">Noch keine Anleitung.</div>'}</div></td></tr>` : '')).join('');
   // frühere Jahre und Einträge zu gelöschten Arbeiten
   const gezeigt = new Set(zeilen.filter(z => z.r).map(z => z.r.id));
   const frueher = S.erledigt.filter(r => r.exemplar_id === x.id && !gezeigt.has(r.id)).sort((a, b) => b.jahr - a.jahr || b.kw - a.kw);
-  const offenAlle = exVon(e).reduce((n, y) => n + svs.reduce((m, s) => m + wochen(s).filter(w => svFaellig(y, s, w)).length, 0), 0);
-  return `<div class="exh"><h4>Service ${esc(exName(x))}</h4>${svs.length ? `<button class="btn ${offenAlle ? 'btn-primary' : 'btn-ghost'} btn-sm" data-act="svE">${ic('check')}Service eintragen${offenAlle ? ` (${offenAlle})` : ''}</button>` : ''}</div>
+  const offen = svOffen(e, [x]);
+  return `<div class="exh"><h4>Service ${esc(exName(x))}</h4>${svs.length ? `<button class="btn ${offen ? 'btn-primary' : 'btn-ghost'} btn-sm" data-act="svE" data-v="eins" title="Service für ${esc(exName(x))} eintragen">${ic('check')}Eintragen${offen ? ` (${offen})` : ''}</button>` : ''}</div>
     ${svs.length ? (zeilen.length ? `<div class="tbl-wrap"><table class="t svz">${rows}</table></div>` : '<div class="small muted">Bei den Service-Arbeiten sind noch keine Wochen gewählt.</div>')
       : `<div class="small muted">Noch keine Service-Arbeiten.${bu ? ' Unten bei «Service-Arbeiten» erfassen – sie gelten für alle Exemplare.' : ''}</div>`}
-    ${frueher.length ? `<div class="grp-title">Früher</div><div class="tbl-wrap"><table class="t svz">${frueher.map(h => `<tr><td>${esc(h.arbeit)}</td><td class="nw small muted">KW ${h.kw} ${h.jahr}</td>
-      <td>${h.erledigt ? `<span class="stat ok">${ic('check')}${datumCH(h.datum)}</span>` : `<span class="stat aus">${ic('x')}ausgelassen</span>`}${h.stand || h.bemerkung ? ` <span class="small muted">${esc([h.stand, h.bemerkung].filter(Boolean).join(' · '))}</span>` : ''}</td>
-      <td class="nw" style="width:30px">${bu ? `<button class="xbtn" data-act="erlDel" data-id="${h.id}" title="Eintrag löschen">${ic('x')}</button>` : ''}</td></tr>`).join('')}</table></div>` : ''}`;
+    ${frueher.length ? `<div class="grp-title">Früher</div><div class="tbl-wrap"><table class="t svz">${frueher.map(h => svZeile(h.arbeit, null, h.kw, h, bu, true)).join('')}</table></div>` : ''}`;
 }
 // «Service eintragen»: alle offenen Arbeiten aller Exemplare dieses Eintrags bis zum gewählten Zeitraum,
 // das aktive Exemplar zuoberst. Pro Zeile Datum, Stand, Bemerkung, Belege und «Ausgeführt» / «Ausgelassen».
@@ -894,12 +907,12 @@ const svDateien = {};   // Zeile → gewählte Dateien (noch nicht hochgeladen)
 const svWerte = {};     // Zeile → Eingaben (bleiben beim Neuzeichnen erhalten)
 function svMerken(){ document.querySelectorAll('table.sveint tbody tr[data-k]').forEach(tr => { const v = svWerte[tr.dataset.k] = {}; tr.querySelectorAll('[data-f]').forEach(i => v[i.dataset.f] = i.value); }); }
 function svEintragen(e, x){
-  const svs = servicesVon(e), xs = [x, ...exVon(e).filter(y => y.id !== x.id)];
+  const svs = servicesVon(e), xs = S.svE === 'eins' ? [x] : [x, ...exVon(e).filter(y => y.id !== x.id)];
   const zaehler = /lieferwagen|personenwagen|bus|auto/i.test(e.geraeteart || '') ? 'km-Stand' : /bagger|dumper|lader/i.test(e.geraeteart || '') ? 'Betriebsstunden' : 'Zählerstand';
   const bisKw = Math.min(53, NOW_KW + Math.ceil((S.svBis || 0) / 7));
   const zeilen = xs.flatMap(y => svs.flatMap(s => wochen(s).filter(w => !erledigtIn(y, s, w) && w <= bisKw).map(w => ({ y, s, w, k: svKey(y, s, w) }))));
   const belege = k => (svDateien[k] || []).map((f, j) => `<button class="minidoc" data-act="svDoc" data-k="${k}" data-j="${j}" title="${esc(f.name)} anzeigen">${ic(/^image\//.test(f.type) ? 'image' : 'file')}</button>`).join('');
-  return `<div class="exh"><h4>Service eintragen</h4><button class="xbtn" data-act="svE" title="Schliessen">${ic('x')}</button></div>
+  return `<div class="exh"><h4>Service eintragen${S.svE === 'eins' ? ' · ' + esc(exName(x)) : ' · alle Exemplare'}</h4><button class="xbtn" data-act="svE" title="Schliessen">${ic('x')}</button></div>
     <div class="svkopf"><span class="small muted">Offene Arbeiten von ${xs.length > 1 ? `allen ${xs.length} Exemplaren` : 'diesem Exemplar'}, «${esc(exName(x))}» zuoberst. Fällig bis</span>
       <span class="segm">${SV_BIS.map(([d, t]) => `<button class="${(S.svBis || 0) === d ? 'on' : ''}" data-act="svBis" data-v="${d}">${t}</button>`).join('')}</span></div>
     ${zeilen.length ? `<div class="tbl-wrap"><table class="t sveint"><thead><tr><th>Gerät</th><th>Arbeit</th><th>Datum</th><th>${zaehler}</th><th>Bemerkung</th>${S.qr ? '' : '<th>Belege</th>'}<th></th></tr></thead><tbody>
@@ -1852,7 +1865,7 @@ document.addEventListener('click', async ev => {
       S.service = S.service.filter(x => x.id !== s.id); render();
     });
   }
-  else if(a === 'svE'){ svMerken(); S.svE = !S.svE; render(); if(S.svE) document.querySelector('.sveintrag')?.scrollIntoView({ block: 'nearest' }); }
+  else if(a === 'svE'){ svMerken(); S.svE = S.svE && (!d.v || S.svE === d.v) ? false : (d.v || false); render(); if(S.svE) document.querySelector('.sveintrag')?.scrollIntoView({ block: 'nearest' }); }
   else if(a === 'svBis'){ svMerken(); S.svBis = +d.v; render(); }
   else if(a === 'svDatei') waehleDateien('application/pdf,image/*', true, files => { svMerken(); (svDateien[d.k] ||= []).push(...files); render(); });
   else if(a === 'svDoc'){ const fl = svDateien[d.k]?.[+d.j]; if(fl) window.open(URL.createObjectURL(fl), '_blank'); }
