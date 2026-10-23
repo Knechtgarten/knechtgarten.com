@@ -126,6 +126,11 @@ main.wrap{padding-top:22px;padding-bottom:70px;}
 .fld input,.fld select{width:100%;}
 .fld .chk input{width:auto;margin:0;}
 .qrwahl{display:flex;flex-direction:column;gap:8px;}
+.stat.aus{background:var(--soft);color:var(--muted);}
+table.svz td{padding:5px 8px;}
+.sveintrag{border:2px solid var(--primary);}
+table.sveint td{padding:5px 6px;vertical-align:middle;} table.sveint input[type=text],table.sveint input[type=date]{width:100%;min-width:90px;padding:4px 6px;}
+table.sveint tr.aktiv td{background:var(--accent-blue);} table.sveint .dateiklein{font-size:11px;max-width:150px;}
 .stat.wichtig{background:#323E4E;color:#fff;} select.plwahl.wichtig{color:#323E4E;font-weight:700;} select.plwahl.aus{color:var(--muted);}
 .handywrap{position:fixed;inset:0;background:rgba(35,43,53,.45);z-index:70;display:flex;align-items:center;justify-content:center;padding:16px;}
 .handy{background:#232B35;border-radius:28px;padding:10px;box-shadow:0 12px 40px rgba(0,0,0,.35);display:flex;flex-direction:column;gap:6px;height:min(860px,calc(100vh - 32px));}
@@ -520,7 +525,7 @@ const S = {
   kats: [], bereiche: [], merkmale: [], mmKat: '', eintraege: [], exemplare: [], service: [], erledigt: [], lieferanten: [], benutzer: {}, planer: [],
   view: 'suche', eid: null, xid: null, det: null, qr: false,
   q: '', ber: lies('ber', null), kat: lies('kat', null), typ: lies('typ', null), mode: lies('mode', 'foto'),
-  open: new Set(), edit: null, kvNeu: null, kwEdit: null, ask: null, neuService: null, anl: new Set(),
+  open: new Set(), edit: null, kvNeu: null, kwEdit: null, ask: null, svE: false, svSpaeter: false, neuService: null, anl: new Set(),
   listen: [], lid: lies('liste', null), lEdit: null, lsort: null, lsortDir: 1, alleNotizen: null,
   sel: new Set(), used: new Set(), fmt: lies('fmt', '8'), foto: false, pickQ: '',
 };
@@ -657,7 +662,7 @@ function geheZu(view){
   render(); window.scrollTo(0, 0);
 }
 async function oeffne(id, sec, ohneHistory, xid){
-  S.view = 'eintrag'; S.eid = id; S.edit = null; S.kvNeu = null; S.kwEdit = null; S.ask = null; S.neuService = null; S.det = null; S.anl = new Set();
+  S.view = 'eintrag'; S.eid = id; S.edit = null; S.kvNeu = null; S.kwEdit = null; S.ask = null; S.svE = false; S.neuService = null; S.det = null; S.anl = new Set();
   const e = byId(id);
   S.xid = xid && exById(xid)?.eintrag_id === id ? xid : exVon(e)[0]?.id || null;
   if(!ohneHistory && !S.qr) history.pushState(null, '', location.pathname + '#e-' + id + (xid ? '.' + xid : ''));
@@ -821,6 +826,7 @@ function exBlock(e, xs, x){
     ${bu ? `<button class="extab neu" data-act="exNeu">${ic('plus')}Exemplar</button>` : ''}</div>`;
   if(!x) return `<div class="exwrap">${tabs}<div class="expanel"><div class="small muted">Noch kein Exemplar erfasst.</div></div></div>`;
   return `<div class="exwrap">${tabs}<div class="expanel">
+    ${S.svE ? `<div class="excard voll sveintrag">${svEintragen(e, x)}</div>` : ''}
     ${qrZeigt(e, 'x_angaben') ? `<div class="excard">${exAngaben(e, x)}</div>` : ''}
     ${qrZeigt(e, 'x_service') ? `<div class="excard">${exService(e, x)}</div>` : ''}
     ${qrZeigt(e, 'x_notizen') ? `<div class="excard voll">${exNotizen(e, x)}</div>` : ''}
@@ -850,41 +856,62 @@ function exAngaben(e, x){
     ${docs.length ? `<div class="grp-title">Belege</div><div class="docs">${docs.map(f => `<div class="doc">${ic(f.art === 'foto' ? 'image' : 'file')}<div class="grow"><a class="n" href="${esc(urls.get(f.storage_pfad) || '#')}" target="_blank" rel="noopener">${esc(f.name)}</a>
       <div class="small muted">${esc([f.beschreibung, datumCH(f.erstellt_am.slice(0,10))].filter(Boolean).join(' · '))}</div></div></div>`).join('')}</div>` : ''}`;
 }
+// Service des Exemplars: eine Zeile pro Arbeit und Startwoche (dieses Jahr), Status direkt in der Zeile
+function svFaellig(x, s, w){ return !erledigtIn(x, s, w) && w <= NOW_KW; }
 function exService(e, x){
-  const svs = servicesVon(e);
-  const rows = svs.map(s => {
-    const ws = wochen(s);
-    const st = ws.map(w => { const r = erledigtIn(x, s, w);
-      return r ? (r.erledigt ? `<span class="stat ok">${ic('check')}KW ${w} · ${datumCH(r.datum)}</span>` : `<span class="stat no">${ic('x')}KW ${w} nicht gemacht</span>`)
-        : w < NOW_KW ? `<span class="stat no">${ic('alert')}KW ${w} offen</span>` : `<span class="stat open">ab KW ${w}</span>`; }).join(' ');
-    const offen = ws.some(w => !erledigtIn(x, s, w));
-    return `<tr><td><button class="lnk" data-act="anl" data-id="${s.id}" title="Anleitung zeigen">${esc(s.arbeit)}</button>${s.anleitung_html ? ` ${ic('book', 'mini')}` : ''}${s.im_planer && s.wichtig ? ' <span class="stat wichtig">wichtig</span>' : ''}</td>
-      <td>${st || '<span class="small muted">keine Woche</span>'}</td>
-      <td class="nw" style="text-align:right">${offen && ws.length ? `<button class="btn btn-ghost btn-sm" data-act="erl" data-id="${s.id}">${ic('check')}Erledigt</button>` : ''}</td></tr>
-      ${S.anl.has(s.id) ? `<tr><td colspan="3"><div class="anlbox">${s.anleitung_html ? `<div class="rte-ed">${s.anleitung_html}</div>` : '<div class="small muted">Noch keine Anleitung.</div>'}</div></td></tr>` : ''}`;
-  }).join('');
-  let ask = '';
-  const sa = S.ask && svs.find(z => z.id === S.ask);
-  if(sa){
-    const w = wochen(sa).find(z => !erledigtIn(x, sa, z));
-    const zaehler = /lieferwagen|personenwagen|bus|auto/i.test(e.geraeteart || '') ? 'km-Stand' : /bagger|dumper|lader/i.test(e.geraeteart || '') ? 'Betriebsstunden' : 'Zählerstand';
-    const gleiche = exVon(e).filter(z => z.id !== x.id && !erledigtIn(z, sa, w));
-    ask = `<div class="ask"><b>${esc(sa.arbeit)} · ${esc(exName(x))} · KW ${w} ${NOW_Y}</b>
-      <div class="row"><label class="fld">Datum<input type="date" id="dDatum" value="${heuteISO()}"></label>
-        <label class="fld">${zaehler} (optional)<input type="text" id="dStand" size="12"></label>
-        <label class="fld" style="flex:1;min-width:180px">Bemerkung (optional)<input type="text" id="dBem"></label></div>
-      <div class="row"><label class="chk"><input type="checkbox" id="dNicht"> nicht gemacht (bewusst ausgelassen)</label></div>
-      ${S.qr ? '' : `<div class="row"><label class="fld">Rechnung (optional)<input type="file" id="dDatei" accept="application/pdf,image/*"></label></div>`}
-      ${gleiche.length && !S.qr ? `<div class="small muted">Gleich auch eintragen für: ${gleiche.map(g => `<label class="chk" style="margin-right:10px"><input type="checkbox" class="dAuch" value="${g.id}">${esc(exName(g))}</label>`).join('')}</div>` : ''}
-      <div class="row"><button class="btn btn-primary" data-act="erlSave" data-id="${sa.id}" data-w="${w}">${ic('check')}Speichern</button><button class="btn btn-ghost" data-act="erlCancel">Abbrechen</button></div></div>`;
-  }
-  const hist = S.erledigt.filter(r => r.exemplar_id === x.id).sort((a,b) => b.jahr - a.jahr || b.kw - a.kw);
-  return `<div class="exh"><h4>Service ${esc(exName(x))}</h4></div>
-    ${svs.length ? `<div class="tbl-wrap"><table class="t">${rows}</table></div>` : `<div class="small muted">Noch keine Service-Arbeiten.${istBuero() && !S.qr ? ' Unten bei «Service-Arbeiten» erfassen – sie gelten für alle Exemplare.' : ''}</div>`}
-    ${ask}
-    ${hist.length ? `<div class="grp-title">Bisher</div><div class="docs">${hist.map(h => `<div class="doc">${h.erledigt ? `<span class="stat ok">${ic('check')}${h.jahr}</span>` : `<span class="stat no">${ic('x')}${h.jahr}</span>`}
-      <div class="grow"><div class="n">${esc(h.arbeit)} · KW ${h.kw}</div><div class="small muted">${esc([h.erledigt ? datumCH(h.datum) : 'nicht gemacht', h.stand, h.bemerkung].filter(Boolean).join(' · '))}</div></div>
-      ${istBuero() && !S.qr ? `<button class="xbtn" data-act="erlDel" data-id="${h.id}" title="Eintrag löschen">${ic('x')}</button>` : ''}</div>`).join('')}</div>` : ''}`;
+  const svs = servicesVon(e), bu = istBuero() && !S.qr;
+  const zeilen = svs.flatMap(s => wochen(s).map(w => ({ s, w, r: erledigtIn(x, s, w) }))).sort((a, b) => a.w - b.w || a.s.arbeit.localeCompare(b.s.arbeit, 'de'));
+  const status = ({ s, w, r }) => r ? (r.erledigt ? `<span class="stat ok">${ic('check')}${datumCH(r.datum)}</span>${r.stand || r.bemerkung ? ` <span class="small muted">${esc([r.stand, r.bemerkung].filter(Boolean).join(' · '))}</span>` : ''}`
+      : `<span class="stat aus">${ic('x')}ausgelassen</span>`)
+    : w < NOW_KW ? `<span class="stat no">${ic('alert')}offen</span>` : w === NOW_KW ? `<span class="stat no">${ic('alert')}diese Woche</span>` : `<span class="stat open">ab KW ${w}</span>`;
+  const rows = zeilen.map(z => `<tr><td><button class="lnk" data-act="anl" data-id="${z.s.id}" title="Anleitung zeigen">${esc(z.s.arbeit)}</button>${z.s.im_planer && z.s.wichtig ? ' <span class="stat wichtig">wichtig</span>' : ''}</td>
+      <td class="nw small muted">KW ${z.w}</td><td>${status(z)}</td>
+      <td class="nw" style="width:30px">${z.r && bu ? `<button class="xbtn" data-act="erlDel" data-id="${z.r.id}" title="Eintrag löschen">${ic('x')}</button>` : ''}</td></tr>
+      ${S.anl.has(z.s.id) && zeilen.find(y => y.s === z.s) === z ? `<tr><td colspan="4"><div class="anlbox">${z.s.anleitung_html ? `<div class="rte-ed">${z.s.anleitung_html}</div>` : '<div class="small muted">Noch keine Anleitung.</div>'}</div></td></tr>` : ''}`).join('');
+  // frühere Jahre und Einträge zu gelöschten Arbeiten
+  const gezeigt = new Set(zeilen.filter(z => z.r).map(z => z.r.id));
+  const frueher = S.erledigt.filter(r => r.exemplar_id === x.id && !gezeigt.has(r.id)).sort((a, b) => b.jahr - a.jahr || b.kw - a.kw);
+  const offenAlle = exVon(e).reduce((n, y) => n + svs.reduce((m, s) => m + wochen(s).filter(w => svFaellig(y, s, w)).length, 0), 0);
+  return `<div class="exh"><h4>Service ${esc(exName(x))}</h4>${svs.length ? `<button class="btn ${offenAlle ? 'btn-primary' : 'btn-ghost'} btn-sm" data-act="svE">${ic('check')}Service eintragen${offenAlle ? ` (${offenAlle})` : ''}</button>` : ''}</div>
+    ${svs.length ? (zeilen.length ? `<div class="tbl-wrap"><table class="t svz">${rows}</table></div>` : '<div class="small muted">Bei den Service-Arbeiten sind noch keine Wochen gewählt.</div>')
+      : `<div class="small muted">Noch keine Service-Arbeiten.${bu ? ' Unten bei «Service-Arbeiten» erfassen – sie gelten für alle Exemplare.' : ''}</div>`}
+    ${frueher.length ? `<div class="grp-title">Früher</div><div class="tbl-wrap"><table class="t svz">${frueher.map(h => `<tr><td>${esc(h.arbeit)}</td><td class="nw small muted">KW ${h.kw} ${h.jahr}</td>
+      <td>${h.erledigt ? `<span class="stat ok">${ic('check')}${datumCH(h.datum)}</span>` : `<span class="stat aus">${ic('x')}ausgelassen</span>`}${h.stand || h.bemerkung ? ` <span class="small muted">${esc([h.stand, h.bemerkung].filter(Boolean).join(' · '))}</span>` : ''}</td>
+      <td class="nw" style="width:30px">${bu ? `<button class="xbtn" data-act="erlDel" data-id="${h.id}" title="Eintrag löschen">${ic('x')}</button>` : ''}</td></tr>`).join('')}</table></div>` : ''}`;
+}
+// «Service eintragen»: alle fälligen, offenen Arbeiten aller Exemplare dieses Eintrags in einer Tabelle,
+// das aktive Exemplar zuoberst. Pro Zeile Datum, Stand, Bemerkung, Rechnung und «Ausgeführt» / «Ausgelassen».
+function svEintragen(e, x){
+  const svs = servicesVon(e), xs = [x, ...exVon(e).filter(y => y.id !== x.id)];
+  const zaehler = /lieferwagen|personenwagen|bus|auto/i.test(e.geraeteart || '') ? 'km-Stand' : /bagger|dumper|lader/i.test(e.geraeteart || '') ? 'Betriebsstunden' : 'Zählerstand';
+  const zeilen = xs.flatMap(y => svs.flatMap(s => wochen(s).filter(w => S.svSpaeter ? !erledigtIn(y, s, w) : svFaellig(y, s, w)).map(w => ({ y, s, w }))));
+  return `<div class="exh"><h4>Service eintragen</h4><button class="xbtn" data-act="svE" title="Schliessen">${ic('x')}</button></div>
+    <div class="small muted">${S.svSpaeter ? 'Alle noch offenen Arbeiten dieses Jahres' : 'Alle fälligen Arbeiten bis diese Woche'} von ${xs.length > 1 ? `allen ${xs.length} Exemplaren` : 'diesem Exemplar'}. «${esc(exName(x))}» steht zuoberst.
+      <label class="chk" style="margin-left:10px"><input type="checkbox" data-act="svSpaeter" ${S.svSpaeter ? 'checked' : ''}>auch spätere Wochen</label></div>
+    ${zeilen.length ? `<div class="tbl-wrap"><table class="t sveint"><thead><tr><th>Gerät</th><th>Arbeit</th><th>KW</th><th>Datum</th><th>${zaehler}</th><th>Bemerkung</th>${S.qr ? '' : '<th>Rechnung</th>'}<th></th></tr></thead><tbody>
+      ${zeilen.map(({ y, s, w }, i) => `<tr class="${y.id === x.id ? 'aktiv' : ''}" data-svr="${i}" data-x="${y.id}" data-s="${s.id}" data-w="${w}">
+        <td class="nw"><b>${esc(exName(y))}</b>${y.zustaendig ? ` <span class="small muted">${esc(y.zustaendig)}</span>` : ''}</td>
+        <td>${esc(s.arbeit)}${s.im_planer && s.wichtig ? ' <span class="stat wichtig">wichtig</span>' : ''}</td>
+        <td class="nw">${w < NOW_KW ? `<span class="stat no">KW ${w}</span>` : `KW ${w}`}</td>
+        <td><input type="date" data-f="datum" value="${heuteISO()}"></td>
+        <td><input type="text" data-f="stand" size="8"></td>
+        <td><input type="text" data-f="bem"></td>
+        ${S.qr ? '' : `<td><input type="file" data-f="datei" accept="application/pdf,image/*" class="dateiklein"></td>`}
+        <td class="nw"><button class="btn btn-primary btn-sm" data-act="svOk" data-i="${i}">${ic('check')}Ausgeführt</button> <button class="btn btn-ghost btn-sm" data-act="svNicht" data-i="${i}">Ausgelassen</button></td></tr>`).join('')}
+      </tbody></table></div>` : `<div class="small muted">Nichts offen${S.svSpaeter ? '' : ' bis diese Woche'}.</div>`}`;
+}
+async function svSpeichern(btn, nicht){
+  const tr = btn.closest('tr'), e = byId(S.eid), s = S.service.find(z => z.id === tr.dataset.s), xid = tr.dataset.x, w = +tr.dataset.w;
+  const wert = f => tr.querySelector(`[data-f="${f}"]`)?.value.trim() || null;
+  tr.querySelectorAll('button').forEach(b => b.disabled = true);
+  let dateiId = null; const f = tr.querySelector('[data-f="datei"]')?.files[0];
+  if(f){ const dd = await hochladen(f, e.id, 'dokument', null, { beschreibung: `Rechnung ${s.arbeit} ${NOW_Y}`, exemplar_id: xid }); if(!dd){ tr.querySelectorAll('button').forEach(b => b.disabled = false); return; } dateiId = dd.id; }
+  const { data, error } = await sb.from('wissen_service_erledigt').insert({ eintrag_id: e.id, exemplar_id: xid, service_id: s.id, arbeit: s.arbeit, jahr: NOW_Y, kw: w,
+    erledigt: !nicht, datum: nicht ? null : (wert('datum') || heuteISO()), stand: wert('stand'), bemerkung: wert('bem'), datei_id: dateiId, erstellt_von: S.userId }).select().single();
+  if(error){ tr.querySelectorAll('button').forEach(b => b.disabled = false); return fehler(error, 'Speichern'); }
+  S.erledigt.push(data); toast(`${exName(exById(xid))} · ${s.arbeit}: ${nicht ? 'ausgelassen' : 'ausgeführt'}`);
+  if(dateiId) await signiere(S.det.dateien.map(z => z.storage_pfad));
+  render();
 }
 function exNotizen(e, x){
   const d = S.det && S.det.id === e.id ? S.det : null;
@@ -1807,28 +1834,9 @@ document.addEventListener('click', async ev => {
       S.service = S.service.filter(x => x.id !== s.id); render();
     });
   }
-  else if(a === 'erl'){ S.ask = d.id; S.kwEdit = null; S.neuService = null; render(); }
-  else if(a === 'erlCancel'){ S.ask = null; render(); }
-  else if(a === 'erlSave'){
-    const s = S.service.find(x => x.id === d.id), x = exAktiv(e), nicht = $('dNicht').checked;
-    const fuer = [x.id, ...[...document.querySelectorAll('.dAuch:checked')].map(c => c.value)];
-    t.disabled = true;
-    let dateiId = null;
-    const f = $('dDatei')?.files[0];
-    if(f){
-      const dd = await hochladen(f, e.id, 'dokument', null, { beschreibung: `Rechnung ${s.arbeit} ${NOW_Y}`, exemplar_id: fuer.length === 1 ? x.id : null });
-      if(!dd){ t.disabled = false; return; }
-      dateiId = dd.id;
-    }
-    const zeilen = fuer.map(xid => ({ eintrag_id: e.id, exemplar_id: xid, service_id: s.id, arbeit: s.arbeit, jahr: NOW_Y, kw: +d.w, erledigt: !nicht,
-      datum: nicht ? null : ($('dDatum').value || heuteISO()), stand: xid === x.id ? $('dStand').value.trim() || null : null, bemerkung: $('dBem').value.trim() || null,
-      datei_id: dateiId, erstellt_von: S.userId }));
-    const { data, error } = await sb.from('wissen_service_erledigt').insert(zeilen).select();
-    if(error){ t.disabled = false; return fehler(error, 'Speichern'); }
-    S.erledigt.push(...data); S.ask = null; toast(fuer.length > 1 ? `Bei ${fuer.length} Exemplaren eingetragen` : 'Eingetragen');
-    if(dateiId) await signiere(S.det.dateien.map(z => z.storage_pfad));
-    render();
-  }
+  else if(a === 'svE'){ S.svE = !S.svE; render(); if(S.svE) document.querySelector('.sveintrag')?.scrollIntoView({ block: 'nearest' }); }
+  else if(a === 'svSpaeter'){ S.svSpaeter = t.checked; render(); }
+  else if(a === 'svOk' || a === 'svNicht') await svSpeichern(t, a === 'svNicht');
   else if(a === 'erlDel') bestaetige('Diesen Eintrag löschen?', 'Löschen', async () => {
     const { error } = await sb.from('wissen_service_erledigt').delete().eq('id', d.id); if(error) return fehler(error, 'Löschen');
     S.erledigt = S.erledigt.filter(x => x.id !== d.id); render();
