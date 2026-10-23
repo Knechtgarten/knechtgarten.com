@@ -137,7 +137,7 @@
       'type', 'class', 'id', 'value', 'placeholder', 'list', 'style', 'size', 'name', 'disabled', 'checked', 'title', 'aria-label', 'tabindex', 'readonly'];
     var z = ['Seite: ' + location.pathname + location.hash, 'Browser: ' + navigator.userAgent];
     var felder = document.querySelectorAll('input, textarea, select'), n = 0;
-    for(var i = 0; i < felder.length && n < 25; i++){
+    for(var i = 0; i < felder.length && n < 80; i++){
       var el = felder[i], fremd = [];
       for(var k = 0; k < el.attributes.length; k++){ var a = el.attributes[k]; if(eigene.indexOf(a.name) === -1 && a.name.indexOf('data-') === 0 && !/^data-(act|id|v|i|k|f|x|key|kvk|stf|stneu|stziel|svf|xf|lsp|w)$/.test(a.name)) fremd.push(a.name + '=' + String(a.value).slice(0, 40)); }
       var cs = getComputedStyle(el), bg = cs.backgroundImage !== 'none' ? ' hintergrund=' + cs.backgroundImage.slice(0, 50) : '';
