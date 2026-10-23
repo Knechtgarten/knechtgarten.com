@@ -235,7 +235,10 @@ table.t tr:last-child td{border-bottom:0;}
 .stat.no{background:var(--danger-soft);color:var(--danger);}
 .stat.open{background:var(--soft);color:var(--primary);}
 .stat .i{width:13px;height:13px;}
-.kwpanel{background:var(--soft);border-radius:8px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;}
+.ovlbox.breit{max-width:900px;}
+.yrs{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:6px;}
+.yb{all:unset;cursor:pointer;text-align:center;padding:6px 0;border-radius:6px;font-size:12.5px;font-variant-numeric:tabular-nums;border:1px solid var(--line);background:#fff;color:var(--muted);}
+.yb[aria-pressed="true"]{background:#323E4E;border-color:#323E4E;color:#fff;}
 .kwgrid{display:flex;gap:3px;overflow-x:auto;padding-bottom:4px;}
 .kwm{display:flex;flex-direction:column;gap:3px;}
 .kwm span{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;height:13px;}
@@ -554,7 +557,7 @@ const S = {
   kats: [], bereiche: [], merkmale: [], mmKat: '', eintraege: [], exemplare: [], service: [], erledigt: [], lieferanten: [], benutzer: {}, planer: [],
   view: 'suche', eid: null, xid: null, det: null, qr: false,
   q: '', ber: lies('ber', null), kat: lies('kat', null), typ: lies('typ', null), mode: lies('mode', 'foto'),
-  open: new Set(), edit: null, kvNeu: null, kwEdit: null, ask: null, svE: false, svBis: 0, neuService: null, anl: new Set(),
+  open: new Set(), edit: null, kvNeu: null, ask: null, svE: false, svBis: 0, svf: null, anl: new Set(),
   listen: [], lid: lies('liste', null), lEdit: null, lsort: null, lsortDir: 1, alleNotizen: null,
   sel: new Set(), used: new Set(), fmt: lies('fmt', '8'), foto: false, pickQ: '',
 };
@@ -647,7 +650,8 @@ const exName = (x, i) => x.nummer || 'Exemplar ' + ((i ?? exVon(byId(x.eintrag_i
 const exTitel = x => { const e = byId(x.eintrag_id); return (e ? e.titel : '') + (x.nummer ? ' ' + x.nummer : ''); };
 const exAktiv = e => { const l = exVon(e); return l.find(x => x.id === S.xid) || l[0] || null; };
 const servicesVon = e => S.service.filter(s => s.eintrag_id === e.id).sort((a,b) => a.sortierung - b.sortierung);
-const wochen = s => [...s.kws].sort((a,b) => a-b);
+// Startwochen im Jahr j (leer, wenn die Arbeit in diesem Jahr abgewählt ist)
+const wochen = (s, j = NOW_Y) => (s.aus_jahre || []).includes(j) ? [] : [...s.kws].sort((a,b) => a-b);
 const erledigtIn = (x, s, kw, jahr = NOW_Y) => S.erledigt.find(r => r.exemplar_id === x.id && r.service_id === s.id && r.jahr === jahr && r.kw === kw);
 function naechster(x){
   let best = null; const e = byId(x.eintrag_id); if(!e) return null;
@@ -691,7 +695,7 @@ function geheZu(view){
   render(); window.scrollTo(0, 0);
 }
 async function oeffne(id, sec, ohneHistory, xid){
-  S.view = 'eintrag'; S.eid = id; S.edit = null; S.kvNeu = null; S.kwEdit = null; S.ask = null; S.svE = false; S.neuService = null; S.det = null; S.anl = new Set();
+  S.view = 'eintrag'; S.eid = id; S.edit = null; S.kvNeu = null; S.ask = null; S.svE = false; S.svf = null; S.det = null; S.anl = new Set();
   const e = byId(id);
   S.xid = xid && exById(xid)?.eintrag_id === id ? xid : exVon(e)[0]?.id || null;
   if(!ohneHistory && !S.qr) history.pushState(null, '', location.pathname + '#e-' + id + (xid ? '.' + xid : ''));
@@ -1221,54 +1225,50 @@ const MONATE = [['JAN',1,5],['FEB',6,9],['MÄR',10,13],['APR',14,17],['MAI',18,2
 // Einsatzplaner pro Service-Arbeit: aus / normal (nicht erledigt noch 4 Wochen) / wichtig (andere Farbe, bis erledigt)
 const PLANER_ART = [['aus', 'Nicht im Planer'], ['normal', 'Im Planer'], ['wichtig', 'Im Planer – wichtig']];
 const planerArt = s => !s.im_planer ? 'aus' : s.wichtig ? 'wichtig' : 'normal';
-async function svPlanerArt(el){
-  const s = S.service.find(x => x.id === el.dataset.svpl), v = el.value, alt = planerArt(s);
-  const { error } = await sb.from('wissen_service').update({ im_planer: v !== 'aus', wichtig: v === 'wichtig' }).eq('id', s.id);
-  if(error){ el.value = alt; return fehler(error, 'Speichern'); }
-  s.im_planer = v !== 'aus'; s.wichtig = v === 'wichtig'; el.className = 'svin plwahl ' + v; toast(PLANER_ART.find(p => p[0] === v)[1]);
-}
 // Service-Arbeiten des Eintrags (gelten für alle Exemplare). Wochen = Startwochen:
 // nicht Erledigtes wandert im Einsatzplaner weiter, bis es abgehakt ist.
+// Die Tabelle zeigt nur an; geändert wird über den Stift (gleiches Fenster wie «+ Service-Arbeit»).
+const SV_JAHRE = Array.from({ length: 15 }, (_, i) => NOW_Y + i);
+function jahreText(s){
+  const aus = s.aus_jahre || []; if(!aus.length) return 'jedes Jahr';
+  const an = SV_JAHRE.filter(y => !aus.includes(y)); if(!an.length) return 'keine';
+  return an.slice(0, 4).join(', ') + (an.length > 4 ? ' …' : '');
+}
 function serviceBody(e){
   const svs = servicesVon(e), bu = istBuero() && !S.qr;
   const rows = svs.map(s => {
-    const ws = wochen(s);
-    // Buero: Arbeit, Zeit und Wer direkt in der Zeile aendern (speichert beim Verlassen des Feldes)
-    const inp = (f, ph, size) => `<input type="text" class="svin" data-svf="${f}" data-id="${s.id}" value="${esc(s[f] || '')}" placeholder="${ph}" ${size ? `size="${size}"` : ''}>`;
-    return `<tr><td><span class="svarb"><button class="lnk" data-act="anl" data-id="${s.id}" title="Anleitung auf-/zuklappen">${ic(S.anl.has(s.id) ? 'chev' : 'book', 'mini')}${bu ? '' : `<b>${esc(s.arbeit)}</b>`}</button>${bu ? inp('arbeit', 'Arbeit') : ''}</span></td>
-      <td><button class="wkbtn ${S.kwEdit === s.id ? 'on' : ''}" data-act="kw" data-id="${s.id}" ${bu ? '' : 'disabled'}>${ic('cal')}${ws.length ? 'KW ' + ws.join(', ') : 'Wochen wählen'}</button></td>
-      <td class="nw">${bu ? inp('zeit', '–', 8) : esc(s.zeit || '')}</td><td>${bu ? inp('wer', '–', 14) : esc(s.wer || '')}</td>
-      <td class="nw">${bu ? `<select class="svin plwahl ${planerArt(s)}" data-svpl="${s.id}" title="Einsatzplaner">${PLANER_ART.map(([v, t]) => `<option value="${v}" ${planerArt(s) === v ? 'selected' : ''}>${t}</option>`).join('')}</select>`
-        : s.im_planer ? `<span class="stat ${s.wichtig ? 'wichtig' : 'open'}">${s.wichtig ? 'Planer · wichtig' : 'Planer'}</span>` : ''}</td>
-      <td class="nw">${bu ? `<button class="xbtn" data-act="svDel" data-id="${s.id}" title="Arbeit löschen">${ic('trash')}</button>` : ''}</td></tr>
-      ${S.anl.has(s.id) ? `<tr><td colspan="6">${rte('svc', s.id, s.anleitung_html || '', 'Anleitung: wie wird es gemacht?', bu)}</td></tr>` : ''}`;
+    const ws = [...s.kws].sort((a,b) => a-b);
+    return `<tr><td><button class="lnk svarb" data-act="anl" data-id="${s.id}" title="Anleitung auf-/zuklappen">${ic(S.anl.has(s.id) ? 'chev' : 'book', 'mini')}<b>${esc(s.arbeit)}</b></button></td>
+      <td class="nw">${ws.length ? 'KW ' + ws.join(', ') : '<span class="muted">–</span>'}</td>
+      <td class="nw ${(s.aus_jahre || []).length ? '' : 'muted'}">${jahreText(s)}</td>
+      <td class="nw">${esc(s.zeit || '–')}</td><td>${esc(s.wer || '–')}</td>
+      <td class="nw">${s.im_planer ? `<span class="stat ${s.wichtig ? 'wichtig' : 'open'}">${s.wichtig ? 'Planer · wichtig' : 'Planer'}</span>` : '<span class="small muted">nicht im Planer</span>'}</td>
+      <td class="nw">${bu ? `<button class="xbtn" data-act="svfEdit" data-id="${s.id}" title="Bearbeiten">${ic('edit')}</button><button class="xbtn" data-act="svDel" data-id="${s.id}" title="Arbeit löschen">${ic('trash')}</button>` : ''}</td></tr>
+      ${S.anl.has(s.id) ? `<tr><td colspan="7">${rte('svc', s.id, s.anleitung_html || '', 'Anleitung: wie wird es gemacht?', bu)}</td></tr>` : ''}`;
   }).join('');
-  let panel = '';
-  const s = S.kwEdit && svs.find(x => x.id === S.kwEdit);
-  if(s){
-    panel = `<div class="kwpanel">
-      <div class="small muted">${esc(s.arbeit)} · Startwoche(n) für alle Exemplare. Was nicht erledigt ist, rutscht im Einsatzplaner weiter.</div>
-      <div class="kwgrid">${MONATE.map(([m,f,t]) => `<div class="kwm"><span>${m}</span><div class="row">${Array.from({length:t-f+1},(_,j)=>f+j).map(w =>
-        `<button class="kwc ${s.kws.includes(w) ? 'plus' : ''} ${w === NOW_KW ? 'now' : ''}" data-act="kwt" data-w="${w}">${w}</button>`).join('')}</div></div>`).join('')}</div>
-      <div class="legend"><span><i style="background:var(--primary)"></i>Startwoche</span><span><i style="outline:2px solid var(--accent-lime);outline-offset:-1px"></i>aktuelle Woche</span></div>
-      <div class="small">Klick auf ein Kästchen schaltet die Woche ein oder aus. Wird sofort gespeichert. <button class="addrow small" data-act="kw" data-id="${s.id}" style="padding:0;margin-left:8px">Schliessen</button></div></div>`;
-  }
-  const ns = S.neuService;
-  const neu = ns ? `<div class="ask"><b>Neue Service-Arbeit${exVon(e).length > 1 ? ` (für alle ${exVon(e).length} Exemplare)` : ''}</b>
-      <div class="row"><label class="fld" style="flex:1;min-width:200px">Arbeit<input type="text" id="nsArbeit" value="${esc(ns.arbeit || '')}" placeholder="z. B. Messer schleifen, Jahresservice Werkstatt"></label>
-        <label class="fld">Zeit<input type="text" id="nsZeit" value="${esc(ns.zeit || '')}" placeholder="½ Tag" size="10"></label>
-        <label class="fld">Wer<input type="text" id="nsWer" value="${esc(ns.wer || '')}" placeholder="Werkstatt / intern" size="14"></label></div>
-      <div class="fld">Einsatzplaner<div><span class="segm">${PLANER_ART.map(([v, t]) => `<button class="${ns.art === v ? 'on' : ''}" data-act="nsArt" data-v="${v}">${t}</button>`).join('')}</span>
-        <span class="small muted" style="margin-left:8px">${ns.art === 'wichtig' ? 'Andere Farbe im Planer, wandert weiter, bis es erledigt ist.' : ns.art === 'normal' ? 'Wandert nicht erledigt noch 4 Wochen mit, dann fällt es weg.' : 'Erscheint nur hier im Wissens-Tool.'}</span></div></div>
-      <div class="fld">Startwoche(n)${ns.kws.length ? ': KW ' + ns.kws.join(', ') : ' – Kästchen anklicken'}
-        <div class="kwgrid">${MONATE.map(([m,f,t]) => `<div class="kwm"><span>${m}</span><div class="row">${Array.from({length:t-f+1},(_,j)=>f+j).map(w =>
-          `<button class="kwc ${ns.kws.includes(w) ? 'plus' : ''} ${w === NOW_KW ? 'now' : ''}" data-act="nsKw" data-w="${w}">${w}</button>`).join('')}</div></div>`).join('')}</div></div>
-      <div class="row"><button class="btn btn-primary" data-act="nsSave">${ic('check')}Hinzufügen</button><button class="btn btn-ghost" data-act="nsCancel">Abbrechen</button></div></div>` : '';
-  return `${svs.length ? `<div class="tbl-wrap"><table class="t"><thead><tr><th>Arbeit</th><th>Startwochen</th><th>Zeit</th><th>Wer</th><th></th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`
+  return `${svs.length ? `<div class="tbl-wrap"><table class="t"><thead><tr><th>Arbeit</th><th>Startwochen</th><th>Jahre</th><th>Zeit</th><th>Wer</th><th>Planer</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`
       : '<div class="small muted">Noch keine Service-Arbeiten.</div>'}
-    ${panel}${neu}
-    ${bu && !S.neuService ? `<div><button class="addrow" data-act="nsNeu">${ic('plus')}Service-Arbeit</button></div>` : ''}`;
+    ${bu ? `<div><button class="addrow" data-act="svfNeu">${ic('plus')}Service-Arbeit</button></div>` : ''}`;
 }
+// Fenster «Service-Arbeit» (neu oder bearbeiten): Arbeit, Zeit, Wer, Planer, Startwochen, Jahre
+function svForm(){
+  const e = byId(S.eid), f = S.svf, n = exVon(e).length;
+  $('ovlBox').classList.add('breit');
+  $('ovlBox').innerHTML = `<h3>${f.id ? 'Service-Arbeit bearbeiten' : 'Neue Service-Arbeit'}${n > 1 ? ` <span class="small muted">(für alle ${n} Exemplare)</span>` : ''}</h3>
+    <div class="row"><label class="fld" style="flex:1;min-width:200px">Arbeit<input type="text" id="svfArbeit" value="${esc(f.arbeit || '')}" placeholder="z. B. Messer schleifen, Jahresservice Werkstatt"></label>
+      <label class="fld">Zeit<input type="text" id="svfZeit" value="${esc(f.zeit || '')}" placeholder="½ Tag" size="10"></label>
+      <label class="fld">Wer<input type="text" id="svfWer" value="${esc(f.wer || '')}" placeholder="Werkstatt / intern" size="14"></label></div>
+    <div class="fld">Einsatzplaner<div><span class="segm">${PLANER_ART.map(([v, t]) => `<button class="${f.art === v ? 'on' : ''}" data-act="svfArt" data-v="${v}">${t}</button>`).join('')}</span>
+      <span class="small muted" style="margin-left:8px">${f.art === 'wichtig' ? 'Andere Farbe im Planer, wandert weiter, bis es erledigt ist.' : f.art === 'normal' ? 'Wandert nicht erledigt noch 4 Wochen mit, dann fällt es weg.' : 'Erscheint nur hier im Wissens-Tool.'}</span></div></div>
+    <div class="fld">Startwoche(n)${f.kws.length ? ': KW ' + f.kws.join(', ') : ' – Kästchen anklicken'}
+      <div class="kwgrid">${MONATE.map(([m,a,b]) => `<div class="kwm"><span>${m}</span><div class="row">${Array.from({length:b-a+1},(_,j)=>a+j).map(w =>
+        `<button class="kwc ${f.kws.includes(w) ? 'plus' : ''} ${w === NOW_KW ? 'now' : ''}" data-act="svfKw" data-w="${w}">${w}</button>`).join('')}</div></div>`).join('')}</div></div>
+    <div class="fld">In diesen Jahren <span class="small muted">(abwählen, wenn es nicht jedes Jahr gemacht wird)</span>
+      <div class="yrs">${SV_JAHRE.map(y => `<button type="button" class="yb" data-act="svfJahr" data-y="${y}" aria-pressed="${!f.aus.includes(y)}">${y}</button>`).join('')}</div></div>
+    <div class="ovlbtns"><button class="btn btn-ghost" data-act="ovlZu">Abbrechen</button><button class="btn btn-primary" data-act="svfSave">${ic('check')}${f.id ? 'Speichern' : 'Hinzufügen'}</button></div>`;
+  $('ovl').classList.add('show');
+}
+const svfMerken = () => { const f = S.svf; f.arbeit = $('svfArbeit').value; f.zeit = $('svfZeit').value; f.wer = $('svfWer').value; };
 
 // --- Einstellungen (nur Büro): Kategorien und Bereiche; Stift bei der Kategorie öffnet ihre Seite mit den Merkmalen ---
 const mmGruppe = m => (m.kategorie_id || '') === (S.mmKat || '');
@@ -1656,7 +1656,7 @@ async function hochladen(datei, eintragId, bereich, notizId, extra = {}){
 // Overlays
 // ---------------------------------------------------------------------------
 function ovl(html){ $('ovlBox').innerHTML = html; $('ovl').classList.add('show'); setTimeout(() => $('ovlBox').querySelector('input,select')?.focus(), 30); }
-function ovlZu(){ $('ovl').classList.remove('show'); $('ovlBox').innerHTML = ''; }
+function ovlZu(){ $('ovl').classList.remove('show'); $('ovlBox').innerHTML = ''; $('ovlBox').classList.remove('breit'); S.svf = null; }
 $('ovl').addEventListener('mousedown', ev => { if(ev.target === $('ovl')) ovlZu(); });
 let bestaetigenCb = null;
 function bestaetige(text, okText, cb, info){
@@ -1721,14 +1721,6 @@ async function speichereExemplar(id, felder){
   if(error){ fehler(error, 'Speichern'); return false; }
   const i = S.exemplare.findIndex(x => x.id === id); S.exemplare[i] = data; return true;
 }
-async function svFeld(el){
-  const s = S.service.find(x => x.id === el.dataset.id), f = el.dataset.svf, v = el.value.trim();
-  if(!s || (s[f] || '') === v) return;
-  if(f === 'arbeit' && !v){ el.value = s.arbeit; return toast('Arbeit darf nicht leer sein.', true); }
-  const { error } = await sb.from('wissen_service').update({ [f]: v || null }).eq('id', s.id);
-  if(error){ el.value = s[f] || ''; return fehler(error, 'Speichern'); }
-  s[f] = v || null; toast('Gespeichert');
-}
 // Nummer / Zuständig des Exemplars: speichern, Tab-Beschriftung nachführen ohne neu zu zeichnen (Fokus bleibt)
 async function xFeld(el){
   const e = byId(S.eid), x = exAktiv(e), f = el.dataset.xf, v = el.value.trim();
@@ -1770,7 +1762,6 @@ document.addEventListener('change', ev => {
   if(ev.target.id === 'fmt'){ S.fmt = ev.target.value; merke('fmt', S.fmt); S.used = new Set(); render(); }
   if(ev.target.id === 'fotoChk'){ S.foto = ev.target.checked; render(); }
   if(ev.target.id === 'fTyp' && S.edit){ S.edit.typ = ev.target.value; }
-  if(ev.target.dataset?.svf){ svFeld(ev.target); }
   if(ev.target.dataset?.kvk){ kvFeld(ev.target); }
   if(ev.target.dataset?.xf){ xFeld(ev.target); }
   if(ev.target.id === 'xPlaner'){ xPlaner(ev.target); }
@@ -1780,7 +1771,6 @@ document.addEventListener('change', ev => {
   if(ev.target.dataset?.steinh){ stEinheit(ev.target); }
   if(ev.target.dataset?.qrab){ qrAbschnitt(ev.target); }
   if(ev.target.dataset?.katsvc){ katService(ev.target); }
-  if(ev.target.dataset?.svpl){ svPlanerArt(ev.target); }
 });
 document.addEventListener('focusout', ev => {
   const ed = ev.target.closest && ev.target.closest('.rte-ed');
@@ -1907,28 +1897,25 @@ document.addEventListener('click', async ev => {
     });
   }
   // Service (Arbeiten + Startwochen gelten fuer alle Exemplare, erledigt pro Exemplar)
-  else if(a === 'kw'){ S.kwEdit = S.kwEdit === d.id ? null : d.id; S.ask = null; render(); }
-  else if(a === 'kwt'){
-    const s = S.service.find(x => x.id === S.kwEdit), w = +d.w;
-    const kws = s.kws.includes(w) ? s.kws.filter(x => x !== w) : [...s.kws, w].sort((x,y) => x-y);
-    const { error } = await sb.from('wissen_service').update({ kws }).eq('id', s.id); if(error) return fehler(error, 'Speichern');
-    s.kws = kws; render();
-  }
   else if(a === 'anl'){ S.anl.has(d.id) ? S.anl.delete(d.id) : S.anl.add(d.id); render(); }
-  else if(a === 'nsNeu'){ S.neuService = { kws: [], art: 'normal' }; S.kwEdit = null; S.ask = null; render(); $('nsArbeit')?.focus(); }
-  else if(a === 'nsCancel'){ S.neuService = null; render(); }
-  else if(a === 'nsKw' || a === 'nsArt'){ // Eingaben merken, Woche bzw. Planer-Art umschalten, neu zeichnen
-    const ns = S.neuService; ns.arbeit = $('nsArbeit').value; ns.zeit = $('nsZeit').value; ns.wer = $('nsWer').value;
-    if(a === 'nsArt') ns.art = d.v; else { const w = +d.w; ns.kws = ns.kws.includes(w) ? ns.kws.filter(x => x !== w) : [...ns.kws, w].sort((x,y) => x-y); }
-    render();
+  else if(a === 'svfNeu'){ S.svf = { kws: [], art: 'normal', aus: [] }; svForm(); $('svfArbeit')?.focus(); }
+  else if(a === 'svfEdit'){ const s = S.service.find(x => x.id === d.id);
+    S.svf = { id: s.id, arbeit: s.arbeit, zeit: s.zeit, wer: s.wer, kws: [...s.kws].sort((x,y) => x-y), art: planerArt(s), aus: [...(s.aus_jahre || [])] }; svForm(); }
+  else if(a === 'svfKw' || a === 'svfArt' || a === 'svfJahr'){ // Eingaben merken, umschalten, Fenster neu zeichnen
+    const f = S.svf; svfMerken();
+    if(a === 'svfArt') f.art = d.v;
+    else if(a === 'svfKw'){ const w = +d.w; f.kws = f.kws.includes(w) ? f.kws.filter(x => x !== w) : [...f.kws, w].sort((x,y) => x-y); }
+    else { const y = +d.y; f.aus = f.aus.includes(y) ? f.aus.filter(x => x !== y) : [...f.aus, y].sort(); }
+    const sc = $('ovlBox').scrollTop, kx = $('ovlBox').querySelector('.kwgrid')?.scrollLeft; svForm(); $('ovlBox').scrollTop = sc; const g = $('ovlBox').querySelector('.kwgrid'); if(g) g.scrollLeft = kx || 0;
   }
-  else if(a === 'nsSave'){
-    const arbeit = $('nsArbeit').value.trim(); if(!arbeit) return toast('Arbeit fehlt.', true);
-    const z = { eintrag_id: e.id, arbeit, zeit: $('nsZeit').value.trim() || null, wer: $('nsWer').value.trim() || null, kws: S.neuService.kws, sortierung: servicesVon(e).length * 10,
-      im_planer: S.neuService.art !== 'aus', wichtig: S.neuService.art === 'wichtig' };
-    const { data, error } = await sb.from('wissen_service').insert(z).select().single();
-    if(error) return fehler(error, 'Service');
-    S.service.push(data); S.neuService = null; render(); toast('Service-Arbeit hinzugefügt');
+  else if(a === 'svfSave'){
+    const f = S.svf; svfMerken(); const arbeit = (f.arbeit || '').trim(); if(!arbeit) return toast('Arbeit fehlt.', true);
+    const z = { arbeit, zeit: (f.zeit || '').trim() || null, wer: (f.wer || '').trim() || null, kws: f.kws, aus_jahre: f.aus, im_planer: f.art !== 'aus', wichtig: f.art === 'wichtig' };
+    const r = f.id ? await sb.from('wissen_service').update(z).eq('id', f.id).select().single()
+      : await sb.from('wissen_service').insert({ ...z, eintrag_id: e.id, sortierung: servicesVon(e).length * 10 }).select().single();
+    if(r.error) return fehler(r.error, 'Service');
+    if(f.id) S.service[S.service.findIndex(x => x.id === f.id)] = r.data; else S.service.push(r.data);
+    ovlZu(); render(); toast(f.id ? 'Gespeichert' : 'Service-Arbeit hinzugefügt');
   }
   else if(a === 'svDel'){
     const s = S.service.find(x => x.id === d.id), n = exVon(e).length;
