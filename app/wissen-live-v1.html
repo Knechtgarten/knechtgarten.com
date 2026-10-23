@@ -210,6 +210,7 @@ table.t tr:last-child td{border-bottom:0;}
 .legend i{width:14px;height:12px;border-radius:3px;display:inline-block;border:1px solid var(--line);}
 .ask{background:var(--soft);border-left:3px solid var(--accent-lime);border-radius:6px;padding:12px 14px;display:flex;flex-direction:column;gap:10px;}
 .ask .row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;}
+.ask .kwm .row{gap:3px;flex-wrap:nowrap;}
 .chk{display:inline-flex;gap:6px;align-items:center;font-size:13px;color:var(--ink);cursor:pointer;}
 .segm{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:#fff;}
 .segm button{all:unset;cursor:pointer;padding:4px 10px;font-size:12.5px;}
@@ -1039,10 +1040,14 @@ function serviceBody(e){
       <div class="legend"><span><i style="background:var(--primary)"></i>Startwoche</span><span><i style="outline:2px solid var(--accent-lime);outline-offset:-1px"></i>aktuelle Woche</span></div>
       <div class="small">Klick auf ein Kästchen schaltet die Woche ein oder aus. Wird sofort gespeichert. <button class="addrow small" data-act="kw" data-id="${s.id}" style="padding:0;margin-left:8px">Schliessen</button></div></div>`;
   }
-  const neu = S.neuService ? `<div class="ask"><b>Neue Service-Arbeit${exVon(e).length > 1 ? ` (für alle ${exVon(e).length} Exemplare)` : ''}</b>
-      <div class="row"><label class="fld" style="flex:1;min-width:200px">Arbeit<input type="text" id="nsArbeit" placeholder="z. B. Messer schleifen, Jahresservice Werkstatt"></label>
-        <label class="fld">Zeit<input type="text" id="nsZeit" placeholder="½ Tag" size="10"></label>
-        <label class="fld">Wer<input type="text" id="nsWer" placeholder="Werkstatt / intern" size="14"></label></div>
+  const ns = S.neuService;
+  const neu = ns ? `<div class="ask"><b>Neue Service-Arbeit${exVon(e).length > 1 ? ` (für alle ${exVon(e).length} Exemplare)` : ''}</b>
+      <div class="row"><label class="fld" style="flex:1;min-width:200px">Arbeit<input type="text" id="nsArbeit" value="${esc(ns.arbeit || '')}" placeholder="z. B. Messer schleifen, Jahresservice Werkstatt"></label>
+        <label class="fld">Zeit<input type="text" id="nsZeit" value="${esc(ns.zeit || '')}" placeholder="½ Tag" size="10"></label>
+        <label class="fld">Wer<input type="text" id="nsWer" value="${esc(ns.wer || '')}" placeholder="Werkstatt / intern" size="14"></label></div>
+      <div class="fld">Startwoche(n)${ns.kws.length ? ': KW ' + ns.kws.join(', ') : ' – Kästchen anklicken'}
+        <div class="kwgrid">${MONATE.map(([m,f,t]) => `<div class="kwm"><span>${m}</span><div class="row">${Array.from({length:t-f+1},(_,j)=>f+j).map(w =>
+          `<button class="kwc ${ns.kws.includes(w) ? 'plus' : ''} ${w === NOW_KW ? 'now' : ''}" data-act="nsKw" data-w="${w}">${w}</button>`).join('')}</div></div>`).join('')}</div></div>
       <div class="row"><button class="btn btn-primary" data-act="nsSave">${ic('check')}Hinzufügen</button><button class="btn btn-ghost" data-act="nsCancel">Abbrechen</button></div></div>` : '';
   return `${svs.length ? `<div class="tbl-wrap"><table class="t"><thead><tr><th>Arbeit</th><th>Startwochen</th><th>Zeit</th><th>Wer</th><th></th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`
       : '<div class="small muted">Noch keine Service-Arbeiten.</div>'}
@@ -1454,14 +1459,18 @@ document.addEventListener('click', async ev => {
     if(error){ t.checked = !t.checked; return fehler(error, 'Speichern'); }
     s.im_planer = t.checked; toast(t.checked ? 'Wird im Einsatzplaner angezeigt' : 'Nicht im Einsatzplaner');
   }
-  else if(a === 'nsNeu'){ S.neuService = true; S.kwEdit = null; S.ask = null; render(); $('nsArbeit')?.focus(); }
+  else if(a === 'nsNeu'){ S.neuService = { kws: [] }; S.kwEdit = null; S.ask = null; render(); $('nsArbeit')?.focus(); }
   else if(a === 'nsCancel'){ S.neuService = null; render(); }
+  else if(a === 'nsKw'){ // Eingaben merken, Woche umschalten, neu zeichnen
+    const ns = S.neuService, w = +d.w; ns.arbeit = $('nsArbeit').value; ns.zeit = $('nsZeit').value; ns.wer = $('nsWer').value;
+    ns.kws = ns.kws.includes(w) ? ns.kws.filter(x => x !== w) : [...ns.kws, w].sort((x,y) => x-y); render();
+  }
   else if(a === 'nsSave'){
     const arbeit = $('nsArbeit').value.trim(); if(!arbeit) return toast('Arbeit fehlt.', true);
-    const z = { eintrag_id: e.id, arbeit, zeit: $('nsZeit').value.trim() || null, wer: $('nsWer').value.trim() || null, kws: [], sortierung: servicesVon(e).length * 10 };
+    const z = { eintrag_id: e.id, arbeit, zeit: $('nsZeit').value.trim() || null, wer: $('nsWer').value.trim() || null, kws: S.neuService.kws, sortierung: servicesVon(e).length * 10 };
     const { data, error } = await sb.from('wissen_service').insert(z).select().single();
     if(error) return fehler(error, 'Service');
-    S.service.push(data); S.neuService = null; S.kwEdit = data.id; render();
+    S.service.push(data); S.neuService = null; render(); toast('Service-Arbeit hinzugefügt');
   }
   else if(a === 'svDel'){
     const s = S.service.find(x => x.id === d.id), n = exVon(e).length;
