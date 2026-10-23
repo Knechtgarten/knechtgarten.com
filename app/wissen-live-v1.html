@@ -126,11 +126,14 @@ main.wrap{padding-top:22px;padding-bottom:70px;}
 .fld.voll{grid-column:1/-1;}
 .fld input,.fld select{width:100%;}
 .fld .chk input{width:auto;margin:0;}
-.qrwahl{display:flex;flex-direction:column;gap:8px;}
+.qrtab .chk{margin:0;}
+.qrtab .stat{margin-right:6px;}
 .stat.aus{background:var(--soft);color:var(--muted);}
 .svsym{display:inline-flex;width:24px;height:24px;border-radius:50%;align-items:center;justify-content:center;} .svsym .i{width:14px;height:14px;stroke-width:2;}
 .svsym.ok{background:var(--ok-soft);color:var(--ok);} .svsym.no{background:var(--danger-soft);color:var(--danger);} .svsym.aus{background:var(--soft);color:var(--muted);} .svsym.spaeter{color:#C5CAD0;}
 td.svsymz{width:34px;text-align:center;}
+.qrkarte{padding:14px 16px;margin-bottom:10px;display:flex;flex-direction:column;gap:10px;}
+.qrknopf{display:flex;justify-content:flex-end;margin-bottom:10px;}
 .extabs .svalle{margin-left:auto;align-self:center;margin-bottom:4px;}
 table.svz td{padding:3px 8px;font-size:13px;line-height:1.3;} table.svz th{padding:6px 8px;} table.svz .svsym{width:20px;height:20px;} table.svz .svsym .i{width:12px;height:12px;} table.svz .xbtn{width:22px;height:22px;}
 .sveintrag{box-shadow:inset 0 0 0 1.5px var(--primary);}
@@ -838,11 +841,28 @@ function vEintrag(){
     ${kopf}
   </div>
   ${istBuero() && !S.qr ? merkmalListe() : ''}
-  ${geraet ? exBlock(e, xs, x) : ''}
-  ${geraet && !S.qr ? `<div class="allg-h"><h3>Allgemein</h3><span class="small muted">gilt für ${xs.length > 1 ? 'alle ' + xs.length + ' Exemplare' : 'alle Exemplare'}</span></div>` : ''}
-  ${secs.map(([k,i,n]) => `<section class="card sec ${S.open.has(k) ? 'open' : ''}" data-sec="${k}">
+  ${S.qr ? qrInhalt(e, xs, x) : `${geraet ? exBlock(e, xs, x) : ''}
+  ${geraet ? `<div class="allg-h"><h3>Allgemein</h3><span class="small muted">gilt für ${xs.length > 1 ? 'alle ' + xs.length + ' Exemplare' : 'alle Exemplare'}</span></div>` : ''}
+  ${secs.map(s => secHTML(e, s)).join('')}`}`;
+}
+const secHTML = (e, [k, i, n]) => `<section class="card sec ${S.open.has(k) ? 'open' : ''}" data-sec="${k}">
     <button class="sec-h" data-act="sec" data-k="${k}" aria-expanded="${S.open.has(k)}">${ic(i)}<h3>${n}</h3><span class="cnt">${zaehl(e,k)}</span>${ic('chev','chev')}</button>
-    <div class="sec-b">${S.open.has(k) ? secBody(e, k) : ''}</div></section>`).join('')}`;
+    <div class="sec-b">${S.open.has(k) ? secBody(e, k) : ''}</div></section>`;
+// QR-Ansicht (Handy): alles untereinander, in der Reihenfolge aus den Einstellungen der Kategorie
+function qrInhalt(e, xs, x){
+  const reihe = qrAuswahl(e) || QR_ABSCHNITTE.map(z => z[0]);
+  const svOk = x && mitService(e) && servicesVon(e).length && reihe.includes('x_service');
+  const n = svOk ? svOffen(e, [x]) : 0;
+  return `${svOk ? `<div class="qrknopf"><button class="btn ${n ? 'btn-primary' : 'btn-ghost'} btn-sm" data-act="svE" data-v="eins">${ic('check')}Service eintragen${n ? ` (${n})` : ''}</button></div>` : ''}
+    ${S.svE && x ? `<div class="card qrkarte sveintrag">${svEintragen(e, x)}</div>` : ''}
+    ${reihe.map(k => {
+      if(k.startsWith('x_')){
+        if(!x || (k === 'x_service' && !mitService(e))) return '';
+        return `<div class="card qrkarte">${k === 'x_angaben' ? exAngaben(e, x) : k === 'x_service' ? exService(e, x) : exNotizen(e, x)}</div>`;
+      }
+      const s = SECS.find(z => z[0] === k);
+      return s && hatSec(e, k) && (k !== 'service' || mitService(e)) ? secHTML(e, s) : '';
+    }).join('')}`;
 }
 
 // Block wie die Pflegekategorien beim Kunden: oben Tabs, darunter Angaben + Service des Exemplars
@@ -1306,8 +1326,9 @@ function vKategorie(){
     </section>
     <section class="card einst">
       ${k ? `<div class="exh"><h3>Beim Scannen des QR-Codes anzeigen</h3></div>
-        <div class="small muted">Was Mitarbeitende auf dem Handy sehen, wenn sie die Etikette eines Geräts dieser Kategorie scannen. Die gewählten Abschnitte sind gleich aufgeklappt. Nichts gewählt = alles.</div>
-        <div class="qrwahl">${QR_ABSCHNITTE.filter(([key]) => k.mit_service !== false || !['x_service', 'service'].includes(key)).map(([key, t]) => `<label class="chk"><input type="checkbox" data-qrab="${key}" ${(k.qr_abschnitte || []).includes(key) ? 'checked' : ''}>${esc(t)}</label>`).join('')}</div>
+        <div class="small muted">Was Mitarbeitende auf dem Handy sehen, wenn sie die Etikette eines Geräts dieser Kategorie scannen. Gewählte Teile erscheinen untereinander in dieser Reihenfolge (am Griff ziehen), die übrigen sind ausgeblendet. Nichts gewählt = alles.</div>
+        <div class="tbl-wrap"><table class="t sttab qrtab" data-stsort="qr"><colgroup><col class="c-grip"><col></colgroup><tbody>${qrListe(k).map(([key, t], i) => `<tr data-i="${i}"><td class="grip" title="Ziehen zum Verschieben">${ic('grip')}</td>
+          <td><label class="chk"><input type="checkbox" data-qrab="${key}" ${(k.qr_abschnitte || []).includes(key) ? 'checked' : ''}>${key.startsWith('x_') ? '<span class="stat">Exemplar</span>' : ''}${esc(t)}</label></td></tr>`).join('')}</tbody></table></div>
         <div class="exh" style="margin-top:14px"><h3>Service &amp; Wartung</h3></div>
         <label class="chk"><input type="checkbox" data-katsvc="${k.id}" ${k.mit_service !== false ? 'checked' : ''}>Service &amp; Wartung bei dieser Kategorie verwenden</label>
         <div class="small muted">Aus = bei Einträgen dieser Kategorie erscheint nichts zum Service: keine Service-Karte beim Gerät, kein Knopf «Service alle», kein Abschnitt «Service &amp; Wartung» und keine Termine im Einsatzplaner. Bereits erfasste Arbeiten bleiben gespeichert.</div>`
@@ -1338,12 +1359,22 @@ async function katService(el){
   if(error){ el.checked = !el.checked; return fehler(error, 'Speichern'); }
   k.mit_service = el.checked; toast(el.checked ? 'Service & Wartung an' : 'Service & Wartung aus'); render();
 }
-async function qrAbschnitt(el){
+// Liste für die Einstellungen: gewählte Teile in gespeicherter Reihenfolge, danach die übrigen
+function qrListe(k){
+  const alle = QR_ABSCHNITTE.filter(([key]) => k.mit_service !== false || !['x_service', 'service'].includes(key)), gew = k.qr_abschnitte || [];
+  return [...gew.map(key => alle.find(z => z[0] === key)).filter(Boolean), ...alle.filter(z => !gew.includes(z[0]))];
+}
+function qrVerschieben(von, nach){
+  const tb = document.querySelector('.qrtab tbody'), trs = [...tb.children]; if(von === nach || !trs[von]) return;
+  const [z] = trs.splice(von, 1); trs.splice(Math.min(nach, trs.length), 0, z); trs.forEach(t => tb.appendChild(t));
+  qrAbschnitt(z.querySelector('[data-qrab]'), true);
+}
+async function qrAbschnitt(el, verschoben){
   const k = S.kats.find(x => x.id === S.katDetail); if(!k) return;
   const neu = [...document.querySelectorAll('[data-qrab]')].filter(c => c.checked).map(c => c.dataset.qrab);
   const { error } = await sb.from('wissen_kategorie').update({ qr_abschnitte: neu.length ? neu : null }).eq('id', k.id);
-  if(error){ el.checked = !el.checked; return fehler(error, 'Speichern'); }
-  k.qr_abschnitte = neu.length ? neu : null; toast('Gespeichert');
+  if(error){ if(!verschoben) el.checked = !el.checked; return fehler(error, 'Speichern'); }
+  k.qr_abschnitte = neu.length ? neu : null; toast('Gespeichert'); render();
 }
 async function stEinheit(el){
   const m = S.merkmale.find(x => x.id === el.dataset.steinh), v = el.value.trim();
@@ -1375,7 +1406,7 @@ document.addEventListener('dragover', ev => { if(!stZug) return; const tr = ev.t
   ev.preventDefault(); document.querySelectorAll('.sttab tr.ueber, .sttab tr.unter').forEach(x => x.classList.remove('ueber', 'unter'));
   const r = tr.getBoundingClientRect(); tr.classList.add(ev.clientY < r.top + r.height / 2 ? 'ueber' : 'unter'); });
 document.addEventListener('drop', ev => { if(!stZug) return; const tr = ev.target.closest && ev.target.closest('.sttab tr[data-i]'); if(!tr) return; ev.preventDefault();
-  let nach = +tr.dataset.i + (tr.classList.contains('unter') ? 1 : 0); if(nach > stZug.von) nach--; const z = stZug; stZug = null; stVerschieben(z.k, z.von, nach); });
+  let nach = +tr.dataset.i + (tr.classList.contains('unter') ? 1 : 0); if(nach > stZug.von) nach--; const z = stZug; stZug = null; z.k === 'qr' ? qrVerschieben(z.von, nach) : stVerschieben(z.k, z.von, nach); });
 document.addEventListener('dragend', () => { stZug = null; document.querySelectorAll('.sttab tr').forEach(x => { x.draggable = false; x.classList.remove('zieht', 'ueber', 'unter'); }); });
 
 // --- Listen --- gespeicherte Listen (wissen_liste): Filter, «eine Zeile pro» Exemplar/Eintrag, frei wählbare Spalten
