@@ -216,7 +216,9 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 /* Service aus «Wissen & Geräte»: hellblau gestreift = noch offen, rot = Woche vorbei, nicht abgehakt */
 .bar.svc{background:repeating-linear-gradient(135deg,#D6E7F4 0 4px,#FFFFFF 4px 8px);border:1px dashed #6F8FAF;color:#323E4E;cursor:pointer;z-index:2;}
 .bar.svc .t{font-size:9.5px;}
+.bar.svc.wichtig{background:repeating-linear-gradient(135deg,#8DB6DB 0 4px,#FFFFFF 4px 8px);border:2px solid #323E4E;font-weight:700;}
 .bar.svc.over{border:1.5px solid var(--red);}
+.svcw{display:inline-block;background:#323E4E;color:#fff;border-radius:8px;padding:0 6px;font-size:10.5px;font-weight:700;margin-left:4px;}
 .svcf{position:absolute;width:12px;height:12px;border-radius:50%;background:var(--red);color:#fff;font-size:9px;line-height:12px;text-align:center;font-weight:800;z-index:3;pointer-events:none;}
 .svclist{display:flex;flex-direction:column;gap:6px;max-height:280px;overflow:auto;}
 .svci{display:flex;gap:8px;align-items:center;justify-content:space-between;border-top:1px solid var(--line);padding-top:6px;}
@@ -896,6 +898,7 @@ function openInfo(btn){
     ${z(sw('repeating-linear-gradient(135deg,#7E929299 0 3px,#fff 3px 6px)'), 'Offener Auftrag – noch nicht abgemacht')}
     ${z(sw('repeating-linear-gradient(135deg,#E9EDB8 0 3px,#fff 3px 6px)', 'border:1px dashed #9CA43A'), 'Pflege-Vorschlag aus dem Jahresplan')}
     ${z(sw('repeating-linear-gradient(135deg,#D6E7F4 0 3px,#fff 3px 6px)', 'border:1px dashed #6F8FAF'), 'Service (Wissen & Geräte) – rot umrandet = überfällig, rotes ! = Maschine schon eingeteilt')}
+    ${z(sw('repeating-linear-gradient(135deg,#8DB6DB 0 3px,#fff 3px 6px)', 'border:2px solid #323E4E'), 'Wichtiger Service – wandert weiter, bis erledigt')}
     ${z(sw('#A84E8A'), 'Mithilfe – Farbe des Vorarbeiters')}
     ${z(sw('#fff', 'border:1.5px solid #A84E8A'), 'Maschine / Lieferwagen – Rahmen in Farbe des Vorarbeiters')}
     ${z(sw('#C9CED4'), 'Absenz')}
@@ -1480,7 +1483,7 @@ async function ladeService(){
   try{
     const y = new Date().getFullYear();
     const [sv, ex, ei, er] = await Promise.all([
-      fetchAll(() => sb.from('wissen_service').select('id,eintrag_id,arbeit,kws,zeit,wer,im_planer').eq('im_planer', true)),
+      fetchAll(() => sb.from('wissen_service').select('id,eintrag_id,arbeit,kws,zeit,wer,im_planer,wichtig,erstellt_am').eq('im_planer', true)),
       fetchAll(() => sb.from('wissen_exemplar').select('id,eintrag_id,nummer,zustaendig,planer_ressource_id').is('archiviert_am', null)),
       fetchAll(() => sb.from('wissen_eintrag').select('id,titel').is('archiviert_am', null)),
       fetchAll(() => sb.from('wissen_service_erledigt').select('id,exemplar_id,service_id,jahr,kw').gte('jahr', y - 2))
@@ -1497,16 +1500,17 @@ function computeSvc(){
   const nowMon = base - ((dDate(base).getDay() + 6) % 7), yB = dDate(nowMon + 3).getFullYear();
   WS.svc.forEach(s => (WS.exE[s.eintrag_id] || []).forEach(x => {
     const e = WS.ein[s.eintrag_id]; let offen = null, erledigtBis = -Infinity, dieseWoche = false;
+    const ab = s.erstellt_am ? dayIdx(new Date(s.erstellt_am)) : null, seit = ab == null ? -Infinity : ab - (dDate(ab).getDay() + 6) % 7;
     for(const y of [yB - 1, yB, yB + 1]) for(const w of s.kws){
-      // zurück höchstens ein halbes Jahr (sonst wäre beim Start jeder Jahresservice vom Vorjahr «überfällig»)
-      const mon = kwMonday(y, w); if(kw(mon) !== w || mon >= NDAYS || mon < nowMon - 7 * 26) continue;
+      // zurück: wichtig bis ein Jahr, sonst ein halbes Jahr – aber nie vor der Erfassung der Arbeit (sonst wäre beim Start jeder Jahresservice vom Vorjahr «überfällig»)
+      const mon = kwMonday(y, w); if(kw(mon) !== w || mon >= NDAYS || mon < Math.max(nowMon - 7 * (s.wichtig ? 52 : 26), seit)) continue;
       const done = WS.erl.has(`${x.id}_${s.id}_${y}_${w}`);
       if(mon < nowMon){ if(done) erledigtBis = Math.max(erledigtBis, mon); else if(!offen || mon > offen.mon) offen = { y, w, mon }; continue; }
       if(mon === nowMon) dieseWoche = true;
       if(!done) SVC.push({ s, x, e, y, w, mon, s0: mon, over: false });
     }
-    // nur die letzte nicht abgehakte Woche wandert weiter, und nur bis die nächste Startwoche erreicht ist
-    if(offen && offen.mon > erledigtBis && !dieseWoche) SVC.push({ s, x, e, y: offen.y, w: offen.w, mon: offen.mon, s0: nowMon, over: true });
+    // nur die letzte nicht abgehakte Woche wandert weiter, bis die nächste Startwoche erreicht ist; normale Arbeiten höchstens 4 Wochen, wichtige bis erledigt
+    if(offen && offen.mon > erledigtBis && !dieseWoche && (s.wichtig || offen.mon >= nowMon - 7 * 4)) SVC.push({ s, x, e, y: offen.y, w: offen.w, mon: offen.mon, s0: nowMon, over: true });
   }));
 }
 // Baustellen, auf denen die Maschine in dieser Woche eingeteilt ist
@@ -1516,10 +1520,11 @@ function svcKonflikt(rid, s0){
 }
 const svcRowId = () => { const g = GRUPPEN.find(x => x.name === 'Allgemein'); return g && PERSONEN.find(p => p.gruppe_id === g.id && p.aktiv && p.name.toLowerCase() === 'service')?.id; };
 function svcBlock(list, key, top, h, cf){
-  const s0 = list[0].s0, l = s0 * dayW + 1, w = Math.max(4, 5 * dayW - 2), over = list.some(o => o.over);
-  const lab = list.length === 1 ? `${list[0].s.arbeit} · ${svcName(list[0])}` : `${list.length} Service: ${[...new Set(list.map(svcName))].join(', ')}`;
-  const tip = list.map(o => `${o.s.arbeit} · ${svcName(o)} · ${o.over ? 'offen seit KW ' + o.w : 'KW ' + o.w}`).join('\n') + (cf?.length ? `\n\nIn dieser Woche eingeteilt: ${cf.join(', ')}` : '') + '\n\nKlick = abhaken';
-  return `<div class="bar svc${over ? ' over' : ''}" data-svc="${key}" style="left:${l}px;width:${w}px;top:${top}px;height:${h}px" title="${esc(tip)}">${w > 16 ? `<span class="t" style="left:3px;width:${w - 6}px;line-height:${h - 2}px">${over && w > 70 ? `seit KW ${Math.min(...list.filter(o => o.over).map(o => o.w))} · ` : ''}${esc(lab)}</span>` : ''}</div>${cf?.length ? `<span class="svcf" style="left:${l + w - 9}px;top:${top - 3}px" title="${esc('In dieser Woche eingeteilt: ' + cf.join(', '))}">!</span>` : ''}`;
+  const s0 = list[0].s0, l = s0 * dayW + 1, w = Math.max(4, 5 * dayW - 2), over = list.some(o => o.over), wi = list.filter(o => o.s.wichtig).length;
+  list.sort((a, b) => b.s.wichtig - a.s.wichtig);   // wichtige zuerst
+  const lab = list.length === 1 ? `${list[0].s.arbeit} · ${svcName(list[0])}` : `${wi ? wi + " wichtig · " : ""}${list.length} Service: ${[...new Set(list.map(svcName))].join(', ')}`;
+  const tip = list.map(o => `${o.s.wichtig ? 'WICHTIG: ' : ''}${o.s.arbeit} · ${svcName(o)} · ${o.over ? 'offen seit KW ' + o.w : 'KW ' + o.w}`).join('\n') + (cf?.length ? `\n\nIn dieser Woche eingeteilt: ${cf.join(', ')}` : '') + '\n\nKlick = abhaken';
+  return `<div class="bar svc${wi ? ' wichtig' : ''}${over ? ' over' : ''}" data-svc="${key}" style="left:${l}px;width:${w}px;top:${top}px;height:${h}px" title="${esc(tip)}">${w > 16 ? `<span class="t" style="left:3px;width:${w - 6}px;line-height:${h - 2}px">${over && w > 70 ? `seit KW ${Math.min(...list.filter(o => o.over).map(o => o.w))} · ` : ''}${esc(lab)}</span>` : ''}</div>${cf?.length ? `<span class="svcf" style="left:${l + w - 9}px;top:${top - 3}px" title="${esc('In dieser Woche eingeteilt: ' + cf.join(', '))}">!</span>` : ''}`;
 }
 const svcWochen = list => { const by = {}; list.forEach(o => (by[o.s0] ??= []).push(o)); return Object.values(by); };
 // Zeile «Allgemein → Service»: alle Service-Arbeiten, ein Block pro Woche
@@ -1530,11 +1535,12 @@ function svcResBars(rid, top){ return svcWochen(svcResList(rid)).map(l => svcBlo
 function openSvcPop(key, rect){
   const [art, a, b] = key.split(':');
   const list = art === 'w' ? SVC.filter(o => o.s0 === +a) : SVC.filter(o => o.x.planer_ressource_id === a && o.s0 === +b);
+  list.sort((p, q) => q.s.wichtig - p.s.wichtig);
   if(!list.length) return;
   const cf = art === 'r' ? svcKonflikt(a, +b) : [];
   const pop = popAt(rect, `<b>Service · KW ${kw(list[0].s0)}</b>
     ${cf.length ? `<span class="small" style="color:var(--red)">In dieser Woche eingeteilt: ${esc(cf.join(', '))}</span>` : ''}
-    <div class="svclist">${list.map((o, i) => `<div class="svci"><div><b>${esc(o.s.arbeit)}</b><br><span class="small${o.over ? '" style="color:var(--red)' : ' muted'}">${esc(svcName(o))} · ${o.over ? 'offen seit KW ' + o.w : 'KW ' + o.w}${o.s.wer ? ' · ' + esc(o.s.wer) : ''}${o.s.zeit ? ' · ' + esc(o.s.zeit) : ''}</span></div>
+    <div class="svclist">${list.map((o, i) => `<div class="svci"><div><b>${esc(o.s.arbeit)}</b>${o.s.wichtig ? ' <span class="svcw">wichtig</span>' : ''}<br><span class="small${o.over ? '" style="color:var(--red)' : ' muted'}">${esc(svcName(o))} · ${o.over ? 'offen seit KW ' + o.w : 'KW ' + o.w}${o.s.wer ? ' · ' + esc(o.s.wer) : ''}${o.s.zeit ? ' · ' + esc(o.s.zeit) : ''}</span></div>
       <button class="btn btn-ghost" data-sok="${i}" title="Als erledigt eintragen (heute)">${I('check')}Erledigt</button></div>`).join('')}</div>
     <a class="small" href="/wissen-live-v1.html#e-${list[0].e.id}.${list[0].x.id}" target="_blank" rel="noopener">Im Wissens-Tool öffnen (Anleitung, Stand, Rechnung)</a>`);
   pop.querySelectorAll('[data-sok]').forEach(bt => bt.onclick = async () => { closePop(); await svcErledigt(list[+bt.dataset.sok]); });

@@ -126,6 +126,7 @@ main.wrap{padding-top:22px;padding-bottom:70px;}
 .fld input,.fld select{width:100%;}
 .fld .chk input{width:auto;margin:0;}
 .qrwahl{display:flex;flex-direction:column;gap:8px;}
+.stat.wichtig{background:#323E4E;color:#fff;} select.plwahl.wichtig{color:#323E4E;font-weight:700;} select.plwahl.aus{color:var(--muted);}
 .handywrap{position:fixed;inset:0;background:rgba(35,43,53,.45);z-index:70;display:flex;align-items:center;justify-content:center;padding:16px;}
 .handy{background:#232B35;border-radius:28px;padding:10px;box-shadow:0 12px 40px rgba(0,0,0,.35);display:flex;flex-direction:column;gap:6px;height:min(860px,calc(100vh - 32px));}
 .handykopf{display:flex;align-items:center;justify-content:space-between;gap:10px;color:#fff;font-size:12px;padding:2px 6px 0 12px;}
@@ -857,7 +858,7 @@ function exService(e, x){
       return r ? (r.erledigt ? `<span class="stat ok">${ic('check')}KW ${w} · ${datumCH(r.datum)}</span>` : `<span class="stat no">${ic('x')}KW ${w} nicht gemacht</span>`)
         : w < NOW_KW ? `<span class="stat no">${ic('alert')}KW ${w} offen</span>` : `<span class="stat open">ab KW ${w}</span>`; }).join(' ');
     const offen = ws.some(w => !erledigtIn(x, s, w));
-    return `<tr><td><button class="lnk" data-act="anl" data-id="${s.id}" title="Anleitung zeigen">${esc(s.arbeit)}</button>${s.anleitung_html ? ` ${ic('book', 'mini')}` : ''}</td>
+    return `<tr><td><button class="lnk" data-act="anl" data-id="${s.id}" title="Anleitung zeigen">${esc(s.arbeit)}</button>${s.anleitung_html ? ` ${ic('book', 'mini')}` : ''}${s.im_planer && s.wichtig ? ' <span class="stat wichtig">wichtig</span>' : ''}</td>
       <td>${st || '<span class="small muted">keine Woche</span>'}</td>
       <td class="nw" style="text-align:right">${offen && ws.length ? `<button class="btn btn-ghost btn-sm" data-act="erl" data-id="${s.id}">${ic('check')}Erledigt</button>` : ''}</td></tr>
       ${S.anl.has(s.id) ? `<tr><td colspan="3"><div class="anlbox">${s.anleitung_html ? `<div class="rte-ed">${s.anleitung_html}</div>` : '<div class="small muted">Noch keine Anleitung.</div>'}</div></td></tr>` : ''}`;
@@ -1107,6 +1108,15 @@ async function rteMedium(datei){
 
 // --- Service ---
 const MONATE = [['JAN',1,5],['FEB',6,9],['MÄR',10,13],['APR',14,17],['MAI',18,22],['JUN',23,26],['JUL',27,31],['AUG',32,35],['SEP',36,39],['OKT',40,44],['NOV',45,48],['DEZ',49,53]];
+// Einsatzplaner pro Service-Arbeit: aus / normal (nicht erledigt noch 4 Wochen) / wichtig (andere Farbe, bis erledigt)
+const PLANER_ART = [['aus', 'Nicht im Planer'], ['normal', 'Im Planer'], ['wichtig', 'Im Planer – wichtig']];
+const planerArt = s => !s.im_planer ? 'aus' : s.wichtig ? 'wichtig' : 'normal';
+async function svPlanerArt(el){
+  const s = S.service.find(x => x.id === el.dataset.svpl), v = el.value, alt = planerArt(s);
+  const { error } = await sb.from('wissen_service').update({ im_planer: v !== 'aus', wichtig: v === 'wichtig' }).eq('id', s.id);
+  if(error){ el.value = alt; return fehler(error, 'Speichern'); }
+  s.im_planer = v !== 'aus'; s.wichtig = v === 'wichtig'; el.className = 'svin plwahl ' + v; toast(PLANER_ART.find(p => p[0] === v)[1]);
+}
 // Service-Arbeiten des Eintrags (gelten für alle Exemplare). Wochen = Startwochen:
 // nicht Erledigtes wandert im Einsatzplaner weiter, bis es abgehakt ist.
 function serviceBody(e){
@@ -1118,7 +1128,8 @@ function serviceBody(e){
     return `<tr><td><span class="svarb"><button class="lnk" data-act="anl" data-id="${s.id}" title="Anleitung auf-/zuklappen">${ic(S.anl.has(s.id) ? 'chev' : 'book', 'mini')}${bu ? '' : `<b>${esc(s.arbeit)}</b>`}</button>${bu ? inp('arbeit', 'Arbeit') : ''}</span></td>
       <td><button class="wkbtn ${S.kwEdit === s.id ? 'on' : ''}" data-act="kw" data-id="${s.id}" ${bu ? '' : 'disabled'}>${ic('cal')}${ws.length ? 'KW ' + ws.join(', ') : 'Wochen wählen'}</button></td>
       <td class="nw">${bu ? inp('zeit', '–', 8) : esc(s.zeit || '')}</td><td>${bu ? inp('wer', '–', 14) : esc(s.wer || '')}</td>
-      <td class="nw"><label class="chk" title="Im Einsatzplaner anzeigen"><input type="checkbox" data-act="svPlaner" data-id="${s.id}" ${s.im_planer ? 'checked' : ''} ${bu ? '' : 'disabled'}>Planer</label></td>
+      <td class="nw">${bu ? `<select class="svin plwahl ${planerArt(s)}" data-svpl="${s.id}" title="Einsatzplaner">${PLANER_ART.map(([v, t]) => `<option value="${v}" ${planerArt(s) === v ? 'selected' : ''}>${t}</option>`).join('')}</select>`
+        : s.im_planer ? `<span class="stat ${s.wichtig ? 'wichtig' : 'open'}">${s.wichtig ? 'Planer · wichtig' : 'Planer'}</span>` : ''}</td>
       <td class="nw">${bu ? `<button class="xbtn" data-act="svDel" data-id="${s.id}" title="Arbeit löschen">${ic('x')}</button>` : ''}</td></tr>
       ${S.anl.has(s.id) ? `<tr><td colspan="6">${rte('svc', s.id, s.anleitung_html || '', 'Anleitung: wie wird es gemacht?', bu)}</td></tr>` : ''}`;
   }).join('');
@@ -1137,6 +1148,8 @@ function serviceBody(e){
       <div class="row"><label class="fld" style="flex:1;min-width:200px">Arbeit<input type="text" id="nsArbeit" value="${esc(ns.arbeit || '')}" placeholder="z. B. Messer schleifen, Jahresservice Werkstatt"></label>
         <label class="fld">Zeit<input type="text" id="nsZeit" value="${esc(ns.zeit || '')}" placeholder="½ Tag" size="10"></label>
         <label class="fld">Wer<input type="text" id="nsWer" value="${esc(ns.wer || '')}" placeholder="Werkstatt / intern" size="14"></label></div>
+      <div class="fld">Einsatzplaner<div><span class="segm">${PLANER_ART.map(([v, t]) => `<button class="${ns.art === v ? 'on' : ''}" data-act="nsArt" data-v="${v}">${t}</button>`).join('')}</span>
+        <span class="small muted" style="margin-left:8px">${ns.art === 'wichtig' ? 'Andere Farbe im Planer, wandert weiter, bis es erledigt ist.' : ns.art === 'normal' ? 'Wandert nicht erledigt noch 4 Wochen mit, dann fällt es weg.' : 'Erscheint nur hier im Wissens-Tool.'}</span></div></div>
       <div class="fld">Startwoche(n)${ns.kws.length ? ': KW ' + ns.kws.join(', ') : ' – Kästchen anklicken'}
         <div class="kwgrid">${MONATE.map(([m,f,t]) => `<div class="kwm"><span>${m}</span><div class="row">${Array.from({length:t-f+1},(_,j)=>f+j).map(w =>
           `<button class="kwc ${ns.kws.includes(w) ? 'plus' : ''} ${w === NOW_KW ? 'now' : ''}" data-act="nsKw" data-w="${w}">${w}</button>`).join('')}</div></div>`).join('')}</div></div>
@@ -1637,6 +1650,7 @@ document.addEventListener('change', ev => {
   if(ev.target.dataset?.stneu){ stNeu(ev.target); }
   if(ev.target.dataset?.steinh){ stEinheit(ev.target); }
   if(ev.target.dataset?.qrab){ qrAbschnitt(ev.target); }
+  if(ev.target.dataset?.svpl){ svPlanerArt(ev.target); }
 });
 document.addEventListener('focusout', ev => {
   const ed = ev.target.closest && ev.target.closest('.rte-ed');
@@ -1771,21 +1785,17 @@ document.addEventListener('click', async ev => {
     s.kws = kws; render();
   }
   else if(a === 'anl'){ S.anl.has(d.id) ? S.anl.delete(d.id) : S.anl.add(d.id); render(); }
-  else if(a === 'svPlaner'){
-    const s = S.service.find(x => x.id === d.id);
-    const { error } = await sb.from('wissen_service').update({ im_planer: t.checked }).eq('id', s.id);
-    if(error){ t.checked = !t.checked; return fehler(error, 'Speichern'); }
-    s.im_planer = t.checked; toast(t.checked ? 'Wird im Einsatzplaner angezeigt' : 'Nicht im Einsatzplaner');
-  }
-  else if(a === 'nsNeu'){ S.neuService = { kws: [] }; S.kwEdit = null; S.ask = null; render(); $('nsArbeit')?.focus(); }
+  else if(a === 'nsNeu'){ S.neuService = { kws: [], art: 'normal' }; S.kwEdit = null; S.ask = null; render(); $('nsArbeit')?.focus(); }
   else if(a === 'nsCancel'){ S.neuService = null; render(); }
-  else if(a === 'nsKw'){ // Eingaben merken, Woche umschalten, neu zeichnen
-    const ns = S.neuService, w = +d.w; ns.arbeit = $('nsArbeit').value; ns.zeit = $('nsZeit').value; ns.wer = $('nsWer').value;
-    ns.kws = ns.kws.includes(w) ? ns.kws.filter(x => x !== w) : [...ns.kws, w].sort((x,y) => x-y); render();
+  else if(a === 'nsKw' || a === 'nsArt'){ // Eingaben merken, Woche bzw. Planer-Art umschalten, neu zeichnen
+    const ns = S.neuService; ns.arbeit = $('nsArbeit').value; ns.zeit = $('nsZeit').value; ns.wer = $('nsWer').value;
+    if(a === 'nsArt') ns.art = d.v; else { const w = +d.w; ns.kws = ns.kws.includes(w) ? ns.kws.filter(x => x !== w) : [...ns.kws, w].sort((x,y) => x-y); }
+    render();
   }
   else if(a === 'nsSave'){
     const arbeit = $('nsArbeit').value.trim(); if(!arbeit) return toast('Arbeit fehlt.', true);
-    const z = { eintrag_id: e.id, arbeit, zeit: $('nsZeit').value.trim() || null, wer: $('nsWer').value.trim() || null, kws: S.neuService.kws, sortierung: servicesVon(e).length * 10 };
+    const z = { eintrag_id: e.id, arbeit, zeit: $('nsZeit').value.trim() || null, wer: $('nsWer').value.trim() || null, kws: S.neuService.kws, sortierung: servicesVon(e).length * 10,
+      im_planer: S.neuService.art !== 'aus', wichtig: S.neuService.art === 'wichtig' };
     const { data, error } = await sb.from('wissen_service').insert(z).select().single();
     if(error) return fehler(error, 'Service');
     S.service.push(data); S.neuService = null; render(); toast('Service-Arbeit hinzugefügt');
