@@ -134,6 +134,14 @@ td.svsymz{width:34px;text-align:center;}
 table.svz td{padding:5px 8px;}
 .sveintrag{box-shadow:inset 0 0 0 1.5px var(--primary);}
 .svkopf{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.svwahl{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden;background:#fff;}
+.svwahl button{all:unset;cursor:pointer;padding:5px 11px;font-size:12.5px;font-weight:600;color:var(--primary);}
+.svwahl button + button{border-left:1px solid var(--line);}
+.svwahl button:hover{background:var(--soft);}
+.svwahl button.on{background:var(--primary);color:#fff;}
+.svwahl button.on.offen{background:var(--soft);color:var(--primary);}
+.svwahl button.on.offen.rot{background:var(--danger-soft);color:var(--danger);}
+.svwahl button[disabled]{opacity:.5;cursor:default;}
 table.sveint td{padding:4px 6px;vertical-align:middle;} table.sveint .svin{width:100%;min-width:80px;} table.sveint input[type=date].svin{min-width:125px;}
 table.sveint input[type=date]::-webkit-calendar-picker-indicator{opacity:.35;cursor:pointer;}
 .belege{display:inline-flex;align-items:center;gap:3px;}
@@ -899,50 +907,64 @@ function exService(e, x){
       : `<div class="small muted">Noch keine Service-Arbeiten.${bu ? ' Unten bei «Service-Arbeiten» erfassen – sie gelten für alle Exemplare.' : ''}</div>`}
     ${frueher.length ? `<div class="grp-title">Früher</div><div class="tbl-wrap"><table class="t svz">${frueher.map(h => svZeile(h.arbeit, null, h.kw, h, bu, true)).join('')}</table></div>` : ''}`;
 }
-// «Service eintragen»: alle offenen Arbeiten aller Exemplare dieses Eintrags bis zum gewählten Zeitraum,
-// das aktive Exemplar zuoberst. Pro Zeile Datum, Stand, Bemerkung, Belege und «Ausgeführt» / «Ausgelassen».
+// «Service eintragen»: offene Arbeiten aller Exemplare (bzw. nur dieses Geräts) bis zum gewählten Zeitraum,
+// das aktive Exemplar zuoberst. Hinten drei gleich aussehende Knöpfe Ausgeführt · Offen · Ausgelassen:
+// Offen ist vorgewählt (rot, wenn überfällig), Ausgeführt / Ausgelassen speichert sofort und wird dunkelblau,
+// Offen macht es wieder rückgängig. In diesem Fenster Erledigtes bleibt sichtbar, bis es geschlossen wird.
 const SV_BIS = [[0, 'heute'], [7, '1 Woche'], [30, '1 Monat'], [91, '3 Monate'], [365, '1 Jahr']];
 const svKey = (y, s, w) => `${y.id}|${s.id}|${w}`;
-const svDateien = {};   // Zeile → gewählte Dateien (noch nicht hochgeladen)
-const svWerte = {};     // Zeile → Eingaben (bleiben beim Neuzeichnen erhalten)
+const svDateien = {};          // Zeile → gewählte Dateien (noch nicht hochgeladen)
+const svWerte = {};            // Zeile → Eingaben (bleiben beim Neuzeichnen erhalten)
+const svHier = new Set();      // Zeilen, die in diesem Fenster eingetragen wurden (bleiben sichtbar)
 function svMerken(){ document.querySelectorAll('table.sveint tbody tr[data-k]').forEach(tr => { const v = svWerte[tr.dataset.k] = {}; tr.querySelectorAll('[data-f]').forEach(i => v[i.dataset.f] = i.value); }); }
 function svEintragen(e, x){
   const svs = servicesVon(e), xs = S.svE === 'eins' ? [x] : [x, ...exVon(e).filter(y => y.id !== x.id)];
   const zaehler = /lieferwagen|personenwagen|bus|auto/i.test(e.geraeteart || '') ? 'km-Stand' : /bagger|dumper|lader/i.test(e.geraeteart || '') ? 'Betriebsstunden' : 'Zählerstand';
   const bisKw = Math.min(53, NOW_KW + Math.ceil((S.svBis || 0) / 7));
-  const zeilen = xs.flatMap(y => svs.flatMap(s => wochen(s).filter(w => !erledigtIn(y, s, w) && w <= bisKw).map(w => ({ y, s, w, k: svKey(y, s, w) }))));
+  const zeilen = xs.flatMap(y => svs.flatMap(s => wochen(s).filter(w => w <= bisKw && (!erledigtIn(y, s, w) || svHier.has(svKey(y, s, w)))).map(w => ({ y, s, w, k: svKey(y, s, w), r: erledigtIn(y, s, w) }))));
   const belege = k => (svDateien[k] || []).map((f, j) => `<button class="minidoc" data-act="svDoc" data-k="${k}" data-j="${j}" title="${esc(f.name)} anzeigen">${ic(/^image\//.test(f.type) ? 'image' : 'file')}</button>`).join('');
+  const wahl = ({ r, w }) => { const st = r ? (r.erledigt ? 'ok' : 'aus') : 'offen';
+    return `<span class="svwahl"><button class="${st === 'ok' ? 'on' : ''}" data-act="svSet" data-v="ok">Ausgeführt</button><button class="${st === 'offen' ? 'on offen' + (w < NOW_KW ? ' rot' : '') : ''}" data-act="svSet" data-v="offen" title="${w < NOW_KW ? 'überfällig seit KW ' + w : 'fällig KW ' + w}">Offen</button><button class="${st === 'aus' ? 'on' : ''}" data-act="svSet" data-v="aus">Ausgelassen</button></span>`; };
   return `<div class="exh"><h4>Service eintragen${S.svE === 'eins' ? ' · ' + esc(exName(x)) : ' · alle Exemplare'}</h4><button class="xbtn" data-act="svE" title="Schliessen">${ic('x')}</button></div>
-    <div class="svkopf"><span class="small muted">Offene Arbeiten von ${xs.length > 1 ? `allen ${xs.length} Exemplaren` : 'diesem Exemplar'}, «${esc(exName(x))}» zuoberst. Fällig bis</span>
+    <div class="svkopf"><span class="small muted">${xs.length > 1 ? `Offene Arbeiten von allen ${xs.length} Exemplaren, «${esc(exName(x))}» zuoberst.` : 'Offene Arbeiten dieses Geräts.'} Fällig bis</span>
       <span class="segm">${SV_BIS.map(([d, t]) => `<button class="${(S.svBis || 0) === d ? 'on' : ''}" data-act="svBis" data-v="${d}">${t}</button>`).join('')}</span></div>
     ${zeilen.length ? `<div class="tbl-wrap"><table class="t sveint"><thead><tr><th>Gerät</th><th>Arbeit</th><th>Datum</th><th>${zaehler}</th><th>Bemerkung</th>${S.qr ? '' : '<th>Belege</th>'}<th></th></tr></thead><tbody>
-      ${zeilen.map(({ y, s, w, k }) => { const v = svWerte[k] || {}; return `<tr class="${y.id === x.id ? 'aktiv' : ''}" data-k="${k}" data-x="${y.id}" data-s="${s.id}" data-w="${w}">
+      ${zeilen.map(z => { const { y, s, k, r } = z, v = svWerte[k] || {}; return `<tr class="${y.id === x.id && xs.length > 1 ? 'aktiv' : ''}" data-k="${k}" data-x="${y.id}" data-s="${s.id}" data-w="${z.w}">
         <td class="nw"><b>${esc(exName(y))}</b>${y.zustaendig ? ` <span class="small muted">${esc(y.zustaendig)}</span>` : ''}</td>
-        <td>${esc(s.arbeit)}${s.im_planer && s.wichtig ? ' <span class="stat wichtig">wichtig</span>' : ''}${w < NOW_KW ? ' <span class="stat no">überfällig</span>' : ''}</td>
-        <td><input type="date" class="svin" data-f="datum" value="${esc(v.datum || heuteISO())}"></td>
-        <td><input type="text" class="svin" data-f="stand" value="${esc(v.stand || '')}" placeholder="–"></td>
-        <td><input type="text" class="svin" data-f="bem" value="${esc(v.bem || '')}" placeholder="–"></td>
+        <td>${esc(s.arbeit)}${s.im_planer && s.wichtig ? ' <span class="stat wichtig">wichtig</span>' : ''}</td>
+        <td><input type="date" class="svin" data-f="datum" value="${esc(v.datum || r?.datum || heuteISO())}"></td>
+        <td><input type="text" class="svin" data-f="stand" value="${esc(v.stand ?? r?.stand ?? '')}" placeholder="–"></td>
+        <td><input type="text" class="svin" data-f="bem" value="${esc(v.bem ?? r?.bemerkung ?? '')}" placeholder="–"></td>
         ${S.qr ? '' : `<td class="nw"><span class="belege">${belege(k)}<button class="ibtn" data-act="svDatei" data-k="${k}" title="Rechnung oder Foto anhängen">${ic('clip')}</button></span></td>`}
-        <td class="nw"><button class="btn btn-ghost btn-sm" data-act="svOk">${ic('check')}Ausgeführt</button><button class="addrow small" data-act="svNicht" style="margin-left:10px">Ausgelassen</button></td></tr>`; }).join('')}
+        <td class="nw">${wahl(z)}</td></tr>`; }).join('')}
       </tbody></table></div>` : `<div class="small muted">Nichts offen bis ${SV_BIS.find(z => z[0] === (S.svBis || 0))[1]}.</div>`}`;
 }
-async function svSpeichern(btn, nicht){
+// Status einer Zeile setzen: ok / aus = eintragen bzw. ändern, offen = Eintrag wieder löschen
+async function svSetzen(btn, v){
   const tr = btn.closest('tr'), e = byId(S.eid), s = S.service.find(z => z.id === tr.dataset.s), xid = tr.dataset.x, w = +tr.dataset.w, k = tr.dataset.k;
-  const wert = f => tr.querySelector(`[data-f="${f}"]`)?.value.trim() || null;
+  const r = erledigtIn(exById(xid), s, w), wert = f => tr.querySelector(`[data-f="${f}"]`)?.value.trim() || null;
+  if((v === 'offen' && !r) || (r && (v === 'ok') === r.erledigt && v !== 'offen')) return;
   tr.querySelectorAll('button').forEach(b => b.disabled = true);
-  let dateiId = null;
-  for(const f of svDateien[k] || []){
-    const dd = await hochladen(f, e.id, 'dokument', null, { beschreibung: `Beleg ${s.arbeit} ${NOW_Y}`, exemplar_id: xid });
-    if(!dd){ tr.querySelectorAll('button').forEach(b => b.disabled = false); return; }
-    if(!dateiId) dateiId = dd.id;
+  const zurueck = () => tr.querySelectorAll('button').forEach(b => b.disabled = false);
+  if(v === 'offen'){
+    const { error } = await sb.from('wissen_service_erledigt').delete().eq('id', r.id); if(error){ zurueck(); return fehler(error, 'Zurücksetzen'); }
+    S.erledigt = S.erledigt.filter(z => z.id !== r.id);
+  } else {
+    let dateiId = r?.datei_id || null;
+    for(const f of svDateien[k] || []){
+      const dd = await hochladen(f, e.id, 'dokument', null, { beschreibung: `Beleg ${s.arbeit} ${NOW_Y}`, exemplar_id: xid });
+      if(!dd){ zurueck(); return; } if(!dateiId) dateiId = dd.id;
+    }
+    const felder = { erledigt: v === 'ok', datum: v === 'ok' ? (wert('datum') || heuteISO()) : null, stand: wert('stand'), bemerkung: wert('bem'), datei_id: dateiId };
+    const q = r ? sb.from('wissen_service_erledigt').update(felder).eq('id', r.id)
+      : sb.from('wissen_service_erledigt').insert({ eintrag_id: e.id, exemplar_id: xid, service_id: s.id, arbeit: s.arbeit, jahr: NOW_Y, kw: w, erstellt_von: S.userId, ...felder });
+    const { data, error } = await q.select().single();
+    if(error){ zurueck(); return fehler(error, 'Speichern'); }
+    S.erledigt = S.erledigt.filter(z => z.id !== data.id).concat([data]);
+    delete svDateien[k];
+    if(dateiId) await signiere(S.det.dateien.map(z => z.storage_pfad));
   }
-  const { data, error } = await sb.from('wissen_service_erledigt').insert({ eintrag_id: e.id, exemplar_id: xid, service_id: s.id, arbeit: s.arbeit, jahr: NOW_Y, kw: w,
-    erledigt: !nicht, datum: nicht ? null : (wert('datum') || heuteISO()), stand: wert('stand'), bemerkung: wert('bem'), datei_id: dateiId, erstellt_von: S.userId }).select().single();
-  if(error){ tr.querySelectorAll('button').forEach(b => b.disabled = false); return fehler(error, 'Speichern'); }
-  delete svDateien[k]; delete svWerte[k];
-  S.erledigt.push(data); toast(`${exName(exById(xid))} · ${s.arbeit}: ${nicht ? 'ausgelassen' : 'ausgeführt'}`);
-  if(dateiId) await signiere(S.det.dateien.map(z => z.storage_pfad));
-  svMerken(); render();
+  svHier.add(k); svMerken(); render();
 }
 function exNotizen(e, x){
   const d = S.det && S.det.id === e.id ? S.det : null;
@@ -1865,11 +1887,11 @@ document.addEventListener('click', async ev => {
       S.service = S.service.filter(x => x.id !== s.id); render();
     });
   }
-  else if(a === 'svE'){ svMerken(); S.svE = S.svE && (!d.v || S.svE === d.v) ? false : (d.v || false); render(); if(S.svE) document.querySelector('.sveintrag')?.scrollIntoView({ block: 'nearest' }); }
+  else if(a === 'svE'){ svMerken(); svHier.clear(); S.svE = S.svE && (!d.v || S.svE === d.v) ? false : (d.v || false); render(); if(S.svE) document.querySelector('.sveintrag')?.scrollIntoView({ block: 'nearest' }); }
   else if(a === 'svBis'){ svMerken(); S.svBis = +d.v; render(); }
   else if(a === 'svDatei') waehleDateien('application/pdf,image/*', true, files => { svMerken(); (svDateien[d.k] ||= []).push(...files); render(); });
   else if(a === 'svDoc'){ const fl = svDateien[d.k]?.[+d.j]; if(fl) window.open(URL.createObjectURL(fl), '_blank'); }
-  else if(a === 'svOk' || a === 'svNicht') await svSpeichern(t, a === 'svNicht');
+  else if(a === 'svSet') await svSetzen(t, d.v);
   else if(a === 'erlDel') bestaetige('Diesen Eintrag löschen?', 'Löschen', async () => {
     const { error } = await sb.from('wissen_service_erledigt').delete().eq('id', d.id); if(error) return fehler(error, 'Löschen');
     S.erledigt = S.erledigt.filter(x => x.id !== d.id); render();
