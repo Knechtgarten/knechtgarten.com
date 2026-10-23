@@ -212,6 +212,14 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 .bar.prov{background:repeating-linear-gradient(135deg,#E9EDB8 0 4px,#FFFFFF 4px 8px);border:1px dashed #9CA43A;color:#323E4E;cursor:pointer;}
 .bar.prov.over{border:1.5px solid var(--red);}
 .bar.altb{border:1.5px solid var(--red) !important;}
+/* Service aus «Wissen & Geräte»: hellblau gestreift = noch offen, rot = Woche vorbei, nicht abgehakt */
+.bar.svc{background:repeating-linear-gradient(135deg,#D6E7F4 0 4px,#FFFFFF 4px 8px);border:1px dashed #6F8FAF;color:#323E4E;cursor:pointer;z-index:2;}
+.bar.svc .t{font-size:9.5px;}
+.bar.svc.over{border:1.5px solid var(--red);}
+.svcf{position:absolute;width:12px;height:12px;border-radius:50%;background:var(--red);color:#fff;font-size:9px;line-height:12px;text-align:center;font-weight:800;z-index:3;pointer-events:none;}
+.svclist{display:flex;flex-direction:column;gap:6px;max-height:280px;overflow:auto;}
+.svci{display:flex;gap:8px;align-items:center;justify-content:space-between;border-top:1px solid var(--line);padding-top:6px;}
+.svci .btn{padding:3px 8px;font-size:12px;flex:none;}
 .bar.prov.nozeit{background:repeating-linear-gradient(135deg,#E9EDB8 0 4px,#FFFFFF 4px 8px);border:1px dashed #C08A2E;}
 .row.grp .lane .bar{top:2px;height:15px;}
 .aghost{position:fixed;z-index:95;background:var(--primary);color:#fff;font-size:11.5px;padding:4px 8px;border-radius:5px;pointer-events:none;box-shadow:0 4px 12px rgba(0,0,0,.2);}
@@ -657,6 +665,7 @@ async function ladeAlles(){
     if(k){ KUNDEN = {}; k.forEach(x => KUNDEN[x.id] = x); KLIST = k.map(x => ({ id: x.id, lab: kLabel(x) })); }
     if(isBuero() && !BENUTZER.length){ const { data } = await sb.rpc('pflege_zustaendige'); BENUTZER = data || []; }
     if(!PF || Date.now() - (PF.t || 0) > 300000){ await ladePflege(); if(PF) PF.t = Date.now(); }
+    if(!WS || Date.now() - (WS.t || 0) > 60000){ await ladeService(); if(WS) WS.t = Date.now(); }
     syncPflegeErledigt();
   }catch(err){ fehler(err, 'Laden'); }
 }
@@ -790,7 +799,7 @@ function compute(){
   // Vorarbeiter-Baustelle ohne Mithilfe (und nicht «allein») = Personal fehlt (nur ab heute)
   const cover = {}; ALL.forEach(h => { if(h.kind === 'hilfe' && h.link && LAY[h.id]) LAY[h.id].free.forEach(k => (cover[h.link] ??= new Set()).add(k)); });
   ALL.forEach(b => { if(b.kind !== 'baustelle' || b.allein || !P[b.mid]?.ist_vorarbeiter || !LAY[b.id]) return; const c = cover[b.id] || new Set(); LAY[b.id].miss = LAY[b.id].free.filter(k => !c.has(k) && k >= TODAY * 2); });
-  computeRU(); computeProv();
+  computeRU(); computeProv(); computeSvc();
 }
 const spanLabel = it => {
   const d0 = Math.floor(it.s + 1e-9), d1 = Math.ceil(it.e - 1e-9) - 1;
@@ -885,6 +894,7 @@ function openInfo(btn){
     ${z(sw(SELBER), 'Auftrag ohne Zuständige (selber abgemacht)')}
     ${z(sw('repeating-linear-gradient(135deg,#7E929299 0 3px,#fff 3px 6px)'), 'Offener Auftrag – noch nicht abgemacht')}
     ${z(sw('repeating-linear-gradient(135deg,#E9EDB8 0 3px,#fff 3px 6px)', 'border:1px dashed #9CA43A'), 'Pflege-Vorschlag aus dem Jahresplan')}
+    ${z(sw('repeating-linear-gradient(135deg,#D6E7F4 0 3px,#fff 3px 6px)', 'border:1px dashed #6F8FAF'), 'Service (Wissen & Geräte) – rot umrandet = überfällig, rotes ! = Maschine schon eingeteilt')}
     ${z(sw('#A84E8A'), 'Mithilfe – Farbe des Vorarbeiters')}
     ${z(sw('#fff', 'border:1.5px solid #A84E8A'), 'Maschine / Lieferwagen – Rahmen in Farbe des Vorarbeiters')}
     ${z(sw('#C9CED4'), 'Absenz')}
@@ -897,11 +907,13 @@ function openInfo(btn){
     ${isBuero() ? `<div class="small"><a href="#personen">Farben der Personen ändern</a> · <a href="#feiertage">Farben der Absenzen ändern</a></div>` : ''}
     <b>Anzeigen</b>
     <label class="chk"><input type="checkbox" id="provChk" ${showProv ? 'checked' : ''}>Pflege-Vorschläge anzeigen</label>
+    <label class="chk"><input type="checkbox" id="svcChk" ${showSvc ? 'checked' : ''}>Service anzeigen</label>
     <b>Bedienung</b>
     <div class="small muted">${tag}<br>Ziehen = neuer Eintrag<br>Klick = Details · Doppelklick = dort einfügen<br>Rechtsklick = Menü · Am Rand ziehen = länger/kürzer</div>
   </div>`);
   pop.style.left = Math.max(8, btn.getBoundingClientRect().right - pop.offsetWidth) + 'px';
   pop.querySelector('#provChk').onchange = e => { showProv = e.target.checked; lsSet('prov', showProv); renderRows(); };
+  pop.querySelector('#svcChk').onchange = e => { showSvc = e.target.checked; lsSet('svc', showSvc); renderRows(); };
   pop.querySelectorAll('a').forEach(a => a.addEventListener('click', closePop));
 }
 function setZoom(z){ if(z === zoom) return; const t = tlEl(); const a = t.scrollLeft / dayW, b = a + visW() / dayW; const tv = TODAY + 1 > a + .05 && TODAY < b - .05; const c = centerU(); zoom = z; lsSet('zoom', z); dayW = calcDayW(); renderRows(); scrollToU(c, 'center'); renderPlan(); if(tv) goToday(); }
@@ -982,7 +994,7 @@ function personRow(p, W, bgx){
     }
   });
   const mine = p.benutzer_id === ME;
-  return `<div class="row${openMid === p.id ? " fokusp" : ""}" data-mid="${p.id}"><div class="nm" title="${esc(p.name + (p.zusatz ? ' · ' + p.zusatz : ''))}"><span class="dot" style="background:${p.farbe || '#fff'}"></span><span class="n">${esc(p.name)}</span>${pzPunkt(p.id)}${p.zusatz ? `<span class="z">${esc(p.zusatz)}</span>` : ''}${mine ? '<span class="me">Ich</span>' : ''}${p.farbe && !p.ist_projektleiter ? `<button class="mab${openMid === p.id && openTyp === 'maschine' ? ' on' : ''}" data-mab="${p.id}" data-typ="maschine" title="Maschinen einteilen (aufklappen)" aria-label="Maschinen einteilen">${I('digger')}</button><button class="mab mab2${openMid === p.id && openTyp === 'fahrzeug' ? ' on' : ''}" data-mab="${p.id}" data-typ="fahrzeug" title="Lieferwagen und Anhänger einteilen (aufklappen)" aria-label="Lieferwagen einteilen">${I('truck')}</button>` : ''}</div><div class="lane${ed ? ' ed' : ''}" data-mid="${p.id}" style="width:${W}px;${bgx}">${feierHTML()}${bars}${provBars('p:' + p.id)}${vehLine(p)}</div></div>`;
+  return `<div class="row${openMid === p.id ? " fokusp" : ""}" data-mid="${p.id}"><div class="nm" title="${esc(p.name + (p.zusatz ? ' · ' + p.zusatz : ''))}"><span class="dot" style="background:${p.farbe || '#fff'}"></span><span class="n">${esc(p.name)}</span>${pzPunkt(p.id)}${p.zusatz ? `<span class="z">${esc(p.zusatz)}</span>` : ''}${mine ? '<span class="me">Ich</span>' : ''}${p.farbe && !p.ist_projektleiter ? `<button class="mab${openMid === p.id && openTyp === 'maschine' ? ' on' : ''}" data-mab="${p.id}" data-typ="maschine" title="Maschinen einteilen (aufklappen)" aria-label="Maschinen einteilen">${I('digger')}</button><button class="mab mab2${openMid === p.id && openTyp === 'fahrzeug' ? ' on' : ''}" data-mab="${p.id}" data-typ="fahrzeug" title="Lieferwagen und Anhänger einteilen (aufklappen)" aria-label="Lieferwagen einteilen">${I('truck')}</button>` : ''}</div><div class="lane${ed ? ' ed' : ''}" data-mid="${p.id}" style="width:${W}px;${bgx}">${feierHTML()}${bars}${provBars('p:' + p.id)}${p.id === svcRowId() ? svcRowBars() : ''}${vehLine(p)}</div></div>`;
 }
 function renderRows(){
   const t = tlEl(); if(!t) return; compute(); t.classList.toggle("fokus", !!openMid && layer === "p"); // aufgeklappt: Rest grau
@@ -1061,8 +1073,9 @@ function ovRows(W, bgx, typ = layer, focusMid = null){
   rs.forEach(r => { const u = RU[r.id] || { list: [], cnt: {} };
     const ents = u.list.filter(x => x.slots.length).map(x => ({ x, first: Math.min(...x.slots) })).sort((a, b) => a.first - b.first);
     const lanes = []; ents.forEach(o => { let l = lanes.findIndex(L => !o.x.slots.some(k => L.has(k))); if(l < 0){ l = lanes.length; lanes.push(new Set()); } o.x.slots.forEach(k => lanes[l].add(k)); o.ln = l; });
-    const n = Math.max(1, lanes.length), rowH = n <= 1 ? 24 : n * 11 + 4, bh = n === 1 ? 17 : 10, top0 = n === 1 ? 3 : 2;
-    let bars = '';
+    const n = Math.max(1, lanes.length), bh = n === 1 ? 17 : 10, top0 = n === 1 ? 3 : 2;
+    const sv = svcResList(r.id).length > 0, rowH = (n <= 1 ? 24 : n * 11 + 4) + (sv ? 13 : 0); // Service: schmaler Streifen unten
+    let bars = sv ? svcResBars(r.id, rowH - 14) : '';
     ents.forEach(({ x, ln }) => {
       const b = x.bau ? byId(x.bau) : null;
       const lab = typ === 'maschine' ? (b ? `${first(P[b.mid]?.name)} · ${labOf(b)}` : '?') : `${first(P[x.mid]?.name)}`;
@@ -1455,6 +1468,82 @@ async function provToEinsatz(pid, mid, s, e, ok){
 }
 
 // ---------------------------------------------------------------------------
+// SERVICE aus «Wissen & Geräte»: Service-Arbeiten (im Planer angehakt) mit
+// Startwochen, erledigt pro Exemplar. Noch offen = gestreift; vergangene, nicht
+// abgehakte Woche wandert in die aktuelle Woche (rot «seit KW …»). Geräte mit
+// Planer-Verknüpfung zusätzlich auf ihrer Zeile, rotes «!» = Maschine in der
+// Woche schon einer Baustelle zugeteilt. Abhaken schreibt wissen_service_erledigt.
+// ---------------------------------------------------------------------------
+let WS = null, SVC = [], showSvc = lsGet('svc', true);
+async function ladeService(){
+  try{
+    const y = new Date().getFullYear();
+    const [sv, ex, ei, er] = await Promise.all([
+      fetchAll(() => sb.from('wissen_service').select('id,eintrag_id,arbeit,kws,zeit,wer,im_planer').eq('im_planer', true)),
+      fetchAll(() => sb.from('wissen_exemplar').select('id,eintrag_id,nummer,zustaendig,planer_ressource_id').is('archiviert_am', null)),
+      fetchAll(() => sb.from('wissen_eintrag').select('id,titel').is('archiviert_am', null)),
+      fetchAll(() => sb.from('wissen_service_erledigt').select('id,exemplar_id,service_id,jahr,kw').gte('jahr', y - 2))
+    ]);
+    const ein = {}; ei.forEach(e => ein[e.id] = e);
+    const exE = {}; ex.forEach(x => { if(ein[x.eintrag_id]) (exE[x.eintrag_id] ??= []).push(x); });
+    WS = { svc: sv.filter(s => s.kws?.length), ein, exE, erl: new Map(er.map(r => [`${r.exemplar_id}_${r.service_id}_${r.jahr}_${r.kw}`, r.id])) };
+  }catch(e){ console.warn('Service-Daten nicht geladen', e); WS = null; }
+}
+const svcName = o => `${o.e.titel}${o.x.nummer ? ' ' + o.x.nummer : ''}`;
+function computeSvc(){
+  SVC = []; if(!WS || !showSvc) return;
+  let base = TODAY; while(dDate(base).getDay() === 0 || dDate(base).getDay() === 6) base++;
+  const nowMon = base - ((dDate(base).getDay() + 6) % 7), yB = dDate(nowMon + 3).getFullYear();
+  WS.svc.forEach(s => (WS.exE[s.eintrag_id] || []).forEach(x => {
+    const e = WS.ein[s.eintrag_id]; let offen = null, erledigtBis = -Infinity;
+    for(const y of [yB - 1, yB, yB + 1]) for(const w of s.kws){
+      const mon = kwMonday(y, w); if(kw(mon) !== w || mon >= NDAYS || mon < nowMon - 7 * 52) continue;
+      const done = WS.erl.has(`${x.id}_${s.id}_${y}_${w}`);
+      if(mon < nowMon){ if(done) erledigtBis = Math.max(erledigtBis, mon); else if(!offen || mon > offen.mon) offen = { y, w, mon }; continue; }
+      if(!done) SVC.push({ s, x, e, y, w, mon, s0: mon, over: false });
+    }
+    // nur die letzte nicht abgehakte Woche wandert weiter (ältere sind durch eine spätere Erledigung erledigt)
+    if(offen && offen.mon > erledigtBis) SVC.push({ s, x, e, y: offen.y, w: offen.w, mon: offen.mon, s0: nowMon, over: true });
+  }));
+}
+// Baustellen, auf denen die Maschine in dieser Woche eingeteilt ist
+function svcKonflikt(rid, s0){
+  const u = RU[rid]; if(!u) return [];
+  return u.list.filter(z => z.slots.some(k => k >= s0 * 2 && k < (s0 + 5) * 2 && !z.evtl?.has(k))).map(z => { const b = z.bau ? byId(z.bau) : null; return b ? `${labOf(b)} (${first(P[b.mid]?.name)})` : first(P[z.mid]?.name) || '?'; });
+}
+const svcRowId = () => { const g = GRUPPEN.find(x => x.name === 'Allgemein'); return g && PERSONEN.find(p => p.gruppe_id === g.id && p.aktiv && p.name.toLowerCase() === 'service')?.id; };
+function svcBlock(list, key, top, h, cf){
+  const s0 = list[0].s0, l = s0 * dayW + 1, w = Math.max(4, 5 * dayW - 2), over = list.some(o => o.over);
+  const lab = list.length === 1 ? `${list[0].s.arbeit} · ${svcName(list[0])}` : `${list.length} Service: ${[...new Set(list.map(svcName))].join(', ')}`;
+  const tip = list.map(o => `${o.s.arbeit} · ${svcName(o)} · ${o.over ? 'offen seit KW ' + o.w : 'KW ' + o.w}`).join('\n') + (cf?.length ? `\n\nIn dieser Woche eingeteilt: ${cf.join(', ')}` : '') + '\n\nKlick = abhaken';
+  return `<div class="bar svc${over ? ' over' : ''}" data-svc="${key}" style="left:${l}px;width:${w}px;top:${top}px;height:${h}px" title="${esc(tip)}">${w > 16 ? `<span class="t" style="left:3px;width:${w - 6}px;line-height:${h - 2}px">${over && w > 70 ? `seit KW ${Math.min(...list.filter(o => o.over).map(o => o.w))} · ` : ''}${esc(lab)}</span>` : ''}</div>${cf?.length ? `<span class="svcf" style="left:${l + w - 9}px;top:${top - 3}px" title="${esc('In dieser Woche eingeteilt: ' + cf.join(', '))}">!</span>` : ''}`;
+}
+const svcWochen = list => { const by = {}; list.forEach(o => (by[o.s0] ??= []).push(o)); return Object.values(by); };
+// Zeile «Allgemein → Service»: alle Service-Arbeiten, ein Block pro Woche
+function svcRowBars(){ return svcWochen(SVC).map(l => svcBlock(l, 'w:' + l[0].s0, 3, 17)).join(''); }
+// Zeile einer Maschine / eines Fahrzeugs: schmaler Streifen unten
+function svcResList(rid){ return SVC.filter(o => o.x.planer_ressource_id === rid); }
+function svcResBars(rid, top){ return svcWochen(svcResList(rid)).map(l => svcBlock(l, `r:${rid}:${l[0].s0}`, top, 12, svcKonflikt(rid, l[0].s0))).join(''); }
+function openSvcPop(key, rect){
+  const [art, a, b] = key.split(':');
+  const list = art === 'w' ? SVC.filter(o => o.s0 === +a) : SVC.filter(o => o.x.planer_ressource_id === a && o.s0 === +b);
+  if(!list.length) return;
+  const cf = art === 'r' ? svcKonflikt(a, +b) : [];
+  const pop = popAt(rect, `<b>Service · KW ${kw(list[0].s0)}</b>
+    ${cf.length ? `<span class="small" style="color:var(--red)">In dieser Woche eingeteilt: ${esc(cf.join(', '))}</span>` : ''}
+    <div class="svclist">${list.map((o, i) => `<div class="svci"><div><b>${esc(o.s.arbeit)}</b><br><span class="small${o.over ? '" style="color:var(--red)' : ' muted'}">${esc(svcName(o))} · ${o.over ? 'offen seit KW ' + o.w : 'KW ' + o.w}${o.s.wer ? ' · ' + esc(o.s.wer) : ''}${o.s.zeit ? ' · ' + esc(o.s.zeit) : ''}</span></div>
+      <button class="btn btn-ghost" data-sok="${i}" title="Als erledigt eintragen (heute)">${I('check')}Erledigt</button></div>`).join('')}</div>
+    <a class="small" href="/wissen-live-v1.html#e-${list[0].e.id}.${list[0].x.id}" target="_blank" rel="noopener">Im Wissens-Tool öffnen (Anleitung, Stand, Rechnung)</a>`);
+  pop.querySelectorAll('[data-sok]').forEach(bt => bt.onclick = async () => { closePop(); await svcErledigt(list[+bt.dataset.sok]); });
+}
+async function svcErledigt(o){
+  const { data, error } = await sb.from('wissen_service_erledigt').insert({ eintrag_id: o.e.id, exemplar_id: o.x.id, service_id: o.s.id, arbeit: o.s.arbeit, jahr: o.y, kw: o.w, erledigt: true, datum: isoDate(TODAY), erstellt_von: ME }).select('id').single();
+  if(error) return fehler(error, 'Service');
+  const k = `${o.x.id}_${o.s.id}_${o.y}_${o.w}`; WS.erl.set(k, data.id); renderRows();
+  toast(`${o.s.arbeit} · ${svcName(o)}: erledigt`, async () => { const { error: e2 } = await sb.from('wissen_service_erledigt').delete().eq('id', data.id); if(e2) return fehler(e2); WS.erl.delete(k); renderRows(); });
+}
+
+// ---------------------------------------------------------------------------
 // Neu eintragen: Ziehen → Leiste «Was ist es?». Zahl 1–4 oder Klick legt direkt an.
 // 1 Auftrag · 2 Offener Auftrag · 3 Mithilfe · 4 Absenz (dann Absenz-Typ 1–n)
 // ---------------------------------------------------------------------------
@@ -1617,6 +1706,7 @@ function bindTimeline(t){
     const tgp = e.target.closest('.tgrp'); if(tgp){ const d = +tgp.dataset.tday; drag = { kind: 'click', fn: () => { zoom = 'tag'; lsSet('zoom', 'tag'); dayW = calcDayW(); renderRows(); scrollToU(d, 'left'); renderPlan(); } }; return; }
     // Ablage freier Lieferwagen: Kärtchen hochziehen oder anklicken = zuteilen
     const vm = e.target.closest('[data-vmore]'); if(vm){ poolAll = vm.dataset.vmore === '1'; renderRows(); return; }
+    const svb = e.target.closest('[data-svc]'); if(svb){ drag = { kind: 'click', fn: () => openSvcPop(svb.dataset.svc, svb.getBoundingClientRect()) }; return; }
     const vc = e.target.closest('.vchip'); if(vc){ if(!vc.classList.contains('ed')) return; drag = { kind: 'vchip', rid: vc.dataset.vrid, a: +vc.dataset.a, b: +vc.dataset.b, x0: e.clientX, y0: e.clientY, moved: false }; e.preventDefault(); return; }
     if(e.target.closest('.lane.vown') && !e.target.closest('.band')) return;
     // Übersicht Maschinen / Fahrzeuge / Anhänger
