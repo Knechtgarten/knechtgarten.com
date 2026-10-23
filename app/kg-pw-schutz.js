@@ -1,6 +1,6 @@
 /* kgPasswortManagerSchutz – gemeinsam für ALLE Tools.
    Einbinden ganz oben im <head>, vor allen anderen Skripten:
-     <script src="/kg-pw-schutz.js?v=2"></script>
+     <script src="/kg-pw-schutz.js?v=3"></script>
 
    Passwort-Manager (Dashlane, LastPass, 1Password, Bitwarden) dürfen nur beim Login
    (.logincard, autocomplete="username" / "current-password") etwas eintragen, sonst nirgends.
@@ -129,4 +129,39 @@
     }).observe(document.body, { childList: true });
   }
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
+
+  // Diagnose: Adresse mit «?pwdiag» (oder «&pwdiag») öffnen → nach 6 Sekunden Kasten mit allem, was
+  // fremde Erweiterungen (Dashlane …) an Feldern und im Dokument eingefügt haben, plus Knopf «Kopieren».
+  if(/[?&]pwdiag/.test(location.search)) setTimeout(function(){
+    var eigene = ['data-kg-pw', 'autocomplete', 'data-lpignore', 'data-1p-ignore', 'data-bwignore', 'data-dashlane-ignore', 'data-form-type',
+      'type', 'class', 'id', 'value', 'placeholder', 'list', 'style', 'size', 'name', 'disabled', 'checked', 'title', 'aria-label', 'tabindex', 'readonly'];
+    var z = ['Seite: ' + location.pathname + location.hash, 'Browser: ' + navigator.userAgent];
+    var felder = document.querySelectorAll('input, textarea, select'), n = 0;
+    for(var i = 0; i < felder.length && n < 25; i++){
+      var el = felder[i], fremd = [];
+      for(var k = 0; k < el.attributes.length; k++){ var a = el.attributes[k]; if(eigene.indexOf(a.name) === -1 && a.name.indexOf('data-') === 0 && !/^data-(act|id|v|i|k|f|x|key|kvk|stf|stneu|stziel|svf|xf|lsp|w)$/.test(a.name)) fremd.push(a.name + '=' + String(a.value).slice(0, 40)); }
+      var cs = getComputedStyle(el), bg = cs.backgroundImage !== 'none' ? ' hintergrund=' + cs.backgroundImage.slice(0, 50) : '';
+      var form = el.closest('form'), f = form ? (form.getAttribute('data-kg-huelle') ? 'huelle' : 'form') : 'OHNE-FORM';
+      if(fremd.length || bg || f === 'OHNE-FORM'){ n++; z.push('Feld ' + i + ' [' + el.tagName.toLowerCase() + ' ' + (el.type || '') + ' «' + String(el.value || el.placeholder || '').slice(0, 25) + '» ' + f + '] ' + fremd.join(' ') + bg); }
+    }
+    z.push('Felder gesamt: ' + felder.length + ', davon auffällig: ' + n);
+    var alle = document.querySelectorAll('*'), fremdeEl = [];
+    for(var j = 0; j < alle.length && fremdeEl.length < 25; j++){
+      var e = alle[j], tag = e.tagName.toLowerCase();
+      if(e.shadowRoot || tag.indexOf('-') !== -1 || /dashlane|kwimpala/i.test(e.id + ' ' + (typeof e.className === 'string' ? e.className : '')))
+        fremdeEl.push(tag + (e.id ? '#' + e.id : '') + (e.shadowRoot ? ' (shadow)' : '') + ' in ' + (e.parentElement ? e.parentElement.tagName.toLowerCase() + (e.parentElement.id ? '#' + e.parentElement.id : '') : '-'));
+    }
+    z.push('Fremde Elemente: ' + (fremdeEl.join(' | ') || 'keine'));
+    var html = document.documentElement, ha = [];
+    for(var m = 0; m < html.attributes.length; m++) ha.push(html.attributes[m].name);
+    z.push('html-Merkmale: ' + ha.join(' '));
+    var text = z.join('\n');
+    var box = document.createElement('div');
+    box.style.cssText = 'position:fixed;left:16px;right:16px;bottom:16px;max-height:45vh;overflow:auto;background:#fff;border:2px solid #323E4E;border-radius:10px;padding:12px;z-index:99999;font:12px/1.4 monospace;white-space:pre-wrap;box-shadow:0 8px 30px rgba(0,0,0,.25)';
+    var knopf = document.createElement('button'); knopf.type = 'button'; knopf.textContent = 'Kopieren';
+    knopf.style.cssText = 'float:right;font:600 13px sans-serif;padding:6px 12px;border-radius:6px;border:0;background:#323E4E;color:#fff;cursor:pointer';
+    knopf.onclick = function(){ navigator.clipboard.writeText(text).then(function(){ knopf.textContent = 'Kopiert'; }); };
+    box.appendChild(knopf); box.appendChild(document.createTextNode(text));
+    document.documentElement.appendChild(box);
+  }, 6000);
 })();
