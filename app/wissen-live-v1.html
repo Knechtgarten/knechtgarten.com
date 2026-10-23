@@ -125,6 +125,11 @@ main.wrap{padding-top:22px;padding-bottom:70px;}
 .fld.voll{grid-column:1/-1;}
 .fld input,.fld select{width:100%;}
 .fld .chk input{width:auto;margin:0;}
+.qrwahl{display:flex;flex-direction:column;gap:8px;}
+.handywrap{position:fixed;inset:0;background:rgba(35,43,53,.45);z-index:70;display:flex;align-items:center;justify-content:center;padding:16px;}
+.handy{background:#232B35;border-radius:28px;padding:10px;box-shadow:0 12px 40px rgba(0,0,0,.35);display:flex;flex-direction:column;gap:6px;height:min(860px,calc(100vh - 32px));}
+.handykopf{display:flex;align-items:center;justify-content:space-between;gap:10px;color:#fff;font-size:12px;padding:2px 6px 0 12px;}
+.handy iframe{width:390px;max-width:calc(100vw - 52px);flex:1;border:0;border-radius:20px;background:#fff;}
 .mitein{display:flex;align-items:center;gap:4px;} .mitein .svin{flex:1;min-width:0;} .mitein .ein{color:var(--muted);font-size:12.5px;white-space:nowrap;}
 .fld .zeile{display:flex;gap:14px;align-items:center;flex-wrap:wrap;min-height:34px;}
 .berchips{display:flex;gap:5px;flex-wrap:wrap;}
@@ -661,6 +666,8 @@ async function oeffne(id, sec, ohneHistory, xid){
   if(S.eid !== id) return;
   // gewuenschter Abschnitt leer (z.B. noch keine Anleitung) -> ersten vorhandenen oeffnen
   if(![...S.open].some(k => hatSec(e, k))){ const erster = SECS.find(([k]) => k !== 'notizen' && hatSec(e, k)) || SECS[0]; if(erster) S.open = new Set([erster[0]]); }
+  // QR-Ansicht mit Auswahl der Kategorie: die gewählten Abschnitte gleich offen
+  if(S.qr && qrAuswahl(e)) S.open = new Set(qrAuswahl(e));
   render();
 }
 
@@ -672,7 +679,8 @@ function render(){
     const nav = [['suche','grid','Übersicht'],['listen','table','Listen'],['etiketten','label','Etiketten']];
     $('subnavInner').innerHTML = nav.map(([k,i,n]) =>
       `<button data-act="nav" data-v="${k}" class="${S.view===k||(k==='suche'&&S.view==='eintrag')?'on':''}">${ic(i)}${n}</button>`).join('')
-      + (istBuero() ? `<button class="neu" data-act="neu">${ic('plus')}Neuer Eintrag</button><button data-act="nav" data-v="einstellungen" class="${S.view === 'einstellungen' ? 'on' : ''}">${ic('gear')}Einstellungen</button>` : '');
+      + `<button class="neu" data-act="handy" title="So sieht es auf dem Handy aus (bei einem Gerät: wie nach dem QR-Scan)">${ic('phone')}Handy</button>`
+      + (istBuero() ? `<button data-act="neu">${ic('plus')}Neuer Eintrag</button><button data-act="nav" data-v="einstellungen" class="${S.view === 'einstellungen' ? 'on' : ''}">${ic('gear')}Einstellungen</button>` : '');
   }
   const m = $('appMain');
   m.innerHTML = S.view === 'eintrag' ? vEintrag() : S.view === 'listen' ? vListen() : S.view === 'etiketten' ? vEtiketten() : S.view === 'einstellungen' ? vEinstellungen() : vSuche();
@@ -759,10 +767,15 @@ function zaehl(e, k){
   if(k === 'notizen') return d.notizen.filter(n => !n.exemplar_id).length || '';
   return '';
 }
+// QR-Ansicht (Handy nach dem Scannen): nur die Abschnitte, die bei der Kategorie gewählt sind (nichts gewählt = alles)
+const QR_ABSCHNITTE = [['x_angaben', 'Angaben zum Gerät (Nummer, Zuständig, Jahrgang …)'], ['x_service', 'Service dieses Geräts (abhaken)'], ['x_notizen', 'Notizen zu diesem Gerät'],
+  ['notizen', 'Notizen für alle'], ['steck', 'Technische Daten'], ['anw', 'Anwendung'], ['service', 'Service-Arbeiten (Anleitungen)'], ['kontakte', 'Kontakte'], ['docs', 'Dokumente']];
+const qrAuswahl = e => S.kats.find(k => k.id === e.kategorie_id)?.qr_abschnitte || null;
+const qrZeigt = (e, k) => !S.qr || !qrAuswahl(e) || qrAuswahl(e).includes(k);
 function vEintrag(){
   const e = byId(S.eid); if(!e) return '<div class="card empty">Eintrag nicht gefunden.</div>';
   const geraet = e.typ === 'geraet', xs = exVon(e), x = exAktiv(e);
-  const secs = SECS.filter(([k]) => hatSec(e, k));
+  const secs = SECS.filter(([k]) => hatSec(e, k) && qrZeigt(e, k));
   const alle = secs.every(([k]) => S.open.has(k));
   const kopf = S.edit ? kopfForm(e) : S.qr ? `
     <div style="min-width:0">
@@ -807,9 +820,9 @@ function exBlock(e, xs, x){
     ${bu ? `<button class="extab neu" data-act="exNeu">${ic('plus')}Exemplar</button>` : ''}</div>`;
   if(!x) return `<div class="exwrap">${tabs}<div class="expanel"><div class="small muted">Noch kein Exemplar erfasst.</div></div></div>`;
   return `<div class="exwrap">${tabs}<div class="expanel">
-    <div class="excard">${exAngaben(e, x)}</div>
-    <div class="excard">${exService(e, x)}</div>
-    <div class="excard voll">${exNotizen(e, x)}</div>
+    ${qrZeigt(e, 'x_angaben') ? `<div class="excard">${exAngaben(e, x)}</div>` : ''}
+    ${qrZeigt(e, 'x_service') ? `<div class="excard">${exService(e, x)}</div>` : ''}
+    ${qrZeigt(e, 'x_notizen') ? `<div class="excard voll">${exNotizen(e, x)}</div>` : ''}
     ${bu ? `<div class="exfuss">${xs.length > 1 ? `<button class="addrow small" data-act="exLoesen">${ic('link')}In eigenen Eintrag herauslösen</button>` : ''}
       <button class="addrow small" data-act="exArchiv" style="color:var(--danger)">${ic('archive')}«${esc(exName(x))}» archivieren</button></div>` : ''}
   </div></div>`;
@@ -1189,10 +1202,10 @@ function vKategorie(){
       <datalist id="einhListe">${einheiten.map(u => `<option value="${esc(u)}">`).join('')}</datalist>
     </section>
     <section class="card einst">
-      ${k ? `<div class="exh"><h3>Kategorie</h3></div>
-        <label class="fld">Bezeichnung<input type="text" data-stf="kat" data-id="${k.id}" value="${esc(k.name)}"></label>
-        <div class="exh" style="margin-top:6px"><h3>Einträge in dieser Kategorie</h3><span class="small muted">${es.length}</span></div>
-        <div class="anbau">${es.map(e => `<button data-act="open" data-id="${e.id}"><span class="chip">${esc(e.titel)}${exVon(e).length > 1 ? ' × ' + exVon(e).length : ''}</span></button>`).join('') || '<span class="small muted">Noch keine.</span>'}</div>`
+      ${k ? `<div class="exh"><h3>Beim Scannen des QR-Codes anzeigen</h3></div>
+        <div class="small muted">Was Mitarbeitende auf dem Handy sehen, wenn sie die Etikette eines Geräts dieser Kategorie scannen. Die gewählten Abschnitte sind gleich aufgeklappt. Nichts gewählt = alles.</div>
+        <div class="qrwahl">${QR_ABSCHNITTE.map(([key, t]) => `<label class="chk"><input type="checkbox" data-qrab="${key}" ${(k.qr_abschnitte || []).includes(key) ? 'checked' : ''}>${esc(t)}</label>`).join('')}</div>
+        ${es.find(e => exVon(e).length) ? `<div><a class="btn btn-ghost btn-sm" href="?qr=${exVon(es.find(e => exVon(e).length))[0].qr_nr}" target="_blank" rel="noopener" style="text-decoration:none">${ic('phone')}Beispiel ansehen</a></div>` : ''}`
       : `<div class="exh"><h3>Für alle Kategorien</h3></div><div class="small muted">Merkmale, die überall passen (z. B. Hersteller / Modell, Anschaffungsjahr, Kaufpreis).</div>`}
     </section></div>`;
 }
@@ -1203,6 +1216,23 @@ async function stFeld(el){
   const { error } = await sb.from(c.tab).update({ name: v }).eq('id', z.id);
   if(error){ el.value = z.name; return fehler(error.code === '23505' ? 'Diesen Namen gibt es schon.' : error, 'Speichern'); }
   z.name = v; toast('Gespeichert');
+}
+// Handy-Vorschau: aktuelle Seite in Handy-Grösse; bei einem Gerät so, wie es nach dem QR-Scan erscheint
+function handyVorschau(){
+  const e = S.view === 'eintrag' && byId(S.eid), x = e && exAktiv(e);
+  const url = x ? location.pathname + '?qr=' + x.qr_nr : location.pathname + location.hash;
+  const w = document.createElement('div'); w.className = 'handywrap';
+  w.innerHTML = `<div class="handy"><div class="handykopf"><span>${x ? 'QR-Ansicht ' + esc(exTitel(x)) : 'Handy-Ansicht'}</span><button class="xbtn" title="Schliessen">${ic('x')}</button></div><iframe src="${esc(url)}" title="Handy-Vorschau"></iframe></div>`;
+  const zu = () => w.remove();
+  w.querySelector('.xbtn').onclick = zu; w.onmousedown = ev => { if(ev.target === w) zu(); };
+  document.body.appendChild(w);
+}
+async function qrAbschnitt(el){
+  const k = S.kats.find(x => x.id === S.katDetail); if(!k) return;
+  const neu = [...document.querySelectorAll('[data-qrab]')].filter(c => c.checked).map(c => c.dataset.qrab);
+  const { error } = await sb.from('wissen_kategorie').update({ qr_abschnitte: neu.length ? neu : null }).eq('id', k.id);
+  if(error){ el.checked = !el.checked; return fehler(error, 'Speichern'); }
+  k.qr_abschnitte = neu.length ? neu : null; toast('Gespeichert');
 }
 async function stEinheit(el){
   const m = S.merkmale.find(x => x.id === el.dataset.steinh), v = el.value.trim();
@@ -1606,6 +1636,7 @@ document.addEventListener('change', ev => {
   if(S.lEdit && (ev.target.dataset?.lsp != null || ev.target.id === 'lArt' || ev.target.id === 'lQ')){ lisLesen(); render(); }
   if(ev.target.dataset?.stneu){ stNeu(ev.target); }
   if(ev.target.dataset?.steinh){ stEinheit(ev.target); }
+  if(ev.target.dataset?.qrab){ qrAbschnitt(ev.target); }
 });
 document.addEventListener('focusout', ev => {
   const ed = ev.target.closest && ev.target.closest('.rte-ed');
@@ -1795,6 +1826,7 @@ document.addEventListener('click', async ev => {
   // Einstellungen
   else if(a === 'katOpen'){ S.katDetail = d.id || ''; render(); window.scrollTo(0, 0); }
   else if(a === 'katZu'){ S.katDetail = null; render(); }
+  else if(a === 'handy') handyVorschau();
   else if(a === 'qrKopie'){ try{ await navigator.clipboard.writeText(d.v); toast('Link kopiert'); }catch(err){ toast(d.v); } }
   else if(a === 'stDel'){ const c = STAMM[d.k], z = c.liste().find(x => x.id === d.id);
     bestaetige(`«${z.name}» löschen?`, 'Löschen', async () => {
