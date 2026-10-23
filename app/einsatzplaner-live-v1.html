@@ -1482,15 +1482,18 @@ let WS = null, SVC = [], showSvc = lsGet('svc', true);
 async function ladeService(){
   try{
     const y = new Date().getFullYear();
-    const [sv, ex, ei, er] = await Promise.all([
+    const [sv, ex, ei, er, ka] = await Promise.all([
       fetchAll(() => sb.from('wissen_service').select('id,eintrag_id,arbeit,kws,zeit,wer,im_planer,wichtig,erstellt_am').eq('im_planer', true)),
       fetchAll(() => sb.from('wissen_exemplar').select('id,eintrag_id,nummer,zustaendig,planer_ressource_id').is('archiviert_am', null)),
-      fetchAll(() => sb.from('wissen_eintrag').select('id,titel').is('archiviert_am', null)),
-      fetchAll(() => sb.from('wissen_service_erledigt').select('id,exemplar_id,service_id,jahr,kw').gte('jahr', y - 2))
+      fetchAll(() => sb.from('wissen_eintrag').select('id,titel,kategorie_id').is('archiviert_am', null)),
+      fetchAll(() => sb.from('wissen_service_erledigt').select('id,exemplar_id,service_id,jahr,kw').gte('jahr', y - 2)),
+      fetchAll(() => sb.from('wissen_kategorie').select('id,mit_service'))
     ]);
-    const ein = {}; ei.forEach(e => ein[e.id] = e);
+    // Kategorien mit «Service & Wartung» aus: deren Einträge erscheinen nicht
+    const ohne = new Set(ka.filter(k => k.mit_service === false).map(k => k.id));
+    const ein = {}; ei.forEach(e => { if(!ohne.has(e.kategorie_id)) ein[e.id] = e; });
     const exE = {}; ex.forEach(x => { if(ein[x.eintrag_id]) (exE[x.eintrag_id] ??= []).push(x); });
-    WS = { svc: sv.filter(s => s.kws?.length), ein, exE, erl: new Map(er.map(r => [`${r.exemplar_id}_${r.service_id}_${r.jahr}_${r.kw}`, r.id])) };
+    WS = { svc: sv.filter(s => s.kws?.length && ein[s.eintrag_id]), ein, exE, erl: new Map(er.map(r => [`${r.exemplar_id}_${r.service_id}_${r.jahr}_${r.kw}`, r.id])) };
   }catch(e){ console.warn('Service-Daten nicht geladen', e); WS = null; }
 }
 const svcName = o => `${o.e.titel}${o.x.nummer ? ' ' + o.x.nummer : ''}`;

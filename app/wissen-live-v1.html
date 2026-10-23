@@ -775,7 +775,7 @@ function vSuche(){
 
 // --- Eintrag ---
 // Gerät: Kopf (gilt für alle) → Tabs mit den Exemplaren → Block des Exemplars → «Allgemein» (gilt für alle)
-const SECS = [['notizen','note','Notizen'],['steck','list','Technische Daten'],['anw','book','Anwendung'],['service','wrench','Service-Arbeiten'],['kontakte','user','Kontakte'],['docs','file','Dokumente']];
+const SECS = [['notizen','note','Notizen'],['steck','list','Technische Daten'],['anw','book','Anwendung'],['service','wrench','Service & Wartung'],['kontakte','user','Kontakte'],['docs','file','Dokumente']];
 const allgDocs = (e, d) => d.dateien.filter(x => x.bereich === 'dokument' && !x.exemplar_id && x.storage_pfad !== e.titelfoto_pfad);
 function hatSec(e, k){
   const d = S.det && S.det.id === e.id ? S.det : null;
@@ -803,10 +803,12 @@ const QR_ABSCHNITTE = [['x_angaben', 'Angaben zum Gerät (Nummer, Zuständig, Ja
   ['notizen', 'Notizen für alle'], ['steck', 'Technische Daten'], ['anw', 'Anwendung'], ['service', 'Service-Arbeiten (Anleitungen)'], ['kontakte', 'Kontakte'], ['docs', 'Dokumente']];
 const qrAuswahl = e => S.kats.find(k => k.id === e.kategorie_id)?.qr_abschnitte || null;
 const qrZeigt = (e, k) => !S.qr || !qrAuswahl(e) || qrAuswahl(e).includes(k);
+// «Service & Wartung verwenden» pro Kategorie (Einstellungen): aus = nichts zum Service zeigen
+const mitService = e => e.typ === 'geraet' && S.kats.find(k => k.id === e.kategorie_id)?.mit_service !== false;
 function vEintrag(){
   const e = byId(S.eid); if(!e) return '<div class="card empty">Eintrag nicht gefunden.</div>';
   const geraet = e.typ === 'geraet', xs = exVon(e), x = exAktiv(e);
-  const secs = SECS.filter(([k]) => hatSec(e, k) && qrZeigt(e, k));
+  const secs = SECS.filter(([k]) => hatSec(e, k) && qrZeigt(e, k) && (k !== 'service' || mitService(e)));
   const alle = secs.every(([k]) => S.open.has(k));
   const kopf = S.edit ? kopfForm(e) : S.qr ? `
     <div style="min-width:0">
@@ -848,7 +850,7 @@ function exBlock(e, xs, x){
   const bu = istBuero() && !S.qr;
   // ein einziger Knopf zum Eintragen, rechts in der Reiterzeile: mehrere Geräte = «Service alle», sonst bzw. beim QR-Scan nur dieses Gerät
   const nurEins = S.qr || xs.length < 2;
-  const svKnopf = servicesVon(e).length && x ? (n => `<button class="btn ${n ? 'btn-primary' : 'btn-ghost'} btn-sm svalle" data-act="svE" data-v="${nurEins ? 'eins' : 'alle'}" title="${nurEins ? 'Service eintragen' : `Service für alle ${xs.length} Exemplare eintragen`}">${ic('check')}${nurEins ? 'Service eintragen' : 'Service alle'}${n ? ` (${n})` : ''}</button>`)(svOffen(e, nurEins ? [x] : xs)) : '';
+  const svKnopf = mitService(e) && servicesVon(e).length && x ? (n => `<button class="btn ${n ? 'btn-primary' : 'btn-ghost'} btn-sm svalle" data-act="svE" data-v="${nurEins ? 'eins' : 'alle'}" title="${nurEins ? 'Service eintragen' : `Service für alle ${xs.length} Exemplare eintragen`}">${ic('check')}${nurEins ? 'Service eintragen' : 'Service alle'}${n ? ` (${n})` : ''}</button>`)(svOffen(e, nurEins ? [x] : xs)) : '';
   const tabs = S.qr ? (svKnopf ? `<div class="extabs">${svKnopf}</div>` : '') : `<div class="extabs" role="tablist">${xs.map((z, i) => `<button class="extab ${z === x ? 'on' : ''}" data-act="exTab" data-id="${z.id}" role="tab" aria-selected="${z === x}">
       <span class="dt"></span>${esc(exName(z, i))}${z.zustaendig ? `<span class="z">${esc(z.zustaendig)}</span>` : ''}</button>`).join('')}
     ${bu ? `<button class="extab neu" data-act="exNeu">${ic('plus')}Exemplar</button>` : ''}
@@ -857,7 +859,7 @@ function exBlock(e, xs, x){
   return `<div class="exwrap">${tabs}<div class="expanel">
     ${S.svE ? `<div class="excard voll sveintrag">${svEintragen(e, x)}</div>` : ''}
     ${qrZeigt(e, 'x_angaben') ? `<div class="excard">${exAngaben(e, x)}</div>` : ''}
-    ${qrZeigt(e, 'x_service') ? `<div class="excard">${exService(e, x)}</div>` : ''}
+    ${qrZeigt(e, 'x_service') && mitService(e) ? `<div class="excard">${exService(e, x)}</div>` : ''}
     ${qrZeigt(e, 'x_notizen') ? `<div class="excard voll">${exNotizen(e, x)}</div>` : ''}
     ${bu ? `<div class="exfuss">${xs.length > 1 ? `<button class="addrow small" data-act="exLoesen">${ic('link')}In eigenen Eintrag herauslösen</button>` : ''}
       <button class="addrow small" data-act="exArchiv" style="color:var(--danger)">${ic('archive')}«${esc(exName(x))}» archivieren</button></div>` : ''}
@@ -1305,8 +1307,10 @@ function vKategorie(){
     <section class="card einst">
       ${k ? `<div class="exh"><h3>Beim Scannen des QR-Codes anzeigen</h3></div>
         <div class="small muted">Was Mitarbeitende auf dem Handy sehen, wenn sie die Etikette eines Geräts dieser Kategorie scannen. Die gewählten Abschnitte sind gleich aufgeklappt. Nichts gewählt = alles.</div>
-        <div class="qrwahl">${QR_ABSCHNITTE.map(([key, t]) => `<label class="chk"><input type="checkbox" data-qrab="${key}" ${(k.qr_abschnitte || []).includes(key) ? 'checked' : ''}>${esc(t)}</label>`).join('')}</div>
-        ${es.find(e => exVon(e).length) ? `<div><a class="btn btn-ghost btn-sm" href="?qr=${exVon(es.find(e => exVon(e).length))[0].qr_nr}" target="_blank" rel="noopener" style="text-decoration:none">${ic('phone')}Beispiel ansehen</a></div>` : ''}`
+        <div class="qrwahl">${QR_ABSCHNITTE.filter(([key]) => k.mit_service !== false || !['x_service', 'service'].includes(key)).map(([key, t]) => `<label class="chk"><input type="checkbox" data-qrab="${key}" ${(k.qr_abschnitte || []).includes(key) ? 'checked' : ''}>${esc(t)}</label>`).join('')}</div>
+        <div class="exh" style="margin-top:14px"><h3>Service &amp; Wartung</h3></div>
+        <label class="chk"><input type="checkbox" data-katsvc="${k.id}" ${k.mit_service !== false ? 'checked' : ''}>Service &amp; Wartung bei dieser Kategorie verwenden</label>
+        <div class="small muted">Aus = bei Einträgen dieser Kategorie erscheint nichts zum Service: keine Service-Karte beim Gerät, kein Knopf «Service alle», kein Abschnitt «Service &amp; Wartung» und keine Termine im Einsatzplaner. Bereits erfasste Arbeiten bleiben gespeichert.</div>`
       : `<div class="exh"><h3>Für alle Kategorien</h3></div><div class="small muted">Merkmale, die überall passen (z. B. Hersteller / Modell, Anschaffungsjahr, Kaufpreis).</div>`}
     </section></div>`;
 }
@@ -1327,6 +1331,12 @@ function handyVorschau(){
   const zu = () => w.remove();
   w.querySelector('.xbtn').onclick = zu; w.onmousedown = ev => { if(ev.target === w) zu(); };
   document.body.appendChild(w);
+}
+async function katService(el){
+  const k = S.kats.find(x => x.id === el.dataset.katsvc); if(!k) return;
+  const { error } = await sb.from('wissen_kategorie').update({ mit_service: el.checked }).eq('id', k.id);
+  if(error){ el.checked = !el.checked; return fehler(error, 'Speichern'); }
+  k.mit_service = el.checked; toast(el.checked ? 'Service & Wartung an' : 'Service & Wartung aus'); render();
 }
 async function qrAbschnitt(el){
   const k = S.kats.find(x => x.id === S.katDetail); if(!k) return;
@@ -1738,6 +1748,7 @@ document.addEventListener('change', ev => {
   if(ev.target.dataset?.stneu){ stNeu(ev.target); }
   if(ev.target.dataset?.steinh){ stEinheit(ev.target); }
   if(ev.target.dataset?.qrab){ qrAbschnitt(ev.target); }
+  if(ev.target.dataset?.katsvc){ katService(ev.target); }
   if(ev.target.dataset?.svpl){ svPlanerArt(ev.target); }
 });
 document.addEventListener('focusout', ev => {
