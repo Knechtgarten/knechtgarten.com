@@ -177,7 +177,15 @@ main.wrap{padding-top:22px;padding-bottom:70px;}
 .fld .chk input{width:auto;margin:0;}
 .qrtab col.c-chk{width:96px;} .qrtab col.c-bs{width:190px;}
 .einst .tbl-wrap:has(> .felder){overflow-x:auto;} table.felder{min-width:520px;}
-.bsname{display:flex;gap:8px;align-items:center;flex-wrap:wrap;} .felderknopf{margin-left:auto;padding:3px 9px;font-size:12px;} .felderknopf .chev{width:14px;height:14px;transition:transform .15s;} .felderknopf.on .chev{transform:rotate(180deg);} .felderknopf.on{border-color:var(--primary);}
+/* Einzelne Knöpfe statt zusammengeklebter Schalter (Rubrik, Aus/Zu/Offen, Felder) */
+.bkreihe{display:inline-flex;gap:5px;flex-wrap:wrap;}
+.bk{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:5px;padding:4px 11px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--muted);font-size:12.5px;font-weight:600;white-space:nowrap;}
+.bk:hover{border-color:var(--primary);color:var(--primary);}
+.bk.on{background:var(--primary);border-color:var(--primary);color:#fff;}
+.bk[disabled]{opacity:.4;cursor:default;} .bk .i{width:14px;height:14px;}
+.qrtab col.c-bs{width:200px;} .qrtab .mid{text-align:right;}
+.kfwahl tr.frei td{padding-top:3px;padding-bottom:3px;} .kfwahl .chk{margin:0;display:inline-flex;gap:8px;align-items:center;} .kfwahl .chk.muted{color:var(--muted);}
+.bsname{display:flex;gap:8px;align-items:center;flex-wrap:wrap;} .felderknopf{margin-left:auto;} .felderknopf .chev{width:14px;height:14px;transition:transform .15s;} .felderknopf.on .chev{transform:rotate(180deg);} .felderknopf.on{border-color:var(--primary);}
 .qrtab tr.feldpanel > td{background:var(--soft);padding:12px 14px 14px;} .qrtab tr.feldpanel > td > *{margin-top:8px;} .qrtab tr.feldpanel > td > :first-child{margin-top:0;}
 .felder col.c-art{width:120px;}
 .felder col.c-art{width:110px;} .felder col.c-pro{width:74px;} .felder .mid{text-align:center;} .felder input[type=checkbox]{accent-color:var(--primary);width:16px;height:16px;}
@@ -722,7 +730,7 @@ async function ladeAlles(){
   ]);
   const err = r.find(x => x.error); if(err) return fehler(err.error, 'Laden');
   [S.kats, S.bereiche, S.eintraege, S.service, S.exemplare, S.erledigt, S.lieferanten, S.planer] = r.map(x => x.data || []);
-  { const [mm, li] = await Promise.all([sb.from('wissen_merkmal').select('*').order('sortierung'), sb.from('wissen_liste').select('*').order('sortierung')]); S.merkmale = mm.data || []; S.listen = li.data || []; }
+  { const [fe, li] = await Promise.all([sb.from('wissen_feld').select('*').order('name'), sb.from('wissen_liste').select('*').order('sortierung')]); S.felder = fe.data || []; S.listen = li.data || []; felderAbleiten(); }
   S.eintraege.sort((a,b) => a.titel.localeCompare(b.titel, 'de', {numeric:true}));
   S.exemplare.sort((a,b) => a.sortierung - b.sortierung || String(a.nummer || '').localeCompare(String(b.nummer || ''), 'de', {numeric:true}));
   await signiere(S.eintraege.map(e => e.titelfoto_pfad && vorschau(e.titelfoto_pfad)).filter(Boolean));
@@ -1273,6 +1281,11 @@ function kopfForm(e){
 // key: steckbrief = Eintrag, xsteck = Angaben des Exemplars
 const KVFELD = { steckbrief: 'steckbrief', xsteck: 'steckbrief' };
 // Vorschläge: Merkmale der Kategorie des Eintrags plus «für alle», in beiden Tabellen gleich
+// Felder je Kategorie (aus der gemeinsamen Feldliste und der Auswahl der Kategorie): wie früher wissen_merkmal, nur abgeleitet
+function felderAbleiten(){
+  S.merkmale = S.kats.flatMap(k => (k.felder || []).map((z, i) => { const f = (S.felder || []).find(x => x.id === z.f);
+    return f ? { id: f.id, feld_id: f.id, name: f.name, art: f.art, einheit: f.einheit, optionen: f.optionen, pro_stueck: !!z.s, kategorie_id: k.id, sortierung: i } : null; })).filter(Boolean);
+}
 const merkmaleFuer = e => S.merkmale.filter(m => m.kategorie_id === e.kategorie_id)
   .sort((a, b) => (!a.kategorie_id - !b.kategorie_id) || a.sortierung - b.sortierung);
 // Einheit eines Merkmals (aus den Einstellungen), nur angehängt, wenn der Wert eine reine Zahl ist
@@ -1645,69 +1658,132 @@ function stZeilen(k, l, mitEinh){
           <button class="xbtn" data-act="stDel" data-k="${k}" data-id="${z.id}" title="${n ? 'Wird noch verwendet' : 'Löschen'}" ${n ? 'disabled' : ''}>${ic('trash')}</button></td></tr>`; }).join('')}
       <tr><td></td><td colspan="${mitEinh ? 4 : 3}"><input type="text" class="svin" data-stneu="${k}" placeholder="+ ${STAMM[k].neu} (Name eingeben, Enter)"></td></tr></tbody></table></div>`;
 }
-// Felder (Baustein «Infos») einer Kategorie: Bezeichnung, Art, Einheit bzw. Auswahl-Werte, pro Stück
+// Feldverwaltung: alle Felder des Nachschlagewerks (gemeinsame Liste); die Kategorien wählen nur daraus aus
 const FELDART = [['text', 'Text'], ['zahl', 'Zahl'], ['datum', 'Datum'], ['janein', 'Ja / Nein'], ['auswahl', 'Auswahl']];
-function feldZeilen(l, sk){
-  return `<div class="tbl-wrap"><table class="t sttab felder" data-stsort="${sk}"><colgroup><col class="c-grip"><col><col class="c-art"><col class="c-einh"><col class="c-btn1"></colgroup>
-    <thead><tr><th></th><th>Feld</th><th>Art</th><th>Einheit / Werte</th><th></th></tr></thead><tbody>${l.map((z, i) => {
-      const n = mmNutzung(z);
-      return `<tr data-i="${i}"><td class="grip" title="Ziehen zum Verschieben">${ic('grip')}</td>
-        <td><input type="text" class="svin" data-stf="mm" data-id="${z.id}" value="${esc(z.name)}">${n ? `<div class="small muted">${n}× ausgefüllt</div>` : ''}</td>
-        <td><select class="svin" data-mmart="${z.id}">${FELDART.map(([v, t]) => `<option value="${v}" ${(z.art || 'text') === v ? 'selected' : ''}>${t}</option>`).join('')}</select></td>
-        <td>${z.art === 'auswahl' ? `<input type="text" class="svin" data-mmopt="${z.id}" value="${esc((z.optionen || []).join(', '))}" placeholder="Werte mit Komma">`
-          : z.art === 'zahl' ? `<input type="text" class="svin" data-steinh="${z.id}" value="${esc(z.einheit || '')}" placeholder="Einheit" list="einhListe">` : '<span class="small muted">–</span>'}</td>
-        <td class="nw"><button class="xbtn" data-act="stDel" data-k="mm" data-id="${z.id}" title="Feld löschen">${ic('trash')}</button></td></tr>`; }).join('')}
-      <tr><td></td><td colspan="4"><input type="text" class="svin" data-stneu="${sk}" placeholder="+ ${STAMM[sk].neu} (Name eingeben, Enter)"></td></tr></tbody></table></div>`;
+const katsMitFeld = id => S.kats.filter(k => (k.felder || []).some(z => z.f === id));
+function vFelder(){
+  return `<button class="back" data-act="katZu">${ic('back')}Einstellungen</button>
+    <h2 style="font-size:22px;margin-bottom:12px">Felder</h2>
+    <section class="card einst">
+      <div class="small muted">Alle Felder des Nachschlagewerks. Welche davon eine Kategorie zeigt, wählst du bei der Kategorie (Baustein «Infos» bzw. «Mehrfach»). Umbenennen wirkt bei allen Einträgen.</div>
+      <div class="tbl-wrap"><table class="t felder"><colgroup><col><col class="c-art"><col class="c-einh"><col><col class="c-btn1"></colgroup>
+        <thead><tr><th>Feld</th><th>Art</th><th>Einheit / Werte</th><th>Verwendet in</th><th></th></tr></thead><tbody>
+        ${(S.felder || []).map(z => `<tr><td><input type="text" class="svin" data-fname="${z.id}" value="${esc(z.name)}"></td>
+          <td><select class="svin" data-fart="${z.id}">${FELDART.map(([v, t]) => `<option value="${v}" ${(z.art || 'text') === v ? 'selected' : ''}>${t}</option>`).join('')}</select></td>
+          <td>${z.art === 'auswahl' ? `<input type="text" class="svin" data-fopt="${z.id}" value="${esc((z.optionen || []).join(', '))}" placeholder="Werte mit Komma">`
+            : z.art === 'zahl' ? `<input type="text" class="svin" data-feinh="${z.id}" value="${esc(z.einheit || '')}" placeholder="Einheit" list="einhListe">` : '<span class="small muted">–</span>'}</td>
+          <td class="small muted">${esc(katsMitFeld(z.id).map(k => k.name).join(', ')) || '–'}</td>
+          <td class="nw"><button class="xbtn" data-act="fDel" data-id="${z.id}" title="Feld löschen">${ic('trash')}</button></td></tr>`).join('')}
+        <tr><td colspan="5"><input type="text" class="svin" data-fneu="1" placeholder="+ Neues Feld (Name eingeben, Enter)"></td></tr>
+      </tbody></table></div>${einhListe()}</section>`;
 }
-async function feldSetzen(id, werte, el){
-  const m = S.merkmale.find(x => x.id === id), alt = { ...m };
-  Object.assign(m, werte);
-  const { error } = await sb.from('wissen_merkmal').update(werte).eq('id', id);
-  if(error){ Object.assign(m, alt); render(); return fehler(error, 'Speichern'); }
-  toast('Gespeichert'); if(!el || el.dataset.mmart || el.dataset.mmpro) render();
+async function feldAendern(id, werte, neuZeichnen){
+  const z = S.felder.find(x => x.id === id), alt = { ...z };
+  Object.assign(z, werte);
+  const { error } = await sb.from('wissen_feld').update(werte).eq('id', id);
+  if(error){ Object.assign(z, alt); render(); return fehler(error, 'Speichern'); }
+  felderAbleiten(); toast('Gespeichert'); if(neuZeichnen) render();
+}
+// Umbenennen: gespeicherte Werte (Bezeichnung im steckbrief) in allen Kategorien, die das Feld verwenden, gehen mit
+async function feldUmbenennen(el){
+  const z = S.felder.find(x => x.id === el.dataset.fname), v = el.value.trim(), alt = z.name;
+  if(!v || v === alt){ el.value = alt; return; }
+  const { error } = await sb.from('wissen_feld').update({ name: v }).eq('id', z.id);
+  if(error){ el.value = alt; return fehler(error.code === '23505' ? 'Diesen Namen gibt es schon.' : error, 'Speichern'); }
+  z.name = v; felderAbleiten();
+  const um = rows => rows?.some(r => r.label === alt) && !rows.some(r => r.label === v) ? rows.map(r => r.label === alt ? { ...r, label: v } : r) : null;
+  const kids = new Set(katsMitFeld(z.id).map(k => k.id));
+  for(const e of S.eintraege.filter(x => kids.has(x.kategorie_id))){
+    const n = um(e.steckbrief); if(n) await speichereEintrag(e.id, { steckbrief: n });
+    for(const y of exVon(e)){ const m = um(y.steckbrief); if(m) await speichereExemplar(y.id, { steckbrief: m }); }
+  }
+  toast('Gespeichert');
+}
+// Löschen nur, wenn kein Eintrag einen Wert dafür hat; aus den Kategorien wird es dabei entfernt
+function feldLoeschen(id){
+  const z = S.felder.find(x => x.id === id), kats = katsMitFeld(id), kids = new Set(kats.map(k => k.id));
+  const werte = S.eintraege.filter(e => kids.has(e.kategorie_id)).reduce((n, e) => n + [e, ...exVon(e)].filter(y => (y.steckbrief || []).some(r => r.label === z.name && (r.wert || r.hinweis))).length, 0);
+  if(werte) return toast(`«${z.name}» ist noch bei ${werte} Einträgen bzw. Stücken ausgefüllt und kann nicht gelöscht werden.`, true);
+  bestaetige(`Feld «${z.name}» löschen?`, 'Löschen', async () => {
+    for(const k of kats){ const neu = k.felder.filter(x => x.f !== id); const { error } = await sb.from('wissen_kategorie').update({ felder: neu }).eq('id', k.id); if(error) return fehler(error, 'Löschen'); k.felder = neu; }
+    const { error } = await sb.from('wissen_feld').delete().eq('id', id); if(error) return fehler(error, 'Löschen');
+    S.felder = S.felder.filter(x => x.id !== id); felderAbleiten(); render(); toast('Gelöscht');
+  }, kats.length ? `Es wird auch aus ${kats.map(k => '«' + esc(k.name) + '»').join(', ')} entfernt.` : '');
+}
+async function feldNeu(el){
+  const v = el.value.trim(); if(!v) return;
+  const { data, error } = await sb.from('wissen_feld').insert({ name: v }).select().single();
+  if(error) return fehler(error.code === '23505' ? 'Diesen Namen gibt es schon.' : error, 'Anlegen');
+  S.felder = [...S.felder, data].sort((a, b) => a.name.localeCompare(b.name, 'de')); render(); document.querySelector('[data-fneu]')?.focus();
+}
+// Auswahl der Felder pro Kategorie (art: 'eintrag' = Baustein «Infos», 'stueck' = «Mehrfach»)
+async function kfSpeichern(k, neu){
+  const alt = k.felder; k.felder = neu; felderAbleiten(); render();
+  const { error } = await sb.from('wissen_kategorie').update({ felder: neu }).eq('id', k.id);
+  if(error){ k.felder = alt; felderAbleiten(); render(); return fehler(error, 'Speichern'); }
+  toast('Gespeichert');
+}
+function kfVerschieben(art, von, nach){
+  const k = S.kats.find(x => x.id === S.katDetail), s = art === 'stueck', l = (k.felder || []).filter(z => !!z.s === s);
+  if(von === nach || !l[von]) return; const [z] = l.splice(von, 1); l.splice(Math.min(nach, l.length), 0, z);
+  kfSpeichern(k, [...(k.felder || []).filter(x => !!x.s !== s), ...l]);
+}
+function kfUmschalten(el){
+  const k = S.kats.find(x => x.id === S.katDetail), s = el.dataset.kf === 'stueck', id = el.dataset.f, l = k.felder || [];
+  kfSpeichern(k, el.checked ? [...l.filter(z => z.f !== id), { f: id, s }] : l.filter(z => z.f !== id));
+}
+// Feldauswahl unter der Zeile «Infos» bzw. «Mehrfach»: gewählte oben in ihrer Reihenfolge, die übrigen zum Anhaken
+function kfPanel(k, art){
+  const s = art === 'stueck', gew = (k.felder || []).filter(z => !!z.s === s), feld = id => S.felder.find(x => x.id === id);
+  const andere = new Set((k.felder || []).filter(z => !!z.s !== s).map(z => z.f));
+  const info = f => [FELDART.find(a => a[0] === (f.art || 'text'))[1], f.einheit].filter(Boolean).join(' · ');
+  const frei = (S.felder || []).filter(f => !gew.some(z => z.f === f.id));
+  return `<tr class="feldpanel"><td colspan="3">
+    ${art === 'eintrag' ? `<label class="fld">Titel in der Ansicht<input type="text" class="svin" data-katinfos="${k.id}" value="${esc(k.infos_titel || '')}" placeholder="Technische Daten"></label>` : ''}
+    <div class="tbl-wrap"><table class="t sttab kfwahl" data-stsort="kf-${art}"><colgroup><col class="c-grip"><col><col class="c-art"></colgroup><tbody>
+      ${gew.map((z, i) => { const f = feld(z.f); return f ? `<tr data-i="${i}"><td class="grip" title="Ziehen zum Verschieben">${ic('grip')}</td>
+        <td><label class="chk"><input type="checkbox" checked data-kf="${art}" data-f="${f.id}">${esc(f.name)}</label></td><td class="small muted">${esc(info(f))}</td></tr>` : ''; }).join('')}
+      ${frei.map(f => `<tr class="frei"><td></td><td><label class="chk ${andere.has(f.id) ? 'muted' : ''}"><input type="checkbox" data-kf="${art}" data-f="${f.id}" ${andere.has(f.id) ? 'disabled' : ''}>${esc(f.name)}</label></td>
+        <td class="small muted">${andere.has(f.id) ? (s ? 'bei Infos' : 'bei Mehrfach') : esc(info(f))}</td></tr>`).join('')}
+    </tbody></table></div>
+    <div class="small muted">Fehlt ein Feld? <button class="addrow small" data-act="felderVerw">${ic('edit')}Felder verwalten</button></div></td></tr>`;
 }
 const einhListe = () => `<datalist id="einhListe">${unik(['kg', 't', 'g', 'm', 'cm', 'mm', 'm²', 'm³', 'l', 'kW', 'PS', 'V', 'Ah', 'h', 'Std.', 'Min.', '°C', '%', 'Stk.', 'CHF', ...S.merkmale.map(m => m.einheit)]).map(u => `<option value="${esc(u)}">`).join('')}</datalist>`;
 function vEinstellungen(){
+  if(S.katDetail === '__felder') return vFelder();
   if(S.katDetail != null) return vKategorie();
   S.mmKat = ''; // Merkmale für alle Kategorien
   const block = k => { const c = STAMM[k], l = c.liste();
     return `<section class="card einst"><div class="exh"><h3>${c.titel}</h3><span class="small muted">${l.length}</span></div>
       <div class="small muted">${c.text}</div>${stZeilen(k, l, k === 'mm')}${k === 'mm' ? einhListe() : ''}</section>`; };
-  return `<h2 style="font-size:22px;margin-bottom:12px">Einstellungen</h2><div class="einstgrid">${block('kat')}<section class="card einst"><div class="exh"><h3>So ist es aufgebaut</h3></div><div class="small muted">Jede Kategorie gehört zu einer <b>Rubrik</b> (Geräte, Produkte, Wissen, Kurzinfo), die den Kopf des Eintrags bestimmt. Mit dem Stift bei einer Kategorie legst du ihre <b>Infos-Felder</b> und <b>Bausteine</b> fest.</div></section></div>
+  return `<h2 style="font-size:22px;margin-bottom:12px">Einstellungen</h2><div class="einstgrid">${block('kat')}<section class="card einst"><div class="exh"><h3>Einstellungen</h3></div><div class="tbl-wrap"><table class="t sttab"><colgroup><col><col class="c-cnt"><col class="c-btn1"></colgroup><tbody><tr><td>Felder</td><td class="nw small muted cnt">${(S.felder || []).length} Felder</td><td class="nw"><button class="xbtn" data-act="felderVerw" title="Felder verwalten">${ic('edit')}</button></td></tr></tbody></table></div></section></div>
     <div class="small muted" style="margin-top:10px">Am Griff links ziehen = Reihenfolge ändern. Löschen geht nur, wenn kein Eintrag die Kategorie mehr braucht. Namen ändern wirkt sofort bei allen Einträgen.</div>`;
 }
 // Seite einer Kategorie (bzw. «alle Kategorien»): links Merkmale, rechts Name und Einträge
 function vKategorie(){
   const k = S.kats.find(x => x.id === S.katDetail); S.mmKat = k ? k.id : '';
   if(!k) return `<button class="back" data-act="katZu">${ic('back')}Einstellungen</button><div class="card empty">Kategorie nicht gefunden.</div>`;
-  // Feldverwaltung klappt direkt unter der Zeile «Infos» bzw. «Mehrfach» auf
-  const felderPanel = art => `<tr class="feldpanel"><td colspan="3">
-      ${art === 'eintrag' ? `<div class="small muted">Felder, die jeder Eintrag dieser Kategorie hat (z. B. Gewicht, Leistung). Reihenfolge am Griff ziehen.</div>
-        <label class="fld">Titel in der Ansicht<input type="text" class="svin" data-katinfos="${k.id}" value="${esc(k.infos_titel || '')}" placeholder="Technische Daten"></label>
-        ${feldZeilen(STAMM.mmE.liste(), 'mmE')}`
-      : `<div class="small muted">Felder, die jedes einzelne Stück hat (z. B. Kontrollschild, Anschaffungsjahr). Sie stehen bei den Angaben des Stücks.</div>
-        ${feldZeilen(STAMM.mmS.liste(), 'mmS')}`}</td></tr>`;
-  const knopf = (art, n, an) => `<button class="btn btn-ghost btn-sm felderknopf ${S.felderAuf === art ? 'on' : ''}" data-act="felderAuf" data-v="${art}" ${an ? '' : 'disabled'}>${ic('list')}${art === 'eintrag' ? 'Felder' : 'Felder pro Stück'} (${n})${ic('chev', 'chev')}</button>`;
+  const anz = s => (k.felder || []).filter(z => !!z.s === s && S.felder.some(f => f.id === z.f)).length;
+  // Knopf «Felder»: klappt die Feldauswahl unter der Zeile auf
+  const knopf = (art, an) => `<button class="bk felderknopf ${S.felderAuf === art ? 'on' : ''}" data-act="felderAuf" data-v="${art}" ${an ? '' : 'disabled'}>${ic('list')}Felder (${anz(art === 'stueck')})${ic('chev', 'chev')}</button>`;
   return `<button class="back" data-act="katZu">${ic('back')}Einstellungen</button>
     <h2 style="font-size:22px;margin-bottom:6px">${esc(k.name)}</h2>
-    <div class="katart"><span class="small muted">Rubrik:</span><span class="segm">${Object.entries(RUBRIK).map(([v, t]) => `<button class="${(k.art || 'geraet') === v ? 'on' : ''}" data-act="katArt" data-v="${v}">${t}</button>`).join('')}</span>
+    <div class="katart"><span class="small muted">Rubrik:</span><span class="bkreihe">${Object.entries(RUBRIK).map(([v, t]) => `<button class="bk ${(k.art || 'geraet') === v ? 'on' : ''}" data-act="katArt" data-v="${v}">${t}</button>`).join('')}</span>
       <span class="small muted">bestimmt den Kopf: ${RUBRIK_KOPF[k.art || 'geraet']}</span></div>
     <section class="card einst">
       <div class="exh"><h3>Bausteine</h3></div>
       <div class="small muted">Was bei Einträgen dieser Kategorie erscheint und in welcher Reihenfolge (am Griff ziehen).
         <b>Offen</b> steht gleich da, <b>Zu</b> ist am PC zugeklappt und auf dem Handy ein Knopf unter «Mehr», <b>Aus</b> gibt es bei dieser Kategorie nicht.
-        Leeres sieht man nur beim Bearbeiten. Die Felder von «Infos» und «Mehrfach» legst du mit dem Knopf in der Zeile fest.</div>
+        Leeres sieht man nur beim Bearbeiten. Bei «Infos» und «Mehrfach» wählst du mit «Felder», welche Felder erscheinen.</div>
       <div class="tbl-wrap"><table class="t sttab qrtab" data-stsort="qr"><colgroup><col class="c-grip"><col><col class="c-bs"></colgroup><tbody>
         ${bsListe(k).map(({ k: key, m }, i) => {
           const felder = key === 'steck' ? 'eintrag' : istMehrfach(key) ? 'stueck' : null;
-          const n = felder === 'eintrag' ? STAMM.mmE.liste().length : felder ? STAMM.mmS.liste().length : 0;
           return `<tr data-i="${i}" class="${m === 'aus' ? 'aus' : ''}"><td class="grip" title="Ziehen zum Verschieben">${ic('grip')}</td>
-          <td><span class="bsname">${esc(ABSCHNITTE.find(z => z[0] === key)[1])}${felder && (m !== 'aus' || felder === 'eintrag') ? knopf(felder, n, m !== 'aus') : ''}</span></td>
-          <td class="mid"><span class="segm klein">${[['aus', 'Aus'], ['zu', 'Zu'], ['offen', 'Offen']].filter(([v]) => !istMehrfach(key) || v !== 'zu').map(([v, t]) => `<button class="${m === v ? 'on' : ''}" data-act="bsSet" data-key="${key}" data-v="${v}">${t}</button>`).join('')}</span></td></tr>
-          ${felder && S.felderAuf === felder && m !== 'aus' ? felderPanel(felder) : ''}`; }).join('')}
+          <td><span class="bsname">${esc(ABSCHNITTE.find(z => z[0] === key)[1])}${felder && (m !== 'aus' || felder === 'eintrag') ? knopf(felder, m !== 'aus') : ''}</span></td>
+          <td class="mid"><span class="bkreihe">${[['aus', 'Aus'], ['zu', 'Zu'], ['offen', 'Offen']].filter(([v]) => !istMehrfach(key) || v !== 'zu').map(([v, t]) => `<button class="bk ${m === v ? 'on' : ''}" data-act="bsSet" data-key="${key}" data-v="${v}">${t}</button>`).join('')}</span></td></tr>
+          ${felder && S.felderAuf === felder && m !== 'aus' ? kfPanel(k, felder) : ''}`; }).join('')}
       </tbody></table></div>
       <label class="fld">Vorlage<select id="bsVorlage"><option value="">Bausteine von Kategorie übernehmen …</option>${S.kats.filter(x => x.id !== k.id).map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join('')}</select></label>
-      ${einhListe()}
     </section>`;
 }
 async function stFeld(el){
@@ -1782,7 +1858,7 @@ document.addEventListener('dragover', ev => { if(!stZug) return; const tr = ev.t
   ev.preventDefault(); document.querySelectorAll('.sttab tr.ueber, .sttab tr.unter').forEach(x => x.classList.remove('ueber', 'unter'));
   const r = tr.getBoundingClientRect(); tr.classList.add(ev.clientY < r.top + r.height / 2 ? 'ueber' : 'unter'); });
 document.addEventListener('drop', ev => { if(!stZug) return; const tr = ev.target.closest && ev.target.closest('.sttab tr[data-i]'); if(!tr) return; ev.preventDefault();
-  let nach = +tr.dataset.i + (tr.classList.contains('unter') ? 1 : 0); if(nach > stZug.von) nach--; const z = stZug; stZug = null; z.k === 'qr' ? qrVerschieben(z.von, nach) : stVerschieben(z.k, z.von, nach); });
+  let nach = +tr.dataset.i + (tr.classList.contains('unter') ? 1 : 0); if(nach > stZug.von) nach--; const z = stZug; stZug = null; z.k === 'qr' ? qrVerschieben(z.von, nach) : z.k.startsWith('kf-') ? kfVerschieben(z.k.slice(3), z.von, nach) : stVerschieben(z.k, z.von, nach); });
 document.addEventListener('dragend', () => { stZug = null; document.querySelectorAll('.sttab tr').forEach(x => { x.draggable = false; x.classList.remove('zieht', 'ueber', 'unter'); }); });
 
 // --- Listen --- gespeicherte Listen (wissen_liste): Filter, «eine Zeile pro» Exemplar/Eintrag, frei wählbare Spalten
@@ -2156,9 +2232,12 @@ document.addEventListener('change', ev => {
   if(ev.target.dataset?.stneu){ stNeu(ev.target); }
   if(ev.target.id === 'nKat' && $('nWertFld')) $('nWertFld').hidden = artVon(ev.target.value) !== 'kurz';
   if(ev.target.dataset?.inf){ infFeld(ev.target); }
-  if(ev.target.dataset?.mmart) feldSetzen(ev.target.dataset.mmart, { art: ev.target.value }, ev.target);
-  if(ev.target.dataset?.mmpro) feldSetzen(ev.target.dataset.mmpro, { pro_stueck: ev.target.checked }, ev.target);
-  if(ev.target.dataset?.mmopt) feldSetzen(ev.target.dataset.mmopt, { optionen: ev.target.value.split(',').map(x => x.trim()).filter(Boolean) }, ev.target);
+  if(ev.target.dataset?.fname) feldUmbenennen(ev.target);
+  if(ev.target.dataset?.fart) feldAendern(ev.target.dataset.fart, { art: ev.target.value }, true);
+  if(ev.target.dataset?.feinh) feldAendern(ev.target.dataset.feinh, { einheit: ev.target.value.trim() || null });
+  if(ev.target.dataset?.fopt) feldAendern(ev.target.dataset.fopt, { optionen: ev.target.value.split(',').map(x => x.trim()).filter(Boolean) });
+  if(ev.target.dataset?.fneu) feldNeu(ev.target);
+  if(ev.target.dataset?.kf) kfUmschalten(ev.target);
   if(ev.target.dataset?.katinfos){ const k = S.kats.find(x => x.id === ev.target.dataset.katinfos), v = ev.target.value.trim() || null;
     sb.from('wissen_kategorie').update({ infos_titel: v }).eq('id', k.id).then(({ error }) => { if(error) return fehler(error, 'Speichern'); k.infos_titel = v; toast('Gespeichert'); }); }
   if(ev.target.dataset?.steinh){ stEinheit(ev.target); }
@@ -2354,6 +2433,8 @@ document.addEventListener('click', async ev => {
       Der Eintrag ist danach unwiderruflich weg. Die Arbeit erscheint wieder als offen.` : ''); }
   // Einstellungen
   else if(a === 'katOpen'){ S.katDetail = d.id || ''; render(); window.scrollTo(0, 0); }
+  else if(a === 'felderVerw'){ S.katDetail = '__felder'; S.felderAuf = null; render(); window.scrollTo(0, 0); }
+  else if(a === 'fDel') feldLoeschen(d.id);
   else if(a === 'felderAuf'){ S.felderAuf = S.felderAuf === d.v ? null : d.v; render(); }
   else if(a === 'bsSet'){ const k = S.kats.find(x => x.id === S.katDetail), l = bsListe(k); l.find(b => b.k === d.key).m = d.v;
     // «Mehrfach mit» und «ohne Service» schliessen sich aus: der eine übernimmt den Platz des anderen
