@@ -157,6 +157,8 @@ main.wrap{padding-top:22px;padding-bottom:70px;}
 .ehead .ph{aspect-ratio:4/3;border-radius:8px;position:relative;}
 .ehead .ph .i{width:60px;height:60px;stroke-width:1;}
 .ehead .ph .fotobtn{position:absolute;right:6px;bottom:6px;}
+.ehead button.phleer{all:unset;box-sizing:border-box;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;background:var(--bg);border:1.5px dashed var(--line);color:var(--muted);font-size:13px;font-weight:600;}
+.ehead button.phleer:hover{border-color:var(--primary);color:var(--primary);} .ehead button.phleer .i{width:40px;height:40px;stroke-width:1.2;}
 .ehead h2{font-size:24px;line-height:1.2;}
 .ehead .subt{color:var(--muted);margin-top:2px;}
 .ehead .meta{display:flex;gap:5px;flex-wrap:wrap;margin-top:10px;}
@@ -165,7 +167,7 @@ main.wrap{padding-top:22px;padding-bottom:70px;}
 .ehead .acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;}
 /* Kopf je Rubrik: Produkte klein mit Bild, Wissen nur Titel */
 .ehead.klein{grid-template-columns:72px minmax(0,1fr);align-items:center;}
-.ehead.klein .ph{aspect-ratio:1;width:72px;} .ehead.klein .ph .i{width:30px;height:30px;} .ehead.klein .ph .fotobtn{display:none;}
+.ehead.klein .ph{aspect-ratio:1;width:72px;} .ehead.klein .ph .i{width:30px;height:30px;} .ehead.klein .ph .fotobtn{display:none;} .ehead.klein .phleer span{display:none;} .ehead.klein button.phleer .i{width:26px;height:26px;}
 .ehead.klein h2{font-size:20px;}
 .ehead.text{grid-template-columns:minmax(0,1fr);}
 .crumb{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--muted);margin-bottom:4px;} .crumb .i{width:14px;height:14px;}
@@ -555,7 +557,7 @@ body.qr nav.subnav{display:none;}
   .ehead{grid-template-columns:64px minmax(0,1fr);align-items:center;padding:10px 12px;}
   .ehead .ph{max-width:none;width:64px;height:48px;aspect-ratio:auto;}
   .ehead .ph .i{width:26px;height:26px;}
-  .ehead .ph .fotobtn,.ehead .subt,.ehead .meta,.ehead .facts{display:none;}
+  .ehead .subt,.ehead .meta,.ehead .facts{display:none;} .ehead .phleer span{display:none;} .ehead .ph .fotobtn{right:2px;bottom:2px;} .ehead button.phleer .i{width:22px;height:22px;}
   .ehead h2{font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .ehead .acts{margin-top:6px;}
   /* Service wird auf dem Handy nur angezeigt, abgehakt wird am PC */
@@ -1109,7 +1111,9 @@ function vEintrag(){
   const acts = S.qr ? '' : `<div class="acts">${modus}${!amHandy() && secs.length > 1 ? `<button class="btn btn-ghost" data-act="allopen" style="margin-left:auto">${ic('chev')}${alle ? 'Alle schliessen' : 'Alle öffnen'}</button>` : ''}</div>${etikette ? `<div class="acts" style="margin-top:8px">${etikette}</div>` : ''}`;
   const titel = `<h2>${esc(e.titel)}${S.qr && x?.nummer ? ' ' + esc(x.nummer) : ''}</h2>`;
   const meta = `<div class="meta">${e.kategorie_id ? `<span class="chip">${esc(katName(e.kategorie_id))}</span>` : ''}${e.tags.map(t => `<span class="chip tag">${esc(t)}</span>`).join('')}</div>`;
-  const foto = `<div class="ph">${bildHTML(e, true)}${darfEdit() ? `<button class="btn btn-ghost btn-sm fotobtn" data-act="titelfoto">${ic('camera')}${e.titelfoto_pfad ? 'Ändern' : 'Foto'}</button>` : ''}</div>`;
+  // Bildfeld: Büro kann immer (auch in «Anzeigen» und nach dem QR-Scan) ein Foto hinzufügen; ersetzen mit Rückfrage
+  const foto = istBuero() && !e.titelfoto_pfad ? `<button class="ph phleer" data-act="titelfoto" title="Foto hinzufügen (Kamera oder Galerie)">${ic('camera')}<span>Foto hinzufügen</span></button>`
+    : `<div class="ph">${bildHTML(e, true)}${istBuero() && e.titelfoto_pfad ? `<button class="kg-ibtn fotobtn" data-act="titelfotoNeu" title="Foto ersetzen">${ic('camera')}</button>` : ''}</div>`;
   // Kopf je Rubrik: Geräte gross mit Foto, Produkte klein, Wissen/Kurzinfo nur Titel
   const kopf = S.edit ? `<div class="card ehead">${foto}${kopfForm(e)}</div>`
     : rubrik === 'geraet' ? `<div class="card ehead">${foto}<div style="min-width:0">${titel}${S.qr ? '' : `${e.untertitel ? `<div class="subt">${esc(e.untertitel)}</div>` : ''}${meta}
@@ -2250,6 +2254,18 @@ function vEtiketten(){
 // ---------------------------------------------------------------------------
 // Dateien
 // ---------------------------------------------------------------------------
+// Titelfoto wählen (Handy: Kamera oder Galerie) und hochladen; ein bisheriges Foto wird danach entfernt
+function titelfotoWaehlen(e){
+  waehleDateien('image/*', false, async ([f]) => {
+    const dd = await hochladen(f, e.id, 'dokument', null, { beschreibung: 'Titelfoto' });
+    if(!dd) return;
+    const alt = e.titelfoto_pfad;
+    if(await speichereEintrag(e.id, { titelfoto_pfad: dd.storage_pfad })){
+      if(alt){ await sb.from('wissen_datei').delete().eq('storage_pfad', alt); await sb.storage.from(BUCKET).remove([alt, vorschau(alt)]); if(S.det) S.det.dateien = S.det.dateien.filter(x => x.storage_pfad !== alt); }
+      await signiere([dd.storage_pfad, dd.vorschau_pfad]); render(); toast('Foto gespeichert');
+    }
+  });
+}
 function waehleDateien(accept, mehrere, fertig){
   const inp = $('fileInput'); inp.value = ''; inp.accept = accept; inp.multiple = mehrere;
   inp.onchange = () => { const f = [...inp.files]; if(f.length) fertig(f); };
@@ -2514,15 +2530,8 @@ document.addEventListener('click', async ev => {
       const { data, error } = await sb.rpc('wissen_herausloesen', { ex: x.id }); if(error) return fehler(error, 'Herauslösen');
       toast('Eigener Eintrag erstellt'); await ladeNeu(data, x.id);
     }); }
-  else if(a === 'titelfoto') waehleDateien('image/*', false, async ([f]) => {
-    const dd = await hochladen(f, e.id, 'dokument', null, { beschreibung: 'Titelfoto' });
-    if(!dd) return;
-    const alt = e.titelfoto_pfad;
-    if(await speichereEintrag(e.id, { titelfoto_pfad: dd.storage_pfad })){
-      if(alt){ await sb.from('wissen_datei').delete().eq('storage_pfad', alt); await sb.storage.from(BUCKET).remove([alt, vorschau(alt)]); if(S.det) S.det.dateien = S.det.dateien.filter(x => x.storage_pfad !== alt); }
-      await signiere([dd.storage_pfad, dd.vorschau_pfad]); render();
-    }
-  });
+  else if(a === 'titelfoto') titelfotoWaehlen(e);
+  else if(a === 'titelfotoNeu') bestaetige('Bisheriges Foto ersetzen?', 'Ersetzen', () => titelfotoWaehlen(e), 'Das bisherige Foto wird danach gelöscht.');
   // Merkmal-Tabellen (Technische Daten, Angaben / Verwaltung des Exemplars)
   else if(a === 'planAn') await planSetzen(true);
   else if(a === 'planTyp'){ ovlZu(); await planSetzen(true, d.v); }
