@@ -137,7 +137,6 @@ main.wrap{padding-top:22px;padding-bottom:70px;}
 .svsym.ok{background:var(--ok-soft);color:var(--ok);} .svsym.no{background:var(--danger-soft);color:var(--danger);} .svsym.aus{background:var(--soft);color:var(--muted);} .svsym.spaeter{color:#C5CAD0;}
 td.svsymz{width:34px;text-align:center;}
 .qrkarte{padding:14px 16px;margin-bottom:10px;display:flex;flex-direction:column;gap:10px;}
-.qrknopf{display:flex;justify-content:flex-end;margin-bottom:10px;}
 .extabs .svalle{margin-left:auto;align-self:center;margin-bottom:4px;}
 table.svz td{padding:3px 8px;font-size:13px;line-height:1.3;} table.svz th{padding:6px 8px;} table.svz .svsym{width:20px;height:20px;} table.svz .svsym .i{width:12px;height:12px;} table.svz .xbtn{width:22px;height:22px;}
 .sveintrag{box-shadow:inset 0 0 0 1.5px var(--primary);}
@@ -185,6 +184,9 @@ table.sveint tr.aktiv td{background:#EEF5FB;} table.sveint tr.aktiv td:first-chi
 .sec-h .chev{transition:transform .15s;}
 .sec.open .sec-h .chev{transform:rotate(180deg);}
 .sec-b{padding:4px 18px 18px;display:none;flex-direction:column;gap:12px;}
+.sec.warn:not(.open){background:var(--danger-soft);border-color:#E2A6A0;box-shadow:inset 3px 0 0 var(--danger);}
+.sec.warn:not(.open) .sec-h{color:var(--danger);} .sec.warn:not(.open) .sec-h h3{color:var(--danger);} .sec.warn:not(.open) .sec-h .cnt{color:var(--danger);}
+.sec.warn:not(.open) .sec-h:hover{background:#F2D9D6;}
 .sec.open .sec-b{display:flex;}
 .kv{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#fff;}
 .kv div{padding:9px 12px;box-shadow:1px 1px 0 var(--line);}
@@ -430,7 +432,22 @@ body.qr nav.subnav{display:none;}
   header.app .wrap{gap:12px;}
   header.app .brand h1{font-size:15px;white-space:nowrap;}
   .ehead{padding:14px;gap:12px;}
-  .ehead .ph{max-width:none;aspect-ratio:16/9;}
+  /* Kopf auf dem Handy: kleines Bild links, Titel auf einer Zeile, sonst nichts */
+  .ehead{grid-template-columns:64px minmax(0,1fr);align-items:center;padding:10px 12px;}
+  .ehead .ph{max-width:none;width:64px;height:48px;aspect-ratio:auto;}
+  .ehead .ph .i{width:26px;height:26px;}
+  .ehead .ph .fotobtn,.ehead .subt,.ehead .meta,.ehead .facts{display:none;}
+  .ehead h2{font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .ehead .acts{margin-top:6px;}
+  /* Service wird auf dem Handy nur angezeigt, abgehakt wird am PC */
+  .extabs .svalle{display:none;}
+  table.svz th:nth-child(4),table.svz td:nth-child(4){display:none;}
+  /* Merkmal-Tabellen zweizeilig: oben klein das Merkmal, darunter der Wert */
+  table.kvt,table.kvt tbody{display:block;} table.kvt thead{display:none;}
+  table.kvt tr{display:grid;grid-template-columns:minmax(0,1fr) auto;border-bottom:1px solid var(--line);padding:4px 0;}
+  table.kvt td{display:block;grid-column:1;border:0;padding:1px 8px;}
+  table.kvt td.m{font-size:11.5px;}
+  table.kvt td.nw{grid-column:2;grid-row:1 / span 3;align-self:center;}
   .kvedit .r{grid-template-columns:minmax(0,1fr) minmax(0,1fr) 24px;}
 }
 @media print{
@@ -724,14 +741,15 @@ async function oeffne(id, sec, ohneHistory, xid){
   const e = byId(id);
   S.xid = xid && exById(xid)?.eintrag_id === id ? xid : exVon(e)[0]?.id || null;
   if(!ohneHistory && !S.qr) history.pushState(null, '', location.pathname + '#e-' + id + (xid ? '.' + xid : ''));
-  S.open = new Set([sec || (e.steckbrief?.length || !e.anwendung_html ? 'steck' : 'anw')]);
+  S.open = new Set(sec ? [sec] : ['notizen', e.steckbrief?.length || !e.anwendung_html ? 'steck' : 'anw']);
   render(); window.scrollTo(0, 0);
   await ladeDetail(id);
   if(S.eid !== id) return;
   // gewuenschter Abschnitt leer (z.B. noch keine Anleitung) -> ersten vorhandenen oeffnen
   if(![...S.open].some(k => hatSec(e, k))){ const erster = SECS.find(([k]) => k !== 'notizen' && hatSec(e, k)) || SECS[0]; if(erster) S.open = new Set([erster[0]]); }
   // QR-Ansicht mit Auswahl der Kategorie: die gewählten Abschnitte gleich offen
-  if(S.qr && katVon(e)?.qr_aus?.length) S.open = new Set(reiheVon(katVon(e)).filter(k => zeigt(e, k)));
+  // QR-Ansicht: alles Gezeigte offen, nur die Arbeitssicherheit zu (sie ist rot hervorgehoben)
+  if(S.qr) S.open = new Set(reiheVon(katVon(e)).filter(k => zeigt(e, k) && k !== 'sicher'));
   render();
 }
 
@@ -814,8 +832,8 @@ const PSA = [['brille', 'Schutzbrille'], ['gesicht', 'Gesichtsschutz'], ['gehoer
   ['schuhe', 'Sicherheitsschuhe'], ['helm', 'Schutzhelm'], ['schnitt', 'Schnittschutz'], ['weste', 'Warnweste'], ['kleidung', 'Schutzkleidung']];
 const psaText = e => PSA.filter(([k]) => (e.psa || []).includes(k)).map(z => z[1]);
 const sichDocs = (e, d) => d.dateien.filter(x => x.bereich === 'sicherheit' && !x.exemplar_id);
-// Schutzausrüstung oben beim Eintrag (nur wenn der Abschnitt bei der Kategorie angezeigt wird)
-const psaKopf = e => e.psa?.length && zeigt(e, 'sicher') ? `<div class="meta psakopf">${psaText(e).map(t => `<span class="chip psa">${ic('helm')}${esc(t)}</span>`).join('')}</div>` : '';
+// Arbeitssicherheit hat Inhalt (dann rot hervorgehoben, solange zugeklappt)
+const sichInhalt = e => { const d = S.det && S.det.id === e.id ? S.det : null; return !!(e.psa?.length || (e.sicherheit_html || '').replace(/<[^>]+>/g, '').trim() || (d && sichDocs(e, d).length)); };
 const allgDocs = (e, d) => d.dateien.filter(x => x.bereich === 'dokument' && !x.exemplar_id && x.storage_pfad !== e.titelfoto_pfad);
 function hatSec(e, k){
   const d = S.det && S.det.id === e.id ? S.det : null;
@@ -836,7 +854,8 @@ function zaehl(e, k){
   if(!d) return '';
   if(k === 'kontakte') return d.kontakte.length || '';
   if(k === 'docs') return allgDocs(e, d).length || '';
-  if(k === 'sicher') return sichDocs(e, d).length ? sichDocs(e, d).length + (sichDocs(e, d).length === 1 ? ' Datei' : ' Dateien') : '';
+  if(k === 'sicher'){ const p = (e.psa || []).length, n = sichDocs(e, d).length;
+    return [p && p + (p === 1 ? ' Schutzausrüstung' : ' Schutzausrüstungen'), n && n + (n === 1 ? ' Datenblatt' : ' Datenblätter')].filter(Boolean).join(' · '); }
   if(k === 'notizen') return d.notizen.filter(n => !n.exemplar_id).length || '';
   return '';
 }
@@ -858,9 +877,6 @@ function vEintrag(){
   const kopf = S.edit ? kopfForm(e) : S.qr ? `
     <div style="min-width:0">
       <h2>${esc(e.titel)}${x?.nummer ? ' ' + esc(x.nummer) : ''}</h2>
-      ${e.untertitel ? `<div class="subt">${esc(e.untertitel)}</div>` : ''}
-      ${x?.zustaendig ? `<div class="facts"><span>Zuständig <b>${esc(x.zustaendig)}</b></span></div>` : ''}
-      ${psaKopf(e)}
     </div>` : `
     <div style="min-width:0">
       <h2>${esc(e.titel)}</h2>
@@ -871,7 +887,6 @@ function vEintrag(){
       <div class="facts">${e.geraeteart ? `<span>Geräteart <b>${esc(e.geraeteart)}</b></span>` : ''}
         ${geraet ? `<span>Anzahl <b>${xs.length}</b></span>` : ''}
         </div>
-      ${psaKopf(e)}
       <div class="acts">
         ${istBuero() ? `<button class="btn btn-ghost" data-act="edit">${ic('edit')}Bearbeiten</button>` : ''}
         <button class="btn btn-ghost" data-act="allopen" style="margin-left:auto">${ic('chev')}${alle ? 'Alle schliessen' : 'Alle öffnen'}</button>
@@ -888,17 +903,14 @@ function vEintrag(){
   ${geraet ? `<div class="allg-h"><h3>Allgemein</h3><span class="small muted">gilt für ${xs.length > 1 ? 'alle ' + xs.length + ' Exemplare' : 'alle Exemplare'}</span></div>` : ''}
   ${secs.map(s => secHTML(e, s)).join('')}`}`;
 }
-const secHTML = (e, [k, i, n]) => `<section class="card sec ${S.open.has(k) ? 'open' : ''}" data-sec="${k}">
+const secHTML = (e, [k, i, n]) => `<section class="card sec ${S.open.has(k) ? 'open' : ''}${k === 'sicher' && sichInhalt(e) ? ' warn' : ''}" data-sec="${k}">
     <button class="sec-h" data-act="sec" data-k="${k}" aria-expanded="${S.open.has(k)}">${ic(i)}<h3>${n}</h3><span class="cnt">${zaehl(e,k)}</span>${ic('chev','chev')}</button>
     <div class="sec-b">${S.open.has(k) ? secBody(e, k) : ''}</div></section>`;
 // QR-Ansicht (Handy): alles untereinander, in der Reihenfolge aus den Einstellungen der Kategorie
 function qrInhalt(e, xs, x){
   const reihe = reiheVon(katVon(e)).filter(k => zeigt(e, k));
-  const svOk = x && mitService(e) && servicesVon(e).length && reihe.includes('x_service');
-  const n = svOk ? svOffen(e, [x]) : 0;
-  return `${svOk ? `<div class="qrknopf"><button class="btn ${n ? 'btn-primary' : 'btn-ghost'} btn-sm" data-act="svE" data-v="eins">${ic('check')}Service eintragen${n ? ` (${n})` : ''}</button></div>` : ''}
-    ${S.svE && x ? `<div class="card qrkarte sveintrag">${svEintragen(e, x)}</div>` : ''}
-    ${reihe.map(k => {
+  // Service wird auf dem Handy nur angezeigt, abgehakt wird am PC
+  return `${reihe.map(k => {
       if(k.startsWith('x_')){
         if(!x || (k === 'x_service' && !mitService(e))) return '';
         return `<div class="card qrkarte">${k === 'x_angaben' ? exAngaben(e, x) : k === 'x_service' ? exService(e, x) : exNotizen(e, x)}</div>`;
