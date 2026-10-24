@@ -15,6 +15,9 @@
    Neue Tools brauchen nichts weiter – nur diese eine Zeile im <head>. */
 (function(){
   if(window.kgPwSchutz) return; window.kgPwSchutz = true;
+  // Nur zur Ursachensuche (Seite pw-vergleich.html): ?pwtest=ohnemarken / ohnehuelle / ohnelogin / nichts schaltet Teile ab
+  var TEST = (location.search.match(/[?&]pwtest=([a-z]+)/) || [])[1] || '';
+  var MARKEN = TEST !== 'ohnemarken' && TEST !== 'nichts', HUELLE = TEST !== 'ohnehuelle' && TEST !== 'nichts', LOGINWEG = TEST === 'ohnelogin' || TEST === 'nichts';
   var AUSNAHMEN = ['username', 'current-password', 'new-password', 'one-time-code'];
   var OHNE_TYP = ['password', 'hidden', 'checkbox', 'radio', 'file', 'button', 'submit', 'reset', 'image', 'range', 'color'];
   var ATTR = [['autocomplete', 'off'], ['data-lpignore', 'true'], ['data-1p-ignore', 'true'], ['data-bwignore', 'true'],
@@ -42,11 +45,13 @@
     Object.defineProperty(proto, prop, { configurable: true, enumerable: d.enumerable, get: d.get,
       set: function(v){ d.set.call(this, ergaenze(v)); } });
   }
+  if(MARKEN){
   haken(Element.prototype, 'innerHTML');
   haken(Element.prototype, 'outerHTML');
   if(window.ShadowRoot) haken(ShadowRoot.prototype, 'innerHTML');
   var iah = Element.prototype.insertAdjacentHTML;
   Element.prototype.insertAdjacentHTML = function(pos, html){ return iah.call(this, pos, ergaenze(html)); };
+  }
 
   // 2) Rückfallebene: Felder, die anders entstehen
   function schuetze(el){
@@ -68,7 +73,7 @@
     for(var i = 0; i < liste.length; i++) schuetze(liste[i]);
   }
   new MutationObserver(function(ms){
-    for(var i = 0; i < ms.length; i++) for(var k = 0; k < ms[i].addedNodes.length; k++) alle(ms[i].addedNodes[k]);
+    if(MARKEN) for(var i = 0; i < ms.length; i++) for(var k = 0; k < ms[i].addedNodes.length; k++) alle(ms[i].addedNodes[k]);
   }).observe(document.documentElement, { childList: true, subtree: true });
 
   // 4) Alles ausser dem Login in ein unsichtbares <form data-form-type="other"> packen.
@@ -120,12 +125,13 @@
       karte.parentNode.insertBefore(f, karte);
       f.appendChild(karte);
     }
-    alle(document.documentElement);
-    einpacken();
+    if(LOGINWEG){ var li = document.querySelectorAll('.logincard input'); for(var lx = 0; lx < li.length; lx++) li[lx].remove(); }
+    if(MARKEN) alle(document.documentElement);
+    if(HUELLE) einpacken();
     // später direkt in <body> eingefügte Elemente (Popups, Overlays) ebenfalls einpacken
     new MutationObserver(function(ms){
       for(var i = 0; i < ms.length; i++){ if(ms[i].target !== document.body) continue;
-        for(var k = 0; k < ms[i].addedNodes.length; k++) if(!draussen(ms[i].addedNodes[k])){ spaeterEinpacken(); return; } }
+        for(var k = 0; k < ms[i].addedNodes.length; k++) if(HUELLE && !draussen(ms[i].addedNodes[k])){ spaeterEinpacken(); return; } }
     }).observe(document.body, { childList: true });
   }
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
