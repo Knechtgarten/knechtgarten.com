@@ -127,7 +127,7 @@ main.wrap{padding-top:22px;padding-bottom:70px;}
 .fld.voll{grid-column:1/-1;}
 .fld input,.fld select{width:100%;}
 .fld .chk input{width:auto;margin:0;}
-.qrtab col.c-chk{width:72px;}
+.qrtab col.c-chk{width:96px;}
 .qrtab tbody td:nth-child(2){white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .qrtab .mid{text-align:center;}
 .qrtab input[type=checkbox]{accent-color:var(--primary);width:16px;height:16px;cursor:pointer;}
@@ -184,6 +184,7 @@ table.sveint tr.aktiv td{background:#EEF5FB;} table.sveint tr.aktiv td:first-chi
 .sec-h .chev{transition:transform .15s;}
 .sec.open .sec-h .chev{transform:rotate(180deg);}
 .sec-b{padding:4px 18px 18px;display:none;flex-direction:column;gap:12px;}
+.sec.leer:not(.open) .sec-h h3{color:var(--muted);font-weight:500;} .sec.leer:not(.open) .sec-h .i{opacity:.55;}
 .sec.warn:not(.open){background:var(--danger-soft);border-color:#E2A6A0;box-shadow:inset 3px 0 0 var(--danger);}
 .sec.warn:not(.open) .sec-h{color:var(--danger);} .sec.warn:not(.open) .sec-h h3{color:var(--danger);} .sec.warn:not(.open) .sec-h .cnt{color:var(--danger);}
 .sec.warn:not(.open) .sec-h:hover{background:#F2D9D6;}
@@ -741,15 +742,10 @@ async function oeffne(id, sec, ohneHistory, xid){
   const e = byId(id);
   S.xid = xid && exById(xid)?.eintrag_id === id ? xid : exVon(e)[0]?.id || null;
   if(!ohneHistory && !S.qr) history.pushState(null, '', location.pathname + '#e-' + id + (xid ? '.' + xid : ''));
-  S.open = new Set(sec ? [sec] : ['notizen', e.steckbrief?.length || !e.anwendung_html ? 'steck' : 'anw']);
+  S.open = new Set(sec ? [sec] : offenVon(e));
   render(); window.scrollTo(0, 0);
   await ladeDetail(id);
   if(S.eid !== id) return;
-  // gewuenschter Abschnitt leer (z.B. noch keine Anleitung) -> ersten vorhandenen oeffnen
-  if(![...S.open].some(k => hatSec(e, k))){ const erster = SECS.find(([k]) => k !== 'notizen' && hatSec(e, k)) || SECS[0]; if(erster) S.open = new Set([erster[0]]); }
-  // QR-Ansicht mit Auswahl der Kategorie: die gewählten Abschnitte gleich offen
-  // QR-Ansicht: alles Gezeigte offen, nur die Arbeitssicherheit zu (sie ist rot hervorgehoben)
-  if(S.qr) S.open = new Set(reiheVon(katVon(e)).filter(k => zeigt(e, k) && k !== 'sicher'));
   render();
 }
 
@@ -835,9 +831,8 @@ const sichDocs = (e, d) => d.dateien.filter(x => x.bereich === 'sicherheit' && !
 // Arbeitssicherheit hat Inhalt (dann rot hervorgehoben, solange zugeklappt)
 const sichInhalt = e => { const d = S.det && S.det.id === e.id ? S.det : null; return !!(e.psa?.length || (e.sicherheit_html || '').replace(/<[^>]+>/g, '').trim() || (d && sichDocs(e, d).length)); };
 const allgDocs = (e, d) => d.dateien.filter(x => x.bereich === 'dokument' && !x.exemplar_id && x.storage_pfad !== e.titelfoto_pfad);
-function hatSec(e, k){
+function hatInhalt(e, k){
   const d = S.det && S.det.id === e.id ? S.det : null;
-  if(istBuero() && !S.qr) return k !== 'service' || e.typ === 'geraet';   // Buero sieht alle Abschnitte (auch leere, zum Befuellen)
   return ({
     steck: !!(e.steckbrief?.length || e.gehoert_zu_id || S.eintraege.some(x => x.gehoert_zu_id === e.id)),
     anw: !!(e.anwendung_html || '').replace(/<[^>]+>/g, '').trim() || /<(img|video|table)/.test(e.anwendung_html || ''),
@@ -847,6 +842,11 @@ function hatSec(e, k){
     sicher: !!(e.psa?.length || (e.sicherheit_html || '').replace(/<[^>]+>/g, '').trim() || (d && sichDocs(e, d).length)),
     notizen: true,
   })[k];
+// Büro sieht auch leere Abschnitte (zum Befüllen, unten angehängt), sonst nur solche mit Inhalt
+function hatSec(e, k){
+  if(k === 'service' && e.typ !== 'geraet') return false;
+  return (istBuero() && !S.qr) || hatInhalt(e, k);
+}
 }
 function zaehl(e, k){
   const d = S.det && S.det.id === e.id ? S.det : null;
@@ -859,20 +859,25 @@ function zaehl(e, k){
   if(k === 'notizen') return d.notizen.filter(n => !n.exemplar_id).length || '';
   return '';
 }
-// Anzeige pro Kategorie (Einstellungen): Reihenfolge aller Teile, je eine Ausblend-Liste für die normale Ansicht und die QR-Ansicht
+// Anzeige pro Kategorie (Einstellungen): Reihenfolge aller Teile und was beim Öffnen aufgeklappt ist
 const ABSCHNITTE = [['x_angaben', 'Angaben'], ['x_service', 'Service abhaken'], ['x_notizen', 'Notizen'],
   ['notizen', 'Notizen für alle'], ['sicher', 'Arbeitssicherheit'], ['steck', 'Technische Daten'], ['anw', 'Anwendung'], ['service', 'Service-Arbeiten (Anleitungen)'], ['kontakte', 'Kontakte'], ['docs', 'Dokumente']];
 const katVon = e => S.kats.find(k => k.id === e.kategorie_id);
 // gespeicherte Reihenfolge; neu dazugekommene Teile an ihrem Standardplatz (nach ihrem Vorgänger) einfügen
 const reiheVon = k => { const alle = ABSCHNITTE.map(z => z[0]), r = (k?.abschnitt_reihe || []).filter(x => alle.includes(x));
   alle.forEach((x, i) => { if(!r.includes(x)) r.splice(i ? r.indexOf(alle[i - 1]) + 1 : 0, 0, x); }); return r; };
-const zeigt = (e, key, qr = S.qr) => !(katVon(e)?.[qr ? 'qr_aus' : 'normal_aus'] || []).includes(key);
-// Service gibt es, solange in der normalen Ansicht nicht beide Service-Teile aus sind (mit_service wird beim Speichern nachgeführt, der Einsatzplaner liest es)
-const mitService = e => e.typ === 'geraet' && katVon(e)?.mit_service !== false;
+// Reihenfolge der Kategorie, Abschnitte ohne Inhalt nach unten (Exemplar-Teile bleiben, wo sie sind)
+const reiheMitInhalt = e => { const r = reiheVon(katVon(e)), voll = k => k.startsWith('x_') || hatInhalt(e, k); return [...r.filter(voll), ...r.filter(k => !voll(k))]; };
+// beim Öffnen aufgeklappt: pro Kategorie für PC und Handy (QR-Scan oder schmaler Bildschirm), sonst Standard
+const OFFEN_STANDARD = { pc: ['notizen', 'steck'], handy: ['notizen'] };
+const amHandy = () => S.qr || matchMedia('(max-width:620px)').matches;
+const offenVon = e => katVon(e)?.[amHandy() ? 'offen_handy' : 'offen_pc'] || OFFEN_STANDARD[amHandy() ? 'handy' : 'pc'];
+// Service gibt es bei Geräten, sobald Service-Arbeiten erfasst sind
+const mitService = e => e.typ === 'geraet';
 function vEintrag(){
   const e = byId(S.eid); if(!e) return '<div class="card empty">Eintrag nicht gefunden.</div>';
   const geraet = e.typ === 'geraet', xs = exVon(e), x = exAktiv(e);
-  const secs = reiheVon(katVon(e)).map(k => SECS.find(z => z[0] === k)).filter(s => s && hatSec(e, s[0]) && zeigt(e, s[0]) && (s[0] !== 'service' || mitService(e)));
+  const secs = reiheMitInhalt(e).map(k => SECS.find(z => z[0] === k)).filter(s => s && hatSec(e, s[0]));
   const alle = secs.every(([k]) => S.open.has(k));
   const kopf = S.edit ? kopfForm(e) : S.qr ? `
     <div style="min-width:0">
@@ -903,20 +908,20 @@ function vEintrag(){
   ${geraet ? `<div class="allg-h"><h3>Allgemein</h3><span class="small muted">gilt für ${xs.length > 1 ? 'alle ' + xs.length + ' Exemplare' : 'alle Exemplare'}</span></div>` : ''}
   ${secs.map(s => secHTML(e, s)).join('')}`}`;
 }
-const secHTML = (e, [k, i, n]) => `<section class="card sec ${S.open.has(k) ? 'open' : ''}${k === 'sicher' && sichInhalt(e) ? ' warn' : ''}" data-sec="${k}">
+const secHTML = (e, [k, i, n]) => `<section class="card sec ${S.open.has(k) ? 'open' : ''}${k === 'sicher' && sichInhalt(e) ? ' warn' : ''}${hatInhalt(e, k) ? '' : ' leer'}" data-sec="${k}">
     <button class="sec-h" data-act="sec" data-k="${k}" aria-expanded="${S.open.has(k)}">${ic(i)}<h3>${n}</h3><span class="cnt">${zaehl(e,k)}</span>${ic('chev','chev')}</button>
     <div class="sec-b">${S.open.has(k) ? secBody(e, k) : ''}</div></section>`;
 // QR-Ansicht (Handy): alles untereinander, in der Reihenfolge aus den Einstellungen der Kategorie
 function qrInhalt(e, xs, x){
-  const reihe = reiheVon(katVon(e)).filter(k => zeigt(e, k));
+  const reihe = reiheMitInhalt(e);
   // Service wird auf dem Handy nur angezeigt, abgehakt wird am PC
   return `${reihe.map(k => {
       if(k.startsWith('x_')){
-        if(!x || (k === 'x_service' && !mitService(e))) return '';
+        if(!x || (k === 'x_service' && !(mitService(e) && servicesVon(e).length))) return '';
         return `<div class="card qrkarte">${k === 'x_angaben' ? exAngaben(e, x) : k === 'x_service' ? exService(e, x) : exNotizen(e, x)}</div>`;
       }
       const s = SECS.find(z => z[0] === k);
-      return s && hatSec(e, k) && (k !== 'service' || mitService(e)) ? secHTML(e, s) : '';
+      return s && hatSec(e, k) ? secHTML(e, s) : '';
     }).join('')}`;
 }
 
@@ -933,7 +938,7 @@ function exBlock(e, xs, x){
   if(!x) return `<div class="exwrap">${tabs}<div class="expanel"><div class="small muted">Noch kein Exemplar erfasst.</div></div></div>`;
   return `<div class="exwrap">${tabs}<div class="expanel">
     ${S.svE ? `<div class="excard voll sveintrag">${svEintragen(e, x)}</div>` : ''}
-    ${reiheVon(katVon(e)).filter(k => k.startsWith('x_') && zeigt(e, k) && (k !== 'x_service' || mitService(e))).map(k => k === 'x_angaben' ? `<div class="excard">${exAngaben(e, x)}</div>`
+    ${reiheVon(katVon(e)).filter(k => k.startsWith('x_') && (k !== 'x_service' || (mitService(e) && servicesVon(e).length))).map(k => k === 'x_angaben' ? `<div class="excard">${exAngaben(e, x)}</div>`
       : k === 'x_service' ? `<div class="excard">${exService(e, x)}</div>` : `<div class="excard voll">${exNotizen(e, x)}</div>`).join('')}
     ${bu ? `<div class="exfuss">${xs.length > 1 ? `<button class="addrow small" data-act="exLoesen">${ic('link')}In eigenen Eintrag herauslösen</button>` : ''}
       <button class="addrow small" data-act="exArchiv" style="color:var(--danger)">${ic('archive')}«${esc(exName(x))}» archivieren</button></div>` : ''}
@@ -1431,13 +1436,13 @@ function vKategorie(){
     </section>
     <section class="card einst">
       ${k ? `<div class="exh"><h3>Anzeige</h3></div>
-        <div class="small muted">Was bei Einträgen dieser Kategorie erscheint: <b>Normal</b> = im Tool am PC oder Handy, <b>QR-Scan</b> = nach dem Scannen der Etikette. Reihenfolge am Griff ziehen
-          (Exemplar-Teile bleiben in der normalen Ansicht im Exemplar-Bereich). Sind in «Normal» beide Service-Teile aus, gibt es bei dieser Kategorie keinen Service – auch nicht im Einsatzplaner.
-          Ausgeblendetes bleibt gespeichert.</div>
+        <div class="small muted">Reihenfolge der Teile bei Einträgen dieser Kategorie (am Griff ziehen) und was beim Öffnen <b>aufgeklappt</b> ist – ohne Haken bleibt der Teil zugeklappt.
+          <b>Handy</b> gilt auch nach dem Scannen der Etikette. Teile ohne Inhalt rutschen automatisch nach unten; Exemplar-Teile sind immer offen.</div>
         <div class="tbl-wrap"><table class="t sttab qrtab" data-stsort="qr"><colgroup><col class="c-grip"><col><col class="c-chk"><col class="c-chk"></colgroup>
-          <thead><tr><th></th><th>Teil</th><th class="mid">Normal</th><th class="mid">QR-Scan</th></tr></thead><tbody>${reiheVon(k).map((key, i) => `<tr data-i="${i}"><td class="grip" title="Ziehen zum Verschieben">${ic('grip')}</td>
+          <thead><tr><th></th><th>Teil</th><th class="mid">Offen am PC</th><th class="mid">Offen am Handy</th></tr></thead><tbody>${reiheVon(k).map((key, i) => `<tr data-i="${i}"><td class="grip" title="Ziehen zum Verschieben">${ic('grip')}</td>
           <td>${key.startsWith('x_') ? '<span class="stat">Exemplar</span>' : ''}${esc(ABSCHNITTE.find(z => z[0] === key)[1])}</td>
-          ${['normal', 'qr'].map(a => `<td class="mid"><input type="checkbox" data-ansicht="${a}" data-key="${key}" ${(k[a + '_aus'] || []).includes(key) ? '' : 'checked'}></td>`).join('')}</tr>`).join('')}</tbody></table></div>`
+          ${key.startsWith('x_') ? '<td class="mid small muted" colspan="2">immer offen</td>'
+            : ['pc', 'handy'].map(a => `<td class="mid"><input type="checkbox" data-offen="${a}" data-key="${key}" ${(k['offen_' + a] || OFFEN_STANDARD[a]).includes(key) ? 'checked' : ''}></td>`).join('')}</tr>`).join('')}</tbody></table></div>`
       : `<div class="exh"><h3>Für alle Kategorien</h3></div><div class="small muted">Merkmale, die überall passen (z. B. Hersteller / Modell, Anschaffungsjahr, Kaufpreis).</div>`}
     </section></div>`;
 }
@@ -1459,15 +1464,14 @@ function handyVorschau(){
   w.querySelector('.xbtn').onclick = zu; w.onmousedown = ev => { if(ev.target === w) zu(); };
   document.body.appendChild(w);
 }
-// Häkchen Normal / QR-Scan: ausgeblendete Teile speichern; in «Normal» beide Service-Teile aus = kein Service (mit_service)
-async function ansichtSetzen(el){
+// Häkchen «Offen am PC / am Handy»: Liste der aufgeklappten Teile speichern
+async function offenSetzen(el){
   const k = S.kats.find(x => x.id === S.katDetail); if(!k) return;
-  const feld = el.dataset.ansicht + '_aus', key = el.dataset.key, alt = k[feld] || [];
-  const neu = el.checked ? alt.filter(x => x !== key) : [...alt, key];
-  const werte = { [feld]: neu, ...(feld === 'normal_aus' ? { mit_service: !(neu.includes('x_service') && neu.includes('service')) } : {}) };
-  const { error } = await sb.from('wissen_kategorie').update(werte).eq('id', k.id);
+  const a = el.dataset.offen, feld = 'offen_' + a, key = el.dataset.key, alt = k[feld] || OFFEN_STANDARD[a];
+  const neu = el.checked ? [...alt.filter(x => x !== key), key] : alt.filter(x => x !== key);
+  const { error } = await sb.from('wissen_kategorie').update({ [feld]: neu }).eq('id', k.id);
   if(error){ el.checked = !el.checked; return fehler(error, 'Speichern'); }
-  Object.assign(k, werte); toast('Gespeichert'); render();
+  k[feld] = neu; toast('Gespeichert');
 }
 async function qrVerschieben(von, nach){
   const k = S.kats.find(x => x.id === S.katDetail); if(!k || von === nach) return;
@@ -1879,7 +1883,7 @@ document.addEventListener('change', ev => {
   if(S.lEdit && (ev.target.dataset?.lsp != null || ev.target.id === 'lArt' || ev.target.id === 'lQ')){ lisLesen(); render(); }
   if(ev.target.dataset?.stneu){ stNeu(ev.target); }
   if(ev.target.dataset?.steinh){ stEinheit(ev.target); }
-  if(ev.target.dataset?.ansicht){ ansichtSetzen(ev.target); }
+  if(ev.target.dataset?.offen){ offenSetzen(ev.target); }
 });
 document.addEventListener('focusout', ev => {
   const ed = ev.target.closest && ev.target.closest('.rte-ed');
