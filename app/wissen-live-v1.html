@@ -107,6 +107,15 @@ main.wrap{padding-top:22px;padding-bottom:70px;}
 .lrow .tx b{font-weight:600;color:var(--primary);}
 .lrow .tx .small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .lrow .mt{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;}
+/* Übersicht als Liste: Titel · Untertitel · neueste Notiz, Foto erst beim Überfahren des Titels */
+.lrow.zl{grid-template-columns:minmax(0,1.1fr) minmax(0,1fr) minmax(0,1.6fr);gap:16px;padding:8px 14px;}
+.lrow.zl .tt{position:relative;min-width:0;} .lrow.zl .tt b{font-weight:600;color:var(--primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;}
+.lrow.zl .ut,.lrow.zl .nz{font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lrow.zl .nz{color:var(--ink);}
+.lrow.zl .vorschau{display:none;position:absolute;left:0;top:100%;z-index:20;width:180px;height:135px;border-radius:8px;overflow:hidden;background:var(--soft);box-shadow:0 8px 24px rgba(0,0,0,.18);}
+.lrow.zl .vorschau img{width:100%;height:100%;object-fit:cover;}
+.lrow.zl .tt:hover .vorschau{display:block;}
+.card.lst.zl{overflow:visible;}
 .empty{padding:30px;text-align:center;color:var(--muted);}
 
 /* Eintrag */
@@ -426,6 +435,7 @@ body.qr nav.subnav{display:none;}
 }
 @media (max-width:620px){
   .lrow .mt{display:none;} .lrow{grid-template-columns:48px minmax(0,1fr);}
+  .lrow.zl{grid-template-columns:minmax(0,1fr);gap:2px;} .lrow.zl .ut{display:none;} .lrow.zl .tt:hover .vorschau{display:none;}
   .gal{grid-template-columns:repeat(2,minmax(0,1fr));}
   .filterrow .lbl{width:100%;}
   .sec-h,.sec-b{padding-left:12px;padding-right:12px;}
@@ -733,7 +743,7 @@ window.addEventListener('popstate', () => {
   S.eid = null; render();
 });
 function geheZu(view){
-  S.view = view; S.eid = null; S.edit = null; S.katDetail = null; S.lid = null;
+  S.view = view; S.eid = null; S.edit = null; S.katDetail = null; S.lid = null; S.alleNotizen = null; S.notizenLaden = false;
   history.pushState(null, '', location.pathname + (view === 'suche' ? '' : '#' + view));
   render(); window.scrollTo(0, 0);
 }
@@ -798,6 +808,7 @@ function passt(e){
 }
 function vSuche(){
   const res = S.eintraege.filter(passt);
+  if(S.mode !== 'foto' && !S.alleNotizen && !S.notizenLaden){ S.notizenLaden = true; ladeAlleNotizen(); }
   const chips = (act, aktiv, liste) => `<button class="fchip ${!aktiv?'on':''}" data-act="${act}" data-v="">Alle</button>`
     + liste.map(([v,n]) => `<button class="fchip ${aktiv===v?'on':''}" data-act="${act}" data-v="${v}">${esc(n)}</button>`).join('');
   return `<div class="hero-search">
@@ -815,9 +826,10 @@ function vSuche(){
   ${!res.length ? `<div class="card empty">${S.eintraege.length ? 'Nichts gefunden. Anderes Stichwort versuchen oder Filter auf «Alle» stellen.' : 'Noch keine Einträge.'}</div>`
     : S.mode === 'foto'
       ? `<div class="gal">${res.map(e => `<button class="gcard" data-act="open" data-id="${e.id}" title="${esc(e.titel)}"><div class="ph">${bildHTML(e)}</div><div class="t">${esc(e.titel)}${exVon(e).length > 1 ? ` <span class="small muted">× ${exVon(e).length}</span>` : ''}</div></button>`).join('')}</div>`
-      : `<div class="card lst">${res.map(e => `<button class="lrow" data-act="open" data-id="${e.id}"><span class="ph">${bildHTML(e)}</span>
-          <span class="tx"><b>${esc(e.titel)}</b><span class="small muted">${esc([e.untertitel, exVon(e).length > 1 ? exVon(e).length + ' Stück: ' + exVon(e).map(x => x.nummer).filter(Boolean).join(', ') : ''].filter(Boolean).join(' · '))}</span></span>
-          <span class="mt"><span class="chip typ">${TYP[e.typ]}</span>${e.kategorie_id ? `<span class="chip">${esc(katName(e.kategorie_id))}</span>` : ''}</span></button>`).join('')}</div>`}`;
+      : `<div class="card lst zl">${res.map(e => `<button class="lrow zl" data-act="open" data-id="${e.id}">
+          <span class="tt"><b>${esc(e.titel)}</b>${e.titelfoto_pfad ? `<span class="vorschau">${bildHTML(e)}</span>` : ''}</span>
+          <span class="ut">${esc(e.untertitel || '')}</span>
+          <span class="nz">${esc(letzteNotiz(e))}</span></button>`).join('')}</div>`}`;
 }
 
 // --- Eintrag ---
@@ -1614,10 +1626,12 @@ function vListen(){
       ${lisTabelle(l)}
       <div class="small muted">Spaltentitel anklicken zum Sortieren · Zeile anklicken öffnet den Eintrag.</div></div>`;
 }
+// neueste allgemeine Notiz eines Eintrags als Text (Übersicht als Liste)
+const letzteNotiz = e => { if(!S.alleNotizen) return ''; const n = S.alleNotizen.find(x => x.eintrag_id === e.id && !x.exemplar_id && ohneHtml(x.html)); return n ? ohneHtml(n.html) : ''; };
 async function ladeAlleNotizen(){
   const { data, error } = await sb.from('wissen_notiz').select('eintrag_id,exemplar_id,html,erstellt_am').order('erstellt_am', { ascending: false });
   if(error) return fehler(error, 'Notizen');
-  S.alleNotizen = data || []; if(S.view === 'listen') render();
+  S.alleNotizen = data || []; if(S.view === 'listen' || S.view === 'suche') render();
 }
 // Editor: Name, Zeile pro, Filter, Spalten
 function lisSpaltenAuswahl(f){
