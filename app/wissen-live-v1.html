@@ -306,6 +306,7 @@ table.t tr:last-child td{border-bottom:0;}
 
 /* Exemplare (wie Pflegekategorien beim Kunden: Tabs, darunter grauer Block mit Karten) */
 .exwrap{margin:4px 0 22px;}
+.exwrap.eins .expanel{border-top:0;border-radius:11px;} .extabs.ohne{justify-content:flex-end;margin-bottom:8px;}
 .extabs{display:flex;gap:2px;flex-wrap:wrap;align-items:flex-end;padding:0 4px;}
 .extab{all:unset;cursor:pointer;box-sizing:border-box;display:inline-flex;align-items:center;gap:7px;padding:9px 14px 8px;border-radius:8px 8px 0 0;font-weight:600;font-size:13.5px;color:var(--muted);border-top:2px solid transparent;}
 .extab:hover{color:var(--primary);background:#fff;}
@@ -901,25 +902,28 @@ function zaehl(e, k){
 }
 // Bausteine pro Kategorie (Einstellungen): Reihenfolge und Anzeige «offen» / «zu»; nicht aufgeführt = Aus.
 // Am PC ist «zu» ein zugeklappter Abschnitt, auf dem Handy ein Knopf in der Zeile «Mehr».
-const ABSCHNITTE = [['x_angaben', 'Angaben'], ['x_service', 'Service abhaken'], ['x_notizen', 'Notizen'],
-  ['notizen', 'Notizen für alle'], ['sicher', 'Arbeitssicherheit'], ['steck', 'Infos'], ['anw', 'Anwendung'], ['service', 'Service-Arbeiten (Anleitungen)'], ['kontakte', 'Kontakte'], ['docs', 'Dokumente & Links']];
-const BAUSTEIN_STANDARD = ABSCHNITTE.map(([k]) => ({ k, m: k.startsWith('x_') || k === 'notizen' || k === 'steck' ? 'offen' : 'zu' }));
+const ABSCHNITTE = [['mehrfachS', 'Mehrfach mit Service'], ['mehrfach', 'Mehrfach ohne Service'],  ['notizen', 'Notizen'], ['sicher', 'Arbeitssicherheit'], ['steck', 'Infos'], ['anw', 'Anwendung'], ['kontakte', 'Kontakte'], ['docs', 'Dokumente & Links']];
+// neue Kategorie: nur Notizen offen
+const BAUSTEIN_STANDARD = [{ k: 'notizen', m: 'offen' }];
+// «Mehrfach»: Stücke mit Nummer, Zuständig, Angaben, Etikette, Notiz pro Stück – mit Service zusätzlich Service-Arbeiten zum Abhaken
+const istMehrfach = k => k === 'mehrfach' || k === 'mehrfachS';
 const katVon = e => S.kats.find(k => k.id === e.kategorie_id);
 const bausteineVon = k => (k?.bausteine || BAUSTEIN_STANDARD).filter(b => ABSCHNITTE.some(z => z[0] === b.k));
 const hatBaustein = (e, key) => bausteineVon(katVon(e)).some(b => b.k === key);
 // Reihenfolge der Kategorie (ohne «Aus»), Abschnitte ohne Inhalt nach unten (Exemplar-Teile bleiben, wo sie sind)
-const reiheMitInhalt = e => { const r = bausteineVon(katVon(e)).map(b => b.k), voll = k => k.startsWith('x_') || hatInhalt(e, k); return [...r.filter(voll), ...r.filter(k => !voll(k))]; };
+const reiheMitInhalt = e => { const r = bausteineVon(katVon(e)).map(b => b.k), voll = k => istMehrfach(k) || hatInhalt(e, k); return [...r.filter(voll), ...r.filter(k => !voll(k))]; };
 const amHandy = () => S.qr || matchMedia('(max-width:620px)').matches;
 // beim Öffnen aufgeklappt = Bausteine mit «offen»
 const offenVon = e => bausteineVon(katVon(e)).filter(b => b.m === 'offen').map(b => b.k);
 // Service gibt es bei Geräten, sobald Service-Arbeiten erfasst sind
-const mitService = e => e.typ === 'geraet';
+const mehrfachVon = e => bausteineVon(katVon(e)).find(b => istMehrfach(b.k))?.k || null;
+const mitService = e => mehrfachVon(e) === 'mehrfachS';
 // Rubrik der Kategorie bestimmt den Kopf
 const RUBRIK = { geraet: 'Geräte', produkt: 'Produkte', wissen: 'Wissen', kurz: 'Kurzinfo' };
 const RUBRIK_KOPF = { geraet: 'grosser Kopf mit Foto, Stücken, Etikette pro Stück', produkt: 'kleiner Kopf mit Bild, Etikette', wissen: 'nur der Titel, dann der Inhalt, Etikette', kurz: 'kurze Angabe ohne viel Drumherum (Liste und Suche folgen in einer späteren Etappe)' };
 function vEintrag(){
   const e = byId(S.eid); if(!e) return '<div class="card empty">Eintrag nicht gefunden.</div>';
-  const geraet = e.typ === 'geraet', xs = exVon(e), x = exAktiv(e), rubrik = katVon(e)?.art || e.typ || 'geraet';
+  const geraet = !!mehrfachVon(e), xs = exVon(e), x = exAktiv(e), rubrik = katVon(e)?.art || e.typ || 'geraet';
   const secs = reiheMitInhalt(e).map(k => SECS.find(z => z[0] === k)).filter(s => s && hatSec(e, s[0]));
   const alle = secs.every(([k]) => S.open.has(k));
   // Link und Etikette (pro Stück bzw. zum Eintrag) stehen nur beim Bearbeiten im Kopf
@@ -933,17 +937,29 @@ function vEintrag(){
   // Kopf je Rubrik: Geräte gross mit Foto, Produkte klein, Wissen/Kurzinfo nur Titel
   const kopf = S.edit ? `<div class="card ehead">${foto}${kopfForm(e)}</div>`
     : rubrik === 'geraet' ? `<div class="card ehead">${foto}<div style="min-width:0">${titel}${S.qr ? '' : `${e.untertitel ? `<div class="subt">${esc(e.untertitel)}</div>` : ''}${meta}
-        <div class="facts">${e.geraeteart ? `<span>Geräteart <b>${esc(e.geraeteart)}</b></span>` : ''}${geraet ? `<span>Anzahl <b>${xs.length}</b></span>` : ''}</div>`}${acts}</div></div>`
+        <div class="facts">${e.geraeteart ? `<span>Geräteart <b>${esc(e.geraeteart)}</b></span>` : ''}${geraet && xs.length > 1 ? `<span>Anzahl <b>${xs.length}</b></span>` : ''}</div>`}${acts}</div></div>`
     : rubrik === 'produkt' ? `<div class="card ehead klein">${foto}<div style="min-width:0">${titel}${e.untertitel && !S.qr ? `<div class="subt">${esc(e.untertitel)}</div>` : ''}${acts}</div></div>`
     : `<div class="card ehead text"><div style="min-width:0"><div class="crumb">${ic('book')}${esc(katName(e.kategorie_id) || RUBRIK[rubrik])}</div>${titel}${acts}</div></div>`;
   return `${S.qr ? (istBuero() ? `<a class="back" href="${location.pathname}#e-${e.id}${x ? '.' + x.id : ''}" style="text-decoration:none">${ic('back')}Zur Übersicht</a>` : '')
       : `<button class="back" data-act="zurueck">${ic('back')}Zurück</button>`}
   ${kopf}
   ${darfEdit() ? merkmalListe() : ''}
-  ${S.qr ? qrInhalt(e, xs, x) : `${geraet ? exBlock(e, xs, x) : ''}
-  ${geraet && secs.length ? `<div class="allg-h"><h3>Allgemein</h3><span class="small muted">gilt für ${xs.length > 1 ? 'alle ' + xs.length + ' Exemplare' : 'alle Exemplare'}</span></div>` : ''}
-  ${abschnitte(e, secs)}`}`;
+${S.qr ? qrInhalt(e, xs, x) : inhalt(e, secs, xs, x)}`;
 }
+// Inhalt am PC bzw. im Browser: Abschnitte vor dem Mehrfach-Block, der Block, «Allgemein» und die Abschnitte danach.
+// Auf dem Handy (Ansicht) stehen alle zugeklappten Abschnitte als Knöpfe «Mehr» am Schluss.
+function inhalt(e, secs, xs, x){
+  const reihe = reiheMitInhalt(e), iM = reihe.findIndex(istMehrfach);
+  if(iM < 0) return abschnitte(e, secs);
+  const vor = secs.filter(([k]) => reihe.indexOf(k) < iM), nach = secs.filter(([k]) => reihe.indexOf(k) > iM);
+  const allg = nach.length ? `<div class="allg-h"><h3>Allgemein</h3><span class="small muted">gilt für ${xs.length > 1 ? 'alle ' + xs.length + ' Stück' : 'den ganzen Eintrag'}</span></div>` : '';
+  if(!amHandy() || darfEdit()) return `${abschnitte(e, vor)}${exBlock(e, xs, x)}${allg}${abschnitte(e, nach)}`;
+  const start = offenVon(e), offen = l => l.filter(([k]) => start.includes(k)), zu = secs.filter(([k]) => !start.includes(k));
+  return `${offen(vor).map(s => secHTML(e, s)).join('')}${exBlock(e, xs, x)}${offen(nach).length ? allg : ''}${offen(nach).map(s => secHTML(e, s)).join('')}${mehrZeile(e, zu)}`;
+}
+// Knopfzeile «Mehr» (Handy) mit den zugeklappten Abschnitten; geöffnete erscheinen darunter
+const mehrZeile = (e, zu) => zu.length ? `<div class="mehr"><span class="lbl">Mehr</span>${zu.map(([k, i, n]) => `<button class="${S.open.has(k) ? 'on' : ''}${k === 'sicher' && sichInhalt(e) && !S.open.has(k) ? ' warn' : ''}" data-act="sec" data-k="${k}">${ic(i)}${n}</button>`).join('')}</div>`
+  + zu.filter(([k]) => S.open.has(k)).map(s => secHTML(e, s)).join('') : '';
 // Abschnitte: am PC aufklappbar; auf dem Handy (Ansicht) stehen die zugeklappten als Knöpfe in der Zeile «Mehr»
 function abschnitte(e, secs){
   if(!amHandy() || darfEdit()) return secs.map(s => secHTML(e, s)).join('');
@@ -959,33 +975,34 @@ const secHTML = (e, [k, i, n]) => (k === 'steck' && (n = katVon(e)?.infos_titel 
 function qrInhalt(e, xs, x){
   const start = offenVon(e), zu = [];
   const teile = reiheMitInhalt(e).map(k => {
-    if(k.startsWith('x_')){
-      if(!x || (k === 'x_service' && !(mitService(e) && servicesVon(e).length)) || (k === 'x_notizen' && !notizHat(e, x))) return '';
-      return `<div class="card qrkarte">${k === 'x_angaben' ? exAngaben(e, x) : k === 'x_service' ? exService(e, x) : exNotizen(e, x)}</div>`;
-    }
+    if(istMehrfach(k)) return !x ? '' : `<div class="card qrkarte">${exAngaben(e, x)}</div>`
+      + (mitService(e) && servicesVon(e).length ? `<div class="card qrkarte">${exService(e, x)}</div>` : '')
+      + (notizHat(e, x) ? `<div class="card qrkarte">${exNotizen(e, x)}</div>` : '');
     const s = SECS.find(z => z[0] === k); if(!s || !hatSec(e, k)) return '';
     if(!start.includes(k)){ zu.push(s); return ''; }
     return secHTML(e, s);
   }).join('');
-  return teile + (zu.length ? `<div class="mehr"><span class="lbl">Mehr</span>${zu.map(([k, i, n]) => `<button class="${S.open.has(k) ? 'on' : ''}${k === 'sicher' && sichInhalt(e) && !S.open.has(k) ? ' warn' : ''}" data-act="sec" data-k="${k}">${ic(i)}${n}</button>`).join('')}</div>`
-    + zu.filter(([k]) => S.open.has(k)).map(s => secHTML(e, s)).join('') : '');
+  return teile + mehrZeile(e, zu);
 }
 
-// Block wie die Pflegekategorien beim Kunden: oben Tabs, darunter Angaben + Service des Exemplars
+// Baustein «Mehrfach»: oben Tabs pro Stück (ab 2 Stück oder beim Bearbeiten), darunter Angaben, Service und Notiz des Stücks
 function exBlock(e, xs, x){
-  const bu = darfEdit();
-  // ein einziger Knopf zum Eintragen, rechts in der Reiterzeile: mehrere Geräte = «Service alle», sonst bzw. beim QR-Scan nur dieses Gerät
+  const bu = darfEdit(), mitSv = mitService(e);
+  // ein einziger Knopf zum Eintragen: mehrere Stück = «Service alle», sonst nur dieses
   const nurEins = S.qr || xs.length < 2;
-  const svKnopf = mitService(e) && servicesVon(e).length && x ? (n => `<button class="btn ${n ? 'btn-primary' : 'btn-ghost'} btn-sm svalle" data-act="svE" data-v="${nurEins ? 'eins' : 'alle'}" title="${nurEins ? 'Service eintragen' : `Service für alle ${xs.length} Exemplare eintragen`}">${ic('check')}${nurEins ? 'Service eintragen' : 'Service alle'}${n ? ` (${n})` : ''}</button>`)(svOffen(e, nurEins ? [x] : xs)) : '';
-  const tabs = S.qr ? (svKnopf ? `<div class="extabs">${svKnopf}</div>` : '') : `<div class="extabs" role="tablist">${xs.map((z, i) => `<button class="extab ${z === x ? 'on' : ''}" data-act="exTab" data-id="${z.id}" role="tab" aria-selected="${z === x}">
+  const svKnopf = mitSv && servicesVon(e).length && x ? (n => `<button class="btn ${n ? 'btn-primary' : 'btn-ghost'} btn-sm svalle" data-act="svE" data-v="${nurEins ? 'eins' : 'alle'}" title="${nurEins ? 'Service eintragen' : `Service für alle ${xs.length} Stück eintragen`}">${ic('check')}${nurEins ? 'Service eintragen' : 'Service alle'}${n ? ` (${n})` : ''}</button>`)(svOffen(e, nurEins ? [x] : xs)) : '';
+  const mitTabs = xs.length > 1 || bu;
+  const tabs = mitTabs ? `<div class="extabs" role="tablist">${xs.map((z, i) => `<button class="extab ${z === x ? 'on' : ''}" data-act="exTab" data-id="${z.id}" role="tab" aria-selected="${z === x}">
       <span class="dt"></span>${esc(exName(z, i))}${z.zustaendig ? `<span class="z">${esc(z.zustaendig)}</span>` : ''}</button>`).join('')}
-    ${bu ? `<button class="extab neu" data-act="exNeu">${ic('plus')}Exemplar</button>` : ''}
-    ${svKnopf}</div>`;
-  if(!x) return `<div class="exwrap">${tabs}<div class="expanel"><div class="small muted">Noch kein Exemplar erfasst.</div></div></div>`;
-  return `<div class="exwrap">${tabs}<div class="expanel">
+    ${bu ? `<button class="extab neu" data-act="exNeu">${ic('plus')}Stück</button>` : ''}
+    ${svKnopf}</div>` : svKnopf ? `<div class="extabs ohne">${svKnopf}</div>` : '';
+  if(!x) return `<div class="exwrap">${tabs}<div class="expanel"><div class="small muted">Noch kein Stück erfasst.</div></div></div>`;
+  return `<div class="exwrap ${mitTabs ? '' : 'eins'}">${tabs}<div class="expanel">
     ${S.svE ? `<div class="excard voll sveintrag">${svEintragen(e, x)}</div>` : ''}
-    ${bausteineVon(katVon(e)).map(b => b.k).filter(k => k.startsWith('x_') && (k !== 'x_service' || (mitService(e) && servicesVon(e).length)) && (k !== 'x_notizen' || darfEdit() || notizHat(e, x))).map(k => k === 'x_angaben' ? `<div class="excard">${exAngaben(e, x)}</div>`
-      : k === 'x_service' ? `<div class="excard">${exService(e, x)}</div>` : `<div class="excard voll">${exNotizen(e, x)}</div>`).join('')}
+    <div class="excard">${exAngaben(e, x)}</div>
+    ${mitSv && (servicesVon(e).length || bu) ? `<div class="excard">${exService(e, x)}</div>` : ''}
+    ${bu || notizHat(e, x) ? `<div class="excard voll">${exNotizen(e, x)}</div>` : ''}
+    ${bu && mitSv ? `<div class="excard voll"><div class="exh"><h4>Service-Arbeiten</h4><span class="small muted">gelten für ${xs.length > 1 ? 'alle ' + xs.length + ' Stück' : 'das Stück'}</span></div>${serviceBody(e)}</div>` : ''}
     ${bu ? `<div class="exfuss">${xs.length > 1 ? `<button class="addrow small" data-act="exLoesen">${ic('link')}In eigenen Eintrag herauslösen</button>` : ''}
       <button class="addrow small" data-act="exArchiv" style="color:var(--danger)">${ic('archive')}«${esc(exName(x))}» archivieren</button></div>` : ''}
   </div></div>`;
@@ -1137,8 +1154,8 @@ function kopfForm(e){
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-primary" data-act="editSave">${ic('check')}Speichern</button>
       <button class="btn btn-ghost" data-act="editCancel">Abbrechen</button>
-      ${e.typ === 'geraet' ? `<button class="btn btn-ghost" data-act="zusDialog" style="margin-left:auto">${ic('link')}Mit anderem Eintrag zusammenlegen</button>` : ''}
-      <button class="btn btn-ghost" data-act="archiv" style="${e.typ === 'geraet' ? '' : 'margin-left:auto;'}color:var(--danger)">${ic('archive')}Archivieren</button>
+      ${mehrfachVon(e) ? `<button class="btn btn-ghost" data-act="zusDialog" style="margin-left:auto">${ic('link')}Mit anderem Eintrag zusammenlegen</button>` : ''}
+      <button class="btn btn-ghost" data-act="archiv" style="${mehrfachVon(e) ? '' : 'margin-left:auto;'}color:var(--danger)">${ic('archive')}Archivieren</button>
     </div></div>`;
 }
 
@@ -1158,7 +1175,7 @@ function merkmalListe(){
   const gleiche = S.eintraege.filter(x => x.kategorie_id === e.kategorie_id);
   const benutzt = gleiche.flatMap(x => [...(x.steckbrief || []), ...exVon(x).flatMap(y => y.steckbrief || [])]).map(r => r.label);
   const l = [...new Set([...merkmaleFuer(e).map(m => m.name), ...benutzt.filter(Boolean).sort((a,b) => a.localeCompare(b, 'de'))])];
-  return `<datalist id="kvl">${[...(e.typ === 'geraet' ? [PLANER_FELD] : []), ...l].map(v => `<option value="${esc(v)}">`).join('')}</datalist>`;
+  return `<datalist id="kvl">${[...(mehrfachVon(e) ? [PLANER_FELD] : []), ...l].map(v => `<option value="${esc(v)}">`).join('')}</datalist>`;
 }
 // --- Baustein «Infos»: Felder pro Kategorie (Einstellungen), Werte im steckbrief des Eintrags bzw. des Stücks ---
 // pro = true: Felder des einzelnen Stücks (Angaben des Exemplars), sonst des Eintrags
@@ -1258,7 +1275,7 @@ function merkmalWahl(key){
   const e = byId(S.eid), x = exAktiv(e), n = exVon(e).length;
   const schon = [...(e.steckbrief || []), ...(x?.steckbrief || [])].map(r => r.label);
   const res = x && x.planer_ressource_id && S.planer.find(p => p.id === x.planer_ressource_id);
-  const spez = key === 'xsteck' && e.typ === 'geraet' && !(res && res.aktiv) ? [PLANER_FELD] : [];
+  const spez = key === 'xsteck' && mehrfachVon(e) && !(res && res.aktiv) ? [PLANER_FELD] : [];
   const l = [...spez]; // Felder der Kategorie stehen schon im Formular
   ovl(`<h3>Weiteres Feld</h3><div class="small muted">Nur für diesen Eintrag. Felder für alle Einträge der Kategorie legst du in den Einstellungen fest.</div>
     ${key === 'xsteck' && n > 1 ? `<div class="small muted">Wird bei allen ${n} Exemplaren als Zeile eingefügt, der Wert gilt pro Exemplar.</div>` : ''}
@@ -1569,8 +1586,8 @@ function vKategorie(){
           Leeres sieht man nur beim Bearbeiten.</div>
         <div class="tbl-wrap"><table class="t sttab qrtab" data-stsort="qr"><colgroup><col class="c-grip"><col><col class="c-bs"></colgroup><tbody>
           ${bsListe(k).map(({ k: key, m }, i) => `<tr data-i="${i}" class="${m === 'aus' ? 'aus' : ''}"><td class="grip" title="Ziehen zum Verschieben">${ic('grip')}</td>
-            <td>${key.startsWith('x_') ? '<span class="stat">Exemplar</span>' : ''}${esc(ABSCHNITTE.find(z => z[0] === key)[1])}</td>
-            <td class="mid"><span class="segm klein">${[['aus', 'Aus'], ['zu', 'Zu'], ['offen', 'Offen']].filter(([v]) => !key.startsWith('x_') || v !== 'zu').map(([v, t]) => `<button class="${m === v ? 'on' : ''}" data-act="bsSet" data-key="${key}" data-v="${v}">${t}</button>`).join('')}</span></td></tr>`).join('')}
+            <td>${istMehrfach(key) ? '<span class="stat">Stücke</span>' : ''}${esc(ABSCHNITTE.find(z => z[0] === key)[1])}</td>
+            <td class="mid"><span class="segm klein">${[['aus', 'Aus'], ['zu', 'Zu'], ['offen', 'Offen']].filter(([v]) => !istMehrfach(key) || v !== 'zu').map(([v, t]) => `<button class="${m === v ? 'on' : ''}" data-act="bsSet" data-key="${key}" data-v="${v}">${t}</button>`).join('')}</span></td></tr>`).join('')}
         </tbody></table></div>
         <label class="fld">Vorlage<select id="bsVorlage"><option value="">Bausteine von Kategorie übernehmen …</option>${S.kats.filter(x => x.id !== k.id).map(x => `<option value="${x.id}">${esc(x.name)}</option>`).join('')}</select></label>`
       : `<div class="exh"><h3>Für alle Kategorien</h3></div><div class="small muted">Merkmale, die überall passen (z. B. Hersteller / Modell, Anschaffungsjahr, Kaufpreis).</div>`}
@@ -1607,8 +1624,8 @@ function handyVorschau(){
 const bsListe = k => { const an = bausteineVon(k); return [...an, ...ABSCHNITTE.filter(([key]) => !an.some(b => b.k === key)).map(([key]) => ({ k: key, m: 'aus' }))]; };
 async function bsSpeichern(k, liste){
   const neu = liste.filter(b => b.m !== 'aus').map(b => ({ k: b.k, m: b.m })), alt = k.bausteine;
-  k.bausteine = neu; render();
-  const { error } = await sb.from('wissen_kategorie').update({ bausteine: neu }).eq('id', k.id);
+  k.bausteine = neu; k.mit_service = neu.some(b => b.k === 'mehrfachS'); render();
+  const { error } = await sb.from('wissen_kategorie').update({ bausteine: neu, mit_service: neu.some(b => b.k === 'mehrfachS') }).eq('id', k.id);
   if(error){ k.bausteine = alt; render(); return fehler(error, 'Speichern'); }
   toast('Gespeichert');
 }
@@ -1831,7 +1848,7 @@ function bogenHTML(interaktiv){
   }).join('')}</div>`;
 }
 // eine Etikette pro Exemplar (eigene QR-Nummer)
-const etikettenListe = () => S.exemplare.filter(x => byId(x.eintrag_id)?.typ === 'geraet').sort((a,b) => exTitel(a).localeCompare(exTitel(b), 'de', {numeric:true}));
+const etikettenListe = () => S.exemplare.filter(x => { const e = byId(x.eintrag_id); return e && katVon(e)?.art !== 'kurz'; }).sort((a,b) => exTitel(a).localeCompare(exTitel(b), 'de', {numeric:true}));
 const etikettenTreffer = () => etikettenListe().filter(x => !S.pickQ || (exTitel(x) + ' ' + (byId(x.eintrag_id).geraeteart || '')).toLowerCase().includes(S.pickQ.toLowerCase()));
 function vEtiketten(){
   const F = FMT[S.fmt], total = F.c * F.r;
@@ -1922,7 +1939,7 @@ function neuDialog(){
 let zusWahl = null;
 function zusDialog(e){
   zusWahl = null;
-  const liste = S.eintraege.filter(x => x.id !== e.id && x.typ === 'geraet')
+  const liste = S.eintraege.filter(x => x.id !== e.id && mehrfachVon(x))
     .sort((a,b) => ((b.geraeteart === e.geraeteart) - (a.geraeteart === e.geraeteart)) || a.titel.localeCompare(b.titel, 'de', {numeric:true}));
   ovl(`<h3>Mit «${esc(e.titel)}» zusammenlegen</h3>
     <div class="small muted">Der gewählte Eintrag wird aufgelöst: seine Exemplare (mit Notizen, Belegen und erledigten Services), Kontakte und Dokumente kommen hierher. Gleich benannte Service-Arbeiten werden zusammengeführt, die Anwendung wird angehängt.</div>
@@ -2209,7 +2226,10 @@ document.addEventListener('click', async ev => {
       Der Eintrag ist danach unwiderruflich weg. Die Arbeit erscheint wieder als offen.` : ''); }
   // Einstellungen
   else if(a === 'katOpen'){ S.katDetail = d.id || ''; render(); window.scrollTo(0, 0); }
-  else if(a === 'bsSet'){ const k = S.kats.find(x => x.id === S.katDetail), l = bsListe(k); l.find(b => b.k === d.key).m = d.v; await bsSpeichern(k, l); }
+  else if(a === 'bsSet'){ const k = S.kats.find(x => x.id === S.katDetail), l = bsListe(k); l.find(b => b.k === d.key).m = d.v;
+    // «Mehrfach mit» und «ohne Service» schliessen sich aus: der eine übernimmt den Platz des anderen
+    if(istMehrfach(d.key) && d.v !== 'aus'){ const anders = l.find(b => istMehrfach(b.k) && b.k !== d.key); if(anders && anders.m !== 'aus'){ const i = l.indexOf(anders), j = l.findIndex(b => b.k === d.key); const [z] = l.splice(j, 1); l.splice(i, 0, z); anders.m = 'aus'; } }
+    await bsSpeichern(k, l); }
   else if(a === 'katArt'){ const k = S.kats.find(x => x.id === S.katDetail), es = S.eintraege.filter(x => x.kategorie_id === k.id);
     const setzen = async () => {
       const r = await sb.from('wissen_kategorie').update({ art: d.v }).eq('id', k.id); if(r.error) return fehler(r.error, 'Speichern');
