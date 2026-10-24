@@ -113,7 +113,23 @@ main.wrap{padding-top:22px;padding-bottom:70px;}
 .lrow .mt{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;}
 /* Übersicht als Liste: Titel · Untertitel · neueste Notiz, Foto erst beim Überfahren des Titels */
 [hidden]{display:none !important;}
-.kurzl{margin-bottom:12px;} .lrow.kurz{cursor:default;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) auto;gap:16px;padding:9px 14px;}
+.kurzl{margin-bottom:12px;}
+/* Suche: Mikrofon und KI-Antwort */
+.mic{all:unset;cursor:pointer;width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:var(--primary);flex:none;}
+.mic:hover{background:var(--soft);} .mic .i{width:20px;height:20px;color:inherit;}
+.mic.hoert{background:var(--danger);color:#fff;animation:puls 1s infinite;}
+@keyframes puls{50%{box-shadow:0 0 0 7px rgba(180,101,95,.25);}}
+@media (prefers-reduced-motion:reduce){.mic.hoert{animation:none;}}
+.kiknopf{display:flex;gap:10px;align-items:center;margin-bottom:12px;}
+.ki{border:1px solid #8DB6DB;background:linear-gradient(180deg,#F3F8FC,#fff 70%);border-radius:11px;padding:14px 18px;display:flex;flex-direction:column;gap:8px;margin-bottom:14px;max-width:820px;}
+.ki.leer{border-color:var(--line);background:#fff;}
+.kikopf{display:flex;gap:8px;align-items:center;font-family:var(--f-head);font-weight:600;color:var(--primary);}
+.kitext{font-size:14px;line-height:1.55;} .kitext p{margin:0 0 4px;} .kitext ul{margin:4px 0;padding-left:20px;display:flex;flex-direction:column;gap:3px;}
+.kiquellen{display:flex;gap:6px;flex-wrap:wrap;align-items:center;} .kiquellen button.chip{cursor:pointer;} .kiquellen .chip .i{width:13px;height:13px;}
+.kilaedt{display:flex;gap:8px;align-items:center;color:var(--muted);}
+.dots span{display:inline-block;width:6px;height:6px;border-radius:50%;background:#8DB6DB;margin-right:3px;animation:dot 1s infinite;}
+.dots span:nth-child(2){animation-delay:.15s} .dots span:nth-child(3){animation-delay:.3s}
+@keyframes dot{50%{opacity:.25}} .lrow.kurz{cursor:default;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) auto;gap:16px;padding:9px 14px;}
 .lrow.kurz .tt{display:flex;flex-direction:column;min-width:0;} .lrow.kurz .tt b{font-weight:600;color:var(--primary);}
 .lrow.kurz .kw{font-weight:600;font-variant-numeric:tabular-nums;white-space:pre-line;user-select:all;}
 .lrow.kurz .kb{display:flex;gap:6px;}
@@ -606,6 +622,8 @@ const ICONS = {
   ul:'<path d="M9 6h12M9 12h12M9 18h12"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/>',
   ol:'<path d="M10 6h11M10 12h11M10 18h11"/><path d="M4 4.5h1.5V9M4 9h3"/><path d="M4 14.5a1.5 1.5 0 0 1 3 .5c0 1-3 2-3 4h3"/>',
   upload:'<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v4h16v-4"/>',
+  mic:'<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><path d="M12 18v3"/>',
+  spark:'<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>',
   copy:'<rect x="9" y="9" width="11" height="11" rx="1.5"/><path d="M5 15V5a1.5 1.5 0 0 1 1.5-1.5H15"/>',
   trash:'<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/>',
   clip:'<path d="M20 11.5l-7.6 7.6a5 5 0 0 1-7.1-7.1L13 4.3a3.3 3.3 0 0 1 4.7 4.7l-7.7 7.7a1.7 1.7 0 0 1-2.4-2.4l7.1-7.1"/>',
@@ -834,14 +852,74 @@ function bildHTML(e, gross){
 }
 
 // --- Suche ---
+// Suchtext eines Eintrags (alles, was man finden können soll)
+function heu(e){
+  const xs = exVon(e);
+  const steck = [...(e.steckbrief || []), ...xs.flatMap(x => x.steckbrief || [])].map(r => r.label + ' ' + r.wert + ' ' + (r.hinweis || ''));
+  return [e.titel, e.untertitel, e.wert, e.geraeteart, ...xs.flatMap(x => [x.nummer, x.zustaendig]), katName(e.kategorie_id), ...e.tags, ...steck,
+    ohneHtml(e.anwendung_html), ohneHtml(e.sicherheit_html), ...psaText(e), ...(S.alleNotizen || []).filter(n => n.eintrag_id === e.id).map(n => ohneHtml(n.html))].join(' ').toLowerCase();
+}
+// Frage statt Stichwort: «Welcher Beton für …?», «Wie …», «Wann …»
+const istFrage = q => (q || '').trim().length > 6 && (/\?\s*$/.test(q) || /^(welche[rsn]?|wann|wie|was|wo|wer|wieso|warum|darf|muss|kann|soll|gibt)\b/i.test(q.trim()));
+const STOPP = new Set('welche welcher welches welchen wann wie was wo wer wieso warum darf muss kann soll gibt es ist sind der die das den dem des ein eine einen einem einer für fur von mit bei auf aus an in im zu zum zur und oder man ich wir unser unsere unseren nehmen braucht brauche machen viel viele genau bitte'.split(' '));
+const suchWoerter = q => q.toLowerCase().replace(/[?!.,;:«»"()]/g, ' ').split(/\s+/).filter(t => t && !(istFrage(q) && STOPP.has(t)));
+// Treffer pro Eintrag: wie viele Suchwörter vorkommen (auch ohne Endung, z. B. «Hecken» → «hecke»)
+const treffer = (e, woerter) => { const h = heu(e); return woerter.filter(t => h.includes(t) || (t.length > 4 && h.includes(t.slice(0, -1)))).length; };
 function passt(e){
   if(S.kat && e.kategorie_id !== S.kat) return false;
   if(!S.q) return true;
-  const xs = exVon(e);
-  const steck = [...(e.steckbrief || []), ...xs.flatMap(x => [...(x.steckbrief || []), ...(istBuero() ? x.verwaltung || [] : [])])].map(r => r.label + ' ' + r.wert + ' ' + (r.hinweis || ''));
-  const hay = [e.titel, e.untertitel, e.wert, e.geraeteart, ...xs.flatMap(x => [x.nummer, x.zustaendig]), katName(e.kategorie_id), ...e.tags, ...steck,
-    (e.anwendung_html || '').replace(/<[^>]+>/g, ' '), (e.sicherheit_html || '').replace(/<[^>]+>/g, ' '), ...psaText(e)].join(' ').toLowerCase();
-  return S.q.toLowerCase().split(/\s+/).filter(Boolean).every(t => hay.includes(t));
+  const w = suchWoerter(S.q); if(!w.length) return true;
+  // Stichworte: alle müssen vorkommen; Frage: mindestens eines
+  return istFrage(S.q) ? treffer(e, w) > 0 : treffer(e, w) === w.length;
+}
+// --- KI-Antwort: Frage + die passendsten Einträge gehen an die Funktion «wissen-ki-antwort» (Claude antwortet nur daraus) ---
+function eintragText(e){
+  const k = katVon(e), defs = S.merkmale.filter(m => m.kategorie_id === e.kategorie_id);
+  const infos = [...(e.steckbrief || []), ...exVon(e).flatMap(x => x.steckbrief || [])].filter(r => r.wert).map(r => `${r.label}: ${infoWert(defs.find(m => m.name === r.label), r.wert)}`);
+  const notiz = (S.alleNotizen || []).filter(n => n.eintrag_id === e.id && !n.exemplar_id).map(n => ohneHtml(n.html)).join(' ');
+  return [k && `Kategorie: ${k.name}`, e.untertitel && `Untertitel: ${e.untertitel}`, e.wert && `Wert: ${e.wert}`, e.tags?.length && `Stichwörter: ${e.tags.join(', ')}`,
+    infos.length && `Infos: ${unik(infos).join('; ')}`, ohneHtml(e.anwendung_html) && `Anwendung: ${ohneHtml(e.anwendung_html)}`,
+    (psaText(e).length || ohneHtml(e.sicherheit_html)) && `Arbeitssicherheit: ${[psaText(e).join(', '), ohneHtml(e.sicherheit_html)].filter(Boolean).join(' – ')}`,
+    notiz && `Notizen: ${notiz}`, servicesVon(e).length && `Service-Arbeiten: ${servicesVon(e).map(s => s.arbeit).join(', ')}`,
+    exVon(e).length > 1 && `Stücke: ${exVon(e).map(x => [x.nummer, x.zustaendig].filter(Boolean).join(' ')).join(', ')}`].filter(Boolean).join('\n');
+}
+async function kiFragen(){
+  const q = S.q.trim(); if(!q) return;
+  S.ki = { q, status: 'laedt' }; render();
+  if(!S.alleNotizen){ S.notizenLaden = true; await ladeAlleNotizen(); }
+  const w = suchWoerter(q), kand = S.eintraege.map(e => [e, treffer(e, w)]).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([e]) => e);
+  if(!kand.length){ S.ki = { q, status: 'fertig', gefunden: false, antwort: 'Dazu steht noch nichts im Nachschlagewerk.', quellen: [] }; return render(); }
+  const { data, error } = await sb.functions.invoke('wissen-ki-antwort', { body: { frage: q, eintraege: kand.map(e => ({ id: e.id, titel: e.titel, text: eintragText(e) })) } });
+  if(S.ki?.q !== q) return; // inzwischen anders gesucht
+  S.ki = error || data?.error ? { q, status: 'fehler', antwort: error?.message || data.error } : { q, status: 'fertig', ...data };
+  render();
+}
+// einfache Formatierung: **fett**, Zeilen mit «- » als Liste
+const kiHtml = t => { const z = esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').split('\n').filter(x => x.trim());
+  const li = z.filter(x => /^\s*[-•]\s/.test(x)), rest = z.filter(x => !/^\s*[-•]\s/.test(x));
+  return rest.map(x => `<p>${x}</p>`).join('') + (li.length ? `<ul>${li.map(x => `<li>${x.replace(/^\s*[-•]\s/, '')}</li>`).join('')}</ul>` : ''); };
+function kiBox(){
+  const q = S.q.trim(); if(!q) return '';
+  const k = S.ki?.q === q ? S.ki : null;
+  if(!k) return istFrage(q) ? `<div class="kiknopf"><button class="btn btn-ghost btn-sm" data-act="kiFragen">${ic('spark')}KI-Antwort aus dem Nachschlagewerk</button><span class="small muted">oder Enter drücken</span></div>` : '';
+  if(k.status === 'laedt') return `<div class="ki"><div class="kikopf">${ic('spark')}Antwort aus dem Nachschlagewerk</div><div class="kilaedt"><span class="dots"><span></span><span></span><span></span></span>Liest die passenden Einträge …</div></div>`;
+  if(k.status === 'fehler') return `<div class="ki"><div class="kikopf">${ic('spark')}Antwort aus dem Nachschlagewerk</div><div class="small">Die KI ist gerade nicht erreichbar (${esc(k.antwort)}). Die Treffer unten gelten trotzdem.</div></div>`;
+  const quellen = (k.quellen || []).map(byId).filter(Boolean);
+  return `<div class="ki ${k.gefunden ? '' : 'leer'}"><div class="kikopf">${ic('spark')}Antwort aus dem Nachschlagewerk</div><div class="kitext">${kiHtml(k.antwort || '')}</div>
+    ${quellen.length ? `<div class="kiquellen"><span class="small muted">Aus:</span>${quellen.map(e => istKurz(e) ? `<span class="chip">${esc(e.titel)}</span>` : `<button class="chip" data-act="open" data-id="${e.id}">${ic('book')}${esc(e.titel)}</button>`).join('')}</div>` : ''}
+    <div class="small muted">KI-Antwort nur aus unseren Einträgen. Im Zweifel den Eintrag öffnen.</div></div>`;
+}
+// Mikrofon: Spracherkennung des Browsers (Chrome, Edge, Safari); ohne Unterstützung erscheint kein Knopf
+const Sprache = window.SpeechRecognition || window.webkitSpeechRecognition;
+function mikrofon(){
+  if(!Sprache) return;
+  if(S.hoert){ S.hoert.stop(); return; }
+  const r = new Sprache(); r.lang = 'de-CH'; r.interimResults = true; r.maxAlternatives = 1;
+  r.onresult = ev => { const t = [...ev.results].map(x => x[0].transcript).join(' ').trim(); S.q = t.charAt(0).toUpperCase() + t.slice(1); const q = $('q'); if(q) q.value = S.q;
+    if(ev.results[ev.results.length - 1].isFinal){ r.stop(); } };
+  r.onerror = ev => { if(ev.error === 'not-allowed') toast('Mikrofon ist im Browser gesperrt. In den Website-Einstellungen erlauben.', true); else if(ev.error !== 'no-speech' && ev.error !== 'aborted') toast('Spracherkennung: ' + ev.error, true); };
+  r.onend = () => { S.hoert = null; render(); if(S.q && istFrage(S.q.trim() + (/\?$/.test(S.q) ? '' : '?'))){ if(!/\?$/.test(S.q)) S.q += '?'; kiFragen(); } };
+  S.hoert = r; r.start(); render();
 }
 // Kurzinfo: keine Detailseite – Titel, Wert (zum Kopieren) und kurzer Hinweis direkt in der Übersicht
 const kurzZeile = e => `<div class="lrow kurz"><span class="tt"><b>${esc(e.titel)}</b>${e.untertitel ? `<span class="small muted">${esc(e.untertitel)}</span>` : ''}</span>
@@ -856,16 +934,19 @@ function kurzDialog(e){
       <button class="btn btn-ghost" data-act="ovlZu">Abbrechen</button><button class="btn btn-primary" data-act="kurzSave" data-id="${e.id}">Speichern</button></div>`);
 }
 function vSuche(){
-  const alle = S.eintraege.filter(passt), kurz = alle.filter(istKurz), res = alle.filter(e => !istKurz(e));
+  let alle = S.eintraege.filter(passt);
+  if(S.q && istFrage(S.q)){ const w = suchWoerter(S.q); alle = alle.map(e => [e, treffer(e, w)]).sort((a, b) => b[1] - a[1]).map(([e]) => e); }
+  const kurz = alle.filter(istKurz), res = alle.filter(e => !istKurz(e));
   if(S.mode !== 'foto' && !S.alleNotizen && !S.notizenLaden){ S.notizenLaden = true; ladeAlleNotizen(); }
   const chips = (act, aktiv, liste) => `<button class="fchip ${!aktiv?'on':''}" data-act="${act}" data-v="">Alle</button>`
     + liste.map(([v,n]) => `<button class="fchip ${aktiv===v?'on':''}" data-act="${act}" data-v="${v}">${esc(n)}</button>`).join('');
   return `<div class="hero-search">
     <h2 style="font-size:26px">Was suchst du?</h2>
-    <div class="searchbox">${ic('search')}<input id="q" type="search" placeholder="z. B. Bagger Breite, Kleber Metall, Abkanten, Schweissspiegel …" value="${esc(S.q)}" autocomplete="off"></div>
+    <div class="searchbox">${ic('search')}<input id="q" type="search" placeholder="Suchen oder fragen, z. B. «Bagger Breite» oder «Welcher Kleber für Metall?»" value="${esc(S.q)}" autocomplete="off">${Sprache ? `<button class="mic ${S.hoert ? 'hoert' : ''}" data-act="mic" title="Sprechen statt tippen" aria-label="Sprechen statt tippen">${ic('mic')}</button>` : ''}</div>
     ${Object.entries(RUBRIK).map(([r, n]) => { const ks = S.kats.filter(k => (k.art || 'geraet') === r && (k.id === S.kat || S.eintraege.some(e => e.kategorie_id === k.id)));
       return ks.length ? `<div class="filterrow"><span class="lbl">${n}</span>${ks.map(k => `<button class="fchip ${S.kat === k.id ? 'on' : ''}" data-act="kat" data-v="${S.kat === k.id ? '' : k.id}">${esc(k.name)}</button>`).join('')}</div>` : ''; }).join('')}
   </div>
+  ${kiBox()}
   ${kurz.length ? `<div class="card lst kurzl">${kurz.map(kurzZeile).join('')}</div>` : ''}
   <div class="reshead"><span class="small muted">${res.length} ${res.length === 1 ? 'Eintrag' : 'Einträge'}${S.kat ? ` in «${esc(katName(S.kat))}» <button class="addrow small" data-act="kat" data-v="">alle zeigen</button>` : ''}</span>
     <span class="resakt">${istBuero() ? `<button class="btn btn-ghost btn-sm" data-act="neu">${ic('plus')}Neuer Eintrag</button>` : ''}
@@ -2184,6 +2265,8 @@ document.addEventListener('click', async ev => {
     for(const f of files){ toast(`«${f.name}» wird hochgeladen …`); await hochladen(f, e.id, 'sicherheit', null); }
     await signiere(S.det.dateien.flatMap(x => [x.storage_pfad, x.vorschau_pfad]).filter(Boolean)); render();
   });
+  else if(a === 'mic') mikrofon();
+  else if(a === 'kiFragen') kiFragen();
   else if(a === 'kopieren'){ try{ await navigator.clipboard.writeText(d.v); toast('Kopiert: ' + d.v); }catch(err){ toast('Kopieren nicht möglich – Wert markieren und kopieren.', true); } }
   else if(a === 'kurzEdit') kurzDialog(byId(d.id));
   else if(a === 'kurzSave'){ const t = $('kzTitel').value.trim(); if(!t) return toast('Titel fehlt.', true);
@@ -2342,6 +2425,7 @@ document.addEventListener('click', async ev => {
 $('lightbox').addEventListener('click', () => $('lightbox').classList.remove('show'));
 document.addEventListener('keydown', ev => {
   if(ev.key === 'Escape'){ $('lightbox').classList.remove('show'); if($('ovl').classList.contains('show')) ovlZu(); }
+  if(ev.key === 'Enter' && ev.target.id === 'q' && istFrage(S.q)){ ev.preventDefault(); kiFragen(); }
   if(ev.key === 'Enter' && $('ovl').classList.contains('show') && ev.target.tagName === 'INPUT' && ev.target.id !== 'kSuche'){
     const ok = $('ovlBox').querySelector('.btn-primary'); if(ok) ok.click();
   }
