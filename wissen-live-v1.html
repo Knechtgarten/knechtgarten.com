@@ -577,7 +577,7 @@ const S = {
   view: 'suche', eid: null, xid: null, det: null, qr: false,
   q: '', ber: lies('ber', null), kat: lies('kat', null), typ: lies('typ', null), mode: lies('mode', 'foto'),
   open: new Set(), edit: null, kvNeu: null, ask: null, svE: false, svBis: 0, svf: null, anl: new Set(),
-  listen: [], lid: lies('liste', null), lEdit: null, lsort: null, lsortDir: 1, alleNotizen: null,
+  listen: [], lid: null, lEdit: null, lsort: null, lsortDir: 1, alleNotizen: null,
   sel: new Set(), used: new Set(), fmt: lies('fmt', '8'), foto: false, pickQ: '',
 };
 const urls = new Map();   // storage_pfad -> signierter Link
@@ -709,7 +709,7 @@ window.addEventListener('popstate', () => {
   S.eid = null; render();
 });
 function geheZu(view){
-  S.view = view; S.eid = null; S.edit = null; S.katDetail = null;
+  S.view = view; S.eid = null; S.edit = null; S.katDetail = null; S.lid = null;
   history.pushState(null, '', location.pathname + (view === 'suche' ? '' : '#' + view));
   render(); window.scrollTo(0, 0);
 }
@@ -1544,20 +1544,25 @@ function lisFilterText(l){
   return [f.kats?.length ? f.kats.map(katName).join(', ') : 'alle Kategorien', f.bers?.length ? 'Bereich ' + f.bers.map(berName).join(', ') : '', f.art ? 'Geräteart ' + f.art : '', f.q ? '«' + f.q + '»' : '',
     l.pro === 'eintrag' ? 'eine Zeile pro Eintrag' : 'eine Zeile pro Gerät'].filter(Boolean).join(' · ');
 }
+// Listen: zuerst alle Listen untereinander (wie die Übersicht), Klick öffnet die Liste
 function vListen(){
   if(S.lEdit) return lisEditor();
-  const ls = S.listen; const l = ls.find(x => x.id === S.lid) || ls[0];
-  if(l) S.lid = l.id;
-  if(l && l.spalten.includes('notiz') && !S.alleNotizen) ladeAlleNotizen();
-  return `<div class="reshead" style="align-items:flex-start"><h2 style="font-size:22px">Listen</h2>
+  const ls = S.listen, l = ls.find(x => x.id === S.lid);
+  if(!l) return `<div class="reshead" style="align-items:flex-start"><h2 style="font-size:22px">Listen</h2>
       ${istBuero() ? `<button class="btn btn-ghost" data-act="lNeu">${ic('plus')}Neue Liste</button>` : ''}</div>
-    <div class="extabs" style="margin-bottom:0">${ls.map(x => `<button class="extab ${x === l ? 'on' : ''}" data-act="lTab" data-id="${x.id}"><span class="dt"></span>${esc(x.name)}<span class="z">${lisZeilen(x).length}</span></button>`).join('')}</div>
-    ${l ? `<div class="lispanel"><div class="exh"><span class="small muted">${esc(lisFilterText(l))}</span>
-        <span style="display:flex;gap:8px">${istBuero() ? `<button class="btn btn-ghost btn-sm" data-act="lEdit">${ic('edit')}Bearbeiten</button>` : ''}
-        <button class="btn btn-ghost btn-sm" data-act="lDruck">${ic('print')}Drucken</button></span></div>
+    ${ls.length ? `<div class="card lst">${ls.map(x => { const n = lisZeilen(x).length;
+      return `<button class="lrow" data-act="lTab" data-id="${x.id}"><span class="ph">${ic('table')}</span>
+        <span class="tx"><b>${esc(x.name)}</b><span class="small muted">${esc(lisFilterText(x))}</span></span>
+        <span class="mt"><span class="chip">${n} ${n === 1 ? 'Zeile' : 'Zeilen'}</span></span></button>`; }).join('')}</div>`
+      : `<div class="card empty">Noch keine Listen.${istBuero() ? ' Mit «Neue Liste» anlegen.' : ''}</div>`}`;
+  if(l.spalten.includes('notiz') && !S.alleNotizen) ladeAlleNotizen();
+  return `<button class="back" data-act="lZu">${ic('back')}Alle Listen</button>
+    <div class="reshead" style="align-items:flex-start"><h2 style="font-size:22px">${esc(l.name)}</h2>
+      <span style="display:flex;gap:8px">${istBuero() ? `<button class="btn btn-ghost btn-sm" data-act="lEdit">${ic('edit')}Bearbeiten</button>` : ''}
+      <button class="btn btn-ghost btn-sm" data-act="lDruck">${ic('print')}Drucken</button></span></div>
+    <div class="lispanel"><div class="exh"><span class="small muted">${esc(lisFilterText(l))} · ${lisZeilen(l).length} Zeilen</span></div>
       ${lisTabelle(l)}
-      <div class="small muted">Spaltentitel anklicken zum Sortieren · Zeile anklicken öffnet den Eintrag.</div></div>`
-    : `<div class="card empty">Noch keine Listen.${istBuero() ? ' Mit «Neue Liste» anlegen.' : ''}</div>`}`;
+      <div class="small muted">Spaltentitel anklicken zum Sortieren · Zeile anklicken öffnet den Eintrag.</div></div>`;
 }
 async function ladeAlleNotizen(){
   const { data, error } = await sb.from('wissen_notiz').select('eintrag_id,exemplar_id,html,erstellt_am').order('erstellt_am', { ascending: false });
@@ -2004,7 +2009,8 @@ document.addEventListener('click', async ev => {
       c.setze(c.liste().filter(x => x.id !== z.id)); if(d.k === 'kat') S.merkmale = S.merkmale.filter(m => m.kategorie_id !== z.id); if(S.kat === z.id) S.kat = null; if(S.ber === z.id) S.ber = null; render();
     }); }
   // Listen
-  else if(a === 'lTab'){ S.lid = d.id; merke('liste', d.id); S.lsort = null; S.lsortDir = 1; render(); }
+  else if(a === 'lTab'){ S.lid = d.id; S.lsort = null; S.lsortDir = 1; render(); window.scrollTo(0, 0); }
+  else if(a === 'lZu'){ S.lid = null; render(); window.scrollTo(0, 0); }
   else if(a === 'lsort'){ const l = S.lEdit || S.listen.find(x => x.id === S.lid); const akt = S.lsort && l?.spalten.includes(S.lsort) ? S.lsort : l?.spalten[0];
     if(akt === d.k) S.lsortDir *= -1; else { S.lsort = d.k; S.lsortDir = 1; } if(S.lEdit) lisLesen(); render(); }
   else if(a === 'lNeu'){ S.lEdit = { name: '', pro: 'exemplar', filter: { kats: [], bers: [], art: '', q: '' }, spalten: ['nummer', 'titel', 'zustaendig'] }; render(); $('lName')?.focus(); }
@@ -2024,11 +2030,11 @@ document.addEventListener('click', async ev => {
       : await sb.from('wissen_liste').insert({ ...z, sortierung: Math.max(0, ...S.listen.map(x => x.sortierung)) + 10, erstellt_von: S.userId }).select().single();
     if(r.error) return fehler(r.error, 'Liste');
     S.listen = f.id ? S.listen.map(x => x.id === f.id ? r.data : x) : [...S.listen, r.data];
-    S.lid = r.data.id; merke('liste', S.lid); S.lEdit = null; S.lsort = null; toast('Liste gespeichert'); render();
+    S.lid = r.data.id; S.lEdit = null; S.lsort = null; toast('Liste gespeichert'); render();
   }
   else if(a === 'lDel') bestaetige(`Liste «${S.lEdit.name}» löschen? Die Einträge selbst bleiben.`, 'Löschen', async () => {
     const { error } = await sb.from('wissen_liste').delete().eq('id', S.lEdit.id); if(error) return fehler(error, 'Löschen');
-    S.listen = S.listen.filter(x => x.id !== S.lEdit.id); S.lEdit = null; S.lid = S.listen[0]?.id || null; render();
+    S.listen = S.listen.filter(x => x.id !== S.lEdit.id); S.lEdit = null; S.lid = null; render();
   });
   else if(a === 'lDruck'){
     const l = S.listen.find(x => x.id === S.lid);
