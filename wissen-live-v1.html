@@ -155,6 +155,7 @@ main.wrap{padding-top:22px;padding-bottom:70px;}
 .fld input,.fld select{width:100%;}
 .fld .chk input{width:auto;margin:0;}
 .qrtab col.c-chk{width:96px;} .qrtab col.c-bs{width:190px;}
+.felder col.c-art{width:110px;} .felder col.c-pro{width:74px;} .felder .mid{text-align:center;} .felder input[type=checkbox]{accent-color:var(--primary);width:16px;height:16px;}
 .qrtab tr.aus td:nth-child(2){color:var(--muted);}
 .qrtab .segm button{padding:4px 10px;font-size:12px;}
 .qrtab tbody td:nth-child(2){white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -872,7 +873,7 @@ const notizHat = (e, x) => !!S.det?.notizen.some(n => n.eintrag_id === e.id && (
 function hatInhalt(e, k){
   const d = S.det && S.det.id === e.id ? S.det : null;
   return ({
-    steck: !!(e.steckbrief?.length || e.gehoert_zu_id || S.eintraege.some(x => x.gehoert_zu_id === e.id)),
+    steck: !!((e.steckbrief || []).some(r => r.wert || r.hinweis) || e.gehoert_zu_id || S.eintraege.some(x => x.gehoert_zu_id === e.id)),
     anw: !!(e.anwendung_html || '').replace(/<[^>]+>/g, '').trim() || /<(img|video|table)/.test(e.anwendung_html || ''),
     service: servicesVon(e).length > 0,
     kontakte: !!d?.kontakte.length,
@@ -900,7 +901,7 @@ function zaehl(e, k){
 // Bausteine pro Kategorie (Einstellungen): Reihenfolge und Anzeige «offen» / «zu»; nicht aufgeführt = Aus.
 // Am PC ist «zu» ein zugeklappter Abschnitt, auf dem Handy ein Knopf in der Zeile «Mehr».
 const ABSCHNITTE = [['x_angaben', 'Angaben'], ['x_service', 'Service abhaken'], ['x_notizen', 'Notizen'],
-  ['notizen', 'Notizen für alle'], ['sicher', 'Arbeitssicherheit'], ['steck', 'Technische Daten'], ['anw', 'Anwendung'], ['service', 'Service-Arbeiten (Anleitungen)'], ['kontakte', 'Kontakte'], ['docs', 'Dokumente & Links']];
+  ['notizen', 'Notizen für alle'], ['sicher', 'Arbeitssicherheit'], ['steck', 'Infos'], ['anw', 'Anwendung'], ['service', 'Service-Arbeiten (Anleitungen)'], ['kontakte', 'Kontakte'], ['docs', 'Dokumente & Links']];
 const BAUSTEIN_STANDARD = ABSCHNITTE.map(([k]) => ({ k, m: k.startsWith('x_') || k === 'notizen' || k === 'steck' ? 'offen' : 'zu' }));
 const katVon = e => S.kats.find(k => k.id === e.kategorie_id);
 const bausteineVon = k => (k?.bausteine || BAUSTEIN_STANDARD).filter(b => ABSCHNITTE.some(z => z[0] === b.k));
@@ -950,9 +951,9 @@ function abschnitte(e, secs){
     ${zu.length ? `<div class="mehr"><span class="lbl">Mehr</span>${zu.map(([k, i, n]) => `<button class="${S.open.has(k) ? 'on' : ''}${k === 'sicher' && sichInhalt(e) && !S.open.has(k) ? ' warn' : ''}" data-act="sec" data-k="${k}">${ic(i)}${n}</button>`).join('')}</div>` : ''}
     ${zu.filter(([k]) => S.open.has(k)).map(s => secHTML(e, s)).join('')}`;
 }
-const secHTML = (e, [k, i, n]) => `<section class="card sec ${S.open.has(k) ? 'open' : ''}${k === 'sicher' && sichInhalt(e) ? ' warn' : ''}${hatInhalt(e, k) ? '' : ' leer'}" data-sec="${k}">
+const secHTML = (e, [k, i, n]) => (k === 'steck' && (n = katVon(e)?.infos_titel || 'Technische Daten'), `<section class="card sec ${S.open.has(k) ? 'open' : ''}${k === 'sicher' && sichInhalt(e) ? ' warn' : ''}${hatInhalt(e, k) ? '' : ' leer'}" data-sec="${k}">
     <button class="sec-h" data-act="sec" data-k="${k}" aria-expanded="${S.open.has(k)}">${ic(i)}<h3>${n}</h3><span class="cnt">${zaehl(e,k)}</span>${ic('chev','chev')}</button>
-    <div class="sec-b">${S.open.has(k) ? secBody(e, k) : ''}</div></section>`;
+    <div class="sec-b">${S.open.has(k) ? secBody(e, k) : ''}</div></section>`);
 // QR-Ansicht (Handy): alles untereinander in der Reihenfolge der Kategorie; zugeklappte Abschnitte als Knöpfe «Mehr» am Schluss
 function qrInhalt(e, xs, x){
   const start = offenVon(e), zu = [];
@@ -997,12 +998,11 @@ function exAngaben(e, x){
   const fixe = bu ? `<div class="eform"><label class="fld">Nummer / Kontrollschild<input type="text" data-xf="nummer" value="${esc(x.nummer || '')}" placeholder="z. B. T1.1, BE-123456"></label>
       <label class="fld">Zuständig<input type="text" data-xf="zustaendig" value="${esc(x.zustaendig || '')}"></label></div>`
     : '';
-  const lesen = bu ? x.steckbrief || [] : [x.nummer && { label: 'Nummer', wert: x.nummer }, x.zustaendig && { label: 'Zuständig', wert: x.zustaendig }, ...(x.steckbrief || [])].filter(Boolean);
   // Spezialfeld «Im Einsatzplaner»: steht als Zeile in der Tabelle, solange das Exemplar im Planer ist
   const planZeile = res && res.aktiv ? `<tr class="spez"><td class="m">${PLANER_FELD}</td><td colspan="2"><b>${esc([RTYP[res.typ] || res.typ, res.nummer, res.name].filter(Boolean).join(' · '))}</b></td>${bu ? `<td class="nw"><button class="xbtn" data-act="planAus" title="Aus dem Einsatzplaner nehmen">${ic('trash')}</button></td>` : ''}</tr>` : '';
   return `<div class="exh"><h4>Angaben ${esc(exName(x))}</h4></div>
     ${fixe}
-    ${kvTab('xsteck', lesen, bu, 'Was nur dieses Exemplar betrifft: Anschaffungsjahr, Seriennummer, Fahrzeugprüfung, km-Stand …', planZeile)}
+    ${infosHTML('xsteck', e, x, planZeile + (bu ? '' : [['Nummer', x.nummer], ['Zuständig', x.zustaendig]].filter(([, w]) => w).map(([l, w]) => `<tr><td class="m">${l}</td><td><b>${esc(w)}</b></td></tr>`).join('')))}
     ${docs.length ? `<div class="grp-title">Belege</div><div class="docs">${docs.map(f => `<div class="doc">${ic(f.art === 'foto' ? 'image' : 'file')}<div class="grow"><a class="n" href="${esc(urls.get(f.storage_pfad) || '#')}" target="_blank" rel="noopener">${esc(f.name)}</a>
       <div class="small muted">${esc([f.beschreibung, datumCH(f.erstellt_am.slice(0,10))].filter(Boolean).join(' · '))}</div></div></div>`).join('')}</div>` : ''}`;
 }
@@ -1146,7 +1146,7 @@ function kopfForm(e){
 // key: steckbrief = Eintrag, xsteck = Angaben des Exemplars
 const KVFELD = { steckbrief: 'steckbrief', xsteck: 'steckbrief' };
 // Vorschläge: Merkmale der Kategorie des Eintrags plus «für alle», in beiden Tabellen gleich
-const merkmaleFuer = e => S.merkmale.filter(m => !m.kategorie_id || m.kategorie_id === e.kategorie_id)
+const merkmaleFuer = e => S.merkmale.filter(m => m.kategorie_id === e.kategorie_id)
   .sort((a, b) => (!a.kategorie_id - !b.kategorie_id) || a.sortierung - b.sortierung);
 // Einheit eines Merkmals (aus den Einstellungen), nur angehängt, wenn der Wert eine reine Zahl ist
 const einheitVon = (e, label) => e && merkmaleFuer(e).find(m => m.name === label)?.einheit || '';
@@ -1158,6 +1158,52 @@ function merkmalListe(){
   const benutzt = gleiche.flatMap(x => [...(x.steckbrief || []), ...exVon(x).flatMap(y => y.steckbrief || [])]).map(r => r.label);
   const l = [...new Set([...merkmaleFuer(e).map(m => m.name), ...benutzt.filter(Boolean).sort((a,b) => a.localeCompare(b, 'de'))])];
   return `<datalist id="kvl">${[...(e.typ === 'geraet' ? [PLANER_FELD] : []), ...l].map(v => `<option value="${esc(v)}">`).join('')}</datalist>`;
+}
+// --- Baustein «Infos»: Felder pro Kategorie (Einstellungen), Werte im steckbrief des Eintrags bzw. des Stücks ---
+// pro = true: Felder des einzelnen Stücks (Angaben des Exemplars), sonst des Eintrags
+const felderVon = (e, pro) => S.merkmale.filter(m => m.kategorie_id === e.kategorie_id && !!m.pro_stueck === !!pro).sort((a, b) => a.sortierung - b.sortierung);
+const istIso = v => /^\d{4}-\d{2}-\d{2}$/.test(v || '');
+// Wert für die Ansicht: Datum schweizerisch, Zahl mit Einheit
+function infoWert(m, w){
+  if(!w) return '';
+  if(m?.art === 'datum' && istIso(w)) return datumCH(w);
+  if(m?.einheit && /^[\d\s.,'’-]+$/.test(w)) return w + ' ' + m.einheit;
+  return w;
+}
+// key: steckbrief = Eintrag, xsteck = Stück; vorne: zusätzliche Zeilen (z. B. «Im Einsatzplaner», Nummer)
+function infosHTML(key, e, ziel, vorne = ''){
+  const rows = ziel?.steckbrief || [], defs = felderVon(e, key === 'xsteck'), namen = defs.map(m => m.name);
+  const extra = rows.map((r, i) => ({ r, i })).filter(({ r }) => !namen.includes(r.label));
+  if(!darfEdit()){
+    const zeilen = [...defs.map(m => [m, rows.find(r => r.label === m.name)]).filter(([, r]) => r?.wert || r?.hinweis).map(([m, r]) => [m.name, infoWert(m, r.wert), r.hinweis]),
+      ...extra.filter(({ r }) => r.label && (r.wert || r.hinweis)).map(({ r }) => [r.label, r.wert, r.hinweis])];
+    if(!zeilen.length && !vorne) return '';
+    return `<div class="tbl-wrap"><table class="t kvt infos"><tbody>${vorne}${zeilen.map(([l, w, h]) => `<tr><td class="m">${esc(l)}</td><td><b>${esc(w)}</b>${h ? ` <span class="small muted">${esc(h)}</span>` : ''}</td></tr>`).join('')}</tbody></table></div>`;
+  }
+  const feld = m => { const r = rows.find(q => q.label === m.name) || {}, w = r.wert || '', a = `class="svin" data-inf="${key}" data-l="${esc(m.name)}" data-f="wert"`;
+    if(m.art === 'janein') return `<select ${a}><option value=""></option>${['Ja', 'Nein'].map(o => `<option ${w === o ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
+    if(m.art === 'auswahl') return `<select ${a}><option value=""></option>${[...(m.optionen || []), ...(w && !(m.optionen || []).includes(w) ? [w] : [])].map(o => `<option ${w === o ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
+    if(m.art === 'datum' && (!w || istIso(w))) return `<input type="date" ${a} value="${esc(w)}">`;
+    if(m.art === 'zahl' && m.einheit) return `<span class="mitein"><input type="text" inputmode="decimal" ${a} value="${esc(w)}"><span class="ein">${esc(m.einheit)}</span></span>`;
+    return `<input type="text" ${a} value="${esc(w)}">`; };
+  const hinw = m => `<input type="text" class="svin" data-inf="${key}" data-l="${esc(m.name)}" data-f="hinweis" value="${esc(rows.find(q => q.label === m.name)?.hinweis || '')}" placeholder="Hinweis">`;
+  const inp = (i, f, r, ph) => `<input type="text" class="svin" data-kvk="${key}" data-i="${i}" data-f="${f}" value="${esc(r[f] || '')}" placeholder="${ph}"${f === 'label' ? ' list="kvl"' : ''}>`;
+  return `<div class="tbl-wrap"><table class="t kvt"><thead><tr><th>Feld</th><th>Wert</th><th>Hinweis</th><th></th></tr></thead><tbody>${vorne}
+      ${defs.map(m => `<tr><td class="m">${esc(m.name)}</td><td>${feld(m)}</td><td>${hinw(m)}</td><td></td></tr>`).join('')}
+      ${extra.map(({ r, i }) => `<tr class="extra"><td class="m">${inp(i, 'label', r, 'Feld')}</td><td>${inp(i, 'wert', r, '')}</td><td>${inp(i, 'hinweis', r, '')}</td>
+        <td class="nw"><button class="xbtn" data-act="kvDel" data-key="${key}" data-i="${i}" title="Feld löschen">${ic('trash')}</button></td></tr>`).join('')}
+      ${S.kvNeu === key ? `<tr><td class="m">${inp(rows.length, 'label', {}, 'Feld')}</td><td>${inp(rows.length, 'wert', {}, 'Wert')}</td><td>${inp(rows.length, 'hinweis', {}, '')}</td><td></td></tr>` : ''}
+    </tbody></table></div>
+    <div class="addlinks"><button class="addrow small" data-act="kvAdd" data-key="${key}">${ic('plus')}Weiteres Feld</button>
+      ${!defs.length ? `<span class="small muted">Felder für diese Kategorie legst du in den Einstellungen fest.</span>` : ''}</div>`;
+}
+async function infFeld(el){
+  const e = byId(S.eid), key = el.dataset.inf, label = el.dataset.l, f = el.dataset.f, v = el.value.trim();
+  const rows = JSON.parse(JSON.stringify(kvZiel(key, e)?.steckbrief || [])); let r = rows.find(q => q.label === label);
+  if((r?.[f] || '') === v) return;
+  if(!r){ r = { label, wert: '' }; rows.push(r); }
+  r[f] = v;
+  if(await kvSpeichern(key, e, rows)) toast('Gespeichert');
 }
 function kvTab(key, rows, ed, hinweis, spez = ''){
   const e = byId(S.eid);
@@ -1212,11 +1258,11 @@ function merkmalWahl(key){
   const schon = [...(e.steckbrief || []), ...(x?.steckbrief || [])].map(r => r.label);
   const res = x && x.planer_ressource_id && S.planer.find(p => p.id === x.planer_ressource_id);
   const spez = key === 'xsteck' && e.typ === 'geraet' && !(res && res.aktiv) ? [PLANER_FELD] : [];
-  const l = [...spez, ...merkmaleFuer(e).map(m => m.name).filter(v => !schon.includes(v))];
-  ovl(`<h3>Merkmal hinzufügen</h3>
+  const l = [...spez]; // Felder der Kategorie stehen schon im Formular
+  ovl(`<h3>Weiteres Feld</h3><div class="small muted">Nur für diesen Eintrag. Felder für alle Einträge der Kategorie legst du in den Einstellungen fest.</div>
     ${key === 'xsteck' && n > 1 ? `<div class="small muted">Wird bei allen ${n} Exemplaren als Zeile eingefügt, der Wert gilt pro Exemplar.</div>` : ''}
     ${l.length ? `<div class="mmwahl">${l.map(v => `<button class="chip ${spez.includes(v) ? 'planer' : ''}" data-act="kvWahl" data-key="${key}" data-v="${esc(v)}">${spez.includes(v) ? ic('cal') : ''}${esc(v)}</button>`).join('')}</div>` : ''}
-    <div class="row"><input type="text" id="kvEigen" placeholder="Eigenes Merkmal" style="flex:1"><button class="btn btn-primary" data-act="kvWahl" data-key="${key}">${ic('plus')}Hinzufügen</button></div>
+    <div class="row"><input type="text" id="kvEigen" placeholder="Bezeichnung, z. B. km Januar 2026" style="flex:1"><button class="btn btn-primary" data-act="kvWahl" data-key="${key}">${ic('plus')}Hinzufügen</button></div>
     <div class="ovlbtns"><button class="btn btn-ghost" data-act="ovlZu">Abbrechen</button></div>`);
 }
 async function merkmalDazu(key, label){
@@ -1242,9 +1288,7 @@ function secBody(e, k){
   if(k === 'steck'){
     const kinder = S.eintraege.filter(x => x.gehoert_zu_id === e.id);
     const parent = e.gehoert_zu_id && byId(e.gehoert_zu_id);
-    return `${kvTab('steckbrief', e.steckbrief || [], darfEdit(), e.typ === 'geraet'
-        ? 'Technische Daten, die bei allen Exemplaren gleich sind: Hersteller / Modell, Gewicht, Breite, Höhe, Leistung, Treibstoff … Was pro Maschine verschieden ist (Nummer, Jahrgang, km), gehört oben in die Angaben des Exemplars.'
-        : 'Eckdaten zum Nachschlagen, z. B. Hersteller, Verarbeitungszeit, Temperaturbereich, Gebindegrösse …')}
+    return `${infosHTML('steckbrief', e, e)}
       ${parent ? `<div class="grp-title">Gehört zu</div><div class="anbau"><button data-act="open" data-id="${parent.id}"><span class="chip">${ic('link')}${esc(parent.titel)}</span></button></div>` : ''}
       ${kinder.length ? `<div class="grp-title">Anbaugeräte</div><div class="anbau">${kinder.map(x => `<button data-act="open" data-id="${x.id}"><span class="chip">${ic('link')}${esc(x.titel)}</span></button>`).join('')}</div>` : ''}`;
   }
@@ -1469,6 +1513,28 @@ function stZeilen(k, l, mitEinh){
           <button class="xbtn" data-act="stDel" data-k="${k}" data-id="${z.id}" title="${n ? 'Wird noch verwendet' : 'Löschen'}" ${n ? 'disabled' : ''}>${ic('trash')}</button></td></tr>`; }).join('')}
       <tr><td></td><td colspan="${mitEinh ? 4 : 3}"><input type="text" class="svin" data-stneu="${k}" placeholder="+ ${STAMM[k].neu} (Name eingeben, Enter)"></td></tr></tbody></table></div>`;
 }
+// Felder (Baustein «Infos») einer Kategorie: Bezeichnung, Art, Einheit bzw. Auswahl-Werte, pro Stück
+const FELDART = [['text', 'Text'], ['zahl', 'Zahl'], ['datum', 'Datum'], ['janein', 'Ja / Nein'], ['auswahl', 'Auswahl']];
+function feldZeilen(l){
+  return `<div class="tbl-wrap"><table class="t sttab felder" data-stsort="mm"><colgroup><col class="c-grip"><col><col class="c-art"><col class="c-einh"><col class="c-pro"><col class="c-btn1"></colgroup>
+    <thead><tr><th></th><th>Feld</th><th>Art</th><th>Einheit / Werte</th><th class="mid">Pro Stück</th><th></th></tr></thead><tbody>${l.map((z, i) => {
+      const n = mmNutzung(z);
+      return `<tr data-i="${i}"><td class="grip" title="Ziehen zum Verschieben">${ic('grip')}</td>
+        <td><input type="text" class="svin" data-stf="mm" data-id="${z.id}" value="${esc(z.name)}">${n ? `<div class="small muted">${n}× ausgefüllt</div>` : ''}</td>
+        <td><select class="svin" data-mmart="${z.id}">${FELDART.map(([v, t]) => `<option value="${v}" ${(z.art || 'text') === v ? 'selected' : ''}>${t}</option>`).join('')}</select></td>
+        <td>${z.art === 'auswahl' ? `<input type="text" class="svin" data-mmopt="${z.id}" value="${esc((z.optionen || []).join(', '))}" placeholder="Werte mit Komma">`
+          : z.art === 'zahl' ? `<input type="text" class="svin" data-steinh="${z.id}" value="${esc(z.einheit || '')}" placeholder="Einheit" list="einhListe">` : '<span class="small muted">–</span>'}</td>
+        <td class="mid"><input type="checkbox" data-mmpro="${z.id}" ${z.pro_stueck ? 'checked' : ''}></td>
+        <td class="nw"><button class="xbtn" data-act="stDel" data-k="mm" data-id="${z.id}" title="Feld löschen">${ic('trash')}</button></td></tr>`; }).join('')}
+      <tr><td></td><td colspan="5"><input type="text" class="svin" data-stneu="mm" placeholder="+ Neues Feld (Name eingeben, Enter)"></td></tr></tbody></table></div>`;
+}
+async function feldSetzen(id, werte, el){
+  const m = S.merkmale.find(x => x.id === id), alt = { ...m };
+  Object.assign(m, werte);
+  const { error } = await sb.from('wissen_merkmal').update(werte).eq('id', id);
+  if(error){ Object.assign(m, alt); render(); return fehler(error, 'Speichern'); }
+  toast('Gespeichert'); if(!el || el.dataset.mmart || el.dataset.mmpro) render();
+}
 const einhListe = () => `<datalist id="einhListe">${unik(['kg', 't', 'g', 'm', 'cm', 'mm', 'm²', 'm³', 'l', 'kW', 'PS', 'V', 'Ah', 'h', 'Std.', 'Min.', '°C', '%', 'Stk.', 'CHF', ...S.merkmale.map(m => m.einheit)]).map(u => `<option value="${esc(u)}">`).join('')}</datalist>`;
 function vEinstellungen(){
   if(S.katDetail != null) return vKategorie();
@@ -1476,7 +1542,7 @@ function vEinstellungen(){
   const block = k => { const c = STAMM[k], l = c.liste();
     return `<section class="card einst"><div class="exh"><h3>${c.titel}</h3><span class="small muted">${l.length}</span></div>
       <div class="small muted">${c.text}</div>${stZeilen(k, l, k === 'mm')}${k === 'mm' ? einhListe() : ''}</section>`; };
-  return `<h2 style="font-size:22px;margin-bottom:12px">Einstellungen</h2><div class="einstgrid">${block('kat')}<div class="einstspalte">${block('mm')}</div></div>
+  return `<h2 style="font-size:22px;margin-bottom:12px">Einstellungen</h2><div class="einstgrid">${block('kat')}<section class="card einst"><div class="exh"><h3>So ist es aufgebaut</h3></div><div class="small muted">Jede Kategorie gehört zu einer <b>Rubrik</b> (Geräte, Produkte, Wissen, Kurzinfo), die den Kopf des Eintrags bestimmt. Mit dem Stift bei einer Kategorie legst du ihre <b>Infos-Felder</b> und <b>Bausteine</b> fest.</div></section></div>
     <div class="small muted" style="margin-top:10px">Am Griff links ziehen = Reihenfolge ändern. Löschen geht nur, wenn kein Eintrag die Kategorie mehr braucht. Namen ändern wirkt sofort bei allen Einträgen.</div>`;
 }
 // Seite einer Kategorie (bzw. «alle Kategorien»): links Merkmale, rechts Name und Einträge
@@ -1489,10 +1555,10 @@ function vKategorie(){
       <span class="small muted">bestimmt den Kopf: ${RUBRIK_KOPF[k.art || 'geraet']}</span></div>` : ''}
     <div class="einstgrid">
     <section class="card einst">
-      <div class="exh"><h3>Merkmale</h3><span class="small muted">${STAMM.mm.liste().length}</span></div>
-      <div class="small muted">${k ? 'Werden bei Einträgen dieser Kategorie' : 'Werden bei jeder Kategorie zusätzlich'} bei «+ Merkmal» zur Auswahl angeboten (Technische Daten und Angaben zum Exemplar).
-        Die Einheit ist freiwillig: Bei Zahlen erscheint sie im Eintrag hinter dem Wert (z. B. «1,9» → «1,9 t»).</div>
-      ${stZeilen('mm', STAMM.mm.liste(), true)}
+      <div class="exh"><h3>Infos</h3><span class="small muted">${STAMM.mm.liste().length} Felder</span></div>
+      <div class="small muted">Felder, die jeder Eintrag dieser Kategorie hat. <b>Pro Stück</b> = gehört zum einzelnen Stück (erscheint bei den Angaben, z. B. Kontrollschild), sonst zum Eintrag (z. B. Gewicht). Reihenfolge am Griff ziehen.</div>
+      <label class="fld">Titel in der Ansicht<input type="text" class="svin" data-katinfos="${k?.id || ''}" value="${esc(k?.infos_titel || '')}" placeholder="Technische Daten"></label>
+      ${feldZeilen(STAMM.mm.liste())}
       ${einhListe()}
     </section>
     <section class="card einst">
@@ -1515,7 +1581,16 @@ async function stFeld(el){
   if(!v){ el.value = z.name; return toast('Name darf nicht leer sein.', true); }
   const { error } = await sb.from(c.tab).update({ name: v }).eq('id', z.id);
   if(error){ el.value = z.name; return fehler(error.code === '23505' ? 'Diesen Namen gibt es schon.' : error, 'Speichern'); }
-  z.name = v; toast('Gespeichert');
+  const alt = z.name; z.name = v;
+  // Feld umbenannt: die gespeicherten Werte der Einträge (und Stücke) dieser Kategorie gehen mit
+  if(el.dataset.stf === 'mm' && z.kategorie_id){
+    const um = rows => rows?.some(r => r.label === alt) && !rows.some(r => r.label === v) ? rows.map(r => r.label === alt ? { ...r, label: v } : r) : null;
+    for(const e of S.eintraege.filter(x => x.kategorie_id === z.kategorie_id)){
+      const n = um(e.steckbrief); if(n) await speichereEintrag(e.id, { steckbrief: n });
+      for(const y of exVon(e)){ const m = um(y.steckbrief); if(m) await speichereExemplar(y.id, { steckbrief: m }); }
+    }
+  }
+  toast('Gespeichert');
 }
 // Handy-Vorschau: aktuelle Seite in Handy-Grösse; bei einem Gerät so, wie es nach dem QR-Scan erscheint
 function handyVorschau(){
@@ -1943,6 +2018,12 @@ document.addEventListener('change', ev => {
   if(ev.target.dataset?.stf){ stFeld(ev.target); }
   if(S.lEdit && (ev.target.dataset?.lsp != null || ev.target.id === 'lArt' || ev.target.id === 'lQ')){ lisLesen(); render(); }
   if(ev.target.dataset?.stneu){ stNeu(ev.target); }
+  if(ev.target.dataset?.inf){ infFeld(ev.target); }
+  if(ev.target.dataset?.mmart) feldSetzen(ev.target.dataset.mmart, { art: ev.target.value }, ev.target);
+  if(ev.target.dataset?.mmpro) feldSetzen(ev.target.dataset.mmpro, { pro_stueck: ev.target.checked }, ev.target);
+  if(ev.target.dataset?.mmopt) feldSetzen(ev.target.dataset.mmopt, { optionen: ev.target.value.split(',').map(x => x.trim()).filter(Boolean) }, ev.target);
+  if(ev.target.dataset?.katinfos){ const k = S.kats.find(x => x.id === ev.target.dataset.katinfos), v = ev.target.value.trim() || null;
+    sb.from('wissen_kategorie').update({ infos_titel: v }).eq('id', k.id).then(({ error }) => { if(error) return fehler(error, 'Speichern'); k.infos_titel = v; toast('Gespeichert'); }); }
   if(ev.target.dataset?.steinh){ stEinheit(ev.target); }
   if(ev.target.id === 'bsVorlage' && ev.target.value){ const k = S.kats.find(x => x.id === S.katDetail), von = S.kats.find(x => x.id === ev.target.value);
     bsSpeichern(k, bausteineVon(von).map(b => ({ ...b }))); toast(`Bausteine von «${von.name}» übernommen`); }
