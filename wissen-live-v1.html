@@ -312,6 +312,10 @@ svg.i.mini{width:14px;height:14px;color:var(--muted);vertical-align:-2px;}
 @media (max-width:900px){ .einstgrid{grid-template-columns:minmax(0,1fr);} }
 @media (max-width:620px){ .qrtab col.c-chk{width:46px;} .qrtab th.mid{font-size:9px;letter-spacing:0;} }
 .einstspalte{display:flex;flex-direction:column;gap:14px;}
+.psawahl{display:flex;flex-wrap:wrap;gap:6px;}
+.psawahl .yb{padding:6px 12px;}
+.chip.psa{background:#D6E7F4;border-color:#8DB6DB;color:var(--primary);font-weight:600;}
+.psakopf{margin-top:6px;}
 .mmwahl{display:flex;flex-wrap:wrap;gap:6px;}
 .mmwahl .chip{cursor:pointer;font-size:13px;padding:5px 11px;}
 .mmwahl .chip:hover{border-color:var(--primary);}
@@ -504,6 +508,7 @@ const ICONS = {
   plus:'<path d="M12 5v14M5 12h14"/>',
   file:'<path d="M7 3h7l5 5v13H7z"/><path d="M14 3v5h5"/>',
   note:'<path d="M5 4h14v12l-4 4H5z"/><path d="M15 20v-4h4"/><path d="M8 9h8M8 13h5"/>',
+  shield:'<path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6z"/>',
   wrench:'<path d="M14.5 6.5a4 4 0 0 0-5.3 5.3L4 17l3 3 5.2-5.2a4 4 0 0 0 5.3-5.3l-2.5 2.5-2.5-.5-.5-2.5z"/>',
   user:'<circle cx="12" cy="8" r="3.5"/><path d="M5 20c1-4 4-6 7-6s6 2 7 6"/>',
   list:'<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/>',
@@ -773,7 +778,7 @@ function passt(e){
   const xs = exVon(e);
   const steck = [...(e.steckbrief || []), ...xs.flatMap(x => [...(x.steckbrief || []), ...(istBuero() ? x.verwaltung || [] : [])])].map(r => r.label + ' ' + r.wert + ' ' + (r.hinweis || ''));
   const hay = [e.titel, e.untertitel, e.geraeteart, ...xs.flatMap(x => [x.nummer, x.zustaendig]), katName(e.kategorie_id), ...e.tags, ...e.bereich_ids.map(berName), ...steck,
-    (e.anwendung_html || '').replace(/<[^>]+>/g, ' ')].join(' ').toLowerCase();
+    (e.anwendung_html || '').replace(/<[^>]+>/g, ' '), (e.sicherheit_html || '').replace(/<[^>]+>/g, ' '), ...psaText(e)].join(' ').toLowerCase();
   return S.q.toLowerCase().split(/\s+/).filter(Boolean).every(t => hay.includes(t));
 }
 function vSuche(){
@@ -802,7 +807,14 @@ function vSuche(){
 
 // --- Eintrag ---
 // Gerät: Kopf (gilt für alle) → Tabs mit den Exemplaren → Block des Exemplars → «Allgemein» (gilt für alle)
-const SECS = [['notizen','note','Notizen'],['steck','list','Technische Daten'],['anw','book','Anwendung'],['service','wrench','Service & Wartung'],['kontakte','user','Kontakte'],['docs','file','Dokumente']];
+const SECS = [['notizen','note','Notizen'],['sicher','shield','Arbeitssicherheit'],['steck','list','Technische Daten'],['anw','book','Anwendung'],['service','wrench','Service & Wartung'],['kontakte','user','Kontakte'],['docs','file','Dokumente']];
+// Arbeitssicherheit: nötige Schutzausrüstung (wird auch oben beim Eintrag angezeigt)
+const PSA = [['brille', 'Schutzbrille'], ['gesicht', 'Gesichtsschutz'], ['gehoer', 'Gehörschutz'], ['atem', 'Atemschutz'], ['handschuhe', 'Schutzhandschuhe'],
+  ['schuhe', 'Sicherheitsschuhe'], ['helm', 'Schutzhelm'], ['schnitt', 'Schnittschutz'], ['weste', 'Warnweste'], ['kleidung', 'Schutzkleidung']];
+const psaText = e => PSA.filter(([k]) => (e.psa || []).includes(k)).map(z => z[1]);
+const sichDocs = (e, d) => d.dateien.filter(x => x.bereich === 'sicherheit' && !x.exemplar_id);
+// Schutzausrüstung oben beim Eintrag (nur wenn der Abschnitt bei der Kategorie angezeigt wird)
+const psaKopf = e => e.psa?.length && zeigt(e, 'sicher') ? `<div class="meta psakopf">${psaText(e).map(t => `<span class="chip psa">${ic('shield')}${esc(t)}</span>`).join('')}</div>` : '';
 const allgDocs = (e, d) => d.dateien.filter(x => x.bereich === 'dokument' && !x.exemplar_id && x.storage_pfad !== e.titelfoto_pfad);
 function hatSec(e, k){
   const d = S.det && S.det.id === e.id ? S.det : null;
@@ -813,6 +825,7 @@ function hatSec(e, k){
     service: servicesVon(e).length > 0,
     kontakte: !!d?.kontakte.length,
     docs: !!d && allgDocs(e, d).length > 0,
+    sicher: !!(e.psa?.length || (e.sicherheit_html || '').replace(/<[^>]+>/g, '').trim() || (d && sichDocs(e, d).length)),
     notizen: true,
   })[k];
 }
@@ -822,14 +835,17 @@ function zaehl(e, k){
   if(!d) return '';
   if(k === 'kontakte') return d.kontakte.length || '';
   if(k === 'docs') return allgDocs(e, d).length || '';
+  if(k === 'sicher') return sichDocs(e, d).length ? sichDocs(e, d).length + (sichDocs(e, d).length === 1 ? ' Datei' : ' Dateien') : '';
   if(k === 'notizen') return d.notizen.filter(n => !n.exemplar_id).length || '';
   return '';
 }
 // Anzeige pro Kategorie (Einstellungen): Reihenfolge aller Teile, je eine Ausblend-Liste für die normale Ansicht und die QR-Ansicht
 const ABSCHNITTE = [['x_angaben', 'Angaben zum Gerät (Nummer, Zuständig, Jahrgang …)'], ['x_service', 'Service dieses Geräts (abhaken)'], ['x_notizen', 'Notizen zu diesem Gerät'],
-  ['notizen', 'Notizen für alle'], ['steck', 'Technische Daten'], ['anw', 'Anwendung'], ['service', 'Service-Arbeiten (Anleitungen)'], ['kontakte', 'Kontakte'], ['docs', 'Dokumente']];
+  ['notizen', 'Notizen für alle'], ['sicher', 'Arbeitssicherheit'], ['steck', 'Technische Daten'], ['anw', 'Anwendung'], ['service', 'Service-Arbeiten (Anleitungen)'], ['kontakte', 'Kontakte'], ['docs', 'Dokumente']];
 const katVon = e => S.kats.find(k => k.id === e.kategorie_id);
-const reiheVon = k => { const alle = ABSCHNITTE.map(z => z[0]), r = (k?.abschnitt_reihe || []).filter(x => alle.includes(x)); return [...r, ...alle.filter(x => !r.includes(x))]; };
+// gespeicherte Reihenfolge; neu dazugekommene Teile an ihrem Standardplatz (nach ihrem Vorgänger) einfügen
+const reiheVon = k => { const alle = ABSCHNITTE.map(z => z[0]), r = (k?.abschnitt_reihe || []).filter(x => alle.includes(x));
+  alle.forEach((x, i) => { if(!r.includes(x)) r.splice(i ? r.indexOf(alle[i - 1]) + 1 : 0, 0, x); }); return r; };
 const zeigt = (e, key, qr = S.qr) => !(katVon(e)?.[qr ? 'qr_aus' : 'normal_aus'] || []).includes(key);
 // Service gibt es, solange in der normalen Ansicht nicht beide Service-Teile aus sind (mit_service wird beim Speichern nachgeführt, der Einsatzplaner liest es)
 const mitService = e => e.typ === 'geraet' && katVon(e)?.mit_service !== false;
@@ -843,6 +859,7 @@ function vEintrag(){
       <h2>${esc(e.titel)}${x?.nummer ? ' ' + esc(x.nummer) : ''}</h2>
       ${e.untertitel ? `<div class="subt">${esc(e.untertitel)}</div>` : ''}
       ${x?.zustaendig ? `<div class="facts"><span>Zuständig <b>${esc(x.zustaendig)}</b></span></div>` : ''}
+      ${psaKopf(e)}
     </div>` : `
     <div style="min-width:0">
       <h2>${esc(e.titel)}</h2>
@@ -853,6 +870,7 @@ function vEintrag(){
       <div class="facts">${e.geraeteart ? `<span>Geräteart <b>${esc(e.geraeteart)}</b></span>` : ''}
         ${geraet ? `<span>Anzahl <b>${xs.length}</b></span>` : ''}
         </div>
+      ${psaKopf(e)}
       <div class="acts">
         ${istBuero() ? `<button class="btn btn-ghost" data-act="edit">${ic('edit')}Bearbeiten</button>` : ''}
         <button class="btn btn-ghost" data-act="allopen" style="margin-left:auto">${ic('chev')}${alle ? 'Alle schliessen' : 'Alle öffnen'}</button>
@@ -1156,6 +1174,20 @@ function secBody(e, k){
       ${parent ? `<div class="grp-title">Gehört zu</div><div class="anbau"><button data-act="open" data-id="${parent.id}"><span class="chip">${ic('link')}${esc(parent.titel)}</span></button></div>` : ''}
       ${kinder.length ? `<div class="grp-title">Anbaugeräte</div><div class="anbau">${kinder.map(x => `<button data-act="open" data-id="${x.id}"><span class="chip">${ic('link')}${esc(x.titel)}</span></button>`).join('')}</div>` : ''}`;
   }
+  if(k === 'sicher'){
+    const bu = istBuero() && !S.qr, an = e.psa || [], docs = d ? sichDocs(e, d) : [];
+    return `<div class="grp-title">Schutzausrüstung</div>
+      ${bu ? `<div class="psawahl">${PSA.map(([v, t]) => `<button type="button" class="yb" data-act="psaT" data-v="${v}" aria-pressed="${an.includes(v)}">${esc(t)}</button>`).join('')}</div>`
+        : an.length ? `<div class="meta">${psaText(e).map(t => `<span class="chip psa">${ic('shield')}${esc(t)}</span>`).join('')}</div>` : '<div class="small muted">Keine besondere Schutzausrüstung.</div>'}
+      ${rte('sich', e.id, e.sicherheit_html || '', 'Verhaltensregeln: Gefahren, worauf achten, was im Notfall tun', bu)}
+      <div class="grp-title">Sicherheitsdatenblätter &amp; Merkblätter</div>
+      ${!d ? '<div class="small muted">Lädt …</div>' : docs.length ? `<div class="docs">${docs.map(x => `<div class="doc">${ic(x.art === 'foto' ? 'image' : 'file')}
+          <div class="grow"><a class="n" href="${esc(urls.get(x.storage_pfad) || '#')}" target="_blank" rel="noopener">${esc(x.name)}</a>
+          <div class="small muted">${esc(datumCH(x.erstellt_am.slice(0,10)))}</div></div>
+          ${bu ? `<button class="xbtn" data-act="dateiDel" data-id="${x.id}" title="Löschen">${ic('trash')}</button>` : ''}</div>`).join('')}</div>`
+        : '<div class="small muted">Noch keine.</div>'}
+      ${bu ? `<div><button class="addrow" data-act="sichUpload">${ic('upload')}Sicherheitsdatenblatt / Merkblatt hochladen</button> <span class="small muted">PDF oder Foto</span></div>` : ''}`;
+  }
   if(k === 'anw') return rte('anw', e.id, e.anwendung_html || '', 'Kurzanleitung, Arbeitsschritte, Tabellen, Fotos', istBuero() && !S.qr);
   if(k === 'service') return serviceBody(e);
   if(k === 'kontakte'){
@@ -1233,6 +1265,7 @@ async function rteSpeichern(ed){
   const hinweis = document.querySelector(`[data-saving="${ed.dataset.rte}"]`);
   let r;
   if(kind === 'anw'){ r = await sb.from('wissen_eintrag').update({ anwendung_html: html }).eq('id', id); if(!r.error) byId(id).anwendung_html = html; }
+  else if(kind === 'sich'){ r = await sb.from('wissen_eintrag').update({ sicherheit_html: html || null }).eq('id', id); if(!r.error) byId(id).sicherheit_html = html || null; }
   else if(kind === 'svc'){ r = await sb.from('wissen_service').update({ anleitung_html: html || null }).eq('id', id); const s = S.service.find(x => x.id === id); if(s && !r.error) s.anleitung_html = html || null; }
   else { r = await sb.from('wissen_notiz').update({ html }).eq('id', id); const n = S.det?.notizen.find(x => x.id === id); if(n && !r.error) n.html = html; }
   if(r.error) return fehler(r.error, 'Speichern');
@@ -1943,6 +1976,12 @@ document.addEventListener('click', async ev => {
   }
   else if(a === 'kontaktDel'){ const { error } = await sb.from('wissen_kontakt').delete().eq('id', d.id); if(error) return fehler(error, 'Löschen'); S.det.kontakte = S.det.kontakte.filter(k => k.id !== d.id); render(); }
   // Dokumente
+  else if(a === 'psaT'){ const an = e.psa || [], neu = an.includes(d.v) ? an.filter(x => x !== d.v) : [...an, d.v];
+    if(await speichereEintrag(e.id, { psa: neu })) render(); }
+  else if(a === 'sichUpload') waehleDateien('application/pdf,image/*', true, async files => {
+    for(const f of files){ toast(`«${f.name}» wird hochgeladen …`); await hochladen(f, e.id, 'sicherheit', null); }
+    await signiere(S.det.dateien.flatMap(x => [x.storage_pfad, x.vorschau_pfad]).filter(Boolean)); render();
+  });
   else if(a === 'docUpload') waehleDateien('application/pdf,image/*,video/*', true, async files => {
     for(const f of files){ toast(`«${f.name}» wird hochgeladen …`); await hochladen(f, e.id, 'dokument', null); }
     await signiere(S.det.dateien.flatMap(x => [x.storage_pfad, x.vorschau_pfad]).filter(Boolean)); render();
