@@ -80,6 +80,8 @@ main.wrap{padding-top:22px;padding-bottom:70px;}
 .searchbox input{all:unset;flex:1;padding:12px 0;font-size:16px;min-width:0;}
 .searchbox .i{color:var(--muted);width:20px;height:20px;}
 .filterrow{display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
+.resakt{display:flex;gap:10px;align-items:center;}
+.katart{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;}
 .filterrow .lbl{font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);width:78px;flex:none;}
 .fchip{all:unset;cursor:pointer;border:1px solid var(--line);background:#fff;border-radius:20px;padding:4px 11px;font-size:12.5px;}
 .fchip:hover{border-color:var(--primary-l);}
@@ -524,6 +526,9 @@ const QR_BASIS = 'https://knechtgarten.com/g/';
 const LOGO = '/logo-gruen-blau.png';
 const ROLLE_LABEL = { admin: 'Admin', buero_team: 'Büro-Team', mitarbeitende: 'Mitarbeitende', service_team: 'Service-Team' };
 const TYP = { geraet: 'Gerät', produkt: 'Produkt', wissen: 'Wissen' };
+// Art (Gerät / Produkt / Wissen) kommt aus der Kategorie (Einstellungen)
+const artVon = katId => S.kats.find(k => k.id === katId)?.art || 'geraet';
+const alleStichwoerter = () => unik(S.eintraege.flatMap(e => e.tags || [])).sort((a, b) => a.localeCompare(b, 'de'));
 const RTYP = { maschine: 'Maschine', fahrzeug: 'Fahrzeug', anhaenger: 'Anhänger' };
 
 const ICONS = {
@@ -609,7 +614,7 @@ const S = {
   rolle: null, userId: null, buero: false,
   kats: [], bereiche: [], merkmale: [], mmKat: '', eintraege: [], exemplare: [], service: [], erledigt: [], lieferanten: [], benutzer: {}, planer: [],
   view: 'suche', eid: null, xid: null, det: null, qr: false,
-  q: '', ber: lies('ber', null), kat: lies('kat', null), typ: lies('typ', null), mode: lies('mode', 'foto'),
+  q: '', kat: lies('kat', null), mode: lies('mode', 'foto'),
   open: new Set(), edit: null, kvNeu: null, ask: null, svE: false, svBis: 0, svf: null, anl: new Set(),
   listen: [], lid: null, lEdit: null, lsort: null, lsortDir: 1, alleNotizen: null,
   sel: new Set(), used: new Set(), fmt: lies('fmt', '8'), foto: false, pickQ: '',
@@ -768,7 +773,7 @@ function render(){
     $('subnavInner').innerHTML = nav.map(([k,i,n]) =>
       `<button data-act="nav" data-v="${k}" class="${S.view===k||(k==='suche'&&S.view==='eintrag')?'on':''}">${ic(i)}${n}</button>`).join('')
       + `<button class="neu" data-act="handy" title="So sieht es auf dem Handy aus (bei einem Gerät: wie nach dem QR-Scan)">${ic('phone')}Handy</button>`
-      + (istBuero() ? `<button data-act="neu">${ic('plus')}Neuer Eintrag</button><button data-act="nav" data-v="einstellungen" class="${S.view === 'einstellungen' ? 'on' : ''}">${ic('gear')}Einstellungen</button>` : '');
+      + (istBuero() ? `<button data-act="nav" data-v="einstellungen" class="${S.view === 'einstellungen' ? 'on' : ''}">${ic('gear')}Einstellungen</button>` : '');
   }
   const m = $('appMain');
   m.innerHTML = S.view === 'eintrag' ? vEintrag() : S.view === 'listen' ? vListen() : S.view === 'etiketten' ? vEtiketten() : S.view === 'einstellungen' ? vEinstellungen() : vSuche();
@@ -796,13 +801,11 @@ function bildHTML(e, gross){
 
 // --- Suche ---
 function passt(e){
-  if(S.ber && !e.bereich_ids.includes(S.ber)) return false;
   if(S.kat && e.kategorie_id !== S.kat) return false;
-  if(S.typ && e.typ !== S.typ) return false;
   if(!S.q) return true;
   const xs = exVon(e);
   const steck = [...(e.steckbrief || []), ...xs.flatMap(x => [...(x.steckbrief || []), ...(istBuero() ? x.verwaltung || [] : [])])].map(r => r.label + ' ' + r.wert + ' ' + (r.hinweis || ''));
-  const hay = [e.titel, e.untertitel, e.geraeteart, ...xs.flatMap(x => [x.nummer, x.zustaendig]), katName(e.kategorie_id), ...e.tags, ...e.bereich_ids.map(berName), ...steck,
+  const hay = [e.titel, e.untertitel, e.geraeteart, ...xs.flatMap(x => [x.nummer, x.zustaendig]), katName(e.kategorie_id), ...e.tags, ...steck,
     (e.anwendung_html || '').replace(/<[^>]+>/g, ' '), (e.sicherheit_html || '').replace(/<[^>]+>/g, ' '), ...psaText(e)].join(' ').toLowerCase();
   return S.q.toLowerCase().split(/\s+/).filter(Boolean).every(t => hay.includes(t));
 }
@@ -814,15 +817,14 @@ function vSuche(){
   return `<div class="hero-search">
     <h2 style="font-size:26px">Was suchst du?</h2>
     <div class="searchbox">${ic('search')}<input id="q" type="search" placeholder="z. B. Bagger Breite, Kleber Metall, Abkanten, Schweissspiegel …" value="${esc(S.q)}" autocomplete="off"></div>
-    <div class="filterrow"><span class="lbl">Bereich</span>${chips('ber', S.ber, S.bereiche.map(b => [b.id, b.name]))}</div>
-    <div class="filterrow"><span class="lbl">Kategorie</span>${chips('kat', S.kat, S.kats.map(k => [k.id, k.name]))}</div>
-    <div class="filterrow"><span class="lbl">Art</span>${chips('typ', S.typ, Object.entries(TYP))}</div>
+    <div class="filterrow"><span class="lbl">Kategorie</span>${chips('kat', S.kat, S.kats.filter(k => k.id === S.kat || S.eintraege.some(e => e.kategorie_id === k.id)).map(k => [k.id, k.name]))}</div>
   </div>
   <div class="reshead"><span class="small muted">${res.length} ${res.length === 1 ? 'Eintrag' : 'Einträge'}</span>
+    <span class="resakt">${istBuero() ? `<button class="btn btn-ghost btn-sm" data-act="neu">${ic('plus')}Neuer Eintrag</button>` : ''}
     <div class="viewtg" role="group" aria-label="Ansicht">
       <button class="${S.mode==='foto'?'on':''}" data-act="mode" data-v="foto" title="Fotos">${ic('grid')}</button>
       <button class="${S.mode==='liste'?'on':''}" data-act="mode" data-v="liste" title="Liste">${ic('rows')}</button>
-    </div></div>
+    </div></span></div>
   ${!res.length ? `<div class="card empty">${S.eintraege.length ? 'Nichts gefunden. Anderes Stichwort versuchen oder Filter auf «Alle» stellen.' : 'Noch keine Einträge.'}</div>`
     : S.mode === 'foto'
       ? `<div class="gal">${res.map(e => `<button class="gcard" data-act="open" data-id="${e.id}" title="${esc(e.titel)}"><div class="ph">${bildHTML(e)}</div><div class="t">${esc(e.titel)}${exVon(e).length > 1 ? ` <span class="small muted">× ${exVon(e).length}</span>` : ''}</div></button>`).join('')}</div>`
@@ -868,7 +870,7 @@ function zaehl(e, k){
   if(k === 'docs') return allgDocs(e, d).length || '';
   if(k === 'sicher'){ const p = (e.psa || []).length, n = sichDocs(e, d).length;
     return [p && p + (p === 1 ? ' Schutzausrüstung' : ' Schutzausrüstungen'), n && n + (n === 1 ? ' Datenblatt' : ' Datenblätter')].filter(Boolean).join(' · '); }
-  if(k === 'notizen') return d.notizen.filter(n => !n.exemplar_id).length || '';
+  if(k === 'notizen') return '';
   return '';
 }
 // Anzeige pro Kategorie (Einstellungen): Reihenfolge aller Teile und was beim Öffnen aufgeklappt ist
@@ -898,9 +900,8 @@ function vEintrag(){
     <div style="min-width:0">
       <h2>${esc(e.titel)}</h2>
       ${e.untertitel ? `<div class="subt">${esc(e.untertitel)}</div>` : ''}
-      <div class="meta"><span class="chip typ">${TYP[e.typ]}</span>${e.kategorie_id ? `<span class="chip">${esc(katName(e.kategorie_id))}</span>` : ''}
-        ${e.bereich_ids.map(b => `<span class="chip">${esc(berName(b))}</span>`).join('')}
-        ${e.tags.map(t => `<span class="chip tag">#${esc(t)}</span>`).join('')}</div>
+      <div class="meta">${e.kategorie_id ? `<span class="chip">${esc(katName(e.kategorie_id))}</span>` : ''}
+        ${e.tags.map(t => `<span class="chip tag">${esc(t)}</span>`).join('')}</div>
       <div class="facts">${e.geraeteart ? `<span>Geräteart <b>${esc(e.geraeteart)}</b></span>` : ''}
         ${geraet ? `<span>Anzahl <b>${xs.length}</b></span>` : ''}
         </div>
@@ -1067,12 +1068,28 @@ async function svSetzen(btn, v){
 }
 function exNotizen(e, x){
   const d = S.det && S.det.id === e.id ? S.det : null;
-  const ns = d ? d.notizen.filter(n => n.exemplar_id === x.id) : [];
-  return `<div class="exh"><h4>Notizen ${esc(exName(x))}</h4><button class="addrow small" data-act="notizNeu" data-x="${x.id}">${ic('plus')}Neue Notiz</button></div>
-    ${!d ? '<div class="small muted">Lädt …</div>' : ns.length ? `<div class="notes">${ns.map(n => rte('notiz', n.id, n.html,
-      `${datumCH(n.erstellt_am.slice(0,10))}${S.benutzer[n.erstellt_von] ? ' · ' + esc(S.benutzer[n.erstellt_von]) : ''}`, true, n.id)).join('')}</div>`
-      : '<div class="small muted">Nur was dieses Exemplar betrifft (z. B. «Kupplung rutscht»). Was für alle gilt, unten bei Notizen.</div>'}`;
+  return `<div class="exh"><h4>Notizen ${esc(exName(x))}</h4></div>
+    ${!d ? '<div class="small muted">Lädt …</div>' : notizFeld(e, x, d)}`;
 }
+// eine Notiz pro Eintrag (x = null) bzw. Exemplar; fehlt sie, wird sie beim ersten Hineinklicken angelegt
+function notizFeld(e, x, d){
+  const n = d.notizen.find(n => x ? n.exemplar_id === x.id : !n.exemplar_id);
+  const kopf = n?.geaendert_am ? 'zuletzt geändert ' + datumCH(n.geaendert_am.slice(0, 10)) : x ? 'Nur was dieses Exemplar betrifft' : '';
+  return rte(n ? 'notiz' : 'notizneu', n ? n.id : e.id + (x ? '.' + x.id : ''), n?.html || '', kopf, true);
+}
+async function notizAnlegen(ed){
+  if(!ed.dataset.rte.startsWith('notizneu:')) return;
+  if(ed._anlegen) return ed._anlegen;
+  const [eid, xid] = ed.dataset.rte.slice(9).split('.');
+  ed._anlegen = (async () => {
+    const { data, error } = await sb.from('wissen_notiz').insert({ eintrag_id: eid, exemplar_id: xid || null, html: '', erstellt_von: S.userId }).select().single();
+    if(error){ ed._anlegen = null; return fehler(error, 'Notiz'); }
+    S.det?.notizen.unshift(data); ed.dataset.rte = 'notiz:' + data.id;
+    const s = ed.closest('.rte')?.querySelector('[data-saving]'); if(s) s.dataset.saving = 'notiz:' + data.id;
+  })();
+  return ed._anlegen;
+}
+document.addEventListener('focusin', ev => { const ed = ev.target.closest && ev.target.closest('.rte-ed[data-rte^="notizneu:"]'); if(ed) notizAnlegen(ed); });
 
 function kopfForm(e){
   const f = S.edit;
@@ -1082,12 +1099,10 @@ function kopfForm(e){
     <div class="eform">
       <label class="fld voll">Titel<input type="text" id="fTitel" value="${esc(f.titel)}"></label>
       <label class="fld voll">Untertitel<input type="text" id="fUntertitel" value="${esc(f.untertitel || '')}" placeholder="z. B. Takeuchi TB290 · 9 t"></label>
-      <label class="fld">Art<select id="fTyp">${Object.entries(TYP).map(([k,n]) => `<option value="${k}" ${f.typ===k?'selected':''}>${n}</option>`).join('')}</select></label>
       <label class="fld">Kategorie<select id="fKat"><option value="">–</option>${S.kats.map(k => `<option value="${k.id}" ${f.kategorie_id===k.id?'selected':''}>${esc(k.name)}</option>`).join('')}</select></label>
       <label class="fld">Geräteart (Gruppe in der Tabelle)<input type="text" id="fArt" list="artListe" value="${esc(f.geraeteart || '')}"><datalist id="artListe">${arten.map(a => `<option value="${esc(a)}">`).join('')}</datalist></label>
       <label class="fld">Gehört zu (Anbaugerät)<select id="fGehoert"><option value="">–</option>${andere.map(x => `<option value="${x.id}" ${f.gehoert_zu_id===x.id?'selected':''}>${esc(x.titel)}</option>`).join('')}</select></label>
-      <div class="fld voll">Bereiche<div class="berchips">${S.bereiche.map(b => `<button class="fchip ${f.bereich_ids.includes(b.id)?'on':''}" data-act="fBer" data-v="${b.id}">${esc(b.name)}</button>`).join('')}</div></div>
-      <label class="fld voll">Stichwörter (mit Komma trennen)<input type="text" id="fTags" value="${esc(f.tags.join(', '))}"></label>
+      <label class="fld voll">Stichwörter <span class="small muted">(mit Komma trennen, z. B. Pflege, Baustelle, Akku)</span><input type="text" id="fTags" value="${esc(f.tags.join(', '))}" placeholder="${esc(alleStichwoerter().slice(0, 6).join(', '))}"></label>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-primary" data-act="editSave">${ic('check')}Speichern</button>
@@ -1247,9 +1262,7 @@ function secBody(e, k){
   }
   if(k === 'notizen'){
     if(!d) return '<div class="small muted">Lädt …</div>';
-    return `<div><button class="addrow" data-act="notizNeu">${ic('plus')}Neue Notiz</button></div>
-      <div class="notes">${d.notizen.filter(n => !n.exemplar_id).map(n => rte('notiz', n.id, n.html,
-        `${datumCH(n.erstellt_am.slice(0,10))}${S.benutzer[n.erstellt_von] ? ' · ' + esc(S.benutzer[n.erstellt_von]) : ''}`, true, n.id)).join('')}</div>`;
+    return notizFeld(e, null, d);
   }
   return '';
 }
@@ -1265,6 +1278,7 @@ function rte(kind, id, html, head, editierbar, notizId){
     <span class="tsep"></span>
     <button class="tbtn" data-cmd="foto" title="Foto einfügen">${ic('camera')}</button>
     <button class="tbtn" data-cmd="video" title="Video einfügen (max. 50 MB)">${ic('video')}</button>
+    ${kind.startsWith('notiz') ? `<span class="tsep"></span><button class="tbtn" data-cmd="datum" title="Datum einfügen">${ic('cal')}</button>` : ''}
     ${notizId ? `<span class="tsep"></span><button class="tbtn" data-act="notizDel" data-id="${notizId}" title="Notiz löschen">${ic('x')}</button>` : ''}</div>`;
   return `<div class="rte"><div class="rte-h"><span class="nh">${head || ''}</span><span class="saving" data-saving="${kind}:${id}"></span>${tb}</div>
     <div class="rte-ed" ${editierbar ? 'contenteditable="true"' : ''} data-rte="${kind}:${id}" data-placeholder="${editierbar ? 'Text, Liste oder Tabelle …' : ''}">${html}</div></div>`;
@@ -1290,6 +1304,7 @@ function rteGeaendert(ed){
   speicherTimer[key] = setTimeout(() => rteSpeichern(ed), 900);
 }
 async function rteSpeichern(ed){
+  await notizAnlegen(ed);
   const [kind, id] = ed.dataset.rte.split(':');
   const html = saubererHTML(ed);
   const hinweis = document.querySelector(`[data-saving="${ed.dataset.rte}"]`);
@@ -1311,6 +1326,7 @@ function rteBefehl(btn){
   if(c === 'bold') document.execCommand('bold');
   else if(c === 'ul') document.execCommand('insertUnorderedList');
   else if(c === 'ol') document.execCommand('insertOrderedList');
+  else if(c === 'datum') document.execCommand('insertHTML', false, '<b>' + datumCH(heuteISO()) + ':</b>&nbsp;');
   else if(c === 'table') document.execCommand('insertHTML', false,
     '<table><tr><th>Spalte 1</th><th>Spalte 2</th><th>Spalte 3</th></tr><tr><td><br></td><td><br></td><td><br></td></tr><tr><td><br></td><td><br></td><td><br></td></tr></table><p><br></p>');
   else if(c === 'mark' && !sel.isCollapsed){
@@ -1325,6 +1341,7 @@ function rteBefehl(btn){
 }
 async function rteMedium(datei){
   const { ed, range, art } = rteZiel || {}; if(!ed || !datei) return;
+  await notizAnlegen(ed);
   const [kind, id] = ed.dataset.rte.split(':');
   const e = byId(kind === 'anw' ? id : S.eid);
   toast(art === 'video' ? 'Video wird hochgeladen …' : 'Foto wird hochgeladen …');
@@ -1429,15 +1446,17 @@ function vEinstellungen(){
   const block = k => { const c = STAMM[k], l = c.liste();
     return `<section class="card einst"><div class="exh"><h3>${c.titel}</h3><span class="small muted">${l.length}</span></div>
       <div class="small muted">${c.text}</div>${stZeilen(k, l, k === 'mm')}${k === 'mm' ? einhListe() : ''}</section>`; };
-  return `<h2 style="font-size:22px;margin-bottom:12px">Einstellungen</h2><div class="einstgrid">${block('kat')}<div class="einstspalte">${block('ber')}${block('mm')}</div></div>
-    <div class="small muted" style="margin-top:10px">Am Griff links ziehen = Reihenfolge ändern. Löschen geht nur, wenn kein Eintrag die Kategorie bzw. den Bereich mehr braucht. Namen ändern wirkt sofort bei allen Einträgen.</div>`;
+  return `<h2 style="font-size:22px;margin-bottom:12px">Einstellungen</h2><div class="einstgrid">${block('kat')}<div class="einstspalte">${block('mm')}</div></div>
+    <div class="small muted" style="margin-top:10px">Am Griff links ziehen = Reihenfolge ändern. Löschen geht nur, wenn kein Eintrag die Kategorie mehr braucht. Namen ändern wirkt sofort bei allen Einträgen.</div>`;
 }
 // Seite einer Kategorie (bzw. «alle Kategorien»): links Merkmale, rechts Name und Einträge
 function vKategorie(){
   const k = S.kats.find(x => x.id === S.katDetail); S.mmKat = k ? k.id : '';
   const es = k ? S.eintraege.filter(e => e.kategorie_id === k.id) : [];
   return `<button class="back" data-act="katZu">${ic('back')}Einstellungen</button>
-    <h2 style="font-size:22px;margin-bottom:12px">${k ? esc(k.name) : 'Für alle Kategorien'}</h2>
+    <h2 style="font-size:22px;margin-bottom:6px">${k ? esc(k.name) : 'Für alle Kategorien'}</h2>
+    ${k ? `<div class="katart"><span class="small muted">Art:</span><span class="segm">${Object.entries(TYP).map(([v, t]) => `<button class="${(k.art || 'geraet') === v ? 'on' : ''}" data-act="katArt" data-v="${v}">${t}</button>`).join('')}</span>
+      <span class="small muted">${{ geraet: 'mit Exemplaren, QR-Etikette und Service', produkt: 'ohne Exemplare, z. B. Kleber, Dünger', wissen: 'nur Text, Tabellen und Dokumente' }[k.art || 'geraet']}</span></div>` : ''}
     <div class="einstgrid">
     <section class="card einst">
       <div class="exh"><h3>Merkmale</h3><span class="small muted">${STAMM.mm.liste().length}</span></div>
@@ -1538,7 +1557,7 @@ const LSP = {
   zustaendig: ['Zuständig', 'Allgemein'],
   kategorie:  ['Kategorie', 'Allgemein'],
   geraeteart: ['Geräteart', 'Allgemein'],
-  bereiche:   ['Bereiche', 'Allgemein'],
+  bereiche:   ['Stichwörter', 'Allgemein'],
   anzahl:     ['Anzahl Stück', 'Allgemein'],
   svc_next:   ['Nächster Service', 'Service'],
   svc_last:   ['Letzter Service', 'Service'],
@@ -1549,7 +1568,7 @@ const LSP = {
 const spName = k => k.startsWith('m:') || k.startsWith('v:') ? k.slice(2) : LSP[k]?.[0] || k;
 function lisPasst(e, f){
   if(f.kats?.length && !f.kats.includes(e.kategorie_id)) return false;
-  if(f.bers?.length && !f.bers.some(b => e.bereich_ids.includes(b))) return false;
+  if(f.stw?.length && !f.stw.some(s => (e.tags || []).includes(s))) return false;
   if(f.art && (e.geraeteart || '').toLowerCase() !== f.art.toLowerCase()) return false;
   if(f.q){ const xs = exVon(e);
     const hay = [e.titel, e.untertitel, e.geraeteart, ...e.tags, ...xs.flatMap(x => [x.nummer, x.zustaendig]), ...[...(e.steckbrief || []), ...xs.flatMap(x => x.steckbrief || [])].map(r => r.label + ' ' + r.wert)].join(' ').toLowerCase();
@@ -1573,7 +1592,7 @@ function lisWert(z, k){
   if(k === 'zustaendig') return x ? x.zustaendig || '' : mehr(y => y.zustaendig);
   if(k === 'kategorie') return katName(e.kategorie_id);
   if(k === 'geraeteart') return e.geraeteart || '';
-  if(k === 'bereiche') return e.bereich_ids.map(berName).join(', ');
+  if(k === 'bereiche') return (e.tags || []).join(', ');
   if(k === 'anzahl') return String(exVon(e).length || '');
   if(k === 'planer') return xs.some(y => y.planer_ressource_id && S.planer.find(p => p.id === y.planer_ressource_id && p.aktiv)) ? '✓' : '';
   if(k === 'qr') return x ? String(x.qr_nr) : mehr(y => String(y.qr_nr)) || (e.typ !== 'geraet' ? String(e.qr_nr) : '');
@@ -1603,7 +1622,7 @@ function lisTabelle(l, druck){
 }
 function lisFilterText(l){
   const f = l.filter || {};
-  return [f.kats?.length ? f.kats.map(katName).join(', ') : 'alle Kategorien', f.bers?.length ? 'Bereich ' + f.bers.map(berName).join(', ') : '', f.art ? 'Geräteart ' + f.art : '', f.q ? '«' + f.q + '»' : '',
+  return [f.kats?.length ? f.kats.map(katName).join(', ') : 'alle Kategorien', f.stw?.length ? 'Stichwort ' + f.stw.join(', ') : '', f.art ? 'Geräteart ' + f.art : '', f.q ? '«' + f.q + '»' : '',
     l.pro === 'eintrag' ? 'eine Zeile pro Eintrag' : 'eine Zeile pro Gerät'].filter(Boolean).join(' · ');
 }
 // Listen: zuerst alle Listen untereinander (wie die Übersicht), Klick öffnet die Liste
@@ -1651,7 +1670,7 @@ function lisEditor(){
     <div class="fld">Eine Zeile pro<div><span class="segm"><button class="${f.pro === 'exemplar' ? 'on' : ''}" data-act="lPro" data-v="exemplar">Gerät (Exemplar)</button><button class="${f.pro === 'eintrag' ? 'on' : ''}" data-act="lPro" data-v="eintrag">Eintrag</button></span>
       <span class="small muted" style="margin-left:8px">${f.pro === 'exemplar' ? 'Jede Heckenschere einzeln (T1.1, T1.2 …)' : 'Eine Zeile «Heckenschere» mit allen Nummern'}</span></div></div>
     <div class="fld">Kategorien <span class="small">(keine gewählt = alle)</span><div class="berchips">${S.kats.map(k => `<button class="fchip ${fl.kats.includes(k.id) ? 'on' : ''}" data-act="lKat" data-v="${k.id}">${esc(k.name)}</button>`).join('')}</div></div>
-    <div class="fld">Bereiche <span class="small">(keiner gewählt = alle)</span><div class="berchips">${S.bereiche.map(b => `<button class="fchip ${fl.bers.includes(b.id) ? 'on' : ''}" data-act="lBer" data-v="${b.id}">${esc(b.name)}</button>`).join('')}</div></div>
+    <div class="fld">Stichwörter <span class="small">(keines gewählt = alle)</span><div class="berchips">${alleStichwoerter().map(s => `<button class="fchip ${(fl.stw || []).includes(s) ? 'on' : ''}" data-act="lStw" data-v="${esc(s)}">${esc(s)}</button>`).join('')}</div></div>
     <div class="eform"><label class="fld">Nur Geräteart (optional)<input type="text" id="lArt" list="lArten" value="${esc(fl.art || '')}"><datalist id="lArten">${arten.map(a => `<option value="${esc(a)}">`).join('')}</datalist></label>
       <label class="fld">Nur mit Stichwort (optional)<input type="text" id="lQ" value="${esc(fl.q || '')}" placeholder="z. B. Team 1, Akku"></label></div>
     <div class="small muted">Passend: ${lisZeilen(f).length} Zeilen</div>
@@ -1790,8 +1809,7 @@ function bestaetige(text, okText, cb, info){
 function neuDialog(){
   ovl(`<h3>Neuer Eintrag</h3>
     <label class="fld">Titel<input type="text" id="nTitel" placeholder="z. B. Montagekleber Naturstein auf Metall"></label>
-    <label class="fld">Art<select id="nTyp">${Object.entries(TYP).map(([k,n]) => `<option value="${k}">${n}</option>`).join('')}</select></label>
-    <label class="fld">Kategorie<select id="nKat"><option value="">–</option>${S.kats.map(k => `<option value="${k.id}">${esc(k.name)}</option>`).join('')}</select></label>
+    <label class="fld">Kategorie<select id="nKat">${S.kats.map(k => `<option value="${k.id}" ${k.id === S.kat ? 'selected' : ''}>${esc(k.name)}</option>`).join('')}</select></label>
     <div class="ovlbtns"><button class="btn btn-ghost" data-act="ovlZu">Abbrechen</button><button class="btn btn-primary" data-act="neuSave">Anlegen</button></div>`);
 }
 // Zusammenlegen: anderer Eintrag (mit allen Exemplaren) kommt in diesen
@@ -1890,7 +1908,6 @@ document.addEventListener('input', ev => {
 document.addEventListener('change', ev => {
   if(ev.target.id === 'fmt'){ S.fmt = ev.target.value; merke('fmt', S.fmt); S.used = new Set(); render(); }
   if(ev.target.id === 'fotoChk'){ S.foto = ev.target.checked; render(); }
-  if(ev.target.id === 'fTyp' && S.edit){ S.edit.typ = ev.target.value; }
   if(ev.target.dataset?.kvk){ kvFeld(ev.target); }
   if(ev.target.dataset?.xf){ xFeld(ev.target); }
   if(ev.target.dataset?.stf){ stFeld(ev.target); }
@@ -1919,12 +1936,11 @@ document.addEventListener('click', async ev => {
   // Kopf bearbeiten
   else if(a === 'edit'){ S.edit = JSON.parse(JSON.stringify(e)); render(); }
   else if(a === 'editCancel'){ S.edit = null; render(); }
-  else if(a === 'fBer'){ const b = S.edit.bereich_ids; b.includes(d.v) ? b.splice(b.indexOf(d.v), 1) : b.push(d.v); t.classList.toggle('on'); }
   else if(a === 'editSave'){
     const f = {
-      titel: $('fTitel').value.trim(), untertitel: $('fUntertitel').value.trim() || null, typ: $('fTyp').value,
+      titel: $('fTitel').value.trim(), untertitel: $('fUntertitel').value.trim() || null, typ: artVon($('fKat').value),
       kategorie_id: $('fKat').value || null, geraeteart: $('fArt').value.trim() || null,
-      gehoert_zu_id: $('fGehoert').value || null, bereich_ids: S.edit.bereich_ids,
+      gehoert_zu_id: $('fGehoert').value || null,
       tags: $('fTags').value.split(',').map(x => x.trim()).filter(Boolean),
     };
     if(!f.titel) return toast('Titel fehlt.', true);
@@ -2070,6 +2086,14 @@ document.addEventListener('click', async ev => {
       Der Eintrag ist danach unwiderruflich weg. Die Arbeit erscheint wieder als offen.` : ''); }
   // Einstellungen
   else if(a === 'katOpen'){ S.katDetail = d.id || ''; render(); window.scrollTo(0, 0); }
+  else if(a === 'katArt'){ const k = S.kats.find(x => x.id === S.katDetail), es = S.eintraege.filter(x => x.kategorie_id === k.id);
+    const setzen = async () => {
+      const r = await sb.from('wissen_kategorie').update({ art: d.v }).eq('id', k.id); if(r.error) return fehler(r.error, 'Speichern');
+      if(es.length){ const r2 = await sb.from('wissen_eintrag').update({ typ: d.v }).eq('kategorie_id', k.id); if(r2.error) return fehler(r2.error, 'Speichern'); es.forEach(x => x.typ = d.v); }
+      k.art = d.v; toast('Gespeichert'); render(); };
+    if(es.length && (k.art || 'geraet') === 'geraet' && d.v !== 'geraet') bestaetige(`Art auf «${TYP[d.v]}» ändern?`, 'Ändern', setzen,
+      `Die ${es.length} Einträge dieser Kategorie zeigen dann keine Exemplare, QR-Etiketten und Service mehr an. Die Daten bleiben gespeichert und erscheinen wieder, wenn du zurück auf «Gerät» stellst.`);
+    else await setzen(); }
   else if(a === 'katZu'){ S.katDetail = null; render(); }
   else if(a === 'handy') handyVorschau();
   else if(a === 'qrKopie'){ try{ await navigator.clipboard.writeText(d.v); toast('Link kopiert'); }catch(err){ toast(d.v); } }
@@ -2083,11 +2107,11 @@ document.addEventListener('click', async ev => {
   else if(a === 'lZu'){ S.lid = null; render(); window.scrollTo(0, 0); }
   else if(a === 'lsort'){ const l = S.lEdit || S.listen.find(x => x.id === S.lid); const akt = S.lsort && l?.spalten.includes(S.lsort) ? S.lsort : l?.spalten[0];
     if(akt === d.k) S.lsortDir *= -1; else { S.lsort = d.k; S.lsortDir = 1; } if(S.lEdit) lisLesen(); render(); }
-  else if(a === 'lNeu'){ S.lEdit = { name: '', pro: 'exemplar', filter: { kats: [], bers: [], art: '', q: '' }, spalten: ['nummer', 'titel', 'zustaendig'] }; render(); $('lName')?.focus(); }
-  else if(a === 'lEdit'){ const l = S.listen.find(x => x.id === S.lid); S.lEdit = JSON.parse(JSON.stringify({ ...l, filter: { kats: [], bers: [], art: '', q: '', ...l.filter } })); render(); }
+  else if(a === 'lNeu'){ S.lEdit = { name: '', pro: 'exemplar', filter: { kats: [], stw: [], art: '', q: '' }, spalten: ['nummer', 'titel', 'zustaendig'] }; render(); $('lName')?.focus(); }
+  else if(a === 'lEdit'){ const l = S.listen.find(x => x.id === S.lid); S.lEdit = JSON.parse(JSON.stringify({ ...l, filter: { kats: [], stw: [], art: '', q: '', ...l.filter } })); render(); }
   else if(a === 'lCancel'){ S.lEdit = null; render(); }
   else if(a === 'lPro'){ lisLesen(); S.lEdit.pro = d.v; render(); }
-  else if(a === 'lKat' || a === 'lBer'){ lisLesen(); const arr = S.lEdit.filter[a === 'lKat' ? 'kats' : 'bers']; arr.includes(d.v) ? arr.splice(arr.indexOf(d.v), 1) : arr.push(d.v); render(); }
+  else if(a === 'lKat' || a === 'lStw'){ lisLesen(); const arr = S.lEdit.filter[a === 'lKat' ? 'kats' : 'stw'] ||= []; arr.includes(d.v) ? arr.splice(arr.indexOf(d.v), 1) : arr.push(d.v); render(); }
   else if(a === 'lSpNeu'){ lisLesen(); S.lEdit.spalten.push(''); render(); const s = document.querySelectorAll('[data-lsp]'); s[s.length - 1]?.focus(); }
   else if(a === 'lSpDel'){ lisLesen(); S.lEdit.spalten.splice(+d.i, 1); render(); }
   else if(a === 'lUp' || a === 'lDown'){ lisLesen(); const sp = S.lEdit.spalten, i = +d.i, j = i + (a === 'lUp' ? -1 : 1); [sp[i], sp[j]] = [sp[j], sp[i]]; render(); }
@@ -2095,7 +2119,7 @@ document.addEventListener('click', async ev => {
     lisLesen(); const f = S.lEdit; f.name = f.name.trim(); f.spalten = unik(f.spalten);
     if(!f.name) return toast('Name der Liste fehlt.', true);
     if(!f.spalten.length) return toast('Mindestens eine Spalte wählen.', true);
-    const z = { name: f.name, pro: f.pro, filter: { kats: f.filter.kats, bers: f.filter.bers, ...(f.filter.art ? { art: f.filter.art } : {}), ...(f.filter.q ? { q: f.filter.q } : {}) }, spalten: f.spalten };
+    const z = { name: f.name, pro: f.pro, filter: { kats: f.filter.kats, stw: f.filter.stw || [], ...(f.filter.art ? { art: f.filter.art } : {}), ...(f.filter.q ? { q: f.filter.q } : {}) }, spalten: f.spalten };
     const r = f.id ? await sb.from('wissen_liste').update(z).eq('id', f.id).select().single()
       : await sb.from('wissen_liste').insert({ ...z, sortierung: Math.max(0, ...S.listen.map(x => x.sortierung)) + 10, erstellt_von: S.userId }).select().single();
     if(r.error) return fehler(r.error, 'Liste');
@@ -2128,7 +2152,7 @@ document.addEventListener('click', async ev => {
   else if(a === 'neu') neuDialog();
   else if(a === 'neuSave'){
     const titel = $('nTitel').value.trim(); if(!titel) return toast('Titel fehlt.', true);
-    const { data, error } = await sb.from('wissen_eintrag').insert({ titel, typ: $('nTyp').value, kategorie_id: $('nKat').value || null, erstellt_von: S.userId }).select().single();
+    const { data, error } = await sb.from('wissen_eintrag').insert({ titel, typ: artVon($('nKat').value), kategorie_id: $('nKat').value || null, erstellt_von: S.userId }).select().single();
     if(error) return fehler(error, 'Anlegen');
     if(data.typ === 'geraet'){ const { data: x, error: e2 } = await sb.from('wissen_exemplar').insert({ eintrag_id: data.id, sortierung: 10 }).select().single(); if(e2) fehler(e2, 'Exemplar'); else S.exemplare.push(x); }
     S.eintraege.push(data); ovlZu(); await oeffne(data.id); S.edit = JSON.parse(JSON.stringify(data)); render();
