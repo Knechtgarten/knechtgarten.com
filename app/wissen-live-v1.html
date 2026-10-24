@@ -376,6 +376,10 @@ button.lbstatus{cursor:pointer;} .lbstatus .i{width:12px;height:12px;stroke-widt
 .lbform .lbstwahl{grid-column:span 2;display:flex;flex-direction:column;gap:3px;} .lbstknoepfe{display:flex;gap:4px;flex-wrap:wrap;align-items:center;min-height:30px;}
 .lbstatus.lbwahl{background:#fff;border-color:var(--line);color:var(--muted);} .lbstatus.lbwahl.ok.on{background:var(--primary);border-color:var(--primary);color:#fff;} .lbstatus.lbwahl.aus.on{background:var(--muted);border-color:var(--muted);color:#fff;}
 .lbfuss{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-top:4px;}
+.lbz .lbst{display:flex;align-items:center;gap:6px;} .lbstwrap{position:relative;} .lbicons{margin-left:auto;display:flex;gap:4px;} .kg-ibtn-platz{display:inline-block;width:24px;}
+.lbstatus{min-width:118px;justify-content:center;}
+.lbmenu{position:absolute;top:calc(100% + 4px);left:0;z-index:20;background:#fff;border:1px solid var(--line);border-radius:9px;box-shadow:0 6px 18px rgba(50,62,78,.14);padding:6px;display:flex;flex-direction:column;gap:5px;}
+.lbokdatum{display:flex;gap:5px;align-items:center;} .lbokdatum input{height:24px;padding:1px 5px;font-size:12.5px;}
 @media (max-width:620px){ .stkraster{grid-template-columns:1fr 1fr;} .lbz{grid-template-columns:auto 1fr auto;} .lbz .lbi{grid-column:1 / -1;order:4;} .lbz .lbs{order:5;grid-column:1 / -1;}
   .lbz .lbst, .lbkopf > span:last-child{grid-column:auto;} .lbkopf{display:none;} .lbform{grid-template-columns:1fr 1fr;} .lbform .fld{grid-column:auto !important;} .lbform .lbbreit{grid-column:1 / -1 !important;} }
 .stk{display:flex;flex-direction:column;gap:1px;background:var(--bg);border-radius:7px;padding:4px 8px;min-width:0;}
@@ -1179,14 +1183,51 @@ function logZeilen(e, x){
   const fertig = S.erledigt.filter(r => r.exemplar_id === x.id).sort((a, b) => lbSort(b).localeCompare(lbSort(a))).map(r => ({ k: 'r|' + r.id, r }));
   return [...offen, ...fertig];
 }
+// Status einer Zeile: erledigt / übersprungen aus dem Eintrag; geplante Arbeiten sind offen.
+// Normale Arbeiten gelten 4 Wochen nach ihrer KW automatisch als übersprungen (nur Anzeige, wie im Planer),
+// Pflichtservice bleibt offen und wird dann rot.
+const istPflicht = s => s && (s.art === 'Pflichtservice' || (s.im_planer && s.wichtig));
+function lbStatus(z){
+  const r = z.r;
+  if(r) return r.erledigt ? ['ok', ic('check') + 'Erledigt', ''] : ['aus', ic('x') + 'Übersprungen', ''];
+  if(z.w >= NOW_KW - 4) return ['offen', 'Offen', ''];
+  return istPflicht(z.s) ? ['ueber', 'Offen', 'Pflichtservice, über 4 Wochen überfällig'] : ['aus auto', ic('x') + 'Übersprungen', 'automatisch übersprungen (über 4 Wochen offen)'];
+}
 function logZeile(e, x, z, bu){
-  const r = z.r, s = z.s;
+  const r = z.r, s = z.s, st = lbStatus(z), menu = bu && S.lbMenu === z.k;
   const datum = r ? (r.datum ? datumCH(r.datum) : `KW ${r.kw} ${r.jahr}`) : `KW ${z.w}`;
-  const st = r ? (r.erledigt ? ['ok', ic('check') + 'Erledigt'] : ['aus', ic('x') + 'Übersprungen']) : [z.w < NOW_KW ? 'ueber' : 'offen', 'Offen'];
+  // kleines Menü unter dem Status: nur die anderen Möglichkeiten; «Erledigt» mit Datum, «Offen» nur bei geplanten Arbeiten
+  const opt = (v, t) => `<button class="lbstatus ${v}" data-act="lbSet" data-v="${v}" data-k="${z.k}" data-x="${x.id}">${t}</button>`;
+  const istOk = r && r.erledigt, istAus = r && !r.erledigt, geplant = !r || r.service_id;
+  const menuHTML = menu ? `<div class="lbmenu">
+      ${istOk ? '' : `<span class="lbokdatum">${opt('ok', ic('check') + 'Erledigt')}<input type="date" id="lbMenuDatum" value="${heuteISO()}" title="Erledigt am"></span>`}
+      ${istAus ? '' : opt('aus', ic('x') + 'Übersprungen')}
+      ${r && geplant ? opt('offen', 'Offen') : ''}</div>` : '';
+  const statusEl = bu ? `<button class="lbstatus ${st[0]}" data-act="lbMenu" data-k="${z.k}" data-x="${x.id}" title="${st[2] || 'Status ändern'}">${st[1]}</button>` : `<span class="lbstatus ${st[0]}" title="${st[2]}">${st[1]}</span>`;
+  const icons = bu ? `<span class="lbicons"><button class="kg-ibtn" data-act="lbAuf" data-k="${z.k}" data-x="${x.id}" title="Bearbeiten (Datum, Art, Info, Stand)">${ic('edit')}</button>
+      ${r ? `<button class="kg-ibtn danger" data-act="erlDel" data-id="${r.id}" title="Löschen">${ic('trash')}</button>` : '<span class="kg-ibtn-platz"></span>'}</span>` : '';
   return `<div class="lbz ${r ? '' : 'geplant'} ${S.lbAuf === z.k ? 'auf' : ''}"><span class="lbd">${datum}</span><span class="lba">${esc(r ? r.art : s.art || 'Service')}</span>
     <span class="lbi">${esc(r ? r.arbeit : s.arbeit)}${r?.bemerkung ? ` <span class="muted">· ${esc(r.bemerkung)}</span>` : ''}</span><span class="lbs">${esc(r?.stand || '')}</span>
-    <span class="lbst">${bu ? `<button class="lbstatus ${st[0]}" data-act="lbAuf" data-k="${z.k}" data-x="${x.id}" title="${r ? 'Ändern' : 'Erledigt oder übersprungen eintragen'}">${st[1]}</button>` : `<span class="lbstatus ${st[0]}">${st[1]}</span>`}</span></div>
+    <span class="lbst"><span class="lbstwrap">${statusEl}${menuHTML}</span>${icons}</span></div>
     ${S.lbAuf === z.k ? logForm(x, z) : ''}`;
+}
+// Status aus dem Menü sofort speichern: erledigt (mit Datum), übersprungen, oder zurück auf offen (Eintrag weg)
+async function lbSetzen(x, k, v){
+  const [typ, id, w] = k.split('|'), r = typ === 'r' && S.erledigt.find(q => q.id === id), T = sb.from('wissen_service_erledigt');
+  const datum = $('lbMenuDatum')?.value || heuteISO();
+  if(v === 'offen'){
+    if(!r) return;
+    const { error } = await T.delete().eq('id', r.id); if(error) return fehler(error, 'Zurücksetzen');
+    S.erledigt = S.erledigt.filter(q => q.id !== r.id);
+  } else {
+    const felder = { erledigt: v === 'ok', datum: v === 'ok' ? datum : null };
+    const s = typ === 'p' && S.service.find(q => q.id === id);
+    const q = r ? T.update(felder).eq('id', r.id)
+      : T.insert({ eintrag_id: x.eintrag_id, exemplar_id: x.id, service_id: s.id, arbeit: s.arbeit, art: s.art || 'Service', jahr: NOW_Y, kw: +w, erstellt_von: S.userId, ...felder });
+    const { data, error } = await q.select().single(); if(error) return fehler(error, 'Speichern');
+    S.erledigt = S.erledigt.filter(q => q.id !== data.id).concat([data]);
+  }
+  S.lbMenu = null; toast(v === 'ok' ? 'Erledigt' : v === 'aus' ? 'Übersprungen' : 'Wieder offen'); render();
 }
 function logForm(x, z){
   const r = z.r, s = z.s, letzter = S.erledigt.filter(q => q.exemplar_id === x.id && q.stand).sort((a, b) => lbSort(b).localeCompare(lbSort(a)))[0];
@@ -1986,6 +2027,11 @@ async function stVerschieben(k, von, nach){
 }
 // Ziehen am Griff (HTML5 Drag & Drop)
 let stZug = null;
+// Status-Menü im Logbuch: Klick daneben schliesst es
+document.addEventListener('click', ev => {
+  if(!S.lbMenu || ev.target.closest('.lbmenu, [data-act="lbMenu"]')) return;
+  S.lbMenu = null; if(!ev.target.closest('[data-act]')) render();
+}, true);
 document.addEventListener('mousedown', ev => { const g = ev.target.closest && ev.target.closest('.sttab td.grip'); if(g) g.parentElement.draggable = true; });
 document.addEventListener('dragstart', ev => { const tr = ev.target.closest && ev.target.closest('.sttab tr[data-i]'); if(!tr) return;
   stZug = { k: tr.closest('table').dataset.stsort, von: +tr.dataset.i }; tr.classList.add('zieht'); ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', ''); });
@@ -2484,8 +2530,10 @@ document.addEventListener('click', async ev => {
   else if(a === 'planHaken'){ const r = planerVon(exAktiv(e)); await planSetzen(!(r && r.aktiv)); }
   else if(a === 'svPlan') planFenster();
   else if(a === 'planZu'){ S.planOvl = false; ovlZu(); }
-  else if(a === 'lbAuf'){ S.lbAuf = d.k || null; render(); document.querySelector('#lbDatum')?.focus(); }
+  else if(a === 'lbAuf'){ S.lbMenu = null; S.lbAuf = d.k || null; render(); document.querySelector('#lbDatum')?.focus(); }
   else if(a === 'lbSave') await lbSpeichern(exAktiv(e), d.k);
+  else if(a === 'lbMenu'){ S.lbMenu = S.lbMenu === d.k ? null : d.k; S.lbAuf = null; render(); }
+  else if(a === 'lbSet') await lbSetzen(exAktiv(e), d.k, d.v);
   else if(a === 'lbStat'){ t.parentNode.querySelectorAll('.lbwahl').forEach(b => b.classList.toggle('on', b === t)); }
   else if(a === 'kvAdd') merkmalWahl(d.key);
   else if(a === 'kvWahl'){ const v = d.v || $('kvEigen').value.trim(); if(!v) return; ovlZu(); await merkmalDazu(d.key, v); }
