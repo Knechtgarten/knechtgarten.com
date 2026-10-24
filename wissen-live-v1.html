@@ -354,6 +354,7 @@ table.t tr:last-child td{border-bottom:0;}
 .stkw{overflow-wrap:anywhere;} .stkw input, .stkw select{width:100%;min-width:0;}
 button.stk{all:unset;box-sizing:border-box;display:flex;flex-direction:column;gap:3px;background:var(--bg);border-radius:8px;padding:8px 10px;cursor:pointer;border:1px dashed var(--line);}
 button.stk.on{border:1px solid var(--primary);}
+.plsym{display:inline-flex;color:var(--muted);} .plsym svg{width:14px;height:14px;} .plsym.an{color:#fff;background:var(--primary);border-color:var(--primary);} span.plsym.an{border-radius:50%;width:24px;height:24px;align-items:center;justify-content:center;}
 .standein{display:flex;gap:4px;} .standein input[type=text]{flex:1 1 60px;} .standein select{flex:0 0 58px;width:auto;} .standein input[type=month]{flex:1 1 120px;}
 .mitein{display:flex;align-items:center;gap:4px;} .mitein .ein{font-size:12px;color:var(--muted);}
 @media (max-width:620px){ .stkraster{grid-template-columns:1fr 1fr;} .stk.breit{grid-column:1 / -1;} }
@@ -747,10 +748,11 @@ async function ladeAlles(){
     sb.from('wissen_exemplar').select('*').is('archiviert_am', null),
     sb.from('wissen_service_erledigt').select('*').gte('jahr', NOW_Y - 3),
     sb.from('lieferant').select('id,name,firma').is('archiviert_am', null).order('name'),
-    sb.from('planer_ressource').select('id,typ,nummer,name,aktiv'),
+    sb.from('planer_ressource').select('id,typ,nummer,name,aktiv,stamm_person_id'),
+    sb.from('planer_person').select('id,name,aktiv').order('sortierung'),
   ]);
   const err = r.find(x => x.error); if(err) return fehler(err.error, 'Laden');
-  [S.kats, S.bereiche, S.eintraege, S.service, S.exemplare, S.erledigt, S.lieferanten, S.planer] = r.map(x => x.data || []);
+  [S.kats, S.bereiche, S.eintraege, S.service, S.exemplare, S.erledigt, S.lieferanten, S.planer, S.personen] = r.map(x => x.data || []);
   { const [fe, li] = await Promise.all([sb.from('wissen_feld').select('*').order('name'), sb.from('wissen_liste').select('*').order('sortierung')]); S.felder = fe.data || []; S.listen = li.data || []; felderAbleiten(); }
   S.eintraege.sort((a,b) => a.titel.localeCompare(b.titel, 'de', {numeric:true}));
   S.exemplare.sort((a,b) => a.sortierung - b.sortierung || String(a.nummer || '').localeCompare(String(b.nummer || ''), 'de', {numeric:true}));
@@ -1043,7 +1045,7 @@ function zaehl(e, k){
 const ABSCHNITTE = [['mehrfachS', 'Mehrfach mit Service'], ['mehrfach', 'Mehrfach ohne Service'],  ['notizen', 'Notizen'], ['sicher', 'Arbeitssicherheit'], ['steck', 'Infos'], ['anw', 'Anwendung'], ['kontakte', 'Kontakte'], ['docs', 'Dokumente & Links']];
 // neue Kategorie: nur Notizen offen
 const BAUSTEIN_STANDARD = [{ k: 'notizen', m: 'offen' }];
-// «Mehrfach»: Stücke mit Nummer, Zuständig, Angaben, Etikette, Notiz pro Stück – mit Service zusätzlich Service-Arbeiten zum Abhaken
+// «Mehrfach»: Stücke mit Nummer, Fahrer, Angaben, Etikette, Notiz pro Stück – mit Service zusätzlich Service-Arbeiten zum Abhaken
 const istMehrfach = k => k === 'mehrfach' || k === 'mehrfachS';
 const katVon = e => S.kats.find(k => k.id === e.kategorie_id);
 const bausteineVon = k => (k?.bausteine || BAUSTEIN_STANDARD).filter(b => ABSCHNITTE.some(z => z[0] === b.k));
@@ -1122,7 +1124,7 @@ function qrInhalt(e, xs, x){
 }
 
 // Baustein «Mehrfach»: alle Stücke untereinander, je ein Block mit festen Feldern als Kacheln (für alle Kategorien gleich).
-// Werte im steckbrief des Stücks unter festen Bezeichnungen; Nummer und Fahrer/Zuständig sind Spalten des Stücks.
+// Werte im steckbrief des Stücks unter festen Bezeichnungen; Nummer und Fahrer sind Spalten des Stücks.
 const STK_FELDER = [
   ['Marke / Modell', 'text'], ['Anschaffungsjahr', 'zahl'], ['Stand', 'stand'], ['Versicherung', 'auswahl', ['Keine', 'Teilkasko', 'Vollkasko']],
   ['Selbstbehalt', 'chf'], ['Nächste Prüfung', 'text'], ['Seriennummer', 'text'], ['Kaufpreis', 'chf']];
@@ -1147,21 +1149,25 @@ function stkEingabe(x, l, art, opt){
   return `<input type="text" ${a} value="${esc(w)}"${art === 'zahl' ? ' inputmode="numeric"' : ''}>`;
 }
 function stueckBlock(e, x){
-  const bu = darfEdit(), res = x.planer_ressource_id && S.planer.find(p => p.id === x.planer_ressource_id), nt = notizText(notizVon(e, x)), notizAuf = S.notizAuf?.has(x.id);
+  const bu = darfEdit(), res = planerVon(x), imPlaner = !!(res && res.aktiv), nt = notizText(notizVon(e, x)), notizAuf = S.notizAuf?.has(x.id);
+  const planText = imPlaner ? `<b>${esc(RTYP[res.typ] || res.typ)}</b> · ${esc(res.name)}` : '';
   const kachel = (l, inhalt, extra = '') => `<div class="stk ${extra}"><span class="stkl">${l}</span><span class="stkw">${inhalt}</span></div>`;
   const kacheln = bu
     ? STK_FELDER.map(([l, art, opt]) => kachel(l, stkEingabe(x, l, art, opt), art === 'stand' ? 'breit' : '')).join('')
-      + kachel(PLANER_FELD, res && res.aktiv ? `<b>${esc(RTYP[res.typ] || res.typ)}</b> <button class="xbtn" data-act="planAus" data-x="${x.id}" title="Aus dem Einsatzplaner nehmen">${ic('trash')}</button>` : `<button class="addrow small" data-act="planAn" data-x="${x.id}">${ic('plus')}Aufnehmen</button>`)
+      + `<button class="stk stkplan ${imPlaner ? 'on' : ''}" data-act="planer" data-x="${x.id}"><span class="stkl">Planer</span><span class="stkw">${imPlaner ? planText : `<span class="muted">${res ? 'ausgeblendet' : '+ in den Planer'}</span>`}</span></button>`
     : STK_FELDER.map(([l, art]) => { const w = stkAnzeige(x, l, art); return w ? kachel(l, `<b>${w}</b>`) : ''; }).join('')
-      + (res && res.aktiv ? kachel(PLANER_FELD, `<b>${esc(RTYP[res.typ] || res.typ)}</b>`) : '');
+      + (imPlaner ? kachel('Planer', planText) : '');
+  // Symbol neben der Nummer: dunkel = im Planer, grau = nicht im Planer
+  const plSym = bu ? `<button class="kg-ibtn plsym ${imPlaner ? 'an' : ''}" data-act="planer" data-x="${x.id}" title="${imPlaner ? 'Im Planer' : 'Nicht im Planer'}">${ic('cal')}</button>`
+    : imPlaner ? `<span class="plsym an" title="Im Planer">${ic('cal')}</span>` : '';
   const notizKachel = bu || nt ? `<button class="stk stknotiz ${notizAuf ? 'on' : ''}" data-act="stkNotiz" data-x="${x.id}"><span class="stkl">Notiz</span><span class="stkw">${nt ? esc(nt.split('\n')[0].slice(0, 40)) + (nt.length > 40 || nt.includes('\n') ? ' …' : '') : '<span class="muted">+ Notiz</span>'}</span></button>` : '';
   const notizFeld = notizAuf ? (bu ? `<textarea class="svin xnotiz" data-xnotiz="${x.id}" rows="4" placeholder="Nur was dieses Stück betrifft, z. B. «Kupplung rutscht»">${esc(nt)}</textarea>` : `<div class="xnotiztext">${esc(nt)}</div>`) : '';
   return `<div class="stblock" data-x="${x.id}">
     <div class="stbkopf">${bu ? `<input type="text" class="svin stnr" data-xf="nummer" data-x="${x.id}" value="${esc(x.nummer || '')}" placeholder="Nummer, z. B. BE-123456">
-        <input type="text" class="svin stzu" data-xf="zustaendig" data-x="${x.id}" value="${esc(x.zustaendig || '')}" placeholder="Fahrer / Zuständig">`
-      : `<b class="stnrtext">${esc(x.nummer || 'ohne Nummer')}</b>${x.zustaendig ? `<span class="small muted">${esc(x.zustaendig)}</span>` : ''}`}
+        ${fahrerAuswahl(x.zustaendig || '', `class="svin stzu" data-xf="zustaendig" data-x="${x.id}" title="Fahrer"`)}${plSym}`
+      : `<b class="stnrtext">${esc(x.nummer || 'ohne Nummer')}</b>${x.zustaendig ? `<span class="small muted">${esc(x.zustaendig)}</span>` : ''}${plSym}`}
       ${bu ? `<span class="strechts"><button class="xbtn" data-act="qrKopie" data-v="${QR_BASIS + x.qr_nr}" title="Link kopieren">${ic('link')}</button><button class="xbtn" data-act="etikette" data-id="${x.id}" title="Etikette">${ic('label')}</button>
-        <a class="xbtn" href="?qr=${x.qr_nr}" title="QR-Ansicht">${ic('phone')}</a>${exVon(e).length > 1 ? `<button class="xbtn" data-act="exLoesen" data-x="${x.id}" title="In eigenen Eintrag herauslösen">${ic('link')}</button>` : ''}<button class="xbtn" data-act="exArchiv" data-x="${x.id}" title="Stück archivieren">${ic('archive')}</button></span>` : ''}</div>
+        <a class="xbtn" href="?qr=${x.qr_nr}" title="QR-Ansicht">${ic('phone')}</a>${exVon(e).length > 1 ? `<button class="xbtn" data-act="exLoesen" data-x="${x.id}" title="In eigenen Eintrag herauslösen">${ic('copy')}</button>` : ''}<button class="xbtn" data-act="exArchiv" data-x="${x.id}" title="Stück archivieren">${ic('archive')}</button></span>` : ''}</div>
     <div class="stkraster">${kacheln}${notizKachel}</div>${notizFeld}
     ${mitService(e) && servicesVon(e).length ? `<div class="stteil">${exService(e, x)}</div>` : ''}
   </div>`;
@@ -1928,7 +1934,7 @@ const LSP = {
   titel:      ['Bezeichnung', 'Allgemein'],
   untertitel: ['Untertitel', 'Allgemein'],
   nummer:     ['Nummer', 'Allgemein'],
-  zustaendig: ['Zuständig', 'Allgemein'],
+  zustaendig: ['Fahrer', 'Allgemein'],
   kategorie:  ['Kategorie', 'Allgemein'],
   geraeteart: ['Geräteart', 'Allgemein'],
   bereiche:   ['Stichwörter', 'Allgemein'],
@@ -2238,11 +2244,15 @@ async function speichereExemplar(id, felder){
   if(error){ fehler(error, 'Speichern'); return false; }
   const i = S.exemplare.findIndex(x => x.id === id); S.exemplare[i] = data; return true;
 }
-// Nummer / Zuständig des Exemplars: speichern, Tab-Beschriftung nachführen ohne neu zu zeichnen (Fokus bleibt)
+// Nummer / Fahrer des Stücks: speichern, beim Planer nachführen, Tab-Beschriftung nachführen ohne neu zu zeichnen (Fokus bleibt)
 async function xFeld(el){
   const e = byId(S.eid), x = exAktiv(e), f = el.dataset.xf, v = el.value.trim();
   if((x[f] || '') === v) return;
   if(!await speichereExemplar(x.id, { [f]: v || null })) return;
+  const res = planerVon(x);
+  if(res && f === 'nummer') await planerAbgleich(res, { nummer: v || null });
+  if(res && f === 'zustaendig' && res.typ === 'fahrzeug') await planerAbgleich(res, { stamm_person_id: personId(v) });
+  if(res) render();
   const y = exById(x.id), tab = document.querySelector(`.extab[data-id="${x.id}"]`);
   if(tab) tab.innerHTML = `<span class="dt"></span>${esc(exName(y))}${y.zustaendig ? `<span class="z">${esc(y.zustaendig)}</span>` : ''}`;
   document.querySelectorAll('.excard .exh h4').forEach(h => h.textContent = h.textContent.replace(/^(Angaben|Service|Notizen) .*/, `$1 ${exName(y)}`));
@@ -2250,6 +2260,47 @@ async function xFeld(el){
 }
 // Spezialfeld «Im Einsatzplaner»: an = Ressource anlegen bzw. wieder einblenden (typ nur beim ersten Mal), aus = ausblenden
 const PLANER_FELD = 'Im Einsatzplaner';
+// Planer pro Stück: Name, Art und Fahrer im Einsatzplaner; der Fahrer ist derselbe wie beim Stück
+// (bei Fahrzeugen = Stamm-Fahrer im Planer). Auswahl aus der Personenliste des Planers, alte freie Einträge bleiben wählbar.
+const planerVon = x => x.planer_ressource_id && S.planer.find(p => p.id === x.planer_ressource_id) || null;
+const personId = name => S.personen.find(p => p.name === name)?.id || null;
+function fahrerAuswahl(w, attr){
+  const namen = S.personen.filter(p => p.aktiv).map(p => p.name);
+  return `<select ${attr}><option value="">${w ? 'kein Fahrer' : 'Fahrer wählen …'}</option>${[...namen, ...(w && !namen.includes(w) ? [w] : [])].map(n => `<option ${n === w ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>`;
+}
+async function planerAbgleich(res, felder){
+  const { error } = await sb.from('planer_ressource').update(felder).eq('id', res.id);
+  if(error){ fehler(error, 'Planer'); return false; }
+  Object.assign(res, felder); return true;
+}
+function planerDialog(e, x){
+  const res = planerVon(x), vorname = (x.zustaendig || '').split(' ')[0];
+  const typ = res?.typ || (/anhänger/i.test(e.titel + ' ' + (e.geraeteart || '')) ? 'anhaenger' : /wagen|bus|auto|caddy|fahrzeug/i.test(e.titel + ' ' + (e.geraeteart || '')) ? 'fahrzeug' : 'maschine');
+  const name = res?.name || [e.titel, vorname].filter(Boolean).join(' ');
+  ovl(`<h3>Planer ${esc(x.nummer || '')}</h3>
+    <div class="small muted">${res ? (res.aktiv ? 'So erscheint das Stück im Einsatzplaner.' : 'Ist im Einsatzplaner ausgeblendet.') : 'Ist noch nicht im Einsatzplaner.'}</div>
+    <label class="fld">Name im Planer<input type="text" id="plName" value="${esc(name)}"></label>
+    <label class="fld">Art<select id="plTyp">${Object.entries(RTYP).map(([v, t]) => `<option value="${v}" ${v === typ ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+    <label class="fld">Fahrer${fahrerAuswahl(x.zustaendig || '', 'id="plFahrer"')}<span class="small muted">Gilt auch beim Stück. Bei Fahrzeugen ist es der Stamm-Fahrer im Planer.</span></label>
+    <div class="small muted">Nummer im Planer: <b>${esc(x.nummer || '–')}</b> (kommt vom Stück)</div>
+    <div class="ovlbtns">${res && res.aktiv ? `<button class="btn btn-ghost" data-act="plSpeichern" data-x="${x.id}" data-v="aus" style="margin-right:auto">Aus dem Planer nehmen</button>` : ''}
+      <button class="btn btn-ghost" data-act="ovlZu">Abbrechen</button>
+      <button class="btn btn-primary" data-act="plSpeichern" data-x="${x.id}" data-v="an">${res && res.aktiv ? 'Speichern' : 'In den Planer aufnehmen'}</button></div>`);
+}
+async function planerSpeichern(x, an){
+  const name = $('plName').value.trim(), typ = $('plTyp').value, fahrer = $('plFahrer').value;
+  if(!name) return toast('Name fehlt');
+  const res = planerVon(x), felder = { name, typ, nummer: x.nummer || null, stamm_person_id: typ === 'fahrzeug' ? personId(fahrer) : null, aktiv: an };
+  if(res){ if(!await planerAbgleich(res, felder)) return; }
+  else {
+    const { data, error } = await sb.from('planer_ressource').insert({ ...felder, sortierung: 999 }).select('id,typ,nummer,name,aktiv,stamm_person_id').single();
+    if(error) return fehler(error, 'Planer');
+    S.planer.push(data);
+    if(!await speichereExemplar(x.id, { planer_ressource_id: data.id })) return;
+  }
+  if((x.zustaendig || '') !== fahrer) await speichereExemplar(x.id, { zustaendig: fahrer || null });
+  ovlZu(); toast(an ? 'Im Planer gespeichert' : 'Aus dem Planer genommen'); render();
+}
 async function planSetzen(an, typ){
   const e = byId(S.eid), x = exAktiv(e), res = x.planer_ressource_id && S.planer.find(p => p.id === x.planer_ressource_id);
   if(an && !res){
@@ -2386,6 +2437,8 @@ document.addEventListener('click', async ev => {
   else if(a === 'planAn') await planSetzen(true);
   else if(a === 'planTyp'){ ovlZu(); await planSetzen(true, d.v); }
   else if(a === 'planAus') await planSetzen(false);
+  else if(a === 'planer'){ if(darfEdit()) planerDialog(e, exAktiv(e)); }
+  else if(a === 'plSpeichern') await planerSpeichern(exAktiv(e), d.v === 'an');
   else if(a === 'kvAdd') merkmalWahl(d.key);
   else if(a === 'kvWahl'){ const v = d.v || $('kvEigen').value.trim(); if(!v) return; ovlZu(); await merkmalDazu(d.key, v); }
   else if(a === 'kvDel') kvLoeschen(d.key, +d.i);
