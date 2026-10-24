@@ -865,6 +865,8 @@ const STOPP = new Set('welche welcher welches welchen wann wie was wo wer wieso 
 const suchWoerter = q => q.toLowerCase().replace(/[?!.,;:«»"()]/g, ' ').split(/\s+/).filter(t => t && !(istFrage(q) && STOPP.has(t)));
 // Treffer pro Eintrag: wie viele Suchwörter vorkommen (auch ohne Endung, z. B. «Hecken» → «hecke»)
 const treffer = (e, woerter) => { const h = heu(e); return woerter.filter(t => h.includes(t) || (t.length > 4 && h.includes(t.slice(0, -1)))).length; };
+// Rangfolge: Treffer im Titel/Untertitel zählen dreifach (sonst verdrängen z. B. Anbaugeräte «passt an Raupenbagger» die Bagger selbst)
+const rang = (e, woerter) => { const t = (e.titel + ' ' + (e.untertitel || '')).toLowerCase(); return treffer(e, woerter) + 2 * woerter.filter(w => t.includes(w) || (w.length > 4 && t.includes(w.slice(0, -1)))).length; };
 function passt(e){
   if(S.kat && e.kategorie_id !== S.kat) return false;
   if(!S.q) return true;
@@ -887,7 +889,7 @@ async function kiFragen(){
   const q = S.q.trim(); if(!q) return;
   S.ki = { q, status: 'laedt' }; render();
   if(!S.alleNotizen){ S.notizenLaden = true; await ladeAlleNotizen(); }
-  const w = suchWoerter(q), kand = S.eintraege.map(e => [e, treffer(e, w)]).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([e]) => e);
+  const w = suchWoerter(q), kand = S.eintraege.map(e => [e, rang(e, w)]).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([e]) => e);
   if(!kand.length){ S.ki = { q, status: 'fertig', gefunden: false, antwort: 'Dazu steht noch nichts im Nachschlagewerk.', quellen: [] }; return render(); }
   const { data, error } = await sb.functions.invoke('wissen-ki-antwort', { body: { frage: q, eintraege: kand.map(e => ({ id: e.id, titel: e.titel, text: eintragText(e) })) } });
   if(S.ki?.q !== q) return; // inzwischen anders gesucht
@@ -935,7 +937,7 @@ function kurzDialog(e){
 }
 function vSuche(){
   let alle = S.eintraege.filter(passt);
-  if(S.q && istFrage(S.q)){ const w = suchWoerter(S.q); alle = alle.map(e => [e, treffer(e, w)]).sort((a, b) => b[1] - a[1]).map(([e]) => e); }
+  if(S.q && istFrage(S.q)){ const w = suchWoerter(S.q); alle = alle.map(e => [e, rang(e, w)]).sort((a, b) => b[1] - a[1]).map(([e]) => e); }
   const kurz = alle.filter(istKurz), res = alle.filter(e => !istKurz(e));
   if(S.mode !== 'foto' && !S.alleNotizen && !S.notizenLaden){ S.notizenLaden = true; ladeAlleNotizen(); }
   const chips = (act, aktiv, liste) => `<button class="fchip ${!aktiv?'on':''}" data-act="${act}" data-v="">Alle</button>`
