@@ -395,6 +395,37 @@ Deno.serve(async (req) => {
     return json({ error: 'Ungueltiger Request-Body (JSON erwartet).' }, 400);
   }
 
+  // Kuerzel fuer die Erweiterung (Text-Ersetzung wie Text Blaze): alle
+  // Kurzinfos aus dem Nachschlagewerk mit Kuerzel. Enthaelt IBAN & Co., darum
+  // nur fuer ein angemeldetes @knechtgarten.ch-Google-Konto. Die Adresse holen
+  // wir ueber das Gmail-Profil, weil die Erweiterung nur Drive-/Gmail-Scopes
+  // hat (kein separater "email"-Scope noetig, keine Neuanmeldung).
+  if (body?.aktion === 'kurzinfos') {
+    const token = body.googleAccessToken;
+    if (!token || typeof token !== 'string') return json({ error: 'googleAccessToken fehlt.' }, 400);
+    const profilRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!profilRes.ok) return json({ error: 'Google-Anmeldung ungueltig oder abgelaufen.' }, 401);
+    const profil = await profilRes.json();
+    const email = String(profil?.emailAddress || '').toLowerCase();
+    if (!email.endsWith('@knechtgarten.ch')) return json({ error: 'Nur fuer @knechtgarten.ch-Konten.' }, 403);
+
+    const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+    const { data, error } = await sb
+      .from('wissen_eintrag')
+      .select('kuerzel, wert, wissen_kategorie!inner(art)')
+      .eq('wissen_kategorie.art', 'kurz')
+      .not('kuerzel', 'is', null)
+      .is('archiviert_am', null);
+    if (error) return json({ error: error.message }, 500);
+    return json({
+      kuerzel: (data || [])
+        .filter((e: any) => String(e.kuerzel).trim() && e.wert != null)
+        .map((e: any) => ({ kuerzel: String(e.kuerzel).trim(), wert: e.wert })),
+    });
+  }
+
   // OAuth-Token-Austausch/-Erneuerung fuer die Erweiterung (Authorization-Code
   // + PKCE + Refresh-Token statt des frueheren Implicit-Grant-Tokens, das nach
   // ~1h ohne Erneuerungsmoeglichkeit ablief und ein woechentliches "Mit Google

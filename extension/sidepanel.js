@@ -26,8 +26,8 @@ const GOOGLE_SCOPES = [
   'https://www.googleapis.com/auth/drive.readonly',
   'https://www.googleapis.com/auth/gmail.readonly',
 ];
-const EDGE_FUNCTION_URL = 'https://oalapdxinqlnzwxhyuzy.supabase.co/functions/v1/dokumenten-suche';
-const SUPABASE_ANON_KEY = 'sb_publishable_DoeD4uEnwemmnFu4AxE9uw_5lmQYc5P';
+// EDGE_FUNCTION_URL, SUPABASE_ANON_KEY, speichereToken, holeGespeichertenToken
+// und ladeKuerzel kommen aus google-token.js (auch vom Hintergrund genutzt).
 
 const $ = (id) => document.getElementById(id);
 
@@ -71,46 +71,6 @@ function parseCodeAusRedirect(redirectUrl) {
   return code;
 }
 
-// Speichert Access-Token + Ablaufzeit, behaelt einen vorhandenen Refresh-Token
-// bei, falls die aktuelle Antwort (z.B. eine reine Erneuerung) keinen neuen
-// mitliefert - Google gibt den Refresh-Token normalerweise nur beim ersten
-// Consent zurueck.
-async function speichereToken({ accessToken, expiresIn, refreshToken }) {
-  const vorhandenes = (await chrome.storage.local.get('googleToken')).googleToken || {};
-  await chrome.storage.local.set({
-    googleToken: {
-      accessToken,
-      ablaufZeit: Date.now() + (Number(expiresIn) || 3600) * 1000,
-      refreshToken: refreshToken || vorhandenes.refreshToken || null,
-    },
-  });
-}
-
-async function holeGespeichertenToken() {
-  const { googleToken } = await chrome.storage.local.get('googleToken');
-  if (!googleToken) return null;
-  // 60 Sekunden Puffer vor dem eigentlichen Ablauf.
-  if (googleToken.ablaufZeit > Date.now() + 60_000) return googleToken.accessToken;
-  if (!googleToken.refreshToken) return null;
-  // Access-Token abgelaufen, aber Refresh-Token vorhanden: im Hintergrund
-  // erneuern statt die/den Mitarbeitende(n) erneut durch die Google-Anmeldung
-  // zu schicken.
-  try {
-    const res = await fetch(EDGE_FUNCTION_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
-      body: JSON.stringify({ oauthAction: 'refresh', refreshToken: googleToken.refreshToken }),
-    });
-    const data = await res.json();
-    if (!res.ok || !data.accessToken) throw new Error(data.error || 'Refresh fehlgeschlagen.');
-    await speichereToken({ accessToken: data.accessToken, expiresIn: data.expiresIn, refreshToken: googleToken.refreshToken });
-    return data.accessToken;
-  } catch (e) {
-    console.error('Automatische Token-Erneuerung fehlgeschlagen:', e);
-    return null;
-  }
-}
-
 function verbinden() {
   $('connectStatus').textContent = 'Google-Anmeldefenster öffnet sich …';
   $('connectStatus').className = 'status-line';
@@ -140,13 +100,43 @@ async function verbindenAblauf() {
   if (!res.ok) throw new Error(data.error || `Fehler ${res.status}`);
   if (!data.accessToken) throw new Error('Kein accessToken erhalten.');
   await speichereToken(data);
+  ladeKuerzel().then(zeigeKuerzelStand);
   zeigeSuche();
 }
 
 function zeigeSuche() {
   $('connectBox').hidden = true;
   $('searchBox').hidden = false;
+  $('kuerzelBox').hidden = false;
   ladeDokumentarten();
+  zeigeKuerzelStand();
+}
+
+// ---------------------------------------------------------------------------
+// Kuerzel (wie Text Blaze): die eigentliche Ersetzung macht kuerzel-content.js
+// auf jeder Seite, geladen werden sie im Hintergrund (background.js, alle 15
+// Minuten). Hier nur Anzeige "x Kürzel geladen" + Knopf zum sofortigen Laden.
+// ---------------------------------------------------------------------------
+async function zeigeKuerzelStand() {
+  const { kuerzelListe, kuerzelStand } = await chrome.storage.local.get(['kuerzelListe', 'kuerzelStand']);
+  const anzahl = (kuerzelListe || []).length;
+  const el = $('kuerzelStatus');
+  if (kuerzelStand?.fehler) {
+    el.textContent = `Kürzel: ${anzahl} vorhanden, letztes Laden fehlgeschlagen (${kuerzelStand.fehler})`;
+    el.className = 'status-line err';
+  } else {
+    el.textContent = anzahl
+      ? `Kürzel: ${anzahl} aktiv (${(kuerzelListe || []).map((k) => k.kuerzel).join(', ')})`
+      : 'Kürzel: noch keine. Im Nachschlagewerk bei einer Kurzinfo ein Kürzel wie «/mwst» eintragen.';
+    el.className = 'status-line';
+  }
+}
+
+async function kuerzelNeuLaden() {
+  $('kuerzelStatus').textContent = 'Kürzel werden geladen …';
+  $('kuerzelStatus').className = 'status-line';
+  await ladeKuerzel();
+  zeigeKuerzelStand();
 }
 
 // ---------------------------------------------------------------------------
@@ -1021,6 +1011,7 @@ async function suchen() {
 
 $('connectBtn').addEventListener('click', verbinden);
 $('searchBtn').addEventListener('click', suchen);
+$('kuerzelNeuBtn').addEventListener('click', kuerzelNeuLaden);
 $('queryInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') suchen(); });
 $('peaxLieferantFeld').addEventListener('keydown', (e) => { if (e.key === 'Enter') suchen(); });
 $('peaxDetailsFeld').addEventListener('keydown', (e) => { if (e.key === 'Enter') suchen(); });
