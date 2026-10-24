@@ -49,7 +49,7 @@ Deno.serve(async (req) => {
       method: 'POST',
       headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
       body: JSON.stringify({
-        model, max_tokens: 700, system: SYSTEM,
+        model, max_tokens: 1500, system: SYSTEM,
         messages: [{ role: 'user', content: `Einträge aus dem Nachschlagewerk:\n\n${kontext}\n\nFrage: ${frage}` }],
       }),
     });
@@ -62,7 +62,10 @@ Deno.serve(async (req) => {
       const ids = new Set(eintraege.map((e: any) => String(e.id)));
       return json({ gefunden: !!r.gefunden, antwort: String(r.antwort || ''), quellen: (r.quellen || []).map(String).filter((i: string) => ids.has(i)), modell: model });
     } catch {
-      return json({ gefunden: true, antwort: text.trim(), quellen: [], modell: model });
+      // unvollständiges JSON (z. B. abgeschnitten): Antwort und gefundene ids einzeln herauslesen
+      const antwort = text.match(/"antwort"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+      const ids = eintraege.map((e: any) => String(e.id)).filter((i: string) => text.includes(i));
+      return json({ gefunden: !/"gefunden"\s*:\s*false/.test(text), antwort: antwort ? JSON.parse(`"${antwort[1]}"`) : text.trim(), quellen: ids, modell: model });
     }
   }
   return json({ error: letzterFehler || 'KI nicht erreichbar.' }, 502);
