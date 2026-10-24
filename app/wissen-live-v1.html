@@ -112,6 +112,11 @@ main.wrap{padding-top:22px;padding-bottom:70px;}
 .lrow .tx .small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .lrow .mt{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end;}
 /* Übersicht als Liste: Titel · Untertitel · neueste Notiz, Foto erst beim Überfahren des Titels */
+[hidden]{display:none !important;}
+.kurzl{margin-bottom:12px;} .lrow.kurz{cursor:default;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr) auto;gap:16px;padding:9px 14px;}
+.lrow.kurz .tt{display:flex;flex-direction:column;min-width:0;} .lrow.kurz .tt b{font-weight:600;color:var(--primary);}
+.lrow.kurz .kw{font-weight:600;font-variant-numeric:tabular-nums;white-space:pre-line;user-select:all;}
+.lrow.kurz .kb{display:flex;gap:6px;}
 .lrow.zl{grid-template-columns:minmax(0,1.1fr) minmax(0,1fr) minmax(0,1.6fr);gap:16px;padding:8px 14px;}
 .lrow.zl .tt{position:relative;min-width:0;} .lrow.zl .tt b{font-weight:600;color:var(--primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;}
 .lrow.zl .ut,.lrow.zl .nz{font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -458,7 +463,8 @@ body.qr nav.subnav{display:none;}
 }
 @media (max-width:620px){
   .lrow .mt{display:none;} .lrow{grid-template-columns:48px minmax(0,1fr);}
-  .lrow.zl{grid-template-columns:minmax(0,1fr);gap:2px;} .lrow.zl .ut{display:none;} .lrow.zl .tt:hover .vorschau{display:none;}
+  .lrow.zl{grid-template-columns:minmax(0,1fr);gap:2px;}
+  .lrow.kurz{grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;} .lrow.kurz .kw{grid-column:1;grid-row:2;} .lrow.kurz .kb{grid-column:2;grid-row:1 / span 2;align-self:center;} .lrow.zl .ut{display:none;} .lrow.zl .tt:hover .vorschau{display:none;}
   .gal{grid-template-columns:repeat(2,minmax(0,1fr));}
   .filterrow .lbl{width:100%;}
   .sec-h,.sec-b{padding-left:12px;padding-right:12px;}
@@ -549,6 +555,9 @@ const ROLLE_LABEL = { admin: 'Admin', buero_team: 'Büro-Team', mitarbeitende: '
 const TYP = { geraet: 'Gerät', produkt: 'Produkt', wissen: 'Wissen' };
 // Art (Gerät / Produkt / Wissen) kommt aus der Kategorie (Einstellungen)
 const artVon = katId => S.kats.find(k => k.id === katId)?.art || 'geraet';
+// Typ des Eintrags (Datenbank kennt geraet / produkt / wissen): Kurzinfo zählt als wissen
+const typVon = katId => artVon(katId) === 'kurz' ? 'wissen' : artVon(katId);
+const istKurz = e => katVon(e)?.art === 'kurz';
 const alleStichwoerter = () => unik(S.eintraege.flatMap(e => e.tags || [])).sort((a, b) => a.localeCompare(b, 'de'));
 const RTYP = { maschine: 'Maschine', fahrzeug: 'Fahrzeug', anhaenger: 'Anhänger' };
 
@@ -597,6 +606,7 @@ const ICONS = {
   ul:'<path d="M9 6h12M9 12h12M9 18h12"/><circle cx="4.5" cy="6" r="1"/><circle cx="4.5" cy="12" r="1"/><circle cx="4.5" cy="18" r="1"/>',
   ol:'<path d="M10 6h11M10 12h11M10 18h11"/><path d="M4 4.5h1.5V9M4 9h3"/><path d="M4 14.5a1.5 1.5 0 0 1 3 .5c0 1-3 2-3 4h3"/>',
   upload:'<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v4h16v-4"/>',
+  copy:'<rect x="9" y="9" width="11" height="11" rx="1.5"/><path d="M5 15V5a1.5 1.5 0 0 1 1.5-1.5H15"/>',
   trash:'<path d="M4 7h16"/><path d="M9 7V4h6v3"/><path d="M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/>',
   clip:'<path d="M20 11.5l-7.6 7.6a5 5 0 0 1-7.1-7.1L13 4.3a3.3 3.3 0 0 1 4.7 4.7l-7.7 7.7a1.7 1.7 0 0 1-2.4-2.4l7.1-7.1"/>',
   archive:'<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v11h14V9M10 13h4"/>',
@@ -829,12 +839,24 @@ function passt(e){
   if(!S.q) return true;
   const xs = exVon(e);
   const steck = [...(e.steckbrief || []), ...xs.flatMap(x => [...(x.steckbrief || []), ...(istBuero() ? x.verwaltung || [] : [])])].map(r => r.label + ' ' + r.wert + ' ' + (r.hinweis || ''));
-  const hay = [e.titel, e.untertitel, e.geraeteart, ...xs.flatMap(x => [x.nummer, x.zustaendig]), katName(e.kategorie_id), ...e.tags, ...steck,
+  const hay = [e.titel, e.untertitel, e.wert, e.geraeteart, ...xs.flatMap(x => [x.nummer, x.zustaendig]), katName(e.kategorie_id), ...e.tags, ...steck,
     (e.anwendung_html || '').replace(/<[^>]+>/g, ' '), (e.sicherheit_html || '').replace(/<[^>]+>/g, ' '), ...psaText(e)].join(' ').toLowerCase();
   return S.q.toLowerCase().split(/\s+/).filter(Boolean).every(t => hay.includes(t));
 }
+// Kurzinfo: keine Detailseite – Titel, Wert (zum Kopieren) und kurzer Hinweis direkt in der Übersicht
+const kurzZeile = e => `<div class="lrow kurz"><span class="tt"><b>${esc(e.titel)}</b>${e.untertitel ? `<span class="small muted">${esc(e.untertitel)}</span>` : ''}</span>
+  <span class="kw">${esc(e.wert || '')}</span>
+  <span class="kb">${e.wert ? `<button class="xbtn" data-act="kopieren" data-v="${esc(e.wert)}" title="Kopieren">${ic('copy')}</button>` : ''}${istBuero() ? `<button class="xbtn" data-act="kurzEdit" data-id="${e.id}" title="Bearbeiten">${ic('edit')}</button>` : ''}</span></div>`;
+function kurzDialog(e){
+  ovl(`<h3>Kurzinfo bearbeiten</h3>
+    <label class="fld">Titel<input type="text" id="kzTitel" value="${esc(e.titel)}"></label>
+    <label class="fld">Wert<textarea id="kzWert" rows="2">${esc(e.wert || '')}</textarea></label>
+    <label class="fld">Hinweis <span class="small muted">(freiwillig, z. B. «gültig ab 2026»)</span><input type="text" id="kzHinweis" value="${esc(e.untertitel || '')}"></label>
+    <div class="ovlbtns"><button class="btn btn-ghost" data-act="kurzArchiv" data-id="${e.id}" style="margin-right:auto;color:var(--danger)">${ic('archive')}Archivieren</button>
+      <button class="btn btn-ghost" data-act="ovlZu">Abbrechen</button><button class="btn btn-primary" data-act="kurzSave" data-id="${e.id}">Speichern</button></div>`);
+}
 function vSuche(){
-  const res = S.eintraege.filter(passt);
+  const alle = S.eintraege.filter(passt), kurz = alle.filter(istKurz), res = alle.filter(e => !istKurz(e));
   if(S.mode !== 'foto' && !S.alleNotizen && !S.notizenLaden){ S.notizenLaden = true; ladeAlleNotizen(); }
   const chips = (act, aktiv, liste) => `<button class="fchip ${!aktiv?'on':''}" data-act="${act}" data-v="">Alle</button>`
     + liste.map(([v,n]) => `<button class="fchip ${aktiv===v?'on':''}" data-act="${act}" data-v="${v}">${esc(n)}</button>`).join('');
@@ -844,13 +866,14 @@ function vSuche(){
     ${Object.entries(RUBRIK).map(([r, n]) => { const ks = S.kats.filter(k => (k.art || 'geraet') === r && (k.id === S.kat || S.eintraege.some(e => e.kategorie_id === k.id)));
       return ks.length ? `<div class="filterrow"><span class="lbl">${n}</span>${ks.map(k => `<button class="fchip ${S.kat === k.id ? 'on' : ''}" data-act="kat" data-v="${S.kat === k.id ? '' : k.id}">${esc(k.name)}</button>`).join('')}</div>` : ''; }).join('')}
   </div>
+  ${kurz.length ? `<div class="card lst kurzl">${kurz.map(kurzZeile).join('')}</div>` : ''}
   <div class="reshead"><span class="small muted">${res.length} ${res.length === 1 ? 'Eintrag' : 'Einträge'}${S.kat ? ` in «${esc(katName(S.kat))}» <button class="addrow small" data-act="kat" data-v="">alle zeigen</button>` : ''}</span>
     <span class="resakt">${istBuero() ? `<button class="btn btn-ghost btn-sm" data-act="neu">${ic('plus')}Neuer Eintrag</button>` : ''}
     <div class="viewtg" role="group" aria-label="Ansicht">
       <button class="${S.mode==='foto'?'on':''}" data-act="mode" data-v="foto" title="Fotos">${ic('grid')}</button>
       <button class="${S.mode==='liste'?'on':''}" data-act="mode" data-v="liste" title="Liste">${ic('rows')}</button>
     </div></span></div>
-  ${!res.length ? `<div class="card empty">${S.eintraege.length ? 'Nichts gefunden. Anderes Stichwort versuchen oder Filter auf «Alle» stellen.' : 'Noch keine Einträge.'}</div>`
+  ${!res.length ? (kurz.length ? '' : `<div class="card empty">${S.eintraege.length ? 'Nichts gefunden. Anderes Stichwort versuchen oder Filter auf «Alle» stellen.' : 'Noch keine Einträge.'}</div>`)
     : S.mode === 'foto'
       ? `<div class="gal">${res.map(e => `<button class="gcard" data-act="open" data-id="${e.id}" title="${esc(e.titel)}"><div class="ph">${bildHTML(e)}</div><div class="t">${esc(e.titel)}${exVon(e).length > 1 ? ` <span class="small muted">× ${exVon(e).length}</span>` : ''}</div></button>`).join('')}</div>`
       : `<div class="card lst zl">${res.map(e => `<button class="lrow zl" data-act="open" data-id="${e.id}">
@@ -1694,7 +1717,7 @@ function lisPasst(e, f){
   if(f.stw?.length && !f.stw.some(s => (e.tags || []).includes(s))) return false;
   if(f.art && (e.geraeteart || '').toLowerCase() !== f.art.toLowerCase()) return false;
   if(f.q){ const xs = exVon(e);
-    const hay = [e.titel, e.untertitel, e.geraeteart, ...e.tags, ...xs.flatMap(x => [x.nummer, x.zustaendig]), ...[...(e.steckbrief || []), ...xs.flatMap(x => x.steckbrief || [])].map(r => r.label + ' ' + r.wert)].join(' ').toLowerCase();
+    const hay = [e.titel, e.untertitel, e.wert, e.geraeteart, ...e.tags, ...xs.flatMap(x => [x.nummer, x.zustaendig]), ...[...(e.steckbrief || []), ...xs.flatMap(x => x.steckbrief || [])].map(r => r.label + ' ' + r.wert)].join(' ').toLowerCase();
     if(!f.q.toLowerCase().split(/\s+/).filter(Boolean).every(t => hay.includes(t))) return false; }
   return true;
 }
@@ -1933,6 +1956,7 @@ function neuDialog(){
   ovl(`<h3>Neuer Eintrag</h3>
     <label class="fld">Titel<input type="text" id="nTitel" placeholder="z. B. Montagekleber Naturstein auf Metall"></label>
     <label class="fld">Kategorie<select id="nKat">${S.kats.map(k => `<option value="${k.id}" ${k.id === S.kat ? 'selected' : ''}>${esc(k.name)}</option>`).join('')}</select></label>
+    <label class="fld" id="nWertFld" ${artVon(S.kat) === 'kurz' ? '' : 'hidden'}>Wert <span class="small muted">(steht direkt in Liste und Suche)</span><textarea id="nWert" rows="2" placeholder="z. B. CHE-109.466.032"></textarea></label>
     <div class="ovlbtns"><button class="btn btn-ghost" data-act="ovlZu">Abbrechen</button><button class="btn btn-primary" data-act="neuSave">Anlegen</button></div>`);
 }
 // Zusammenlegen: anderer Eintrag (mit allen Exemplaren) kommt in diesen
@@ -2036,6 +2060,7 @@ document.addEventListener('change', ev => {
   if(ev.target.dataset?.stf){ stFeld(ev.target); }
   if(S.lEdit && (ev.target.dataset?.lsp != null || ev.target.id === 'lArt' || ev.target.id === 'lQ')){ lisLesen(); render(); }
   if(ev.target.dataset?.stneu){ stNeu(ev.target); }
+  if(ev.target.id === 'nKat' && $('nWertFld')) $('nWertFld').hidden = artVon(ev.target.value) !== 'kurz';
   if(ev.target.dataset?.inf){ infFeld(ev.target); }
   if(ev.target.dataset?.mmart) feldSetzen(ev.target.dataset.mmart, { art: ev.target.value }, ev.target);
   if(ev.target.dataset?.mmpro) feldSetzen(ev.target.dataset.mmpro, { pro_stueck: ev.target.checked }, ev.target);
@@ -2068,7 +2093,7 @@ document.addEventListener('click', async ev => {
   else if(a === 'editCancel'){ S.edit = null; render(); }
   else if(a === 'editSave'){
     const f = {
-      titel: $('fTitel').value.trim(), untertitel: $('fUntertitel').value.trim() || null, typ: artVon($('fKat').value),
+      titel: $('fTitel').value.trim(), untertitel: $('fUntertitel').value.trim() || null, typ: typVon($('fKat').value),
       kategorie_id: $('fKat').value || null, geraeteart: $('fArt').value.trim() || null,
       gehoert_zu_id: $('fGehoert').value || null,
       tags: $('fTags').value.split(',').map(x => x.trim()).filter(Boolean),
@@ -2159,6 +2184,13 @@ document.addEventListener('click', async ev => {
     for(const f of files){ toast(`«${f.name}» wird hochgeladen …`); await hochladen(f, e.id, 'sicherheit', null); }
     await signiere(S.det.dateien.flatMap(x => [x.storage_pfad, x.vorschau_pfad]).filter(Boolean)); render();
   });
+  else if(a === 'kopieren'){ try{ await navigator.clipboard.writeText(d.v); toast('Kopiert: ' + d.v); }catch(err){ toast('Kopieren nicht möglich – Wert markieren und kopieren.', true); } }
+  else if(a === 'kurzEdit') kurzDialog(byId(d.id));
+  else if(a === 'kurzSave'){ const t = $('kzTitel').value.trim(); if(!t) return toast('Titel fehlt.', true);
+    if(await speichereEintrag(d.id, { titel: t, wert: $('kzWert').value.trim() || null, untertitel: $('kzHinweis').value.trim() || null })){ ovlZu(); toast('Gespeichert'); render(); } }
+  else if(a === 'kurzArchiv'){ const k = byId(d.id); ovlZu(); bestaetige(`«${k.titel}» archivieren?`, 'Archivieren', async () => {
+    const { error } = await sb.from('wissen_eintrag').update({ archiviert_am: new Date().toISOString() }).eq('id', k.id); if(error) return fehler(error, 'Archivieren');
+    S.eintraege = S.eintraege.filter(x => x.id !== k.id); render(); toast('Archiviert'); }); }
   else if(a === 'linkNeu') ovl(`<h3>Link hinzufügen</h3>
     <label class="fld">Adresse<input type="text" id="lnUrl" placeholder="https://…"></label>
     <label class="fld">Bezeichnung <span class="small muted">(freiwillig)</span><input type="text" id="lnTitel" placeholder="z. B. Hersteller-Anleitung"></label>
@@ -2233,7 +2265,7 @@ document.addEventListener('click', async ev => {
   else if(a === 'katArt'){ const k = S.kats.find(x => x.id === S.katDetail), es = S.eintraege.filter(x => x.kategorie_id === k.id);
     const setzen = async () => {
       const r = await sb.from('wissen_kategorie').update({ art: d.v }).eq('id', k.id); if(r.error) return fehler(r.error, 'Speichern');
-      if(es.length){ const r2 = await sb.from('wissen_eintrag').update({ typ: d.v }).eq('kategorie_id', k.id); if(r2.error) return fehler(r2.error, 'Speichern'); es.forEach(x => x.typ = d.v); }
+      if(es.length){ const r2 = await sb.from('wissen_eintrag').update({ typ: d.v === 'kurz' ? 'wissen' : d.v }).eq('kategorie_id', k.id); if(r2.error) return fehler(r2.error, 'Speichern'); es.forEach(x => x.typ = d.v === 'kurz' ? 'wissen' : d.v); }
       k.art = d.v; toast('Gespeichert'); render(); };
     if(es.length && (k.art || 'geraet') === 'geraet' && d.v !== 'geraet') bestaetige(`Rubrik auf «${RUBRIK[d.v]}» ändern?`, 'Ändern', setzen,
       `Die ${es.length} Einträge dieser Kategorie zeigen dann keine Exemplare, QR-Etiketten und Service mehr an. Die Daten bleiben gespeichert und erscheinen wieder, wenn du zurück auf «Gerät» stellst.`);
@@ -2296,10 +2328,12 @@ document.addEventListener('click', async ev => {
   else if(a === 'neu') neuDialog();
   else if(a === 'neuSave'){
     const titel = $('nTitel').value.trim(); if(!titel) return toast('Titel fehlt.', true);
-    const { data, error } = await sb.from('wissen_eintrag').insert({ titel, typ: artVon($('nKat').value), kategorie_id: $('nKat').value || null, erstellt_von: S.userId }).select().single();
+    const { data, error } = await sb.from('wissen_eintrag').insert({ titel, typ: typVon($('nKat').value), kategorie_id: $('nKat').value || null, wert: $('nWert')?.value.trim() || null, erstellt_von: S.userId }).select().single();
     if(error) return fehler(error, 'Anlegen');
     { const { data: x, error: e2 } = await sb.from('wissen_exemplar').insert({ eintrag_id: data.id, sortierung: 10 }).select().single(); if(e2) fehler(e2, 'Exemplar'); else S.exemplare.push(x); }
-    S.eintraege.push(data); ovlZu(); await oeffne(data.id); S.edit = JSON.parse(JSON.stringify(data)); render();
+    S.eintraege.push(data); ovlZu();
+    if(istKurz(data)){ toast('Kurzinfo angelegt'); render(); return; }
+    await oeffne(data.id); S.edit = JSON.parse(JSON.stringify(data)); render();
   }
   else if(a === 'ovlZu') ovlZu();
   else if(a === 'ovlOk'){ const cb = bestaetigenCb; bestaetigenCb = null; ovlZu(); if(cb) await cb(); }
