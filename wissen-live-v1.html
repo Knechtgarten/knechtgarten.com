@@ -377,6 +377,7 @@ button.lbstatus{cursor:pointer;} .lbstatus .i{width:12px;height:12px;stroke-widt
 .lbknoepfe{grid-column:1 / -1;display:flex;gap:6px;flex-wrap:wrap;} .lbknoepfe .btn{display:inline-flex;align-items:center;gap:5px;}
 .lbform .lbstwahl{grid-column:span 2;display:flex;flex-direction:column;gap:3px;} .lbstknoepfe{display:flex;gap:4px;flex-wrap:wrap;align-items:center;min-height:30px;}
 .lbstatus.lbwahl{background:#fff;border-color:var(--line);color:var(--muted);} .lbstatus.lbwahl.ok.on{background:var(--primary);border-color:var(--primary);color:#fff;} .lbstatus.lbwahl.aus.on{background:var(--muted);border-color:var(--muted);color:#fff;}
+.lbneuknopf{grid-column:span 2;display:flex;align-items:flex-end;}
 .lbfuss{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-top:4px;}
 .lbz .lbst{display:flex;align-items:center;gap:6px;} .lbstwrap{position:relative;} .lbicons{margin-left:auto;display:flex;gap:4px;} .kg-ibtn-platz{display:inline-block;width:24px;}
 .lbstatus{min-width:118px;justify-content:center;}
@@ -1208,8 +1209,9 @@ function logZeile(e, x, z, bu){
       ${istAus ? '' : opt('aus', ic('x') + 'Übersprungen')}
       ${r && geplant ? opt('offen', 'Offen') : ''}</div>` : '';
   const statusEl = bu ? `<button class="lbstatus ${st[0]}" data-act="lbMenu" data-k="${z.k}" data-x="${x.id}" title="${st[2] || 'Status ändern'}">${st[1]}</button>` : `<span class="lbstatus ${st[0]}" title="${st[2]}">${st[1]}</span>`;
-  const icons = bu ? `<span class="lbicons"><button class="kg-ibtn" data-act="lbAuf" data-k="${z.k}" data-x="${x.id}" title="Bearbeiten (Datum, Art, Info, Stand)">${ic('edit')}</button>
-      ${r ? `<button class="kg-ibtn danger" data-act="erlDel" data-id="${r.id}" title="Löschen">${ic('trash')}</button>` : '<span class="kg-ibtn-platz"></span>'}</span>` : '';
+  // Stift (auf/zu, dunkelblau = offen) und Abfalleimer nur bei bestehenden Einträgen; geplante Zeilen ändert man über das Status-Menü
+  const icons = bu ? `<span class="lbicons">${r ? `<button class="kg-ibtn ${S.lbAuf === z.k ? 'an' : ''}" data-act="lbAuf" data-k="${z.k}" data-x="${x.id}" title="${S.lbAuf === z.k ? 'Schliessen' : 'Bearbeiten (Datum, Art, Info, Stand)'}">${ic('edit')}</button>
+      <button class="kg-ibtn danger" data-act="erlDel" data-id="${r.id}" title="Löschen">${ic('trash')}</button>` : '<span class="kg-ibtn-platz"></span><span class="kg-ibtn-platz"></span>'}</span>` : '';
   return `<div class="lbz ${r ? '' : 'geplant'} ${S.lbAuf === z.k ? 'auf' : ''}"><span class="lbd">${datum}</span><span class="lba">${esc(r ? r.art : s.art || 'Service')}</span>
     <span class="lbi">${esc(r ? r.arbeit : s.arbeit)}${r?.bemerkung ? ` <span class="muted">· ${esc(r.bemerkung)}</span>` : ''}</span><span class="lbs">${esc(r?.stand || '')}</span>
     <span class="lbst"><span class="lbstwrap">${statusEl}${menuHTML}</span>${icons}</span></div>
@@ -1233,21 +1235,29 @@ async function lbSetzen(x, k, v){
   }
   S.lbMenu = null; toast(v === 'ok' ? 'Erledigt' : v === 'aus' ? 'Übersprungen' : 'Wieder offen'); render();
 }
+// Eingabe unter der Zeile: bestehender Eintrag = jedes Feld speichert sofort beim Verlassen (Stift schliesst wieder);
+// neuer Eintrag («+ Eintrag») = ein Knopf «Hinzufügen», damit keine leeren Einträge entstehen
 function logForm(x, z){
-  const r = z.r, s = z.s, letzter = S.erledigt.filter(q => q.exemplar_id === x.id && q.stand).sort((a, b) => lbSort(b).localeCompare(lbSort(a)))[0];
-  const st = r && !r.erledigt ? 'aus' : 'ok';
-  // Status direkt in der Statusspalte wählen (nur umschalten, gespeichert wird mit «Speichern»)
-  const stKnopf = (v, t) => `<button type="button" class="lbstatus lbwahl ${v} ${st === v ? 'on' : ''}" data-act="lbStat" data-v="${v}">${t}</button>`;
+  const r = z.r, letzter = S.erledigt.filter(q => q.exemplar_id === x.id && q.stand).sort((a, b) => lbSort(b).localeCompare(lbSort(a)))[0];
+  const a = f => r ? `data-lbf="${f}" data-id="${r.id}"` : `id="lb${f[0].toUpperCase() + f.slice(1)}"`;
   return `<div class="lbform">
-    <label class="fld">Datum<input type="date" id="lbDatum" value="${esc(r?.datum || heuteISO())}"></label>
-    <label class="fld">Art<select id="lbArt">${SV_ARTEN.map(a => `<option ${(r?.art || s?.art || 'Service') === a ? 'selected' : ''}>${a}</option>`).join('')}</select></label>
-    <label class="fld lbbreit">Info<input type="text" id="lbInfo" value="${esc(r ? r.arbeit : s ? s.arbeit : '')}" placeholder="z. B. Ölwechsel, km-Kontrolle, MFK"></label>
-    <label class="fld">Stand km / h<input type="text" id="lbStand" value="${esc(r?.stand || '')}" placeholder="${esc(letzter ? 'zuletzt ' + letzter.stand : 'z. B. 71\'490 km')}"></label>
-    <div class="fld lbstwahl"><span>Status</span><span class="lbstknoepfe">${stKnopf('ok', ic('check') + 'Erledigt')}${stKnopf('aus', ic('x') + 'Übersprungen')}</span></div>
-    <div class="lbknoepfe">${r ? `<button class="btn btn-ghost btn-sm" data-act="erlDel" data-id="${r.id}" style="color:var(--danger)">${ic('trash')}${r.service_id ? 'Zurück auf offen' : 'Löschen'}</button>` : ''}
-      <button class="btn btn-ghost btn-sm" data-act="lbAuf" data-k="" data-x="${x.id}" style="margin-left:auto">Abbrechen</button>
-      <button class="btn btn-primary btn-sm" data-act="lbSave" data-k="${z.k}" data-x="${x.id}">${ic('check')}Speichern</button></div>
+    <label class="fld">Datum<input type="date" ${a('datum')} value="${esc(r?.datum || (r ? '' : heuteISO()))}"></label>
+    <label class="fld">Art<select ${a('art')}>${SV_ARTEN.map(v => `<option ${(r?.art || 'Service') === v ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
+    <label class="fld lbbreit">Info<input type="text" ${a('info')} value="${esc(r ? r.arbeit : '')}" placeholder="z. B. Ölwechsel, km-Kontrolle, MFK"></label>
+    <label class="fld">Stand km / h<input type="text" ${a('stand')} value="${esc(r?.stand || '')}" placeholder="${esc(letzter ? 'zuletzt ' + letzter.stand : 'z. B. 71\'490 km')}"></label>
+    ${r ? '' : `<div class="lbneuknopf"><button class="btn btn-primary btn-sm" data-act="lbSave" data-k="${z.k}" data-x="${x.id}">${ic('plus')}Hinzufügen</button></div>`}
   </div>`;
+}
+// ein Feld eines bestehenden Eintrags sofort speichern
+async function lbFeld(el){
+  const r = S.erledigt.find(q => q.id === el.dataset.id), f = el.dataset.lbf, v = el.value.trim();
+  if(!r) return;
+  const felder = f === 'info' ? { arbeit: v || r.art } : f === 'stand' ? { stand: v || null } : f === 'art' ? { art: v }
+    : { datum: v || null, ...(!r.service_id && v ? { jahr: +v.slice(0, 4), kw: Math.min(53, isoKw(v)) } : {}) };
+  if(Object.entries(felder).every(([k, w]) => (r[k] ?? null) === w)) return;
+  const { data, error } = await sb.from('wissen_service_erledigt').update(felder).eq('id', r.id).select().single();
+  if(error) return fehler(error, 'Speichern');
+  Object.assign(r, data); toast('Gespeichert');
 }
 function exService(e, x){
   const bu = darfEdit(), zeilen = logZeilen(e, x), n = servicesVon(e).length;
@@ -1255,7 +1265,7 @@ function exService(e, x){
     ${zeilen.length || S.lbAuf === 'n|' + x.id ? `<div class="lbz lbkopf"><span>Datum</span><span>Art</span><span>Info</span><span>Stand km / h</span><span>Status</span></div>` : ''}
     ${zeilen.map(z => logZeile(e, x, z, bu)).join('')}
     ${S.lbAuf === 'n|' + x.id ? logForm(x, { k: 'n|' + x.id }) : ''}
-    ${bu ? `<div class="lbfuss">${S.lbAuf === 'n|' + x.id ? '<span></span>' : `<button class="addrow small" data-act="lbAuf" data-k="n|${x.id}" data-x="${x.id}">${ic('plus')}Eintrag</button>`}
+    ${bu ? `<div class="lbfuss"><button class="addrow small" data-act="lbAuf" data-k="n|${x.id}" data-x="${x.id}">${ic(S.lbAuf === 'n|' + x.id ? 'x' : 'plus')}Eintrag</button>
       <button class="addrow small" data-act="svPlan">${ic('cal')}Serviceplan bearbeiten${n ? ` (${n} ${n === 1 ? 'Arbeit' : 'Arbeiten'})` : ''}</button></div>` : ''}
   </div>`;
 }
@@ -2453,6 +2463,7 @@ document.addEventListener('change', ev => {
   if(ev.target.dataset?.inf){ infFeld(ev.target); }
   if(ev.target.dataset?.xnotiz) xNotizSpeichern(ev.target);
   if(ev.target.id === 'svfTyp'){ svfMerken(); svForm(); }
+  if(ev.target.dataset?.lbf) lbFeld(ev.target);
   if(ev.target.dataset?.fname) feldUmbenennen(ev.target);
   if(ev.target.dataset?.fart) feldAendern(ev.target.dataset.fart, { art: ev.target.value }, true);
   if(ev.target.dataset?.feinh) feldAendern(ev.target.dataset.feinh, { einheit: ev.target.value.trim() || null });
@@ -2539,7 +2550,7 @@ document.addEventListener('click', async ev => {
   else if(a === 'planHaken'){ const r = planerVon(exAktiv(e)); await planSetzen(!(r && r.aktiv)); }
   else if(a === 'svPlan') planFenster();
   else if(a === 'planZu'){ S.planOvl = false; ovlZu(); }
-  else if(a === 'lbAuf'){ S.lbMenu = null; S.lbAuf = d.k || null; render(); document.querySelector('#lbDatum')?.focus(); }
+  else if(a === 'lbAuf'){ S.lbMenu = null; S.lbAuf = d.k && S.lbAuf !== d.k ? d.k : null; render(); document.querySelector('.lbform input')?.focus(); }
   else if(a === 'lbSave') await lbSpeichern(exAktiv(e), d.k);
   else if(a === 'lbMenu'){ S.lbMenu = S.lbMenu === d.k ? null : d.k; S.lbAuf = null; render(); }
   else if(a === 'lbSet') await lbSetzen(exAktiv(e), d.k, d.v);
