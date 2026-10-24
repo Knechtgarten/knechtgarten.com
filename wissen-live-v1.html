@@ -81,6 +81,8 @@ main.wrap{padding-top:22px;padding-bottom:70px;}
 .searchbox .i{color:var(--muted);width:20px;height:20px;}
 .filterrow{display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
 .resakt{display:flex;gap:10px;align-items:center;}
+.ehead .acts .segm.modus button{display:inline-flex;align-items:center;gap:5px;}
+.ehead .acts .segm.modus .i{width:14px;height:14px;}
 .katart{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px;}
 .filterrow .lbl{font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);width:78px;flex:none;}
 .fchip{all:unset;cursor:pointer;border:1px solid var(--line);background:#fff;border-radius:20px;padding:4px 11px;font-size:12.5px;}
@@ -536,6 +538,7 @@ const ICONS = {
   back:'<path d="M15 18l-6-6 6-6"/>',
   chev:'<path d="M6 9l6 6 6-6"/>',
   label:'<path d="M3 12V5a2 2 0 0 1 2-2h7l9 9-9 9-9-9z"/><circle cx="8" cy="8" r="1.5"/>',
+  eye:'<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
   edit:'<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
   check:'<path d="M5 12.5l4.5 4.5L19 7.5"/>',
   x:'<path d="M6 6l12 12M18 6L6 18"/>',
@@ -615,12 +618,14 @@ const S = {
   kats: [], bereiche: [], merkmale: [], mmKat: '', eintraege: [], exemplare: [], service: [], erledigt: [], lieferanten: [], benutzer: {}, planer: [],
   view: 'suche', eid: null, xid: null, det: null, qr: false,
   q: '', kat: lies('kat', null), mode: lies('mode', 'foto'),
-  open: new Set(), edit: null, kvNeu: null, ask: null, svE: false, svBis: 0, svf: null, anl: new Set(),
+  open: new Set(), edit: null, bearb: false, kvNeu: null, ask: null, svE: false, svBis: 0, svf: null, anl: new Set(),
   listen: [], lid: null, lEdit: null, lsort: null, lsortDir: 1, alleNotizen: null,
   sel: new Set(), used: new Set(), fmt: lies('fmt', '8'), foto: false, pickQ: '',
 };
 const urls = new Map();   // storage_pfad -> signierter Link
 const istBuero = () => S.buero;
+// Bearbeiten nur fürs Büro und nur im Modus «Bearbeiten»; sonst ruhige Ansicht (auch Mitarbeitende und QR-Scan)
+const darfEdit = () => darfEdit() && S.bearb;
 const byId = id => S.eintraege.find(e => e.id === id);
 const katName = id => S.kats.find(k => k.id === id)?.name || '';
 const berName = id => S.bereiche.find(b => b.id === id)?.name || '';
@@ -845,6 +850,8 @@ const sichDocs = (e, d) => d.dateien.filter(x => x.bereich === 'sicherheit' && !
 // Arbeitssicherheit hat Inhalt (dann rot hervorgehoben, solange zugeklappt)
 const sichInhalt = e => { const d = S.det && S.det.id === e.id ? S.det : null; return !!(e.psa?.length || (e.sicherheit_html || '').replace(/<[^>]+>/g, '').trim() || (d && sichDocs(e, d).length)); };
 const allgDocs = (e, d) => d.dateien.filter(x => x.bereich === 'dokument' && !x.exemplar_id && x.storage_pfad !== e.titelfoto_pfad);
+// gibt es eine Notiz mit Text (x = null: allgemeine Notiz des Eintrags)
+const notizHat = (e, x) => !!S.det?.notizen.some(n => n.eintrag_id === e.id && (x ? n.exemplar_id === x.id : !n.exemplar_id) && ohneHtml(n.html));
 function hatInhalt(e, k){
   const d = S.det && S.det.id === e.id ? S.det : null;
   return ({
@@ -854,13 +861,13 @@ function hatInhalt(e, k){
     kontakte: !!d?.kontakte.length,
     docs: !!d && allgDocs(e, d).length > 0,
     sicher: !!(e.psa?.length || (e.sicherheit_html || '').replace(/<[^>]+>/g, '').trim() || (d && sichDocs(e, d).length)),
-    notizen: true,
+    notizen: notizHat(e, null),
   })[k];
 }
 // Büro sieht auch leere Abschnitte (zum Befüllen, unten angehängt), sonst nur solche mit Inhalt
 function hatSec(e, k){
   if(k === 'service' && e.typ !== 'geraet') return false;
-  return (istBuero() && !S.qr) || hatInhalt(e, k);
+  return (darfEdit()) || hatInhalt(e, k);
 }
 function zaehl(e, k){
   const d = S.det && S.det.id === e.id ? S.det : null;
@@ -906,17 +913,17 @@ function vEintrag(){
         ${geraet ? `<span>Anzahl <b>${xs.length}</b></span>` : ''}
         </div>
       <div class="acts">
-        ${istBuero() ? `<button class="btn btn-ghost" data-act="edit">${ic('edit')}Bearbeiten</button>` : ''}
+        ${istBuero() ? `<span class="segm modus"><button class="${S.bearb ? '' : 'on'}" data-act="modus" data-v="0">${ic('eye')}Anzeigen</button><button class="${S.bearb ? 'on' : ''}" data-act="modus" data-v="1">${ic('edit')}Bearbeiten</button></span>${S.bearb ? `<button class="btn btn-ghost btn-sm" data-act="edit">${ic('edit')}Titel, Kategorie, Stichwörter</button>` : ''}` : ''}
         <button class="btn btn-ghost" data-act="allopen" style="margin-left:auto">${ic('chev')}${alle ? 'Alle schliessen' : 'Alle öffnen'}</button>
       </div>
     </div>`;
   return `${S.qr ? (istBuero() ? `<a class="back" href="${location.pathname}#e-${e.id}${x ? '.' + x.id : ''}" style="text-decoration:none">${ic('back')}Zur Übersicht</a>` : '')
       : `<button class="back" data-act="zurueck">${ic('back')}Zurück</button>`}
   <div class="card ehead">
-    <div class="ph">${bildHTML(e, true)}${istBuero() && !S.qr ? `<button class="btn btn-ghost btn-sm fotobtn" data-act="titelfoto">${ic('camera')}${e.titelfoto_pfad ? 'Ändern' : 'Foto'}</button>` : ''}</div>
+    <div class="ph">${bildHTML(e, true)}${darfEdit() ? `<button class="btn btn-ghost btn-sm fotobtn" data-act="titelfoto">${ic('camera')}${e.titelfoto_pfad ? 'Ändern' : 'Foto'}</button>` : ''}</div>
     ${kopf}
   </div>
-  ${istBuero() && !S.qr ? merkmalListe() : ''}
+  ${darfEdit() ? merkmalListe() : ''}
   ${S.qr ? qrInhalt(e, xs, x) : `${geraet ? exBlock(e, xs, x) : ''}
   ${geraet ? `<div class="allg-h"><h3>Allgemein</h3><span class="small muted">gilt für ${xs.length > 1 ? 'alle ' + xs.length + ' Exemplare' : 'alle Exemplare'}</span></div>` : ''}
   ${secs.map(s => secHTML(e, s)).join('')}`}`;
@@ -930,7 +937,7 @@ function qrInhalt(e, xs, x){
   // Service wird auf dem Handy nur angezeigt, abgehakt wird am PC
   return `${reihe.map(k => {
       if(k.startsWith('x_')){
-        if(!x || (k === 'x_service' && !(mitService(e) && servicesVon(e).length))) return '';
+        if(!x || (k === 'x_service' && !(mitService(e) && servicesVon(e).length)) || (k === 'x_notizen' && !notizHat(e, x))) return '';
         return `<div class="card qrkarte">${k === 'x_angaben' ? exAngaben(e, x) : k === 'x_service' ? exService(e, x) : exNotizen(e, x)}</div>`;
       }
       const s = SECS.find(z => z[0] === k);
@@ -940,7 +947,7 @@ function qrInhalt(e, xs, x){
 
 // Block wie die Pflegekategorien beim Kunden: oben Tabs, darunter Angaben + Service des Exemplars
 function exBlock(e, xs, x){
-  const bu = istBuero() && !S.qr;
+  const bu = darfEdit();
   // ein einziger Knopf zum Eintragen, rechts in der Reiterzeile: mehrere Geräte = «Service alle», sonst bzw. beim QR-Scan nur dieses Gerät
   const nurEins = S.qr || xs.length < 2;
   const svKnopf = mitService(e) && servicesVon(e).length && x ? (n => `<button class="btn ${n ? 'btn-primary' : 'btn-ghost'} btn-sm svalle" data-act="svE" data-v="${nurEins ? 'eins' : 'alle'}" title="${nurEins ? 'Service eintragen' : `Service für alle ${xs.length} Exemplare eintragen`}">${ic('check')}${nurEins ? 'Service eintragen' : 'Service alle'}${n ? ` (${n})` : ''}</button>`)(svOffen(e, nurEins ? [x] : xs)) : '';
@@ -951,7 +958,7 @@ function exBlock(e, xs, x){
   if(!x) return `<div class="exwrap">${tabs}<div class="expanel"><div class="small muted">Noch kein Exemplar erfasst.</div></div></div>`;
   return `<div class="exwrap">${tabs}<div class="expanel">
     ${S.svE ? `<div class="excard voll sveintrag">${svEintragen(e, x)}</div>` : ''}
-    ${reiheVon(katVon(e)).filter(k => k.startsWith('x_') && (k !== 'x_service' || (mitService(e) && servicesVon(e).length))).map(k => k === 'x_angaben' ? `<div class="excard">${exAngaben(e, x)}</div>`
+    ${reiheVon(katVon(e)).filter(k => k.startsWith('x_') && (k !== 'x_service' || (mitService(e) && servicesVon(e).length)) && (k !== 'x_notizen' || darfEdit() || notizHat(e, x))).map(k => k === 'x_angaben' ? `<div class="excard">${exAngaben(e, x)}</div>`
       : k === 'x_service' ? `<div class="excard">${exService(e, x)}</div>` : `<div class="excard voll">${exNotizen(e, x)}</div>`).join('')}
     ${bu ? `<div class="exfuss">${xs.length > 1 ? `<button class="addrow small" data-act="exLoesen">${ic('link')}In eigenen Eintrag herauslösen</button>` : ''}
       <button class="addrow small" data-act="exArchiv" style="color:var(--danger)">${ic('archive')}«${esc(exName(x))}» archivieren</button></div>` : ''}
@@ -959,7 +966,7 @@ function exBlock(e, xs, x){
 }
 // Angaben des Exemplars: Büro ändert direkt in den Feldern (speichert beim Verlassen)
 function exAngaben(e, x){
-  const bu = istBuero() && !S.qr;
+  const bu = darfEdit();
   const res = x.planer_ressource_id && S.planer.find(p => p.id === x.planer_ressource_id);
   const d = S.det && S.det.id === e.id ? S.det : null;
   const docs = d ? d.dateien.filter(f => f.exemplar_id === x.id && f.bereich === 'dokument') : [];
@@ -972,7 +979,7 @@ function exAngaben(e, x){
   return `<div class="exh"><h4>Angaben ${esc(exName(x))}</h4></div>
     ${fixe}
     ${kvTab('xsteck', lesen, bu, 'Was nur dieses Exemplar betrifft: Anschaffungsjahr, Seriennummer, Fahrzeugprüfung, km-Stand …', planZeile)}
-    ${S.qr ? '' : `<div class="acts" style="margin-top:0"><button class="btn btn-ghost btn-sm" data-act="qrKopie" data-v="${QR_BASIS + x.qr_nr}" title="Link kopieren">${ic('link')}knechtgarten.com/g/${x.qr_nr}</button><button class="btn btn-ghost btn-sm" data-act="etikette" data-id="${x.id}">${ic('label')}Etikette</button>
+    ${!darfEdit() ? '' : `<div class="acts" style="margin-top:0"><button class="btn btn-ghost btn-sm" data-act="qrKopie" data-v="${QR_BASIS + x.qr_nr}" title="Link kopieren">${ic('link')}knechtgarten.com/g/${x.qr_nr}</button><button class="btn btn-ghost btn-sm" data-act="etikette" data-id="${x.id}">${ic('label')}Etikette</button>
       <a class="btn btn-ghost btn-sm" href="?qr=${x.qr_nr}" style="text-decoration:none">${ic('phone')}QR-Ansicht</a></div>`}
     ${docs.length ? `<div class="grp-title">Belege</div><div class="docs">${docs.map(f => `<div class="doc">${ic(f.art === 'foto' ? 'image' : 'file')}<div class="grow"><a class="n" href="${esc(urls.get(f.storage_pfad) || '#')}" target="_blank" rel="noopener">${esc(f.name)}</a>
       <div class="small muted">${esc([f.beschreibung, datumCH(f.erstellt_am.slice(0,10))].filter(Boolean).join(' · '))}</div></div></div>`).join('')}</div>` : ''}`;
@@ -995,7 +1002,7 @@ function svZeile(arbeit, s, w, r, bu, mitJahr){
     <td class="nw" style="width:30px">${r && bu ? `<button class="xbtn" data-act="erlDel" data-id="${r.id}" title="Service-Eintrag löschen">${ic('trash')}</button>` : ''}</td></tr>`;
 }
 function exService(e, x){
-  const svs = servicesVon(e), bu = istBuero() && !S.qr;
+  const svs = servicesVon(e), bu = darfEdit();
   const zeilen = svs.flatMap(s => wochen(s).map(w => ({ s, w, r: erledigtIn(x, s, w) }))).sort((a, b) => a.w - b.w || a.s.arbeit.localeCompare(b.s.arbeit, 'de'));
   const rows = zeilen.map(z => svZeile(z.s.arbeit, z.s, z.w, z.r, bu)
     + (S.anl.has(z.s.id) && zeilen.find(y => y.s === z.s) === z ? `<tr><td colspan="6"><div class="anlbox">${z.s.anleitung_html ? `<div class="rte-ed">${z.s.anleitung_html}</div>` : '<div class="small muted">Noch keine Anleitung.</div>'}</div></td></tr>` : '')).join('');
@@ -1075,7 +1082,7 @@ function exNotizen(e, x){
 function notizFeld(e, x, d){
   const n = d.notizen.find(n => x ? n.exemplar_id === x.id : !n.exemplar_id);
   const kopf = n?.geaendert_am ? 'zuletzt geändert ' + datumCH(n.geaendert_am.slice(0, 10)) : x ? 'Nur was dieses Exemplar betrifft' : '';
-  return rte(n ? 'notiz' : 'notizneu', n ? n.id : e.id + (x ? '.' + x.id : ''), n?.html || '', kopf, true);
+  return rte(n ? 'notiz' : 'notizneu', n ? n.id : e.id + (x ? '.' + x.id : ''), n?.html || '', kopf, darfEdit());
 }
 async function notizAnlegen(ed){
   if(!ed.dataset.rte.startsWith('notizneu:')) return;
@@ -1213,14 +1220,14 @@ function secBody(e, k){
   if(k === 'steck'){
     const kinder = S.eintraege.filter(x => x.gehoert_zu_id === e.id);
     const parent = e.gehoert_zu_id && byId(e.gehoert_zu_id);
-    return `${kvTab('steckbrief', e.steckbrief || [], istBuero() && !S.qr, e.typ === 'geraet'
+    return `${kvTab('steckbrief', e.steckbrief || [], darfEdit(), e.typ === 'geraet'
         ? 'Technische Daten, die bei allen Exemplaren gleich sind: Hersteller / Modell, Gewicht, Breite, Höhe, Leistung, Treibstoff … Was pro Maschine verschieden ist (Nummer, Jahrgang, km), gehört oben in die Angaben des Exemplars.'
         : 'Eckdaten zum Nachschlagen, z. B. Hersteller, Verarbeitungszeit, Temperaturbereich, Gebindegrösse …')}
       ${parent ? `<div class="grp-title">Gehört zu</div><div class="anbau"><button data-act="open" data-id="${parent.id}"><span class="chip">${ic('link')}${esc(parent.titel)}</span></button></div>` : ''}
       ${kinder.length ? `<div class="grp-title">Anbaugeräte</div><div class="anbau">${kinder.map(x => `<button data-act="open" data-id="${x.id}"><span class="chip">${ic('link')}${esc(x.titel)}</span></button>`).join('')}</div>` : ''}`;
   }
   if(k === 'sicher'){
-    const bu = istBuero() && !S.qr, an = e.psa || [], docs = d ? sichDocs(e, d) : [];
+    const bu = darfEdit(), an = e.psa || [], docs = d ? sichDocs(e, d) : [];
     return `<div class="grp-title">Schutzausrüstung</div>
       ${bu ? `<div class="psawahl">${PSA.map(([v, t]) => `<button type="button" class="yb" data-act="psaT" data-v="${v}" aria-pressed="${an.includes(v)}">${esc(t)}</button>`).join('')}</div>`
         : an.length ? `<div class="meta">${psaText(e).map(t => `<span class="chip psa">${ic('helm')}${esc(t)}</span>`).join('')}</div>` : '<div class="small muted">Keine besondere Schutzausrüstung.</div>'}
@@ -1233,7 +1240,7 @@ function secBody(e, k){
         : '<div class="small muted">Noch keine.</div>'}
       ${bu ? `<div><button class="addrow" data-act="sichUpload">${ic('upload')}Sicherheitsdatenblatt / Merkblatt hochladen</button> <span class="small muted">PDF oder Foto</span></div>` : ''}`;
   }
-  if(k === 'anw') return rte('anw', e.id, e.anwendung_html || '', 'Kurzanleitung, Arbeitsschritte, Tabellen, Fotos', istBuero() && !S.qr);
+  if(k === 'anw') return rte('anw', e.id, e.anwendung_html || '', 'Kurzanleitung, Arbeitsschritte, Tabellen, Fotos', darfEdit());
   if(k === 'service') return serviceBody(e);
   if(k === 'kontakte'){
     if(!d) return '<div class="small muted">Lädt …</div>';
@@ -1242,9 +1249,9 @@ function secBody(e, k){
           : c.art === 'kunde' ? kundeName(d.kunden.find(x => x.id === c.kunde_id)) : c.name;
         const art = c.art === 'lieferant' ? 'Lieferant' : c.art === 'kunde' ? 'Kunde (Easybill)' : '';
         return `<div class="doc">${ic('user')}<div class="grow"><div class="n">${esc(name)}</div><div class="small muted">${esc([c.rolle, art].filter(Boolean).join(' · '))}</div></div>
-          ${!S.qr ? `<button class="xbtn" data-act="kontaktDel" data-id="${c.id}" title="Entfernen">${ic('trash')}</button>` : ''}</div>`; }).join('')}</div>`
+          ${darfEdit() ? `<button class="xbtn" data-act="kontaktDel" data-id="${c.id}" title="Entfernen">${ic('trash')}</button>` : ''}</div>`; }).join('')}</div>`
       : '<div class="small muted">Noch keine Kontakte.</div>'}
-      ${!S.qr ? `<div class="addlinks"><button class="addrow" data-act="kontaktNeu" data-v="lieferant">${ic('plus')}Lieferant</button>
+      ${darfEdit() ? `<div class="addlinks"><button class="addrow" data-act="kontaktNeu" data-v="lieferant">${ic('plus')}Lieferant</button>
         <button class="addrow" data-act="kontaktNeu" data-v="kunde">${ic('plus')}Kunde</button>
         <button class="addrow" data-act="kontaktNeu" data-v="frei">${ic('plus')}Anderer Kontakt</button></div>` : ''}`;
   }
@@ -1256,9 +1263,9 @@ function secBody(e, k){
         return `<div class="doc">${ic(x.art === 'foto' ? 'image' : x.art === 'video' ? 'video' : 'file')}
           <div class="grow"><a class="n" href="${esc(urls.get(x.storage_pfad) || '#')}" target="_blank" rel="noopener">${esc(x.name)}</a>
           <div class="small muted">${esc([x.beschreibung, datumCH(x.erstellt_am.slice(0,10)), andere.length ? 'auch bei ' + andere.join(', ') : ''].filter(Boolean).join(' · '))}</div></div>
-          ${!S.qr ? `<button class="xbtn" data-act="dateiDel" data-id="${x.id}" title="Löschen">${ic('trash')}</button>` : ''}</div>`; }).join('')}</div>`
+          ${darfEdit() ? `<button class="xbtn" data-act="dateiDel" data-id="${x.id}" title="Löschen">${ic('trash')}</button>` : ''}</div>`; }).join('')}</div>`
       : '<div class="small muted">Noch keine Dokumente.</div>'}
-      ${!S.qr ? `<div><button class="addrow" data-act="docUpload">${ic('upload')}Dokument hochladen</button> <span class="small muted">PDF, Fotos, Videos (max. 50 MB)</span></div>` : ''}`;
+      ${darfEdit() ? `<div><button class="addrow" data-act="docUpload">${ic('upload')}Dokument hochladen</button> <span class="small muted">PDF, Fotos, Videos (max. 50 MB)</span></div>` : ''}`;
   }
   if(k === 'notizen'){
     if(!d) return '<div class="small muted">Lädt …</div>';
@@ -1371,7 +1378,7 @@ function jahreText(s){
   return an.slice(0, 4).join(', ') + (an.length > 4 ? ' …' : '');
 }
 function serviceBody(e){
-  const svs = servicesVon(e), bu = istBuero() && !S.qr;
+  const svs = servicesVon(e), bu = darfEdit();
   const rows = svs.map(s => {
     const ws = [...s.kws].sort((a,b) => a-b);
     return `<tr><td><button class="lnk svarb" data-act="anl" data-id="${s.id}" title="Anleitung auf-/zuklappen">${ic(S.anl.has(s.id) ? 'chev' : 'book', 'mini')}<b>${esc(s.arbeit)}</b></button></td>
@@ -2046,6 +2053,7 @@ document.addEventListener('click', async ev => {
     });
   }
   // Service (Arbeiten + Startwochen gelten fuer alle Exemplare, erledigt pro Exemplar)
+  else if(a === 'modus'){ S.bearb = d.v === '1'; S.edit = null; render(); }
   else if(a === 'anl'){ S.anl.has(d.id) ? S.anl.delete(d.id) : S.anl.add(d.id); render(); }
   else if(a === 'svfNeu'){ S.svf = { kws: [], art: 'normal', aus: [] }; svForm(); $('svfArbeit')?.focus(); }
   else if(a === 'svfEdit'){ const s = S.service.find(x => x.id === d.id);
