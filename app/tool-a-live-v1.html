@@ -239,6 +239,7 @@ main.wrap{padding-top:48px;padding-bottom:60px;}
 .vp-fertig{font:inherit;font-size:11.5px;font-weight:600;border:none;background:var(--primary);color:#fff;border-radius:6px;padding:5px 12px;cursor:pointer;}
 .tbdim.tabellenzelle{width:100%;flex:none;}
 .tabellenberechnet{width:100%;box-sizing:border-box;border:1px dashed var(--line);border-radius:6px;padding:6px 7px;font:inherit;font-size:12.5px;color:var(--muted);background:var(--soft);}
+.tabelleauswahl{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:6px;padding:6px 2px;font:inherit;font-size:11.5px;color:var(--ink);background:#fff;}
 .tabellenzeilendel{width:24px;flex:0 0 auto;color:var(--muted);cursor:pointer;display:flex;align-items:center;justify-content:center;padding-top:8px;}
 .tabellenzeilendel:hover{color:var(--danger);}
 .tabellenaddzeile{font-size:11.5px;font-weight:600;color:var(--primary);display:inline-flex;align-items:center;gap:4px;cursor:pointer;}
@@ -2651,7 +2652,7 @@ async function ladeFormelDaten(otId){
   TABELLEN_SPALTEN = {};
   if(tabellenIds.length){
     const { data: spalten, error: spErr } = await sb.from('eingabefeld_tabelle_spalte')
-      .select('id,eingabefeld_id,name,einheit,reihenfolge,ist_berechnung,ausdruck,zusatztext_moeglich,flaechenformel_moeglich,vorschlagswert,ausgeblendet')
+      .select('id,eingabefeld_id,name,einheit,reihenfolge,ist_berechnung,ausdruck,zusatztext_moeglich,flaechenformel_moeglich,vorschlagswert,ausgeblendet,auswahl_werte')
       .in('eingabefeld_id', tabellenIds).order('reihenfolge');
     if(spErr) throw spErr;
     (spalten || []).forEach(s => { (TABELLEN_SPALTEN[s.eingabefeld_id] ||= []).push(s); });
@@ -3370,6 +3371,16 @@ function renderTabelleZeileZelle(spalte, zeile, tdEl){
     tdEl.innerHTML = `<input type="number" class="tabellenberechnet" data-zeile="${zeile._key}" data-spalte="${spalte.id}" value="${wertObj.wert ?? 0}" readonly tabindex="-1">`;
     return;
   }
+  // Auswahl-Spalte (Tool B: Spaltenart "Auswahl"): Dropdown mit Text, gerechnet wird mit der Zahl
+  if(Array.isArray(spalte.auswahl_werte) && spalte.auswahl_werte.length){
+    if(!spalte.auswahl_werte.some(a => Number(a.wert) === Number(wertObj.wert))) wertObj.wert = Number(spalte.auswahl_werte[0].wert);
+    const selDiv = document.createElement('div');
+    selDiv.className = 'tbdim tabellenzelle';
+    selDiv.innerHTML = `<div class="tbdiminput"><select class="tabelleauswahl">${spalte.auswahl_werte.map(a => `<option value="${a.wert}" ${Number(wertObj.wert) === Number(a.wert) ? 'selected' : ''}>${escHtml(a.text)}</option>`).join('')}</select></div>`;
+    tdEl.appendChild(selDiv);
+    selDiv.querySelector('select').addEventListener('change', e => { wertObj.wert = parseFloat(e.target.value) || 0; recalc(); });
+    return;
+  }
   const div = document.createElement('div');
   div.className = 'tbdim tabellenzelle';
   const zusatztextHtml = spalte.zusatztext_moeglich
@@ -3497,7 +3508,8 @@ function renderTabelle(ef, container){
 // nachziehen) aufgerufen.
 function aktualisiereTabellenSumme(efId, spalteId, summe, anzahlZeilen){
   const el = $teilbereiche.querySelector(`.tabellensumme[data-tabelle="${efId}"][data-spalte="${spalteId}"]`);
-  if(el) el.textContent = anzahlZeilen ? summe.toLocaleString('de-CH', { maximumFractionDigits: 2 }) : '';
+  const istAuswahl = Array.isArray((TABELLEN_SPALTEN[efId] || []).find(s => s.id === spalteId)?.auswahl_werte);
+  if(el) el.textContent = (anzahlZeilen && !istAuswahl) ? summe.toLocaleString('de-CH', { maximumFractionDigits: 2 }) : '';
 }
 
 // Wertet alle Berechnungsspalten aller Tabellen pro Zeile neu aus (schreibt
