@@ -2002,6 +2002,7 @@ function bindWindow(){
       const vorher = { s: d.s0, e: d.e0, mid: d.mid0 };
       const ok = await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true), person_id: it.mid });
       if(!ok){ Object.assign(it, vorher); renderRows(); return; }
+      if(it.kind === 'absenz') await ausgleich(it, vorher);
       const msg = it.mid !== d.mid0 ? `${labOf(it)} → ${P[it.mid].name}` : `Verschoben auf ${spanLabel(it)}`;
       toast(msg, async () => { Object.assign(it, vorher); renderRows(); await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true), person_id: it.mid }); });
       if(selId === it.id) openPanel(it.id);
@@ -2013,6 +2014,32 @@ function bindWindow(){
       openNeuLeiste(d.lane, d.mid, r48(a), r48(b));
     }
   });
+}
+// Absenz (z. B. «Frei») in einer Baustelle: Arbeitstage bleiben gleich. Ist hinten frei, wandert das Ende nach hinten;
+// sonst bleibt das Ende und die Baustelle zeigt rot «Geplant X Tage, aktuell Y Tage»
+function halbtageIn(b, list, e, stop){ let c = 0;
+  for(let k = Math.floor(b.s * 2 + 1e-9); k <= Math.ceil(e * 2 - 1e-9) - 1; k++){ const d = k >> 1; if(isOff(d)) continue;
+    const a = Math.max(b.s, k / 2), z = Math.min(e, (k + 1) / 2); if(z - a < 1e-6) continue;
+    const o = list.find(x => x.s < z - 1e-6 && x.e > a + 1e-6);
+    if(o){ if(stop && k / 2 >= b.e - 1e-6 && o.kind !== 'absenz') return { blockiert: true }; continue; }
+    if(++c === stop) return { e: (k + 1) / 2 }; }
+  return stop ? null : c; }
+async function ausgleich(abs, alt){
+  const mids = new Set([abs?.mid, alt?.mid].filter(Boolean));
+  for(const mid of mids){
+    const sonst = EINS.filter(o => o.mid === mid && o !== abs && !isShort(o));
+    const vorher = sonst.concat(alt && alt.mid === mid ? [{ s: alt.s, e: alt.e, kind: 'absenz' }] : []);
+    const jetzt = sonst.concat(abs && abs.mid === mid ? [abs] : []);
+    for(const b of EINS.filter(x => x.mid === mid && x.kind === 'baustelle' && !x.wdh && x.e > TODAY && x.e - x.s > 1 + 1e-6)){
+      const andV = vorher.filter(o => o !== b), andJ = jetzt.filter(o => o !== b);
+      const nV = halbtageIn(b, andV, b.e), nJ = halbtageIn(b, andJ, b.e); if(nV === nJ) continue;
+      const ziel = b.soll ? Math.round(b.soll * 2) : nV;
+      const r = halbtageIn(b, andJ, b.s + 400, ziel);
+      if(r && r.e != null && Math.abs(r.e - b.e) > 1e-6){ b.e = r48(r.e); await speichere(b, { ende: fromU(b.e, true) }); toast(`${labOf(b)}: Ende neu ${dLab(Math.floor(b.e - 1e-6))}, weiterhin ${tageTxt(ziel / 2)}`); }
+      else if(r?.blockiert && !b.soll){ b.soll = ziel / 2; await speichere(b, { soll_tage: b.soll }); toast(`${labOf(b)}: hinten kein Platz – geplant ${tageTxt(b.soll)}`); }
+    }
+  }
+  if(VIEW === 'plan') renderRows(); else render();
 }
 async function speichere(it, patch){
   if(patch.beginn) delete it._alt; // neu gesetzte Zeit = neuer Wunschtermin
@@ -2026,6 +2053,7 @@ async function neuerEinsatz(it, open){
   if(error){ fehler(error, 'Neu anlegen'); return null; }
   const neu = rowToItem(data); EINS.push(neu);
   if(VIEW === 'plan') renderRows();
+  if(neu.kind === 'absenz') await ausgleich(neu, null);
   if(open) openPanel(neu.id, true);
   return neu;
 }
@@ -2034,6 +2062,7 @@ async function loescheEinsatz(it){
   const { error } = await sb.from('planer_einsatz').delete().eq('id', it.id);
   if(error){ fehler(error, 'Löschen'); return; }
   EINS = EINS.filter(x => x.id !== it.id); closePanel(); render();
+  if(it.kind === 'absenz') await ausgleich(null, { s: it.s, e: it.e, mid: it.mid });
   toast(`Gelöscht: ${labOf(kopie)}`, files.length ? null : async () => {
     const row = itemToRow(kopie); row.id = kopie.id; row.erstellt_von = ME;
     const { error } = await sb.from('planer_einsatz').insert(row); if(error){ fehler(error); return; }
@@ -2183,7 +2212,8 @@ function openPanel(id, isNew){
   if(it.kind !== 'absenz') renderFiles(it);
   if(pflege) pflegeMedien(it.kid);
   if(!ed) return;
-  const save = async (patch, local) => { Object.assign(it, local); const cur = byId(it.id); if(cur && cur !== it) Object.assign(cur, local); $('pSave').textContent = 'Speichere …'; const ok = await speichere(it, patch); $('pSave').textContent = ok ? 'Gespeichert' : ''; if(VIEW === 'plan') renderRows(); else render(); return ok; };
+  const save = async (patch, local) => { const alt = { s: it.s, e: it.e, mid: it.mid }; Object.assign(it, local); const cur = byId(it.id); if(cur && cur !== it) Object.assign(cur, local); $('pSave').textContent = 'Speichere …'; const ok = await speichere(it, patch); $('pSave').textContent = ok ? 'Gespeichert' : ''; if(VIEW === 'plan') renderRows(); else render();
+    if(ok && it.kind === 'absenz' && (patch.beginn || patch.ende || patch.person_id)) await ausgleich(it, alt); return ok; };
   $('side').querySelectorAll('[data-pabs]').forEach(b => b.onclick = () => save({ titel: b.dataset.pabs }, { title: b.dataset.pabs }).then(() => openPanel(id)));
   on('#pKEdit', 'onclick', () => { panelKunde = true; openPanel(id); setTimeout(() => $('pKunde')?.focus(), 0); });
   on('#pAbm', 'onclick', () => { panelAbm = true; openPanel(id); });
