@@ -1401,11 +1401,26 @@ function openResChooser(rid, a, b, rect){
   const pop = popAt(rect, `<b>${esc(resName(r))}</b><span class="muted small">${esc(span)} · für wen?</span><div style="display:flex;flex-direction:column;gap:4px;max-height:260px;overflow:auto">${pers.map(p => `<button class="btn btn-ghost" data-pick="${p.id}" style="justify-content:flex-start"><i style="width:10px;height:10px;border-radius:2px;display:inline-block;background:${resCol(p.id)}"></i>${esc(p.name)}${braucht(p) ? ' <span class="small" style="color:var(--red)">braucht Fahrzeug</span>' : ''}</button>`).join('')}</div>`);
   pop.querySelectorAll('[data-pick]').forEach(bt => bt.onclick = () => { closePop(); assignVeh(r, a, b, bt.dataset.pick); });
 }
+// Lieferwagen zuteilen: sofort sichtbar (ohne auf das Neuladen zu warten), gleicher Wagen nie doppelt bei derselben Person
 async function assignVeh(r, a, b, mid){
-  const ok = await resInsert({ ressource_id: r.id, person_id: mid, beginn: fromU(a), ende: fromU(b, true) });
+  const ks = rSlots(a, b);
+  if(RESE.some(z => z.rid === r.id && z.art === 'zuteilung' && z.mid === mid && z.s != null && rSlots(z.s, z.e).some(k => ks.includes(k)))){ toast(`${resName(r)} ist da schon bei ${first(P[mid]?.name)}`); return; }
+  const tmp = { id: 'tmp' + Date.now(), rid: r.id, art: 'zuteilung', eid: null, mid, s: a, e: b, fest: false, ab: 0, bv: 0, pz: [] }; RESE.push(tmp);
+  const weg = r.stamm_person_id && r.stamm_person_id !== mid ? { id: 'tmpw' + Date.now(), rid: r.id, art: 'stamm_weg', mid: r.stamm_person_id, s: a, e: b, pz: [] } : null; if(weg) RESE.push(weg);
+  renderRows();
+  const { data, error } = await sb.from('planer_ressource_einsatz').insert({ ressource_id: r.id, person_id: mid, beginn: fromU(a), ende: fromU(b, true) }).select('id').single();
+  if(error){ RESE = RESE.filter(z => z !== tmp && z !== weg); renderRows(); fehler(error, 'Zuteilen'); return; } tmp.id = data.id;
   // Stammfahrzeug an jemand anderen: beim Stamm-Fahrer für diese Zeit freigeben
-  if(ok && r.stamm_person_id && r.stamm_person_id !== mid) await resInsert({ ressource_id: r.id, art: 'stamm_weg', person_id: r.stamm_person_id, beginn: fromU(a), ende: fromU(b, true) });
-  if(ok) toast(`${resName(r)} → ${P[mid].name}`, () => resDelete(ok.id));
+  if(weg){ const { data: w2 } = await sb.from('planer_ressource_einsatz').insert({ ressource_id: r.id, art: 'stamm_weg', person_id: r.stamm_person_id, beginn: fromU(a), ende: fromU(b, true) }).select('id').single(); if(w2) weg.id = w2.id; }
+  toast(`${resName(r)} → ${P[mid].name}`, () => vehWeg(tmp));
+}
+// Klick auf einen zugeteilten Lieferwagen (aufgeklappt) = direkt zurück in die Ablage, mit Rückgängig
+async function vehWeg(z){
+  const r = resById(z.rid), weg = RESE.find(o => o.rid === z.rid && o.art === 'stamm_weg' && o.s === z.s && o.e === z.e);
+  RESE = RESE.filter(o => o !== z && o !== weg); renderRows();
+  const ids = [z.id, weg?.id].filter(x => x && !String(x).startsWith('tmp'));
+  const { error } = ids.length ? await sb.from('planer_ressource_einsatz').delete().in('id', ids) : {}; if(error){ fehler(error, 'Entfernen'); await neuLaden(); return; }
+  toast(`${resName(r)} zurück in die Ablage`, () => assignVeh(r, z.s, z.e, z.mid));
 }
 function openResPop(zid, rid, rect, u){
   const r = resById(rid); const ed = canEditRes(r.typ);
@@ -1997,7 +2012,7 @@ function bindTimeline(t){
         const mode = e.target.classList.contains('hl') ? 'l' : e.target.classList.contains('hr') ? 'r' : 'move';
         drag = { kind: 'mres', zid, rid, mode, x0: e.clientX, ab0: z.ab, bv0: z.bv, all: x.all, i0: slotIdx(x.all, u), moved: false, rect: band.getBoundingClientRect(), u0: u }; e.preventDefault(); return; }
       if(band.classList.contains('ed') && z && z.s != null){ const mode = e.target.classList.contains('hl') ? 'l' : e.target.classList.contains('hr') ? 'r' : 'move';
-        drag = { kind: 'rbar', zid, rid, mode, x0: e.clientX, s0: z.s, e0: z.e, u0: u, moved: false, rect: band.getBoundingClientRect() }; e.preventDefault(); return; }
+        drag = { kind: 'rbar', zid, rid, mode, x0: e.clientX, s0: z.s, e0: z.e, u0: u, moved: false, rect: band.getBoundingClientRect(), vown: !!band.closest('.lane.vown') }; e.preventDefault(); return; }
       drag = { kind: 'click', fn: () => openResPop(zid, rid, band.getBoundingClientRect(), u) }; return; }
     if(rl){ if(!rl.classList.contains('ed')) return; const u = rsnap(uAt(e.clientX) - RS() / 2); drag = { kind: 'rnew', rid: rl.dataset.rid, u0: u, x0: e.clientX, moved: false, lane: rl }; e.preventDefault(); return; }
     const bpz = e.target.closest('.bpz.ed'); if(bpz){ const it = byId(bpz.dataset.pzid), i = +bpz.dataset.pzi; if(!it?.pz?.[i]) return;
@@ -2053,7 +2068,7 @@ function bindWindow(){
       if(drag.side === 'l') it.pz[drag.i] = [Math.max(0, Math.min(c0 - .5, a0 + du)), c0]; else it.pz[drag.i] = [a0, Math.max(a0 + .5, c0 + du)];
       if(!drag.raf){ drag.raf = requestAnimationFrame(() => { if(drag) drag.raf = 0; renderRows(); }); }
     } else if(drag.kind === 'vchip'){
-      if(!drag.moved && Math.abs(e.clientX - drag.x0) < 5 && Math.abs(e.clientY - drag.y0) < 5) return;
+      if(!drag.moved && Math.abs(e.clientX - drag.x0) < 3 && Math.abs(e.clientY - drag.y0) < 3) return;
       if(!drag.moved){ drag.moved = true; drag.gh = document.createElement('div'); drag.gh.className = 'aghost'; drag.gh.textContent = resName(resById(drag.rid)); document.body.appendChild(drag.gh); }
       drag.gh.style.left = e.clientX + 10 + 'px'; drag.gh.style.top = e.clientY + 8 + 'px';
       document.querySelectorAll('.lane.vown.drop').forEach(l => l.classList.remove('drop')); const ln = document.elementFromPoint(e.clientX, e.clientY)?.closest('.lane.vown'); if(ln) ln.classList.add('drop');
@@ -2150,7 +2165,9 @@ function bindWindow(){
       return;
     }
     if(d.kind === 'rbar'){
-      if(!d.moved){ openResPop(d.zid, d.rid, d.rect, d.u0); return; }
+      if(!d.moved){ const z0 = RESE.find(o => o.id === d.zid); // aufgeklappter Lieferwagen: Klick = direkt zurück in die Ablage
+        if(d.vown && z0 && z0.art === 'zuteilung' && !z0.eid){ vehWeg(z0); return; }
+        openResPop(d.zid, d.rid, d.rect, d.u0); return; }
       const z = RESE.find(o => o.id === d.zid); if(!z) return;
       const { error } = await sb.from('planer_ressource_einsatz').update({ beginn: fromU(z.s), ende: fromU(z.e, true) }).eq('id', z.id);
       if(error){ fehler(error); z.s = d.s0; z.e = d.e0; renderRows(); return; }
