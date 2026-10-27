@@ -260,8 +260,13 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 .row .nm.mvorl{outline:1.5px dashed var(--c);outline-offset:-3px;}
 .row .nm.mfest{outline:1.5px solid var(--c);outline-offset:-3px;}
 .row .nm.mweg .n,.row .nm.mweg .z{opacity:.4;}
-.mres-b{all:unset;cursor:pointer;width:18px;height:18px;border-radius:4px;border:1px solid var(--line);display:inline-flex;align-items:center;justify-content:center;color:#B5BABF;flex:none;background:#fff;box-sizing:border-box;}
-.mres-b .i{width:12px;height:12px;}
+.mctl{margin-left:auto;display:inline-flex;gap:3px;flex:none;padding-left:4px;}
+.mres-b{all:unset;cursor:pointer;width:15px;height:15px;border-radius:3px;border:1px solid #9AA1A8;display:inline-flex;align-items:center;justify-content:center;color:var(--ink);flex:none;background:#fff;box-sizing:border-box;}
+.mres-b .i{width:11px;height:11px;stroke-width:2;}
+.row.ov.mtyp .nm{font-weight:700;color:var(--primary);background:var(--soft);}
+.row.ov.fov.mtyp .nm{background:var(--soft);padding-left:14px;}
+.row.ov.fov.mstk .nm{padding-left:30px;}
+.row.ov.mtyp{border-top:1px solid var(--line);}
 .mres-b:hover{border-color:var(--primary);color:var(--primary);}
 .mres-b.on{background:var(--c,var(--primary));border-color:var(--c,var(--primary));color:#fff;}
 .mres-b:focus-visible{outline:2px solid var(--primary);outline-offset:1px;}
@@ -686,10 +691,18 @@ const r48 = u => Math.round(u * 48) / 48;
 // ---------------------------------------------------------------------------
 let RES = [], RESE = [], GRUPPEN = [], PERSONEN = [], P = {}, EINS = [], FEIER = new Map(), KUNDEN = {}, KLIST = [], BENUTZER = [];
 async function fetchAll(mk){ let out = [], i = 0; for(;;){ const { data, error } = await mk().range(i, i + 999); if(error) throw error; out = out.concat(data); if(data.length < 1000) break; i += 1000; } return out; }
+// Maschinen-Typen kommen aus dem Nachschlagewerk: Eintrag = Typ (z. B. «Raupenbagger 3.5 t»), seine Stück = Maschinen.
+// Ein Typ ist eine eigene «Ressource» mit id 'T:<eintrag>' (vorläufige Reservierung ohne Nummer).
+let TYPEN = [];
+function ladeTypen(wx, we){
+  const tit = {}; (we || []).forEach(x => tit[x.id] = x.titel); const by = {};
+  (wx || []).forEach(x => { const r = RES.find(m => m.id === x.planer_ressource_id); if(r){ r.wx = x.id; r.w_eid = x.eintrag_id; } if(!r || r.typ !== 'maschine' || !tit[x.eintrag_id]) return; r.typ_eid = x.eintrag_id; r.typ_planung = tit[x.eintrag_id]; (by[x.eintrag_id] ||= []).push(r.id); });
+  TYPEN = Object.entries(by).map(([eid, ids]) => ({ id: 'T:' + eid, eid, typ: 'maschine', istTyp: true, name: tit[eid], nummer: null, aktiv: true, ids }));
+}
 async function ladeAlles(){
   try{
     const von = fromU(0), bis = fromU(NDAYS);
-    const [g, p, e, s, f, k, r, z, au, pz, at, vn] = await Promise.all([
+    const [g, p, e, s, f, k, r, z, au, pz, at, vn, wx, we] = await Promise.all([
       fetchAll(() => sb.from('planer_gruppe').select('*').order('sortierung')),
       fetchAll(() => sb.from('planer_person').select('*').order('sortierung')),
       fetchAll(() => sb.from('planer_einsatz').select('*, planer_datei(id,art,name,storage_pfad)').lt('beginn', bis).gt('ende', von)),
@@ -701,10 +714,12 @@ async function ladeAlles(){
       fetchAll(() => sb.from('planer_magazin').select('*, planer_datei(id,art,name,storage_pfad)').is('erledigt_am', null).order('sort')),
       fetchAll(() => sb.from('planer_pendenz').select('*, planer_datei(id,art,name,storage_pfad)').eq('erledigt', false)),
       fetchAll(() => sb.from('planer_absenz_typ').select('*').order('sortierung')),
-      fetchAll(() => sb.from('planer_vorschlag_notiz').select('*'))
+      fetchAll(() => sb.from('planer_vorschlag_notiz').select('*')),
+      fetchAll(() => sb.from('wissen_exemplar').select('id,eintrag_id,planer_ressource_id').not('planer_ressource_id', 'is', null).is('archiviert_am', null)),
+      fetchAll(() => sb.from('wissen_eintrag').select('id,titel').is('archiviert_am', null))
     ]);
     MAG = au; PZ = pz; ABST = at; VNOT = {}; vn.forEach(x => VNOT[`${x.kunde_kategorie_id}_${x.jahr}_${x.kw}`] = { n: x.notiz || '', pl: x.projektleiter_id });
-    RES = r; RESE = z.map(x => ({ id: x.id, rid: x.ressource_id, art: x.art, eid: x.einsatz_id, mid: x.person_id, s: x.beginn ? toU(x.beginn) : null, e: x.ende ? toU(x.ende) : null, fest: !!x.fest, ab: x.ab_slot || 0, bv: x.bis_vor_ende_slot || 0, pz: x.pausen || [] }));
+    RES = r; ladeTypen(wx, we); RESE = z.map(x => ({ id: x.id, rid: x.ressource_id || (x.typ_eintrag_id ? 'T:' + x.typ_eintrag_id : null), typ: x.typ_eintrag_id || null, art: x.art, eid: x.einsatz_id, mid: x.person_id, s: x.beginn ? toU(x.beginn) : null, e: x.ende ? toU(x.ende) : null, fest: !!x.fest, ab: x.ab_slot || 0, bv: x.bis_vor_ende_slot || 0, pz: x.pausen || [] }));
     GRUPPEN = g; PERSONEN = p; P = {}; p.forEach(x => P[x.id] = x);
     EINS = e.concat(s.filter(x => !e.some(y => y.id === x.id))).map(rowToItem); // s = wiederkehrende, auch wenn der erste Termin vor dem Bereich liegt
     FEIER = new Map(); f.forEach(x => FEIER.set(fromIso(x.datum), x.name));
@@ -1103,7 +1118,7 @@ function segsOf(slots){ const segs = []; [...slots].sort((a, b) => a - b).forEac
 function computeRU(){
   RU = {}; NEED = {};
   ALL.forEach(it => { if(it.kind === 'baustelle' && LAYS(it)) LAY[it.id].free.forEach(k => (NEED[it.mid] ??= new Set()).add(k)); });
-  RES.forEach(r => RU[r.id] = { list: [], cnt: {} });
+  RES.concat(TYPEN).forEach(r => RU[r.id] = { list: [], cnt: {} });
   RESE.forEach(z => { const u = RU[z.rid]; if(!u || z.art !== 'zuteilung') return; let s = z.s, e = z.e, b = null;
     if(z.eid){ b = byId(z.eid); if(!b) return;
       // Maschine an Baustelle: Lage relativ zu den Arbeits-Halbtagen der Baustelle (wandert mit), ohne Unterbrüche
@@ -1123,19 +1138,21 @@ function computeRU(){
 }
 // Maschinen-Warnungen pro Baustelle und Person: rot = zwei feste auf derselben Maschine oder Baustelle läuft
 // mit nur vorläufiger Maschine; orange = vorläufige Überschneidung oder Beginn in ≤ 7 Tagen, noch vorläufig
+// Typ: orange, wenn mehr vorläufige Reservierungen als freie Maschinen dieses Typs (fest belegte zählen ab)
+const typZuViel = (t, k) => (RU[t.id]?.cnt[k] || 0) + t.ids.filter(id => (RU[id]?.cntF[k] || 0) > 0).length > t.ids.length;
 let MW = { bau: {}, mid: {}, res: {} };
 function computeMaschWarn(){
   MW = { bau: {}, mid: {}, res: {} }; const jetzt = toU(new Date());
   const hoch = (o, key, lvl, k) => { const a = o[key]; if(!a || (lvl === 'r' && a.l === 'o')) o[key] = { l: lvl, k: Math.min(k, a?.k ?? Infinity) }; else if(a.l === lvl) a.k = Math.min(a.k, k); };
-  RES.forEach(r => { if(r.typ !== 'maschine') return; const u = RU[r.id]; if(!u) return;
+  RES.concat(TYPEN).forEach(r => { if(r.typ !== 'maschine') return; const u = RU[r.id]; if(!u) return;
     u.list.forEach(x => { if(!x.masch) return; const b = byId(x.bau); if(!b) return;
-      x.slots.forEach(k => { const lvl = x.fest && (u.cntF[k] || 0) > 1 ? 'r' : (u.cnt[k] || 0) > 1 ? 'o' : null;
+      x.slots.forEach(k => { const lvl = r.istTyp ? (typZuViel(r, k) ? 'o' : null) : x.fest && (u.cntF[k] || 0) > 1 ? 'r' : (u.cnt[k] || 0) > 1 ? 'o' : null;
         if(lvl && k >= TODAY * 2){ hoch(MW.bau, b.id, lvl, k); hoch(MW.mid, b.mid, lvl, k); hoch(MW.res, r.id, lvl, k); } });
       if(!x.fest && x.slots.length && b.e > jetzt){ const lvl = b.s <= jetzt ? 'r' : b.s - jetzt <= 7 ? 'o' : null;
         if(lvl){ hoch(MW.mid, b.mid, lvl, x.slots[0]); hoch(MW.res, r.id, lvl, x.slots[0]); } } }); });
 }
 const LAYS = it => LAY[it.id] && LAY[it.id].free;
-const resById = id => RES.find(r => r.id === id);
+const resById = id => RES.find(r => r.id === id) || TYPEN.find(t => t.id === id);
 const resName = r => r ? [r.nummer, r.name].filter(Boolean).join(r.typ === 'fahrzeug' ? ' · ' : ' ') : '';
 const resCol = mid => P[mid]?.farbe || '#8B9097'; // Ressourcen in der Farbe der Person (Vorarbeiter), für die reserviert ist
 const canEditRes = typ => isBuero() || (typ === 'anhaenger' && !!myPerson());
@@ -1154,7 +1171,13 @@ function vehLine(p){
     : line(r.s === 'cf' ? 'red' : 'blue', r.a / 2, r.b / 2, r.s === 'cf' ? 'Fahrzeug doppelt verplant' : 'Zweites Fahrzeug')).join('');
 }
 function ovRows(W, bgx, typ = layer, focusMid = null){
-  const rs = RES.filter(r => r.typ === typ && r.aktiv).sort((a, b) => a.sortierung - b.sortierung || resName(a).localeCompare(resName(b)));
+  let rs = RES.filter(r => r.typ === typ && r.aktiv).sort((a, b) => a.sortierung - b.sortierung || resName(a).localeCompare(resName(b)));
+  // Maschinen: Titelzeile pro Typ (vorläufig reservieren), darunter seine Maschinen (fest reservieren)
+  if(typ === 'maschine' && TYPEN.length){ const out = [], done = new Set();
+    rs.forEach(r => { if(done.has(r.id)) return; const t = TYPEN.find(x => x.ids.includes(r.id));
+      if(!t){ out.push(r); done.add(r.id); return; }
+      out.push(t); rs.filter(m => t.ids.includes(m.id)).forEach(m => { out.push(m); done.add(m.id); }); });
+    rs = out; }
   if(!rs.length && focusMid && typ === 'anhaenger') return '';
   if(!rs.length && focusMid) return `<div class="row ov fov"><div class="nm small muted">Keine ${typ === 'maschine' ? 'Maschinen' : 'Lieferwagen'} erfasst</div><div class="lane" style="width:${W}px"></div></div>`;
   if(!rs.length) return `<div class="leer">Noch keine ${typ === 'maschine' ? 'Maschinen' : typ === 'fahrzeug' ? 'Fahrzeuge' : 'Anhänger'} erfasst.${isBuero() ? '<br><br><a class="btn btn-primary" href="#ressourcen">Fahrzeuge &amp; Maschinen erfassen</a>' : ''}</div>`;
@@ -1169,7 +1192,7 @@ function ovRows(W, bgx, typ = layer, focusMid = null){
       const b = x.bau ? byId(x.bau) : null;
       if(x.masch && b){ // Maschine: vorläufig gestrichelt, fest durchgezogen + Schloss; andere Baustellen (unter einer Person) grau
         const grau = focusMid && b.mid !== focusMid, c = grau ? '#9AA1A8' : resCol(b.mid), mv = ed && !grau;
-        const stufe = k => x.fest && (u.cntF[k] || 0) > 1 ? ' cfr' : (u.cnt[k] || 0) > 1 ? ' cfo' : '';
+        const stufe = k => r.istTyp ? (typZuViel(r, k) ? ' cfo' : '') : x.fest && (u.cntF[k] || 0) > 1 ? ' cfr' : (u.cnt[k] || 0) > 1 ? ' cfo' : '';
         const gr = { '': [], ' cfo': [], ' cfr': [] }; x.slots.forEach(k => gr[stufe(k)].push(k));
         const lab = `${x.fest ? I('lock') : ''}${esc(first(P[b.mid]?.name))} · ${esc(labOf(b))}`;
         const tip = `${resName(r)}\n${titleOf(b)} · ${P[b.mid]?.name || ''}\n${x.fest ? 'Fest reserviert' : 'Vorläufig reserviert'}`;
@@ -1191,8 +1214,13 @@ function ovRows(W, bgx, typ = layer, focusMid = null){
       const fw = new Set(); ALL.filter(it => it.mid === focusMid && it.kind === 'baustelle' && it.e > TODAY).forEach(it => rSlots(it.s, it.e).forEach(k => fw.add(k)));
       const weg = !mine.length && u.list.some(x => x.masch && x.fest && byId(x.bau)?.mid !== focusMid && x.slots.some(k => fw.has(k)));
       nmCls = fest ? ' mfest' : vorl ? ' mvorl' : weg ? ' mweg' : ''; nmSt = ` style="--c:${resCol(focusMid)}"`;
-      if(ed) ctl = `<button class="mres-b${vorl ? ' on' : ''}" data-mres="${r.id}" data-art="vorl" title="${vorl ? 'Vorläufige Reservierung entfernen' : 'Vorläufig reservieren (ganze Baustelle)'}" aria-label="Vorläufig reservieren" aria-pressed="${vorl}">${I('check')}</button><button class="mres-b${fest ? ' on' : ''}" data-mres="${r.id}" data-art="fest" title="${fest ? 'Fest reserviert – Klick: wieder vorläufig' : 'Fest reservieren'}" aria-label="Fest reservieren" aria-pressed="${fest}">${I('lock')}</button>`; }
-    h += `<div class="row ov${focusMid ? ' fov' : ''}"><div class="nm${nmCls}"${nmSt} title="${esc(resName(r) + (r.typ_planung ? ' · Typ: ' + r.typ_planung : '') + (warn === 'r' ? '\nDoppelt fest belegt oder Baustelle läuft nur mit vorläufiger Reservierung' : warn === 'o' ? '\nÜberschneidung oder bald Baustellenbeginn, noch vorläufig' : ''))}">${ctl}${I(typ === 'maschine' ? 'digger' : 'truck').replace('class="i"', `class="i${warn ? ' mwi-' + warn : ''}" style="width:14px;height:14px;color:var(--muted)"`)}${r.nummer ? `<span class="z" style="font-weight:700;color:var(--primary)">${esc(r.nummer)}</span>` : ''}<span class="n">${esc(r.name)}</span>${r.stamm_person_id && P[r.stamm_person_id] && first(P[r.stamm_person_id].name) !== r.name ? `<span class="z">${esc(first(P[r.stamm_person_id].name))}</span>` : ''}</div><div class="lane${ed ? ' ed' : ''}" data-rid="${r.id}" style="width:${W}px;height:${rowH}px;${bgx}">${feierHTML()}${bars}</div></div>`;
+      // Typ-Zeile: nur Häkchen (vorläufig, ohne Nummer); Maschinen-Zeile: nur Schloss (diese Maschine fest)
+      if(ed) ctl = `<span class="mctl">${r.istTyp ? `<button class="mres-b${vorl ? ' on' : ''}" data-mres="${r.id}" data-art="vorl" title="${vorl ? 'Vorläufige Reservierung entfernen' : 'Typ vorläufig reservieren (ganze Baustelle)'}" aria-label="Typ vorläufig reservieren" aria-pressed="${vorl}">${I('check')}</button>`
+        : `<button class="mres-b${fest ? ' on' : ''}" data-mres="${r.id}" data-art="fest" title="${fest ? 'Fest reserviert – Klick: wieder vorläufig (nur Typ)' : 'Diese Maschine fest reservieren'}" aria-label="Fest reservieren" aria-pressed="${fest}">${I('lock')}</button>`}</span>`; }
+    const tTit = r.istTyp ? `${r.name} · ${r.ids.length} Stück` : resName(r) + (r.typ_planung ? ' · Typ: ' + r.typ_planung : '');
+    const nmIn = r.istTyp ? `${I('digger').replace('class="i"', `class="i${warn ? ' mwi-' + warn : ''}" style="width:14px;height:14px"`)}<span class="n">${esc(r.name)}</span>`
+      : `${I(typ === 'maschine' ? 'digger' : 'truck').replace('class="i"', `class="i${warn ? ' mwi-' + warn : ''}" style="width:14px;height:14px;color:var(--muted)"`)}${r.nummer ? `<span class="z" style="font-weight:700;color:var(--primary)">${esc(r.nummer)}</span>` : ''}<span class="n">${esc(r.name)}</span>${r.stamm_person_id && P[r.stamm_person_id] && first(P[r.stamm_person_id].name) !== r.name ? `<span class="z">${esc(first(P[r.stamm_person_id].name))}</span>` : ''}`;
+    h += `<div class="row ov${focusMid ? ' fov' : ''}${r.istTyp ? ' mtyp' : typ === 'maschine' && r.typ_eid ? ' mstk' : ''}"><div class="nm${nmCls}"${nmSt} title="${esc(tTit + (warn === 'r' ? '\nDoppelt fest belegt oder Baustelle läuft nur mit vorläufiger Reservierung' : warn === 'o' ? (r.istTyp ? '\nMehr vorläufig reserviert als Maschinen frei, oder bald Baustellenbeginn' : '\nÜberschneidung oder bald Baustellenbeginn, noch vorläufig') : ''))}">${nmIn}${ctl}</div><div class="lane${ed ? ' ed' : ''}" data-rid="${r.id}" style="width:${W}px;height:${rowH}px;${bgx}">${feierHTML()}${bars}</div></div>`;
   });
   return h;
 }
@@ -1249,22 +1277,32 @@ function vehFocusRows(W, bgx, mid){
 // Index des Baustellen-Halbtags unter der Maus (für Ziehen/Unterbrechen von Maschinen)
 function slotIdx(all, u){ const k = Math.floor(u * 2); let i = all.findIndex(x => x >= k); if(i < 0) i = all.length - 1; return Math.max(0, i); }
 // Häkchen (vorläufig) und Schloss (fest) links bei der Maschine, unter einer aufgeklappten Person
+// Häkchen bei der Typ-Zeile = Typ vorläufig; Schloss bei der Maschine = diese Maschine fest
+// (macht aus einer vorläufigen Typ-Reservierung eine feste, Lage und Unterbrüche bleiben)
 async function maschToggle(rid, art, rect){
   const r = resById(rid), upd = (id, row) => sb.from('planer_ressource_einsatz').update(row).eq('id', id);
-  const mine = RESE.filter(z => z.rid === rid && z.art === 'zuteilung' && z.eid && byId(z.eid)?.mid === openMid);
-  const vorl = mine.filter(z => !z.fest), fest = mine.filter(z => z.fest);
-  if(art === 'vorl' && vorl.length){ for(const z of vorl) await sb.from('planer_ressource_einsatz').delete().eq('id', z.id); await neuLaden(); toast(`${resName(r)}: vorläufige Reservierung entfernt`); return; }
-  if((art === 'fest' || art === 'vorl') && fest.length){ for(const z of fest) await upd(z.id, { fest: false }); await neuLaden(); toast(`${resName(r)}: Schloss geöffnet, wieder vorläufig`); return; }
-  if(art === 'fest' && vorl.length){ for(const z of vorl) await upd(z.id, { fest: true }); await neuLaden(); toast(`${resName(r)}: fest reserviert`); return; }
-  // neu: für eine Baustelle der Person (bei mehreren kurz wählen)
+  const meine = id => RESE.filter(z => z.rid === id && z.art === 'zuteilung' && z.eid && byId(z.eid)?.mid === openMid);
   const baus = EINS.filter(x => x.kind === 'baustelle' && x.mid === openMid && x.e > TODAY).sort((a, b) => a.s - b.s);
-  const neu = async bid => { const ok = await resInsert({ ressource_id: rid, einsatz_id: bid, fest: art === 'fest' });
-    if(ok) toast(`${resName(r)} ${art === 'fest' ? 'fest' : 'vorläufig'} für ${labOf(byId(bid))}`, () => resDelete(ok.id)); };
-  if(!baus.length){ toast(`${first(P[openMid]?.name)} hat keine kommende Baustelle.`, null, true); return; }
-  if(baus.length === 1) return neu(baus[0].id);
-  const pop = popAt(rect, `<b>${esc(resName(r))}</b><span class="muted small">Für welche Baustelle?</span>${baus.map(x => `<button class="btn btn-ghost" data-pick="${x.id}" style="justify-content:flex-start">${esc(labOf(x))} · ${esc(spanLabel(x))}</button>`).join('')}`);
-  pop.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => { closePop(); neu(b.dataset.pick); });
+  const waehle = (liste, lab, fn) => { if(liste.length === 1) return fn(liste[0]);
+    const pop = popAt(rect, `<b>${esc(resName(r))}</b><span class="muted small">Für welche Baustelle?</span>${liste.map((x, i) => `<button class="btn btn-ghost" data-pick="${i}" style="justify-content:flex-start">${esc(lab(x))}</button>`).join('')}`);
+    pop.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => { closePop(); fn(liste[+b.dataset.pick]); }); };
+  if(!baus.length && !meine(rid).length){ toast(`${first(P[openMid]?.name)} hat keine kommende Baustelle.`, null, true); return; }
+  if(r.istTyp){
+    const vorl = meine(rid);
+    if(vorl.length){ for(const z of vorl) await sb.from('planer_ressource_einsatz').delete().eq('id', z.id); await neuLaden(); toast(`${r.name}: vorläufige Reservierung entfernt`); return; }
+    return waehle(baus, x => `${labOf(x)} · ${spanLabel(x)}`, async b => { const ok = await resInsert({ typ_eintrag_id: r.eid, einsatz_id: b.id, fest: false });
+      if(ok) toast(`${r.name} vorläufig für ${labOf(b)}`, () => resDelete(ok.id)); });
+  }
+  const fest = meine(rid).filter(z => z.fest);
+  // Schloss öffnen = zurück zur vorläufigen Typ-Reservierung
+  if(fest.length){ for(const z of fest) await upd(z.id, r.typ_eid ? { ressource_id: null, typ_eintrag_id: r.typ_eid, fest: false } : { fest: false }); await neuLaden(); toast(`${resName(r)}: Schloss geöffnet${r.typ_eid ? ', wieder vorläufig ' + r.typ_planung : ''}`); return; }
+  const typVorl = r.typ_eid ? meine('T:' + r.typ_eid) : [];
+  if(typVorl.length) return waehle(typVorl, z => `${labOf(byId(z.eid))} · ${spanLabel(byId(z.eid))}`, async z => { const { error } = await upd(z.id, { ressource_id: rid, typ_eintrag_id: null, fest: true }); if(error) return fehler(error); await neuLaden(); toast(`${resName(r)} fest für ${labOf(byId(z.eid))}`); });
+  return waehle(baus, x => `${labOf(x)} · ${spanLabel(x)}`, async b => { const ok = await resInsert({ ressource_id: rid, einsatz_id: b.id, fest: true });
+    if(ok) toast(`${resName(r)} fest für ${labOf(b)}`, () => resDelete(ok.id)); });
 }
+// Maschine an Baustelle: Typ = vorläufig ohne Nummer, bestimmte Maschine = fest
+const ziel = rid => String(rid).startsWith('T:') ? { typ_eintrag_id: rid.slice(2), fest: false } : resById(rid)?.typ === 'maschine' ? { ressource_id: rid, fest: true } : { ressource_id: rid };
 async function resInsert(row){ const { data, error } = await sb.from('planer_ressource_einsatz').insert(row).select().single(); if(error){ fehler(error, 'Zuteilen'); return null; } await neuLaden(); return data; }
 async function resDelete(id){ const { error } = await sb.from('planer_ressource_einsatz').delete().eq('id', id); if(error){ fehler(error, 'Entfernen'); return false; } await neuLaden(); return true; }
 function popAt(anchorRect, html){ $('popwrap').innerHTML = `<div class="pop" style="left:${Math.max(8, Math.min(innerWidth - 310, anchorRect.left))}px;top:${Math.min(innerHeight - 260, anchorRect.bottom + 6)}px">${html}</div>`; return $('popwrap').firstChild; }
@@ -1272,14 +1310,14 @@ function openResChooser(rid, a, b, rect){
   const r = resById(rid); const span = `${spanLabel({ s: a, e: b })}`;
   // Aufgeklappt unter einer Person: direkt ihr zuteilen, ohne Rückfrage
   if(openMid && r.typ !== 'maschine' && openTyp === 'fahrzeug' && (isBuero() || openMid === myPerson()?.id)){ assignVeh(r, a, b, openMid); return; }
-  if(openMid && r.typ === 'maschine' && openTyp === 'maschine'){ const eig = EINS.filter(x => x.kind === 'baustelle' && x.mid === openMid && x.s < b && x.e > a); if(eig.length === 1){ resInsert({ ressource_id: rid, einsatz_id: eig[0].id }).then(ok => { if(ok) toast(`${resName(r)} → ${labOf(eig[0])}`, () => resDelete(ok.id)); }); return; }
+  if(openMid && r.typ === 'maschine' && openTyp === 'maschine'){ const eig = EINS.filter(x => x.kind === 'baustelle' && x.mid === openMid && x.s < b && x.e > a); if(eig.length === 1){ resInsert({ ...ziel(rid), einsatz_id: eig[0].id }).then(ok => { if(ok) toast(`${resName(r)} → ${labOf(eig[0])}`, () => resDelete(ok.id)); }); return; }
     // Unter einer Person nur ihre eigenen Baustellen, nie die von anderen
     if(!eig.length){ toast(`${first(P[openMid]?.name)} hat in diesem Zeitraum keine Baustelle.`, null, true); return; } }
   if(r.typ === 'maschine'){
     const nurEigene = openMid && openTyp === 'maschine';
     const baus = EINS.filter(x => x.kind === 'baustelle' && x.s < b && x.e > a && (!nurEigene || x.mid === openMid)).sort((x, y) => ((y.mid === openMid) - (x.mid === openMid)) || x.s - y.s);
     const pop = popAt(rect, `<b>${esc(resName(r))}</b><span class="muted small">Für welche Baustelle? Die Maschine bleibt dann für die ganze Baustelle eingeteilt und wandert mit.</span>${baus.map(x => `<button class="btn btn-ghost" data-pick="${x.id}" style="justify-content:flex-start"><i class="sw" style="width:10px;height:10px;border-radius:2px;background:${barStyle(x).bg}"></i>${esc(labOf(x))} · ${esc(first(P[x.mid]?.name))}</button>`).join('') || '<span class="small">Keine Baustelle in diesem Zeitraum.</span>'}`);
-    pop.querySelectorAll('[data-pick]').forEach(bt => bt.onclick = async () => { closePop(); const ok = await resInsert({ ressource_id: rid, einsatz_id: bt.dataset.pick }); if(ok) toast(`${resName(r)} → ${labOf(byId(bt.dataset.pick))}`, () => resDelete(ok.id)); });
+    pop.querySelectorAll('[data-pick]').forEach(bt => bt.onclick = async () => { closePop(); const ok = await resInsert({ ...ziel(rid), einsatz_id: bt.dataset.pick }); if(ok) toast(`${resName(r)} → ${labOf(byId(bt.dataset.pick))}`, () => resDelete(ok.id)); });
     return;
   }
   const pers = (isBuero() ? PERSONEN.filter(p => p.aktiv) : [myPerson()]).filter(Boolean);
@@ -1308,19 +1346,20 @@ function openResPop(zid, rid, rect, u){
   const x = (RU[rid]?.list || []).find(o => o.id === zid); if(!x) return; const b = x.bau ? byId(x.bau) : null;
   if(x.masch && b){ // Maschine an Baustelle: fest/vorläufig, unterbrechen, tauschen (gleicher Typ), entfernen
     const z = RESE.find(o => o.id === zid), i = slotIdx(x.all, u), ps = z.pz || [], sav = row => sb.from('planer_ressource_einsatz').update(row).eq('id', zid);
-    const frei = RES.filter(m => m.typ === 'maschine' && m.aktiv && m.id !== rid && r.typ_planung && m.typ_planung === r.typ_planung && !x.slots.some(k => (RU[m.id]?.cnt[k] || 0) > 0));
+    const teid = r.istTyp ? r.eid : r.typ_eid;
+    const frei = RES.filter(m => m.typ === 'maschine' && m.aktiv && m.id !== rid && teid && m.typ_eid === teid && !x.slots.some(k => (RU[m.id]?.cnt[k] || 0) > 0));
     const ed2 = ed && (!openMid || b.mid === openMid);
-    const pop = popAt(rect, `<b>${esc(resName(r))}</b><span class="muted small">${esc(titleOf(b))} · ${esc(P[b.mid]?.name || '')}<br>${z.fest ? 'Fest reserviert' : 'Vorläufig reserviert'}${z.ab || z.bv ? ' · Teil der Baustelle' : ' · ganze Baustelle'}${ps.length ? ` · ${ps.length} Unterbruch` : ''}</span>
-      ${ed2 ? `<button class="btn btn-ghost" id="mpF" style="justify-content:flex-start">${I('lock')}${z.fest ? 'Schloss öffnen (vorläufig)' : 'Fest reservieren'}</button>
+    const pop = popAt(rect, `<b>${esc(resName(r))}</b><span class="muted small">${esc(titleOf(b))} · ${esc(P[b.mid]?.name || '')}<br>${z.fest ? 'Fest reserviert' : 'Vorläufig reserviert (Typ, noch ohne Nummer)'}${z.ab || z.bv ? ' · Teil der Baustelle' : ' · ganze Baustelle'}${ps.length ? ` · ${ps.length} Unterbruch` : ''}</span>
+      ${ed2 ? `${r.istTyp ? '' : `<button class="btn btn-ghost" id="mpF" style="justify-content:flex-start">${I('lock')}Schloss öffnen (wieder vorläufig)</button>`}
       <button class="btn btn-ghost" id="mpU" style="justify-content:flex-start">${I('pause')}Hier 1 Tag unterbrechen</button>
       ${ps.length || z.ab || z.bv ? `<button class="btn btn-ghost" id="mpG" style="justify-content:flex-start">Wieder ganze Baustelle, ohne Unterbruch</button>` : ''}
-      ${frei.length ? `<span class="small muted">Frei, gleicher Typ (${esc(r.typ_planung)}):</span>${frei.map(m => `<button class="btn btn-ghost" data-swap="${m.id}" style="justify-content:flex-start">Tauschen auf ${esc(resName(m))}</button>`).join('')}` : ''}
+      ${frei.length ? `<span class="small muted">${r.istTyp ? 'Fest reservieren – frei:' : `Frei, gleicher Typ (${esc(r.typ_planung)}):`}</span>${frei.map(m => `<button class="btn btn-ghost" data-swap="${m.id}" style="justify-content:flex-start">${r.istTyp ? I('lock') + esc(resName(m)) : 'Tauschen auf ' + esc(resName(m))}</button>`).join('')}` : r.istTyp ? '<span class="small" style="color:var(--red)">Keine Maschine dieses Typs frei</span>' : ''}
       <div style="display:flex;justify-content:flex-end"><button class="icon-btn danger" id="mpD" title="Reservierung löschen" aria-label="Reservierung löschen">${I('trash')}</button></div>` : ''}`);
     const on = (s, fn) => { const el = pop.querySelector(s); if(el) el.onclick = async () => { closePop(); await fn(); await neuLaden(); }; };
-    on('#mpF', () => sav({ fest: !z.fest }));
+    on('#mpF', () => sav(r.typ_eid ? { ressource_id: null, typ_eintrag_id: r.typ_eid, fest: false } : { fest: false }));
     on('#mpU', () => sav({ pausen: [...ps, [i, Math.min(x.all.length, i + 2)]] }).then(() => toast(`${resName(r)} am ${dLab(x.all[i] >> 1)} nicht gebraucht`)));
     on('#mpG', () => sav({ ab_slot: 0, bis_vor_ende_slot: 0, pausen: [] }));
-    pop.querySelectorAll('[data-swap]').forEach(bt => bt.onclick = async () => { closePop(); const { error } = await sav({ ressource_id: bt.dataset.swap }); if(error) return fehler(error); await neuLaden(); toast(`Getauscht auf ${resName(resById(bt.dataset.swap))}`); });
+    pop.querySelectorAll('[data-swap]').forEach(bt => bt.onclick = async () => { closePop(); const { error } = await sav({ ressource_id: bt.dataset.swap, typ_eintrag_id: null, fest: true }); if(error) return fehler(error); await neuLaden(); toast(`${r.istTyp ? 'Fest' : 'Getauscht auf'} ${resName(resById(bt.dataset.swap))}`); });
     const del = pop.querySelector('#mpD'); if(del) del.onclick = () => { closePop(); bestaetige('Reservierung löschen?', `<div>${esc(resName(r))} · ${esc(labOf(b))}</div>`, 'Löschen', () => resDelete(zid)); };
     return; }
   const pop = popAt(rect, `<b>${esc(resName(r))}</b><span class="muted small">${r.typ === 'maschine' ? `${esc(b ? titleOf(b) : '')} · ${esc(b ? P[b.mid]?.name : '')}<br>${x.own ? esc(spanLabel({ s: x.s, e: x.e })) + ' (eigene Dauer)' : 'ganze Baustelle, wandert mit'}` : `${esc(P[x.mid]?.name || '')}<br>${esc(spanLabel({ s: x.s, e: x.e }))}`}</span>
@@ -2711,14 +2750,16 @@ function personDlg(p, gid){
 // ---------------------------------------------------------------------------
 function renderRessourcen(){
   const typen = [['fahrzeug', 'Fahrzeuge', 'Ein Fahrzeug mit Stamm-Fahrer fährt automatisch mit, wenn dieser eine Baustelle hat.'], ['maschine', 'Maschinen', 'Bagger, Dumper usw. Werden einer Baustelle zugeteilt und wandern mit.'], ['anhaenger', 'Anhänger', 'Können auch Mitarbeitende für die eigene Zeile reservieren.']];
-  $('appMain').innerHTML = `<div class="page"><h2>Fahrzeuge &amp; Maschinen</h2><p class="hint">Eingeteilt wird im Planer über den Umschalter «Maschinen / Fahrzeuge / Anhänger»: in einer Zeile ziehen, dann Baustelle oder Person wählen.</p>
+  // Verwaltet werden Maschinen und Fahrzeuge im Nachschlagewerk (Eintrag = Typ, Stück = Maschine); hier nur Übersicht,
+  // Reihenfolge und Stamm-Fahrer. Neu erfassen / bearbeiten = Link ins Nachschlagewerk.
+  const wl = r => r.wx && r.w_eid ? `/wissen-live-v1.html#e-${r.w_eid}.${r.wx}` : '/wissen-live-v1.html';
+  $('appMain').innerHTML = `<div class="page"><h2>Fahrzeuge &amp; Maschinen</h2><p class="hint">Erfasst und bearbeitet werden Maschinen, Fahrzeuge und Anhänger im <a href="/wissen-live-v1.html" target="_blank" rel="noopener">Nachschlagewerk</a>: ein Eintrag ist der Typ (z. B. «Raupenbagger 2 t»), seine Stück sind die einzelnen Maschinen. Hier nur Reihenfolge im Planer und Stamm-Fahrer.</p>
     ${typen.map(([t, n, h]) => { const rs = RES.filter(r => r.typ === t).sort((a, b) => a.sortierung - b.sortierung || resName(a).localeCompare(resName(b)));
-      return `<div class="card gcard"><div class="ghead"><b>${n}</b><span class="muted small">${esc(h)}</span><button class="btn btn-ghost" data-radd="${t}" style="margin-left:auto">${I('plus')}${RTYP[t]}</button></div>
-        ${rs.map((r, i) => `<div class="prow${r.aktiv ? '' : ' off'}" data-rrow="${r.id}" style="grid-template-columns:18px 100px minmax(0,1.6fr) minmax(0,1.4fr) auto"><span class="rgrip" title="Ziehen zum Sortieren">${I('grip')}</span><b>${esc(r.nummer || '')}</b><span>${esc(r.name)}${r.aktiv ? '' : ' <span class="tag">inaktiv</span>'}</span><span class="small muted">${r.stamm_person_id ? 'Stamm: ' + esc(P[r.stamm_person_id]?.name || '?') : r.typ_planung ? 'Typ: ' + esc(r.typ_planung) : ''}</span>
-          <span class="acts"><button class="icon-btn" data-re="${r.id}" aria-label="Bearbeiten">${I('edit')}</button></span></div>`).join('') || '<div class="prow"><span></span><span class="muted small">Noch keine erfasst</span></div>'}</div>`; }).join('')}</div>`;
+      return `<div class="card gcard"><div class="ghead"><b>${n}</b><span class="muted small">${esc(h)}</span>${isBuero() ? `<a class="btn btn-ghost" href="/wissen-live-v1.html" target="_blank" rel="noopener" style="margin-left:auto">${I('ext')}Im Nachschlagewerk erfassen</a>` : ''}</div>
+        ${rs.map((r, i) => `<div class="prow${r.aktiv ? '' : ' off'}" data-rrow="${r.id}" style="grid-template-columns:18px 100px minmax(0,1.6fr) minmax(0,1.4fr) auto"><span class="rgrip" title="Ziehen zum Sortieren">${I('grip')}</span><b>${esc(r.nummer || '')}</b><span>${esc(r.name)}${r.aktiv ? '' : ' <span class="tag">inaktiv</span>'}${r.wx ? '' : ' <span class="tag" title="Kein Stück im Nachschlagewerk verknüpft">nicht verknüpft</span>'}</span><span class="small muted">${r.stamm_person_id ? 'Stamm: ' + esc(P[r.stamm_person_id]?.name || '?') : r.typ_planung ? 'Typ: ' + esc(r.typ_planung) : ''}</span>
+          <span class="acts">${r.typ === 'fahrzeug' && isBuero() ? `<button class="kg-ibtn" data-re="${r.id}" title="Stamm-Fahrer" aria-label="Stamm-Fahrer">${I('user')}</button>` : ''}<a class="kg-ibtn" href="${wl(r)}" target="_blank" rel="noopener" title="Im Nachschlagewerk öffnen" aria-label="Im Nachschlagewerk öffnen">${I('ext')}</a></span></div>`).join('') || '<div class="prow"><span></span><span class="muted small">Noch keine erfasst</span></div>'}</div>`; }).join('')}</div>`;
   const q = s => $('appMain').querySelectorAll(s);
-  q('[data-radd]').forEach(b => b.onclick = () => resDlg({ typ: b.dataset.radd, nummer: '', name: '', stamm_person_id: null, aktiv: true }, true));
-  q('[data-re]').forEach(b => b.onclick = () => resDlg(resById(b.dataset.re), false));
+  q('[data-re]').forEach(b => b.onclick = () => resDlg(resById(b.dataset.re)));
   // Reihenfolge per Ziehen am Griff, nur innerhalb der Kategorie (gilt dann auch im Planer)
   q('.rgrip').forEach(g => g.addEventListener('pointerdown', e => { if(e.button !== 0) return; e.preventDefault();
     const row = g.closest('[data-rrow]'), r = resById(row.dataset.rrow), card = row.closest('.card');
@@ -2734,28 +2775,18 @@ function renderRessourcen(){
       if(error) fehler(error, 'Sortieren'); await neuLaden(); };
     addEventListener('pointermove', mv); addEventListener('pointerup', up); }));
 }
-function resDlg(r, neu){
+// Stamm-Fahrer eines Lieferwagens (alles andere im Nachschlagewerk)
+function resDlg(r){
+  if(!r || r.typ !== 'fahrzeug') return;
   const d = document.createElement('div'); d.className = 'dlg';
-  d.innerHTML = `<div class="in"><div style="display:flex;align-items:center"><b style="font-size:15px">${neu ? 'Neu: ' + RTYP[r.typ] : esc(resName(r))}</b><button class="icon-btn" id="rX" style="margin-left:auto" aria-label="Schliessen">${I('x')}</button></div>
-    <div class="two"><div class="fld"><label>${r.typ === 'maschine' ? 'Nummer' : 'Kontrollschild'}</label><input type="text" id="rN" value="${esc(r.nummer || '')}" placeholder="${r.typ === 'maschine' ? 'z. B. 2.1' : 'z. B. BE-464602'}"></div><div class="fld"><label>Bezeichnung</label><input type="text" id="rName" value="${esc(r.name)}" placeholder="${r.typ === 'fahrzeug' ? 'z. B. Dominic oder Lieferwagen 1' : 'z. B. Bagger 2.1'}"></div></div>
-    ${r.typ === 'maschine' ? `<div class="fld"><label>Typ (für die Planung)</label><input type="text" id="rT" list="rTList" value="${esc(r.typ_planung || '')}" placeholder="z. B. Raupenbagger 2 t"><datalist id="rTList">${[...new Set(RES.filter(x => x.typ === 'maschine' && x.typ_planung).map(x => x.typ_planung))].map(t => `<option value="${esc(t)}">`).join('')}</datalist><span class="small muted">Maschinen mit gleichem Typ sind austauschbar (Vorschlag beim Tauschen).</span></div>` : ''}
-    ${r.typ === 'fahrzeug' ? `<div class="fld"><label>Stamm-Fahrer</label><select id="rS"><option value="">Kein Stamm-Fahrer (Pool)</option>${PERSONEN.filter(p => p.aktiv).map(p => `<option value="${p.id}"${p.id === r.stamm_person_id ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select></div>` : ''}
-    <label class="chk"><input type="checkbox" id="rA" ${r.aktiv ? 'checked' : ''}>Aktiv</label>
-    <div style="display:flex;gap:8px;justify-content:flex-end">${neu ? '' : `<button class="btn btn-danger" id="rDel" style="margin-right:auto">${I('trash')}Löschen</button>`}<button class="btn btn-ghost" id="rNo">Abbrechen</button><button class="btn btn-primary" id="rOk">Speichern</button></div></div>`;
+  d.innerHTML = `<div class="in"><div style="display:flex;align-items:center"><b style="font-size:15px">${esc(resName(r))}</b><button class="icon-btn" id="rX" style="margin-left:auto" aria-label="Schliessen">${I('x')}</button></div>
+    <div class="fld"><label>Stamm-Fahrer</label><select id="rS"><option value="">Kein Stamm-Fahrer (Pool)</option>${PERSONEN.filter(p => p.aktiv).map(p => `<option value="${p.id}"${p.id === r.stamm_person_id ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select><span class="small muted">Fährt automatisch mit, wenn diese Person eine Baustelle hat.</span></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost" id="rNo">Abbrechen</button><button class="btn btn-primary" id="rOk">Speichern</button></div></div>`;
   document.body.appendChild(d);
   d.querySelector('#rX').onclick = d.querySelector('#rNo').onclick = () => d.remove();
   d.querySelector('#rOk').onclick = async () => {
-    const row = { typ: r.typ, nummer: d.querySelector('#rN').value.trim() || null, name: d.querySelector('#rName').value.trim(), stamm_person_id: d.querySelector('#rS')?.value || null, aktiv: d.querySelector('#rA').checked };
-    if(r.typ === 'maschine') row.typ_planung = d.querySelector('#rT').value.trim() || null;
-    if(!row.name){ toast('Bitte einen Namen eingeben.', null, true); return; }
-    if(neu) row.sortierung = 10 + Math.max(0, ...RES.filter(x => x.typ === r.typ).map(x => x.sortierung));
-    const { error } = neu ? await sb.from('planer_ressource').insert(row) : await sb.from('planer_ressource').update(row).eq('id', r.id);
+    const { error } = await sb.from('planer_ressource').update({ stamm_person_id: d.querySelector('#rS').value || null }).eq('id', r.id);
     if(error) return fehler(error, 'Speichern'); d.remove(); await neuLaden(); toast('Gespeichert');
-  };
-  const del = d.querySelector('#rDel'); if(del) del.onclick = async () => {
-    const n = RESE.filter(z => z.rid === r.id).length;
-    if(n && !del.dataset.sicher){ del.dataset.sicher = 1; del.textContent = `Wirklich? ${n} Einteilung(en) gehen verloren`; return; }
-    const { error } = await sb.from('planer_ressource').delete().eq('id', r.id); if(error) return fehler(error); d.remove(); await neuLaden(); toast('Gelöscht');
   };
 }
 
