@@ -1200,10 +1200,11 @@ function computeRU(){
     u.list.push({ id: z.id, z, bau: z.eid, mid: z.mid || b?.mid, s, e, slots: rSlots(s, e), own: z.s != null }); });
   RES.forEach(r => { if(r.typ !== 'fahrzeug' || !r.stamm_person_id || !P[r.stamm_person_id]?.aktiv || !RU[r.id]) return; const mid = r.stamm_person_id;
     const weg = new Set(); RESE.forEach(z => { if(z.rid === r.id && z.art === 'stamm_weg') rSlots(z.s, z.e).forEach(k => weg.add(k)); });
-    const span = new Set(); ALL.forEach(it => { if(it.mid === mid && it.kind === 'baustelle') rSlots(it.s, it.e).forEach(k => span.add(k)); });
-    const need = NEED[mid] || new Set(); const slots = [...span].filter(k => !weg.has(k));
-    // Fahrer abwesend: Stammfahrzeug «evtl. verfügbar» (heller), zählt nicht als Konflikt
-    RU[r.id].list.push({ id: 'stamm_' + r.id, stamm: true, mid, slots, evtl: new Set(slots.filter(k => !need.has(k))) }); });
+    // Stammfahrzeug gehört zur Person: an allen Arbeitstagen bei ihr (nicht nur an Baustellentagen), ausser freigegeben
+    const slots = []; for(let d = 0; d < NDAYS; d++){ if(isOff(d)) continue; if(!weg.has(d * 2)) slots.push(d * 2); if(!weg.has(d * 2 + 1)) slots.push(d * 2 + 1); }
+    // Fahrer abwesend (Ferien, krank, frei …): Stammfahrzeug «evtl. verfügbar» (heller), zählt nicht als Konflikt
+    const abw = new Set(); ALL.forEach(it => { if(it.mid === mid && it.kind === 'absenz' && LAY[it.id]) LAY[it.id].free.forEach(k => abw.add(k)); });
+    RU[r.id].list.push({ id: 'stamm_' + r.id, stamm: true, mid, slots, evtl: new Set(slots.filter(k => abw.has(k))) }); });
   Object.values(RU).forEach(u => { u.cntF = {}; u.list.forEach(x => x.slots.forEach(k => { if(x.evtl?.has(k)) return; u.cnt[k] = (u.cnt[k] || 0) + 1; if(x.fest) u.cntF[k] = (u.cntF[k] || 0) + 1; })); });
   computeMaschWarn();
 }
@@ -1410,7 +1411,7 @@ function openResPop(zid, rid, rect, u){
   const r = resById(rid); const ed = canEditRes(r.typ);
   if(zid.startsWith('stamm_')){
     const d = Math.floor(u); const wegs = RESE.filter(z => z.rid === rid && z.art === 'stamm_weg' && z.e > TODAY - 7).sort((a, b) => a.s - b.s);
-    const pop = popAt(rect, `<b>${esc(resName(r))}</b><span class="muted small">Stammfahrzeug von ${esc(P[r.stamm_person_id]?.name || '')}. Fährt automatisch mit, wenn er eine Baustelle hat.</span>
+    const pop = popAt(rect, `<b>${esc(resName(r))}</b><span class="muted small">Stammfahrzeug von ${esc(P[r.stamm_person_id]?.name || '')}. Gehört an allen Arbeitstagen zu ihr/ihm, ausser bei Absenz oder Freigabe.</span>
       ${isBuero() ? `<button class="btn btn-ghost" id="rpFrei">Am ${esc(dLab(d))} freigeben</button>` : ''}
       ${wegs.length ? `<span class="small muted">Freigegeben:</span>${wegs.map(z => `<span class="small" style="display:flex;gap:6px;align-items:center">${esc(spanLabel({ s: z.s, e: z.e }))}${isBuero() ? `<button class="icon-btn" data-wx="${z.id}" aria-label="Freigabe aufheben" style="margin-left:auto">${I('x')}</button>` : ''}</span>`).join('')}` : ''}`);
     const fb = pop.querySelector('#rpFrei'); if(fb) fb.onclick = async () => { closePop(); const ok = await resInsert({ ressource_id: rid, art: 'stamm_weg', person_id: r.stamm_person_id, beginn: fromU(d), ende: fromU(d + 1, true) }); if(ok) toast(`${resName(r)} am ${dLab(d)} frei`, () => resDelete(ok.id)); };
@@ -2842,7 +2843,7 @@ function personDlg(p, gid){
 // FAHRZEUGE & MASCHINEN (Stammdaten, Büro / Admin)
 // ---------------------------------------------------------------------------
 function renderRessourcen(){
-  const typen = [['fahrzeug', 'Fahrzeuge', 'Ein Fahrzeug mit Stamm-Fahrer fährt automatisch mit, wenn dieser eine Baustelle hat.'], ['maschine', 'Maschinen', 'Bagger, Dumper usw. Werden einer Baustelle zugeteilt und wandern mit.'], ['anhaenger', 'Anhänger', 'Können auch Mitarbeitende für die eigene Zeile reservieren.']];
+  const typen = [['fahrzeug', 'Fahrzeuge', 'Ein Fahrzeug mit Stamm-Fahrer gehört an allen Arbeitstagen zu dieser Person (ausser Absenz oder Freigabe).'], ['maschine', 'Maschinen', 'Bagger, Dumper usw. Werden einer Baustelle zugeteilt und wandern mit.'], ['anhaenger', 'Anhänger', 'Können auch Mitarbeitende für die eigene Zeile reservieren.']];
   // Verwaltet werden Maschinen und Fahrzeuge im Nachschlagewerk (Eintrag = Typ, Stück = Maschine); hier nur Übersicht,
   // Reihenfolge und Stamm-Fahrer. Neu erfassen / bearbeiten = Link ins Nachschlagewerk.
   const wl = r => r.wx && r.w_eid ? `/wissen-live-v1.html#e-${r.w_eid}.${r.wx}` : '/wissen-live-v1.html';
@@ -2873,7 +2874,7 @@ function resDlg(r){
   if(!r || r.typ !== 'fahrzeug') return;
   const d = document.createElement('div'); d.className = 'dlg';
   d.innerHTML = `<div class="in"><div style="display:flex;align-items:center"><b style="font-size:15px">${esc(resName(r))}</b><button class="icon-btn" id="rX" style="margin-left:auto" aria-label="Schliessen">${I('x')}</button></div>
-    <div class="fld"><label>Stamm-Fahrer</label><select id="rS"><option value="">Kein Stamm-Fahrer (Pool)</option>${PERSONEN.filter(p => p.aktiv).map(p => `<option value="${p.id}"${p.id === r.stamm_person_id ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select><span class="small muted">Fährt automatisch mit, wenn diese Person eine Baustelle hat.</span></div>
+    <div class="fld"><label>Stamm-Fahrer</label><select id="rS"><option value="">Kein Stamm-Fahrer (Pool)</option>${PERSONEN.filter(p => p.aktiv).map(p => `<option value="${p.id}"${p.id === r.stamm_person_id ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select><span class="small muted">Gehört an allen Arbeitstagen zu dieser Person, ausser bei Absenz oder Freigabe.</span></div>
     <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost" id="rNo">Abbrechen</button><button class="btn btn-primary" id="rOk">Speichern</button></div></div>`;
   document.body.appendChild(d);
   d.querySelector('#rX').onclick = d.querySelector('#rNo').onclick = () => d.remove();
