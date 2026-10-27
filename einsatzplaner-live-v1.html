@@ -283,6 +283,8 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 .mwarn .i{width:9px;height:9px;stroke-width:2;}
 .mwarn.o{background:#E08A1E;color:#fff;} .mwarn.r{background:var(--red);color:#fff;}
 .fkgrau{position:absolute;z-index:3;pointer-events:none;background:rgba(35,43,53,.09);backdrop-filter:grayscale(1);-webkit-backdrop-filter:grayscale(1);}
+.fkhell{position:absolute;z-index:3;pointer-events:none;background:rgba(35,43,53,.05);border:1px solid;border-radius:4px;box-sizing:border-box;}
+.fklab{position:absolute;z-index:3;pointer-events:none;font-size:10px;color:var(--muted);white-space:nowrap;}
 .fkrahmen{position:absolute;z-index:3;pointer-events:none;border:2px solid;border-radius:4px;box-sizing:border-box;}
 .tl.fokus .row:not(.fov):not(.fokusp):not(.hdr){filter:grayscale(1);}
 .tl.fokus .row:not(.fov):not(.fokusp) .lane,.tl.fokus .row:not(.fov):not(.fokusp) .nm{box-shadow:inset 0 0 0 9999px rgba(35,43,53,.09);}
@@ -1104,8 +1106,27 @@ function personRow(p, W, bgx){
 }
 // Aufgeklappt (Maschinen / Lieferwagen): Baustellen-Zeitraum der Person mit Rahmen in ihrer Farbe,
 // links und rechts davon grau wie der Rest
+// Bagger aufgeklappt: genau eine Baustelle ist aktiv (weiss), Häkchen/Schloss gelten für sie. Automatisch die Baustelle
+// etwa 4–5 Tage rechts vom linken Rand; Klick in eine andere (hellgraue) Baustelle macht diese aktiv.
+let aktivBau = null, aktivFuer = null;
+const fokusBaus = () => ALL.filter(it => it.mid === openMid && it.kind === 'baustelle' && !it.rep && LAY[it.id]?.segs.length).sort((a, b) => a.s - b.s);
+const fokusRef = () => (tlEl()?.scrollLeft || 0) / dayW + 4.5;
+function aktiveBaustelle(){
+  if(aktivFuer !== openMid){ aktivFuer = openMid; aktivBau = null; }
+  const l = fokusBaus(); if(!l.length) return null; const cur = l.find(b => b.id === aktivBau); if(cur) return cur;
+  const ref = fokusRef(), b = l.find(x => x.s <= ref && x.e >= ref) || l.find(x => x.s >= ref) || l[l.length - 1]; aktivBau = b.id; return b; }
+function aktivNachScroll(){ if(!openMid || openTyp !== 'maschine') return; const ref = fokusRef(), inn = fokusBaus().find(b => b.s <= ref && b.e >= ref);
+  if(inn && inn.id !== aktiveBaustelle()?.id){ aktivBau = inn.id; renderRows(); } }
 function fokusRahmen(t){
   const g = t.querySelector('.grid'), top = g?.querySelector('.row.fokusp'); if(!top) return;
+  if(openTyp === 'maschine'){ // aktive Baustelle weiss mit Rahmen, andere hellgrau mit dünnem Rahmen, Rest grau
+    let last = top; for(let n = top.nextElementSibling; n && n.classList.contains('fov'); n = n.nextElementSibling) last = n;
+    const gr = g.getBoundingClientRect(), y0 = top.getBoundingClientRect().top - gr.top, y1 = last.getBoundingClientRect().bottom - gr.top;
+    const W = NDAYS * dayW, farbe = P[openMid]?.farbe || '#323E4E', akt = aktiveBaustelle(); let h = '', x = 0;
+    const box = (a, b, cls, st = '') => `<div class="${cls}" style="top:${y0}px;height:${y1 - y0}px;left:${NAMEW + a}px;width:${Math.max(0, b - a)}px;${st}"></div>`;
+    fokusBaus().forEach(b => { const sg = LAY[b.id].segs, s = sg[0][0] * dayW, e = sg[sg.length - 1][1] * dayW; if(s > x) h += box(x, s, 'fkgrau');
+      h += b === akt ? box(Math.max(x, s), e, 'fkrahmen', `border-color:${farbe}`) : box(Math.max(x, s), e, 'fkhell', `border-color:${farbe}99`) + `<div class="fklab" style="top:${y1 - 15}px;left:${NAMEW + Math.max(x, s) + 4}px">Klick: ${esc(labOf(b))} aktiv</div>`; x = Math.max(x, e); });
+    h += box(x, W, 'fkgrau'); g.insertAdjacentHTML('beforeend', h); return; }
   let last = top; for(let n = top.nextElementSibling; n && n.classList.contains('fov'); n = n.nextElementSibling) last = n;
   const gr = g.getBoundingClientRect(), y0 = top.getBoundingClientRect().top - gr.top, y1 = last.getBoundingClientRect().bottom - gr.top;
   const win = []; ALL.filter(it => it.mid === openMid && it.kind === 'baustelle' && LAY[it.id]).forEach(it => { const sg = LAY[it.id].segs; if(sg.length) win.push([sg[0][0], sg[sg.length - 1][1]]); });
@@ -1245,13 +1266,13 @@ function ovRows(W, bgx, typ = layer, focusMid = null){
     // Maschine unter einer Person: links Häkchen (vorläufig) und Schloss (fest), Rahmen wie rechts; fest bei anderen = Name hell
     let nmCls = '', nmSt = '', ctl = ''; const warn = typ === 'maschine' ? MW.res[r.id]?.l : null;
     if(typ === 'maschine' && focusMid){
-      const mine = u.list.filter(x => x.masch && byId(x.bau)?.mid === focusMid), vorl = mine.some(x => !x.fest), fest = mine.some(x => x.fest);
-      const fw = new Set(); ALL.filter(it => it.mid === focusMid && it.kind === 'baustelle' && it.e > TODAY).forEach(it => rSlots(it.s, it.e).forEach(k => fw.add(k)));
+      const akt = aktiveBaustelle(), mine = u.list.filter(x => x.masch && akt && x.bau === akt.id), vorl = mine.some(x => !x.fest), fest = mine.some(x => x.fest);
+      const fw = new Set(akt ? rSlots(akt.s, akt.e) : []);
       const weg = !mine.length && u.list.some(x => x.masch && x.fest && byId(x.bau)?.mid !== focusMid && x.slots.some(k => fw.has(k)));
       nmCls = fest ? ' mfest' : vorl ? ' mvorl' : weg ? ' mweg' : ''; nmSt = ` style="--c:${resCol(focusMid)}"`;
       // Typ-Zeile: nur Häkchen (vorläufig, ohne Nummer); Maschinen-Zeile: nur Schloss (diese Maschine fest)
-      if(ed) ctl = `<span class="mctl">${r.istTyp ? `<button class="mres-b${vorl ? ' on' : ''}" data-mres="${r.id}" data-art="vorl" title="${vorl ? 'Vorläufige Reservierung entfernen' : 'Typ vorläufig reservieren (ganze Baustelle)'}" aria-label="Typ vorläufig reservieren" aria-pressed="${vorl}">${I('check')}</button>`
-        : `<button class="mres-b${fest ? ' on' : ''}" data-mres="${r.id}" data-art="fest" title="${fest ? 'Fest reserviert – Klick: wieder vorläufig (nur Typ)' : 'Diese Maschine fest reservieren'}" aria-label="Fest reservieren" aria-pressed="${fest}">${I('lock')}</button>`}</span>`; }
+      if(ed) ctl = `<span class="mctl">${r.istTyp ? `<button class="mres-b${vorl ? ' on' : ''}" data-mres="${r.id}" data-art="vorl" title="${vorl ? 'Vorläufige Reservierung entfernen' : `Typ vorläufig reservieren für ${esc(akt ? labOf(akt) : '')}`}" aria-label="Typ vorläufig reservieren" aria-pressed="${vorl}">${I('check')}</button>`
+        : `<button class="mres-b${fest ? ' on' : ''}" data-mres="${r.id}" data-art="fest" title="${fest ? 'Fest reserviert – Klick: wieder vorläufig (nur Typ)' : `Diese Maschine fest für ${esc(akt ? labOf(akt) : '')}`}" aria-label="Fest reservieren" aria-pressed="${fest}">${I('lock')}</button>`}</span>`; }
     const tTit = r.istTyp ? `${r.name} · ${r.ids.length} Stück` : resName(r) + (r.typ_planung ? ' · Typ: ' + r.typ_planung : '');
     const nmIn = r.istTyp ? `${I('digger').replace('class="i"', `class="i${warn ? ' mwi-' + warn : ''}" style="width:14px;height:14px"`)}<span class="n">${esc(r.name)}</span>`
       : `${I(typ === 'maschine' ? 'digger' : 'truck').replace('class="i"', `class="i${warn ? ' mwi-' + warn : ''}" style="width:14px;height:14px;color:var(--muted)"`)}${r.nummer ? `<span class="z" style="font-weight:700;color:var(--primary)">${esc(r.nummer)}</span>` : ''}<span class="n">${esc(r.name)}</span>${r.stamm_person_id && P[r.stamm_person_id] && first(P[r.stamm_person_id].name) !== r.name ? `<span class="z">${esc(first(P[r.stamm_person_id].name))}</span>` : ''}`;
@@ -1316,8 +1337,9 @@ function slotIdx(all, u){ const k = Math.floor(u * 2); let i = all.findIndex(x =
 // (macht aus einer vorläufigen Typ-Reservierung eine feste, Lage und Unterbrüche bleiben)
 async function maschToggle(rid, art, rect){
   const r = resById(rid), upd = (id, row) => sb.from('planer_ressource_einsatz').update(row).eq('id', id);
-  const meine = id => RESE.filter(z => z.rid === id && z.art === 'zuteilung' && z.eid && byId(z.eid)?.mid === openMid);
-  const baus = EINS.filter(x => x.kind === 'baustelle' && x.mid === openMid && x.e > TODAY).sort((a, b) => a.s - b.s);
+  // gilt nur für die aktive (weisse) Baustelle
+  const akt = aktiveBaustelle(), meine = id => RESE.filter(z => z.rid === id && z.art === 'zuteilung' && akt && z.eid === akt.id);
+  const baus = akt ? [akt] : [];
   const waehle = (liste, lab, fn) => { if(liste.length === 1) return fn(liste[0]);
     const pop = popAt(rect, `<b>${esc(resName(r))}</b><span class="muted small">Für welche Baustelle?</span>${liste.map((x, i) => `<button class="btn btn-ghost" data-pick="${i}" style="justify-content:flex-start">${esc(lab(x))}</button>`).join('')}`);
     pop.querySelectorAll('[data-pick]').forEach(b => b.onclick = () => { closePop(); fn(liste[+b.dataset.pick]); }); };
@@ -1921,7 +1943,7 @@ function bindTimeline(t){
       if(c === 'det') openPanel(m.id); else if(c === 'pz') unterbrich(it, uAt(x)); else if(c === 'cpy') kopiere(m);
       else if(c === 'del1') wdhLoeschen(it, 'nur'); else if(c === 'delf') wdhLoeschen(it, 'folgende'); else if(c === 'dela') loescheEinsatz(m);
       else bestaetige('Löschen?', `<div>${esc(labOf(m))}</div>`, 'Löschen', () => loescheEinsatz(m)); }); });
-  let stT = 0; t.addEventListener('scroll', () => { if(!stT) stT = requestAnimationFrame(() => { stT = 0; stickLabels(); }); }, { passive: true });
+  let stT = 0; t.addEventListener('scroll', () => { if(!stT) stT = requestAnimationFrame(() => { stT = 0; stickLabels(); }); clearTimeout(t._aT); t._aT = setTimeout(aktivNachScroll, 150); }, { passive: true });
   let scT; t.addEventListener('scroll', () => { closePop(); if(zoom === 'tag'){ clearTimeout(scT); scT = setTimeout(() => { const c = Math.floor(t.scrollLeft / dayW); if(c < HR[0] + 3 || c > HR[1] - 4) renderRows(); }, 120); }
     if(openMid && openTyp === 'fahrzeug'){ clearTimeout(t._pT); t._pT = setTimeout(() => { const c = Math.floor(t.scrollLeft / dayW), e2 = c + Math.ceil(visW() / dayW); if(c < POOLR[0] + 3 || e2 > POOLR[1] - 3) renderRows(); }, 150); } }, { passive: true });
   t.addEventListener('pointerdown', e => {
@@ -1945,6 +1967,9 @@ function bindTimeline(t){
     // Übersicht Maschinen / Fahrzeuge / Anhänger
     const mr = e.target.closest('[data-mres]'); if(mr){ e.stopPropagation(); maschToggle(mr.dataset.mres, mr.dataset.art, mr.getBoundingClientRect()); return; }
     const mwk = e.target.closest('.mwarn'); if(mwk){ const ln = mwk.closest('.lane[data-mid]'); if(ln){ openMid = ln.dataset.mid; openTyp = 'maschine'; renderRows(); } return; }
+    // Bagger aufgeklappt: Klick in eine andere (hellgraue) Baustelle der Person = diese aktiv
+    if(openMid && openTyp === 'maschine' && e.target.closest('.row.fov .lane') && !e.target.closest('.band')){ const u = uAt(e.clientX), a = aktiveBaustelle();
+      if(a && !(u >= a.s && u <= a.e)){ const o = fokusBaus().find(b => u >= b.s && u <= b.e); if(o){ aktivBau = o.id; renderRows(); return; } } }
     const band = e.target.closest('.band[data-rz]'), rl = e.target.closest('.lane[data-rid]');
     if(band){ const zid = band.dataset.rz, rid = band.dataset.rid, u = uAt(e.clientX); const z = RESE.find(o => o.id === zid);
       // Maschine an Baustelle: ziehen/kürzen in Halbtagen der Baustelle (Lage bleibt relativ)
