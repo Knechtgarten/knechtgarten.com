@@ -405,6 +405,13 @@ table.bp td{padding:4px;border-top:1px solid var(--soft);white-space:nowrap;}
 .fx{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink);}
 .fx input{width:56px;padding:3px 6px;text-align:right;}
 .fxw{font-size:12px;color:var(--red);font-weight:700;padding-left:30px;}
+.cmrow{display:flex;justify-content:flex-end;gap:6px;padding-top:6px;margin-top:2px;border-top:1px solid var(--line);}
+.bwt{background:var(--red);color:#fff;border-radius:3px;padding:0 3px;font-weight:700;}
+.bpz{position:absolute;top:3px;height:16px;z-index:2;cursor:pointer;}
+.bpz::before{content:"";position:absolute;left:2px;right:2px;top:7px;border-top:2px dashed var(--c);opacity:.8;}
+.bpz .hl,.bpz .hr{position:absolute;top:0;bottom:0;width:6px;cursor:ew-resize;}
+.bpz .hl{left:-1px;} .bpz .hr{right:-1px;}
+.bpz.ed:hover{background:rgba(50,62,78,.06);border-radius:3px;}
 .bwarn{position:absolute;right:2px;top:1px;width:13px;height:13px;border-radius:50%;background:var(--red);color:#fff;font-size:10px;line-height:13px;text-align:center;font-weight:800;z-index:3;pointer-events:none;}
 .kopf2 b{font-weight:700;}
 .zst{display:flex;align-items:center;gap:8px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700;}
@@ -695,8 +702,8 @@ async function ladeAlles(){
     syncPflegeErledigt();
   }catch(err){ fehler(err, 'Laden'); }
 }
-function rowToItem(r){ return { id: r.id, mid: r.person_id, kind: r.art, s: toU(r.beginn), e: toU(r.ende), kid: r.kunde_id, title: r.titel || '', text: r.notiz || '', pl: r.projektleiter_id, link: r.mit_einsatz_id, allein: r.allein, ok: r.abgemacht, soll: r.soll_tage, files: r.planer_datei || [], pkk: r.pflege_kunde_kategorie_id, pj: r.pflege_jahr, pkw: r.pflege_kw, fix: !!r.start_fix, fixg: r.start_fix_grund || '', kv: r.kopie_von, wdh: r.wdh || null }; }
-function itemToRow(it){ return { person_id: it.mid, art: it.kind, beginn: fromU(it.s), ende: fromU(it.e, true), kunde_id: it.kid || null, titel: it.title || null, notiz: it.text || null, projektleiter_id: it.pl || null, mit_einsatz_id: it.link || null, allein: !!it.allein, abgemacht: it.ok !== false, soll_tage: it.soll ?? null, pflege_kunde_kategorie_id: it.pkk || null, pflege_jahr: it.pj || null, pflege_kw: it.pkw || null, start_fix: !!it.fix, start_fix_grund: it.fixg || null, kopie_von: it.kv || null, wdh: it.wdh || null }; }
+function rowToItem(r){ return { id: r.id, mid: r.person_id, kind: r.art, s: toU(r.beginn), e: toU(r.ende), kid: r.kunde_id, title: r.titel || '', text: r.notiz || '', pl: r.projektleiter_id, link: r.mit_einsatz_id, allein: r.allein, ok: r.abgemacht, soll: r.soll_tage, files: r.planer_datei || [], pkk: r.pflege_kunde_kategorie_id, pj: r.pflege_jahr, pkw: r.pflege_kw, fix: !!r.start_fix, fixg: r.start_fix_grund || '', kv: r.kopie_von, wdh: r.wdh || null, pz: r.pausen || [] }; }
+function itemToRow(it){ return { person_id: it.mid, art: it.kind, beginn: fromU(it.s), ende: fromU(it.e, true), kunde_id: it.kid || null, titel: it.title || null, notiz: it.text || null, projektleiter_id: it.pl || null, mit_einsatz_id: it.link || null, allein: !!it.allein, abgemacht: it.ok !== false, soll_tage: it.soll ?? null, pflege_kunde_kategorie_id: it.pkk || null, pflege_jahr: it.pj || null, pflege_kw: it.pkw || null, start_fix: !!it.fix, start_fix_grund: it.fixg || null, kopie_von: it.kv || null, wdh: it.wdh || null, pausen: it.pz || [] }; }
 const kName = k => k ? (k.firma || [k.nachname, k.vorname].filter(Boolean).join(' ') || k.name) : '';
 const kShort = k => k ? (k.firma || k.nachname || k.name || '') : '';
 const kOrt = k => k ? [k.strasse, [k.plz, k.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ') : '';
@@ -796,6 +803,8 @@ function floatOffene(){
     });
   });
 }
+// Unterbruch eines Auftrags: [von, bis) in Tagen ab Beginn
+const inPause = (it, k) => !!it.pz?.length && it.pz.some(([a, c]) => k / 2 >= it.s + a - 1e-6 && (k + 1) / 2 <= it.s + c + 1e-6);
 function compute(){
   floatOffene();
   ALL = EINS.filter(it => !wdhAusSelbst(it)).concat(occs()); LAY = {};
@@ -809,6 +818,7 @@ function compute(){
       const k0 = Math.floor(it.s * 2 + 1e-9), k1 = Math.ceil(it.e * 2 - 1e-9) - 1;
       for(let k = k0; k <= k1; k++){
         const d = k >> 1; if(multi && isOff(d)) continue;
+        if(inPause(it, k)) continue;
         const a = Math.max(it.s, k / 2), b = Math.min(it.e, (k + 1) / 2); if(b - a < 1e-6) continue;
         // Kurze Termine (unter einem Halbtag) unterbrechen nicht – ausser sie füllen zusammen mind. 4 Std. des Halbtags
         const ov = over.filter(o => o.s < b - 1e-6 && o.e > a + 1e-6);
@@ -1000,13 +1010,15 @@ function personRow(p, W, bgx){
     const L = LAY[it.id]; if(!L || !L.segs.length || grpd.has(it.id)) return;
     const st = barStyle(it), hit = hitOf(it), isRep = !!(it.rep || it.wdh); // wiederkehrend: kleines Pfeil-Symbol vorne
     const ohneKunde = istAuftrag(it) && !it.kid && !it.title; // rot umrandet, bis Kunde oder Titel erfasst ist
-    const lab = (it._alt ? `seit ${dLab(Math.floor(it._alt.s))} · ` : '') + (ohneKunde ? 'Ohne Kunde' : labOf(it)) + (it.e - it.s > 1 + 1e-6 && it.kind !== 'hilfe' && L.n >= 1 ? ` · ${fmtN(L.n)} T` : '');
-    const abw = it.soll && Math.abs(L.n - it.soll) > .01; // Arbeitstage fix, aber Plan weicht ab
+    const abw = it.soll && Math.abs(L.n - it.soll) > .01; // Arbeitstage fix, aber Plan weicht ab: rot «14 von 18 T»
+    const mehr = it.e - it.s > 1 + 1e-6 && it.kind !== 'hilfe' && L.n >= 1;
+    const lab = (it._alt ? `seit ${dLab(Math.floor(it._alt.s))} · ` : '') + (ohneKunde ? 'Ohne Kunde' : labOf(it)) + (mehr && !abw ? ` · ${fmtN(L.n)} T` : '');
+    const cntH = abw ? ` · <span class="bwt">${fmtN(L.n)} von ${fmtN(it.soll)} T</span>` : '';
     const tip = `${titleOf(it)}\n${p.name}${it.e - it.s > 1 + 1e-6 ? `\n${fmtN(L.n)} Arbeitstage` : ''}${it.allein ? '\nArbeitet allein' : ''}${it.ok === false ? '\nNoch nicht abgemacht' : ''}${isRep ? '\nWiederkehrend' : ''}${it.fix ? `\nStart fix${it.fixg ? ': ' + it.fixg : ''}` : ''}${abw ? `\nGeplant ${tageTxt(it.soll)}, aktuell ${tageTxt(L.n)}` : ''}`;
     // Beschriftung läuft über Wochenenden weiter
     const x0 = L.segs[0][0] * dayW + 5, tw = Math.max(0, (L.segs[L.segs.length - 1][1] - L.segs[0][0]) * dayW - 9);
     const prov = it.ok === false;
-    const txt = left => tw > 14 ? `<span class="t" data-x0="${x0}" data-x1="${x0 + tw}" data-l="${left}" style="left:${x0 - left}px;width:${tw}px">${it.fix ? I('lock') : ''}${isRep ? I('repeat') : ''}${esc(lab)}</span>` : '';
+    const txt = left => tw > 14 ? `<span class="t" data-x0="${x0}" data-x1="${x0 + tw}" data-l="${left}" style="left:${x0 - left}px;width:${tw}px">${it.fix ? I('lock') : ''}${isRep ? I('repeat') : ''}${esc(lab)}${cntH}</span>` : '';
     const bgS = prov ? `background:repeating-linear-gradient(135deg,${st.bg}99 0 5px,#FFFFFF 5px 10px);color:#232B35` : `background:${st.bg};color:${st.fg}`;
     L.segs.forEach((sg, i) => {
       const l = sg[0] * dayW + 1, w = Math.max(3, (sg[1] - sg[0]) * dayW - 2);
@@ -1014,6 +1026,9 @@ function personRow(p, W, bgx){
       const cls = ['bar', ed ? 'ed' : '', prov ? 'provi' : '', it._alt || ohneKunde ? 'altb' : '', L.mini ? 'mini' : '', selId === it.id ? 'sel' : '', hit ? '' : 'dim'].join(' ');
       bars += `<div class="${cls}" data-id="${it.id}" style="left:${l}px;width:${w}px;${bgS};border-color:${st.bd}" title="${esc(tip)}">${i === 0 && !it.fix && w >= 30 ? '<span class="hl"></span>' : ''}${txt(l + 1)}${i === L.segs.length - 1 && w >= 30 ? '<span class="hr"></span>' : ''}${i === L.segs.length - 1 && abw ? `<span class="bwarn" title="Geplant ${tageTxt(it.soll)}, aktuell ${tageTxt(L.n)}">!</span>` : ''}</div>`;
     });
+    // Unterbruch: Lücke mit gestrichelter Linie, an den Kanten ziehbar, Klick = aufheben
+    (it.pz || []).forEach(([a, c], i) => { const l = (it.s + a) * dayW, w = (c - a) * dayW;
+      bars += `<div class="bpz${ed ? ' ed' : ''}" data-pzid="${it.id}" data-pzi="${i}" style="left:${l}px;width:${w}px;--c:${st.bg}" title="Unterbruch${ed ? ' – an den Kanten ziehen, Klick zum Aufheben' : ''}">${ed ? '<span class="hl"></span><span class="hr"></span>' : ''}</div>`; });
     if(it.allein && L.segs.length) bars += `<span class="bdot" style="left:${L.segs[0][0] * dayW + 3}px" title="Arbeitet allein"></span>`;
     const mw = MW.bau[it.id]; if(mw && L.segs.length) bars += `<span class="mwarn ${mw.l}" style="left:${mw.k / 2 * dayW}px" title="${mw.l === 'r' ? 'Maschine doppelt fest belegt' : 'Maschinen-Überschneidung (vorläufig)'} – Maschinen aufklappen">${I('digger')}</span>`;
     if(L.miss.length){ const slotW = dayW / 2;
@@ -1804,12 +1819,15 @@ function bindTimeline(t){
     e.preventDefault(); const it = byId(bar.dataset.id); if(!it) return; const x = e.clientX, ed = canEdit(it.mid);
     const m = it.rep ? byId(it.rep) : it, rep = !!(m && m.wdh); // wiederkehrend: Original m
     const b = (k, ic, l, st = '') => `<button class="btn btn-ghost" data-cm="${k}" style="justify-content:flex-start;${st}">${I(ic)}${l}</button>`;
-    const pop = popAt({ left: x, bottom: e.clientY }, `<b>${esc(labOf(it))}</b>${b('det', 'file', 'Details')}${ed ? b('ein', 'plus', 'Auftrag zwischenfügen') + (istAuftrag(it) ? b('cpy', 'copy', 'Auftrag kopieren') : '')
-      + (rep ? b('del1', 'trash', 'Nur diesen löschen', 'color:var(--danger)') + b('delf', 'trash', 'Diesen und alle folgenden löschen', 'color:var(--danger)') + b('dela', 'trash', 'Alle löschen', 'color:var(--danger)')
-        : b('del', 'trash', 'Löschen', 'color:var(--danger)')) : ''}`);
+    const ib = (k, ic, l, cls = '') => `<button class="kg-ibtn${cls}" data-cm="${k}" title="${l}" aria-label="${l}">${I(ic)}</button>`;
+    const mehrt = it.e - it.s > 1 + 1e-6 && !rep;
+    const pop = popAt({ left: x, bottom: e.clientY }, `<b>${esc(labOf(it))}</b>${b('det', 'file', 'Details')}${ed && mehrt ? b('pz', 'pause', 'Hier unterbrechen') : ''}${ed
+      ? (rep ? b('del1', 'trash', 'Nur diesen löschen', 'color:var(--danger)') + b('delf', 'trash', 'Diesen und alle folgenden löschen', 'color:var(--danger)') + b('dela', 'trash', 'Alle löschen', 'color:var(--danger)')
+        : `<div class="cmrow">${istAuftrag(it) ? ib('cpy', 'copy', 'Auftrag kopieren') : ''}${ib('del', 'trash', 'Löschen', ' danger')}</div>`) : ''}`);
     pop.querySelectorAll('[data-cm]').forEach(bt => bt.onclick = () => { closePop(); const c = bt.dataset.cm;
-      if(c === 'det') openPanel(m.id); else if(c === 'ein') einfuegen(lane, x, it); else if(c === 'cpy') kopiere(m);
-      else if(c === 'del1') wdhLoeschen(it, 'nur'); else if(c === 'delf') wdhLoeschen(it, 'folgende'); else loescheEinsatz(m); }); });
+      if(c === 'det') openPanel(m.id); else if(c === 'pz') unterbrich(it, uAt(x)); else if(c === 'cpy') kopiere(m);
+      else if(c === 'del1') wdhLoeschen(it, 'nur'); else if(c === 'delf') wdhLoeschen(it, 'folgende'); else if(c === 'dela') loescheEinsatz(m);
+      else bestaetige('Löschen?', `<div>${esc(labOf(m))}</div>`, 'Löschen', () => loescheEinsatz(m)); }); });
   let stT = 0; t.addEventListener('scroll', () => { if(!stT) stT = requestAnimationFrame(() => { stT = 0; stickLabels(); }); }, { passive: true });
   let scT; t.addEventListener('scroll', () => { closePop(); if(zoom === 'tag'){ clearTimeout(scT); scT = setTimeout(() => { const c = Math.floor(t.scrollLeft / dayW); if(c < HR[0] + 3 || c > HR[1] - 4) renderRows(); }, 120); }
     if(openMid && openTyp === 'fahrzeug'){ clearTimeout(t._pT); t._pT = setTimeout(() => { const c = Math.floor(t.scrollLeft / dayW), e2 = c + Math.ceil(visW() / dayW); if(c < POOLR[0] + 3 || e2 > POOLR[1] - 3) renderRows(); }, 150); } }, { passive: true });
@@ -1844,13 +1862,16 @@ function bindTimeline(t){
         drag = { kind: 'rbar', zid, rid, mode, x0: e.clientX, s0: z.s, e0: z.e, u0: u, moved: false, rect: band.getBoundingClientRect() }; e.preventDefault(); return; }
       drag = { kind: 'click', fn: () => openResPop(zid, rid, band.getBoundingClientRect(), u) }; return; }
     if(rl){ if(!rl.classList.contains('ed')) return; const u = rsnap(uAt(e.clientX) - RS() / 2); drag = { kind: 'rnew', rid: rl.dataset.rid, u0: u, x0: e.clientX, moved: false, lane: rl }; e.preventDefault(); return; }
+    const bpz = e.target.closest('.bpz.ed'); if(bpz){ const it = byId(bpz.dataset.pzid), i = +bpz.dataset.pzi; if(!it?.pz?.[i]) return;
+      const side = e.target.classList.contains('hl') ? 'l' : e.target.classList.contains('hr') ? 'r' : 'click';
+      drag = { kind: 'pz', id: it.id, i, side, x0: e.clientX, u0: uAt(e.clientX), p0: [...it.pz[i]], pz0: JSON.parse(JSON.stringify(it.pz)), nV: halbtageJetzt(it), moved: false, rect: bpz.getBoundingClientRect() }; e.preventDefault(); return; }
     const bar = e.target.closest('.bar[data-id]'), lane = e.target.closest('.lane[data-mid]');
     if(bar){
       const id = bar.dataset.id;
       const it = byId(id); if(!it) return;
       const ed = canEdit(it.mid);
       const mode = e.target.classList.contains('hl') ? 'l' : e.target.classList.contains('hr') ? 'r' : 'move';
-      drag = { kind: 'bar', id, mode, x0: e.clientX, y0: e.clientY, s0: it.s, e0: it.e, mid0: it.mid, moved: false, ed, u0: uAt(e.clientX) };
+      drag = { kind: 'bar', id, mode, x0: e.clientX, y0: e.clientY, s0: it.s, e0: it.e, mid0: it.mid, moved: false, ed, u0: uAt(e.clientX), pz0: it.pz?.length ? JSON.parse(JSON.stringify(it.pz)) : null };
       e.preventDefault(); return;
     }
     if(lane && lane.classList.contains('ed')){
@@ -1874,8 +1895,14 @@ function bindWindow(){
       drag.moved = true; const it = byId(drag.id); const du = snapU(uAt(e.clientX) - drag.u0); const sn = SNAP[zoom];
       if(drag.mode === 'move'){ if(it.fix){ if(du) drag.fixHit = true; } else { it.s = r48(drag.s0 + du); it.e = r48(drag.e0 + du); } // Start fix: nur auf andere Person
         const el = document.elementFromPoint(e.clientX, e.clientY)?.closest('.lane[data-mid]'); if(el && canEdit(el.dataset.mid)) it.mid = el.dataset.mid; }
-      else if(drag.mode === 'l') it.s = r48(Math.min(drag.e0 - sn, drag.s0 + du));
+      else if(drag.mode === 'l'){ it.s = r48(Math.min(drag.e0 - sn, drag.s0 + du)); // Unterbrüche bleiben am gleichen Datum
+        if(drag.pz0) it.pz = drag.pz0.map(([a, c]) => [r48(a + drag.s0 - it.s), r48(c + drag.s0 - it.s)]).filter(([a, c]) => c > 0).map(([a, c]) => [Math.max(0, a), c]); }
       else it.e = r48(Math.max(drag.s0 + sn, drag.e0 + du));
+      if(!drag.raf){ drag.raf = requestAnimationFrame(() => { if(drag) drag.raf = 0; renderRows(); }); }
+    } else if(drag.kind === 'pz'){
+      if(drag.side === 'click' || (!drag.moved && Math.abs(e.clientX - drag.x0) < 4)) return;
+      drag.moved = true; const it = byId(drag.id); const du = Math.round((uAt(e.clientX) - drag.u0) * 2) / 2; const [a0, c0] = drag.p0;
+      if(drag.side === 'l') it.pz[drag.i] = [Math.max(0, Math.min(c0 - .5, a0 + du)), c0]; else it.pz[drag.i] = [a0, Math.max(a0 + .5, c0 + du)];
       if(!drag.raf){ drag.raf = requestAnimationFrame(() => { if(drag) drag.raf = 0; renderRows(); }); }
     } else if(drag.kind === 'vchip'){
       if(!drag.moved && Math.abs(e.clientX - drag.x0) < 5 && Math.abs(e.clientY - drag.y0) < 5) return;
@@ -1988,10 +2015,16 @@ function bindWindow(){
       openResChooser(d.rid, a, b, gh ? rect : { left: e.clientX, bottom: e.clientY });
       return;
     }
+    if(d.kind === 'pz'){ const it = byId(d.id); if(!it) return;
+      if(!d.moved){ const pop = popAt(d.rect, `<b>Unterbruch</b><div class="small muted">${it.pz[d.i][1] - it.pz[d.i][0] >= 1 ? fmtN(it.pz[d.i][1] - it.pz[d.i][0]) + ' Tage' : 'Halber Tag'} · Kanten ziehen zum Ändern</div><button class="btn btn-ghost" id="pzWeg" style="justify-content:flex-start">${I('x')}Unterbruch aufheben</button>`);
+        pop.querySelector('#pzWeg').onclick = () => { closePop(); const pz0 = d.pz0; it.pz.splice(d.i, 1); pausenGeaendert(it, pz0, d.nV); }; return; }
+      pausenGeaendert(it, d.pz0, d.nV); return; }
     if(d.kind === 'bar'){
       const it = byId(d.id);
       if(!d.moved){ const now = Date.now();
-        if(lastBarClick && lastBarClick.id === d.id && now - lastBarClick.t < 400){ lastBarClick = null; const ln = document.querySelector(`.bar[data-id="${d.id}"]`)?.closest('.lane[data-mid]'); if(ln) einfuegen(ln, e.clientX, it); return; }
+        if(lastBarClick && lastBarClick.id === d.id && now - lastBarClick.t < 400){ lastBarClick = null; // Doppelklick: mehrtägig = hier unterbrechen, sonst davor/danach einfügen
+          if(it.e - it.s > 1 + 1e-6 && !it.rep && !it.wdh){ unterbrich(it, uAt(e.clientX)); return; }
+          const ln = document.querySelector(`.bar[data-id="${d.id}"]`)?.closest('.lane[data-mid]'); if(ln) einfuegen(ln, e.clientX, it); return; }
         lastBarClick = { id: d.id, t: now }; openPanel(it.rep || d.id); return; }
       if(d.occ){ // Wiederholung verschoben: Arbeitskopie weg, dann fragen
         EINS = EINS.filter(x => x !== it); d.occ.m.wdh.aus.pop(); const neu = { s: it.s, e: it.e, mid: it.mid }; renderRows();
@@ -1999,12 +2032,12 @@ function bindWindow(){
       if(it.wdh && (it.s !== d.s0 || it.e !== d.e0 || it.mid !== d.mid0)){ const neu = { s: it.s, e: it.e, mid: it.mid }; Object.assign(it, { s: d.s0, e: d.e0, mid: d.mid0 }); renderRows(); wdhVerschieben(it, neu); return; }
       if(d.fixHit) toast('Start ist fix. Zum Verschieben im Detailfeld das Schloss öffnen.');
       if(it.s === d.s0 && it.e === d.e0 && it.mid === d.mid0) return;
-      const vorher = { s: d.s0, e: d.e0, mid: d.mid0 };
-      const ok = await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true), person_id: it.mid });
+      const vorher = { s: d.s0, e: d.e0, mid: d.mid0, ...(d.pz0 ? { pz: d.pz0 } : {}) };
+      const ok = await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true), person_id: it.mid, ...(d.pz0 && d.mode === 'l' ? { pausen: it.pz } : {}) });
       if(!ok){ Object.assign(it, vorher); renderRows(); return; }
       if(it.kind === 'absenz') await ausgleich(it, vorher);
       const msg = it.mid !== d.mid0 ? `${labOf(it)} → ${P[it.mid].name}` : `Verschoben auf ${spanLabel(it)}`;
-      toast(msg, async () => { Object.assign(it, vorher); renderRows(); await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true), person_id: it.mid }); });
+      toast(msg, async () => { Object.assign(it, vorher); renderRows(); await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true), person_id: it.mid, ...(vorher.pz ? { pausen: it.pz } : {}) }); });
       if(selId === it.id) openPanel(it.id);
       return;
     }
@@ -2024,22 +2057,49 @@ function halbtageIn(b, list, e, stop){ let c = 0;
     if(o){ if(stop && k / 2 >= b.e - 1e-6 && o.kind !== 'absenz') return { blockiert: true }; continue; }
     if(++c === stop) return { e: (k + 1) / 2 }; }
   return stop ? null : c; }
+// Unterbrüche des Auftrags selbst zählen wie eine Absenz (kein Arbeitstag, hinten nicht blockierend)
+const mitPausen = (b, list) => list.concat((b.pz || []).map(([a, c]) => ({ s: b.s + a, e: b.s + c, kind: 'absenz' })));
+const andereVon = b => EINS.filter(o => o.mid === b.mid && o !== b && o.id !== b.id && !isShort(o));
+// Ende so setzen, dass wieder «ziel» Halbtage drin sind; ist hinten kein Platz, bleibt das Ende und es wird rot «X von Y T»
+function nachziehenPatch(b, nVorher){
+  const ziel = b.soll ? Math.round(b.soll * 2) : nVorher, r = halbtageIn(b, mitPausen(b, andereVon(b)), b.s + 400, ziel);
+  if(r && r.e != null){ if(Math.abs(r.e - b.e) < 1e-6) return {}; b.e = r48(r.e); return { ende: fromU(b.e, true) }; }
+  if(r?.blockiert && !b.soll){ b.soll = ziel / 2; return { soll_tage: b.soll }; }
+  return {};
+}
+const halbtageJetzt = b => halbtageIn(b, mitPausen(b, andereVon(b)), b.e);
 async function ausgleich(abs, alt){
   const mids = new Set([abs?.mid, alt?.mid].filter(Boolean));
   for(const mid of mids){
-    const sonst = EINS.filter(o => o.mid === mid && o !== abs && !isShort(o));
-    const vorher = sonst.concat(alt && alt.mid === mid ? [{ s: alt.s, e: alt.e, kind: 'absenz' }] : []);
-    const jetzt = sonst.concat(abs && abs.mid === mid ? [abs] : []);
     for(const b of EINS.filter(x => x.mid === mid && x.kind === 'baustelle' && !x.wdh && x.e > TODAY && x.e - x.s > 1 + 1e-6)){
-      const andV = vorher.filter(o => o !== b), andJ = jetzt.filter(o => o !== b);
+      const andJ = mitPausen(b, andereVon(b)), andV = andJ.filter(o => o !== abs).concat(alt && alt.mid === mid ? [{ s: alt.s, e: alt.e, kind: 'absenz' }] : []);
       const nV = halbtageIn(b, andV, b.e), nJ = halbtageIn(b, andJ, b.e); if(nV === nJ) continue;
-      const ziel = b.soll ? Math.round(b.soll * 2) : nV;
-      const r = halbtageIn(b, andJ, b.s + 400, ziel);
-      if(r && r.e != null && Math.abs(r.e - b.e) > 1e-6){ b.e = r48(r.e); await speichere(b, { ende: fromU(b.e, true) }); toast(`${labOf(b)}: Ende neu ${dLab(Math.floor(b.e - 1e-6))}, weiterhin ${tageTxt(ziel / 2)}`); }
-      else if(r?.blockiert && !b.soll){ b.soll = ziel / 2; await speichere(b, { soll_tage: b.soll }); toast(`${labOf(b)}: hinten kein Platz – geplant ${tageTxt(b.soll)}`); }
+      const patch = nachziehenPatch(b, nV); if(!Object.keys(patch).length) continue;
+      await speichere(b, patch);
+      toast(patch.ende ? `${labOf(b)}: Ende neu ${dLab(Math.floor(b.e - 1e-6))}, weiterhin ${tageTxt(b.soll || nV / 2)}` : `${labOf(b)}: hinten kein Platz – geplant ${tageTxt(b.soll)}`);
     }
   }
   if(VIEW === 'plan') renderRows(); else render();
+}
+// Auftrag unterbrechen: Lücke von einem Tag; Arbeitstage bleiben gleich (Rest rutscht nach hinten, wenn frei)
+async function unterbrich(it, u){
+  if(!it || it.e - it.s <= 1 + 1e-6 || !canEdit(it.mid)) return;
+  let d = Math.floor(u); if(isOff(d)){ toast('Am Wochenende / Feiertag wird sowieso nicht gearbeitet.'); return; }
+  const nV = halbtageJetzt(it), vorher = { e: it.e, pz: JSON.parse(JSON.stringify(it.pz || [])), soll: it.soll };
+  const a = Math.max(0, r48(d - it.s)), c = r48(d + 1 - it.s);
+  it.pz = mergePausen([...(it.pz || []), [a, c]]);
+  const patch = { pausen: it.pz, ...nachziehenPatch(it, nV) };
+  renderRows(); if(!(await speichere(it, patch))){ Object.assign(it, vorher); renderRows(); return; }
+  toast(patch.soll_tage ? `Unterbrochen – hinten kein Platz, ${labOf(it)} hat jetzt zu wenig Tage` : `Unterbrochen am ${dLab(d)}${patch.ende ? ', Ende neu ' + dLab(Math.floor(it.e - 1e-6)) : ''}`, async () => {
+    Object.assign(it, vorher); renderRows(); await speichere(it, { pausen: it.pz, ende: fromU(it.e, true), soll_tage: it.soll ?? null }); });
+}
+function mergePausen(l){ const out = []; l.filter(([a, c]) => c - a > 1e-6).sort((x, y) => x[0] - y[0]).forEach(p => { const L = out[out.length - 1]; if(L && p[0] <= L[1] + 1e-6) L[1] = Math.max(L[1], p[1]); else out.push([...p]); }); return out; }
+// Unterbruch anpassen / aufheben (Ziehen an der Lücke oder Klick)
+async function pausenGeaendert(it, pz0, nV){
+  const vorher = { e: it.e, soll: it.soll };
+  it.pz = mergePausen(it.pz || []); const patch = { pausen: it.pz, ...nachziehenPatch(it, nV) };
+  renderRows(); if(!(await speichere(it, patch))){ Object.assign(it, vorher, { pz: pz0 }); renderRows(); return; }
+  if(patch.soll_tage) toast(`${labOf(it)}: hinten kein Platz – geplant ${tageTxt(it.soll)}`);
 }
 async function speichere(it, patch){
   if(patch.beginn) delete it._alt; // neu gesetzte Zeit = neuer Wunschtermin
