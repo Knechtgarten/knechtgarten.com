@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script src="/kg-pw-schutz.js?v=5"></script>
-<script src="/kg-stil.js?v=1"></script>
+<script src="/kg-stil.js?v=2"></script>
 <title>Tool A (live) – Offerten-Eingabe</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
@@ -4136,7 +4136,10 @@ async function resolveKundeId(){
     payload.adresse = [ausgewaehlterEasybillKunde.strasse, [ausgewaehlterEasybillKunde.plz, ausgewaehlterEasybillKunde.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ') || null;
   }
   const { data, error } = await sb.from('kunde').insert(payload).select().single();
-  if(error) throw error;
+  if(error){
+    const vorh = payload.easybill_id != null ? alleKunden.find(k => String(k.easybill_id) === String(payload.easybill_id)) : null;
+    throw new Error(KG.kundeFehlertext(error, vorh?.name));
+  }
   await ladeAlleKunden();
   currentKundeId = data.id;
   return data.id;
@@ -4331,8 +4334,22 @@ async function flushAutosave(){
   await fuehreAutosaveDurch();
 }
 
-async function fuehreAutosaveDurch(){
+// Speichern nie parallel: laeuft schon eines (z.B. haengt wegen Internet-
+// Unterbruch), wird nur vermerkt, dass danach nochmals gespeichert werden muss.
+// Sonst legt jeder weitere Autosave eine NEUE Offerte an, solange mode noch
+// 'new' ist (so entstanden 4 gleiche Offerten, 2026-10-27).
+let autosaveLaufend = null, autosaveNochmal = false;
+function fuehreAutosaveDurch(){
   autosaveTimer = null;
+  if(autosaveLaufend){ autosaveNochmal = true; return autosaveLaufend; }
+  autosaveLaufend = (async () => {
+    try{
+      do{ autosaveNochmal = false; await autosaveEinmal(); }while(autosaveNochmal);
+    }finally{ autosaveLaufend = null; }
+  })();
+  return autosaveLaufend;
+}
+async function autosaveEinmal(){
   currentKundeName = $kundeSuche.value.trim();
   const titelVal = $offerteTitel.value.trim();
   if(!currentKundeName || !titelVal) return;
