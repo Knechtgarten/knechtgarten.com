@@ -250,6 +250,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 .row.vpool .lane{background-color:#F7F9FA;}
 .lane.vown.drop{background:#F2F5D6 !important;}
 .nm .lk{all:unset;cursor:pointer;color:var(--primary);font-size:10.5px;margin-left:4px;}
+.fxw .lk{all:unset;cursor:pointer;color:var(--primary);text-decoration:underline;margin-left:4px;}
 .mab{all:unset;cursor:pointer;width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;border-radius:4px;color:#9AA1A8;flex:none;margin-left:auto;}
 .mab .i{width:14px;height:14px;}
 .mab:hover{color:var(--primary);background:var(--soft);}
@@ -2224,7 +2225,9 @@ function bindWindow(){
       if(d.fixHit) toast('Start ist fix. Zum Verschieben im Detailfeld das Schloss öffnen.');
       if(it.s === d.s0 && it.e === d.e0 && it.mid === d.mid0) return;
       const vorher = { s: d.s0, e: d.e0, mid: d.mid0, ...(d.pz0 ? { pz: d.pz0 } : {}), ...(d.at0 ? { at: d.at0 } : {}) };
-      const ok = await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true), person_id: it.mid, ...(d.pz0 && d.mode === 'l' ? { pausen: it.pz } : {}), ...(d.at0 && d.mode === 'l' ? { allein_tage: it.at } : {}) });
+      // Länge bewusst gezogen = neue Arbeitstage, altes Ziel (rot «X von Y T») fällt weg
+      const neuZiel = it.soll && d.mode !== 'move'; if(neuZiel) it.soll = null;
+      const ok = await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true), person_id: it.mid, ...(neuZiel ? { soll_tage: null } : {}), ...(d.pz0 && d.mode === 'l' ? { pausen: it.pz } : {}), ...(d.at0 && d.mode === 'l' ? { allein_tage: it.at } : {}) });
       if(!ok){ Object.assign(it, vorher); renderRows(); return; }
       if(it.kind === 'absenz') await ausgleich(it, vorher);
       // Baustelle verschoben: Arbeitstage bleiben gleich (Absenzen zählen wie Wochenende, Ende rutscht nach hinten)
@@ -2474,12 +2477,11 @@ function openPanel(id, isNew){
   // Oben rechts: roter Punkt = Personal fehlt («allein okay» wird direkt an den Punkten im Plan gesetzt)
   const missT = new Set(L.miss.map(x => x >> 1)).size;
   const punkte = it.kind === 'baustelle' && missT ? `<span class="pdot" title="Personal fehlt an ${missT} ${missT === 1 ? 'Tag' : 'Tagen'} – im Plan Punkt anklicken = allein okay" aria-label="Personal fehlt"></span>` : '';
-  // Schlösser: Start fix und Arbeitstage fix (nur Aufträge, nicht offene)
+  // Start fix (Info + Grund) und Hinweis, wenn hinten kein Platz für alle Arbeitstage war (nur Aufträge, nicht offene)
   const abw = it.soll && Math.abs(L.n - it.soll) > .01;
   const fixe = auftrag && !offen ? `<div class="fixe">
     ${it.fix ? `<div class="fx fxinfo" title="Start fix – lösen per Rechtsklick auf den Balken">${I('lock')}<span>Start fix</span><input type="text" id="pFixG" class="fxg" value="${esc(it.fixg)}" placeholder="Grund, z. B. mit Kunde fix abgemacht" ${dis}></div>` : ''}
-    <div class="fx"><button class="icon-btn${it.soll ? ' on' : ''}" id="pFixT" ${dis} aria-pressed="${!!it.soll}" aria-label="Arbeitstage fix">${I(it.soll ? 'lock' : 'unlock')}</button><span>Arbeitstage fix</span>${it.soll ? `<input type="text" id="pSoll" value="${fmtN(it.soll)}" inputmode="decimal" ${dis}>` : ''}</div>
-    ${abw ? `<div class="fxw">Geplant ${tageTxt(it.soll)}, aktuell ${tageTxt(L.n)}</div>` : ''}</div>` : '';
+    ${abw ? `<div class="fxw">Geplant ${tageTxt(it.soll)}, aktuell ${tageTxt(L.n)} – hinten kein Platz${ed ? ` <button class="lk" id="pSollWeg">${tageTxt(L.n)} übernehmen</button>` : ''}</div>` : ''}</div>` : '';
   // Kopie: Herkunft zeigen; Notiz, Fotos und Dokumente erst auf Wunsch vom Original holen
   const orig = it.kv ? byId(it.kv) : null;
   const kopie = it.kv ? `<div class="kopie">${I('copy').replace('class="i"', 'class="i" style="width:13px;height:13px"')}Kopie${orig ? ` von ${esc(labOf(orig))}, ${esc(dLab(Math.floor(orig.s)))}` : ''}${ed && orig && (orig.text || (orig.files || []).length) && !it.text && !(it.files || []).length ? `<button class="btn btn-ghost" id="pVomOrig" style="padding:3px 9px;font-size:12px">Notiz, Fotos und Dokumente vom Original übernehmen</button>` : ''}</div>` : '';
@@ -2517,8 +2519,7 @@ function openPanel(id, isNew){
   on('#pTitel', 'onchange', e => save({ titel: e.target.value.trim() || null }, { title: e.target.value.trim() }).then(() => { panelKunde = false; openPanel(id); }));
   on('#pPl', 'onchange', e => save({ projektleiter_id: e.target.value || null }, { pl: e.target.value || null }).then(() => openPanel(id)));
   on('#pWdh', 'onclick', () => openWdh(it, $('pWdh')));
-  on('#pFixT', 'onclick', () => { const v = it.soll ? null : Math.round(L.n * 2) / 2; save({ soll_tage: v }, { soll: v }).then(() => openPanel(id)); });
-  on('#pSoll', 'onchange', e => { const v = parseFloat(e.target.value.replace(',', '.')); if(!(v > 0)){ e.target.value = fmtN(it.soll); return; } save({ soll_tage: v }, { soll: v }).then(() => openPanel(id)); });
+  on('#pSollWeg', 'onclick', () => save({ soll_tage: null }, { soll: null }).then(() => openPanel(id)));
   let nt; on('#pNotiz', 'oninput', e => { clearTimeout(nt); const v = e.target.value; nt = setTimeout(() => save({ notiz: v || null }, { text: v }), 700); });
   on('#pDel', 'onclick', () => loescheEinsatz(it));
   on('#pFixG', 'onchange', e => save({ start_fix_grund: e.target.value.trim() || null }, { fixg: e.target.value.trim() }));
