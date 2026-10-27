@@ -235,6 +235,8 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 .row.grp .lane .bar{top:2px;height:15px;}
 .aghost{position:fixed;z-index:95;background:var(--primary);color:#fff;font-size:11.5px;padding:4px 8px;border-radius:5px;pointer-events:none;box-shadow:0 4px 12px rgba(0,0,0,.2);}
 .lane.drop{background:#F2F5D6 !important;}
+.pgrip{display:inline-flex;width:12px;margin-left:-8px;margin-right:-4px;color:#9AA1A8;cursor:grab;opacity:0;flex:none;} .pgrip .i{width:12px;height:12px;}
+.row:hover > .nm .pgrip{opacity:1;}
 .gadd{all:unset;cursor:pointer;width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;border-radius:4px;color:rgba(255,255,255,.6);flex:none;margin-left:auto;}
 .gadd .i{width:13px;height:13px;}
 .gadd:hover{color:#fff;background:rgba(255,255,255,.15);}
@@ -1130,7 +1132,7 @@ function personRow(p, W, bgx){
     }
   });
   const mine = p.benutzer_id === ME;
-  return `<div class="row${openMid === p.id ? " fokusp" : ""}" data-mid="${p.id}"><div class="nm" title="${esc(p.name + (p.zusatz ? ' · ' + p.zusatz : ''))}"><span class="dot" style="background:${p.farbe || '#fff'}"></span><span class="n">${esc(p.name)}</span>${pzPunkt(p.id)}${p.zusatz ? `<span class="z">${esc(p.zusatz)}</span>` : ''}${mine ? '<span class="me">Ich</span>' : ''}${p.farbe && !p.ist_projektleiter ? `${mabKnopf(p)}<button class="mab mab2${openMid === p.id && openTyp === 'fahrzeug' ? ' on' : ''}" data-mab="${p.id}" data-typ="fahrzeug" title="Lieferwagen und Anhänger einteilen (aufklappen)" aria-label="Lieferwagen einteilen">${I('truck')}</button>` : ''}</div><div class="lane${ed ? ' ed' : ''}" data-mid="${p.id}" style="width:${W}px;${bgx}">${feierHTML()}${bars}${provBars('p:' + p.id)}${p.id === svcRowId() ? svcRowBars() : ''}${vehIcons(p)}</div></div>`;
+  return `<div class="row${openMid === p.id ? " fokusp" : ""}" data-mid="${p.id}"><div class="nm" title="${esc(p.name + (p.zusatz ? ' · ' + p.zusatz : ''))}">${isBuero() ? `<span class="pgrip" title="Ziehen: Reihenfolge oder Gruppe ändern">${I('grip')}</span>` : ''}<span class="dot" style="background:${p.farbe || '#fff'}"></span><span class="n">${esc(p.name)}</span>${pzPunkt(p.id)}${p.zusatz ? `<span class="z">${esc(p.zusatz)}</span>` : ''}${mine ? '<span class="me">Ich</span>' : ''}${p.farbe && !p.ist_projektleiter ? `${mabKnopf(p)}<button class="mab mab2${openMid === p.id && openTyp === 'fahrzeug' ? ' on' : ''}" data-mab="${p.id}" data-typ="fahrzeug" title="Lieferwagen und Anhänger einteilen (aufklappen)" aria-label="Lieferwagen einteilen">${I('truck')}</button>` : ''}</div><div class="lane${ed ? ' ed' : ''}" data-mid="${p.id}" style="width:${W}px;${bgx}">${feierHTML()}${bars}${provBars('p:' + p.id)}${p.id === svcRowId() ? svcRowBars() : ''}${vehIcons(p)}</div></div>`;
 }
 // Aufgeklappt (Maschinen / Lieferwagen): Baustellen-Zeitraum der Person mit Rahmen in ihrer Farbe,
 // links und rechts davon grau wie der Rest
@@ -1175,7 +1177,7 @@ function renderRows(){
   const grps = GRUPPEN.concat([{ id: '_ohne', name: 'Ohne Gruppe' }]);
   grps.forEach(g => {
     const ps = act.filter(p => (p.gruppe_id || '_ohne') === g.id).sort((a, b) => a.sortierung - b.sortierung || a.name.localeCompare(b.name));
-    if(!ps.length) return; const zu = collapsed.has(g.id);
+    if(!ps.length && !(isBuero() && g.id !== '_ohne')) return; const zu = collapsed.has(g.id); // Büro sieht auch leere Gruppen (zum Hinzufügen und Hineinziehen)
     h += `<div class="row grp${zu ? ' zu' : ''}" data-g="${g.id}"><div class="nm">${I('chev')}${esc(g.name)} <span style="opacity:.6;font-weight:400">(${ps.length})</span>${isBuero() && g.id !== '_ohne' ? `<button class="gadd" data-gadd="${g.id}" title="Zeile hinzufügen" aria-label="Zeile hinzufügen">${I('plus')}</button>` : ''}</div><div class="lane" style="width:${W}px;height:20px">${provBars('g:' + g.id)}</div></div>`;
     if(!zu) ps.forEach(p => { h += personRow(p, W, bgx); if(openMid === p.id) h += openTyp === 'maschine' ? ovRows(W, bgx, 'maschine', p.id) : vehFocusRows(W, bgx, p.id); }); // Anhänger nur in der Übersicht «Anhänger»
   });
@@ -1931,6 +1933,16 @@ addEventListener('pointermove', e => {
 // Zeilen und Gruppen per Drag & Drop sortieren (Büro / Admin)
 // ---------------------------------------------------------------------------
 const grpPersons = gid => PERSONEN.filter(p => (p.gruppe_id || null) === gid).sort((a, b) => (b.aktiv - a.aktiv) || a.sortierung - b.sortierung || a.name.localeCompare(b.name));
+// Schnupper / Temporär: nur schnell einen Namen eintragen, ohne weitere Angaben
+function schnellPerson(g, rect){
+  const pop = popAt(rect, `<b>${esc(g.name)}</b><input type="text" id="spN" placeholder="Vorname Name" style="font:inherit;font-size:13px;border:1px solid var(--line);border-radius:6px;padding:6px 8px"><div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost" id="spNo">Abbrechen</button><button class="btn btn-primary" id="spOk">${I('plus')}Hinzufügen</button></div>`);
+  const inp = pop.querySelector('#spN'); inp.focus();
+  const ok = async () => { const name = inp.value.trim(); if(!name){ inp.focus(); return; } closePop();
+    const sort = 10 + Math.max(0, ...PERSONEN.filter(p => p.gruppe_id === g.id).map(p => p.sortierung || 0));
+    const { error } = await sb.from('planer_person').insert({ name, gruppe_id: g.id, aktiv: true, sortierung: sort }); if(error) return fehler(error, 'Hinzufügen');
+    await neuLaden(); toast(`${name} hinzugefügt`); };
+  pop.querySelector('#spOk').onclick = ok; pop.querySelector('#spNo').onclick = closePop; inp.onkeydown = e => { if(e.key === 'Enter') ok(); else if(e.key === 'Escape') closePop(); };
+}
 function sortTarget(d, y){
   const x = tlEl().getBoundingClientRect().left + 60;
   const r = document.elementFromPoint(x, y)?.closest('.row'); if(!r || r.classList.contains('ov')) return null; const rc = r.getBoundingClientRect();
@@ -2003,7 +2015,8 @@ function bindTimeline(t){
   t.addEventListener('pointerdown', e => {
     if(e.button !== 0) return; closePop();
     const mb = e.target.closest('[data-mab]'); if(mb){ e.stopPropagation(); const same = openMid === mb.dataset.mab && openTyp === mb.dataset.typ; openMid = same ? null : mb.dataset.mab; openTyp = mb.dataset.typ; renderRows(); return; }
-    const ga = e.target.closest('[data-gadd]'); if(ga){ e.stopPropagation(); personDlg(null, ga.dataset.gadd); return; }
+    const ga = e.target.closest('[data-gadd]'); if(ga){ e.stopPropagation(); const g = GRUPPEN.find(x => x.id === ga.dataset.gadd);
+      if(/schnupper|tempor/i.test(g?.name || '')) schnellPerson(g, ga.getBoundingClientRect()); else personDlg(null, ga.dataset.gadd); return; }
     const pv = e.target.closest('.bar.prov[data-prov]'); if(pv){ drag = { kind: 'prov', pid: pv.dataset.prov, x0: e.clientX, y0: e.clientY, moved: false, rect: pv.getBoundingClientRect() }; e.preventDefault(); return; }
     const g = e.target.closest('.row.grp');
     const toggle = id => { collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id); lsSet('zu', [...collapsed]); renderRows(); };
