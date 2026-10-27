@@ -405,6 +405,19 @@ table.bp td{padding:4px;border-top:1px solid var(--soft);white-space:nowrap;}
 .fx{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--ink);}
 .fx input{width:56px;padding:3px 6px;text-align:right;}
 .fxw{font-size:12px;color:var(--red);font-weight:700;padding-left:30px;}
+.pop.abmp{width:280px;max-width:calc(100vw - 16px);}
+.pop.abmp > b{display:flex;align-items:center;gap:6px;font-size:13.5px;}
+.abt{margin-top:-6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.abl{display:flex;flex-direction:column;gap:3px;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;}
+.abl select,.abl input,.abz2 select{font:inherit;font-size:13px;text-transform:none;letter-spacing:0;color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:6px 8px;background:#fff;min-width:0;}
+.abl select.leer{border-color:var(--red);color:var(--red);}
+.abz2{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.abseg{display:flex;} .abseg button{flex:1;text-align:center;font-size:12px;padding:5px 4px;}
+.abbtn{display:flex;gap:8px;justify-content:flex-end;}
+.mabm{margin-top:8px;display:inline-flex;align-items:center;gap:6px;background:#fff;border:1.5px solid var(--primary, #323E4E);color:var(--primary, #323E4E);border-radius:999px;padding:6px 14px;font:inherit;font-weight:600;font-size:13px;}
+.mabm .i{width:15px;height:15px;}
+@media (max-width:600px){ .pop.abmp{left:0 !important;right:0;bottom:0;top:auto !important;width:auto;max-width:none;border-radius:14px 14px 0 0;padding:14px 16px calc(14px + env(safe-area-inset-bottom,0px));font-size:14px;}
+  .abl select,.abl input,.abz2 select{font-size:16px;padding:9px 10px;} .abseg button{padding:9px 4px;font-size:14px;} .abbtn .btn{flex:1;justify-content:center;padding:11px;} }
 .cmrow{display:flex;justify-content:flex-end;gap:6px;padding-top:6px;margin-top:2px;border-top:1px solid var(--line);}
 .bwt{background:var(--red);color:#fff;border-radius:3px;padding:0 3px;font-weight:700;}
 .bpz{position:absolute;top:3px;height:16px;z-index:2;cursor:pointer;}
@@ -1589,9 +1602,9 @@ function computeProv(){
 function provBars(key){ return (PROVLAY[key] || []).map(x => { const p = x.p, k = KUNDEN[p.kid]; const l = x.s * dayW + 1, w = Math.max(4, (x.e - x.s) * dayW - 2);
   const tip = `${kName(k)} · ${p.kat.name}\n${k?.ort || ''} · KW ${p.w} · ${fmtN(p.min / 60)} Std.\n${p.arb.join(', ')}\nNoch nicht abgemacht${p.fehlt ? '\nZeit fehlt im Pflege-Tool – 1 Std. angenommen' : ''}${x.alt ? '\nOffen seit KW ' + p.w : ''}${VNOT[p.id]?.n ? '\nNotiz: ' + VNOT[p.id].n : ''}`;
   return `<div class="bar prov${x.alt ? ' over' : ''}${p.fehlt ? ' nozeit' : ''}" data-prov="${p.id}" style="left:${l}px;width:${w}px" title="${esc(tip)}">${w > 16 ? `<span class="t" style="left:3px;width:${w - 6}px">${x.alt && w > 60 ? `seit KW ${p.w} · ` : ''}${esc(kShort(k))}</span>` : ''}</div>`; }).join(''); }
-async function provToEinsatz(pid, mid, s, e, ok){
+async function provToEinsatz(pid, mid, s, e, ok, pl){
   const p = PROV.find(x => x.id === pid); if(!p) return;
-  const neu = await neuerEinsatz({ mid, kind: 'termin', s: r48(s), e: r48(e), kid: p.kid, title: `${p.kat.name}: ${p.arb.join(', ')}`, text: VNOT[p.id]?.n || '', ok, pl: VNOT[p.id]?.pl || null, pkk: p.kk, pj: p.y, pkw: p.w }, false);
+  const neu = await neuerEinsatz({ mid, kind: 'termin', s: r48(s), e: r48(e), kid: p.kid, title: `${p.kat.name}: ${p.arb.join(', ')}`, text: VNOT[p.id]?.n || '', ok, pl: pl !== undefined ? pl : VNOT[p.id]?.pl || null, pkk: p.kk, pj: p.y, pkw: p.w }, false);
   if(neu && VNOT[p.id]){ await sb.from('planer_vorschlag_notiz').delete().eq('kunde_kategorie_id', p.kk).eq('jahr', p.y).eq('kw', p.w); delete VNOT[p.id]; }
   if(neu){ renderRows(); toast(`${kShort(KUNDEN[p.kid])}: ${ok ? 'abgemacht' : 'angeheftet'} bei ${P[mid].name}`, () => loescheEinsatz(neu)); }
 }
@@ -1815,8 +1828,14 @@ function einfuegen(lane, x, it){ const mid = lane.dataset.mid; if(!canEdit(mid))
   if(ln) openNeuLeiste(ln, mid, r48(a), r48(a + len)); }
 function bindTimeline(t){
   // Rechtsklick auf einen Balken = kleines Menü
-  t.addEventListener('contextmenu', e => { const bar = e.target.closest('.bar[data-id]'), lane = e.target.closest('.lane[data-mid]'); if(!bar || !lane) return;
+  t.addEventListener('contextmenu', e => {
+    // Provisorisch (Pflege-Vorschlag oder «noch nicht abgemacht») = direkt das Abmachen-Fenster, alles vorbelegt
+    const pv = e.target.closest('.bar.prov[data-prov]'); if(pv){ e.preventDefault(); const p = PROV.find(x => x.id === pv.dataset.prov); if(!p) return;
+      const darf = p.lane.startsWith('g:') ? PERSONEN.some(x => x.aktiv && canEdit(x.id) && x.gruppe_id === p.lane.slice(2)) : canEdit(p.lane.slice(2));
+      if(darf) openAbmachen({ pid: p.id }, { left: e.clientX, bottom: e.clientY }); else openProvPanel(p.id); return; }
+    const bar = e.target.closest('.bar[data-id]'), lane = e.target.closest('.lane[data-mid]'); if(!bar || !lane) return;
     e.preventDefault(); const it = byId(bar.dataset.id); if(!it) return; const x = e.clientX, ed = canEdit(it.mid);
+    if(it.ok === false && ed && !it.rep && !it.wdh){ openAbmachen({ it }, { left: x, bottom: e.clientY }); return; }
     const m = it.rep ? byId(it.rep) : it, rep = !!(m && m.wdh); // wiederkehrend: Original m
     const b = (k, ic, l, st = '') => `<button class="btn btn-ghost" data-cm="${k}" style="justify-content:flex-start;${st}">${I(ic)}${l}</button>`;
     const ib = (k, ic, l, cls = '') => `<button class="kg-ibtn${cls}" data-cm="${k}" title="${l}" aria-label="${l}">${I(ic)}</button>`;
@@ -2204,16 +2223,55 @@ async function pflegeMedien(kid){
     else { d.innerHTML = doks.map(x => `<button class="dokl" data-p="${esc(x.storage_pfad || '')}">${I('file')}${esc(x.titel)}</button>`).join('');
       d.querySelectorAll('[data-p]').forEach(b => b.onclick = async () => { if(!b.dataset.p) return; const { data } = await sb.storage.from('pflege-dokumente').createSignedUrl(b.dataset.p, 3600); if(data) window.open(data.signedUrl, '_blank'); }); } }
 }
-// Bestätigen beim Abmachen: Tag, Zeit, (bei Team) Person
-function abmHTML(s, e, team, gid){
-  const d0 = Math.floor(s + 1e-9), q0 = Math.round((s - d0) * 48); let q1 = Math.round((e - d0) * 48); if(q1 > 48) q1 = 48;
-  const pers = PERSONEN.filter(p => p.aktiv && canEdit(p.id) && (!gid || p.gruppe_id === gid));
-  return `<div class="confirm"><b class="small">Mit dem Kunden abgemacht – bitte bestätigen:</b>
-    <div class="three"><input type="date" id="aD" value="${isoDate(d0)}"><select id="aQ0">${qOpts(q0)}</select><select id="aQ1">${qOpts(q1)}</select></div>
-    ${team ? `<select id="aP"><option value="">Wer geht?</option>${pers.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('')}</select>` : ''}
-    <div style="display:flex;gap:8px"><button class="btn btn-primary" id="aOk">${I('check')}Bestätigen</button><button class="btn btn-ghost" id="aNo">Abbrechen</button></div></div>`;
+// Abmachen: kleines Fenster (Rechtsklick auf provisorischen Termin, Handy: Knopf auf der Karte).
+// Alles ist mit der jetzigen Lage vorbelegt – stimmt es, reicht «Abmachen». Personen nur, wer bearbeitet werden darf.
+function openAbmachen(q, anchor){ // q = { it } (Einsatz) oder { pid } (Pflege-Vorschlag)
+  let s, e, mid = null, gid = null, pl = null, titel = '', p = null;
+  if(q.it){ const it = q.it; s = it.s; e = it.e; mid = it.mid; pl = it.pl || null; titel = titleOf(it); }
+  else { p = PROV.find(x => x.id === q.pid); if(!p) return; const L = Object.values(PROVLAY).flat().find(x => x.p === p); if(!L) return;
+    s = L.s; e = L.e; if(p.lane.startsWith('g:')) gid = p.lane.slice(2); else mid = p.lane.slice(2); pl = VNOT[p.id]?.pl || null; titel = kName(KUNDEN[p.kid]); }
+  const ich = myPerson(); if(!pl && ich?.ist_projektleiter) pl = ich.id;
+  const pers = PERSONEN.filter(x => x.aktiv && canEdit(x.id) && !x.ist_projektleiter).sort((a, b) => (gid ? (b.gruppe_id === gid) - (a.gruppe_id === gid) : 0));
+  if(mid && !pers.some(x => x.id === mid)) mid = null;
+  const multi = e - s > 1 + 1e-6, d0 = Math.floor(s + 1e-9), d1 = Math.ceil(e - 1e-9) - 1, fs = s - d0, fe = e - d1;
+  const q0 = Math.round(fs * 48), q1 = Math.min(48, Math.round((e - d0) * 48));
+  const opt = (v, l, sel) => `<option value="${v}"${sel ? ' selected' : ''}>${esc(l)}</option>`;
+  const pop = popAt(anchor, `<b>${I('check')} Abmachen</b><div class="small muted abt">${esc(titel)}</div>
+    <label class="abl">Wer geht?<select id="abP" class="${mid ? '' : 'leer'}">${opt('', 'Noch wählen', !mid)}${pers.map(x => opt(x.id, x.name, x.id === mid)).join('')}</select></label>
+    ${multi ? `<div class="abz2"><label class="abl">Von<input type="date" id="abD0" value="${isoDate(d0)}"></label><label class="abl">Bis<input type="date" id="abD1" value="${isoDate(d1)}"></label></div>`
+      : `<label class="abl">Datum<input type="date" id="abD" value="${isoDate(d0)}"></label>
+    <div class="seg abseg">${[[0, 48, 'Ganzer Tag'], [0, 24, 'Vormittag'], [24, 48, 'Nachmittag']].map(([a, b, l]) => `<button type="button" data-abz="${a},${b}" aria-pressed="${a === q0 && b === q1}">${l}</button>`).join('')}</div>
+    <div class="abz2"><select id="abQ0" aria-label="Von">${qOpts(q0)}</select><select id="abQ1" aria-label="Bis">${qOpts(q1)}</select></div>`}
+    <label class="abl">Zuständig<select id="abPl">${opt('', '– selber abgemacht –', !pl)}${PERSONEN.filter(x => x.ist_projektleiter && x.aktiv).map(x => opt(x.id, x.name, x.id === pl)).join('')}</select></label>
+    <div class="abbtn"><button class="btn btn-ghost" id="abNo">Abbrechen</button><button class="btn btn-primary" id="abOk">${I('check')}Abmachen</button></div>
+    <div class="cmrow"><button class="kg-ibtn" id="abDet" title="Details" aria-label="Details">${I('file')}</button>${q.it ? `${istAuftrag(q.it) ? `<button class="kg-ibtn" id="abCpy" title="Auftrag kopieren" aria-label="Auftrag kopieren">${I('copy')}</button>` : ''}<button class="kg-ibtn danger" id="abDel" title="Löschen" aria-label="Löschen">${I('trash')}</button>` : ''}</div>`);
+  pop.classList.add('abmp');
+  const r = pop.getBoundingClientRect(); if(r.bottom > innerHeight - 8) pop.style.top = Math.max(8, innerHeight - r.height - 8) + 'px';
+  const $p = sel => pop.querySelector(sel);
+  $p('#abP').onchange = e => e.target.classList.toggle('leer', !e.target.value);
+  pop.querySelectorAll('[data-abz]').forEach(b => b.onclick = () => { const [a, c] = b.dataset.abz.split(','); $p('#abQ0').value = a; $p('#abQ1').value = c; pop.querySelectorAll('[data-abz]').forEach(x => x.setAttribute('aria-pressed', x === b)); });
+  ['#abQ0', '#abQ1'].forEach(sel => { const el = $p(sel); if(el) el.onchange = () => pop.querySelectorAll('[data-abz]').forEach(x => x.setAttribute('aria-pressed', x.dataset.abz === `${$p('#abQ0').value},${$p('#abQ1').value}`)); });
+  $p('#abNo').onclick = closePop;
+  $p('#abDet').onclick = () => { closePop(); q.it ? openPanel(q.it.id) : openProvPanel(q.pid); };
+  if($p('#abCpy')) $p('#abCpy').onclick = () => { closePop(); kopiere(q.it); };
+  if($p('#abDel')) $p('#abDel').onclick = () => { closePop(); bestaetige('Löschen?', `<div>${esc(labOf(q.it))}</div>`, 'Löschen', () => loescheEinsatz(q.it)); };
+  $p('#abOk').onclick = async () => {
+    const wer = $p('#abP').value; if(!wer){ $p('#abP').focus(); toast('Bitte wählen, wer geht.', null, true); return; }
+    let ns, ne;
+    if(multi){ const a = fromIso($p('#abD0').value), b = fromIso($p('#abD1').value); ns = a + fs; ne = b + fe; }
+    else { const d = fromIso($p('#abD').value); ns = d + (+$p('#abQ0').value) / 48; ne = d + (+$p('#abQ1').value) / 48; }
+    if(!(ne > ns)){ toast('«Bis» muss nach «Von» liegen.', null, true); return; }
+    const npl = $p('#abPl').value || null; closePop();
+    if(p){ await provToEinsatz(p.id, wer, ns, ne, true, npl); return; }
+    const it = q.it, vorher = { s: it.s, e: it.e, mid: it.mid, pl: it.pl, ok: it.ok };
+    Object.assign(it, { s: r48(ns), e: r48(ne), mid: wer, pl: npl, ok: true }); VIEW === 'plan' ? renderRows() : render();
+    const ok = await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true), person_id: wer, projektleiter_id: npl, abgemacht: true });
+    if(!ok){ Object.assign(it, vorher); VIEW === 'plan' ? renderRows() : render(); return; }
+    if(selId === it.id) openPanel(it.id);
+    toast(`Abgemacht: ${labOf(it)} · ${spanLabel(it)} · ${P[wer]?.name || ''}`, async () => { Object.assign(it, vorher); VIEW === 'plan' ? renderRows() : render();
+      await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true), person_id: it.mid, projektleiter_id: it.pl || null, abgemacht: false }); });
+  };
 }
-const leseAbm = () => { const d = fromIso($('aD').value), s = d + (+$('aQ0').value) / 48, e = d + (+$('aQ1').value) / 48; return e > s ? { s, e, mid: $('aP') ? $('aP').value : null } : null; };
 
 function openPanel(id, isNew){
   const it = byId(id); if(!it) return; if(selId && selId !== id && istLeer(byId(selId))) leerWeg(selId);
@@ -2255,10 +2313,9 @@ function openPanel(id, isNew){
   // Pflege-Infos nur bei Terminen aus dem Pflege-Jahresplan (normale Aufträge haben eigene Fotos/Dokumente)
   const pflege = it.kid && it.pkk ? pflegeHTML(it.kid, it.pkk, Math.floor(it.s + 1e-9)) : '';
   $('side').innerHTML = `<aside class="sidepanel">
-    <div class="sd-head"><div${offen ? ' class="offenhd" title="Offener Auftrag – noch nicht abgemacht, wandert mit"' : ' style="min-width:0"'}><h3>${esc(it.kind === 'absenz' ? (it.title || 'Absenz') : titleOf(it))}${auftrag && ed && !kundeNeu ? `<button class="kedit" id="pKEdit" title="Kunde oder Titel ändern" aria-label="Kunde oder Titel ändern">${I('edit')}</button>` : ''}</h3>${k && kOrt(k) ? `<div class="small muted">${I('pin').replace('class="i"', 'class="i" style="width:12px;height:12px;vertical-align:-2px"')} ${esc(kOrt(k))}</div>` : ''}</div>${offen && ed && !panelAbm ? `<button class="btn btn-primary hdbtn" id="pAbm" title="Mit dem Kunden abgemacht">${I('check')}Abgemacht</button>` : ''}${punkte}${ed ? `<button class="icon-btn${it.wdh ? ' on' : ''}" id="pWdh" aria-pressed="${!!it.wdh}" title="Wiederkehrend" aria-label="Wiederkehrend">${I('repeat')}</button>` : ''}<button class="icon-btn" id="pX" aria-label="Schliessen">${I('x')}</button></div>
+    <div class="sd-head"><div${offen ? ' class="offenhd" title="Offener Auftrag – noch nicht abgemacht, wandert mit"' : ' style="min-width:0"'}><h3>${esc(it.kind === 'absenz' ? (it.title || 'Absenz') : titleOf(it))}${auftrag && ed && !kundeNeu ? `<button class="kedit" id="pKEdit" title="Kunde oder Titel ändern" aria-label="Kunde oder Titel ändern">${I('edit')}</button>` : ''}</h3>${k && kOrt(k) ? `<div class="small muted">${I('pin').replace('class="i"', 'class="i" style="width:12px;height:12px;vertical-align:-2px"')} ${esc(kOrt(k))}</div>` : ''}</div>${punkte}${ed ? `<button class="icon-btn${it.wdh ? ' on' : ''}" id="pWdh" aria-pressed="${!!it.wdh}" title="Wiederkehrend" aria-label="Wiederkehrend">${I('repeat')}</button>` : ''}<button class="icon-btn" id="pX" aria-label="Schliessen">${I('x')}</button></div>
     ${kundeNeu ? `<div class="kneu"><input type="text" id="pKunde" list="kList" value="${esc(KUNDEN[it.kid] ? kLabel(KUNDEN[it.kid]) : '')}" placeholder="Kunde suchen"><input type="text" id="pTitel" value="${esc(it.title)}" placeholder="${it.kid ? 'Zusatz, z. B. Hecke schneiden' : 'oder Titel, z. B. Werkhof, Besichtigung'}"></div>` : ''}
     ${zeile}${kopie}${zust}
-    ${offen && ed && panelAbm ? abmHTML(it.s, it.e, false) : ''}
     ${fixe}
     ${it.kind === 'absenz' ? `<div class="abs-chips">${ABST.map(t => `<button data-pabs="${esc(t.name)}" class="${t.name === it.title ? 'on' : ''}" ${dis}><i style="background:${absStyle(t.name).bg}"></i>${esc(t.name)}</button>`).join('')}</div>` : ''}
     <div class="fld"><label>${it.kind === 'absenz' ? 'Grund / Notiz' : 'Notiz'}</label><textarea id="pNotiz" placeholder="${it.kind === 'absenz' ? 'z. B. Arztzeugnis bis …' : 'Was ist zu tun, Zufahrt, Material …'}" ${dis}>${esc(it.text)}</textarea></div>
@@ -2276,10 +2333,6 @@ function openPanel(id, isNew){
     if(ok && it.kind === 'absenz' && (patch.beginn || patch.ende || patch.person_id)) await ausgleich(it, alt); return ok; };
   $('side').querySelectorAll('[data-pabs]').forEach(b => b.onclick = () => save({ titel: b.dataset.pabs }, { title: b.dataset.pabs }).then(() => openPanel(id)));
   on('#pKEdit', 'onclick', () => { panelKunde = true; openPanel(id); setTimeout(() => $('pKunde')?.focus(), 0); });
-  on('#pAbm', 'onclick', () => { panelAbm = true; openPanel(id); });
-  on('#aNo', 'onclick', () => { panelAbm = false; openPanel(id); });
-  on('#aOk', 'onclick', async () => { const v = leseAbm(); if(!v){ toast('«Bis» muss nach «Von» liegen.', null, true); return; } panelAbm = false;
-    await save({ beginn: fromU(v.s), ende: fromU(v.e, true), abgemacht: true }, { s: v.s, e: v.e, ok: true }); openPanel(id); toast('Abgemacht: ' + spanLabel(it)); });
   on('#pLink', 'onchange', async e => { await save({ mit_einsatz_id: e.target.value || null }, { link: e.target.value || null }); openPanel(id); });
   on('#pKunde', 'onchange', async e => { const v = e.target.value.trim(); const hit = KLIST.find(x => x.lab === v) || (v.length > 2 ? KLIST.find(x => x.lab.toLowerCase().includes(v.toLowerCase())) : null);
     if(v && !hit){ toast('Kunde nicht gefunden. Name als Titel übernommen.'); await save({ kunde_id: null, titel: v }, { kid: null, title: v }); }
@@ -2314,10 +2367,9 @@ function openProvPanel(pid){
   const wer = team ? 'Team ' + (GRUPPEN.find(g => g.id === gid)?.name || '') : P[p.lane.slice(2)]?.name;
   const darf = team ? PERSONEN.some(x => x.aktiv && canEdit(x.id) && x.gruppe_id === gid) : canEdit(p.lane.slice(2));
   $('side').innerHTML = `<aside class="sidepanel">
-    <div class="sd-head"><div class="offenhd" title="Offener Auftrag – noch nicht abgemacht, wandert mit"><h3>${esc(kName(k))}</h3>${kOrt(k) ? `<div class="small muted">${I('pin').replace('class="i"', 'class="i" style="width:12px;height:12px;vertical-align:-2px"')} ${esc(kOrt(k))}</div>` : ''}</div>${darf && !panelAbm ? `<button class="btn btn-primary hdbtn" id="pAbm" title="Mit dem Kunden abgemacht">${I('check')}Abgemacht</button>` : ''}<button class="icon-btn" id="pX" aria-label="Schliessen">${I('x')}</button></div>
+    <div class="sd-head"><div class="offenhd" title="Offener Auftrag – noch nicht abgemacht, wandert mit"><h3>${esc(kName(k))}</h3>${kOrt(k) ? `<div class="small muted">${I('pin').replace('class="i"', 'class="i" style="width:12px;height:12px;vertical-align:-2px"')} ${esc(kOrt(k))}</div>` : ''}</div><button class="icon-btn" id="pX" aria-label="Schliessen">${I('x')}</button></div>
     <div class="kopf2"><b>${esc(wer || '')}</b> · <b>${fmtN(p.min / 60)} Std.</b></div>
     <label class="zst">Zuständig<select id="vPl" ${darf ? '' : 'disabled'}><option value="">– selber abgemacht –</option>${PERSONEN.filter(x => x.ist_projektleiter && x.aktiv).map(x => `<option value="${x.id}"${x.id === VNOT[p.id]?.pl ? ' selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>
-    ${darf && panelAbm ? abmHTML(L.s, L.e, team, gid) : ''}
     <div class="fld"><label>Notiz</label><textarea id="vNotiz" placeholder="z. B. Kunde ruft zurück, nur vormittags, Schlüssel holen …">${esc(VNOT[p.id]?.n || '')}</textarea><span class="small muted" id="vSave"></span></div>
     ${pflegeHTML(p.kid, p.kk, p.mon)}
   </aside>`;
@@ -2329,11 +2381,6 @@ function openProvPanel(pid){
     if(error){ fehler(error); $('vSave').textContent = ''; return; } if(v.n || v.pl) VNOT[p.id] = v; else delete VNOT[p.id]; $('vSave').textContent = 'Gespeichert'; };
   let vt; $('vNotiz').oninput = e => { clearTimeout(vt); const n = e.target.value.trim(); vt = setTimeout(() => speichereV({ n }), 700); };
   $('vPl').onchange = e => speichereV({ pl: e.target.value || null });
-  const ab = $('pAbm'); if(ab) ab.onclick = () => { panelAbm = true; openProvPanel(pid); };
-  const no = $('aNo'); if(no) no.onclick = () => { panelAbm = false; openProvPanel(pid); };
-  const ok = $('aOk'); if(ok) ok.onclick = async () => { const v = leseAbm(); if(!v){ toast('«Bis» muss nach «Von» liegen.', null, true); return; }
-    const mid = team ? v.mid : p.lane.slice(2); if(!mid){ toast('Bitte wählen, wer geht.', null, true); return; }
-    panelAbm = false; selProv = null; $('side').innerHTML = ''; await provToEinsatz(pid, mid, v.s, v.e, true); };
 }
 // Fotos und Dokumente des Auftrags (eigene Dateien, gleiche Darstellung wie beim Pflege-Kunden)
 async function renderFiles(it){
@@ -2494,6 +2541,7 @@ function renderHandy(){
   document.querySelectorAll('[data-mm]').forEach(b => b.onclick = () => { M.mode = b.dataset.mm; renderHandy(); });
   document.querySelectorAll('[data-mw]').forEach(b => b.onclick = () => { if(b.dataset.mw === 'ich' && !M.mid){ toast('Dein Login ist noch keiner Zeile zugeordnet.'); return; } M.who = b.dataset.mw; renderHandy(); });
   document.querySelectorAll('.mc').forEach(c => c.onclick = () => { c.classList.toggle('open'); if(c.classList.contains('open')) mFiles(c); });
+  document.querySelectorAll('[data-mabm]').forEach(b => b.onclick = e => { e.stopPropagation(); const it = byId(b.dataset.mabm); if(it) openAbmachen({ it }, b.getBoundingClientRect()); });
   bindMPz(day);
 }
 function resLine(it, d){
@@ -2580,6 +2628,7 @@ function mCard(it, d){
     ${mit.length ? `<span class="o">mit ${esc(mit.join(', '))}</span>` : ''}
     ${it.kind === 'baustelle' ? resLine(it, d) : ''}
     ${it.text ? `<div class="nt">${esc(it.text)}</div>` : ''}${(it.files || []).length ? `<div class="fl" data-fl="${it.id}"><span class="small muted">Lade Dateien …</span></div>` : ''}
+    ${it.ok === false && canEdit(it.mid) && !it.rep ? `<button class="mabm" data-mabm="${it.id}">${I('check')}Abmachen</button>` : ''}
   </div>`;
 }
 async function mFiles(card){
