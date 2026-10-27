@@ -456,6 +456,8 @@ table.bp td{padding:4px;border-top:1px solid var(--soft);white-space:nowrap;}
 .mkwahl{display:flex;gap:6px;flex-wrap:wrap;} .mkb{all:unset;cursor:pointer;width:30px;height:30px;border-radius:50%;border:1px solid #C9CED3;background:#fff;display:inline-flex;align-items:center;justify-content:center;color:#323E4E;box-sizing:border-box;}
 .mkb .i{width:17px;height:17px;} .mkb.on{background:var(--primary);border-color:var(--primary);color:#fff;} .pop.mkpop{width:270px;}
 .cmrow{display:flex;justify-content:flex-end;gap:6px;padding-top:6px;margin-top:2px;border-top:1px solid var(--line);}
+.leiste .lmk{display:flex;gap:5px;padding:2px 2px 0;} .leiste .lmk .cmsp{display:none;}
+.cmrow .cmsp{flex:1;} .kg-ibtn.mkm{color:var(--primary);}
 .bwt{background:var(--red);color:#fff;border-radius:3px;padding:0 3px;font-weight:700;}
 .bpz{position:absolute;top:3px;height:16px;z-index:2;cursor:pointer;}
 .bpz::before{content:"";position:absolute;left:2px;right:2px;top:7px;border-top:2px dashed var(--c);opacity:.8;}
@@ -485,6 +487,8 @@ table.bp td{padding:4px;border-top:1px solid var(--soft);white-space:nowrap;}
 .leiste .lb button:hover{border-color:var(--primary);}
 .leiste .lb button:focus-visible{outline:2px solid var(--primary);outline-offset:1px;}
 .leiste .lb .sep{border-top:1px solid var(--soft);margin:2px 0;}
+.leiste .lb .lmk button.kg-ibtn{width:26px;height:26px;padding:0;border-radius:50%;justify-content:center;font-weight:400;box-sizing:border-box;flex:none;}
+.leiste .lb .lmk button.kg-ibtn .i{width:15px;height:15px;}
 .pop{position:fixed;z-index:60;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 24px rgba(30,37,48,.16);padding:10px 12px;display:flex;flex-direction:column;gap:8px;min-width:220px;max-width:300px;font-size:12.5px;}
 .lbox{position:fixed;inset:0;z-index:80;background:rgba(20,25,32,.9);display:flex;align-items:center;justify-content:center;padding:40px;}
 .lbox img{max-width:100%;max-height:100%;object-fit:contain;border-radius:4px;}
@@ -1310,6 +1314,8 @@ function openMark(m, rect){
 }
 // Neue Markierung am angeklickten Tag, vorbelegt «ganzer Tag»
 const markAn = (mid, u) => ({ person_id: mid, tag: isoDate(Math.floor(u)), teil: 'ganz' });
+// Markierungs-Icons als runde Knöpfe (Rechtsklick-Menü, Neu-Leiste): Allgemein-Zeilen andere als Mitarbeitende
+const mkKnoepfe = mid => (istAllg(mid) ? MARK_ALLG : MARK_PERS).map(k => `<button class="kg-ibtn mkm" data-mkm="${k}" title="${MARKART[k]}" aria-label="${MARKART[k]}">${I('m-' + k)}</button>`).join('') + '<span class="cmsp"></span>';
 function vehOn(mid){ const per = {}; RES.forEach(r => { if(r.typ !== 'fahrzeug' || !RU[r.id]) return; RU[r.id].list.forEach(x => { if(x.mid !== mid) return; x.slots.forEach(k => { if(x.evtl?.has(k)) return; (per[k] ??= []).push({ rid: r.id, cf: (RU[r.id].cnt[k] || 0) > 1 }); }); }); }); return per; }
 // Lieferwagen pro Tag unten am Baustellenbalken: roter Wagen = an diesem Tag keiner, zwei graue = zwei oder mehr (Info, auch bei 3+).
 // Ein Wagen = kein Icon. In Quartal/Jahr (schmale Tage) nur rot und nicht jeden Tag.
@@ -1938,11 +1944,13 @@ function drawNeuLeiste(){
   else list = (COPY ? btn('data-paste', `${I('copy')}<span>Kopie einfügen: ${esc(COPY.lab)}</span>`, false) + '<div class="sep"></div>' : '')
     + arten.map(([k, l], i) => btn(`data-art="${k}"`, `<span>${l}</span>`, L.def === k)).join('')
     + (L.extra ? '<div class="sep"></div>' + btn('data-extra', `${I(L.extra.ic || 'x')}<span>${esc(L.extra.lab)}</span>`, false) : '');
+  if(L.step === 'art' && canEdit(L.mid)) list += '<div class="sep"></div><div class="lmk">' + mkKnoepfe(L.mid) + '</div>'; // Markierungen direkt als Icons
   L.el.innerHTML = `<div class="lh">${kopf ? `<b>${kopf}</b>` : ''}<span class="small muted">${esc(spanLabel({ s: L.a, e: L.b }))} · ${esc(P[L.mid]?.name || '')}</span></div><div class="lb">${list}</div>`;
   L.el.querySelectorAll('[data-art]').forEach(x => x.onclick = () => waehleArt(x.dataset.art));
   L.el.querySelectorAll('[data-abs]').forEach(x => x.onclick = () => legeAn('absenz', { title: x.dataset.abs }));
   L.el.querySelectorAll('[data-bau]').forEach(x => x.onclick = () => legeAn('hilfe', { link: x.dataset.bau }));
   const pb = L.el.querySelector('[data-paste]'); if(pb) pb.onclick = fuegeKopieEin;
+  L.el.querySelectorAll('[data-mkm]').forEach(x => x.onclick = () => { const r = L.el.getBoundingClientRect(), m = { person_id: L.mid, tag: isoDate(Math.floor(L.a + 1e-9)), teil: 'ganz', art: x.dataset.mkm }; closeNeuLeiste(); openMark(m, { left: r.left, bottom: r.top }); });
   const xb = L.el.querySelector('[data-extra]'); if(xb) xb.onclick = () => { const fn = L.extra.fn; closeNeuLeiste(); fn(); };
   // gleich neben dem Eintrag, auch am unteren und rechten Rand ganz sichtbar
   const r = L.r, h = L.el.offsetHeight, w = L.el.offsetWidth;
@@ -2068,20 +2076,21 @@ function bindTimeline(t){
     const bar = e.target.closest('.bar[data-id]'), lane = e.target.closest('.lane[data-mid]'); if(!lane) return;
     // Rechtsklick in leere Fläche = gleiche Leiste wie Linksklick (inkl. «Kopie einfügen»)
     if(!bar){ if(!lane.classList.contains('ed') || e.target.closest('.band, .vchip, .bpz, .rdot, .vic')) return; e.preventDefault();
-      const len = zoom === 'tag' ? 4 / 48 : zoom === 'woche' ? 1 / 6 : .5, a = snapU(uAt(e.clientX) - len / 2); const um = uAt(e.clientX), rr = { left: e.clientX, bottom: e.clientY }; openNeuLeiste(lane, lane.dataset.mid, r48(a), r48(a + len), { lab: 'Markierung setzen', ic: 'm-info', fn: () => openMark(markAn(lane.dataset.mid, um), rr) }); return; }
+      const len = zoom === 'tag' ? 4 / 48 : zoom === 'woche' ? 1 / 6 : .5, a = snapU(uAt(e.clientX) - len / 2); const um = uAt(e.clientX), rr = { left: e.clientX, bottom: e.clientY }; openNeuLeiste(lane, lane.dataset.mid, r48(a), r48(a + len)); return; }
     e.preventDefault(); const it = byId(bar.dataset.id); if(!it) return; const x = e.clientX, ed = canEdit(it.mid);
     if(it.ok === false && ed && !it.rep && !it.wdh){ openAbmachen({ it }, { left: x, bottom: e.clientY }); return; }
     const m = it.rep ? byId(it.rep) : it, rep = !!(m && m.wdh); // wiederkehrend: Original m
     const b = (k, ic, l, st = '') => `<button class="btn btn-ghost" data-cm="${k}" style="justify-content:flex-start;${st}">${I(ic)}${l}</button>`;
     const ib = (k, ic, l, cls = '') => `<button class="kg-ibtn${cls}" data-cm="${k}" title="${l}" aria-label="${l}">${I(ic)}</button>`;
     const mehrt = it.e - it.s > 1 + 1e-6 && !rep;
-    const pop = popAt({ left: x, bottom: e.clientY }, `<b>${esc(labOf(it))}</b>${b('det', 'file', 'Details')}${ed && mehrt ? b('pz', 'pause', 'Hier unterbrechen') : ''}${ed ? b('mark', 'm-info', 'Markierung setzen') : ''}${ed
+    const pop = popAt({ left: x, bottom: e.clientY }, `<b>${esc(labOf(it))}</b>${b('det', 'file', 'Details')}${ed && mehrt ? b('pz', 'pause', 'Hier unterbrechen') : ''}${ed
       ? (rep ? b('del1', 'trash', 'Nur diesen löschen', 'color:var(--danger)') + b('delf', 'trash', 'Diesen und alle folgenden löschen', 'color:var(--danger)') + b('dela', 'trash', 'Alle löschen', 'color:var(--danger)')
-        : `<div class="cmrow">${istAuftrag(it) && it.ok !== false ? ib('fix', m.fix ? 'lock' : 'unlock', m.fix ? 'Start fix – Klick: lösen' : 'Start fixieren', m.fix ? ' on' : '') : ''}${istAuftrag(it) ? ib('cpy', 'copy', 'Auftrag kopieren') : ''}${ib('del', 'trash', 'Löschen', ' danger')}</div>`) : ''}`);
+        : `<div class="cmrow">${ed ? mkKnoepfe(it.mid) : ''}${istAuftrag(it) && it.ok !== false ? ib('fix', m.fix ? 'lock' : 'unlock', m.fix ? 'Start fix – Klick: lösen' : 'Start fixieren', m.fix ? ' on' : '') : ''}${istAuftrag(it) ? ib('cpy', 'copy', 'Auftrag kopieren') : ''}${ib('del', 'trash', 'Löschen', ' danger')}</div>`) : ''}`);
     pop.querySelectorAll('[data-cm]').forEach(bt => bt.onclick = () => { closePop(); const c = bt.dataset.cm;
       if(c === 'det') openPanel(m.id); else if(c === 'pz') unterbrich(it, uAt(x)); else if(c === 'mark') openMark(markAn(it.mid, uAt(x)), { left: x, bottom: e.clientY }); else if(c === 'fix'){ const v = !m.fix; m.fix = v; renderRows(); speichere(m, { start_fix: v }).then(ok => { if(!ok){ m.fix = !v; renderRows(); return; } if(selId === m.id) openPanel(m.id); toast(v ? 'Start fix: Balken lässt sich nicht mehr verschieben' : 'Start wieder frei'); }); } else if(c === 'cpy') kopiere(m);
       else if(c === 'del1') wdhLoeschen(it, 'nur'); else if(c === 'delf') wdhLoeschen(it, 'folgende'); else if(c === 'dela') loescheEinsatz(m);
       else bestaetige('Löschen?', `<div>${esc(labOf(m))}</div>`, 'Löschen', () => loescheEinsatz(m)); }); });
+    pop.querySelectorAll('[data-mkm]').forEach(bt => bt.onclick = () => { closePop(); openMark({ ...markAn(it.mid, uAt(x)), art: bt.dataset.mkm }, { left: x, bottom: e.clientY }); });
   let stT = 0; t.addEventListener('scroll', () => { if(!stT) stT = requestAnimationFrame(() => { stT = 0; stickLabels(); }); clearTimeout(t._aT); t._aT = setTimeout(aktivNachScroll, 150); }, { passive: true });
   let scT; t.addEventListener('scroll', () => { closePop(); if(zoom === 'tag'){ clearTimeout(scT); scT = setTimeout(() => { const c = Math.floor(t.scrollLeft / dayW); if(c < HR[0] + 3 || c > HR[1] - 4) renderRows(); }, 120); }
     if(openMid && openTyp === 'fahrzeug'){ clearTimeout(t._pT); t._pT = setTimeout(() => { const c = Math.floor(t.scrollLeft / dayW), e2 = c + Math.ceil(visW() / dayW); if(c < POOLR[0] + 3 || e2 > POOLR[1] - 3) renderRows(); }, 150); } }, { passive: true });
@@ -2108,7 +2117,8 @@ function bindTimeline(t){
     if(e.target.closest('.lane.vown') && !e.target.closest('.band')) return;
     // Übersicht Maschinen / Fahrzeuge / Anhänger
     const mr = e.target.closest('[data-mres]'); if(mr){ e.stopPropagation(); maschToggle(mr.dataset.mres, mr.dataset.art, mr.getBoundingClientRect()); return; }
-    const mkx = e.target.closest('[data-mk]'); if(mkx){ const m = MARK.find(x => x.id === mkx.dataset.mk); if(m) drag = { kind: 'click', fn: () => openMark(m, mkx.getBoundingClientRect()) }; return; }
+    const mkx = e.target.closest('[data-mk]'); if(mkx){ const m = MARK.find(x => x.id === mkx.dataset.mk); if(!m) return; // Markierung: Klick = ändern, ziehen = verschieben (Tag, Halbtag, andere Zeile gleicher Art)
+      drag = canEdit(m.person_id) ? { kind: 'mk', m, el: mkx, x0: e.clientX, y0: e.clientY, moved: false, rect: mkx.getBoundingClientRect() } : { kind: 'click', fn: () => openMark(m, mkx.getBoundingClientRect()) }; e.preventDefault(); return; }
     const vic = e.target.closest('[data-vic]'); if(vic){ openMid = vic.dataset.vic; openTyp = 'fahrzeug'; renderRows(); return; }
     const mwk = e.target.closest('.mwarn'); if(mwk){ const ln = mwk.closest('.lane[data-mid]'); if(ln){ openMid = ln.dataset.mid; openTyp = 'maschine'; renderRows(); } return; }
     // Bagger aufgeklappt: Klick in eine andere (hellgraue) Baustelle der Person = diese aktiv
@@ -2169,6 +2179,9 @@ function bindWindow(){
         if(drag.at0){ const dk = Math.floor(drag.s0 * 2 + 1e-9) - Math.floor(it.s * 2 + 1e-9); it.at = drag.at0.map(r => r + dk).filter(r => r >= 0); } }
       else it.e = r48(Math.max(drag.s0 + sn, drag.e0 + du));
       if(!drag.raf){ drag.raf = requestAnimationFrame(() => { if(drag) drag.raf = 0; renderRows(); }); }
+    } else if(drag.kind === 'mk'){
+      if(!drag.moved && Math.abs(e.clientX - drag.x0) < 4 && Math.abs(e.clientY - drag.y0) < 4) return; drag.moved = true;
+      drag.el.style.transform = `translate(${e.clientX - drag.x0}px, ${e.clientY - drag.y0}px)`; drag.el.style.zIndex = 20; drag.el.style.pointerEvents = 'none';
     } else if(drag.kind === 'solo'){
       const k = Math.floor(uAt(e.clientX) * 2); drag.add(k);
       drag.ks.forEach(x => document.querySelector(`.rdot[data-solo="${drag.id}"][data-k="${drag.tag ? (x >> 1) * 2 : x}"]`)?.classList.add('wahl'));    } else if(drag.kind === 'pz'){
@@ -2293,6 +2306,15 @@ function bindWindow(){
       openResChooser(d.rid, a, b, gh ? rect : { left: e.clientX, bottom: e.clientY });
       return;
     }
+    if(d.kind === 'mk'){ const m = d.m;
+      if(!d.moved){ openMark(m, d.rect); return; }
+      // Ziel: Tag unter der Maus; im Tag links = Vormittag, Mitte = ganzer Tag, rechts = Nachmittag; andere Zeile nur gleicher Art
+      const u = uAt(e.clientX), dd = Math.floor(u), fr = u - dd, ln = document.elementFromPoint(e.clientX, e.clientY)?.closest('.lane[data-mid]');
+      const mid = ln && canEdit(ln.dataset.mid) && istAllg(ln.dataset.mid) === istAllg(m.person_id) ? ln.dataset.mid : m.person_id;
+      const neu = { tag: isoDate(dd), teil: dayW < 14 ? 'ganz' : fr < 1 / 3 ? 'vm' : fr > 2 / 3 ? 'nm' : 'ganz', person_id: mid }, alt = { tag: m.tag, teil: m.teil, person_id: m.person_id };
+      Object.assign(m, neu); renderRows();
+      const { error } = await sb.from('planer_markierung').update(neu).eq('id', m.id); if(error){ Object.assign(m, alt); renderRows(); fehler(error, 'Verschieben'); }
+      return; }
     if(d.kind === 'solo'){ const b = byId(d.id); if(b && d.ks.size) await soloSetzen(b, d.ks, d.an); return; }
     if(d.kind === 'pz'){ const it = byId(d.id); if(!it) return;
       // Klick in die Lücke: hier etwas Neues eintragen (wie in leerer Fläche) oder den Unterbruch aufheben
