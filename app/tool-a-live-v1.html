@@ -480,7 +480,7 @@ tr.ezlinksrow td{border-bottom:none;padding-top:8px;}
 .astage-sum .astagesum{font-weight:700;font-size:12.5px;min-width:16px;text-align:right;}
 .astage-sum .unit{color:rgba(255,255,255,.75);}
 
-.costwrap{margin-top:14px;transition:background-color .1s;border-radius:8px;}
+.costwrap{margin-top:14px;transition:background-color .1s;border-radius:8px;overflow-anchor:none;}
 .costwrap.flash{animation:flashfade .7s ease-out;}
 @keyframes flashfade{from{background-color:var(--accent-blue);}to{background-color:transparent;}}
 table.cost{width:100%;border-collapse:collapse;font-size:12px;}
@@ -749,8 +749,8 @@ input[type=number]{-moz-appearance:textfield;}
 
         <div id="offerteContentWrap">
           <div id="formelInhalt">
-            <div class="card hidden" id="lwFrequenzKarte"><!-- per JS befuellt --></div>
             <div id="teilbereiche"><!-- per JS befuellt --></div>
+            <div class="card hidden" id="lwFrequenzKarte"><!-- per JS befuellt --></div>
           </div>
 
           <div id="tagessatzInhalt" class="hidden"><!-- per JS befuellt --></div>
@@ -4809,7 +4809,23 @@ function versteckeOptionHinweis(){
   $('optHinweisPop').classList.remove('show');
 }
 
-async function recalc(){
+// Kurze Verzoegerung: mehrere Klicks/Eingaben hintereinander loesen nur eine
+// Neuberechnung aus (weniger Flackern). Das Promise wird erst erfuellt, wenn
+// die Berechnung wirklich durch ist - "await recalc()" funktioniert wie bisher.
+const RECALC_DELAY_MS = 150;
+let recalcTimer = null, recalcWartende = [];
+function recalc(){
+  return new Promise(resolve => {
+    recalcWartende.push(resolve);
+    if(recalcTimer) clearTimeout(recalcTimer);
+    recalcTimer = setTimeout(async () => {
+      const wartende = recalcWartende;
+      recalcWartende = []; recalcTimer = null;
+      try{ await recalcJetzt(); }finally{ wartende.forEach(r => r()); }
+    }, RECALC_DELAY_MS);
+  });
+}
+async function recalcJetzt(){
   if(!offertentypId) return;
   const meineGeneration = ++recalcGeneration;
   snapshotGruppen = {};
@@ -4826,7 +4842,9 @@ async function recalc(){
     // Wird weiter unten (sobald die Distanz zur Kunden-PLZ feststeht) wieder
     // sichtbar gemacht und befuellt - hier vorsorglich ausblenden, falls
     // dieses Mal z.B. keine PLZ gesetzt ist und der Block gar nicht laeuft.
-    $('lwFrequenzKarte').classList.add('hidden');
+    // (Karte "Lieferwagenfahrzeit" wird hier bewusst NICHT vorab ausgeblendet:
+    // das Aus-/Einblenden bei jeder Neuberechnung liess die Seite springen.
+    // Sie wird nur unten ein-/ausgeblendet, wenn das Ergebnis feststeht.)
 
     // Wiederverwendbarer Kostenblock (Personal/Maschine/Logistik/Material
     // inkl. Sammelpositionen + Eigene Position + Gesamttotal) - genau einmal
@@ -4834,8 +4852,10 @@ async function recalc(){
     // hier bei Formel eine Schleife pro Teilflaeche mit eigenem Korrektur-
     // Schluessel-Suffix - seit "Teilbereiche moeglich" entfernt wurde, gibt
     // es nur noch einen Bereich, also auch nur noch einen Satz Schluessel).
-    function renderKostenblock(zeilen, container){
-      container.innerHTML = '';
+    function renderKostenblock(zeilen, ziel){
+      // Erst in einem Fragment aufbauen, dann in einem Schritt austauschen -
+      // die Tabelle wird nie kurz leer/niedriger (sonst springt die Seite).
+      const container = document.createDocumentFragment();
       let blockTotal = 0;
 
       function addRow(bezeichnung, menge, einheit, preis, betrag, schluessel, rundungMengeFn = rundeMenge, rundungPreisFn = rundeCHF, rechnungsweg = null, preisKorrigierbar = false){
@@ -5269,6 +5289,7 @@ async function recalc(){
         blockTotal += renderEigeneZeilenFuerKategorie(kat, container);
       });
 
+      ziel.replaceChildren(container);
       return blockTotal;
     }
 
