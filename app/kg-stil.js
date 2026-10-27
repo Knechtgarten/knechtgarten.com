@@ -36,7 +36,15 @@
     pfad: n => P[name(n)] || '',
     icon: (n, size = 14, cls = '') => `<svg ${cls ? `class="${cls}" ` : ''}width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${P[name(n)] || ''}</svg>`,
     // JS-Icon-Liste eines Tools (Name -> Pfade) auf die gemeinsamen Formen umstellen
-    uebernehmen(liste){ for(const k of Object.keys(liste)) if(name(k)) liste[k] = P[name(k)]; return liste; }
+    uebernehmen(liste){ for(const k of Object.keys(liste)) if(name(k)) liste[k] = P[name(k)]; return liste; },
+    // Datenbank-Fehler beim Anlegen/Verknüpfen eines Kunden auf Deutsch (sonst e.message unverändert)
+    kundeFehlertext(e, vorhandenerName){
+      const msg = (e && e.message) || String(e);
+      if((e && e.code === '23505') || /kunde_easybill_id_key|duplicate key/i.test(msg)){
+        return 'Dieser Kunde existiert bereits und wurde schon erfasst' + (vorhandenerName ? ': «' + vorhandenerName + '»' : '') + '. Bitte in der Kundenliste suchen und diesen Kunden verwenden.';
+      }
+      return msg;
+    }
   };
 
   // Sprites <symbol id="i-…"> der Tools auf die gemeinsamen Formen umstellen

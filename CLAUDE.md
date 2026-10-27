@@ -7,7 +7,7 @@ Jedes neue Tool übernimmt diesen Stil – nichts neu erfinden.
 ## Pflicht in jeder Seite (`<head>`, direkt nach `<meta charset>`)
 ```html
 <script src="/kg-pw-schutz.js?v=5"></script>
-<script src="/kg-stil.js?v=1"></script>
+<script src="/kg-stil.js?v=2"></script>
 ```
 - `kg-pw-schutz.js`: hält Passwort-Manager (Dashlane …) von allen Feldern ausser dem Login fern.
 - `kg-stil.js`: gemeinsame Icons und Knopfstil (siehe unten).
