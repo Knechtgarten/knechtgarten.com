@@ -131,6 +131,8 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 .row.grp .nm .i{width:13px;height:13px;transition:transform .15s;}
 .row.grp.zu .nm .i{transform:rotate(-90deg);}
 .row.grp .lane{background:#F7F9FA;}
+.row.grp.arch .nm{background:#8B9097;}
+.row.grp.ajahr .nm{background:var(--soft);color:var(--primary);padding-left:22px;font-weight:600;}
 .lane{position:relative;flex:none;height:24px;}
 .lane.ed{cursor:crosshair;}
 .tdl{position:absolute;top:0;bottom:0;width:2px;background:var(--accent-lime);pointer-events:none;z-index:1;}
@@ -940,6 +942,7 @@ function render(){
 // ---------------------------------------------------------------------------
 let zoom = lsGet('zoom', 'monat'), dayW = 26, query = '', plFilter = null, selId = null, drag = null;
 const collapsed = new Set(lsGet('zu', []));
+let archOffen = !!lsGet('archOffen', false); const archJahre = new Set(lsGet('archJahre', []));
 const SNAP = { jahr: 1, quartal: .5, monat: .5, woche: 1 / 12, tag: 1 / 48 };
 const ZL = { jahr: 'Jahr', quartal: 'Quartal', monat: 'Monat', woche: 'Woche', tag: 'Tag' };
 const snapU = u => { const s = SNAP[zoom]; return Math.round(u / s) * s; };
@@ -1181,6 +1184,15 @@ function renderRows(){
     h += `<div class="row grp${zu ? ' zu' : ''}" data-g="${g.id}"><div class="nm">${I('chev')}${esc(g.name)} <span style="opacity:.6;font-weight:400">(${ps.length})</span>${isBuero() && g.id !== '_ohne' ? `<button class="gadd" data-gadd="${g.id}" title="Zeile hinzufügen" aria-label="Zeile hinzufügen">${I('plus')}</button>` : ''}</div><div class="lane" style="width:${W}px;height:20px">${provBars('g:' + g.id)}</div></div>`;
     if(!zu) ps.forEach(p => { h += personRow(p, W, bgx); if(openMid === p.id) h += openTyp === 'maschine' ? ovRows(W, bgx, 'maschine', p.id) : vehFocusRows(W, bgx, p.id); }); // Anhänger nur in der Übersicht «Anhänger»
   });
+  // Archiv: ehemalige Personen ganz unten, standardmässig zu, nach Jahr des Austritts unterteilt (jedes Jahr auf-/zuklappbar)
+  const arch = PERSONEN.filter(p => p.archiviert_am);
+  if(arch.length || isBuero()){
+    h += `<div class="row grp arch${archOffen ? '' : ' zu'}" data-g="_archiv"><div class="nm">${I('chev')}Archiv <span style="opacity:.6;font-weight:400">(${arch.length})</span></div><div class="lane" style="width:${W}px"></div></div>`;
+    if(archOffen){ const jahre = {}; arch.forEach(p => (jahre[p.archiviert_am.slice(0, 4)] ||= []).push(p));
+      Object.keys(jahre).sort((a, b) => b - a).forEach(y => { const auf = archJahre.has(y);
+        h += `<div class="row grp ajahr${auf ? '' : ' zu'}" data-ay="${y}"><div class="nm">${I('chev')}${y} <span style="opacity:.6;font-weight:400">(${jahre[y].length})</span></div><div class="lane" style="width:${W}px"></div></div>`;
+        if(auf) jahre[y].sort((a, b) => a.name.localeCompare(b.name)).forEach(p => { h += personRow(p, W, bgx); }); }); }
+  }
   const sl = t.scrollLeft, stp = t.scrollTop;
   t.innerHTML = `<div class="grid" style="width:${W + NAMEW}px">${h}</div>`;
   t.scrollLeft = sl; t.scrollTop = stp; fokusRahmen(t); stickLabels();
@@ -1963,10 +1975,15 @@ async function sortApply(d){
   if(d.kind === 'grow'){
     const ids = GRUPPEN.map(g => g.id).filter(id => id !== d.gid); const ti = ids.indexOf(t.gid); ids.splice(t.before ? ti : ti + 1, 0, d.gid);
     jobs = ids.map((id, k) => sb.from('planer_gruppe').update({ sortierung: (k + 1) * 10 }).eq('id', id));
+  } else if(t.gid === '_archiv' || (t.mid && P[t.mid]?.archiviert_am)){ // ins Archiv: nicht mehr aktiv, Datum merken
+    if(P[d.mid]?.archiviert_am) return;
+    jobs = [sb.from('planer_person').update({ aktiv: false, archiviert_am: isoDate(TODAY) }).eq('id', d.mid)];
+    toast(`${P[d.mid]?.name} ist im Archiv`);
   } else {
     const gid = t.gid || P[t.mid].gruppe_id; const list = grpPersons(gid).filter(p => p.id !== d.mid);
     const idx = t.start ? 0 : list.findIndex(p => p.id === t.mid) + (t.after ? 1 : 0); list.splice(idx, 0, P[d.mid]);
-    jobs = list.map((p, k) => sb.from('planer_person').update(p.id === d.mid ? { sortierung: (k + 1) * 10, gruppe_id: gid } : { sortierung: (k + 1) * 10 }).eq('id', p.id));
+    // aus dem Archiv zurückgeholt = wieder aktiv
+    jobs = list.map((p, k) => sb.from('planer_person').update(p.id === d.mid ? { sortierung: (k + 1) * 10, gruppe_id: gid, aktiv: true, archiviert_am: null } : { sortierung: (k + 1) * 10 }).eq('id', p.id));
   }
   const res = await Promise.all(jobs); const err = res.find(r => r.error); if(err) fehler(err.error, 'Sortieren');
   await neuLaden();
@@ -2018,6 +2035,8 @@ function bindTimeline(t){
     const ga = e.target.closest('[data-gadd]'); if(ga){ e.stopPropagation(); const g = GRUPPEN.find(x => x.id === ga.dataset.gadd);
       if(/schnupper|tempor/i.test(g?.name || '')) schnellPerson(g, ga.getBoundingClientRect()); else personDlg(null, ga.dataset.gadd); return; }
     const pv = e.target.closest('.bar.prov[data-prov]'); if(pv){ drag = { kind: 'prov', pid: pv.dataset.prov, x0: e.clientX, y0: e.clientY, moved: false, rect: pv.getBoundingClientRect() }; e.preventDefault(); return; }
+    // Archiv und seine Jahre auf-/zuklappen
+    const ag = e.target.closest('.row.grp[data-ay], .row.grp[data-g="_archiv"]'); if(ag && !(drag && drag.kind === 'prow')){ if(ag.dataset.ay){ const y = ag.dataset.ay; archJahre.has(y) ? archJahre.delete(y) : archJahre.add(y); lsSet('archJahre', [...archJahre]); } else { archOffen = !archOffen; lsSet('archOffen', archOffen); } renderRows(); return; }
     const g = e.target.closest('.row.grp');
     const toggle = id => { collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id); lsSet('zu', [...collapsed]); renderRows(); };
     // Büro: Gruppe am Kopf ziehen = ganze Gruppe verschieben (kurzer Klick = auf-/zuklappen)
