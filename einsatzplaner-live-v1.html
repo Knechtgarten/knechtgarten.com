@@ -153,6 +153,13 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 .brg{position:absolute;top:10px;height:3px;opacity:.55;pointer-events:none;overflow:visible;}
 .brg .t{top:-7px;height:17px;line-height:15px;}
 .rdot{position:absolute;top:0;width:7px;height:7px;border-radius:50%;background:var(--red);border:1px solid #fff;z-index:3;pointer-events:none;}
+.rdot.blau{background:#2F6F9F;}
+.rdot.blau.cf{border-color:var(--red);box-shadow:0 0 0 1px var(--red);}
+.rdot.ph{background:#C3C8CE;opacity:0;transition:opacity .1s;}
+.lane:hover .rdot.ph{opacity:1;}
+.rdot.klick{pointer-events:auto;cursor:pointer;}
+.rdot.klick:hover,.rdot.wahl{transform:scale(1.45);}
+.rdot.wahl{outline:1.5px solid var(--primary);outline-offset:1px;opacity:1;}
 .bdot{position:absolute;top:0;width:7px;height:7px;border-radius:50%;background:#2F6F9F;border:1px solid #fff;z-index:3;pointer-events:none;}
 .planwrap{display:flex;}
 .planwrap .tl{flex:1;min-width:0;}
@@ -732,8 +739,8 @@ async function ladeAlles(){
     syncPflegeErledigt();
   }catch(err){ fehler(err, 'Laden'); }
 }
-function rowToItem(r){ return { id: r.id, mid: r.person_id, kind: r.art, s: toU(r.beginn), e: toU(r.ende), kid: r.kunde_id, title: r.titel || '', text: r.notiz || '', pl: r.projektleiter_id, link: r.mit_einsatz_id, allein: r.allein, ok: r.abgemacht, soll: r.soll_tage, files: r.planer_datei || [], pkk: r.pflege_kunde_kategorie_id, pj: r.pflege_jahr, pkw: r.pflege_kw, fix: !!r.start_fix, fixg: r.start_fix_grund || '', kv: r.kopie_von, wdh: r.wdh || null, pz: r.pausen || [] }; }
-function itemToRow(it){ return { person_id: it.mid, art: it.kind, beginn: fromU(it.s), ende: fromU(it.e, true), kunde_id: it.kid || null, titel: it.title || null, notiz: it.text || null, projektleiter_id: it.pl || null, mit_einsatz_id: it.link || null, allein: !!it.allein, abgemacht: it.ok !== false, soll_tage: it.soll ?? null, pflege_kunde_kategorie_id: it.pkk || null, pflege_jahr: it.pj || null, pflege_kw: it.pkw || null, start_fix: !!it.fix, start_fix_grund: it.fixg || null, kopie_von: it.kv || null, wdh: it.wdh || null, pausen: it.pz || [] }; }
+function rowToItem(r){ return { id: r.id, mid: r.person_id, kind: r.art, s: toU(r.beginn), e: toU(r.ende), kid: r.kunde_id, title: r.titel || '', text: r.notiz || '', pl: r.projektleiter_id, link: r.mit_einsatz_id, allein: r.allein, ok: r.abgemacht, soll: r.soll_tage, files: r.planer_datei || [], pkk: r.pflege_kunde_kategorie_id, pj: r.pflege_jahr, pkw: r.pflege_kw, fix: !!r.start_fix, fixg: r.start_fix_grund || '', kv: r.kopie_von, wdh: r.wdh || null, pz: r.pausen || [], at: r.allein_tage || [] }; }
+function itemToRow(it){ return { person_id: it.mid, art: it.kind, beginn: fromU(it.s), ende: fromU(it.e, true), kunde_id: it.kid || null, titel: it.title || null, notiz: it.text || null, projektleiter_id: it.pl || null, mit_einsatz_id: it.link || null, allein: !!it.allein, abgemacht: it.ok !== false, soll_tage: it.soll ?? null, pflege_kunde_kategorie_id: it.pkk || null, pflege_jahr: it.pj || null, pflege_kw: it.pkw || null, start_fix: !!it.fix, start_fix_grund: it.fixg || null, kopie_von: it.kv || null, wdh: it.wdh || null, pausen: it.pz || [], allein_tage: it.at || [] }; }
 const kName = k => k ? (k.firma || [k.nachname, k.vorname].filter(Boolean).join(' ') || k.name) : '';
 const kShort = k => k ? (k.firma || k.nachname || k.name || '') : '';
 const kOrt = k => k ? [k.strasse, [k.plz, k.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ') : '';
@@ -833,6 +840,12 @@ function floatOffene(){
     });
   });
 }
+// «Allein» pro Halbtag: allein_tage = Halbtage relativ zum ersten Halbtag (wandern mit); altes allein = true = alle
+const soloSet = b => { const k0 = Math.floor(b.s * 2 + 1e-9); if(!b.at?.length && b.allein) return new Set(LAY[b.id]?.free || []); return new Set((b.at || []).map(r => k0 + r)); };
+async function soloSetzen(b, ks, an){
+  const k0 = Math.floor(b.s * 2 + 1e-9), A = soloSet(b); ks.forEach(k => an ? A.add(k) : A.delete(k));
+  const vorher = { at: b.at, allein: b.allein }; b.at = [...A].map(k => k - k0).sort((x, y) => x - y); b.allein = false; renderRows();
+  if(!(await speichere(b, { allein_tage: b.at, allein: false }))){ Object.assign(b, vorher); renderRows(); } }
 // Unterbruch eines Auftrags: [von, bis) in Tagen ab Beginn
 const inPause = (it, k) => !!it.pz?.length && it.pz.some(([a, c]) => k / 2 >= it.s + a - 1e-6 && (k + 1) / 2 <= it.s + c + 1e-6);
 function compute(){
@@ -864,7 +877,10 @@ function compute(){
   });
   // Vorarbeiter-Baustelle ohne Mithilfe (und nicht «allein») = Personal fehlt (nur ab heute)
   const cover = {}; ALL.forEach(h => { if(h.kind === 'hilfe' && h.link && LAY[h.id]) LAY[h.id].free.forEach(k => (cover[h.link] ??= new Set()).add(k)); });
-  ALL.forEach(b => { if(b.kind !== 'baustelle' || b.allein || !P[b.mid]?.ist_vorarbeiter || !LAY[b.id]) return; const c = cover[b.id] || new Set(); LAY[b.id].miss = LAY[b.id].free.filter(k => !c.has(k) && k >= TODAY * 2); });
+  // Blau = an diesem Halbtag allein okay (kein Personal nötig); blau + Mithilfe eingeteilt = Konflikt (roter Rand)
+  ALL.forEach(b => { if(b.kind !== 'baustelle' || !P[b.mid]?.ist_vorarbeiter || !LAY[b.id]) return; const c = cover[b.id] || new Set(), A = soloSet(b), L = LAY[b.id];
+    L.solo = L.free.filter(k => A.has(k)); L.soloCf = new Set(L.solo.filter(k => c.has(k)));
+    L.miss = L.free.filter(k => !c.has(k) && !A.has(k) && k >= TODAY * 2); L.vorarb = true; });
   computeRU(); computeProv(); computeSvc();
 }
 const spanLabel = it => {
@@ -908,7 +924,8 @@ const ZL = { jahr: 'Jahr', quartal: 'Quartal', monat: 'Monat', woche: 'Woche', t
 const snapU = u => { const s = SNAP[zoom]; return Math.round(u / s) * s; };
 const NAMEW = 225;
 const visW = () => Math.max(300, ($('tl')?.clientWidth || innerWidth) - NAMEW);
-function calcDayW(){ return { jahr: 3.2, quartal: 9, monat: 26, woche: Math.max(60, visW() / 7.2), tag: Math.max(500, visW() - 10) }[zoom]; }
+// Breite eines Tages: Monat ≈ 5 Wochen, Quartal ≈ 13 Wochen, Jahr ≈ 53 Wochen im sichtbaren Bereich (mindestens die bisherigen Werte)
+function calcDayW(){ const v = visW(); return { jahr: Math.max(3.2, v / 371), quartal: Math.max(9, v / 92), monat: Math.max(26, v / 35), woche: Math.max(60, v / 7.2), tag: Math.max(500, v - 10) }[zoom]; }
 
 function renderPlan(){
   const main = $('appMain');
@@ -966,8 +983,9 @@ function openInfo(btn){
     ${z(sw('#fff', 'border:1.5px solid #A84E8A'), 'Maschine / Lieferwagen – Rahmen in Farbe des Vorarbeiters')}
     ${z(sw('#C9CED4'), 'Absenz')}
     ${z(sw('#E9ECEF'), 'Werkhof / intern')}
-    ${z('<span class="rdot" style="position:static;display:inline-block"></span>', 'Personal fehlt')}
-    ${z('<span class="bdot" style="position:static;display:inline-block"></span>', 'Arbeitet allein')}
+    ${z('<span class="rdot" style="position:static;display:inline-block"></span>', 'Personal fehlt (Klick = allein okay)')}
+    ${z('<span class="rdot blau" style="position:static;display:inline-block"></span>', 'Allein okay (Klick = aufheben; über leerem Balken erscheinen graue Punkte)')}
+    ${z('<span class="rdot blau cf" style="position:static;display:inline-block"></span>', 'Allein okay, aber Mithilfe eingeteilt')}
     ${z(sw('var(--red)', 'height:3px;border:0'), 'Kein Lieferwagen')}
     ${z('<span class="bwarn" style="position:static;display:inline-block">!</span>', 'Arbeitstage weichen vom Geplanten ab')}
     ${z(I('lock'), 'Start fix')}
@@ -1063,10 +1081,17 @@ function personRow(p, W, bgx){
     if(ed && L.segs.length && !L.mini){ const x0g = L.segs[0][0] * dayW + 1, x1g = L.segs[L.segs.length - 1][1] * dayW - 1;
       bars += `<div class="bgrip" data-gid="${it.id}" data-side="r" style="left:${x1g - 4}px" title="Ziehen: Ende ändern"></div>`;
       if(!it.fix) bars += `<div class="bgrip" data-gid="${it.id}" data-side="l" style="left:${x0g - 6}px" title="Ziehen: Beginn ändern"></div>`; }
-    if(it.allein && L.segs.length) bars += `<span class="bdot" style="left:${L.segs[0][0] * dayW + 3}px" title="Arbeitet allein"></span>`;
+
     const mw = MW.bau[it.id]; if(mw && L.segs.length) bars += `<span class="mwarn ${mw.l}" style="left:${mw.k / 2 * dayW}px" title="${mw.l === 'r' ? 'Maschine doppelt fest belegt' : 'Maschinen-Überschneidung (vorläufig)'} – Maschinen aufklappen">${I('digger')}</span>`;
-    if(L.miss.length){ const slotW = dayW / 2;
-      if(slotW >= 7) L.miss.forEach(k => { bars += `<span class="rdot" style="left:${k / 2 * dayW + slotW / 2 - 3.5}px" title="Personal fehlt"></span>`; });
+    // Punkte oben am Balken: rot = Personal fehlt, blau = allein okay, blau mit rotem Rand = trotzdem jemand eingeteilt.
+    // Klick schaltet rot ↔ blau; leere Halbtage zeigen beim Darüberfahren graue Platzhalter (Klick = blau). Ziehen = mehrere.
+    if(L.vorarb || L.miss.length){ const slotW = dayW / 2, klick = ed && L.vorarb, solo = new Set(L.solo || []), miss = new Set(L.miss);
+      const dot = (k, x, tag) => { const s = solo.has(k), m = miss.has(k); if(!s && !m && !klick) return;
+        const cls = s ? 'rdot blau' + (L.soloCf?.has(k) ? ' cf' : '') : m ? 'rdot' : 'rdot ph';
+        const t = s ? (L.soloCf?.has(k) ? 'Allein okay – aber Mithilfe eingeteilt!' : 'Allein okay') : m ? 'Personal fehlt' : 'Allein okay setzen';
+        bars += `<span class="${cls}${klick ? ' klick' : ''}" ${klick ? `data-solo="${it.id}" data-k="${k}"${tag ? ' data-tag="1"' : ''}` : ''} style="left:${x - 3.5}px" title="${t}${klick ? (s ? ' · Klick: aufheben' : ' · Klick: allein okay') : ''}"></span>`; };
+      if(slotW >= 7) L.free.forEach(k => { if(k >= TODAY * 2 || solo.has(k)) dot(k, k / 2 * dayW + slotW / 2); });
+      else if(dayW >= 7) [...new Set(L.free.map(k => k >> 1))].forEach(d => { const k = [d * 2, d * 2 + 1].find(x => solo.has(x) || miss.has(x)) ?? (L.free.includes(d * 2) ? d * 2 : d * 2 + 1); if(d >= TODAY || solo.has(k)) dot(k, d * dayW + dayW / 2, true); });
       else [...new Set(L.miss.map(k => k >> 1))].forEach((d, j) => { if(j % Math.max(1, Math.ceil(10 / dayW)) === 0) bars += `<span class="rdot" style="left:${d * dayW + dayW / 2 - 3.5}px" title="Personal fehlt"></span>`; });
     }
   });
@@ -1537,7 +1562,7 @@ async function zurueckInsMagazin(it){
   const { error: e2 } = await sb.from('planer_einsatz').delete().eq('id', it.id); if(e2) return fehler(e2);
   closePanel(); magK = dauer; lsSet('magK', magK); aufOpen = true; lsSet('aufOpen', true); await neuLaden(); toast(`Zurück im Magazin (${MAGK[dauer][0]}): ${data.titel}`);
 }
-function recalc(){ if(zoom === 'woche' || zoom === 'tag'){ const c = centerU(); dayW = calcDayW(); renderRows(); scrollToU(c, 'center'); } }
+function recalc(){ const c = centerU(), w = calcDayW(); if(Math.abs(w - dayW) < .01) return; dayW = w; renderRows(); scrollToU(c, 'center'); }
 
 // Pendenzen: persönlich, zwei Spalten «Heute / Morgen» und «Langfristig»
 const pzList = (mid, spalte) => PZ.filter(z => !z.erledigt && z.person_id === mid && (!spalte || z.spalte === spalte));
@@ -1929,8 +1954,12 @@ function bindTimeline(t){
     const bpz = e.target.closest('.bpz.ed'); if(bpz){ const it = byId(bpz.dataset.pzid), i = +bpz.dataset.pzi; if(!it?.pz?.[i]) return;
       const side = e.target.classList.contains('hl') ? 'l' : e.target.classList.contains('hr') ? 'r' : 'click';
       drag = { kind: 'pz', id: it.id, i, side, x0: e.clientX, u0: uAt(e.clientX), p0: [...it.pz[i]], pz0: JSON.parse(JSON.stringify(it.pz)), nV: halbtageJetzt(it), moved: false, rect: bpz.getBoundingClientRect() }; e.preventDefault(); return; }
+    const sd = e.target.closest('.rdot[data-solo]'); if(sd){ const b = byId(sd.dataset.solo); if(!b) return;
+      const tag = !!sd.dataset.tag, ks = new Set(), add = k => { const L = LAY[b.id]; (tag ? [(k >> 1) * 2, (k >> 1) * 2 + 1] : [k]).forEach(x => { if(L?.free.includes(x)) ks.add(x); }); };
+      add(+sd.dataset.k); sd.classList.add('wahl');
+      drag = { kind: 'solo', id: b.id, an: !sd.classList.contains('blau'), ks, add, tag }; e.preventDefault(); e.stopPropagation(); return; }
     const grp = e.target.closest('.bgrip'); if(grp){ const it = byId(grp.dataset.gid); if(!it) return;
-      drag = { kind: 'bar', id: it.id, mode: grp.dataset.side, x0: e.clientX, y0: e.clientY, s0: it.s, e0: it.e, mid0: it.mid, moved: false, ed: canEdit(it.mid), u0: uAt(e.clientX), pz0: it.pz?.length ? JSON.parse(JSON.stringify(it.pz)) : null, n0: null };
+      drag = { kind: 'bar', id: it.id, mode: grp.dataset.side, x0: e.clientX, y0: e.clientY, s0: it.s, e0: it.e, mid0: it.mid, moved: false, ed: canEdit(it.mid), u0: uAt(e.clientX), pz0: it.pz?.length ? JSON.parse(JSON.stringify(it.pz)) : null, at0: it.at?.length ? [...it.at] : null, n0: null };
       e.preventDefault(); return; }
     const bar = e.target.closest('.bar[data-id]'), lane = e.target.closest('.lane[data-mid]');
     if(bar){
@@ -1938,7 +1967,7 @@ function bindTimeline(t){
       const it = byId(id); if(!it) return;
       const ed = canEdit(it.mid);
       const mode = e.target.classList.contains('hl') ? 'l' : e.target.classList.contains('hr') ? 'r' : 'move';
-      drag = { kind: 'bar', id, mode, x0: e.clientX, y0: e.clientY, s0: it.s, e0: it.e, mid0: it.mid, moved: false, ed, u0: uAt(e.clientX), pz0: it.pz?.length ? JSON.parse(JSON.stringify(it.pz)) : null, n0: it.kind === 'baustelle' && it.e - it.s > 1 + 1e-6 && !it.wdh ? halbtageJetzt(it) : null };
+      drag = { kind: 'bar', id, mode, x0: e.clientX, y0: e.clientY, s0: it.s, e0: it.e, mid0: it.mid, moved: false, ed, u0: uAt(e.clientX), pz0: it.pz?.length ? JSON.parse(JSON.stringify(it.pz)) : null, at0: it.at?.length ? [...it.at] : null, n0: it.kind === 'baustelle' && it.e - it.s > 1 + 1e-6 && !it.wdh ? halbtageJetzt(it) : null };
       e.preventDefault(); return;
     }
     if(lane && lane.classList.contains('ed')){
@@ -1963,10 +1992,13 @@ function bindWindow(){
       if(drag.mode === 'move'){ if(it.fix){ if(du) drag.fixHit = true; } else { it.s = r48(drag.s0 + du); it.e = r48(drag.e0 + du); } // Start fix: nur auf andere Person
         const el = document.elementFromPoint(e.clientX, e.clientY)?.closest('.lane[data-mid]'); if(el && canEdit(el.dataset.mid)) it.mid = el.dataset.mid; }
       else if(drag.mode === 'l'){ it.s = r48(Math.min(drag.e0 - sn, drag.s0 + du)); // Unterbrüche bleiben am gleichen Datum
-        if(drag.pz0) it.pz = drag.pz0.map(([a, c]) => [r48(a + drag.s0 - it.s), r48(c + drag.s0 - it.s)]).filter(([a, c]) => c > 0).map(([a, c]) => [Math.max(0, a), c]); }
+        if(drag.pz0) it.pz = drag.pz0.map(([a, c]) => [r48(a + drag.s0 - it.s), r48(c + drag.s0 - it.s)]).filter(([a, c]) => c > 0).map(([a, c]) => [Math.max(0, a), c]);
+        if(drag.at0){ const dk = Math.floor(drag.s0 * 2 + 1e-9) - Math.floor(it.s * 2 + 1e-9); it.at = drag.at0.map(r => r + dk).filter(r => r >= 0); } }
       else it.e = r48(Math.max(drag.s0 + sn, drag.e0 + du));
       if(!drag.raf){ drag.raf = requestAnimationFrame(() => { if(drag) drag.raf = 0; renderRows(); }); }
-    } else if(drag.kind === 'pz'){
+    } else if(drag.kind === 'solo'){
+      const k = Math.floor(uAt(e.clientX) * 2); drag.add(k);
+      drag.ks.forEach(x => document.querySelector(`.rdot[data-solo="${drag.id}"][data-k="${drag.tag ? (x >> 1) * 2 : x}"]`)?.classList.add('wahl'));    } else if(drag.kind === 'pz'){
       if(drag.side === 'click' || (!drag.moved && Math.abs(e.clientX - drag.x0) < 4)) return;
       drag.moved = true; const it = byId(drag.id); const du = Math.round((uAt(e.clientX) - drag.u0) * 2) / 2; const [a0, c0] = drag.p0;
       if(drag.side === 'l') it.pz[drag.i] = [Math.max(0, Math.min(c0 - .5, a0 + du)), c0]; else it.pz[drag.i] = [a0, Math.max(a0 + .5, c0 + du)];
@@ -2082,6 +2114,7 @@ function bindWindow(){
       openResChooser(d.rid, a, b, gh ? rect : { left: e.clientX, bottom: e.clientY });
       return;
     }
+    if(d.kind === 'solo'){ const b = byId(d.id); if(b && d.ks.size) await soloSetzen(b, d.ks, d.an); return; }
     if(d.kind === 'pz'){ const it = byId(d.id); if(!it) return;
       if(!d.moved){ const pop = popAt(d.rect, `<b>Unterbruch</b><div class="small muted">${it.pz[d.i][1] - it.pz[d.i][0] >= 1 ? fmtN(it.pz[d.i][1] - it.pz[d.i][0]) + ' Tage' : 'Halber Tag'} · Kanten ziehen zum Ändern</div><button class="btn btn-ghost" id="pzWeg" style="justify-content:flex-start">${I('x')}Unterbruch aufheben</button>`);
         pop.querySelector('#pzWeg').onclick = () => { closePop(); const pz0 = d.pz0; it.pz.splice(d.i, 1); pausenGeaendert(it, pz0, d.nV); }; return; }
@@ -2099,8 +2132,8 @@ function bindWindow(){
       if(it.wdh && (it.s !== d.s0 || it.e !== d.e0 || it.mid !== d.mid0)){ const neu = { s: it.s, e: it.e, mid: it.mid }; Object.assign(it, { s: d.s0, e: d.e0, mid: d.mid0 }); renderRows(); wdhVerschieben(it, neu); return; }
       if(d.fixHit) toast('Start ist fix. Zum Verschieben im Detailfeld das Schloss öffnen.');
       if(it.s === d.s0 && it.e === d.e0 && it.mid === d.mid0) return;
-      const vorher = { s: d.s0, e: d.e0, mid: d.mid0, ...(d.pz0 ? { pz: d.pz0 } : {}) };
-      const ok = await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true), person_id: it.mid, ...(d.pz0 && d.mode === 'l' ? { pausen: it.pz } : {}) });
+      const vorher = { s: d.s0, e: d.e0, mid: d.mid0, ...(d.pz0 ? { pz: d.pz0 } : {}), ...(d.at0 ? { at: d.at0 } : {}) };
+      const ok = await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true), person_id: it.mid, ...(d.pz0 && d.mode === 'l' ? { pausen: it.pz } : {}), ...(d.at0 && d.mode === 'l' ? { allein_tage: it.at } : {}) });
       if(!ok){ Object.assign(it, vorher); renderRows(); return; }
       if(it.kind === 'absenz') await ausgleich(it, vorher);
       // Baustelle verschoben: Arbeitstage bleiben gleich (Absenzen zählen wie Wochenende, Ende rutscht nach hinten)
@@ -2347,9 +2380,9 @@ function openPanel(id, isNew){
     else if(ed){ const baus = EINS.filter(b => b.kind === 'baustelle' && b.mid !== it.mid && b.s < it.e && b.e > it.s);
       secs += `<div class="fld"><label>Mithilfe bei</label><select id="pLink"><option value="">– Baustelle wählen –</option>${baus.map(b => `<option value="${b.id}">${esc(first(P[b.mid]?.name))} · ${esc(labOf(b))}</option>`).join('')}</select></div>`; }
   }
-  // Oben rechts: roter Punkt = Personal fehlt, Knopf = arbeitet allein
+  // Oben rechts: roter Punkt = Personal fehlt («allein okay» wird direkt an den Punkten im Plan gesetzt)
   const missT = new Set(L.miss.map(x => x >> 1)).size;
-  const punkte = it.kind === 'baustelle' ? `${missT && !it.allein ? `<span class="pdot" title="Personal fehlt an ${missT} ${missT === 1 ? 'Tag' : 'Tagen'}" aria-label="Personal fehlt"></span>` : ''}<button class="icon-btn${it.allein ? ' on' : ''}" id="pAllein" ${dis} aria-pressed="${!!it.allein}" title="${it.allein ? 'Arbeitet allein (kein Personal nötig)' : 'Arbeitet allein? Klicken, wenn kein Personal nötig'}" aria-label="Arbeitet allein">${I('user')}</button>` : '';
+  const punkte = it.kind === 'baustelle' && missT ? `<span class="pdot" title="Personal fehlt an ${missT} ${missT === 1 ? 'Tag' : 'Tagen'} – im Plan Punkt anklicken = allein okay" aria-label="Personal fehlt"></span>` : '';
   // Schlösser: Start fix und Arbeitstage fix (nur Aufträge, nicht offene)
   const abw = it.soll && Math.abs(L.n - it.soll) > .01;
   const fixe = auftrag && !offen ? `<div class="fixe">
@@ -2393,7 +2426,6 @@ function openPanel(id, isNew){
   on('#pTitel', 'onchange', e => save({ titel: e.target.value.trim() || null }, { title: e.target.value.trim() }).then(() => { panelKunde = false; openPanel(id); }));
   on('#pPl', 'onchange', e => save({ projektleiter_id: e.target.value || null }, { pl: e.target.value || null }).then(() => openPanel(id)));
   on('#pWdh', 'onclick', () => openWdh(it, $('pWdh')));
-  on('#pAllein', 'onclick', () => save({ allein: !it.allein }, { allein: !it.allein }).then(() => openPanel(id)));
   on('#pFixS', 'onclick', () => save({ start_fix: !it.fix }, { fix: !it.fix }).then(() => { openPanel(id); toast(it.fix ? 'Start fix: lässt sich nicht mehr nach links/rechts ziehen' : 'Start wieder frei'); }));
   on('#pFixT', 'onclick', () => { const v = it.soll ? null : Math.round(L.n * 2) / 2; save({ soll_tage: v }, { soll: v }).then(() => openPanel(id)); });
   on('#pSoll', 'onchange', e => { const v = parseFloat(e.target.value.replace(',', '.')); if(!(v > 0)){ e.target.value = fmtN(it.soll); return; } save({ soll_tage: v }, { soll: v }).then(() => openPanel(id)); });
@@ -2846,7 +2878,7 @@ async function starteLive(){
   // Beim Zurückkommen auf die Seite (Handy entsperrt) frisch laden
   document.addEventListener('visibilitychange', () => { if(!document.hidden) neuLaden(); });
 }
-let rzT; addEventListener('resize', () => { clearTimeout(rzT); rzT = setTimeout(() => { if(VIEW === 'plan' && (zoom === 'woche' || zoom === 'tag')){ const c = centerU(); dayW = calcDayW(); renderRows(); scrollToU(c, 'center'); } }, 200); });
+let rzT; addEventListener('resize', () => { clearTimeout(rzT); rzT = setTimeout(() => { if(VIEW === 'plan'){ const c = centerU(); dayW = calcDayW(); renderRows(); scrollToU(c, 'center'); } }, 200); });
 
 pruefeAnmeldung();
 })();
