@@ -1496,8 +1496,18 @@ function renderEasybillWrap(){
 async function aktualisiereEasybillNummerFallsFehlend(){
   const meineOfferteId = currentOfferteId;
   const { data, error } = await sb.functions.invoke('easybill-offerte-export', { body: { offerte_id: meineOfferteId, modus: 'status' } });
-  if(error || data?.error || !data?.document_number) return;
+  if(error || data?.error) return;
   if(currentOfferteId !== meineOfferteId) return;
+  // Angebot wurde in Easybill geloescht: Verknuepfung faellt weg (die Edge
+  // Function hat sie auch in der DB entfernt), Button heisst wieder
+  // "Ins Easybill uebertragen".
+  if(data?.geloescht){
+    currentEasybillDocumentId = null;
+    currentEasybillDocumentNumber = null;
+    renderEasybillWrap();
+    return;
+  }
+  if(!data?.document_number || data.document_number === currentEasybillDocumentNumber) return;
   currentEasybillDocumentNumber = data.document_number;
   renderEasybillWrap();
 }
@@ -1523,7 +1533,7 @@ async function starteEasybillExport(modus){
   currentEasybillDocumentId = data.document_id;
   currentEasybillDocumentNumber = data.document_number;
   renderEasybillWrap();
-  $('easybillStatus').textContent = 'Erfolgreich übertragen.'; $('easybillStatus').className = 'status inline ok';
+  $('easybillStatus').textContent = data.neu_angelegt ? 'Das alte Angebot gab es in Easybill nicht mehr – es wurde neu angelegt.' : 'Erfolgreich übertragen.'; $('easybillStatus').className = 'status inline ok';
   $('easybillStatus').classList.remove('hidden');
 }
 $('easybillExportBtn').addEventListener('click', () => {
@@ -3930,7 +3940,7 @@ async function ladeBestehendeOfferte(offerteId){
   currentEasybillDocumentId = offerte.easybill_document_id || null;
   currentEasybillDocumentNumber = offerte.easybill_document_number || null;
   renderEasybillWrap();
-  if(currentEasybillDocumentId && !currentEasybillDocumentNumber) aktualisiereEasybillNummerFallsFehlend();
+  if(currentEasybillDocumentId) aktualisiereEasybillNummerFallsFehlend(); // prueft auch, ob das Angebot in Easybill noch existiert
   setMode('edit');
   renderOfferteListe();
   await recalc();
@@ -4713,7 +4723,7 @@ async function speichereEigeneZeilen(offerteId){
   if(delErr) throw delErr;
   const echte = eigeneZeilen.filter(z => z.bezeichnung.trim());
   if(echte.length){
-    const rows = echte.map((z, i) => ({ offerte_id: offerteId, kategorie: z.kategorie, bezeichnung: z.bezeichnung.trim(), menge: z.menge || 0, einheit: z.einheit || '', preis: z.preis || 0, reihenfolge: i, freitext_vorlage_id: z.freitextVorlageId ?? null, foto1_url: z.foto1Url ?? null, foto2_url: z.foto2Url ?? null, foto3_url: z.foto3Url ?? null, ...(z.geloescht ? { geloescht: true } : {}) }));
+    const rows = echte.map((z, i) => ({ offerte_id: offerteId, kategorie: z.kategorie, bezeichnung: z.bezeichnung.trim(), menge: z.menge || 0, einheit: z.einheit || '', preis: z.preis || 0, reihenfolge: i, freitext_vorlage_id: z.freitextVorlageId ?? null, foto1_url: z.foto1Url ?? null, foto2_url: z.foto2Url ?? null, foto3_url: z.foto3Url ?? null, geloescht: !!z.geloescht })); // immer mitsenden: bei gemischten Zeilen setzt PostgREST fehlende Schluessel sonst auf NULL (Not-null-Fehler)
     const { error: insErr } = await sb.from('offerte_eigene_zeile').insert(rows);
     if(insErr) throw insErr;
   }

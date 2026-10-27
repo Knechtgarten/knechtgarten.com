@@ -98,6 +98,22 @@ async function holeEndgueltigeNummer(documentId: number, auth: string): Promise<
   return await holeNummer();
 }
 
+// Prueft, ob das verknuepfte Easybill-Dokument noch existiert. Wird ein Angebot
+// in Easybill von Hand geloescht, antwortet die API mit 404 ("Document#... not
+// found") - dann ist die gespeicherte Verknuepfung ungueltig und die Offerte
+// soll sich wieder verhalten, als waere sie nie uebertragen worden.
+// null = unklar (Netzwerk-/anderer Fehler): Verknuepfung dann NICHT anfassen.
+async function dokumentExistiert(documentId: number, auth: string): Promise<boolean | null> {
+  try {
+    const res = await fetch(`${EASYBILL_BASE_URL}/documents/${documentId}`, { headers: { Authorization: auth } });
+    if (res.status === 404) return false;
+    if (res.ok) return true;
+    return null;
+  } catch (_e) {
+    return null;
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -140,6 +156,10 @@ Deno.serve(async (req) => {
     // Easybill-Verknuepfung aber ohne lokal bekannte Nummer geladen wird.
     if (modus === 'status') {
       if (!offerte.easybill_document_id) return json({ error: 'Für diese Offerte gibt es noch kein Easybill-Angebot.' }, 400);
+      if (await dokumentExistiert(offerte.easybill_document_id, auth) === false) {
+        await sb.from('offerte').update({ easybill_document_id: null, easybill_document_number: null, easybill_exported_at: null }).eq('id', offerte_id);
+        return json({ geloescht: true, document_id: null, document_number: null });
+      }
       const neueNummer = await holeEndgueltigeNummer(offerte.easybill_document_id, auth);
       if (neueNummer && neueNummer !== offerte.easybill_document_number) {
         await sb.from('offerte').update({ easybill_document_number: neueNummer }).eq('id', offerte_id);
@@ -198,7 +218,15 @@ Deno.serve(async (req) => {
       items,
     };
 
-    const istUeberschreiben = modus === 'ueberschreiben';
+    // Beim Ueberschreiben zuerst pruefen, ob das Angebot in Easybill noch
+    // existiert. Wurde es dort geloescht, wird stattdessen ein neues angelegt
+    // (alte Verknuepfung faellt weg).
+    let istUeberschreiben = modus === 'ueberschreiben';
+    let angebotWarGeloescht = false;
+    if (istUeberschreiben && await dokumentExistiert(offerte.easybill_document_id, auth) === false) {
+      istUeberschreiben = false;
+      angebotWarGeloescht = true;
+    }
     const url = istUeberschreiben ? `${EASYBILL_BASE_URL}/documents/${offerte.easybill_document_id}` : `${EASYBILL_BASE_URL}/documents`;
     const method = istUeberschreiben ? 'PUT' : 'POST';
 
@@ -221,7 +249,7 @@ Deno.serve(async (req) => {
     }).eq('id', offerte_id);
     if (updateErr) return json({ error: friendlyDbError(updateErr) }, 500);
 
-    return json({ document_id: ergebnis.id, document_number: easybillNummer });
+    return json({ document_id: ergebnis.id, document_number: easybillNummer, neu_angelegt: angebotWarGeloescht });
   } catch (e) {
     return json({ error: String(e) }, 500);
   }
