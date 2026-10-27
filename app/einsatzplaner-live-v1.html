@@ -1812,7 +1812,7 @@ async function svcErledigt(o){
 const ABS_TYPEN = () => (typeof ABST !== 'undefined' && ABST.length ? ABST.map(t => t.name) : ['Ferien', 'Krank', 'Unfall', 'Frei', 'Schule', 'Militär']);
 let neuL = null;
 function closeNeuLeiste(){ if(!neuL) return; neuL.el.remove(); neuL.lane.querySelector('.ghost')?.remove(); neuL = null; }
-function openNeuLeiste(lane, mid, a, b){
+function openNeuLeiste(lane, mid, a, b, extra){ // extra = { lab, ic, fn }: zusätzliche Wahl unten (z. B. Unterbruch aufheben)
   closeNeuLeiste();
   const p = P[mid]; const kurz = b - a < .5 - 1e-6;
   // Vorwahl je Zeile: Lehrlinge / Hilfskräfte (ohne Farbe) meistens «Mithilfe»
@@ -1820,7 +1820,7 @@ function openNeuLeiste(lane, mid, a, b){
   const gh = lane.querySelector('.ghost') || (() => { const g = document.createElement('div'); g.className = 'ghost'; lane.appendChild(g); return g; })();
   gh.style.left = a * dayW + 'px'; gh.style.width = (b - a) * dayW + 'px';
   const el = document.createElement('div'); el.className = 'leiste'; document.body.appendChild(el);
-  neuL = { el, lane, mid, a, b, step: 'art', def };
+  neuL = { el, lane, mid, a, b, step: 'art', def, extra };
   neuL.r = gh.getBoundingClientRect();
   drawNeuLeiste();
 }
@@ -1833,12 +1833,14 @@ function drawNeuLeiste(){
   if(L.step === 'absenz'){ kopf = 'Art der Absenz'; list = ABS_TYPEN().map((t, i) => btn(`data-abs="${esc(t)}"`, `<span>${esc(t)}</span>`, false)).join(''); }
   else if(L.step === 'hilfe'){ kopf = 'Mithilfe bei'; list = L.baus.map((x, i) => btn(`data-bau="${x.id}"`, `<span>${esc(first(P[x.mid]?.name))} · ${esc(labOf(x))}</span>`, false)).join(''); }
   else list = (COPY ? btn('data-paste', `${I('copy')}<span>Kopie einfügen: ${esc(COPY.lab)}</span>`, false) + '<div class="sep"></div>' : '')
-    + arten.map(([k, l], i) => btn(`data-art="${k}"`, `<span>${l}</span>`, L.def === k)).join('');
+    + arten.map(([k, l], i) => btn(`data-art="${k}"`, `<span>${l}</span>`, L.def === k)).join('')
+    + (L.extra ? '<div class="sep"></div>' + btn('data-extra', `${I(L.extra.ic || 'x')}<span>${esc(L.extra.lab)}</span>`, false) : '');
   L.el.innerHTML = `<div class="lh">${kopf ? `<b>${kopf}</b>` : ''}<span class="small muted">${esc(spanLabel({ s: L.a, e: L.b }))} · ${esc(P[L.mid]?.name || '')}</span></div><div class="lb">${list}</div>`;
   L.el.querySelectorAll('[data-art]').forEach(x => x.onclick = () => waehleArt(x.dataset.art));
   L.el.querySelectorAll('[data-abs]').forEach(x => x.onclick = () => legeAn('absenz', { title: x.dataset.abs }));
   L.el.querySelectorAll('[data-bau]').forEach(x => x.onclick = () => legeAn('hilfe', { link: x.dataset.bau }));
   const pb = L.el.querySelector('[data-paste]'); if(pb) pb.onclick = fuegeKopieEin;
+  const xb = L.el.querySelector('[data-extra]'); if(xb) xb.onclick = () => { const fn = L.extra.fn; closeNeuLeiste(); fn(); };
   // gleich neben dem Eintrag, auch am unteren und rechten Rand ganz sichtbar
   const r = L.r, h = L.el.offsetHeight, w = L.el.offsetWidth;
   L.el.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.left)) + 'px';
@@ -2161,8 +2163,10 @@ function bindWindow(){
     }
     if(d.kind === 'solo'){ const b = byId(d.id); if(b && d.ks.size) await soloSetzen(b, d.ks, d.an); return; }
     if(d.kind === 'pz'){ const it = byId(d.id); if(!it) return;
-      if(!d.moved){ const pop = popAt(d.rect, `<b>Unterbruch</b><div class="small muted">${it.pz[d.i][1] - it.pz[d.i][0] >= 1 ? fmtN(it.pz[d.i][1] - it.pz[d.i][0]) + ' Tage' : 'Halber Tag'} · Kanten ziehen zum Ändern</div><button class="btn btn-ghost" id="pzWeg" style="justify-content:flex-start">${I('x')}Unterbruch aufheben</button>`);
-        pop.querySelector('#pzWeg').onclick = () => { closePop(); const pz0 = d.pz0; it.pz.splice(d.i, 1); pausenGeaendert(it, pz0, d.nV); }; return; }
+      // Klick in die Lücke: hier etwas Neues eintragen (wie in leerer Fläche) oder den Unterbruch aufheben
+      if(!d.moved){ const ln = document.querySelector(`.row[data-mid="${it.mid}"] > .lane[data-mid="${it.mid}"]`); const a = Math.floor(d.u0 * 2) / 2;
+        const weg = () => { const pz0 = d.pz0; it.pz.splice(d.i, 1); pausenGeaendert(it, pz0, d.nV); };
+        if(ln && canEdit(it.mid)) openNeuLeiste(ln, it.mid, r48(a), r48(a + .5), { lab: 'Unterbruch aufheben', ic: 'x', fn: weg }); else weg(); return; }
       pausenGeaendert(it, d.pz0, d.nV); return; }
     if(d.kind === 'bar'){
       const it = byId(d.id);
