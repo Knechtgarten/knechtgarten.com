@@ -260,6 +260,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 /* Ablage freier Lieferwagen: kräftigere Linie oben und ganz helles Grau (näher bei Weiss), damit «verfügbar» klar getrennt ist */
 .row.ov.fov.vpool{border-top:1.5px solid #8B9097;}
 .row.ov.fov.vpool .lane,.row.ov.fov.vpool .nm{background-color:#FAFBFC;}
+.row.ov.fov.vpool.drop .lane{background-color:#EEF3F7;outline:2px dashed #8B9097;outline-offset:-3px;}
 /* Aufgeklappt (Maschinen / Lieferwagen unter einer Person): Rest grau-weiss und leicht abgedunkelt */
 /* Maschinen-Reservierung: vorläufig gestrichelt, fest durchgezogen; Überschneidung orange (vorläufig) / rot (fest) */
 .band.mres{background:#fff;border:1.5px solid var(--c);color:var(--ink);}
@@ -1412,7 +1413,7 @@ async function assignVeh(r, a, b, mid){
   const weg = r.stamm_person_id && r.stamm_person_id !== mid ? { id: 'tmpw' + Date.now(), rid: r.id, art: 'stamm_weg', mid: r.stamm_person_id, s: a, e: b, pz: [] } : null; if(weg) RESE.push(weg);
   renderRows();
   const { data, error } = await sb.from('planer_ressource_einsatz').insert({ ressource_id: r.id, person_id: mid, beginn: fromU(a), ende: fromU(b, true) }).select('id').single();
-  if(error){ RESE = RESE.filter(z => z !== tmp && z !== weg); renderRows(); fehler(error, 'Zuteilen'); return; } tmp.id = data.id;
+  if(error){ RESE = RESE.filter(z => z !== tmp && z !== weg); renderRows(); fehler(error, 'Zuteilen'); return; } tmp.id = data.id; renderRows(); // echte Kennung in den Balken
   // Stammfahrzeug an jemand anderen: beim Stamm-Fahrer für diese Zeit freigeben
   if(weg){ const { data: w2 } = await sb.from('planer_ressource_einsatz').insert({ ressource_id: r.id, art: 'stamm_weg', person_id: r.stamm_person_id, beginn: fromU(a), ende: fromU(b, true) }).select('id').single(); if(w2) weg.id = w2.id; }
   toast(`${resName(r)} → ${P[mid].name}`, () => vehWeg(tmp));
@@ -2015,7 +2016,7 @@ function bindTimeline(t){
         const mode = e.target.classList.contains('hl') ? 'l' : e.target.classList.contains('hr') ? 'r' : 'move';
         drag = { kind: 'mres', zid, rid, mode, x0: e.clientX, ab0: z.ab, bv0: z.bv, all: x.all, i0: slotIdx(x.all, u), moved: false, rect: band.getBoundingClientRect(), u0: u }; e.preventDefault(); return; }
       if(band.classList.contains('ed') && z && z.s != null){ const mode = e.target.classList.contains('hl') ? 'l' : e.target.classList.contains('hr') ? 'r' : 'move';
-        drag = { kind: 'rbar', zid, rid, mode, x0: e.clientX, s0: z.s, e0: z.e, u0: u, moved: false, rect: band.getBoundingClientRect(), vown: !!band.closest('.lane.vown') }; e.preventDefault(); return; }
+        drag = { kind: 'rbar', zid, rid, mode, x0: e.clientX, s0: z.s, e0: z.e, u0: u, moved: false, rect: band.getBoundingClientRect(), vown: !!band.closest('.lane.vown'), y0: e.clientY }; e.preventDefault(); return; }
       drag = { kind: 'click', fn: () => openResPop(zid, rid, band.getBoundingClientRect(), u) }; return; }
     if(rl){ if(!rl.classList.contains('ed')) return; const u = rsnap(uAt(e.clientX) - RS() / 2); drag = { kind: 'rnew', rid: rl.dataset.rid, u0: u, x0: e.clientX, moved: false, lane: rl }; e.preventDefault(); return; }
     const bpz = e.target.closest('.bpz.ed'); if(bpz){ const it = byId(bpz.dataset.pzid), i = +bpz.dataset.pzi; if(!it?.pz?.[i]) return;
@@ -2110,7 +2111,8 @@ function bindWindow(){
       else z.bv = Math.max(0, Math.min(n - z.ab - 1, drag.bv0 - dl));
       if(!drag.raf){ drag.raf = requestAnimationFrame(() => { if(drag) drag.raf = 0; renderRows(); }); }
     } else if(drag.kind === 'rbar'){
-      if(!drag.moved && Math.abs(e.clientX - drag.x0) < 4) return; drag.moved = true;
+      if(!drag.moved && Math.abs(e.clientX - drag.x0) < 4 && !(drag.vown && Math.abs(e.clientY - drag.y0) >= 4)) return; drag.moved = true;
+      if(drag.vown){ const ab = !!document.elementFromPoint(e.clientX, e.clientY)?.closest('.vpool'); document.querySelector('.vpool')?.classList.toggle('drop', ab); if(ab) return; }
       const z = RESE.find(o => o.id === drag.zid); if(!z) return; const du = rsnap(uAt(e.clientX) - drag.u0), sn = RS();
       if(drag.mode === 'move'){ z.s = drag.s0 + du; z.e = drag.e0 + du; } else if(drag.mode === 'l') z.s = Math.min(drag.e0 - sn, drag.s0 + du); else z.e = Math.max(drag.s0 + sn, drag.e0 + du);
       if(!drag.raf){ drag.raf = requestAnimationFrame(() => { if(drag) drag.raf = 0; renderRows(); }); }
@@ -2168,6 +2170,9 @@ function bindWindow(){
       return;
     }
     if(d.kind === 'rbar'){
+      // aufgeklappter Lieferwagen nach unten in die Ablage gezogen = zurück in die Ablage
+      if(d.vown && document.elementFromPoint(e.clientX, e.clientY)?.closest('.vpool')){ const z = RESE.find(o => o.id === d.zid);
+        if(z && z.art === 'zuteilung' && !z.eid){ z.s = d.s0; z.e = d.e0; vehWeg(z); } return; }
       if(!d.moved){ const z0 = RESE.find(o => o.id === d.zid); // aufgeklappter Lieferwagen: Klick = direkt zurück in die Ablage
         if(d.vown && z0 && z0.art === 'zuteilung' && !z0.eid){ vehWeg(z0); return; }
         openResPop(d.zid, d.rid, d.rect, d.u0); return; }
