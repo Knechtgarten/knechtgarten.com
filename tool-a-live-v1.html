@@ -781,10 +781,12 @@ input[type=number]{-moz-appearance:textfield;}
         <div id="offerteContentWrap">
           <div id="formelInhalt">
             <div id="teilbereiche"><!-- per JS befuellt --></div>
-            <div class="card hidden" id="lwFrequenzKarte"><!-- per JS befuellt --></div>
           </div>
 
           <div id="tagessatzInhalt" class="hidden"><!-- per JS befuellt --></div>
+
+          <!-- Lieferwagenfahrzeit (Std/Km/Budget, Haeufigkeit) - gilt fuer Formel UND Tagesrechner, darum ausserhalb von formelInhalt -->
+          <div class="card hidden" id="lwFrequenzKarte"><!-- per JS befuellt --></div>
 
           <div class="costwrap" id="costwrap">
             <table class="cost">
@@ -1711,7 +1713,8 @@ let tabelleZeileCounter = 0;
 // Lieferwagenfahrzeit (Preisfindung Phase 3): einmal pro Offerte anhand der
 // Kunde-PLZ ueber Google Distance Matrix berechnet, Nutzer waehlt Zeit/km.
 let lieferwagenKonfig = null; // {herkunft_adresse, stundenpreis, kmpreis}
-let lieferwagenModus = 'zeit'; // 'zeit' | 'distanz'
+let lieferwagenModus = 'zeit'; // 'zeit' | 'distanz' | 'budget'
+let lieferwagenBudget = 0;      // CHF, nur bei Modus 'budget'
 let lieferwagenDistanzCache = {}; // {plz: {stdHinRueck, kmHinRueck} | null}
 // Frequenz (aus/woechentlich/taeglich) je Posten - unabhaengig voneinander
 // waehlbar, siehe Absprache Lieferwagenfahrzeit-Personalaufwand: bestimmt,
@@ -4181,10 +4184,11 @@ function setMode(neu){
 
 async function ladeBestehendeOfferte(offerteId){
   const { data: offerte, error: oErr } = await sb
-    .from('offerte').select('id, titel, datum, status, notiz, offertentyp_id, lieferwagen_modus, lieferwagen_frequenz, vorarbeiter_frequenz, vorarbeiter_typ, gartenarbeiter_frequenz, zugaenglichkeit_stufe, beschreibung_block, beschreibung_manuell, optionen_text_liste, optionen_text_manuell, kosten_snapshot, offertnummer, easybill_document_id, easybill_document_number, vorauswahl_id, transport_werk_kies_id, transport_werk_beton_id').eq('id', offerteId).single();
+    .from('offerte').select('id, titel, datum, status, notiz, offertentyp_id, lieferwagen_modus, lieferwagen_budget, lieferwagen_frequenz, vorarbeiter_frequenz, vorarbeiter_typ, gartenarbeiter_frequenz, zugaenglichkeit_stufe, beschreibung_block, beschreibung_manuell, optionen_text_liste, optionen_text_manuell, kosten_snapshot, offertnummer, easybill_document_id, easybill_document_number, vorauswahl_id, transport_werk_kies_id, transport_werk_beton_id').eq('id', offerteId).single();
   if(oErr){ console.error(oErr); $saveStatus.textContent = 'Fehler beim Laden: ' + oErr.message; $saveStatus.className='status err'; return; }
 
   lieferwagenModus = offerte.lieferwagen_modus || 'zeit';
+  lieferwagenBudget = Number(offerte.lieferwagen_budget) || 0;
   lieferwagenFrequenz = offerte.lieferwagen_frequenz || 'taeglich';
   vorarbeiterFrequenz = offerte.vorarbeiter_frequenz || 'taeglich';
   vorarbeiterTyp = offerte.vorarbeiter_typ || 'normal';
@@ -4313,6 +4317,7 @@ async function starteNeueOfferte(otId){
   zeigeBauteilCard();
   setMode('new');
   lieferwagenModus = 'zeit';
+  lieferwagenBudget = 0;
   lieferwagenFrequenz = 'taeglich';
   vorarbeiterFrequenz = 'taeglich';
   // Startwert kommt aus der Vorlage (Tool B) statt immer hart "normal" zu
@@ -4502,7 +4507,7 @@ async function speichereNeueOfferte(titelVal){
     .insert({
       kunde_id: kundeId, offertentyp_id: offertentypId, titel: titelVal,
       datum: $offerteDatum.value || heuteAlsDatumsstring(), status: offerteStatus, notiz: notizWert(),
-      betrag_total: letzterBruttoTotal, lieferwagen_modus: lieferwagenModus,
+      betrag_total: letzterBruttoTotal, lieferwagen_modus: lieferwagenModus, lieferwagen_budget: lieferwagenBudget > 0 ? lieferwagenBudget : null,
       lieferwagen_frequenz: lieferwagenFrequenz, vorarbeiter_frequenz: vorarbeiterFrequenz, vorarbeiter_typ: vorarbeiterTyp, gartenarbeiter_frequenz: gartenarbeiterFrequenz,
       zugaenglichkeit_stufe: bereichZugaenglichkeitStufe ?? 2, vorauswahl_id: aktiveVorauswahlId, transport_werk_kies_id: transportWahl.kies || null, transport_werk_beton_id: transportWahl.beton || null,
       beschreibung_block: $beschreibungBlock.value.trim() || null, beschreibung_manuell: beschreibungManuellBearbeitet,
@@ -4568,7 +4573,7 @@ async function speichereAenderungen(titelVal){
   const { error: oErr } = await sb.from('offerte').update({
     titel: titelVal, datum: $offerteDatum.value || heuteAlsDatumsstring(),
     status: offerteStatus, notiz: notizWert(),
-    betrag_total: letzterBruttoTotal, lieferwagen_modus: lieferwagenModus,
+    betrag_total: letzterBruttoTotal, lieferwagen_modus: lieferwagenModus, lieferwagen_budget: lieferwagenBudget > 0 ? lieferwagenBudget : null,
     lieferwagen_frequenz: lieferwagenFrequenz, vorarbeiter_frequenz: vorarbeiterFrequenz, vorarbeiter_typ: vorarbeiterTyp, gartenarbeiter_frequenz: gartenarbeiterFrequenz,
     zugaenglichkeit_stufe: bereichZugaenglichkeitStufe ?? 2, vorauswahl_id: aktiveVorauswahlId, transport_werk_kies_id: transportWahl.kies || null, transport_werk_beton_id: transportWahl.beton || null,
     beschreibung_block: $beschreibungBlock.value.trim() || null, beschreibung_manuell: beschreibungManuellBearbeitet,
@@ -5698,11 +5703,13 @@ async function recalcJetzt(){
     const LIEFERWAGEN_MINDESTFAHRZEIT_TOTAL_MIN = 15;
     async function berechneLieferwagenfahrzeit(gesamtPersonalStundenWert){
       const plzFuerFahrzeit = $('kundePlz').value.trim();
-      if(!(lieferwagenKonfig?.herkunft_adresse && lieferwagenKonfig.stundenpreis != null && lieferwagenKonfig.kmpreis != null && plzFuerFahrzeit)){
+      // Modus "Budget": fester Betrag fuer den Lieferwagen statt Std/km - braucht keine Distanz
+      const budgetModus = lieferwagenModus === 'budget';
+      if(!(lieferwagenKonfig?.herkunft_adresse && lieferwagenKonfig.stundenpreis != null && lieferwagenKonfig.kmpreis != null && (plzFuerFahrzeit || budgetModus))){
         $('lwFrequenzKarte').classList.add('hidden');
         return { personal: [], logistik: [] };
       }
-      const distanz = await holeLieferwagenDistanz(plzFuerFahrzeit);
+      const distanz = (plzFuerFahrzeit ? await holeLieferwagenDistanz(plzFuerFahrzeit) : null) || (budgetModus ? { stdHinRueck: 0, kmHinRueck: 0 } : null);
       // Waehrend der Wartezeit oben kann laengst ein neuerer recalc()-Aufruf
       // gestartet sein (z.B. schnelles Umklicken der Frequenz-Buttons) - dann
       // hier abbrechen, statt mit veralteten Werten die Karte/Zeilen des
@@ -5750,21 +5757,33 @@ async function recalcJetzt(){
       // synthetischen Zeilen weiter unten (dieselben Werte, nicht zweimal
       // berechnet).
       const lwFahrten = fahrtenFuer(lieferwagenFrequenz);
-      const mengeStdGesamt = rundeMenge(stdGerundet * lwFahrten);
+      // Std auf 2 Dezimalen (Viertelstunden) - mit ganzen Stunden (rundeMenge) wurde die
+      // Mindestfahrzeit von 15 Min bei nahen Kunden auf 0 abgerundet und die Fahrzeit fehlte.
+      const rundeStd = n => Math.round(n * 100) / 100;
+      const mengeStdGesamt = rundeStd(stdGerundet * lwFahrten);
       const mengeKmGesamt = rundeMenge(kmGerundet * lwFahrten);
       const betragZeit = rundeCHF(mengeStdGesamt * stundenpreisGerundet);
       const betragKm = rundeCHF(mengeKmGesamt * kmpreisGerundet);
       lwPosten.forEach(p => {
         if(p.key === 'lieferwagen'){
+          if(budgetModus){
+            p.vorschauMenge = 1;
+            p.vorschauEinheit = 'Budget';
+            p.vorschauBetrag = rundeCHF(lieferwagenBudget || 0);
+            p.artikelId = lieferwagenKonfig.stdArtikelId;
+            p.artikelBezeichnung = lieferwagenKonfig.stdArtikelBezeichnung;
+            p.preis = rundeCHF(lieferwagenBudget || 0);
+          }else{
           p.vorschauMenge = lieferwagenModus === 'distanz' ? mengeKmGesamt : mengeStdGesamt;
           p.vorschauEinheit = lieferwagenModus === 'distanz' ? 'km' : 'Std';
           p.vorschauBetrag = lieferwagenModus === 'distanz' ? betragKm : betragZeit;
           p.artikelId = lieferwagenModus === 'distanz' ? lieferwagenKonfig.kmArtikelId : lieferwagenKonfig.stdArtikelId;
           p.artikelBezeichnung = lieferwagenModus === 'distanz' ? lieferwagenKonfig.kmArtikelBezeichnung : lieferwagenKonfig.stdArtikelBezeichnung;
           p.preis = lieferwagenModus === 'distanz' ? kmpreisGerundet : stundenpreisGerundet;
+          }
         }else{
           const fahrten = fahrtenFuer(p.aktuell);
-          p.vorschauMenge = rundeMenge(stdGerundet * fahrten);
+          p.vorschauMenge = rundeStd(stdGerundet * fahrten);
           p.vorschauEinheit = 'Std';
           p.preis = rundeCHF(p.preis);
           p.vorschauBetrag = rundeCHF(p.vorschauMenge * p.preis);
@@ -5779,25 +5798,24 @@ async function recalcJetzt(){
       // einzelne zusaetzliche Lieferwagenzeit-Sonderpositionen bei
       // Arbeitsschritten (siehe Absprache).
       const kmAktiv = lieferwagenModus === 'distanz';
-      const lwModusToggleHtml = `<label class="lwmodesw wide"><input type="checkbox" id="lwModusToggle"${kmAktiv ? ' checked' : ''}>
-          <span class="trk"><span class="thumb">${kmAktiv ? 'Km' : 'Std'}</span></span>
-        </label>`;
+const lwModusToggleHtml = '<span style="display:flex;gap:4px;">' + [['zeit', 'Std'], ['distanz', 'Km'], ['budget', 'Budget']].map(([k, l]) => '<button type="button" class="opt' + (lieferwagenModus === k ? ' on' : '') + '" data-lwmodus="' + k + '">' + l + '</button>').join('') + '</span>';
       const poolAktiv = vorarbeiterTyp === 'pool';
       const vorarbeiterTypToggleHtml = `<label class="lwmodesw wide"><input type="checkbox" id="vorarbeiterTypToggle"${poolAktiv ? ' checked' : ''}>
           <span class="trk"><span class="thumb">${poolAktiv ? 'Pool' : 'Normal'}</span></span>
         </label>`;
       $lwFrequenzKarte.innerHTML = `<div style="font-weight:700;color:var(--ink);margin-bottom:6px;">Lieferwagenfahrzeit${anzahlArbeitstage ? ` <span style="font-weight:400;color:var(--muted);font-size:12px;">– ${anzahlArbeitstage} Arbeitstag${anzahlArbeitstage === 1 ? '' : 'e'} berechnet</span>` : ''}</div>` +
-        lwPosten.map(p => `<div data-posten="${p.key}" style="display:grid;grid-template-columns:120px 110px auto 130px;align-items:center;gap:8px;margin-top:6px;">
+        lwPosten.map(p => `<div data-posten="${p.key}" style="display:grid;grid-template-columns:120px 170px auto 130px;align-items:center;gap:8px;margin-top:6px;">
           <span style="font-size:12.5px;color:var(--muted);">${p.label}</span>
           <span style="display:flex;align-items:center;gap:6px;">${p.key === 'lieferwagen' ? lwModusToggleHtml : p.key === 'vorarbeiter' ? vorarbeiterTypToggleHtml : ''}</span>
-          <span style="display:flex;gap:6px;flex-wrap:wrap;">
+          ${p.key === 'lieferwagen' && budgetModus ? `<span style="display:flex;gap:6px;align-items:center;"><input type="number" id="lwBudgetInput" min="0" step="10" value="${lieferwagenBudget || ''}" placeholder="Betrag" style="width:90px;border:1px solid var(--line);border-radius:6px;padding:5px 8px;font:inherit;font-size:12.5px;text-align:right;" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other"><span style="font-size:12px;color:var(--muted);">CHF Gesamtbudget Lieferwagen</span></span>` : `<span style="display:flex;gap:6px;flex-wrap:wrap;">
             <button type="button" class="opt${p.aktuell === 'aus' ? ' on' : ''}" data-freq="aus">Aus</button>
             <button type="button" class="opt${p.aktuell === 'woechentlich' ? ' on' : ''}" data-freq="woechentlich">Wöchentlich</button>
             <button type="button" class="opt${p.aktuell === 'taeglich' ? ' on' : ''}" data-freq="taeglich">Täglich</button>
-          </span>
+          </span>`}
           <span style="font-size:10.5px;color:var(--muted);opacity:.7;text-align:right;white-space:nowrap;">${p.vorschauMenge} ${p.vorschauEinheit} · ${fmtCHF(p.vorschauBetrag)}</span>
         </div>`).join('');
-      $('lwModusToggle').addEventListener('change', () => { lieferwagenModus = $('lwModusToggle').checked ? 'distanz' : 'zeit'; recalc(); });
+      $lwFrequenzKarte.querySelectorAll('[data-lwmodus]').forEach(b => b.addEventListener('click', () => { lieferwagenModus = b.dataset.lwmodus; recalc(); planAutosave(); }));
+      $('lwBudgetInput')?.addEventListener('change', () => { lieferwagenBudget = parseFloat($('lwBudgetInput').value) || 0; recalc(); planAutosave(); });
       $('vorarbeiterTypToggle')?.addEventListener('change', () => { vorarbeiterTyp = $('vorarbeiterTypToggle').checked ? 'pool' : 'normal'; recalc(); });
       lwPosten.forEach(p => {
         $lwFrequenzKarte.querySelectorAll(`[data-posten="${p.key}"] [data-freq]`).forEach(b => {
@@ -5814,7 +5832,7 @@ async function recalcJetzt(){
       const personal = [];
       const logistik = [];
       lwPosten.forEach(p => {
-        if(p.aktuell === 'aus' || p.artikelId == null) return;
+        if((p.aktuell === 'aus' && !(p.key === 'lieferwagen' && budgetModus)) || p.artikelId == null) return;
         const row = {
           kategorie: p.key === 'lieferwagen' ? 'logistik' : 'personal',
           artikelId: p.artikelId,
