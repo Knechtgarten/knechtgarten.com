@@ -48,6 +48,7 @@ Regeln:
 - «ausser in Monat X» = diese Monate als Zeitraum in ausDat. «ohne KW 15» = ausKW.
 - Ferien ohne genaue Daten: setze die üblichen Daten im Kanton Bern als Vorschlag in ausDat (Weihnachtsferien ca. 24.12.–2.1.) und schreibe im "hinweis", dass die Daten geprüft werden sollen.
 - Mehrere verschiedene Wünsche = mehrere Serien.
+- Ist eine "Aktuelle Einstellung" mitgeschickt, hat der Benutzer links schon etwas eingestellt: übernimm diese Werte als Ausgangslage und ändere/ergänze nur, was im Wunsch steht (z. B. «zusätzlich Nick», «nur bis Ende Mai», «ausser in den Sportferien»). Nur wenn der Wunsch klar etwas ganz Neues beschreibt, fängst du neu an.
 - "hinweis": ein bis zwei kurze Sätze auf Deutsch (Schweiz, ss statt ß), was du verstanden hast und was unklar ist. Leer, wenn alles klar ist.`;
 
 Deno.serve(async (req) => {
@@ -65,8 +66,9 @@ Deno.serve(async (req) => {
   const absenzen = (Array.isArray(body?.absenzen) ? body.absenzen : []).slice(0, 30).map((a: any) => String(a).slice(0, 40)).join(', ');
   const icons = (Array.isArray(body?.icons) ? body.icons : []).slice(0, 30).map((i: any) => `${String(i.key).slice(0, 20)} = ${String(i.name).slice(0, 40)}`).join(', ');
   const heute = String(body?.heute || new Date().toISOString().slice(0, 10)).slice(0, 10);
+  const aktuell = body?.aktuell && typeof body.aktuell === 'object' ? JSON.stringify(body.aktuell).slice(0, 3000) : '';
 
-  const kontext = `Heute: ${heute}\nAbsenz-Arten: ${absenzen}\nIcons: ${icons}\nPersonen (id | Name | Gruppe):\n${personen}\n\nWunsch des Benutzers:\n${text}`;
+  const kontext = `Heute: ${heute}\nAbsenz-Arten: ${absenzen}\nIcons: ${icons}\nPersonen (id | Name | Gruppe):\n${personen}\n${aktuell ? `\nAktuelle Einstellung im Formular (JSON, gleiche Felder wie SERIE, "aus" = Ausnahmen als Text):\n${aktuell}\n` : ''}\nWunsch des Benutzers:\n${text}`;
 
   let letzterFehler = '';
   for (const model of MODELLE) {
