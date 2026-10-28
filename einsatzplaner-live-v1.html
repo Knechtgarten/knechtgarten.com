@@ -345,6 +345,14 @@ body.kopiert, body.kopiert *{cursor:copy !important;}
 .skirow textarea{flex:1;min-height:44px;resize:vertical;font:inherit;font-size:13px;}
 .skirow .kg-ibtn{width:32px;height:32px;flex:none;}
 .skirow .kg-ibtn.on{background:var(--danger,#C0392B);color:#fff;border-color:transparent;}
+.skibtn{display:flex;flex-direction:column;gap:6px;}
+.sright.drop .skirow textarea{border-color:var(--primary);background:#D6E7F4;box-shadow:0 0 0 2px #D6E7F4;}
+.skidat{display:flex;flex-wrap:wrap;gap:4px;}
+.skidat .tchip{cursor:default;max-width:190px;}
+.skidat .tchip > span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.skidat .tchip .i{width:13px;height:13px;flex:none;}
+.skidat .tchip button{all:unset;cursor:pointer;display:inline-flex;color:var(--muted);}
+.skidat .tchip button:hover{color:var(--danger);}
 .svor{background:#F5F7F9;border-radius:7px;padding:8px 10px;font-size:13px;}
 .aghost{position:fixed;z-index:95;background:var(--primary);color:#fff;font-size:11.5px;padding:4px 8px;border-radius:5px;pointer-events:none;box-shadow:0 4px 12px rgba(0,0,0,.2);}
 .lane.drop{background:#F2F5D6 !important;}
@@ -1520,9 +1528,11 @@ function serieTage(f){ // Tage (Index) laut Regel, ohne Ausnahmen
   const kwAus = new Set(); [String(f.ausKW || ''), ...ausT.filter(s => !/\./.test(s)).map(s => s.replace(/kw\s*/i, ''))].join(',').split(/[,;\s]+/).forEach(s => { const m = /^(\d+)(?:-(\d+))?$/.exec(s); if(m) for(let k = +m[1]; k <= +(m[2] || m[1]); k++) kwAus.add(k); });
   const datAus = []; [String(f.ausDat || ''), ...ausT.filter(s => /\./.test(s))].join(',').split(/[,;\n]+/).forEach(s => { const m = s.trim().match(/(\d{1,2})\.(\d{1,2})\.(\d{2,4})(?:\s*[-–]\s*(\d{1,2})\.(\d{1,2})\.(\d{2,4}))?/); if(!m) return;
     const y = v => +v < 100 ? 2000 + +v : +v, d1 = dayIdx(new Date(y(m[3]), m[2] - 1, m[1])), d2 = m[4] ? dayIdx(new Date(y(m[6]), m[5] - 1, m[4])) : d1; datAus.push([d1, d2]); });
+  const liste = new Set((f.daten || []).map(fromIso)); // Regel «bestimmte Daten» (von der KI, z. B. aus einem Schulplan)
   const nn = Math.max(1, +f.n || 1), m0 = dDate(a).getFullYear() * 12 + dDate(a).getMonth(); let wt = -1;
   for(let d = a; d <= b; d++){ const w = wd(d), dt = dDate(d);
-    if(f.regel === 'taeglich'){ if(w > 4 || FEIER.has(d)) continue; if(++wt % nn) continue; }
+    if(f.regel === 'liste'){ if(!liste.has(d)) continue; }
+    else if(f.regel === 'taeglich'){ if(w > 4 || FEIER.has(d)) continue; if(++wt % nn) continue; }
     else if(f.regel === 'woche'){ if(!f.tage.includes(w) || Math.floor((d - mo0) / 7) % Math.max(1, f.n) !== 0) continue; }
     else { if(w !== f.mwd || (dt.getFullYear() * 12 + dt.getMonth() - m0) % nn) continue; const n = Math.ceil(dt.getDate() / 7), letzt = new Date(dt.getFullYear(), dt.getMonth() + 1, 0).getDate() - dt.getDate() < 7; if(f.nth === -1 ? !letzt : n !== f.nth) continue; }
     if(f.ausFeier && FEIER.has(d)) continue; if(kwAus.has(kw(d))) continue; if(datAus.some(([x, y]) => d >= x && d <= y)) continue;
@@ -1530,7 +1540,19 @@ function serieTage(f){ // Tage (Index) laut Regel, ohne Ausnahmen
   return out; }
 // Serien-Leiste im Werkzeugfeld (statt Fenster). Wer = die links markierten Zeilen (Klick ins leere Feld neben dem Namen).
 const SF = { art: 'abs', abs: 'Schule', mk: 'aemtli', text: '', kunde: '', teil: 'ganz', regel: 'woche', n: 1, tage: [0], nth: 1, mwd: 0, von: isoDate(TODAY), bis: isoDate(TODAY + 180), ausFeier: true, aus: '', vert: 'alle' }; // Feiertage immer ausgelassen
-const SKI = { text: '', serien: [], i: 0, hinweis: '', rec: null, laeuft: false }; // KI-Eingabe (Text oder Mikrofon)
+const SKI = { text: '', serien: [], i: 0, hinweis: '', rec: null, laeuft: false, dateien: [] }; // KI-Eingabe (Text oder Mikrofon, dazu Bilder/PDFs)
+// Anhänge fürs KI-Feld: Plus-Knopf, Reinziehen oder Ctrl+V. Bilder werden verkleinert (max. 2000 px), PDF bis 8 MB.
+async function skiDateien(liste){
+  for(const fl of [...liste]){
+    if(SKI.dateien.length >= 3){ toast('Höchstens 3 Dateien.', null, true); break; }
+    const pdf = fl.type === 'application/pdf'; if(!pdf && !/^image\//.test(fl.type)){ toast(`${fl.name || 'Datei'}: nur Bilder oder PDF.`, null, true); continue; }
+    if(pdf && fl.size > 8e6){ toast(`${fl.name}: PDF ist zu gross (max. 8 MB).`, null, true); continue; }
+    let url = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.onerror = () => r(null); fr.readAsDataURL(fl); }); if(!url) continue;
+    if(!pdf){ const img = await new Promise(r => { const im = new Image(); im.onload = () => r(im); im.onerror = () => r(null); im.src = url; }); if(!img) continue;
+      const k = Math.min(1, 2000 / Math.max(img.width, img.height)); if(k < 1 || fl.size > 1.5e6 || !/png|jpeg|gif|webp/.test(fl.type)){
+        const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k); const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height); url = c.toDataURL('image/jpeg', .88); } }
+    SKI.dateien.push({ name: fl.name || 'Bild aus Zwischenablage', pdf, url }); }
+  drawSbar(); }
 const serieWer = () => MARKS.filter(id => P[id]);
 function sbarInner(){
   const f = SF, tage = serieTage(f), wer = serieWer(), n = f.vert === 'wechsel' && wer.length > 1 ? tage.length : tage.length * wer.length;
@@ -1548,10 +1570,11 @@ function sbarInner(){
     <button class="btn btn-primary sokbig" data-sok="1"${n ? '' : ' disabled'}>Serie erstellen</button>
     <div class="stop3">${wer.length > 1 ? seg('vert', [['alle', 'Alle'], ['wechsel', 'Abwechselnd']]) : ''}${n ? `<span class="svor1" title="${esc(bsp.replace(/<br>/g, ' | '))}"><b>${n} Einträge</b> <span class="muted">${bsp.split('<br>')[0]}${tage.length > 1 ? ' …' : ''}</span></span>` : ''}</div>
     <div class="sbx sregel">
-      <div class="srow">alle <input type="number" data-sin="n" min="1" max="12" value="${f.n}" style="width:44px">
-        <select data-sin="regel"><option value="taeglich"${f.regel === 'taeglich' ? ' selected' : ''}>Werktag(e)</option><option value="woche"${f.regel === 'woche' ? ' selected' : ''}>Woche(n)</option><option value="monat"${f.regel === 'monat' ? ' selected' : ''}>Monat(e)</option></select>${f.regel === 'woche' ? ' am' : ''}</div>
+      <div class="srow">${f.regel === 'liste' ? '' : `alle <input type="number" data-sin="n" min="1" max="12" value="${f.n}" style="width:44px">`}
+        <select data-sin="regel"><option value="taeglich"${f.regel === 'taeglich' ? ' selected' : ''}>Werktag(e)</option><option value="woche"${f.regel === 'woche' ? ' selected' : ''}>Woche(n)</option><option value="monat"${f.regel === 'monat' ? ' selected' : ''}>Monat(e)</option>${f.daten?.length ? `<option value="liste"${f.regel === 'liste' ? ' selected' : ''}>Bestimmte Daten</option>` : ''}</select>${f.regel === 'woche' ? ' am' : ''}</div>
       ${f.regel === 'woche' ? `<span class="seg" data-sf="tage">${WDK.slice(0, 6).map((l, i) => `<button data-v="${i}" aria-pressed="${f.tage.includes(i)}">${l}</button>`).join('')}</span>` : ''}
       ${f.regel === 'monat' ? `<div class="srow">am ${seg('nth', [[1, '1.'], [2, '2.'], [3, '3.'], [4, '4.'], [-1, 'letzten']])} ${seg('mwd', WDK.slice(0, 5).map((l, i) => [i, l]))}</div>` : ''}
+      ${f.regel === 'liste' ? `<span class="tchip saus" title="${esc(f.daten.map(x => dLab(fromIso(x))).join(', '))}">${f.daten.length} bestimmte Daten (von der KI)<button data-sdatx="1" aria-label="Daten entfernen">${I('x')}</button></span>` : ''}
       ${seg('teil', [['ganz', 'Ganzer Tag'], ['vm', 'Vormittag'], ['nm', 'Nachmittag']])}
       <div class="srow sdat"><input type="date" data-sin="von" value="${f.von}" title="Von"><span>bis</span><input type="date" data-sin="bis" value="${f.bis}" title="Bis"></div>
       ${f.aus ? `<span class="tchip saus" title="Ausnahmen (von der KI)">Ohne: ${esc(f.aus)}<button data-sausx="1" aria-label="Ausnahmen entfernen">${I('x')}</button></span>` : ''}</div>
@@ -1562,7 +1585,9 @@ function sbarInner(){
       ${f.art === 'mk' ? `<input type="text" data-sin="text" value="${esc(f.text)}" placeholder="Hinweis (optional)" style="width:84px">` : ''}</div>
     <div class="sbx sright">
       <div class="ski"><div class="skirow"><textarea data-ski="1" rows="3" placeholder="Mit KI: sagen oder schreiben, z. B. «Für Tim und Nick jeden Montag Schule, ausser in den Schulferien». Enter = ausfüllen.">${esc(SKI.text)}</textarea>
-        <button class="kg-ibtn${SKI.rec ? ' on' : ''}" data-smic="1" title="${SKI.rec ? 'Aufnahme stoppen' : 'Sprechen'}" aria-label="Sprechen">${I('mic')}</button></div>
+        <div class="skibtn"><button class="kg-ibtn${SKI.rec ? ' on' : ''}" data-smic="1" title="${SKI.rec ? 'Aufnahme stoppen' : 'Sprechen'}" aria-label="Sprechen">${I('mic')}</button>
+        <button class="kg-ibtn" data-sadd="1" title="Datei anhängen (Bild oder PDF, z. B. Schulplan). Geht auch: Datei aufs Feld ziehen oder Bild mit Ctrl+V einfügen" aria-label="Datei anhängen">${I('plus')}</button></div></div>
+        ${SKI.dateien.length ? `<div class="skidat">${SKI.dateien.map((d, i) => `<span class="tchip" title="${esc(d.name)}">${I(d.pdf ? 'file' : 'image')}<span>${esc(d.name)}</span><button data-sdx="${i}" aria-label="Datei entfernen">${I('x')}</button></span>`).join('')}</div>` : ''}
         ${SKI.laeuft || SKI.serien.length > 1 ? `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">${SKI.laeuft ? '<span class="small">KI denkt …</span>' : ''}
         ${SKI.serien.length > 1 ? `<span class="seg">${SKI.serien.map((s, i) => `<button data-ki="${i}" aria-pressed="${i === SKI.i}">Serie ${i + 1}</button>`).join('')}</span>` : ''}</div>` : ''}
         ${SKI.hinweis ? `<div class="small" style="color:var(--primary)">${esc(SKI.hinweis)}</div>` : ''}</div></div></div>`; }
@@ -1582,9 +1607,11 @@ function sbarUebernimm(s){ if(!s) return; const f = SF, ok = (v, l) => l.include
   if(ok(s.art, ['abs', 'auf', 'mk'])) f.art = s.art; if(ok(s.abs, ABS_TYPEN())) f.abs = s.abs; if(MARKART[s.mk]) f.mk = s.mk;
   f.text = String(s.text || ''); f.kunde = s.kunde ? (KLIST.find(x => x.lab.toLowerCase().includes(String(s.kunde).toLowerCase()))?.lab || String(s.kunde)) : '';
   if(Array.isArray(s.wer)) MARKS = s.wer.filter(id => P[id]); if(ok(s.vert, ['alle', 'wechsel'])) f.vert = s.vert; if(ok(s.teil, ['ganz', 'vm', 'nm'])) f.teil = s.teil;
-  if(ok(s.regel, ['woche', 'monat', 'taeglich'])) f.regel = s.regel; f.n = Math.max(1, +s.n || 1); if(Array.isArray(s.tage) && s.tage.length) f.tage = s.tage.map(Number).filter(x => x >= 0 && x <= 5);
+  if(ok(s.regel, ['woche', 'monat', 'taeglich', 'liste'])) f.regel = s.regel; f.n = Math.max(1, +s.n || 1); if(Array.isArray(s.tage) && s.tage.length) f.tage = s.tage.map(Number).filter(x => x >= 0 && x <= 5);
   if([1, 2, 3, 4, -1].includes(+s.nth)) f.nth = +s.nth; if(+s.mwd >= 0 && +s.mwd <= 4) f.mwd = +s.mwd;
   if(/^\d{4}-\d\d-\d\d$/.test(s.von)) f.von = s.von; if(/^\d{4}-\d\d-\d\d$/.test(s.bis)) f.bis = s.bis;
+  const dl = [...new Set((Array.isArray(s.daten) ? s.daten : []).map(String).filter(x => /^\d{4}-\d\d-\d\d$/.test(x) && !isNaN(fromIso(x))))].sort();
+  if(f.regel === 'liste'){ if(dl.length){ f.daten = dl; f.von = dl[0]; f.bis = dl[dl.length - 1]; } else f.regel = 'woche'; }
   f.ausFeier = true; f.aus = [s.ausKW, s.ausDat].map(x => String(x || '').trim()).filter(Boolean).map(x => /\./.test(x) ? x : x.split(/[,;\s]+/).filter(Boolean).map(k => 'KW ' + k).join(', ')).join(', '); }
 async function sbarKlick(e){
   const el = e.target.closest('button'); if(!el) return; const f = SF;
@@ -1594,6 +1621,9 @@ async function sbarKlick(e){
   if(el.dataset.swauf){ f.werOffen = !f.werOffen; drawSbar(); return; }
   if(el.dataset.swleer){ MARKS = []; renderRows(); return; }
   if(el.dataset.sausx){ f.aus = ''; drawSbar(); return; }
+  if(el.dataset.sdatx){ f.daten = []; f.regel = 'woche'; drawSbar(); return; }
+  if(el.dataset.sadd){ const inp = document.createElement('input'); inp.type = 'file'; inp.multiple = true; inp.accept = 'image/*,application/pdf'; inp.onchange = () => skiDateien(inp.files); inp.click(); return; }
+  if(el.dataset.sdx != null){ SKI.dateien.splice(+el.dataset.sdx, 1); drawSbar(); return; }
   if(el.dataset.swx){ MARKS = MARKS.filter(x => x !== el.dataset.swx); renderRows(); return; }
   if(el.dataset.ki != null){ SKI.i = +el.dataset.ki; sbarUebernimm(SKI.serien[SKI.i]); renderRows(); return; }
   if(el.dataset.sok){ const weiter = SKI.serien.length > SKI.i + 1, ok = await serieAnlegen(f, serieWer());
@@ -1606,12 +1636,13 @@ async function sbarKlick(e){
     r.onend = () => { SKI.rec = null; drawSbar(); if(SKI.text.trim()) sbarKI(); }; r.onerror = ev => { if(ev.error !== 'aborted' && ev.error !== 'no-speech') toast('Mikrofon: ' + ev.error, null, true); };
     SKI.rec = r; r.start(); drawSbar(); return; }
 }
-async function sbarKI(){ { if(!SKI.text.trim()){ toast('Bitte zuerst etwas sagen oder schreiben.', null, true); return; }
+async function sbarKI(){ { if(!SKI.text.trim() && SKI.dateien.length) SKI.text = 'Gemäss der angehängten Datei eintragen.';
+    if(!SKI.text.trim()){ toast('Bitte zuerst etwas sagen oder schreiben.', null, true); return; }
     if(SKI.rec) SKI.rec.stop(); SKI.laeuft = true; drawSbar();
     const ps = PERSONEN.filter(p => p.aktiv && !/planungshilfe/i.test(GRUPPEN.find(g => g.id === p.gruppe_id)?.name || ''));
     const { data, error } = await sb.functions.invoke('einsatzplaner-serie-ki', { body: { text: SKI.text, heute: isoDate(TODAY),
       personen: ps.map(p => ({ id: p.id, name: p.name, gruppe: GRUPPEN.find(g => g.id === p.gruppe_id)?.name || '' })), absenzen: ABS_TYPEN(), icons: Object.keys(MARKART).map(k => ({ key: k, name: MARKART[k] })),
-      aktuell: { art: SF.art, abs: SF.abs, mk: SF.mk, text: SF.text, kunde: SF.kunde, wer: serieWer(), vert: SF.vert, teil: SF.teil, regel: SF.regel, n: SF.n, tage: SF.tage, nth: SF.nth, mwd: SF.mwd, von: SF.von, bis: SF.bis, aus: SF.aus } } });
+      aktuell: { art: SF.art, abs: SF.abs, mk: SF.mk, text: SF.text, kunde: SF.kunde, wer: serieWer(), vert: SF.vert, teil: SF.teil, regel: SF.regel, n: SF.n, tage: SF.tage, nth: SF.nth, mwd: SF.mwd, von: SF.von, bis: SF.bis, aus: SF.aus, ...(SF.regel === 'liste' ? { daten: SF.daten } : {}) }, dateien: SKI.dateien.map(d => ({ name: d.name, data_url: d.url })) } });
     SKI.laeuft = false;
     if(error || data?.error || !data?.serien?.length){ SKI.hinweis = data?.hinweis || data?.error || 'Die KI hat nichts Passendes erkannt. Bitte genauer beschreiben.'; drawSbar(); return; }
     SKI.serien = data.serien; SKI.i = 0; SKI.hinweis = (data.hinweis || '') + (data.serien.length > 1 ? ` ${data.serien.length} Serien erkannt – jede prüfen und einzeln erstellen.` : ' Bitte Vorschau prüfen.');
@@ -2479,6 +2510,11 @@ function bindTimeline(t){
     pop.querySelectorAll('[data-mkp]').forEach(bt => bt.onclick = () => { closePop(); mkEinfuegen(it.mid, uAt(x)); }); });
   t.addEventListener('click', e => { if(e.target.closest('#sbar')) sbarKlick(e); }); // Serien-Leiste
   t.addEventListener('input', e => { if(e.target.closest('#sbar')) sbarEingabe(e); });
+  // KI-Feld: Dateien reinziehen oder Bild mit Ctrl+V einfügen
+  t.addEventListener('dragover', e => { const k = e.target.closest?.('#sbar .sright'); if(!k || ![...(e.dataTransfer?.types || [])].includes('Files')) return; e.preventDefault(); k.classList.add('drop'); });
+  t.addEventListener('dragleave', e => { const k = e.target.closest?.('#sbar .sright'); if(k && !k.contains(e.relatedTarget)) k.classList.remove('drop'); });
+  t.addEventListener('drop', e => { const k = e.target.closest?.('#sbar .sright'); if(!k || !e.dataTransfer?.files?.length) return; e.preventDefault(); k.classList.remove('drop'); skiDateien(e.dataTransfer.files); });
+  t.addEventListener('paste', e => { if(!e.target.dataset?.ski) return; const fl = [...(e.clipboardData?.files || [])]; if(!fl.length) return; e.preventDefault(); skiDateien(fl); });
   t.addEventListener('keydown', e => { if(e.target.dataset?.ski && e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); SKI.text = e.target.value; sbarKI(); } }); t.addEventListener('change', e => { if(e.target.closest('#sbar')) sbarEingabe(e); });
   let stT = 0; t.addEventListener('scroll', () => { const o = $('tlTop'); if(o && Math.abs(o.scrollLeft - t.scrollLeft) > 1) o.scrollLeft = t.scrollLeft; if(!stT) stT = requestAnimationFrame(() => { stT = 0; stickLabels(); }); clearTimeout(t._aT); t._aT = setTimeout(aktivNachScroll, 150); }, { passive: true });
   let scT; t.addEventListener('scroll', () => { closePop(); if(zoom === 'tag'){ clearTimeout(scT); scT = setTimeout(() => { const c = Math.floor(UX(t.scrollLeft)); if(c < HR[0] + 3 || c > HR[1] - 4) renderRows(); }, 120); }
