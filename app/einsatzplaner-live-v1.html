@@ -257,6 +257,11 @@ body.kopiert, body.kopiert *{cursor:copy !important;}
 .swer button i{width:9px;height:9px;border-radius:50%;border:1px solid rgba(35,43,53,.25);}
 .swer button[aria-pressed="true"]{background:var(--primary);color:#fff;border-color:var(--primary);}
 .srow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:13px;}
+.ski{display:flex;flex-direction:column;gap:6px;background:#F5F7F9;border-radius:8px;padding:8px 10px;}
+.skirow{display:flex;gap:8px;align-items:flex-start;}
+.skirow textarea{flex:1;min-height:44px;resize:vertical;font:inherit;font-size:13px;}
+.skirow .kg-ibtn{width:32px;height:32px;flex:none;}
+.skirow .kg-ibtn.on{background:var(--danger,#C0392B);color:#fff;border-color:transparent;}
 .svor{background:#F5F7F9;border-radius:7px;padding:8px 10px;font-size:13px;}
 .aghost{position:fixed;z-index:95;background:var(--primary);color:#fff;font-size:11.5px;padding:4px 8px;border-radius:5px;pointer-events:none;box-shadow:0 4px 12px rgba(0,0,0,.2);}
 .lane.drop{background:#F2F5D6 !important;}
@@ -1417,6 +1422,7 @@ function serieTage(f){ // Tage (Index) laut Regel, ohne Ausnahmen
   return out; }
 function openSerie(){
   const f = { art: 'abs', abs: 'Schule', mk: 'aemtli', text: '', kunde: '', wer: [], teil: 'ganz', regel: 'woche', n: 1, tage: [0], nth: 1, mwd: 1, von: isoDate(TODAY), bis: isoDate(TODAY + 180), ausFeier: true, ausKW: '', ausDat: '', vert: 'alle' };
+  const ki = { text: '', serien: [], i: 0, hinweis: '', rec: null, laeuft: false }; // KI-Eingabe (Text oder Mikrofon)
   const d = document.createElement('div'); d.className = 'dlg';
   const ps = PERSONEN.filter(p => p.aktiv && !/planungshilfe/i.test(GRUPPEN.find(g => g.id === p.gruppe_id)?.name || ''));
   const seg = (k, opts) => `<div class="seg" data-f="${k}">${opts.map(([v, l]) => `<button data-v="${v}" aria-pressed="${String(f[k]) === String(v)}">${l}</button>`).join('')}</div>`;
@@ -1425,6 +1431,11 @@ function openSerie(){
     const bsp = tage.slice(0, 6).map((t, i) => `${dLab(t)}${wer.length ? ' · ' + (f.vert === 'wechsel' ? first(wer[i % wer.length].name) : wer.length > 2 ? wer.length + ' Personen' : wer.map(p => first(p.name)).join(', ')) : ''}`).join('<br>');
     d.innerHTML = `<div class="in serie" style="max-width:600px" role="dialog" aria-modal="true" aria-label="Serientermin">
       <div style="display:flex;align-items:center"><b style="font-size:15px">Serientermin</b><button class="icon-btn" data-x style="margin-left:auto" aria-label="Schliessen">${I('x')}</button></div>
+      <div class="ski"><div class="skirow"><textarea id="sKI" rows="2" placeholder="Sagen oder schreiben, z. B. «Für Tim und Nick jeden Montag Schule, ausser in den Schulferien»">${esc(ki.text)}</textarea>
+        <button class="kg-ibtn${ki.rec ? ' on' : ''}" id="sMic" title="${ki.rec ? 'Aufnahme stoppen' : 'Sprechen'}" aria-label="Sprechen">${I('mic')}</button></div>
+        <div style="display:flex;align-items:center;gap:8px"><button class="btn btn-ghost" id="sKIgo" style="padding:3px 10px;font-size:12px"${ki.laeuft ? ' disabled' : ''}>${ki.laeuft ? 'KI denkt …' : 'Mit KI ausfüllen'}</button>
+        ${ki.serien.length > 1 ? `<span class="seg" id="sKIs">${ki.serien.map((s, i) => `<button data-ki="${i}" aria-pressed="${i === ki.i}">Serie ${i + 1}</button>`).join('')}</span>` : ''}</div>
+        ${ki.hinweis ? `<div class="small" style="color:var(--primary)">${esc(ki.hinweis)}</div>` : ''}</div>
       <div class="fld"><label>Was</label>${seg('art', [['abs', 'Absenz'], ['auf', 'Auftrag'], ['mk', 'Icon']])}</div>
       ${f.art === 'abs' ? `<div class="fld"><label>Art der Absenz</label>${seg('abs', ABS_TYPEN().map(t => [t, esc(t)]))}</div>` : ''}
       ${f.art === 'auf' ? `<div class="two"><div class="fld"><label>Kunde</label><input type="text" id="sK" list="sKList" value="${esc(f.kunde)}" placeholder="Kunde suchen"><datalist id="sKList">${KLIST.map(x => `<option value="${esc(x.lab)}">`).join('')}</datalist></div><div class="fld"><label>Titel</label><input type="text" id="sT" value="${esc(f.text)}" placeholder="z. B. Rasen mähen"></div></div>` : ''}
@@ -1447,11 +1458,37 @@ function openSerie(){
     d.querySelectorAll('[data-p]').forEach(b => b.onclick = () => { const id = b.dataset.p; f.wer = f.wer.includes(id) ? f.wer.filter(x => x !== id) : [...f.wer, id]; draw(); });
     const inp = (sel, k, fn = v => v) => { const el = d.querySelector(sel); if(el) el.onchange = () => { f[k] = fn(el.type === 'checkbox' ? el.checked : el.value); draw(); }; };
     inp('#sN', 'n', v => Math.max(1, +v || 1)); inp('#sV', 'von'); inp('#sB', 'bis'); inp('#sF', 'ausFeier'); inp('#sKW', 'ausKW'); inp('#sD', 'ausDat'); inp('#sK', 'kunde'); inp('#sT', 'text');
-    d.querySelector('#sOk').onclick = () => serieAnlegen(f, d);
+    d.querySelector('#sOk').onclick = async () => { const ok = await serieAnlegen(f, d, ki.serien.length > ki.i + 1);
+      if(ok && ki.serien.length > ki.i + 1){ ki.i++; uebernimm(ki.serien[ki.i]); draw(); toast(`Serie ${ki.i} angelegt – jetzt Serie ${ki.i + 1} prüfen`); } };
+    const ta = d.querySelector('#sKI'); ta.oninput = () => { ki.text = ta.value; };
+    d.querySelectorAll('[data-ki]').forEach(b => b.onclick = () => { ki.i = +b.dataset.ki; uebernimm(ki.serien[ki.i]); draw(); });
+    d.querySelector('#sMic').onclick = () => { // Spracheingabe im Browser (Chrome/Edge); Mundart wird als Hochdeutsch erkannt
+      if(ki.rec){ ki.rec.stop(); return; }
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition; if(!SR){ toast('Spracheingabe geht in diesem Browser nicht – bitte Chrome oder Edge verwenden oder Text schreiben.', null, true); return; }
+      const r = new SR(); r.lang = 'de-CH'; r.continuous = true; r.interimResults = true; const basis = ki.text ? ki.text.trim() + ' ' : '';
+      r.onresult = e => { let t = ''; for(const x of e.results) t += x[0].transcript; ki.text = basis + t; const el = d.querySelector('#sKI'); if(el) el.value = ki.text; };
+      r.onend = () => { ki.rec = null; draw(); }; r.onerror = e => { if(e.error !== 'aborted' && e.error !== 'no-speech') toast('Mikrofon: ' + e.error, null, true); };
+      ki.rec = r; r.start(); draw(); };
+    d.querySelector('#sKIgo').onclick = async () => { if(!ki.text.trim()){ toast('Bitte zuerst etwas sagen oder schreiben.', null, true); return; }
+      if(ki.rec) ki.rec.stop(); ki.laeuft = true; draw();
+      const { data, error } = await sb.functions.invoke('einsatzplaner-serie-ki', { body: { text: ki.text, heute: isoDate(TODAY),
+        personen: ps.map(p => ({ id: p.id, name: p.name, gruppe: GRUPPEN.find(g => g.id === p.gruppe_id)?.name || '' })), absenzen: ABS_TYPEN(), icons: Object.keys(MARKART).map(k => ({ key: k, name: MARKART[k] })) } });
+      ki.laeuft = false;
+      if(error || data?.error || !data?.serien?.length){ ki.hinweis = data?.hinweis || data?.error || 'Die KI hat nichts Passendes erkannt. Bitte genauer beschreiben.'; draw(); return; }
+      ki.serien = data.serien; ki.i = 0; ki.hinweis = (data.hinweis || '') + (data.serien.length > 1 ? ` ${data.serien.length} Serien erkannt – jede prüfen und einzeln erstellen.` : ' Bitte Vorschau prüfen.'); uebernimm(ki.serien[0]); draw(); };
   };
+  // KI-Vorschlag in die Felder übernehmen (nur gültige Werte)
+  const uebernimm = s => { if(!s) return; const ids = new Set(ps.map(p => p.id)), ok = (v, l) => l.includes(v);
+    if(ok(s.art, ['abs', 'auf', 'mk'])) f.art = s.art; if(ok(s.abs, ABS_TYPEN())) f.abs = s.abs; if(MARKART[s.mk]) f.mk = s.mk;
+    f.text = String(s.text || ''); f.kunde = s.kunde ? (KLIST.find(x => x.lab.toLowerCase().includes(String(s.kunde).toLowerCase()))?.lab || String(s.kunde)) : '';
+    if(Array.isArray(s.wer)) f.wer = s.wer.filter(id => ids.has(id)); if(ok(s.vert, ['alle', 'wechsel'])) f.vert = s.vert; if(ok(s.teil, ['ganz', 'vm', 'nm'])) f.teil = s.teil;
+    if(ok(s.regel, ['woche', 'monat', 'taeglich'])) f.regel = s.regel; f.n = Math.max(1, +s.n || 1); if(Array.isArray(s.tage) && s.tage.length) f.tage = s.tage.map(Number).filter(x => x >= 0 && x <= 5);
+    if([1, 2, 3, 4, -1].includes(+s.nth)) f.nth = +s.nth; if(+s.mwd >= 0 && +s.mwd <= 4) f.mwd = +s.mwd;
+    if(/^\d{4}-\d\d-\d\d$/.test(s.von)) f.von = s.von; if(/^\d{4}-\d\d-\d\d$/.test(s.bis)) f.bis = s.bis;
+    f.ausFeier = s.ausFeier !== false; f.ausKW = String(s.ausKW || ''); f.ausDat = String(s.ausDat || ''); };
   document.body.appendChild(d); d.onclick = e => { if(e.target === d) d.remove(); }; draw();
 }
-async function serieAnlegen(f, dlg){
+async function serieAnlegen(f, dlg, weiter){
   const tage = serieTage(f), wer = f.wer.filter(id => P[id]); if(!tage.length || !wer.length) return;
   const sid = crypto.randomUUID(), teil = f.teil, eins = [], marks = []; let falsch = 0;
   const k = f.art === 'auf' ? (KLIST.find(x => x.lab === f.kunde.trim()) || null) : null;
@@ -1464,11 +1501,11 @@ async function serieAnlegen(f, dlg){
     const row = itemToRow(f.art === 'abs' ? { mid, kind: 'absenz', s, e, title: f.abs, ok: true } : { mid, kind: 'termin', s, e, kid: k?.id || null, title: f.text.trim(), pl, ok: true });
     row.erstellt_von = ME; row.serie_id = sid; eins.push(row); }));
   const n = eins.length + marks.length; if(!n){ toast('Kein Eintrag möglich (Icon passt nicht zu diesen Zeilen).', null, true); return; }
-  dlg.remove(); toast(`Serie wird angelegt (${n} Einträge) …`);
+  if(!weiter) dlg.remove(); toast(`Serie wird angelegt (${n} Einträge) …`);
   if(eins.length){ const { data, error } = await sb.from('planer_einsatz').insert(eins).select('*, planer_datei(id,art,name,storage_pfad)'); if(error) return fehler(error, 'Serie');
     const neu = data.map(rowToItem); EINS.push(...neu); for(const a of neu.filter(x => x.kind === 'absenz')) await ausgleich(a, null); }
   if(marks.length){ const { data, error } = await sb.from('planer_markierung').insert(marks).select(); if(error) return fehler(error, 'Serie'); MARK.push(...data); }
-  renderRows(); toast(`Serie angelegt: ${n} Einträge${falsch ? ` (${falsch} übersprungen, passt nicht in die Zeile)` : ''}`, () => serieLoeschen(sid));
+  renderRows(); setTimeout(() => toast(`Serie angelegt: ${n} Einträge${falsch ? ` (${falsch} übersprungen, passt nicht in die Zeile)` : ''}`, () => serieLoeschen(sid)), weiter ? 1200 : 0); return true;
 }
 const serieFrage = sid => bestaetige('Ganze Serie löschen?', `<div>${EINS.filter(o => o.serie === sid).length + MARK.filter(o => o.serie_id === sid).length} Einträge dieser Serie werden gelöscht.</div>`, 'Löschen', () => serieLoeschen(sid));
 async function serieLoeschen(sid){
