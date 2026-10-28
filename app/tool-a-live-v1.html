@@ -258,6 +258,20 @@ main.wrap{padding-top:48px;padding-bottom:60px;}
 
 /* Zugänglichkeit Slider (pro Teilbereich) */
 .zugwrap{margin-top:2px;max-width:420px;}
+.zugRow{display:flex;gap:28px;align-items:flex-start;flex-wrap:wrap;}
+.zugRow .zugblock{flex:0 1 420px;min-width:260px;}
+.transportWahl{flex:1 1 380px;min-width:300px;min-height:60px;}
+.tw-tab{border-collapse:collapse;width:100%;font-size:11.5px;}
+.tw-tab th{font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:700;text-align:left;padding:3px 6px;}
+.tw-tab td{padding:4px 6px;border-top:1px solid var(--line);vertical-align:middle;}
+.tw-tab tr.sel td{background:var(--soft);}
+.tw-c{text-align:center !important;}
+.tw-cell{display:flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;}
+.tw-cell input{margin:0;accent-color:var(--primary);}
+.tw-preis{display:flex;flex-direction:column;line-height:1.15;text-align:left;font-variant-numeric:tabular-nums;}
+.tw-preis small{font-size:9.5px;color:var(--muted);}
+.tw-best{background:var(--accent-green,#D1DB5F);color:#3C4106;font-size:9.5px;font-weight:700;border-radius:999px;padding:1px 7px;white-space:nowrap;}
+.tw-na{color:var(--muted);font-size:10.5px;}
 .zugslider{position:relative;height:16px;margin:0 6px;}
 .zugtrack{position:absolute;top:7px;left:0;right:0;height:3px;background:var(--line);border-radius:2px;}
 .zugfill{position:absolute;top:0;left:0;height:100%;background:var(--primary);border-radius:2px;transition:width .15s;}
@@ -1630,6 +1644,7 @@ let bereichOptionAnzahl = {};
 // dieser Option gilt (siehe Tool B "Option bearbeiten" -> Auswahlgruppe).
 let bereichAuswahlgruppenWahl = {};
 let bereichZugaenglichkeitStufe = 2;
+let transportWahl = { kies: null, beton: null }; // gewaehltes Werk pro Stoff, null = automatisch das guenstigste
 let bereichKonfigEingeklappt = false;
 let bereichAfOffenState = {};
 // Auf/Zu-Zustand der Zwischentitel bei den Eingabefeldern - rein visueller
@@ -1675,8 +1690,6 @@ let zugaenglichkeitAktivFuerOffertentyp = true;
 // km-Preis pro Kieswerk (Einstellungen -> Sonderpositionen),
 // Distanz Kieswerk -> Kunde-PLZ per Google Distance Matrix, einfache Strecke
 // (kein Hin+Rueck - anders als bei der Lieferwagenfahrzeit).
-let KIESWERK_KIES = [];
-let KIESWERK_BETON = [];
 let kiesBetonDistanzCache = {}; // {"adresse::plz": km | null}
 
 // Systemwert-Terms (Formel-Bibliothek): Terms vom Typ 'systemwert' haben keinen
@@ -1863,13 +1876,68 @@ async function holeLieferwagenDistanzRoh(plz){
   }
 }
 
+// Kies-/Betonwerke: eine Liste (Tabelle transport_werk, Verwaltung in
+// Einstellungen -> Sonderpositionen -> "Kies- und Betonwerke").
+let TRANSPORT_WERKE = [];
 async function ladeKieswerke(){
-  const [k, b] = await Promise.all([
-    sb.from('kieswerk_kies').select('id,name,adresse,pauschale,km_preis,marge_pct,mindestmenge').order('reihenfolge'),
-    sb.from('kieswerk_beton').select('id,name,adresse,pauschale,km_preis,marge_pct,mindestmenge').order('reihenfolge')
-  ]);
-  if(k.error){ console.error(k.error); } else { KIESWERK_KIES = k.data; }
-  if(b.error){ console.error(b.error); } else { KIESWERK_BETON = b.data; }
+  const { data, error } = await sb.from('transport_werk').select('*').order('reihenfolge');
+  if(error){ console.error(error); } else { TRANSPORT_WERKE = data; }
+}
+
+// Preis pro m3 je Werk und Stoff fuer die Kunde-PLZ (einmal pro Neuberechnung):
+// Einkaufspreis = Formel Grundpreis + km-Preis x einfache Strecke (Preislisten
+// der Werke folgen), Verkaufspreis = Einkauf inkl. Marge. Gewaehlt ist das vom
+// Mitarbeiter angehakte Werk (transportWahl), sonst automatisch das
+// guenstigste pro Stoff.
+let letzteTransportInfo = null;
+async function berechneTransportInfo(plz){
+  const werke = TRANSPORT_WERKE.filter(w => (w.adresse || '').trim());
+  const kms = await Promise.all(werke.map(w => plz ? holeKieswerkDistanzKm(w.adresse, plz) : Promise.resolve(null)));
+  const info = { werke: [], gewaehlt: { kies: null, beton: null }, guenstigster: { kies: null, beton: null } };
+  werke.forEach((w, i) => {
+    const e = { werk: w, km: kms[i], kies: null, beton: null };
+    ['kies', 'beton'].forEach(stoff => {
+      if(!w['liefert_' + stoff] || e.km == null) return;
+      const einkauf = (Number(w.grundpreis_m3) || 0) + (Number(w.km_preis_m3) || 0) * e.km;
+      e[stoff] = { einkauf, verkauf: einkauf * (1 + (Number(w.marge_pct) || 0) / 100), art: 'formel' };
+    });
+    info.werke.push(e);
+  });
+  ['kies', 'beton'].forEach(stoff => {
+    const kandidaten = info.werke.filter(e => e[stoff]);
+    if(!kandidaten.length) return;
+    const guenstigster = kandidaten.reduce((a, b) => b[stoff].verkauf < a[stoff].verkauf ? b : a);
+    info.guenstigster[stoff] = guenstigster;
+    info.gewaehlt[stoff] = kandidaten.find(e => e.werk.id === transportWahl[stoff]) || guenstigster;
+  });
+  letzteTransportInfo = info;
+  return info;
+}
+
+// Haken-Tabelle oben im Konfigurator (rechts neben der Zugaenglichkeit):
+// Zeilen = Werke, Spalten Kies/Beton, ein Haken pro Spalte.
+function renderTransportWahl(){
+  const box = document.getElementById('transportWahl');
+  if(!box) return;
+  const info = letzteTransportInfo;
+  if(!info){ box.innerHTML = ''; return; }
+  const fmt = n => n.toFixed(2);
+  const zelle = (e, stoff) => {
+    const p = e[stoff];
+    if(!p) return `<td class="tw-c"><span class="tw-na">${!e.werk['liefert_' + stoff] ? '–' : (e.km == null ? 'keine Strecke' : '–')}</span></td>`;
+    const gew = info.gewaehlt[stoff] === e, best = info.guenstigster[stoff] === e;
+    return `<td class="tw-c"><label class="tw-cell"><input type="checkbox" class="twWahl" data-w="${e.werk.id}" data-stoff="${stoff}" ${gew ? 'checked' : ''}>
+      <span class="tw-preis"><b>${fmt(p.verkauf)}</b><small>${p.art === 'liste' ? 'Liste ' + fmt(p.einkauf) : '≈ ' + fmt(p.einkauf) + ' geschätzt'}</small></span>${best ? '<span class="tw-best">günstigster</span>' : ''}</label></td>`;
+  };
+  box.innerHTML = `<label class="flabel">Kieswerk für den Transport (CHF/m³ inkl. Marge)</label>
+    <table class="tw-tab"><thead><tr><th>Werk</th><th class="tw-c">km</th><th class="tw-c">Kies</th><th class="tw-c">Beton</th></tr></thead><tbody>${
+      info.werke.map(e => `<tr${(info.gewaehlt.kies === e || info.gewaehlt.beton === e) ? ' class="sel"' : ''}><td><b>${e.werk.name}</b></td><td class="tw-c">${e.km != null ? e.km.toFixed(1) : '–'}</td>${zelle(e, 'kies')}${zelle(e, 'beton')}</tr>`).join('')
+    }</tbody></table>`;
+  box.querySelectorAll('.twWahl').forEach(c => c.addEventListener('change', () => {
+    transportWahl[c.dataset.stoff] = c.checked ? c.dataset.w : null;
+    planAutosave();
+    recalc();
+  }));
 }
 
 // Adressliste fuer den Systemwert "Fahrt Baustelle zu naechster Deponie"
@@ -2371,7 +2439,7 @@ async function ermittleNaechsteAdresseZeit(liste, plz){
 // auch die Personal-Variante (Chauffeur) desselben Orts dieselbe Adressliste
 // bekommen - unabhaengig davon, wie die Sonderposition umbenannt wurde.
 function lieferwagenTransportAdressliste(ort){
-  if(ort === 'kieswerk_betonwerk') return [...KIESWERK_KIES, ...KIESWERK_BETON];
+  if(ort === 'kieswerk_betonwerk') return TRANSPORT_WERKE.filter(w => (w.adresse || '').trim());
   if(ort === 'deponie') return DEPONIE_DISTANZ_LISTE;
   if(ort === 'magazin') return MAGAZIN_ADRESSEN_LISTE;
   return null;
@@ -2930,6 +2998,7 @@ function initBereich(){
   aktiveVorauswahlId = null;
   vorauswahlBearbeitet = false;
   bereichZugaenglichkeitStufe = 2;
+  transportWahl = { kies: null, beton: null };
   bereichKonfigEingeklappt = false;
   bereichAfOffenState = {};
   bereichZwischentitelZu = {};
@@ -2957,6 +3026,10 @@ function aktualisiereZugAnzeige(container){
 // Konfiguration (Masse/Zugaenglichkeit/Auswahlfelder) genau einmal statt pro
 // Teilflaeche - die Kostentabelle lebt daneben direkt im aeusseren
 // #costbody/#total (siehe recalc()), analog zum Tagessatz-Modell.
+// Kies-/Beton-Transport kommt in diesem Offerte-Typ vor -> Werke-Auswahl oben zeigen
+function transportWahlRelevant(){
+  return TRANSPORT_WERKE.length > 0 && ressourcenzeilen.some(rz => rz.sonderpositionTyp?.name === 'Kies-Transport' || rz.sonderpositionTyp?.name === 'Beton-Transport');
+}
 function renderBereich(){
   schliesseVerweisPopup();
   $teilbereiche.innerHTML = `
@@ -2967,6 +3040,7 @@ function renderBereich(){
       </div>
       <div class="konfigbody">
         <div class="dimsrows"></div>
+        ${(zugaenglichkeitAktivFuerOffertentyp || transportWahlRelevant()) ? '<div class="zugRow">' : ''}
         ${zugaenglichkeitAktivFuerOffertentyp ? `<div class="afblock zugblock">
           <label class="flabel">Zugänglichkeit Standort</label>
           <div class="zugwrap">
@@ -2982,6 +3056,8 @@ function renderBereich(){
             </div>
           </div>
         </div>` : ''}
+        ${transportWahlRelevant() ? '<div class="afblock transportWahl" id="transportWahl"></div>' : ''}
+        ${(zugaenglichkeitAktivFuerOffertentyp || transportWahlRelevant()) ? '</div>' : ''}
         ${VORAUSWAHLEN.length ? `<div class="vorauswahlRow">
           ${VORAUSWAHLEN.map(v => `<button type="button" class="vwbtn${aktiveVorauswahlId === v.id ? ' active' : ''}" data-vw="${v.id}">${v.name}</button>`).join('')}
         </div>` : ''}
@@ -2994,6 +3070,7 @@ function renderBereich(){
       </div>
     </div>`;
 
+  renderTransportWahl();
   $teilbereiche.querySelector('.konfighead')?.addEventListener('click', () => {
     bereichKonfigEingeklappt = !bereichKonfigEingeklappt;
     $teilbereiche.querySelector('.konfigblock').classList.toggle('collapsed', bereichKonfigEingeklappt);
@@ -3843,7 +3920,7 @@ function setMode(neu){
 
 async function ladeBestehendeOfferte(offerteId){
   const { data: offerte, error: oErr } = await sb
-    .from('offerte').select('id, titel, datum, status, notiz, offertentyp_id, lieferwagen_modus, lieferwagen_frequenz, vorarbeiter_frequenz, vorarbeiter_typ, gartenarbeiter_frequenz, zugaenglichkeit_stufe, beschreibung_block, beschreibung_manuell, optionen_text_liste, optionen_text_manuell, kosten_snapshot, offertnummer, easybill_document_id, easybill_document_number, vorauswahl_id').eq('id', offerteId).single();
+    .from('offerte').select('id, titel, datum, status, notiz, offertentyp_id, lieferwagen_modus, lieferwagen_frequenz, vorarbeiter_frequenz, vorarbeiter_typ, gartenarbeiter_frequenz, zugaenglichkeit_stufe, beschreibung_block, beschreibung_manuell, optionen_text_liste, optionen_text_manuell, kosten_snapshot, offertnummer, easybill_document_id, easybill_document_number, vorauswahl_id, transport_werk_kies_id, transport_werk_beton_id').eq('id', offerteId).single();
   if(oErr){ console.error(oErr); $saveStatus.textContent = 'Fehler beim Laden: ' + oErr.message; $saveStatus.className='status err'; return; }
 
   lieferwagenModus = offerte.lieferwagen_modus || 'zeit';
@@ -3914,6 +3991,7 @@ async function ladeBestehendeOfferte(offerteId){
     bereichOptionAnzahl = Object.fromEntries((auswahlRows || []).map(a => [a.option_id, a.anzahl ?? 1]));
     bereichAuswahlgruppenWahl = Object.fromEntries((auswahlRows || []).filter(a => a.auswahlgruppe_option_id).map(a => [a.option_id, a.auswahlgruppe_option_id]));
     bereichZugaenglichkeitStufe = offerte.zugaenglichkeit_stufe ?? 2;
+    transportWahl = { kies: offerte.transport_werk_kies_id || null, beton: offerte.transport_werk_beton_id || null };
     bereichKonfigEingeklappt = false;
     bereichAfOffenState = {};
     bereichZwischentitelZu = {};
@@ -4155,7 +4233,7 @@ async function speichereNeueOfferte(titelVal){
       datum: $offerteDatum.value || heuteAlsDatumsstring(), status: offerteStatus, notiz: notizWert(),
       betrag_total: letzterBruttoTotal, lieferwagen_modus: lieferwagenModus,
       lieferwagen_frequenz: lieferwagenFrequenz, vorarbeiter_frequenz: vorarbeiterFrequenz, vorarbeiter_typ: vorarbeiterTyp, gartenarbeiter_frequenz: gartenarbeiterFrequenz,
-      zugaenglichkeit_stufe: bereichZugaenglichkeitStufe ?? 2, vorauswahl_id: aktiveVorauswahlId,
+      zugaenglichkeit_stufe: bereichZugaenglichkeitStufe ?? 2, vorauswahl_id: aktiveVorauswahlId, transport_werk_kies_id: transportWahl.kies || null, transport_werk_beton_id: transportWahl.beton || null,
       beschreibung_block: $beschreibungBlock.value.trim() || null, beschreibung_manuell: beschreibungManuellBearbeitet,
       optionen_text_liste: $optionenTextBlock.value.trim() || null, optionen_text_manuell: optionenTextManuellBearbeitet,
       kosten_snapshot: letzterKostenSnapshot, offertnummer
@@ -4220,7 +4298,7 @@ async function speichereAenderungen(titelVal){
     status: offerteStatus, notiz: notizWert(),
     betrag_total: letzterBruttoTotal, lieferwagen_modus: lieferwagenModus,
     lieferwagen_frequenz: lieferwagenFrequenz, vorarbeiter_frequenz: vorarbeiterFrequenz, vorarbeiter_typ: vorarbeiterTyp, gartenarbeiter_frequenz: gartenarbeiterFrequenz,
-    zugaenglichkeit_stufe: bereichZugaenglichkeitStufe ?? 2, vorauswahl_id: aktiveVorauswahlId,
+    zugaenglichkeit_stufe: bereichZugaenglichkeitStufe ?? 2, vorauswahl_id: aktiveVorauswahlId, transport_werk_kies_id: transportWahl.kies || null, transport_werk_beton_id: transportWahl.beton || null,
     beschreibung_block: $beschreibungBlock.value.trim() || null, beschreibung_manuell: beschreibungManuellBearbeitet,
     optionen_text_liste: $optionenTextBlock.value.trim() || null, optionen_text_manuell: optionenTextManuellBearbeitet,
     kosten_snapshot: letzterKostenSnapshot
@@ -5546,8 +5624,9 @@ async function recalcJetzt(){
       // PLZ ab (nicht von der Teilflaeche/Option), daher einmal pro
       // Neuberechnung ermitteln statt pro Teilflaeche/Zeile.
       const kundePlzTrim = $('kundePlz').value.trim();
-      const naechstesKiesWerk = await ermittleNaechstesKieswerk(KIESWERK_KIES, kundePlzTrim);
-      const naechstesBetonWerk = await ermittleNaechstesKieswerk(KIESWERK_BETON, kundePlzTrim);
+      const transportInfo = await berechneTransportInfo(kundePlzTrim);
+      if(meineGeneration !== recalcGeneration) return; // inzwischen ueberholt
+      renderTransportWahl();
       seedeFreitextZeilen();
       const zugFaktor = zi => (zi.zugangsfaktoren?.[(bereichZugaenglichkeitStufe || 2) - 1]) ?? 1;
       // Mengenoption (Tool B, Option bearbeiten): multipliziert die Menge
@@ -5577,19 +5656,17 @@ async function recalcJetzt(){
           }
           if(rz.sonderpositionTyp?.name === 'Kies-Transport' || rz.sonderpositionTyp?.name === 'Beton-Transport'){
             const einheit = rz.sonderpositionTyp.einheit || 'm3';
-            // Kieswerk wird NICHT mehr gewaehlt, sondern ist immer das
-            // geografisch naechstgelegene zur Kunde-PLZ (siehe naechstesKiesWerk/
-            // naechstesBetonWerk oben, einmal pro Neuberechnung ermittelt).
-            const naechstes = rz.sonderpositionTyp.name === 'Kies-Transport' ? naechstesKiesWerk : naechstesBetonWerk;
-            if(!naechstes){
-              return { ...rz, bezeichnung: rz.bezeichnung + ' (kein Kieswerk erfasst oder Distanz nicht ermittelbar)', einheit, menge: 0, preis: 0, betrag: 0 };
+            // Kieswerk: vom Mitarbeiter angehakt (transportWahl), sonst das guenstigste -
+            // siehe berechneTransportInfo() (einmal pro Neuberechnung ermittelt).
+            const stoff = rz.sonderpositionTyp.name === 'Kies-Transport' ? 'kies' : 'beton';
+            const gewaehlt = transportInfo.gewaehlt[stoff];
+            if(!gewaehlt){
+              return { ...rz, bezeichnung: rz.bezeichnung + ' (kein Werk erfasst oder Distanz nicht ermittelbar)', einheit, menge: 0, preis: 0, betrag: 0 };
             }
-            const { kw: kieswerk, km } = naechstes;
+            const kieswerk = gewaehlt.werk;
             // Menge-Formel ergibt das Transportvolumen (m3) - gleiche Auswertung
             // wie bei generischen Ressourcenzeilen (eval_ausdruck-RPC), aber mit
-            // eigener, hartcodierter Preisfindung statt Artikel-Preis: der
-            // km-Preis des Kieswerks gilt pro m3 und Kilometer, dazu kommt die
-            // Pauschale, zum Schluss die Marge (siehe Nutzer-Vorgabe).
+            // eigener Preisfindung statt Artikel-Preis (siehe unten)
             let mengeRoh;
             try {
               const { data, error } = await sb.rpc('eval_ausdruck', { node: rz.menge_ausdruck, werte: { ...bereichWerteMap, ...systemwerteMap, ...tabelleSummenMap } });
@@ -5599,10 +5676,11 @@ async function recalcJetzt(){
               return { ...rz, bezeichnung: rz.bezeichnung + ` (Berechnung fehlgeschlagen: ${e.message || e})`, einheit, menge: 0, preis: 0, betrag: 0 };
             }
             let menge = mengeRoh * anzahlFaktor(rz);
-            if(kieswerk.mindestmenge != null && menge < kieswerk.mindestmenge) menge = kieswerk.mindestmenge;
-            let betrag = kieswerk.pauschale + km * kieswerk.km_preis * menge;
-            betrag = betrag * (1 + (kieswerk.marge_pct || 0) / 100);
-            const preis = menge > 0 ? betrag / menge : 0;
+            const mindestmenge = Number(kieswerk['mindestmenge_' + stoff]);
+            if(menge > 0 && mindestmenge > 0 && menge < mindestmenge) menge = mindestmenge;
+            // Preis pro m3 (inkl. Marge) kommt aus berechneTransportInfo(): Preisliste oder Formel
+            const preis = gewaehlt[stoff].verkauf;
+            const betrag = menge * preis;
             const bezeichnung = rz.bezeichnung + ` (${kieswerk.name})`;
             return { ...rz, bezeichnung, einheit, menge, preis, betrag };
           }
