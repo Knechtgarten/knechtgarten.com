@@ -277,10 +277,10 @@ main.wrap{padding-top:48px;padding-bottom:60px;}
 .tsdsumme{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;}
 .zugRow{display:flex;gap:28px;align-items:flex-start;flex-wrap:wrap;}
 .zugRow .zugblock{flex:0 1 420px;min-width:260px;}
-.transportWahl{flex:1 1 380px;min-width:300px;min-height:60px;}
-.tw-tab{border-collapse:collapse;width:100%;font-size:11.5px;}
+.transportWahl{flex:0 0 auto;min-width:0;}
+.tw-tab{border-collapse:collapse;font-size:11.5px;}
 .tw-tab th{font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:700;text-align:left;padding:3px 6px;}
-.tw-tab td{padding:4px 6px;border-top:1px solid var(--line);vertical-align:middle;}
+.tw-tab td{padding:2px 10px 2px 6px;border-top:1px solid var(--line);vertical-align:middle;}
 .tw-tab tr.sel td{background:var(--soft);}
 .tw-c{text-align:center !important;}
 .tw-cell{display:flex;align-items:center;justify-content:center;gap:6px;cursor:pointer;}
@@ -2039,18 +2039,32 @@ function renderTransportWahl(){
   if(!box) return;
   const info = letzteTransportInfo;
   if(!info){ box.innerHTML = ''; return; }
-  const fmt = n => n.toFixed(2);
-  const zelle = (e, stoff) => {
-    const p = e[stoff];
-    if(!p) return `<td class="tw-c"><span class="tw-na">${!e.werk['liefert_' + stoff] ? '–' : (e.km == null ? 'keine Strecke' : '–')}</span></td>`;
-    const gew = info.gewaehlt[stoff] === e, best = info.guenstigster[stoff] === e;
-    return `<td class="tw-c"><label class="tw-cell"><input type="checkbox" class="twWahl" data-w="${e.werk.id}" data-stoff="${stoff}" ${gew ? 'checked' : ''}>
-      <span class="tw-preis"><b>${fmt(p.verkauf)}</b><small>${p.art === 'liste' ? 'Liste ' + fmt(p.einkauf) : '≈ ' + fmt(p.einkauf) + ' geschätzt'}</small></span>${best ? '<span class="tw-best">günstigster</span>' : ''}</label></td>`;
+  // Kompakte Tabelle: nur Werk + Haken Kies/Beton (Preise, km und Hinweise stehen
+  // in der Kostentabelle). Werke mit gleichem ersten Namenswort, von denen eines nur
+  // Kies und das andere nur Beton liefert (z.B. Alluvia Oberwangen / Alluvia Bern-
+  // Bethlehem), erscheinen in EINER Zeile, z.B. "Alluvia Bern".
+  const erstesWort = n => String(n).trim().split(/\s+/)[0];
+  const gruppen = [];
+  info.werke.forEach(e => {
+    const w = e.werk;
+    const nurEinStoff = !!w.liefert_kies !== !!w.liefert_beton;
+    const g = nurEinStoff ? gruppen.find(x => x.nurEinStoff && x.key === erstesWort(w.name) && !x.werke.some(y => !!y.werk.liefert_kies === !!w.liefert_kies)) : null;
+    if(g) g.werke.push(e); else gruppen.push({ key: erstesWort(w.name), nurEinStoff, werke: [e] });
+  });
+  const label = g => {
+    if(g.werke.length === 1) return g.werke[0].werk.name;
+    const beton = g.werke.find(e => e.werk.liefert_beton) || g.werke[0];
+    const rest = beton.werk.name.trim().split(/\s+/).slice(1).join(' ').split('-')[0];
+    return g.key + (rest ? ' ' + rest : '');
   };
-  box.innerHTML = `<label class="flabel">Kieswerk für den Transport (CHF/m³ inkl. Marge)</label>
-    <table class="tw-tab"><thead><tr><th>Werk</th><th class="tw-c">km</th><th class="tw-c">Kies</th><th class="tw-c">Beton</th></tr></thead><tbody>${
-      info.werke.map(e => `<tr${(info.gewaehlt.kies === e || info.gewaehlt.beton === e) ? ' class="sel"' : ''}><td><b>${e.werk.name}</b></td><td class="tw-c">${e.km != null ? e.km.toFixed(1) : '–'}</td>${zelle(e, 'kies')}${zelle(e, 'beton')}</tr>`).join('')
-    }</tbody></table>`;
+  const zelle = (g, stoff) => {
+    const e = g.werke.find(x => x[stoff]);
+    if(!e) return '<td class="tw-c"><span class="tw-na">–</span></td>';
+    return `<td class="tw-c"><input type="checkbox" class="twWahl" data-w="${e.werk.id}" data-stoff="${stoff}" ${info.gewaehlt[stoff] === e ? 'checked' : ''} aria-label="${escHtml(e.werk.name)} ${stoff === 'kies' ? 'Kies' : 'Beton'}"></td>`;
+  };
+  box.innerHTML = `<table class="tw-tab"><thead><tr><th>Werk</th><th class="tw-c">Kies</th><th class="tw-c">Beton</th></tr></thead><tbody>${
+    gruppen.map(g => `<tr${g.werke.some(e => info.gewaehlt.kies === e || info.gewaehlt.beton === e) ? ' class="sel"' : ''}><td><b>${escHtml(label(g))}</b></td>${zelle(g, 'kies')}${zelle(g, 'beton')}</tr>`).join('')
+  }</tbody></table>`;
   box.querySelectorAll('.twWahl').forEach(c => c.addEventListener('change', () => {
     transportWahl[c.dataset.stoff] = c.checked ? c.dataset.w : null;
     planAutosave();
