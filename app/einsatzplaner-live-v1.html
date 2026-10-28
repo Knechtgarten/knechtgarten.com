@@ -57,6 +57,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 .icon-btn:hover{border-color:var(--primary);color:var(--primary);}
 .icon-btn.danger:hover{border-color:var(--danger);color:var(--danger);background:#FBEFEC;}
 .icon-btn.on{background:var(--primary);color:#fff;border-color:var(--primary);}
+.icon-btn.sdrep{cursor:default;} /* Serie im Detailfeld: nur Anzeige */
 .seg{display:inline-flex;}
 .seg button{all:unset;cursor:pointer;padding:5px 11px;border:1px solid var(--line);background:#fff;font-size:12.5px;color:var(--primary);}
 .seg button + button{border-left:0;}
@@ -1140,7 +1141,7 @@ function renderChips(){
   const cx = $('cpyX'); if(cx) cx.onclick = kopieWeg;
 }
 // Klick daneben schliesst kleine Fenster (Info, Rechtsklick-Menü …)
-addEventListener('pointerdown', e => { if($('popwrap')?.firstChild && !e.target.closest('.pop, #infoB, #pWdh')) closePop(); }, true);
+addEventListener('pointerdown', e => { if($('popwrap')?.firstChild && !e.target.closest('.pop, #infoB')) closePop(); }, true);
 // Info: Bedeutung von Farben und Zeichen, Anzeige-Schalter, Bedienung
 function openInfo(btn){
   if($('popwrap').querySelector('.infop')){ closePop(); return; }
@@ -3033,7 +3034,7 @@ function openPanel(id, isNew){
   // Pflege-Infos nur bei Terminen aus dem Pflege-Jahresplan (normale Aufträge haben eigene Fotos/Dokumente)
   const pflege = it.kid && it.pkk ? pflegeHTML(it.kid, it.pkk, Math.floor(it.s + 1e-9)) : '';
   $('side').innerHTML = `<aside class="sidepanel">
-    <div class="sd-head"><div${offen ? ' class="offenhd" title="Offener Auftrag – noch nicht abgemacht, wandert mit"' : ' style="min-width:0"'}><h3>${esc(it.kind === 'absenz' ? (it.title || 'Absenz') : titleOf(it))}${auftrag && ed && !kundeNeu ? `<button class="kedit" id="pKEdit" title="Kunde oder Titel ändern" aria-label="Kunde oder Titel ändern">${I('edit')}</button>` : ''}</h3>${k && kOrt(k) ? `<div class="small muted">${I('pin').replace('class="i"', 'class="i" style="width:12px;height:12px;vertical-align:-2px"')} ${esc(kOrt(k))}</div>` : ''}</div>${punkte}${ed ? `<button class="icon-btn${it.wdh ? ' on' : ''}" id="pWdh" aria-pressed="${!!it.wdh}" title="Wiederkehrend" aria-label="Wiederkehrend">${I('repeat')}</button>` : ''}<button class="icon-btn" id="pX" aria-label="Schliessen">${I('x')}</button></div>
+    <div class="sd-head"><div${offen ? ' class="offenhd" title="Offener Auftrag – noch nicht abgemacht, wandert mit"' : ' style="min-width:0"'}><h3>${esc(it.kind === 'absenz' ? (it.title || 'Absenz') : titleOf(it))}${auftrag && ed && !kundeNeu ? `<button class="kedit" id="pKEdit" title="Kunde oder Titel ändern" aria-label="Kunde oder Titel ändern">${I('edit')}</button>` : ''}</h3>${k && kOrt(k) ? `<div class="small muted">${I('pin').replace('class="i"', 'class="i" style="width:12px;height:12px;vertical-align:-2px"')} ${esc(kOrt(k))}</div>` : ''}</div>${punkte}${it.serie || it.wdh ? `<span class="icon-btn on sdrep" id="pWdh" title="Wiederkehrender Termin" aria-label="Wiederkehrender Termin">${I('repeat')}</span>` : ''}<button class="icon-btn" id="pX" aria-label="Schliessen">${I('x')}</button></div>
     ${kundeNeu ? `<div class="kneu"><input type="text" id="pKunde" list="kList" value="${esc(KUNDEN[it.kid] ? kLabel(KUNDEN[it.kid]) : '')}" placeholder="Kunde suchen"><input type="text" id="pTitel" value="${esc(it.title)}" placeholder="${it.kid ? 'Zusatz, z. B. Hecke schneiden' : 'oder Titel, z. B. Werkhof, Besichtigung'}"></div>` : ''}
     ${zeile}${kopie}${zust}
     ${fixe}
@@ -3060,7 +3061,7 @@ function openPanel(id, isNew){
     panelKunde = false; openPanel(id); });
   on('#pTitel', 'onchange', e => save({ titel: e.target.value.trim() || null }, { title: e.target.value.trim() }).then(() => { panelKunde = false; openPanel(id); }));
   on('#pPl', 'onchange', e => save({ projektleiter_id: e.target.value || null }, { pl: e.target.value || null }).then(() => openPanel(id)));
-  on('#pWdh', 'onclick', () => openWdh(it, $('pWdh')));
+  if(it.serie) serieInfo(it.serie).then(t => { const b = $('pWdh'); if(b) b.title = t; });
   on('#pSollWeg', 'onclick', () => save({ soll_tage: null }, { soll: null }).then(() => openPanel(id)));
   let nt; on('#pNotiz', 'oninput', e => { clearTimeout(nt); const v = e.target.value; nt = setTimeout(() => save({ notiz: v || null }, { text: v }), 700); });
   on('#pDel', 'onclick', () => loescheEinsatz(it));
@@ -3175,48 +3176,14 @@ async function wdhLoeschen(o, art){
   if(!await wdhSpeichern(m, neu)) return; renderRows();
   toast(art === 'nur' ? `Termin am ${dLab(tag)} gelöscht` : `Ab ${dLab(tag)} gelöscht`, async () => { if(await wdhSpeichern(m, alt)) renderRows(); });
 }
-// Das kleine Feld hinter dem Pfeil-Symbol im Detailfeld: Vorlage, Benutzerdefiniert, Ende, Feiertage
-function openWdh(it, btn){
-  if($('popwrap').querySelector('.wdhp')){ closePop(); return; }
-  const d0 = Math.floor(it.s + 1e-9), a = dDate(d0), wd = a.getDay(), nth = Math.ceil(a.getDate() / 7);
-  const PR = [['none', 'Nicht wiederholen'], ['w1', `Jede Woche am ${WDL[wd]}`], ['w2', `Alle 2 Wochen am ${WDL[wd]}`], ['mn', `Jeden Monat am ${nth}. ${WDL[wd]}`], ['ml', `Jeden Monat am letzten ${WDL[wd]}`],
-    ['md', `Jeden Monat am ${a.getDate()}.`], ['y', `Jedes Jahr am ${a.getDate()}. ${MONL[a.getMonth()]}`], ['wt', 'Jeden Werktag (Mo–Fr)'], ['custom', 'Benutzerdefiniert …']];
-  const VOR = { w1: { u: 'w', n: 1, days: [wd] }, w2: { u: 'w', n: 2, days: [wd] }, mn: { u: 'm', n: 1, mm: 'nth' }, ml: { u: 'm', n: 1, mm: 'last' }, md: { u: 'm', n: 1, mm: 'date' }, y: { u: 'y', n: 1 }, wt: { u: 'w', n: 1, days: [1, 2, 3, 4, 5] } };
-  let r = it.wdh ? JSON.parse(JSON.stringify(it.wdh)) : { p: 'none', u: 'w', n: 1, days: [wd], mm: 'date', ende: 'nie', fe: 'skip', aus: [] };
-  const pop = popAt(btn.getBoundingClientRect(), '<div class="wdhp"></div>'), box = pop.querySelector('.wdhp');
-  const WDK = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
-  const zus = () => { if(r.p === 'none') return 'Einmaliger Eintrag';
-    const n = 1 + wdhTage({ ...it, wdh: r }, true).length; return r.ende === 'nie' ? 'Ohne Ende' : `${n} ${n === 1 ? 'Termin' : 'Termine'}${r.ende === 'bis' ? ' bis ' + r.bis.split('-').reverse().join('.') : ''}`; };
-  const draw = () => {
-    const c = r.p === 'custom', on = r.p !== 'none';
-    box.innerHTML = `<select id="wP" aria-label="Wiederholung">${PR.map(([k, l]) => `<option value="${k}"${r.p === k ? ' selected' : ''}>${l}</option>`).join('')}</select>
-      ${c ? `<div class="wrow">Alle <input type="number" id="wN" min="1" max="12" value="${r.n || 1}" aria-label="Anzahl"><select id="wU" aria-label="Einheit"><option value="w"${r.u === 'w' ? ' selected' : ''}>Wochen</option><option value="m"${r.u === 'm' ? ' selected' : ''}>Monate</option><option value="y"${r.u === 'y' ? ' selected' : ''}>Jahre</option></select></div>
-        ${r.u === 'w' ? `<div class="wtage">${[1, 2, 3, 4, 5, 6, 0].map(x => `<button data-t="${x}" class="${(r.days || []).includes(x) ? 'on' : ''}" aria-pressed="${(r.days || []).includes(x)}" title="${WDL[x]}">${WDK[x]}</button>`).join('')}</div>` : ''}
-        ${r.u === 'm' ? `<div class="wrad">${[['date', `am ${a.getDate()}.`], ['nth', `am ${nth}. ${WDL[wd]}`], ['last', `am letzten ${WDL[wd]}`]].map(([k, l]) => `<label><input type="radio" name="wM" value="${k}"${r.mm === k ? ' checked' : ''}>${l}</label>`).join('')}</div>` : ''}` : ''}
-      ${on ? `<span class="wlab">Ende</span><div class="wrad">
-        <label><input type="radio" name="wE" value="nie"${r.ende === 'nie' ? ' checked' : ''}>Ohne Ende</label>
-        <label><input type="radio" name="wE" value="bis"${r.ende === 'bis' ? ' checked' : ''}>Bis <input type="date" id="wB" value="${r.bis || isoDate(d0 + 91)}"></label>
-        <label><input type="radio" name="wE" value="anzahl"${r.ende === 'anzahl' ? ' checked' : ''}>Nach <input type="number" id="wA" min="1" max="200" value="${r.anzahl || 10}"> Terminen</label></div>
-        <span class="wlab">An Feiertagen</span><select id="wF" aria-label="An Feiertagen"><option value="skip"${r.fe === 'skip' ? ' selected' : ''}>Auslassen</option><option value="next"${r.fe === 'next' ? ' selected' : ''}>Auf nächsten Werktag verschieben</option><option value="keep"${r.fe === 'keep' ? ' selected' : ''}>Trotzdem eintragen</option></select>` : ''}
-      <b class="wsum">${esc(zus())}</b>`;
-    const q = s => box.querySelector(s);
-    q('#wP').onchange = e => { r.p = e.target.value; if(VOR[r.p]) Object.assign(r, VOR[r.p]); if(r.p === 'custom' && !r.u) Object.assign(r, VOR.w1); speichern(); };
-    if(q('#wN')) q('#wN').onchange = e => { r.n = Math.max(1, +e.target.value || 1); speichern(); };
-    if(q('#wU')) q('#wU').onchange = e => { r.u = e.target.value; if(r.u === 'w' && !(r.days || []).length) r.days = [wd]; if(r.u === 'm' && !r.mm) r.mm = 'date'; speichern(); };
-    box.querySelectorAll('[data-t]').forEach(b => b.onclick = () => { const x = +b.dataset.t, s = new Set(r.days || []); s.has(x) ? s.delete(x) : s.add(x); if(!s.size) s.add(wd); r.days = [...s]; speichern(); });
-    box.querySelectorAll('[name=wM]').forEach(x => x.onchange = () => { r.mm = x.value; speichern(); });
-    box.querySelectorAll('[name=wE]').forEach(x => x.onchange = () => { r.ende = x.value; if(r.ende === 'bis' && !r.bis) r.bis = q('#wB').value; if(r.ende === 'anzahl' && !r.anzahl) r.anzahl = +q('#wA').value || 10; speichern(); });
-    if(q('#wB')) q('#wB').onchange = e => { r.bis = e.target.value || isoDate(d0 + 91); r.ende = 'bis'; speichern(); };
-    if(q('#wA')) q('#wA').onchange = e => { r.anzahl = Math.max(1, +e.target.value || 1); r.ende = 'anzahl'; speichern(); };
-    if(q('#wF')) q('#wF').onchange = e => { r.fe = e.target.value; speichern(); };
-  };
-  const speichern = async () => { const v = r.p === 'none' ? null : { ...r };
-    if(v && v.ende === 'bis' && !v.bis) v.bis = isoDate(d0 + 91);
-    if(!await wdhSpeichern(it, v)) return; const cur = byId(it.id); if(cur && cur !== it) cur.wdh = v;
-    draw(); renderRows(); const b = $('pWdh'); if(b){ b.classList.toggle('on', !!v); b.setAttribute('aria-pressed', !!v); } };
-  draw();
-  pop.style.left = Math.max(8, btn.getBoundingClientRect().right - pop.offsetWidth) + 'px';
-}
+// Detailfeld: Pfeil-Symbol = nur Anzeige «wiederkehrend». Serien werden nur noch unten in der Serien-Leiste erfasst;
+// mit der Maus darüber sieht man, wie oft (aus allen Einträgen der Serie gelesen).
+async function serieInfo(sid){
+  const { data } = await sb.from('planer_einsatz').select('beginn, person_id').eq('serie_id', sid).order('beginn'); if(!data?.length) return 'Serientermin';
+  const tage = [...new Set(data.map(r => Math.floor(toU(r.beginn) + 1e-9)))], pers = new Set(data.map(r => r.person_id)).size;
+  const ab = tage.slice(1).map((d, i) => d - tage[i]), g = ab.length && ab.every(x => x === ab[0]) ? ab[0] : 0, wt = WDL[dDate(tage[0]).getDay()];
+  const regel = g === 1 ? 'jeden Tag' : ab.length && ab.every(x => x === 1 || x === 3) && tage.every(d => ((d % 7) + 7) % 7 < 5) ? 'jeden Werktag' : ab.length && ab.every(x => x >= 28 && x <= 35) ? `einmal im Monat am ` : g === 7 ? `jede Woche am ${wt}` : g && g % 7 === 0 ? `alle ${g / 7} Wochen am ${wt}` : 'unregelmässig (Ausnahmen oder mehrere Tage)';
+  return `Serientermin: ${regel}\n${data.length} Einträge${pers > 1 ? ` bei ${pers} Personen` : ''}, ${dLab(tage[0])} bis ${dLab(tage[tage.length - 1])}\nÄndern: Serie löschen und unten neu erstellen`; }
 document.addEventListener('keydown', e => { if(e.key === 'Escape'){ closePop(); closePanel(); } });
 
 // ---------------------------------------------------------------------------
