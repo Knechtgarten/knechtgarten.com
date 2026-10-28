@@ -2,7 +2,8 @@
 // einsatzplaner-serie-ki – KI-Eingabe im Serientermin-Fenster des Einsatzplaners.
 // Das Tool schickt den gesprochenen/geschriebenen Wunsch plus die Personen,
 // Absenz-Arten und Icons. Claude füllt daraus die Felder des Fensters aus
-// (eine oder mehrere Serien). Gespeichert wird nichts: der Benutzer prüft die
+// (eine oder mehrere Serien). Bilder und PDFs (z. B. Schulplan) gehen als Anhang mit;
+// unregelmässige Tage kommen als Datenliste zurück (regel "liste"). Gespeichert wird nichts: der Benutzer prüft die
 // Vorschau und klickt selber auf «Serie erstellen». Nur für eingeloggte
 // Benutzer (verify_jwt).
 // ============================================================================
@@ -31,11 +32,12 @@ SERIE = {
  "wer": ["<person-id>", ...],             // nur ids aus der Personenliste
  "vert": "alle" | "wechsel",              // wechsel = der Reihe nach abwechselnd (z. B. Ämtli aufteilen)
  "teil": "ganz" | "vm" | "nm",
- "regel": "woche" | "monat" | "taeglich", // taeglich = jeden Werktag
+ "regel": "woche" | "monat" | "taeglich" | "liste", // taeglich = jeden Werktag, liste = nur die Daten in "daten"
  "n": 1,                                  // bei woche: alle n Wochen
  "tage": [0],                             // bei woche: Wochentage 0=Mo … 5=Sa
  "nth": 1,                                // bei monat: 1–4 oder -1 = letzter
  "mwd": 1,                                // bei monat: Wochentag 0=Mo … 4=Fr
+ "daten": [],                              // bei liste: alle Tage als "YYYY-MM-DD"
  "von": "YYYY-MM-DD", "bis": "YYYY-MM-DD",
  "ausFeier": true,                        // Feiertage auslassen (Standard true)
  "ausKW": "",                             // ausgelassene Kalenderwochen, z. B. "15-16, 52"
@@ -48,6 +50,7 @@ Regeln:
 - «ausser in Monat X» = diese Monate als Zeitraum in ausDat. «ohne KW 15» = ausKW.
 - Ferien ohne genaue Daten: setze die üblichen Daten im Kanton Bern als Vorschlag in ausDat (Weihnachtsferien ca. 24.12.–2.1.) und schreibe im "hinweis", dass die Daten geprüft werden sollen.
 - Mehrere verschiedene Wünsche = mehrere Serien.
+- Ist eine Datei angehängt (Schulplan, Stundenplan, Kursplan, Ferienliste …): lies die betroffenen Tage genau heraus. Schultage eines Lehrlings = Absenz-Art «Schule» für diese Person (Name aus Wunsch oder Datei). Lassen sich die Tage sauber als Regel mit wenigen Ausnahmen beschreiben (z. B. jeden Dienstag ausser in den Schulferien), nimm woche/monat; sonst regel "liste" und schreibe jeden einzelnen Tag in "daten" (von = erster, bis = letzter Tag). Halbtage (nur Vormittag/Nachmittag) als teil "vm"/"nm"; sind Halb- und Ganztage gemischt, mache je eine Serie.
 - Ist eine "Aktuelle Einstellung" mitgeschickt, hat der Benutzer links schon etwas eingestellt: übernimm diese Werte als Ausgangslage und ändere/ergänze nur, was im Wunsch steht (z. B. «zusätzlich Nick», «nur bis Ende Mai», «ausser in den Sportferien»). Nur wenn der Wunsch klar etwas ganz Neues beschreibt, fängst du neu an.
 - "hinweis": ein bis zwei kurze Sätze auf Deutsch (Schweiz, ss statt ß), was du verstanden hast und was unklar ist. Leer, wenn alles klar ist.`;
 
@@ -66,16 +69,24 @@ Deno.serve(async (req) => {
   const absenzen = (Array.isArray(body?.absenzen) ? body.absenzen : []).slice(0, 30).map((a: any) => String(a).slice(0, 40)).join(', ');
   const icons = (Array.isArray(body?.icons) ? body.icons : []).slice(0, 30).map((i: any) => `${String(i.key).slice(0, 20)} = ${String(i.name).slice(0, 40)}`).join(', ');
   const heute = String(body?.heute || new Date().toISOString().slice(0, 10)).slice(0, 10);
-  const aktuell = body?.aktuell && typeof body.aktuell === 'object' ? JSON.stringify(body.aktuell).slice(0, 3000) : '';
+  const aktuell = body?.aktuell && typeof body.aktuell === 'object' ? JSON.stringify(body.aktuell).slice(0, 8000) : '';
 
-  const kontext = `Heute: ${heute}\nAbsenz-Arten: ${absenzen}\nIcons: ${icons}\nPersonen (id | Name | Gruppe):\n${personen}\n${aktuell ? `\nAktuelle Einstellung im Formular (JSON, gleiche Felder wie SERIE, "aus" = Ausnahmen als Text):\n${aktuell}\n` : ''}\nWunsch des Benutzers:\n${text}`;
+  // Anhänge: Bilder und PDFs als data:-URL (Browser verkleinert Bilder vorher)
+  const anhang: any[] = [];
+  for (const d of (Array.isArray(body?.dateien) ? body.dateien : []).slice(0, 3)) {
+    const m = /^data:([^;,]+);base64,(.+)$/s.exec(String(d?.data_url || '')); if (!m) continue;
+    if (m[1] === 'application/pdf') anhang.push({ type: 'document', source: { type: 'base64', media_type: m[1], data: m[2] } });
+    else if (['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(m[1])) anhang.push({ type: 'image', source: { type: 'base64', media_type: m[1], data: m[2] } });
+  }
+
+  const kontext = `Heute: ${heute}\nAbsenz-Arten: ${absenzen}\nIcons: ${icons}\nPersonen (id | Name | Gruppe):\n${personen}\n${aktuell ? `\nAktuelle Einstellung im Formular (JSON, gleiche Felder wie SERIE, "aus" = Ausnahmen als Text):\n${aktuell}\n` : ''}${anhang.length ? `\n${anhang.length} Datei(en) angehängt (siehe oben).` : ''}\nWunsch des Benutzers:\n${text}`;
 
   let letzterFehler = '';
   for (const model of MODELLE) {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({ model, max_tokens: 2500, system: SYSTEM, messages: [{ role: 'user', content: kontext }] }),
+      body: JSON.stringify({ model, max_tokens: 8000, system: SYSTEM, messages: [{ role: 'user', content: [...anhang, { type: 'text', text: kontext }] }] }),
     });
     const data = await res.json();
     if (!res.ok) { letzterFehler = data?.error?.message || `Anthropic-Fehler (${res.status})`; continue; }
