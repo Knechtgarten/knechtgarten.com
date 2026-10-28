@@ -925,10 +925,11 @@ function compute(){
     list.forEach(o => { if(!isShort(o) || !LAY[o.id]) return; const k = Math.floor(o.s + o.e);
       const host = list.find(h => h !== o && h.kind !== 'absenz' && !isShort(h) && LAY[h.id] && LAY[h.id].free.includes(k)); LAY[o.id].mini = host ? host.id : null; });
   });
-  // Vorarbeiter-Baustelle ohne Mithilfe (und nicht «allein») = Personal fehlt (nur ab heute)
-  const cover = {}; ALL.forEach(h => { if(h.kind === 'hilfe' && h.link && LAY[h.id]) LAY[h.id].free.forEach(k => (cover[h.link] ??= new Set()).add(k)); });
+  // Vorarbeiter-Baustelle oder -Termin (z. B. Pflege) ohne Mithilfe (und nicht «allein») = Personal fehlt (nur ab heute)
+  // Mithilfe zählt pro Person und Halbtag: «Mit Cornelia» deckt alle Termine von Cornelia in diesem Halbtag
+  const cover = {}; ALL.forEach(h => { const l = h.kind === 'hilfe' && h.link && byId(h.link); if(l && LAY[h.id]) LAY[h.id].free.forEach(k => (cover[l.mid] ??= new Set()).add(k)); });
   // Blau = an diesem Halbtag allein okay (kein Personal nötig); blau + Mithilfe eingeteilt = Konflikt (roter Rand)
-  ALL.forEach(b => { if(b.kind !== 'baustelle' || !P[b.mid]?.ist_vorarbeiter || !LAY[b.id]) return; const c = cover[b.id] || new Set(), A = soloSet(b), L = LAY[b.id];
+  ALL.forEach(b => { if(!(b.kind === 'baustelle' || (b.kind === 'termin' && b.e - b.s >= 2 / 12 - 1e-6)) || !P[b.mid]?.ist_vorarbeiter || !LAY[b.id] || LAY[b.id].mini) return; const c = cover[b.mid] || new Set(), A = soloSet(b), L = LAY[b.id];
     L.solo = L.free.filter(k => A.has(k)); L.soloCf = new Set(L.solo.filter(k => c.has(k)));
     L.miss = L.free.filter(k => !c.has(k) && !A.has(k) && k >= TODAY * 2); L.vorarb = true; });
   computeRU(); computeProv(); computeSvc();
@@ -3046,7 +3047,7 @@ function personDlg(p, gid){
     <div class="two"><div class="fld"><label>Name</label><input type="text" id="dN" value="${esc(p.name)}" placeholder="Vorname Nachname"></div><div class="fld"><label>Kürzel</label><input type="text" id="dK" value="${esc(p.kuerzel || '')}" placeholder="z. B. SK"></div></div>
     <div class="two"><div class="fld"><label>Gruppe</label><select id="dG"><option value="">Ohne Gruppe</option>${GRUPPEN.map(g => `<option value="${g.id}"${g.id === p.gruppe_id ? ' selected' : ''}>${esc(g.name)}</option>`).join('')}</select></div><div class="fld"><label>Zusatz</label><input type="text" id="dZ" value="${esc(p.zusatz || '')}" placeholder="z. B. 2. Lj., 80 %"></div></div>
     <div class="fld"><label>Farbe (Balken)</label><div class="pal" id="dF"><button data-c="" aria-pressed="${!p.farbe}" aria-label="Keine Farbe" title="Keine Farbe (Lehrlinge, Hilfskräfte)" style="background:#fff;border:2px dashed #C3C8CE"></button>${PALETTE.map(c => `<button style="background:${c}" data-c="${c}" aria-pressed="${c === p.farbe}" aria-label="Farbe ${c}"></button>`).join('')}</div></div>
-    <label class="chk"><input type="checkbox" id="dV" ${p.ist_vorarbeiter ? 'checked' : ''}>Vorarbeiter (Baustellen ohne Mithilfe zeigen «Personal fehlt»)</label>
+    <label class="chk"><input type="checkbox" id="dV" ${p.ist_vorarbeiter ? 'checked' : ''}>Vorarbeiter (Baustellen und Termine ohne Mithilfe zeigen «Personal fehlt»)</label>
     <label class="chk"><input type="checkbox" id="dP" ${p.ist_projektleiter ? 'checked' : ''}>Projektleiter (Baustellen bekommen seine Farbe)</label>
     <div class="fld"><label>Login</label><select id="dB"><option value="">Kein Login (z. B. Lernende, Temporäre)</option>${BENUTZER.filter(b => (b.email || b.id === p.benutzer_id) && !vergeben.has(b.id)).map(b => `<option value="${b.id}"${b.id === p.benutzer_id ? ' selected' : ''}>${esc(b.email || (p.name + ' (Benutzer ohne Login)'))} (${esc(ROLLE_LABEL[b.rolle] || b.rolle)})</option>`).join('')}</select></div>
     <label class="chk"><input type="checkbox" id="dA" ${p.aktiv ? 'checked' : ''}>Aktiv (im Planer sichtbar)</label>
