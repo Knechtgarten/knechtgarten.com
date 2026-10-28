@@ -258,6 +258,23 @@ main.wrap{padding-top:48px;padding-bottom:60px;}
 
 /* Zugänglichkeit Slider (pro Teilbereich) */
 .zugwrap{margin-top:2px;max-width:420px;}
+.tsDetailBtn{position:relative;margin-left:8px;}
+.tsDot{position:absolute;top:-2px;right:-2px;width:8px;height:8px;border-radius:50%;background:#D08A2E;border:1.5px solid #fff;}
+.tsrowtop{align-items:center;}
+.tsdtab{border-collapse:collapse;width:100%;min-width:680px;font-size:12px;}
+.tsdtab th{font-size:10px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);text-align:left;font-weight:700;padding:5px 6px;white-space:nowrap;}
+.tsdtab td{padding:6px;border-top:1px solid var(--line);vertical-align:middle;}
+.tsdn{text-align:right !important;font-variant-numeric:tabular-nums;}
+.tsdtab input{border:1px solid var(--line);border-radius:6px;padding:5px 6px;font:inherit;font-size:12px;color:var(--ink);background:#fff;}
+.tsdMenge{width:70px;text-align:right;}
+.tsdMenge.geaendert{border-color:#D08A2E;background:#FBF1DC;}
+.tsdPreis{width:78px;text-align:right;}
+.tsdEinheit{width:56px;}
+.tsdName{width:100%;min-width:160px;}
+.tsdHint{font-size:10px;color:#7A5A12;}
+.tsdKat{display:inline-block;border-radius:999px;background:var(--soft);padding:1px 9px;font-size:10px;font-weight:700;text-transform:uppercase;}
+.tsdfoot{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;border-top:1px solid var(--line);margin-top:12px;padding-top:10px;}
+.tsdsumme{font-size:15px;font-weight:700;font-variant-numeric:tabular-nums;}
 .zugRow{display:flex;gap:28px;align-items:flex-start;flex-wrap:wrap;}
 .zugRow .zugblock{flex:0 1 420px;min-width:260px;}
 .transportWahl{flex:1 1 380px;min-width:300px;min-height:60px;}
@@ -992,6 +1009,34 @@ input[type=number]{-moz-appearance:textfield;}
   <img id="ezrFotoZoomBild" alt="" style="max-width:90vw;max-height:90vh;border-radius:8px;box-shadow:0 12px 40px rgba(0,0,0,.35);cursor:zoom-out;">
 </div>
 
+<!-- Tagesrechner: Detailfenster "Was ist drin?" pro Teilschritt (siehe oeffneTsDetail). -->
+<div class="ovl" id="tsDetailOvl">
+  <div class="ovlbox wide" style="max-width:860px;">
+    <div class="geomodalhead">
+      <span class="t" id="tsDetailTitel"></span>
+      <button type="button" class="notiztoolbtn" id="tsDetailX" title="Schliessen"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    </div>
+    <div class="hint" id="tsDetailHinweis" style="margin-bottom:10px;"></div>
+    <div style="overflow-x:auto;">
+      <table class="tsdtab">
+        <thead><tr><th>Typ</th><th>Artikel</th><th class="tsdn">Menge pro Tag</th><th>Einheit</th><th class="tsdn">Total</th><th class="tsdn">Preis</th><th class="tsdn">Betrag</th><th></th></tr></thead>
+        <tbody id="tsDetailBody"></tbody>
+      </table>
+    </div>
+    <div style="margin-top:10px;">
+      <span class="ez-add-link" id="tsDetailStamm">+ Position aus Artikelstamm</span>
+      <span class="ez-add-link" id="tsDetailEigen">+ Eigene Position</span>
+    </div>
+    <div class="tsdfoot">
+      <div><div class="hint">Summe dieses Teilschritts</div><div class="tsdsumme" id="tsDetailSumme"></div></div>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <button type="button" class="btnlink" id="tsDetailReset">Alles auf Vorlage zurücksetzen</button>
+        <button type="button" class="savebtn" id="tsDetailOk">Übernehmen</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Grosser Artikel-Katalog fuer "Position aus Artikelstamm" (siehe
      openArtikelstammPicker weiter unten). -->
 <div class="ovl" id="artikelstammPickerOvl">
@@ -1620,6 +1665,7 @@ let tagessatzTeilschritte = []; // [{id,arbeitsschrittId,name,beschreibung,optio
 let teilschrittTage = {};           // {teilschritt_id: zahl} - der eigentliche Tagesbedarf wird pro Teilschritt erfasst
 let tagessatzAuswahl = {};          // {teilschritt_id: Set<option_id>}
 let tagessatzOffenIds = new Set();  // Arbeitsschritt-IDs, die gerade aufgeklappt sind
+let tagessatzAnpassungen = {};      // {teilschritt_id: [{rzId|null, artikelId, kategorie, bezeichnung, einheit, preis, mengeProTag, geloescht}]} - nur diese Offerte, siehe oeffneTsDetail()
 
 // Jede Formel-Offerte hat genau einen (impliziten) Bereich mit eigenen
 // Massen, eigener Zugaenglichkeit und eigener Options-Wahl - frueher gab es
@@ -2728,6 +2774,7 @@ function renderTagessatzInhalt(){
               <div class="tsrowtop">
                 <span class="tsname">${ts.name}</span>
                 <div class="astage"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="number" step="0.5" min="0" value="${teilschrittTage[ts.id] ?? 0}" data-ts="${ts.id}"><span class="unit">Tage</span></div>
+                <button type="button" class="kg-ibtn tsDetailBtn" data-ts="${ts.id}" title="Was ist drin? Zeilen ansehen und für diese Offerte ändern" aria-label="Was ist drin?">${KG.icon('notiz', 14)}${(tagessatzAnpassungen[ts.id] || []).length ? '<span class="tsDot"></span>' : ''}</button>
               </div>
               ${af ? `<div class="afblock">
                 <label class="flabel">${af.name}</label>
@@ -2756,6 +2803,7 @@ function renderTagessatzInhalt(){
       recalc();
     });
   });
+  $tagessatzInhalt.querySelectorAll('.tsDetailBtn').forEach(b => b.addEventListener('click', () => oeffneTsDetail(b.dataset.ts)));
   $tagessatzInhalt.querySelectorAll('.opt').forEach(btn => {
     btn.addEventListener('click', () => {
       const tsId = btn.closest('.tsrow').dataset.ts;
@@ -2768,6 +2816,146 @@ function renderTagessatzInhalt(){
     });
   });
 }
+
+// ---------------------------------------------------------------------------
+// Detailfenster pro Teilschritt (Tagesrechner): zeigt alle Zeilen, die dieser Teilschritt
+// aktuell rechnet (Vorlage aus Tool B), und erlaubt Aenderungen NUR fuer diese Offerte:
+// Menge pro Tag aendern, Zeile weglassen, Position aus dem Artikelstamm oder eigene
+// Position ergaenzen. Die Vorlage bleibt unveraendert. Gespeichert in
+// offerte_teilschritt_zeile (siehe speichereTsAnpassungen).
+// ---------------------------------------------------------------------------
+async function speichereTsAnpassungen(offerteId){
+  const { error: delErr } = await sb.from('offerte_teilschritt_zeile').delete().eq('offerte_id', offerteId);
+  if(delErr) throw delErr;
+  const rows = [];
+  Object.entries(tagessatzAnpassungen).forEach(([tsId, liste]) => liste.forEach((a, i) => rows.push({
+    offerte_id: offerteId, teilschritt_id: tsId, ressourcenzeile_id: a.rzId || null, artikel_id: a.artikelId || null,
+    kategorie: a.kategorie || null, bezeichnung: a.bezeichnung || null, einheit: a.einheit || null, preis: a.preis ?? null,
+    menge_pro_tag: a.mengeProTag ?? null, geloescht: !!a.geloescht, reihenfolge: i
+  })));
+  if(rows.length){
+    const { error } = await sb.from('offerte_teilschritt_zeile').insert(rows);
+    if(error) throw error;
+  }
+}
+
+let tsDetailId = null;
+let tsDetailZeilen = []; // Arbeitskopie im Fenster
+
+function tsDetailAufbauen(tsId, ohneAnpassungen){
+  const ausgewaehlt = tagessatzAuswahl[tsId] || new Set();
+  const anpassungen = ohneAnpassungen ? [] : (tagessatzAnpassungen[tsId] || []);
+  const zeilen = tagessatzRessourcenzeilen
+    .filter(rz => rz.teilschrittId === tsId && (rz.optionId == null || ausgewaehlt.has(rz.optionId)))
+    .map(rz => {
+      const anp = anpassungen.find(a => a.rzId === rz.id);
+      const vorlage = rz.tagesleistungMenge || 0;
+      return { rzId: rz.id, kategorie: rz.kategorie, bezeichnung: rz.bezeichnung, einheit: rz.einheit || 'Std.', preis: rz.preis, vorlage,
+        menge: anp && anp.mengeProTag != null ? anp.mengeProTag : vorlage, geloescht: !!anp?.geloescht, zusatz: false };
+    });
+  anpassungen.filter(a => !a.rzId).forEach(a => zeilen.push({ rzId: null, artikelId: a.artikelId, kategorie: a.kategorie || 'material', bezeichnung: a.bezeichnung,
+    einheit: a.einheit || 'Stk.', preis: a.preis || 0, vorlage: null, menge: a.mengeProTag || 0, geloescht: false, zusatz: true, eigen: !a.artikelId }));
+  return zeilen;
+}
+
+function oeffneTsDetail(tsId){
+  const ts = tagessatzTeilschritte.find(t => t.id === tsId);
+  if(!ts) return;
+  tsDetailId = tsId;
+  tsDetailZeilen = tsDetailAufbauen(tsId);
+  $('tsDetailTitel').textContent = ts.name;
+  renderTsDetail();
+  $('tsDetailOvl').classList.add('show');
+}
+
+function renderTsDetail(){
+  const tage = teilschrittTage[tsDetailId] || 0;
+  const ts = tagessatzTeilschritte.find(t => t.id === tsDetailId);
+  const asName = tagessatzArbeitsschritte.find(a => a.id === ts?.arbeitsschrittId)?.name || '';
+  $('tsDetailHinweis').textContent = `${asName} · ${rundeTage(tage)} ${tage === 1 ? 'Tag' : 'Tage'} · Änderungen gelten nur für diese Offerte, die Vorlage in Tool B bleibt unverändert.`;
+  let summe = 0;
+  $('tsDetailBody').innerHTML = tsDetailZeilen.map((z, i) => {
+    const betrag = z.geloescht ? 0 : z.menge * tage * z.preis;
+    summe += betrag;
+    const abw = !z.zusatz && z.menge !== z.vorlage;
+    const kat = { personal: 'Personal', maschine: 'Maschine', logistik: 'Logistik', material: 'Material' }[z.kategorie] || z.kategorie;
+    const name = z.eigen
+      ? `<input type="text" class="tsdName" data-i="${i}" value="${escHtml(z.bezeichnung || '')}" placeholder="Bezeichnung" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other">`
+      : `<span style="${z.geloescht ? 'text-decoration:line-through;color:var(--muted);' : ''}">${escHtml(z.bezeichnung)}</span>${z.zusatz ? ' <span class="tsdHint">neu in dieser Offerte</span>' : ''}${z.geloescht ? ' <span class="tsdHint">weggelassen</span>' : ''}`;
+    const preisZelle = z.eigen
+      ? `<input type="number" step="0.01" class="tsdPreis" data-i="${i}" value="${z.preis}" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other">`
+      : fmtCHF(z.preis);
+    const einheitZelle = z.eigen
+      ? `<input type="text" class="tsdEinheit" data-i="${i}" value="${escHtml(z.einheit || '')}" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other">`
+      : escHtml(z.einheit);
+    return `<tr>
+      <td><span class="tsdKat">${kat}</span></td>
+      <td>${name}</td>
+      <td class="tsdn"><input type="number" step="0.5" min="0" class="tsdMenge${abw ? ' geaendert' : ''}" data-i="${i}" value="${z.menge}" ${z.geloescht ? 'disabled' : ''} autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other">${abw ? `<div class="tsdHint">Vorlage: ${z.vorlage}</div>` : ''}</td>
+      <td>${einheitZelle}</td>
+      <td class="tsdn">${z.geloescht ? '–' : rundeMenge(z.menge * tage) + ' ' + escHtml(z.einheit || '')}</td>
+      <td class="tsdn">${preisZelle}</td>
+      <td class="tsdn"><b>${fmtCHF(betrag)}</b></td>
+      <td style="white-space:nowrap;">${(abw || z.geloescht) ? `<button type="button" class="kg-ibtn" data-undo="${i}" title="Auf Vorlage zurücksetzen" aria-label="Zurücksetzen">${KG.icon('undo', 14)}</button> ` : ''}${z.geloescht ? '' : `<button type="button" class="kg-ibtn danger" data-del="${i}" title="${z.zusatz ? 'Entfernen' : 'In dieser Offerte weglassen'}" aria-label="Entfernen">${KG.icon('trash', 14)}</button>`}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="8" style="color:var(--muted);">Dieser Teilschritt hat noch keine Zeilen.</td></tr>';
+  $('tsDetailSumme').textContent = fmtCHF(summe);
+}
+
+// Eingaben im Fenster (Delegation, einmalig registriert)
+$('tsDetailBody').addEventListener('input', e => {
+  const i = e.target.dataset.i;
+  if(i === undefined) return;
+  const z = tsDetailZeilen[i];
+  if(e.target.classList.contains('tsdMenge')) z.menge = parseFloat(e.target.value) || 0;
+  if(e.target.classList.contains('tsdPreis')) z.preis = parseFloat(e.target.value) || 0;
+  if(e.target.classList.contains('tsdName')) z.bezeichnung = e.target.value;
+  if(e.target.classList.contains('tsdEinheit')) z.einheit = e.target.value;
+});
+$('tsDetailBody').addEventListener('change', e => {
+  if(e.target.classList.contains('tsdMenge') || e.target.classList.contains('tsdPreis')) renderTsDetail();
+});
+$('tsDetailBody').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if(!b) return;
+  if(b.dataset.del !== undefined){
+    const z = tsDetailZeilen[b.dataset.del];
+    if(z.zusatz) tsDetailZeilen.splice(b.dataset.del, 1); else z.geloescht = true;
+    renderTsDetail();
+  }
+  if(b.dataset.undo !== undefined){
+    const z = tsDetailZeilen[b.dataset.undo];
+    z.menge = z.vorlage; z.geloescht = false;
+    renderTsDetail();
+  }
+});
+$('tsDetailStamm').addEventListener('click', async () => {
+  await openArtikelstammPicker(null, a => {
+    tsDetailZeilen.push({ rzId: null, artikelId: a.id, kategorie: a.kategorie, bezeichnung: a.bezeichnung, einheit: a.einheit, preis: a.vp_knecht ?? 0, vorlage: null, menge: 1, geloescht: false, zusatz: true });
+    renderTsDetail();
+  });
+});
+$('tsDetailEigen').addEventListener('click', () => {
+  tsDetailZeilen.push({ rzId: null, artikelId: null, kategorie: 'material', bezeichnung: '', einheit: 'Stk.', preis: 0, vorlage: null, menge: 1, geloescht: false, zusatz: true, eigen: true });
+  renderTsDetail();
+});
+$('tsDetailReset').addEventListener('click', () => { tsDetailZeilen = tsDetailAufbauen(tsDetailId, true); renderTsDetail(); });
+$('tsDetailX').addEventListener('click', () => $('tsDetailOvl').classList.remove('show'));
+$('tsDetailOk').addEventListener('click', () => {
+  const neu = [];
+  tsDetailZeilen.forEach(z => {
+    if(z.zusatz){
+      if((z.bezeichnung || '').trim()) neu.push({ rzId: null, artikelId: z.artikelId || null, kategorie: z.kategorie, bezeichnung: z.bezeichnung.trim(), einheit: z.einheit, preis: z.preis, mengeProTag: z.menge, geloescht: false });
+    }else if(z.geloescht || z.menge !== z.vorlage){
+      neu.push({ rzId: z.rzId, artikelId: null, kategorie: null, bezeichnung: null, einheit: null, preis: null, mengeProTag: z.menge !== z.vorlage ? z.menge : null, geloescht: z.geloescht });
+    }
+  });
+  if(neu.length) tagessatzAnpassungen[tsDetailId] = neu; else delete tagessatzAnpassungen[tsDetailId];
+  $('tsDetailOvl').classList.remove('show');
+  renderTagessatzInhalt();
+  recalc();
+  planAutosave();
+});
 
 // Aktiviert/deaktiviert eine Option innerhalb eines Auswahlfelds - Optionen
 // OHNE eigenen Mehrfachauswahl-Haken (Tool B: "Option bearbeiten") sind
@@ -3008,7 +3196,7 @@ async function ladeTagessatzDaten(otId){
   tagessatzTeilschritte = [];
   function pushRz(rz, optionId, teilschrittId, arbeitsschrittId, arbeitsschrittName){
     tagessatzRessourcenzeilen.push({
-      optionId, teilschrittId, arbeitsschrittId, arbeitsschritt: arbeitsschrittName,
+      id: rz.id, optionId, teilschrittId, arbeitsschrittId, arbeitsschritt: arbeitsschrittName,
       kategorie: rz.kategorie,
       artikelId: rz.artikel_id || null,
       bezeichnung: rz.bezeichnung_override || rz.artikel?.bezeichnung || '(unbenannt)',
@@ -4022,6 +4210,15 @@ async function ladeBestehendeOfferte(offerteId){
       if(!tagessatzAuswahl[a.teilschritt_id]) tagessatzAuswahl[a.teilschritt_id] = new Set();
       tagessatzAuswahl[a.teilschritt_id].add(a.option_id);
     });
+    const { data: anpRows, error: anpErr } = await sb.from('offerte_teilschritt_zeile').select('*').eq('offerte_id', offerteId).order('reihenfolge');
+    if(anpErr){ console.error(anpErr); $saveStatus.textContent = 'Fehler beim Laden: ' + anpErr.message; $saveStatus.className='status err'; return; }
+    tagessatzAnpassungen = {};
+    (anpRows || []).forEach(r => {
+      (tagessatzAnpassungen[r.teilschritt_id] ||= []).push({
+        rzId: r.ressourcenzeile_id, artikelId: r.artikel_id, kategorie: r.kategorie, bezeichnung: r.bezeichnung, einheit: r.einheit,
+        preis: r.preis != null ? Number(r.preis) : null, mengeProTag: r.menge_pro_tag != null ? Number(r.menge_pro_tag) : null, geloescht: !!r.geloescht
+      });
+    });
     // Arbeitsschritte mit bereits erfasstem Tagesbedarf gleich aufgeklappt zeigen.
     tagessatzOffenIds = new Set(tagessatzTeilschritte.filter(ts => teilschrittTage[ts.id] > 0).map(ts => ts.arbeitsschrittId));
     renderTagessatzInhalt();
@@ -4126,6 +4323,7 @@ async function starteNeueOfferte(otId){
     // Tagessatz-Offerten starten immer bei null, ohne jede Default-Auswahl
     // (kein "Standard-Option"-Haekchen, keine Vorauswahl - siehe Memory).
     teilschrittTage = {};
+    tagessatzAnpassungen = {};
     tagessatzAuswahl = {};
     tagessatzOffenIds = new Set();
     renderTagessatzInhalt();
@@ -4329,6 +4527,7 @@ async function speichereNeueOfferte(titelVal){
       const { error: oaErr } = await sb.from('offerte_teilschritt_option').insert(optRows);
       if(oaErr) throw oaErr;
     }
+    await speichereTsAnpassungen(offerte.id);
   }else{
     const werteRows = eingabefelder.map(ef => ({ offerte_id: offerte.id, eingabefeld_id: ef.id, wert: bereichWerteMap[ef.id] }));
     if(werteRows.length){
@@ -4393,6 +4592,7 @@ async function speichereAenderungen(titelVal){
       const { error: insOptErr } = await sb.from('offerte_teilschritt_option').insert(optRows);
       if(insOptErr) throw insOptErr;
     }
+    await speichereTsAnpassungen(currentOfferteId);
   }else{
     const werteRows = eingabefelder.map(ef => ({ offerte_id: currentOfferteId, eingabefeld_id: ef.id, wert: bereichWerteMap[ef.id] }));
     if(werteRows.length){
@@ -5642,9 +5842,20 @@ async function recalcJetzt(){
         if(tage <= 0) return;
         const ausgewaehlt = tagessatzAuswahl[ts.id] || new Set();
         const aktive = tagessatzRessourcenzeilen.filter(rz => rz.teilschrittId === ts.id && (rz.optionId == null || ausgewaehlt.has(rz.optionId)));
+        // Anpassungen nur fuer diese Offerte (Detailfenster "Was ist drin?"): Vorlagenzeile
+        // weggelassen oder mit anderer Menge pro Tag, dazu ergaenzte Zeilen
+        const anpassungen = tagessatzAnpassungen[ts.id] || [];
         aktive.forEach(rz => {
-          const menge = (rz.tagesleistungMenge || 0) * tage;
+          const anp = anpassungen.find(a => a.rzId === rz.id);
+          if(anp?.geloescht) return;
+          const proTag = anp && anp.mengeProTag != null ? anp.mengeProTag : (rz.tagesleistungMenge || 0);
+          const menge = proTag * tage;
           alleZeilen.push({ kategorie: rz.kategorie, arbeitsschritt: rz.arbeitsschritt, bezeichnung: rz.bezeichnung, einheit: rz.einheit || 'Std', preis: rz.preis, menge, betrag: menge * rz.preis, artikelId: rz.artikelId });
+        });
+        const asName = tagessatzArbeitsschritte.find(a => a.id === ts.arbeitsschrittId)?.name || '';
+        anpassungen.filter(a => !a.rzId && !a.geloescht).forEach(a => {
+          const menge = (a.mengeProTag || 0) * tage;
+          alleZeilen.push({ kategorie: a.kategorie || 'material', arbeitsschritt: asName, bezeichnung: a.bezeichnung, einheit: a.einheit || 'Stk.', preis: a.preis || 0, menge, betrag: menge * (a.preis || 0), artikelId: a.artikelId || null });
         });
       });
       // Fuer die Lieferwagenfahrzeit zaehlen nur die Stunden des Vorarbeiters
