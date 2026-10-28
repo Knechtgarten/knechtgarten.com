@@ -12,7 +12,7 @@ while ($l.IsListening) {
   $f = Join-Path $root $p
   if ((Test-Path $f -PathType Leaf) -and ((Resolve-Path $f).Path.StartsWith($root.Path))) {
     $b = [IO.File]::ReadAllBytes($f)
-    $c.Response.ContentType = if ($f -like '*.html') { 'text/html; charset=utf-8' } else { 'application/octet-stream' }
+    $c.Response.ContentType = if ($f -like '*.html') { 'text/html; charset=utf-8' } elseif ($f -like '*.js') { 'text/javascript; charset=utf-8' } else { 'application/octet-stream' }
     $c.Response.OutputStream.Write($b, 0, $b.Length)
   } else { $c.Response.StatusCode = 404 }
   $c.Response.Close()
