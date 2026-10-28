@@ -140,10 +140,39 @@ async function rufeClaudeAufStreamend(modell: string, system: string, userText: 
         tokensInput = event.message?.usage?.input_tokens ?? 0;
       } else if (event.type === 'message_delta') {
         tokensOutput = event.usage?.output_tokens ?? tokensOutput;
+      } else if (event.type === 'error') {
+        // z.B. overloaded_error mitten im Stream (HTTP 200, aber Fehler-Ereignis) -
+        // frueher wurde das stillschweigend ignoriert und der Mitarbeiter bekam
+        // eine leere Antwort statt einer Fehlermeldung.
+        throw new Error(event.error?.message || event.error?.type || 'Anthropic-Streamfehler');
       }
     }
   }
   return { tokensInput, tokensOutput };
+}
+
+// Wie rufeClaudeAufStreamend, versucht es aber bis zu 3x, solange noch KEIN
+// Text zum Mitarbeiter geschickt wurde (Fehler vor dem ersten Textstueck oder
+// komplett leere Antwort) - kurzzeitige Ueberlastung bei Anthropic faellt so
+// nicht mehr als leere Antwort durch.
+async function rufeClaudeAufStreamendMitRetry(modell: string, system: string, userText: string, maxTokens: number, onChunk: (text: string) => void) {
+  let letzterFehler: unknown = null;
+  for (let versuch = 1; versuch <= 3; versuch++) {
+    let textGesendet = false;
+    try {
+      const r = await rufeClaudeAufStreamend(modell, system, userText, maxTokens, (t) => {
+        if (t) textGesendet = true;
+        onChunk(t);
+      });
+      if (textGesendet) return r;
+      letzterFehler = new Error('Leere Antwort von der KI');
+    } catch (e) {
+      if (textGesendet) throw e; // schon Text beim Mitarbeiter angekommen: nicht nochmal von vorn
+      letzterFehler = e;
+    }
+    if (versuch < 3) await new Promise((res) => setTimeout(res, 1200 * versuch));
+  }
+  throw letzterFehler instanceof Error ? letzterFehler : new Error('KI-Antwort fehlgeschlagen');
 }
 
 // Extrahiert das erste vollstaendige {...}-JSON-Objekt aus einer Antwort -
@@ -650,7 +679,7 @@ VORLAGE:\n${zweig.inhalt}`);
     async start(controller) {
       const encoder = new TextEncoder();
       try {
-        const { tokensInput, tokensOutput } = await rufeClaudeAufStreamend(modell, system, userText, 2500, (chunk) => {
+        const { tokensInput, tokensOutput } = await rufeClaudeAufStreamendMitRetry(modell, system, userText, 2500, (chunk) => {
           controller.enqueue(encoder.encode(chunk));
         });
         await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', body.vorlageId, tokensInput, tokensOutput);
@@ -753,7 +782,7 @@ VORLAGE:\n${inhalt}`);
     async start(controller) {
       const encoder = new TextEncoder();
       try {
-        const { tokensInput, tokensOutput } = await rufeClaudeAufStreamend(modell, system, userText, 2500, (chunk) => {
+        const { tokensInput, tokensOutput } = await rufeClaudeAufStreamendMitRetry(modell, system, userText, 2500, (chunk) => {
           controller.enqueue(encoder.encode(chunk));
         });
         await protokolliereNutzung(body.mitarbeiterEmail, 'antworten', logVorlageId, tokensInput, tokensOutput);
