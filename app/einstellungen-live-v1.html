@@ -813,7 +813,6 @@ input[type=number]{-moz-appearance:textfield;}
           <div class="cardheader" onclick="toggleCard(this)"><span class="cardchevron" style="transform:rotate(90deg);">&#9656;</span><div class="cardlabel">Kies- und Betonwerke</div></div>
           <div class="hint">Ein Werk steht nur einmal in der Liste. Die Haken «Kies» und «Beton» legen fest, was es liefert. In der Offerte wird pro Spalte das günstigste Werk gewählt, du kannst es dort umstellen. Preis pro m³: Preisliste des Werks, sonst die Formel (Grundpreis + km-Preis × Strecke), dann die Marge obendrauf.</div>
           <div class="cardbody">
-            <div id="transportWerkeRemind" class="hint" style="margin-bottom:10px;"></div>
             <table class="sgtable" style="table-layout:fixed;">
               <colgroup><col><col style="width:100px;"><col style="width:250px;"><col style="width:80px;"><col style="width:70px;"></colgroup>
               <thead><tr><th>Werk</th><th style="white-space:normal;">Liefert</th><th>Preisliste</th><th style="white-space:normal;">Marge %</th><th></th></tr></thead>
@@ -859,7 +858,7 @@ input[type=number]{-moz-appearance:textfield;}
               <thead><tr><th>Titel</th><th>Artikel (Std)</th><th>Artikel (km)</th><th></th></tr></thead>
               <tbody id="lwKiesTransportZeilenBody"></tbody>
             </table>
-            <div class="hint">Adressen der Werke: siehe «Kies- und Betonwerke» oben (es zählt das nächstgelegene Werk).</div>
+            <div class="hint">Welche Werke der eigene Lieferwagen anfährt, stellst du bei «Kies- und Betonwerke» oben unter dem Zahnrad ein («Eigener Lieferwagen holt hier»). Die Preislisten dort gelten nur für Fremdtransporte, nicht für diese Fahrt.</div>
           </div>
         </div>
 
@@ -2687,7 +2686,7 @@ function twListeStatus(w){
 function twPreislisteZelleHtml(w){
   const st = twListeStatus(w);
   const titel = st === 'fehlt' ? 'Preisliste hierher ziehen' : 'Preisliste ' + w.liste_jahr;
-  const info = st === 'fehlt' ? 'noch keine hinterlegt, es gilt die Formel' : st === 'alt' ? 'älter als ein Jahr, neue Liste hineinziehen' : 'aktuell, neue Liste hineinziehen zum Ersetzen';
+  const info = st === 'fehlt' ? 'noch keine hinterlegt, es gilt die Formel' : 'neue Liste hineinziehen zum Ersetzen';
   return `<div class="tw-drop ${st}" data-drop="${w.id}" tabindex="0" role="button" title="PDF oder Foto der Preisliste hierher ziehen oder klicken">
     ${KG.icon('upload', 20)}<div><b>${titel}</b><span>${info}</span></div></div>`;
 }
@@ -2701,6 +2700,7 @@ function twDetailHtml(w){
       <div class="fld" style="max-width:160px;"><label>km-Preis CHF/m³ und km</label>${twFeld(w,'km_preis_m3','number')}</div>
       <div class="fld" style="max-width:160px;"><label>Mindestmenge Kies m³</label>${twFeld(w,'mindestmenge_kies','number','0.5')}</div>
       <div class="fld" style="max-width:160px;"><label>Mindestmenge Beton m³</label>${twFeld(w,'mindestmenge_beton','number','0.5')}</div>
+      <div class="fld" style="max-width:260px;"><label>Eigener Lieferwagen holt hier</label><label style="display:flex;gap:6px;align-items:center;font-weight:400;cursor:pointer;"><input type="checkbox" class="twCheck" data-feld="lieferwagen_holt" ${w.lieferwagen_holt ? 'checked' : ''} style="width:auto;"> zählt für Lieferwagentransport</label></div>
     </div></td></tr>`;
 }
 
@@ -2721,14 +2721,6 @@ function renderTransportWerke(){
     <input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="text" class="twFeld" data-feld="adresse" placeholder="Adresse"></div></td><td></td><td></td><td></td><td></td></tr>`;
   body.innerHTML = rows + draft;
   attachTransportWerkeHandlers();
-  const veraltet = TRANSPORT_WERKE.filter(w => twListeStatus(w) !== 'aktuell');
-  const rem = $('transportWerkeRemind');
-  if(rem){
-    rem.style.cssText = veraltet.length ? 'margin-bottom:10px;background:#FBF1DC;color:#7A5A12;border-radius:6px;padding:8px 10px;' : 'margin-bottom:10px;';
-    rem.innerHTML = veraltet.length
-      ? '<b>Preislisten aktualisieren:</b> ' + veraltet.map(w => `${w.name} (${w.liste_jahr ? 'Liste ' + w.liste_jahr : 'fehlt'})`).join(', ') + '. Die neue PDF in das gestrichelte Feld ziehen.'
-      : '';
-  }
 }
 
 function attachTransportWerkeHandlers(){
@@ -2797,9 +2789,182 @@ async function twSpeichere(id, feld, wert){
   if(feld === 'adresse') renderTransportWerke();
 }
 
-// Platzhalter bis zur Preislisten-Einlesung (naechster Schritt)
-function importiereTransportPreisliste(werkId, file){
-  showToast('Der Preislisten-Import folgt im nächsten Schritt.', true);
+// ---------------------------------------------------------------------------
+// Preisliste einlesen (Drag & Drop auf das gestrichelte Feld eines Werks):
+//  1) PDF: mit pdf.js den Text jeder Seite lesen und die Seiten mit Transport-
+//     Preistabellen finden, in Ausschnitte zu max. 3 Seiten teilen (pdf-lib).
+//     Bild: ein Ausschnitt.
+//  2) Jeder Ausschnitt geht an die Edge Function "preisliste-lesen" (Gemini).
+//  3) Vorschau (Anzahl, Beispielzeilen, Jahr), nach "Speichern" werden die
+//     alten Preise des Werks ersetzt (transport_preis / transport_distanzstufe).
+// ---------------------------------------------------------------------------
+function ladeSkriptEinmal(url){
+  return new Promise((ok, fehler) => {
+    if(document.querySelector(`script[data-lib="${url}"]`)) return ok();
+    const s = document.createElement('script');
+    s.src = url; s.dataset.lib = url; s.onload = () => ok(); s.onerror = () => fehler(new Error('Konnte ' + url + ' nicht laden'));
+    document.head.appendChild(s);
+  });
+}
+function dateiAlsDataUrl(blobOderBytes, mime){
+  const blob = blobOderBytes instanceof Blob ? blobOderBytes : new Blob([blobOderBytes], { type: mime });
+  return new Promise((ok, fehler) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => fehler(r.error); r.readAsDataURL(blob); });
+}
+
+// Overlay mit Fortschritt/Vorschau (einmalig im DOM angelegt)
+function twImportOverlay(){
+  let ovl = document.getElementById('twImportOvl');
+  if(ovl) return ovl;
+  ovl = document.createElement('div');
+  ovl.className = 'ovl'; ovl.id = 'twImportOvl';
+  ovl.innerHTML = `<div class="ovlbox xwide"><div class="subhead" id="twImpTitel" style="margin-top:0;">Preisliste einlesen</div>
+    <div id="twImpInhalt"></div><div class="ovlbtns"><button class="btnlink" id="twImpAbbrechen">Abbrechen</button><button class="btn" id="twImpSpeichern" style="display:none;">Speichern</button></div></div>`;
+  document.body.appendChild(ovl);
+  return ovl;
+}
+
+async function importiereTransportPreisliste(werkId, file){
+  const werk = TRANSPORT_WERKE.find(w => w.id === werkId);
+  if(!werk) return;
+  const ovl = twImportOverlay();
+  const inhalt = $('twImpInhalt'), speichern = $('twImpSpeichern'), abbrechen = $('twImpAbbrechen');
+  let abgebrochen = false;
+  speichern.style.display = 'none';
+  $('twImpTitel').textContent = 'Preisliste einlesen: ' + werk.name;
+  const status = (t, farbe) => { inhalt.innerHTML = `<div class="hint" style="font-size:12.5px;${farbe ? 'color:' + farbe + ';' : ''}">${t}</div>`; };
+  const schliessen = () => { ovl.classList.remove('show'); };
+  abbrechen.onclick = () => { abgebrochen = true; schliessen(); };
+  ovl.classList.add('show');
+  status('Datei wird gelesen …');
+  try{
+    // --- Ausschnitte bilden ---
+    const ausschnitte = []; // [{ dataUrl, name }]
+    const istPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+    let jahrAusDatei = (file.name.match(/20\d\d/) || [])[0];
+    if(istPdf){
+      await ladeSkriptEinmal('https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js');
+      await ladeSkriptEinmal('https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js');
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const pdf = await window.pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+      status(`PDF mit ${pdf.numPages} Seiten: suche die Seiten mit Transportpreisen …`);
+      // Seiten mit Transportpreisen erkennen: mind. 2 typische Begriffe der Tarifseiten
+      // (Anlieferungsort, Fuhrtarife, Kies/m3, Tarif km, Akkordtarife ...) und viele Preise
+      const MARKER = [/anlieferungsort/i, /ortsgebiet/i, /tarif\s*km/i, /fuhrtarife/i, /mindesttransportmenge/i, /kies\s*\/\s*m[3³]/i,
+        /ortsverzeichnis/i, /akkordtarife?/i, /einfache\s+transportdistanz/i, /kies\s+und\s+sand/i, /we-la-ki/i, /\bgemeinde\b.*\bort\b/i];
+      const seitenInfo = [];
+      for(let i = 1; i <= pdf.numPages; i++){
+        const seite = await pdf.getPage(i);
+        const tc = await seite.getTextContent();
+        const t = tc.items.map(x => x.str).join(' ');
+        if(!jahrAusDatei){ const m = t.match(/\b(20[2-3]\d)\b/); if(m && i <= 3) jahrAusDatei = m[1]; }
+        const preise = (t.match(/\b\d{1,3}[.,]\d{2}\b/g) || []).length;
+        const marker = MARKER.filter(r => r.test(t)).length;
+        seitenInfo[i] = { preise, treffer: marker >= 2 && preise >= 12 };
+      }
+      const treffer = [];
+      for(let i = 1; i <= pdf.numPages; i++){
+        // Folgeseiten ohne Kopfzeile mitnehmen, wenn direkt neben einem Treffer und voller Preise
+        const nachbar = (seitenInfo[i - 1]?.treffer || seitenInfo[i + 1]?.treffer) && seitenInfo[i].preise >= 40;
+        if(seitenInfo[i].treffer || nachbar) treffer.push(i);
+      }
+      if(abgebrochen) return;
+      if(!treffer.length) throw new Error('In dieser PDF habe ich keine Seiten mit Transportpreisen gefunden. Bitte nur die Seiten mit den Transportpreisen als eigene PDF oder als Foto hineinziehen.');
+      const gruppen = [];
+      for(let i = 0; i < treffer.length; i += 3) gruppen.push(treffer.slice(i, i + 3));
+      const quelle = await window.PDFLib.PDFDocument.load(bytes);
+      for(const g of gruppen){
+        const neu = await window.PDFLib.PDFDocument.create();
+        const kopien = await neu.copyPages(quelle, g.map(n => n - 1));
+        kopien.forEach(p => neu.addPage(p));
+        const teil = await neu.save();
+        ausschnitte.push({ dataUrl: await dateiAlsDataUrl(teil, 'application/pdf'), name: 'Seite ' + g.join(', ') });
+      }
+    }else{
+      ausschnitte.push({ dataUrl: await dateiAlsDataUrl(file, file.type || 'image/jpeg'), name: file.name });
+    }
+
+    // --- Ausschnitte auslesen (max. 3 gleichzeitig) ---
+    const ergebnisse = [];
+    let fertig = 0;
+    status(`Die KI liest ${ausschnitte.length} Ausschnitt${ausschnitte.length === 1 ? '' : 'e'} …`);
+    const arbeiter = async () => {
+      while(ausschnitte.length && !abgebrochen){
+        const a = ausschnitte.shift();
+        const { data, error } = await sb.functions.invoke('preisliste-lesen', { body: { datei_data_url: a.dataUrl, werk_name: werk.name } });
+        if(error || data?.error) throw new Error((data?.error) || error.message || 'Fehler beim Lesen');
+        ergebnisse.push({ name: a.name, ...data });
+        fertig++;
+        status(`Gelesen: ${fertig} Ausschnitt${fertig === 1 ? '' : 'e'} …`);
+      }
+    };
+    await Promise.all([arbeiter(), arbeiter(), arbeiter()]);
+    if(abgebrochen) return;
+
+    // --- zusammenfuehren ---
+    const typen = ergebnisse.map(e => e.typ).filter(t => t === 'ort' || t === 'distanz');
+    const typ = typen.filter(t => t === 'distanz').length > typen.filter(t => t === 'ort').length ? 'distanz' : 'ort';
+    const zeilen = [], seen = new Set();
+    ergebnisse.filter(e => e.typ === 'ort').forEach(e => (e.zeilen || []).forEach(z => {
+      const k = [z.plz, z.gemeinde, z.ort, z.kies, z.beton].join('|');
+      if(!seen.has(k)){ seen.add(k); zeilen.push(z); }
+    }));
+    const stufenMap = new Map();
+    ergebnisse.filter(e => e.typ === 'distanz').forEach(e => (e.stufen || []).forEach(s => stufenMap.set(s.bis_km, s)));
+    const stufen = [...stufenMap.values()].sort((a, b) => a.bis_km - b.bis_km);
+    const jahr = Number(ergebnisse.map(e => e.jahr).find(j => j >= 2020 && j <= 2040)) || Number(jahrAusDatei) || TW_JAHR;
+    const minK = ergebnisse.map(e => e.mindestmenge_kies).find(v => v > 0) ?? null;
+    const minB = ergebnisse.map(e => e.mindestmenge_beton).find(v => v > 0) ?? null;
+    const anzahl = typ === 'distanz' ? stufen.length : zeilen.length;
+    if(!anzahl) throw new Error('Die KI hat in dieser Datei keine Transportpreise erkannt. Bitte prüfen, ob es die Transport-Seiten sind, oder ein Foto der Tabelle versuchen.');
+
+    // --- Vorschau ---
+    const tabelle = typ === 'distanz'
+      ? `<table class="sgtable"><thead><tr><th>bis km</th><th>Kies CHF/m³</th><th>Beton CHF/m³</th></tr></thead><tbody>${stufen.slice(0, 12).map(s => `<tr><td>${s.bis_km}</td><td>${s.kies ?? '–'}</td><td>${s.beton ?? '–'}</td></tr>`).join('')}</tbody></table>`
+      : `<table class="sgtable"><thead><tr><th>PLZ</th><th>Gemeinde</th><th>Ort</th><th>Kies CHF/m³</th><th>Beton CHF/m³</th><th>Zone</th></tr></thead><tbody>${zeilen.slice(0, 12).map(z => `<tr><td>${z.plz ?? ''}</td><td>${z.gemeinde ?? ''}</td><td>${z.ort ?? ''}</td><td>${z.kies ?? '–'}</td><td>${z.beton ?? '–'}</td><td>${z.zone ?? ''}</td></tr>`).join('')}</tbody></table>`;
+    inhalt.innerHTML = `<div class="row" style="margin-bottom:10px;gap:10px;flex-wrap:wrap;">
+        <div class="fld" style="max-width:150px;"><label>Art der Liste</label><div style="font-weight:700;padding:6px 0;">${typ === 'distanz' ? 'Distanzliste' : 'Ortsliste'}</div></div>
+        <div class="fld" style="max-width:150px;"><label>${typ === 'distanz' ? 'Stufen' : 'Orte'} erkannt</label><div style="font-weight:700;padding:6px 0;">${anzahl}</div></div>
+        <div class="fld" style="max-width:130px;"><label>Jahr der Liste</label><input id="twImpJahr" type="number" value="${jahr}"></div>
+        <div class="fld" style="max-width:150px;"><label>Mindestmenge Kies / Beton m³</label><div style="font-weight:700;padding:6px 0;">${minK ?? '–'} / ${minB ?? '–'}</div></div></div>
+      <div class="hint" style="margin-bottom:8px;">So sehen die ersten Zeilen aus. Bitte mit der PDF vergleichen. Gibt es für einen Ort mehrere Preise, gilt in der Offerte der teuerste. Orte, die nicht in der Liste stehen, werden mit der Formel geschätzt.</div>
+      <div style="overflow-x:auto;">${tabelle}</div>
+      <div class="hint" style="margin-top:8px;">Beim Speichern wird die bisherige Liste von «${werk.name}» ersetzt.</div>`;
+    speichern.style.display = '';
+    speichern.onclick = async () => {
+      speichern.disabled = true; speichern.textContent = 'Speichere …';
+      try{
+        await sb.from('transport_preis').delete().eq('werk_id', werkId);
+        await sb.from('transport_distanzstufe').delete().eq('werk_id', werkId);
+        if(typ === 'distanz'){
+          const rows = stufen.map(s => ({ werk_id: werkId, bis_km: s.bis_km, kies_m3: s.kies, beton_m3: s.beton }));
+          const { error } = await sb.from('transport_distanzstufe').insert(rows);
+          if(error) throw error;
+        }else{
+          for(let i = 0; i < zeilen.length; i += 300){
+            const rows = zeilen.slice(i, i + 300).map(z => ({ werk_id: werkId, plz: z.plz, gemeinde: z.gemeinde, ort: z.ort, kies_m3: z.kies, beton_m3: z.beton, zone: z.zone }));
+            const { error } = await sb.from('transport_preis').insert(rows);
+            if(error) throw error;
+          }
+        }
+        const werte = { listentyp: typ, liste_jahr: parseInt($('twImpJahr').value) || TW_JAHR, liste_orte: typ === 'ort' ? zeilen.length : null };
+        if(minK) werte.mindestmenge_kies = minK;
+        if(minB) werte.mindestmenge_beton = minB;
+        const { error: e2 } = await sb.from('transport_werk').update(werte).eq('id', werkId);
+        if(e2) throw e2;
+        schliessen();
+        showToast('Preisliste gespeichert.');
+        await loadTransportWerke();
+      }catch(e){
+        console.error(e);
+        showToast('Fehler beim Speichern: ' + (e.message || e), true);
+        speichern.disabled = false; speichern.textContent = 'Speichern';
+      }
+    };
+  }catch(e){
+    console.error(e);
+    status(String(e.message || e), 'var(--danger)');
+  }
 }
 
 // ---------------------------------------------------------------------------

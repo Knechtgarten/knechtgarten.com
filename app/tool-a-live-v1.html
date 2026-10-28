@@ -1879,9 +1879,70 @@ async function holeLieferwagenDistanzRoh(plz){
 // Kies-/Betonwerke: eine Liste (Tabelle transport_werk, Verwaltung in
 // Einstellungen -> Sonderpositionen -> "Kies- und Betonwerke").
 let TRANSPORT_WERKE = [];
+const TRANSPORT_PREISE = {}; // werkId -> [{plz, gemeinde, ort, kies_m3, beton_m3}] (Ortslisten)
+const TRANSPORT_STUFEN = {}; // werkId -> [{bis_km, kies_m3, beton_m3}] sortiert (Distanzlisten)
+async function ladeAlleZeilen(tabelle, spalten, ordnung){
+  const alle = [];
+  for(let von = 0; ; von += 1000){
+    let q = sb.from(tabelle).select(spalten).range(von, von + 999);
+    if(ordnung) q = q.order(ordnung);
+    const { data, error } = await q;
+    if(error){ console.error(error); break; }
+    alle.push(...data);
+    if(data.length < 1000) break;
+  }
+  return alle;
+}
 async function ladeKieswerke(){
   const { data, error } = await sb.from('transport_werk').select('*').order('reihenfolge');
-  if(error){ console.error(error); } else { TRANSPORT_WERKE = data; }
+  if(error){ console.error(error); return; }
+  TRANSPORT_WERKE = data;
+  const [preise, stufen] = await Promise.all([
+    ladeAlleZeilen('transport_preis', 'werk_id, plz, gemeinde, ort, kies_m3, beton_m3', 'id'),
+    ladeAlleZeilen('transport_distanzstufe', 'werk_id, bis_km, kies_m3, beton_m3', 'bis_km')
+  ]);
+  Object.keys(TRANSPORT_PREISE).forEach(k => delete TRANSPORT_PREISE[k]);
+  Object.keys(TRANSPORT_STUFEN).forEach(k => delete TRANSPORT_STUFEN[k]);
+  preise.forEach(p => (TRANSPORT_PREISE[p.werk_id] ||= []).push(p));
+  stufen.forEach(s => (TRANSPORT_STUFEN[s.werk_id] ||= []).push(s));
+}
+
+// Ortsnamen vergleichen: ohne Gross-/Kleinschreibung, Akzente, Klammern, Sonderzeichen
+function normOrt(s){
+  return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\(.*?\)/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
+}
+// Ortsname(n) zur Postleitzahl des Kunden (Ortsverzeichnis von swisstopo) - die
+// Preislisten von Stucki/Daepp haben keine PLZ, nur Gemeinde/Ort
+const plzOrtCache = {};
+async function holeOrteZurPlz(plz){
+  if(!plz) return [];
+  if(plzOrtCache[plz]) return plzOrtCache[plz];
+  let orte = [];
+  try{
+    const res = await fetch('https://api3.geo.admin.ch/rest/services/api/SearchServer?searchText=' + encodeURIComponent(plz) + '&type=locations&origins=zipcode&limit=10');
+    const j = await res.json();
+    orte = (j.results || []).map(r => String(r.attrs?.label || '').replace(/<[^>]+>/g, '')).filter(l => l.startsWith(plz)).map(l => l.replace(/^\d+\s*-?\s*/, '')).filter(Boolean);
+  }catch(e){ console.error(e); }
+  plzOrtCache[plz] = orte;
+  return orte;
+}
+// Preis (Einkauf, CHF/m3) aus der Preisliste des Werks oder null, wenn die Liste den Ort nicht kennt.
+// Mehrere Preise fuer denselben Ort (verschiedene Weiler/Strassen): der teuerste gilt.
+function transportListenPreis(w, stoff, plz, orteNorm, km){
+  const feld = stoff + '_m3';
+  if(w.listentyp === 'distanz'){
+    const st = TRANSPORT_STUFEN[w.id] || [];
+    if(!st.length || km == null) return null;
+    const s = st.find(x => km <= Number(x.bis_km));
+    return s && s[feld] != null ? Number(s[feld]) : null;
+  }
+  const rows = TRANSPORT_PREISE[w.id] || [];
+  if(!rows.length) return null;
+  let kand = plz ? rows.filter(r => r.plz && String(r.plz).trim() === plz) : [];
+  if(!kand.length) kand = rows.filter(r => r.ort && orteNorm.has(normOrt(r.ort)));
+  if(!kand.length) kand = rows.filter(r => r.gemeinde && orteNorm.has(normOrt(r.gemeinde)));
+  const preise = kand.map(r => r[feld]).filter(p => p != null).map(Number);
+  return preise.length ? Math.max(...preise) : null;
 }
 
 // Preis pro m3 je Werk und Stoff fuer die Kunde-PLZ (einmal pro Neuberechnung):
@@ -1893,13 +1954,21 @@ let letzteTransportInfo = null;
 async function berechneTransportInfo(plz){
   const werke = TRANSPORT_WERKE.filter(w => (w.adresse || '').trim());
   const kms = await Promise.all(werke.map(w => plz ? holeKieswerkDistanzKm(w.adresse, plz) : Promise.resolve(null)));
+  const kundeOrt = alleKunden.find(k => k.id === currentKundeId)?.ort;
+  const orteNorm = new Set([...(await holeOrteZurPlz(plz)), kundeOrt].filter(Boolean).map(normOrt));
   const info = { werke: [], gewaehlt: { kies: null, beton: null }, guenstigster: { kies: null, beton: null } };
   werke.forEach((w, i) => {
     const e = { werk: w, km: kms[i], kies: null, beton: null };
     ['kies', 'beton'].forEach(stoff => {
-      if(!w['liefert_' + stoff] || e.km == null) return;
-      const einkauf = (Number(w.grundpreis_m3) || 0) + (Number(w.km_preis_m3) || 0) * e.km;
-      e[stoff] = { einkauf, verkauf: einkauf * (1 + (Number(w.marge_pct) || 0) / 100), art: 'formel' };
+      if(!w['liefert_' + stoff]) return;
+      // 1) Preisliste des Werks, 2) Formel Grundpreis + km-Preis x Strecke
+      let einkauf = transportListenPreis(w, stoff, plz, orteNorm, e.km), art = 'liste';
+      if(einkauf == null){
+        if(e.km == null) return;
+        einkauf = (Number(w.grundpreis_m3) || 0) + (Number(w.km_preis_m3) || 0) * e.km;
+        art = 'formel';
+      }
+      e[stoff] = { einkauf, verkauf: einkauf * (1 + (Number(w.marge_pct) || 0) / 100), art };
     });
     info.werke.push(e);
   });
@@ -2439,7 +2508,9 @@ async function ermittleNaechsteAdresseZeit(liste, plz){
 // auch die Personal-Variante (Chauffeur) desselben Orts dieselbe Adressliste
 // bekommen - unabhaengig davon, wie die Sonderposition umbenannt wurde.
 function lieferwagenTransportAdressliste(ort){
-  if(ort === 'kieswerk_betonwerk') return TRANSPORT_WERKE.filter(w => (w.adresse || '').trim());
+  // nur Werke, bei denen der EIGENE Lieferwagen holt (Haken in den Einstellungen) - die
+  // Preislisten der Fremdtransporte haben hier keinen Einfluss
+  if(ort === 'kieswerk_betonwerk') return TRANSPORT_WERKE.filter(w => w.lieferwagen_holt && (w.adresse || '').trim());
   if(ort === 'deponie') return DEPONIE_DISTANZ_LISTE;
   if(ort === 'magazin') return MAGAZIN_ADRESSEN_LISTE;
   return null;
