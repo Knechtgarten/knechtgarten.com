@@ -2420,14 +2420,15 @@ function renderAuswahlfeld(tsId, af){
   const markiert = optGruppeAuswahl[af.id] || new Set();
   const tabHtml = o => {
     const konflikt = optionMengenoptionKonflikt(o);
+    const gruppeMoeglich = optionGruppierbar(o);
     const konfliktTitel = 'Achtung: Mengenoption aktiv UND mindestens eine Ressourcenzeilen-Formel verweist auf eine Tabellenspalte (z.B. Flaeche) - die Menge wird dadurch doppelt gezaehlt (einmal durch die Formel, einmal durch die Mengenoption). Mengenoption eignet sich nur fuer stueckbasierte Formeln, nicht fuer Formeln die bereits eine geteilte Tabellen-Summe verwenden.';
-    const inGruppe = !!o.optionsgruppe_id;
+    const inGruppe = !!optionsgruppeId(o);
     const eckeTitel = inGruppe
       ? (markiert.size ? 'Markierte Optionen zu dieser Gruppe hinzufügen' : 'Aus der Gruppe nehmen')
       : (markiert.has(o.id) ? 'Markierung aufheben' : 'Für eine Optionsgruppe markieren (mindestens zwei Optionen)');
     return `
             <div class="opttabwrap ${o.id===activeOpt?.id?'on':''}${konflikt ? ' konflikt' : ''}" data-opt="${o.id}"${konflikt ? ` title="${escAttr(konfliktTitel)}"` : ''}>
-              <button type="button" class="optecke${(inGruppe || markiert.has(o.id)) ? ' an' : ''}" title="${eckeTitel}" aria-label="${eckeTitel}" onclick="event.stopPropagation(); klickOptionsEcke('${af.id}','${o.id}')"></button>
+              ${gruppeMoeglich ? `<button type="button" class="optecke${(inGruppe || markiert.has(o.id)) ? ' an' : ''}" title="${eckeTitel}" aria-label="${eckeTitel}" onclick="event.stopPropagation(); klickOptionsEcke('${af.id}','${o.id}')"></button>` : ''}
               <button class="opttab" onclick="waehleOption('${af.id}','${o.id}')">${o.name}</button>
               <button type="button" class="opttab-caret" onclick="event.stopPropagation(); toggleOptMenu('${o.id}')">${ICON.chevronDown}</button>
               <div class="optmenu" id="optmenu-${o.id}">
@@ -2440,9 +2441,9 @@ function renderAuswahlfeld(tsId, af){
   let tabsHtml = '';
   for(let i = 0; i < optionen.length;){
     const o = optionen[i];
-    if(!o.optionsgruppe_id){ tabsHtml += tabHtml(o); i++; continue; }
+    if(!optionsgruppeId(o)){ tabsHtml += tabHtml(o); i++; continue; }
     let j = i, inner = '';
-    while(j < optionen.length && optionen[j].optionsgruppe_id === o.optionsgruppe_id){ inner += tabHtml(optionen[j]); j++; }
+    while(j < optionen.length && optionsgruppeId(optionen[j]) === o.optionsgruppe_id){ inner += tabHtml(optionen[j]); j++; }
     tabsHtml += `<div class="optgrp" data-grp="${o.optionsgruppe_id}">
               <input type="text" class="optgrp-name" autocomplete="off" value="${escAttr(o.optionsgruppe_name || '')}" title="Name der Optionsgruppe (erscheint in Tool A als Button)" aria-label="Name der Optionsgruppe" onclick="event.stopPropagation()" onkeydown="if(event.key==='Enter') this.blur()" onblur="speichereGruppenName('${o.optionsgruppe_id}', this)">
               <div class="optgrp-tabs">${inner}</div>
@@ -2466,6 +2467,11 @@ function renderAuswahlfeld(tsId, af){
 // optionsgruppe_id erscheinen in Tool B unter einem Balken, in Tool A als EIN
 // Button mit Dropdown. Der Gruppenname steht an jeder Option der Gruppe.
 // ---------------------------------------------------------------------------
+// EINE Regel fuer alle: Gruppen gibt es nur im Formel-Modell (Tagesrechner/Tagessatz kennt keine) und nur fuer
+// Optionen OHNE Haken "Mehrfachauswahl" (Zusatzoptionen schliessen sich nicht gegenseitig aus). Tool A wendet
+// dieselbe Regel beim Laden an (optionsgruppeId = null bei Mehrfachauswahl).
+function optionGruppierbar(o){ return currentBerechnungsmodell !== 'tagessatz' && !o.mehrfachauswahl; }
+function optionsgruppeId(o){ return optionGruppierbar(o) ? (o.optionsgruppe_id || null) : null; }
 function findeAuswahlfeld(afId){
   for(const as of ARBEITSSCHRITTE) for(const ts of (as.teilschritt || [])) if(ts.auswahlfeld?.id === afId) return ts.auswahlfeld;
   return null;
@@ -2513,7 +2519,7 @@ async function klickOptionsEcke(afId, optId){
   if(!af) return;
   const optionen = af.auswahloption || [];
   const o = optionen.find(x => x.id === optId);
-  if(!o) return;
+  if(!o || !optionGruppierbar(o)) return;
   const sel = (optGruppeAuswahl[afId] = optGruppeAuswahl[afId] || new Set());
   [...sel].forEach(id => { if(!optionen.some(x => x.id === id && !x.optionsgruppe_id)) sel.delete(id); });
   if(o.optionsgruppe_id){
@@ -2550,13 +2556,21 @@ async function optionAusGruppeNehmen(af, o){
   const gid = o.optionsgruppe_id;
   const mitglieder = optionen.filter(x => x.optionsgruppe_id === gid);
   const name = o.optionsgruppe_name || 'Gruppe';
+  const frage = mitglieder.length <= 2
+    ? `Die Gruppe «${name}» auflösen? Die Optionen bleiben erhalten, nur die Gruppe verschwindet.`
+    : `Die Option «${o.name}» aus der Gruppe «${name}» entfernen?`;
+  if(!(await confirmDialog(frage))) return;
+  await optionAusGruppeEntfernen(af, o);
+}
+// Ohne Rueckfrage: Option aus ihrer Gruppe loesen (bei nur 2 Mitgliedern verschwindet die ganze Gruppe)
+async function optionAusGruppeEntfernen(af, o){
+  const optionen = af.auswahloption || [];
+  const mitglieder = optionen.filter(x => x.optionsgruppe_id === o.optionsgruppe_id);
   if(mitglieder.length <= 2){
-    if(!(await confirmDialog(`Die Gruppe «${name}» auflösen? Die Optionen bleiben erhalten, nur die Gruppe verschwindet.`))) return;
     if(!(await setzeOptionsgruppe(mitglieder.map(x => x.id), null, null))) return;
     await loadArbeitsschritte();
     return;
   }
-  if(!(await confirmDialog(`Die Option «${o.name}» aus der Gruppe «${name}» entfernen?`))) return;
   if(!(await setzeOptionsgruppe([o.id], null, null))) return;
   const rest = mitglieder.filter(x => x.id !== o.id);
   await persistReihenfolge('auswahloption', reihenfolgeMitBlock(optionen, [o.id], rest[rest.length - 1].id));
@@ -3221,6 +3235,16 @@ $('addOptConfirm').addEventListener('click', async () => {
   const eigenePosition = $('addOptEigenePositionInput').checked;
   const eigenePositionTitel = $('addOptEigenePositionTitelInput').value.trim() || null;
   if(addOptEditingId){
+    // Zusatzoption (Mehrfachauswahl) kann nicht in einer Optionsgruppe bleiben - vorher nachfragen
+    let ausGruppe = null;
+    if(mehrfachauswahl){
+      const afAlt = findeAuswahlfeldZuOption(addOptEditingId);
+      const optAlt = afAlt?.auswahloption?.find(x => x.id === addOptEditingId);
+      if(optAlt?.optionsgruppe_id){
+        if(!(await confirmDialog(`Mit «Mehrfachauswahl» kann die Option «${name}» nicht in der Gruppe «${optAlt.optionsgruppe_name || 'Gruppe'}» bleiben. Sie wird aus der Gruppe entfernt. Fortfahren?`))) return;
+        ausGruppe = { af: afAlt, opt: optAlt };
+      }
+    }
     const payload = {
       name,
       mehrfachauswahl,
@@ -3238,7 +3262,8 @@ $('addOptConfirm').addEventListener('click', async () => {
     if(error){ showToast(friendlyError(error), true); return; }
     await syncAuswahlgruppenZeile(addOptEditingId, auswahlgruppeId);
     $('addOptOverlay').classList.remove('show');
-    await loadArbeitsschritte();
+    if(ausGruppe) await optionAusGruppeEntfernen(ausGruppe.af, ausGruppe.opt);
+    else await loadArbeitsschritte();
   }else{
     if(await addOption(addOptContext, name, mengenoption, mengenoptionEinheit, mehrfachauswahl, eigenePosition, mengenoptionStandardmenge, eigenePositionTitel, verweis)) $('addOptOverlay').classList.remove('show');
   }
