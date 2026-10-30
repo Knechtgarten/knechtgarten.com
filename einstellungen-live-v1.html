@@ -116,6 +116,19 @@ tr.dragging{opacity:.4;}
 .vwopt{font-size:11px;font-weight:600;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:20px;padding:7px 13px;cursor:pointer;}
 .vwopt.on{background:var(--primary);color:#fff;border-color:var(--primary);}
 .vwoptwrap{display:inline-flex;align-items:stretch;}
+/* Optionsgruppe: ein Knopf mit Pfeil, Dropdown mit den Optionen der Gruppe (wie Tool A) */
+.vwg-wrap{position:relative;display:inline-flex;}
+.vwg{font-size:11px;font-weight:600;border:1px solid var(--line);background:#fff;color:var(--ink);padding:7px 13px;cursor:pointer;}
+.vwg.on{background:var(--primary);color:#fff;border-color:var(--primary);}
+.vwg-main{border-radius:20px 0 0 20px;}
+.vwg-arrow{border-radius:0 20px 20px 0;border-left:none;padding:7px 11px 7px 8px;display:inline-flex;align-items:center;}
+.vwg-arrow.on{border-left:1px solid rgba(255,255,255,.35);}
+.vwgruppe:has(.vwoptMenge) .vwg-arrow{border-top-right-radius:0;border-bottom-right-radius:0;}
+.vwg-menu{display:none;position:absolute;z-index:30;left:0;top:100%;margin-top:3px;min-width:150px;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.16);padding:4px;}
+.vwg-menu.show{display:block;}
+.vwg-menu button{display:block;width:100%;text-align:left;font:inherit;font-size:11.5px;color:var(--ink);background:none;border:none;border-radius:5px;padding:6px 9px;cursor:pointer;white-space:nowrap;}
+.vwg-menu button:hover{background:var(--soft,#f5f7f9);}
+.vwg-menu button.cur{font-weight:700;}
 .vwoptMenge{width:38px;font-size:11px;padding:3px 2px;text-align:center;border:1px solid var(--line);border-left:none;border-radius:0;}
 .vwoptMengeUnit{display:flex;align-items:center;font-size:10px;color:var(--muted);border:1px solid var(--line);border-left:none;border-top-right-radius:6px;border-bottom-right-radius:6px;padding:3px 6px 3px 2px;background:#fff;}
 .artikelpicker-tablewrap{max-height:460px;overflow-y:auto;margin-top:10px;}
@@ -1140,7 +1153,7 @@ async function loescheVorauswahl(id){
 
 async function ladeVorauswahlBaum(){
   const { data, error } = await sb.from('arbeitsschritt')
-    .select('id,name,reihenfolge,teilschritt(id,name,reihenfolge,auswahlfeld(id,name,auswahloption(id,name,reihenfolge,mengenoption,mengenoption_einheit,mengenoption_standardmenge)))')
+    .select('id,name,reihenfolge,teilschritt(id,name,reihenfolge,auswahlfeld(id,name,auswahloption(id,name,reihenfolge,mengenoption,mengenoption_einheit,mengenoption_standardmenge,mehrfachauswahl,optionsgruppe_id,optionsgruppe_name)))')
     .eq('offertentyp_id', vwSelectedOtId).order('reihenfolge');
   if(error){ console.error(error); VW_BAUM = []; return; }
   VW_BAUM = (data || []).map(as => ({
@@ -1153,6 +1166,42 @@ async function ladeVorauswahlBaum(){
   })).filter(as => as.teilschritte.length);
 }
 
+// Menge-Feld einer aktiven Mengenoption (neben Knopf bzw. Gruppen-Knopf)
+function vwMengeHtml(o){
+  if(!(o.mengenoption && vwEditingOptionIds.has(o.id))) return '';
+  const menge = vwEditingMengen[o.id] ?? o.mengenoption_standardmenge ?? 0;
+  return `<input type="number" min="0" step="any" class="vwoptMenge" data-opt="${o.id}" value="${menge}" title="Anzahl"><span class="vwoptMengeUnit">${o.mengenoption_einheit || 'Stk.'}</span>`;
+}
+
+// Optionen eines Auswahlfelds: einzelne Knöpfe, aufeinanderfolgende Optionen mit gleicher
+// Optionsgruppe (Tool B) als EIN Knopf mit Dropdown wie in Tool A (Mehrfachauswahl-Optionen nie gruppiert)
+function vwOptionenHtml(optionen){
+  const gid = o => (o.mehrfachauswahl ? null : o.optionsgruppe_id) || null;
+  let html = '';
+  for(let i = 0; i < optionen.length;){
+    const o = optionen[i];
+    if(!gid(o)){
+      html += `<span class="vwoptwrap">
+        <button type="button" class="vwopt ${vwEditingOptionIds.has(o.id) ? 'on' : ''}" data-opt="${o.id}" data-mengenoption="${!!o.mengenoption}" data-standardmenge="${o.mengenoption_standardmenge ?? 0}">${o.name}</button>${vwMengeHtml(o)}
+      </span>`;
+      i++; continue;
+    }
+    const mitglieder = [];
+    let j = i;
+    while(j < optionen.length && gid(optionen[j]) === gid(o)){ mitglieder.push(optionen[j]); j++; }
+    i = j;
+    const aktivesM = mitglieder.find(m => vwEditingOptionIds.has(m.id)) || null;
+    const gName = o.optionsgruppe_name || 'Gruppe';
+    html += `<span class="vwoptwrap vwgruppe">
+      <span class="vwg-wrap">
+        <button type="button" class="vwg vwg-main ${aktivesM ? 'on' : ''}">${gName}${aktivesM ? ': ' + aktivesM.name : ''}</button><button type="button" class="vwg vwg-arrow ${aktivesM ? 'on' : ''}" aria-haspopup="true" title="${gName} wählen">${ICON.chevronDown}</button>
+        <div class="vwg-menu" role="menu">${mitglieder.map(m => `<button type="button" role="menuitemradio" class="${m === aktivesM ? 'cur' : ''}" aria-checked="${m === aktivesM}" data-grpopt="${m.id}" data-mengenoption="${!!m.mengenoption}" data-standardmenge="${m.mengenoption_standardmenge ?? 0}" data-mitglieder="${mitglieder.map(x => x.id).join(',')}">${m.name}</button>`).join('')}</div>
+      </span>${aktivesM ? vwMengeHtml(aktivesM) : ''}
+    </span>`;
+  }
+  return html;
+}
+
 function renderVorauswahlBaum(){
   $('vwBaumWrap').innerHTML = VW_BAUM.map(as => `
     <div class="vwasheader">${as.name}</div>
@@ -1160,17 +1209,7 @@ function renderVorauswahlBaum(){
       <div class="vwafblock">
         <div class="vwaflabel">${ts.auswahlfeld.name}</div>
         <div class="vwoptrow">
-          ${ts.auswahlfeld.optionen.map(o => {
-            const aktiv = vwEditingOptionIds.has(o.id);
-            const zeigeMenge = o.mengenoption && aktiv;
-            const menge = vwEditingMengen[o.id] ?? o.mengenoption_standardmenge ?? 0;
-            const mengeHtml = zeigeMenge
-              ? `<input type="number" min="0" step="any" class="vwoptMenge" data-opt="${o.id}" value="${menge}" title="Anzahl"><span class="vwoptMengeUnit">${o.mengenoption_einheit || 'Stk.'}</span>`
-              : '';
-            return `<span class="vwoptwrap">
-              <button type="button" class="vwopt ${aktiv ? 'on' : ''}" data-opt="${o.id}" data-mengenoption="${!!o.mengenoption}" data-standardmenge="${o.mengenoption_standardmenge ?? 0}">${o.name}</button>${mengeHtml}
-            </span>`;
-          }).join('')}
+          ${vwOptionenHtml(ts.auswahlfeld.optionen)}
         </div>
       </div>`).join('')}
   `).join('') || '<div class="hint">Dieser Offertentyp hat noch keine Auswahlfelder in Tool B.</div>';
@@ -1185,6 +1224,32 @@ function renderVorauswahlBaum(){
     }
     renderVorauswahlBaum();
   }));
+  // Optionsgruppe: Hauptteil waehlt ab (bzw. oeffnet das Dropdown, solange nichts gewaehlt ist), Pfeil oeffnet das Dropdown
+  $('vwBaumWrap').querySelectorAll('.vwgruppe').forEach(gw => {
+    const menu = gw.querySelector('.vwg-menu');
+    const eintraege = [...menu.querySelectorAll('button[data-grpopt]')];
+    const aktiv = eintraege.find(b => vwEditingOptionIds.has(b.dataset.grpopt));
+    const oeffneMenu = e => {
+      e.stopPropagation();
+      const warOffen = menu.classList.contains('show');
+      document.querySelectorAll('.vwg-menu.show').forEach(m => m.classList.remove('show'));
+      if(!warOffen) menu.classList.add('show');
+    };
+    gw.querySelector('.vwg-arrow').addEventListener('click', oeffneMenu);
+    gw.querySelector('.vwg-main').addEventListener('click', e => {
+      if(aktiv){ vwEditingOptionIds.delete(aktiv.dataset.grpopt); renderVorauswahlBaum(); }
+      else oeffneMenu(e);
+    });
+    eintraege.forEach(b => b.addEventListener('click', e => {
+      e.stopPropagation();
+      if(b === aktiv){ menu.classList.remove('show'); return; }
+      eintraege.forEach(x => vwEditingOptionIds.delete(x.dataset.grpopt));
+      const id = b.dataset.grpopt;
+      vwEditingOptionIds.add(id);
+      if(b.dataset.mengenoption === 'true' && vwEditingMengen[id] == null) vwEditingMengen[id] = parseFloat(b.dataset.standardmenge) || 0;
+      renderVorauswahlBaum();
+    }));
+  });
   $('vwBaumWrap').querySelectorAll('.vwoptMenge').forEach(inp => {
     inp.addEventListener('click', e => e.stopPropagation());
     inp.addEventListener('change', () => {
@@ -1194,6 +1259,8 @@ function renderVorauswahlBaum(){
     });
   });
 }
+
+document.addEventListener('click', () => document.querySelectorAll('.vwg-menu.show').forEach(m => m.classList.remove('show')));
 
 function aktualisiereVwEditorTitel(){
   const name = $('vwNameInput').value.trim();
