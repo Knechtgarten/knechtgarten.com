@@ -181,6 +181,24 @@ button:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
 #tip b{display:block;}
 #tip span{display:block;color:var(--muted);font-size:12px;margin-top:4px;}
 .zhint{font-size:11px;color:var(--muted);padding:4px 4px 6px;}
+/* Offerten: Chance als drei Balken (tief / mittel / hoch), fällig = rotes Telefon, Erinnerung in «Heute» */
+.chance{all:unset;display:inline-flex;align-items:flex-end;gap:2px;height:14px;padding:0 2px;cursor:pointer;flex:none;}
+.chance i{width:4px;border-radius:1px;background:#D5DAE0;}
+.chance i:nth-child(1){height:5px;} .chance i:nth-child(2){height:9px;} .chance i:nth-child(3){height:13px;}
+.chance.c1 i:nth-child(1){background:#8E5B4A;}
+.chance.c2 i:nth-child(-n+2){background:#9A8A3A;}
+.chance.c3 i{background:#5F8A6B;}
+.faellig{display:inline-flex;color:var(--red);}
+.faellig svg{width:13px !important;height:13px !important;}
+.wdat{font-size:11px;color:var(--muted);}
+.erinn{all:unset;box-sizing:border-box;background:#fff;border-radius:6px;height:30px;display:flex;align-items:center;gap:6px;padding:0 6px;cursor:pointer;border:1px dashed #C9CFD5;flex:none;}
+.erinn:hover{border-color:var(--primary);}
+.erinn .ty{width:21px;height:21px;border-radius:5px;display:inline-flex;align-items:center;justify-content:center;color:#fff;flex:none;}
+.erinn .ty svg{width:17px;height:17px;}
+.erinn .tx{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13.5px;}
+.erinn .etag{font-size:11px;font-weight:700;color:var(--red);flex:none;}
+.ofrow{display:flex;flex-wrap:wrap;align-items:center;gap:8px;}
+.ofrow .seg .chance{cursor:inherit;margin-right:4px;}
 
 /* Popover */
 .pop{position:fixed;z-index:25;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 30px rgba(35,43,53,.18);padding:10px;display:flex;flex-direction:column;gap:9px;}
@@ -330,7 +348,11 @@ const AI = {
   jahr:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   bereich:'<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16"/>',
   pin:'<path d="M9 3h6l-1 6 3 3v2H7v-2l3-3z"/><path d="M12 14v7"/>',
-  bild:'<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M21 15l-5-5L5 20"/>'
+  bild:'<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M21 15l-5-5L5 20"/>',
+  senden:'<path d="M21 3L10 14"/><path d="M21 3l-7 18-4-7-7-4z"/>',
+  zurueck:'<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-3"/>',
+  stumm:'<path d="M4 5h16v11H9l-5 4z"/><path d="M3 3l18 18"/>',
+  absage:'<circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/>'
 };
 const A = (n, s) => `<svg class="i" viewBox="0 0 24 24"${s ? ` style="width:${s}px;height:${s}px"` : ''}>${AI[n] || AI.dok}</svg>`;
 const ZEIT = [null, { t:'Heute', c:'var(--z1)', icon:'sonne', hell:true }, { t:'Diese Woche', c:'var(--z2)', icon:'woche', hell:true }, { t:'Dieser Monat', c:'var(--z3)', icon:'monat', hell:true }];
@@ -342,7 +364,7 @@ const R = 20, LW = 320;
 
 let ME = null, ROLLE = null;
 const S = { boards:[], mitglieder:[], archiv:null, pick:null, arten:{}, board:null, listen:[], gruppen:[], pz:[], dateien:[], benutzer:{}, ein:{ oeffnen:'fenster', breiten:{}, farben:{}, notizzettel:'' },
-  sel:null, del:false, delDatei:null, delListe:false, pop:null, zpick:null, neuListe:false, set:false, zettel:false, toast:null, urls:{}, splitOn:null, pwLast:{ zeit:360, team:380 } };
+  erinn:[], ofMeine:false, sel:null, del:false, delDatei:null, delListe:false, pop:null, zpick:null, neuListe:false, set:false, zettel:false, toast:null, urls:{}, splitOn:null, pwLast:{ zeit:360, team:380 } };
 
 // ---------------------------------------------------------------------------
 // Helfer
@@ -350,7 +372,17 @@ const S = { boards:[], mitglieder:[], archiv:null, pick:null, arten:{}, board:nu
 const art = id => S.arten[id] || { titel:'?', icon:'dok', farbe:'#8B9097' };
 const artFarbe = id => S.ein.farben[id] || art(id).farbe;
 const listeById = id => S.listen.find(l => l.id === id);
-const fixListe = l => l.art_id === 'team' || l.art_id === 'notizen'; // Eingangs-Listen: fester Name, nicht löschbar
+const OF = id => !!id && id.startsWith('of_'); // Listen des Offerten-Boards (Zugestellt … Abgesagt)
+const istOfferten = () => S.board?.typ === 'offerten';
+const ofBoard = () => S.boards.find(b => b.typ === 'offerten');
+const fixListe = l => l.art_id === 'team' || l.art_id === 'notizen' || OF(l.art_id); // Eingangs-Listen: fester Name, nicht löschbar
+const CHANCE = ['offen', 'tief', 'mittel', 'hoch'];
+// Offerte fällig: 14 Tage in Zugestellt / Nachgefasst, oder «wieder anschauen am» erreicht (Meldet sich wieder ohne Datum: 14 Tage)
+function faellig(p, l){ if(!l) return false; const tage = (Date.now() - new Date(p.liste_seit || p.erstellt_am)) / 864e5;
+  if(l.art_id === 'of_zugestellt' || l.art_id === 'of_nachgefasst') return tage >= 14;
+  if(l.art_id === 'of_meldet' || l.art_id === 'of_aufgeschoben') return p.wieder_am ? p.wieder_am <= isoTag(new Date()) : l.art_id === 'of_meldet' && tage >= 14;
+  return false; }
+const ofVon = p => p.offerte_von || p.erstellt_von;
 const listFarbe = l =>l.farbe || artFarbe(l.art_id); // eigene Listenfarbe, sonst Farbe der Pendenzenart
 const bereichOf = l => l.bereich || 'mitte';
 // Drei Bereiche (zeit, mitte, team) in frei wählbarer Reihenfolge: aussen eingestellte Breite, Mitte = Rest
@@ -358,7 +390,7 @@ const SEITE_MIN = LW + 2 * R, STD_BREITE = { zeit:SEITE_MIN, mitte:680, team:SEI
 const breite = b => { const v = S.ein.breiten[b] ?? STD_BREITE[b]; return v <= 60 || b === 'mitte' ? v : Math.max(v, SEITE_MIN); };
 // fest für alle; eigenes Board: Zeit | Arten | Team, gemeinsame Boards: Arten | Team. Jede Liste bleibt in ihrem Bereich
 // Reihenfolge pro Person (am Griff tauschbar), gespeichert in pendenz_benutzer.breiten._reihe / _reiheG
-const reihe = () => { const eigen = S.board?.typ === 'person', std = eigen ? ['zeit', 'mitte', 'team'] : ['mitte', 'team'], r = S.ein.breiten[eigen ? '_reihe' : '_reiheG'];
+const reihe = () => { if(istOfferten()) return ['mitte']; const eigen = S.board?.typ === 'person', std = eigen ? ['zeit', 'mitte', 'team'] : ['mitte', 'team'], r = S.ein.breiten[eigen ? '_reihe' : '_reiheG'];
   return Array.isArray(r) && r.length === std.length && std.every(z => r.includes(z)) ? r : std; };
 const bereichFuerArt = artId => artId === 'team' || artId === 'notizen' ? 'team' : 'mitte'; // rechts: Team-box und Dauernde Notizen
 const platz = () => innerWidth - 9 * (reihe().length - 1);
@@ -375,7 +407,7 @@ const lBreite = l => Math.min(l.breite || LW, KAPPE), lX = l => Math.max(0, Math
 function modusFuer(ls, w, zn){ if(w <= 60) return 'schmal'; if(zn !== 'mitte') return 'frei'; return w >= Math.max(0, ...ls.map(l => l.x + (l.breite || LW))) + R ? 'frei' : 'spalten'; }
 const sortiert = l => S.pz.filter(p => p.liste_id === l.id).sort((a, b) => a.sortierung - b.sortierung || a.erstellt_am.localeCompare(b.erstellt_am));
 const zeitIds = z => S.pz.filter(p => p.zeit === z).sort((a, b) => (a.zeit_sortierung ?? 1e12) - (b.zeit_sortierung ?? 1e12) || a.sortierung - b.sortierung);
-const estH = l => 44 + (l.zu ? 0 : (l.zeit ? zeitIds(l.zeit) : sortiert(l)).length * 34 + S.gruppen.filter(g => g.liste_id === l.id).length * 30 + 46);
+const estH = l => 44 + (l.zu ? 0 : ((l.zeit ? zeitIds(l.zeit) : sortiert(l)).length + (l.zeit === 1 ? S.erinn.length : 0)) * 34 + S.gruppen.filter(g => g.liste_id === l.id).length * 30 + 46);
 const avatar = uid => { const b = S.benutzer[uid]; if(!b) return ''; const n = b.anzeigename || b.email || '?'; const k = n.split(/[\s.@]+/).filter(Boolean).slice(0, 2).map(x => x[0].toUpperCase()).join('');
   let h = 0; for(const c of uid) h = (h * 31 + c.charCodeAt(0)) >>> 0; const pf = S.pfarbe?.[uid]; // Personenfarbe, sonst feste Ersatzfarbe
   return `<span class="av" style="background:${pf || AVF[h % AVF.length]}${pf ? ';color:var(--ink)' : ''}" title="${esc(n)}">${esc(k)}</span>`; };
@@ -451,7 +483,8 @@ async function ladeAlles(){
     const { data: gb } = ids.length ? await sb.from('pendenz_board').select('*').in('id', ids).neq('typ', 'person').order('name') : { data: [] };
     S.boards = [eigen, ...(gb || [])];
     let gew = null; try { gew = localStorage.getItem('pz_board'); } catch(e){}
-    S.board = S.boards.find(b => b.id === gew) || eigen;
+    const [gid, gm] = (gew || '').split('|');
+    S.board = S.boards.find(b => b.id === gid) || eigen; S.ofMeine = gm === 'm';
     await ladeBoard();
   } catch(e){ fehler(e, 'Laden'); }
 }
@@ -464,12 +497,26 @@ async function ladeBoard(){
   ]);
   if(rg.error) return fehler(rg.error); if(rp.error) return fehler(rp.error);
   S.gruppen = rg.data; S.pz = rp.data;
+  if(istOfferten()){ // abgesagte Offerten nach 30 Tagen ins Archiv; Ansicht «meine» = nur eigene Offerten
+    const ab = ls.find(l => l.art_id === 'of_abgesagt'), alt = ab ? S.pz.filter(p => p.liste_id === ab.id && Date.now() - new Date(p.liste_seit) > 30 * 864e5) : [];
+    if(alt.length){ const { error: ea } = await sb.from('pendenz').update({ erledigt: true, erledigt_am: new Date().toISOString(), offerte_status: 'abgesagt' }).in('id', alt.map(p => p.id));
+      if(!ea) S.pz = S.pz.filter(p => !alt.includes(p)); }
+    if(S.ofMeine) S.pz = S.pz.filter(p => ofVon(p) === ME); }
+  S.erinn = S.board.typ === 'person' ? await ladeErinnerungen() : [];
   S.mitglieder = [];
   if(S.board.typ !== 'person'){ const { data: mm } = await sb.from('pendenz_board_mitglied').select('benutzer_id').eq('board_id', S.board.id); S.mitglieder = (mm || []).map(m => m.benutzer_id); }
   const pids = S.pz.map(p => p.id);
   S.dateien = [];
   for(let i = 0; i < pids.length; i += 200){ const { data } = await sb.from('pendenz_datei').select('*').in('pendenz_id', pids.slice(i, i + 200)); S.dateien.push(...(data || [])); }
   zeichne();
+}
+// eigene Offerten, die fällig sind → erscheinen in «Heute» (nur Hinweis; verschoben wird im Offerten-Board)
+async function ladeErinnerungen(){
+  const ob = ofBoard(); if(!ob) return [];
+  const { data: ol } = await sb.from('pendenz_liste').select('id,art_id,titel,farbe').eq('board_id', ob.id); if(!ol?.length) return [];
+  const { data: op } = await sb.from('pendenz').select('id,titel,liste_id,liste_seit,erstellt_am,wieder_am,offerte_von,erstellt_von').in('liste_id', ol.map(l => l.id)).eq('erledigt', false);
+  return (op || []).filter(p => ofVon(p) === ME).map(p => ({ p, l: ol.find(l => l.id === p.liste_id) })).filter(x => faellig(x.p, x.l))
+    .sort((a, b) => a.p.liste_seit.localeCompare(b.p.liste_seit));
 }
 let rzTimer = null;
 window.addEventListener('resize', () => { clearTimeout(rzTimer); rzTimer = setTimeout(() => { if(S.board && !ld && !sd) zeichne(); }, 150); });
@@ -485,7 +532,11 @@ function pdHtml(p, opt = {}){
   if(fs.some(d => d.art !== 'mail')) ind.push(K('foto', 12));
   if(p.planer_einsatz_id) ind.push(`<span title="Im Einsatzplaner">${K('kalender', 12)}</span>`);
   // gemeinsames Board: keine Zeit, Streifen links in der Pendenzen-Farbe der Person, die sie eingetragen hat; eigenes Board: Zeit-Streifen, Avatar bei fremden
-  const gemeinsam = S.board.typ !== 'person', pf = gemeinsam && S.pfarbe?.[p.erstellt_von], notiz = l.art_id === 'notizen';
+  const gemeinsam = S.board.typ !== 'person', pf = gemeinsam && S.pfarbe?.[istOfferten() ? ofVon(p) : p.erstellt_von], notiz = l.art_id === 'notizen';
+  // Offerten: «wieder anschauen am», rotes Telefon wenn fällig, Chance als drei Balken (Klick = nächste Stufe)
+  if(OF(l.art_id)){ if(p.wieder_am) ind.push(`<span class="wdat" title="Wieder anschauen am">${esc(new Date(p.wieder_am).toLocaleDateString('de-CH', { day:'numeric', month:'numeric' }))}</span>`);
+    if(faellig(p, l)) ind.push(`<span class="faellig" title="Nachfassen fällig">${A('telefon')}</span>`);
+    ind.push(`<button class="chance c${p.chance || 0}" data-chance="${p.id}" aria-label="Chance: ${CHANCE[p.chance || 0]}" title="Chance: ${CHANCE[p.chance || 0]}"><i></i><i></i><i></i></button>`); }
   if(!gemeinsam && p.erstellt_von && p.erstellt_von !== ME) ind.push(avatar(p.erstellt_von));
   // Team-box: vorne die Herkunft – rotes Mail-Icon (per Mail), Pfeil (von einem Kollegen im Tool zugeschoben)
   const herkunft = l.art_id === 'team' && p.herkunft ? `<span class="herk ${p.herkunft}" title="${p.herkunft === 'mail' ? 'Per Mail gekommen' : 'Von einem Kollegen zugeschoben'}">${p.herkunft === 'mail' ? A('brief') : K('senden', 14)}</span>` : '';
@@ -500,14 +551,16 @@ function listHtml(l){
   let kopf, body;
   if(l.zeit){ const z = ZEIT[l.zeit], ps = zeitIds(l.zeit);
     kopf = `<div class="lh${z.hell ? ' hell' : ''}" data-drag="${l.id}" style="background:${z.c}"><button class="tog" data-tog="${l.id}" aria-label="Auf-/zuklappen">${K('chev')}</button>${A(z.icon)}<b>${esc(z.t)}</b></div>`;
-    body = `<div class="cards" data-drop="${l.id}">${ps.map(p => pdHtml(p, { zeit:true })).join('')}</div>`
+    const erinn = l.zeit === 1 ? S.erinn.map(({ p, l: ol }) => `<button class="erinn" data-erinn="${p.id}" title="Im Offerten-Board öffnen"><span class="ty" style="background:${ol.farbe || artFarbe(ol.art_id)}">${A(art(ol.art_id).icon)}</span><span class="tx">${esc(p.titel)}</span><span class="etag">${ol.art_id === 'of_aufgeschoben' || (ol.art_id === 'of_meldet' && p.wieder_am) ? 'wieder anschauen' : 'nachfassen'}</span></button>`).join('') : '';
+    body = `<div class="cards" data-drop="${l.id}">${erinn}${ps.map(p => pdHtml(p, { zeit:true })).join('')}</div>`
       + `<div class="ladd"><input type="text" id="add-${l.id}" placeholder="+ Pendenz" aria-label="Neue Pendenz für ${esc(z.t)}"><button class="kg-ibtn${recZiel === 'add-' + l.id ? ' on' : ''}" data-mic="add-${l.id}" aria-label="Sprechen" title="Sprechen">${K('mikrofon')}</button><button class="kg-ibtn" data-add="${l.id}" aria-label="Hinzufügen">${K('plus')}</button></div>`;
   } else { const a = art(l.art_id), gs = S.gruppen.filter(g => g.liste_id === l.id), ps = sortiert(l);
     kopf = `<div class="lh" data-drag="${l.id}" style="background:${listFarbe(l)}"><button class="tog" data-tog="${l.id}" aria-label="Auf-/zuklappen">${K('chev')}</button>${A(a.icon)}<b>${esc(l.titel)}</b><button class="kg-ibtn" data-set="${l.id}" aria-label="Liste einstellen">${K('gear')}</button></div>`;
     body = `<div class="cards" data-drop="${l.id}">${ps.filter(p => !p.gruppe_id).map(p => pdHtml(p)).join('')}</div>`
       + gs.map(g => `<div class="gh${g.zu ? ' zu' : ''}" data-gtog="${g.id}"><span class="tog">${K('chev')}</span>${esc(g.titel)}</div><div class="cards gcards" data-drop="${l.id}" data-grp="${g.id}">${ps.filter(p => p.gruppe_id === g.id).map(p => pdHtml(p)).join('')}</div>`).join('')
-      + (l.art_id === 'team' ? '' : `<div class="ladd"><input type="text" id="add-${l.id}" placeholder="${l.art_id === 'notizen' ? '+ Notiz' : '+ Pendenz'}" aria-label="Neue ${l.art_id === 'notizen' ? 'Notiz' : 'Pendenz'} in ${esc(l.titel)}"><button class="kg-ibtn${recZiel === 'add-' + l.id ? ' on' : ''}" data-mic="add-${l.id}" aria-label="Sprechen" title="Sprechen">${K('mikrofon')}</button><button class="kg-ibtn" data-add="${l.id}" aria-label="Hinzufügen">${K('plus')}</button></div>`)
-      + (l.art_id === 'team' && !ps.length ? '<div class="zhint">Hier landet, was dir Kollegen zuschieben.</div>' : '');
+      + (l.art_id === 'team' || (OF(l.art_id) && l.art_id !== 'of_zugestellt') ? '' : `<div class="ladd"><input type="text" id="add-${l.id}" placeholder="${l.art_id === 'notizen' ? '+ Notiz' : '+ Pendenz'}" aria-label="Neue ${l.art_id === 'notizen' ? 'Notiz' : 'Pendenz'} in ${esc(l.titel)}"><button class="kg-ibtn${recZiel === 'add-' + l.id ? ' on' : ''}" data-mic="add-${l.id}" aria-label="Sprechen" title="Sprechen">${K('mikrofon')}</button><button class="kg-ibtn" data-add="${l.id}" aria-label="Hinzufügen">${K('plus')}</button></div>`)
+      + (l.art_id === 'team' && !ps.length ? '<div class="zhint">Hier landet, was dir Kollegen zuschieben.</div>' : '')
+      + (l.art_id === 'of_abgesagt' ? '<div class="zhint">Kommt nach 30 Tagen automatisch ins Archiv.</div>' : '');
   }
   // Pendenzenarten in der Mitte: Hintergrund ganz fein in der Titelfarbe
   const tint = !l.zeit && bereichOf(l) === 'mitte' ? `;background:color-mix(in srgb, ${listFarbe(l)} 9%, #F5F7F9)` : '';
@@ -518,8 +571,10 @@ function zeichne(){
   $('hknoepfe').innerHTML = `<button class="hbtn" data-archivo aria-label="Archiv" title="Archiv">${K('archiv', 16)}</button><button class="hbtn" data-zettel aria-pressed="${S.zettel}" aria-label="Notizzettel" title="Notizzettel">${K('notiz', 16)}</button><button class="hbtn" data-seto aria-label="Einstellungen" title="Einstellungen">${K('gear', 16)}</button>`;
   const bname = b => b.typ === 'person' ? 'Mein Board' : b.name;
   const bw = anzeigeBreiten();
-  const sel = S.boards.length > 1 ? `<select id="bsel" class="bsel" aria-label="Board wechseln">${S.boards.map(b => `<option value="${b.id}"${b.id === S.board.id ? ' selected' : ''}>${esc(bname(b))}</option>`).join('')}</select>` : `<span class="bname bsel">${esc(bname(S.board))}</span>`;
-  const dzs = [['archiv', 'archiv', 'Archivieren'], ['board', 'senden', 'In anderes Board'], ['planer', 'kalender', 'In den Planer']].map(([z, ic, t]) => `<span class="dz bslot" data-dzone="${z}">${K(ic, 15)}${t}</span>`).join('');
+  // Offerten-Board zweimal in der Auswahl: «meine» (nur eigene Offerten) und «alle» (mit Farbstreifen pro Person)
+  const opts = S.boards.flatMap(b => b.typ === 'offerten' ? [[b.id + '|m', 'Offerten – meine', b.id === S.board.id && S.ofMeine], [b.id, 'Offerten – alle', b.id === S.board.id && !S.ofMeine]] : [[b.id, bname(b), b.id === S.board.id]]);
+  const sel = opts.length > 1 ? `<select id="bsel" class="bsel" aria-label="Board wechseln">${opts.map(([v, t, s]) => `<option value="${v}"${s ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select>` : `<span class="bname bsel">${esc(bname(S.board))}</span>`;
+  const dzs = (istOfferten() ? [['archiv', 'archiv', 'Archivieren'], ['board', 'senden', 'In anderes Board'], ['zusage', 'check', 'Zugesagt → Planung']] : [['archiv', 'archiv', 'Archivieren'], ['board', 'senden', 'In anderes Board'], ['planer', 'kalender', 'In den Planer']]).map(([z, ic, t]) => `<span class="dz bslot" data-dzone="${z}">${K(ic, 15)}${t}</span>`).join('');
   $('bbar').innerHTML = `<span class="bflow"><span class="bslot bselw">${sel}</span>${dzs}</span>`
     + '<span class="brechts"></span>';
   $('main').innerHTML = `<div class="zones">${reihe().map((zn, i) => { const ls = S.listen.filter(l => bereichOf(l) === zn), w = bw[zn], modus = modusFuer(ls, w, zn); KAPPE = zn === 'mitte' ? Infinity : w - 2 * R;
@@ -538,7 +593,7 @@ function zeichne(){
     // Linie zwischen zwei festen Bereichen: der eine wird breiter, der andere gleich viel schmaler – nur diese Linie bewegt sich.
     const vor = reihe()[i - 1], paar = vor !== 'mitte' && zn !== 'mitte', fest = vor === 'mitte' ? zn : vor, links = fest === vor;
     return (i ? `<div class="split${S.splitOn === (paar ? vor + '|' + zn : fest) ? ' on' : ''}" ${paar ? `data-paar="${vor}|${zn}"` : `data-split="${fest}" data-links="${links ? 1 : 0}"`} role="separator" aria-label="Breite ändern"><span class="grip"></span></div>` : '')
-      + `<div class="pane ${zn === 'mitte' ? 'flex' : 'seite'}${modus === 'schmal' ? ' schmal' : ''}" data-pane="${zn}"${zn !== 'mitte' ? ` style="width:${w}px"` : ''}><div class="ptitle"><span class="pgriff" data-pgriff="${zn}" title="Bereich verschieben: ziehen und auf einen anderen Bereich fallen lassen">${KG.icon('griff', 14)}</span>${A(BEREICHE[zn][1], 13)}<span>${BEREICHE[zn][0]}</span>${zn === 'mitte' ? `<button class="btn btn-primary bneu" data-neuliste>${K('plus', 13)}Liste</button>` : ''}</div>${inhalt}</div>`; }).join('')}</div>`;
+      + `<div class="pane ${zn === 'mitte' ? 'flex' : 'seite'}${modus === 'schmal' ? ' schmal' : ''}" data-pane="${zn}"${zn !== 'mitte' ? ` style="width:${w}px"` : ''}><div class="ptitle">${istOfferten() ? `${A('dok', 13)}<span>Offerten${S.ofMeine ? ' – meine' : ' – alle'}</span>` : `<span class="pgriff" data-pgriff="${zn}" title="Bereich verschieben: ziehen und auf einen anderen Bereich fallen lassen">${KG.icon('griff', 14)}</span>${A(BEREICHE[zn][1], 13)}<span>${BEREICHE[zn][0]}</span>`}${zn === 'mitte' && !istOfferten() ? `<button class="btn btn-primary bneu" data-neuliste>${K('plus', 13)}Liste</button>` : ''}</div>${inhalt}</div>`; }).join('')}</div>`;
   KAPPE = Infinity;
   document.querySelectorAll('[data-cv]').forEach(c => { const s = sc[c.dataset.cv]; if(s){ c.scrollLeft = s[0]; c.scrollTop = s[1]; } });
   entzerren();
@@ -599,12 +654,15 @@ function detHtml(){
     <div class="hd"><span class="ty" style="background:${kopfFarbe}" title="${esc(l.titel)}">${A(a.icon)}</span><input type="text" id="dtxt" value="${esc(p.titel)}" aria-label="Titel"><button class="kg-ibtn" data-close aria-label="Schliessen">${K('x')}</button></div>
     ${p.erstellt_von && p.erstellt_von !== ME ? `<div class="von">von ${avatar(p.erstellt_von)} ${esc(name(p.erstellt_von))}</div>` : ''}
     ${S.board.typ === 'person' && l.art_id !== 'notizen' ? `<div class="seg" role="group" aria-label="Zeit">${[1,2,3,0].map(z => `<button data-dz="${z}" aria-pressed="${p.zeit === z}">${z ? `<i style="background:${ZEIT[z].c}"></i>${ZEIT[z].t}` : 'Irgendwann'}</button>`).join('')}</div>` : ''}
+    ${OF(l.art_id) ? `<div class="ofrow"><span class="small muted">Chance</span><div class="seg" role="group" aria-label="Chance">${[1,2,3,0].map(c => `<button data-dchance="${c}" aria-pressed="${(p.chance || 0) === c}">${c ? `<span class="chance c${c}"><i></i><i></i><i></i></span>` : ''}${CHANCE[c]}</button>`).join('')}</div>
+      ${l.art_id === 'of_meldet' || l.art_id === 'of_aufgeschoben' ? `<label class="small muted" for="dwieder">Wieder anschauen am</label><input type="date" id="dwieder" value="${esc(p.wieder_am || '')}">` : ''}
+      ${p.offerte_von && p.offerte_von !== ME ? `<span class="small muted">Offerte von ${esc(name(p.offerte_von))}</span>` : ''}</div>` : ''}
     <div class="ed">${editorHtml('det', p.notiz, 'Notiz schreiben …')}</div>
     <div class="strip"><div class="lab">${K('foto', 13)}Fotos und Dateien</div><div class="tiles">${rest.map(dateiTile).join('')}<label class="fadd" title="Fotos oder Dateien hinzufügen">${K('plus')}<input type="file" id="dupload" multiple hidden></label></div></div>
     ${mails.length ? `<div class="strip"><div class="lab">${A('brief', 13)}Mails und Anhänge</div><div class="tiles">${mails.map(dateiTile).join('')}</div></div>` : ''}
     ${dd ? `<div class="confirm">«${esc(dd.name)}» wirklich löschen?<span class="sp"></span><button class="btn btn-ghost" data-ddno>Abbrechen</button><button class="btn btn-danger" data-ddyes>Löschen</button></div>` : ''}
     ${p.planer_einsatz_id ? `<div class="strip"><div class="lab">${K('kalender', 13)}Im Einsatzplaner</div><a class="small" href="einsatzplaner-live-v1.html" target="_blank" rel="noopener">Offener Auftrag – im Planer anschauen</a></div>` : ''}
-    <div class="foot"><span class="sp"></span><button class="btn btn-ghost" data-archiv="${p.id}">${K('archiv', 15)}Archivieren</button></div>
+    <div class="foot"><span class="sp"></span>${OF(l.art_id) ? `<button class="btn btn-ghost" data-zusage="${p.id}">${K('check', 15)}Zugesagt → Planung</button>` : ''}<button class="btn btn-ghost" data-archiv="${p.id}">${K('archiv', 15)}Archivieren</button></div>
   </aside>`;
 }
 function zeichneOver(){
@@ -669,7 +727,7 @@ async function upd(tab, id, patch, key = 'id'){ const { error } = await sb.from(
 async function neuePendenz(l, titel, gruppe_id = null){
   const max = Math.max(0, ...S.pz.filter(p => p.liste_id === l.id).map(p => p.sortierung));
   // in einer Zeitliste erfasst: gehört direkt zu ihr (ohne Pendenzenart) und hat deren Zeit
-  const { data, error } = await sb.from('pendenz').insert({ liste_id: l.id, gruppe_id, titel, zeit: l.zeit || 0, sortierung: max + 1, erstellt_von: ME }).select().single();
+  const { data, error } = await sb.from('pendenz').insert({ liste_id: l.id, gruppe_id, titel, zeit: l.zeit || 0, sortierung: max + 1, erstellt_von: ME, ...(OF(l.art_id) ? { offerte_von: ME } : {}) }).select().single();
   if(error) return fehler(error, 'Erfassen');
   S.pz.push(data); zeichne();
 }
@@ -682,8 +740,18 @@ function setzeZeit(p, z){
 }
 async function archivieren(p){
   S.pz = S.pz.filter(x => x !== p); if(S.sel === p.id) S.sel = null; zeichne();
-  if(!(await upd('pendenz', p.id, { erledigt: true, erledigt_am: new Date().toISOString(), erledigt_von: ME }))){ S.pz.push(p); return zeichne(); }
-  toast('Archiviert', async () => { if(await upd('pendenz', p.id, { erledigt: false, erledigt_am: null, erledigt_von: null })){ S.pz.push(p); zeichne(); } });
+  const l = listeById(p.liste_id), st = OF(l?.art_id) ? { offerte_status: l.art_id === 'of_abgesagt' ? 'abgesagt' : 'archiviert' } : {};
+  if(!(await upd('pendenz', p.id, { erledigt: true, erledigt_am: new Date().toISOString(), erledigt_von: ME, ...st }))){ S.pz.push(p); return zeichne(); }
+  toast('Archiviert', async () => { if(await upd('pendenz', p.id, { erledigt: false, erledigt_am: null, erledigt_von: null, ...(st.offerte_status ? { offerte_status: null } : {}) })){ S.pz.push(p); zeichne(); } });
+}
+// Offerte zugesagt → Büro-Board, Liste «Planung» (bleibt mit Status «zugesagt» für spätere Auswertungen)
+async function zusagen(p){
+  const { data: pl, error } = await sb.from('pendenz_liste').select('id').eq('rolle', 'planung').maybeSingle();
+  if(error) return fehler(error, 'Planung'); if(!pl) return toast('Liste «Planung» im Büro-Board nicht gefunden.', null, true);
+  const alt = { liste_id: p.liste_id, gruppe_id: p.gruppe_id, offerte_status: p.offerte_status || null };
+  if(!(await upd('pendenz', p.id, { liste_id: pl.id, gruppe_id: null, offerte_status: 'zugesagt', offerte_von: ofVon(p) }))) return;
+  S.pz = S.pz.filter(x => x !== p); if(S.sel === p.id) S.sel = null; zeichne();
+  toast('Zugesagt – liegt jetzt im Büro-Board unter «Planung»', async () => { if(await upd('pendenz', p.id, alt)){ Object.assign(p, alt); S.pz.push(p); zeichne(); } });
 }
 const isoTag = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const naechsterWerktag = () => { const d = new Date(); d.setDate(d.getDate() + 1); while(d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1); return isoTag(d); };
@@ -706,7 +774,8 @@ async function oeffnePick(artZiel, p){
     const rang = x => !x.farbe ? 2 : (() => { const [r, g, b] = rgbVon(x.farbe); return b > r && b >= g ? 0 : 1; })();
     Object.values(spalte).forEach(l => l.sort((u, v) => rang(u) - rang(v) || hellwert(u.farbe || '#FFFFFF') - hellwert(v.farbe || '#FFFFFF')));
     if(S.pick) S.pick.daten = { boards: S.boards.filter(b => b.id !== S.board.id), buero, spalten: [spalte.rest, spalte.pflege, spalte.bau] };
-    if(S.pick) S.pick.sel = new Set();
+    // aus der Liste «Offerten»: Offerten-Board schon angehakt (kommt dort in «Zugestellt»)
+    const ob = ofBoard(); if(S.pick) S.pick.sel = new Set(ob && ob.id !== S.board.id && listeById(p.liste_id)?.art_id === 'offerte' ? ['b:' + ob.id] : []);
   }
   zeichneOver();
 }
@@ -725,17 +794,19 @@ function farbSpalte(hex){
 // Mitarbeitende bekommen sie in ihre Pendenzen im Einsatzplaner («Heute»). Nur Mitarbeitende gewählt = Pendenz hier archivieren.
 async function sendePick(){
   const pk = S.pick, p = S.pz.find(x => x.id === pk.id); if(!p || !pk.sel.size) return;
-  const ziele = [...pk.sel], listen = [], namen = [];
+  const ziele = [...pk.sel], listen = [], namen = [], ofl = new Set();
+  // Offerten-Board: in «Zugestellt», die Offerte gehört dann mir (für «meine» und die Erinnerung)
+  const zusatz = lid => ofl.has(lid) ? { herkunft: null, offerte_von: ME } : { herkunft: 'board' };
   try {
     for(const z of ziele){ const [typ, id] = z.split(':');
-      if(typ === 'b'){ const b = S.boards.find(x => x.id === id); const { data } = await sb.from('pendenz_liste').select('id,art_id').eq('board_id', id); const l = (data || []).find(x => x.art_id === 'team') || (data || [])[0]; if(l){ listen.push(l.id); namen.push(b.typ === 'person' ? 'Mein Board' : b.name); } }
+      if(typ === 'b'){ const b = S.boards.find(x => x.id === id); const { data } = await sb.from('pendenz_liste').select('id,art_id').eq('board_id', id); const l = (data || []).find(x => x.art_id === 'team' || x.art_id === 'of_zugestellt') || (data || [])[0]; if(l){ listen.push(l.id); if(l.art_id === 'of_zugestellt') ofl.add(l.id); namen.push(b.typ === 'person' ? 'Mein Board' : b.name); } }
       if(typ === 'u'){ const b = await eigenesBoard(id); const { data } = await sb.from('pendenz_liste').select('id').eq('board_id', b.id).eq('art_id', 'team').maybeSingle(); if(data){ listen.push(data.id); namen.push(name(id)); } } }
     const ma = ziele.filter(z => z.startsWith('p:')).map(z => z.slice(2));
     if(ma.length){ const { error } = await sb.from('planer_pendenz').insert(ma.map(pid => ({ person_id: pid, spalte: 'tag', tag: isoTag(new Date()), text: p.titel, erstellt_von: ME }))); if(error) throw error;
       ma.forEach(pid => namen.push(pk.daten.spalten.flat().find(x => x.id === pid)?.name.split(' ')[0] || '')); }
     if(listen.length){
-      const { error } = await sb.from('pendenz').update({ liste_id: listen[0], gruppe_id: null, zeit_sortierung: null, herkunft: 'board' }).eq('id', p.id); if(error) throw error;
-      if(listen.length > 1){ const { error: e2 } = await sb.from('pendenz').insert(listen.slice(1).map(lid => ({ liste_id: lid, titel: p.titel, notiz: p.notiz, sortierung: Date.now() / 1000, erstellt_von: p.erstellt_von || ME, herkunft: 'board' }))); if(e2) throw e2; }
+      const { error } = await sb.from('pendenz').update({ liste_id: listen[0], gruppe_id: null, zeit_sortierung: null, ...zusatz(listen[0]) }).eq('id', p.id); if(error) throw error;
+      if(listen.length > 1){ const { error: e2 } = await sb.from('pendenz').insert(listen.slice(1).map(lid => ({ liste_id: lid, titel: p.titel, notiz: p.notiz, sortierung: Date.now() / 1000, erstellt_von: p.erstellt_von || ME, ...zusatz(lid) }))); if(e2) throw e2; }
     } else { const { error } = await sb.from('pendenz').update({ erledigt: true, erledigt_am: new Date().toISOString(), erledigt_von: ME }).eq('id', p.id); if(error) throw error; }
     S.pz = S.pz.filter(x => x !== p); if(S.sel === p.id) S.sel = null; S.pick = null; zeichne();
     toast(`Gesendet an ${namen.filter(Boolean).join(', ')}`);
@@ -840,6 +911,12 @@ document.addEventListener('click', async e => {
   if(d.zset != null && S.zpick){ const p = S.pz.find(x => x.id === S.zpick.id); S.zpick = null; return setzeZeit(p, +d.zset); }
   S.zpick = null;
   if(d.archiv){ const p = S.pz.find(x => x.id === d.archiv); if(p) return archivieren(p); return; }
+  // Offerten: Chance (Klick auf die Balken = nächste Stufe), Zugesagt, Erinnerung in «Heute» öffnet die Offerte
+  if(d.chance){ e.stopPropagation(); const p = S.pz.find(x => x.id === d.chance); p.chance = ((p.chance || 0) + 1) % 4 || null; zeichne(); return upd('pendenz', p.id, { chance: p.chance }); }
+  if(d.dchance != null){ const p = S.pz.find(x => x.id === S.sel); p.chance = +d.dchance || null; zeichne(); return upd('pendenz', p.id, { chance: p.chance }); }
+  if(d.zusage){ const p = S.pz.find(x => x.id === d.zusage); if(p) return zusagen(p); return; }
+  if(d.erinn){ const ob = ofBoard(); if(!ob) return; S.board = ob; S.ofMeine = true; S.pop = null; try { localStorage.setItem('pz_board', ob.id + '|m'); } catch(err){}
+    await ladeBoard(); S.sel = S.pz.some(p => p.id === d.erinn) ? d.erinn : null; zeichne(); return ladeUrls(); }
   // Archiv-Ansicht
   if('archivo' in d){ S.archiv = { rows:null, del:null }; zeichneOver();
     const { data, error } = await sb.from('pendenz').select('*').in('liste_id', S.listen.map(l => l.id)).eq('erledigt', true).order('erledigt_am', { ascending:false }).limit(300);
@@ -901,7 +978,8 @@ document.addEventListener('change', async e => { const t = e.target;
   if(t.id === 'dtxt'){ const p = S.pz.find(x => x.id === S.sel), v = t.value.trim(); if(!v) return; p.titel = v; zeichne(); return upd('pendenz', p.id, { titel: v }); }
   if(t.dataset.gname){ const g = S.gruppen.find(x => x.id === t.dataset.gname), v = t.value.trim(); if(!g || !v) return; g.titel = v; zeichne(); return upd('pendenz_gruppe', g.id, { titel: v }); }
   if(t.id === 'dupload'){ const fs = [...t.files]; t.value = ''; return hochladen(fs); }
-  if(t.id === 'bsel'){ const b = S.boards.find(x => x.id === t.value); if(!b) return; S.board = b; S.sel = null; S.pop = null; try { localStorage.setItem('pz_board', b.id); } catch(err){} return ladeBoard(); }
+  if(t.id === 'bsel'){ const [id, m] = t.value.split('|'), b = S.boards.find(x => x.id === id); if(!b) return; S.board = b; S.ofMeine = m === 'm'; S.sel = null; S.pop = null; try { localStorage.setItem('pz_board', t.value); } catch(err){} return ladeBoard(); }
+  if(t.id === 'dwieder'){ const p = S.pz.find(x => x.id === S.sel); if(!p) return; p.wieder_am = t.value || null; zeichne(); return upd('pendenz', p.id, { wieder_am: p.wieder_am }); }
   if(t.id === 'pdatum' && S.pick){ S.pick.datum = t.value; return; }
   if(t.dataset.pk && S.pick?.sel){ t.checked ? S.pick.sel.add(t.dataset.pk) : S.pick.sel.delete(t.dataset.pk); return zeichneOver(); }
   if(t.dataset.mitglied){ const uid = t.dataset.mitglied;
@@ -1009,7 +1087,7 @@ document.addEventListener('drop', async e => {
   if(!dc) return;
   const dz = e.target.closest('[data-dzone]');
   if(dz){ e.preventDefault(); const p = S.pz.find(x => x.id === dc); dc = null; dz.classList.remove('hot'); if(!p) return;
-    return dz.dataset.dzone === 'archiv' ? archivieren(p) : oeffnePick(dz.dataset.dzone, p); }
+    return dz.dataset.dzone === 'archiv' ? archivieren(p) : dz.dataset.dzone === 'zusage' ? zusagen(p) : oeffnePick(dz.dataset.dzone, p); }
   const z = e.target.closest('[data-drop]'); if(!z) return; e.preventDefault();
   const p = S.pz.find(x => x.id === dc), to = listeById(z.dataset.drop), { cs, i } = dropIdx(z, e.clientY); dc = null;
   const vor = cs[i - 1] && S.pz.find(x => x.id === cs[i - 1].dataset.card), nach = cs[i] && S.pz.find(x => x.id === cs[i].dataset.card);
@@ -1020,6 +1098,7 @@ document.addEventListener('drop', async e => {
   if(to.zeit){ p.zeit = to.zeit; p.zeit_sortierung = zwischen(vor?.zeit_sortierung ?? (vor ? i - 1 : null), nach?.zeit_sortierung ?? (nach ? i + 1 : null));
     if(von?.zeit) p.liste_id = to.id; // direkt in einer Zeitliste erfasst: wandert mit
     zeichne(); return upd('pendenz', p.id, { zeit: p.zeit, zeit_sortierung: p.zeit_sortierung, liste_id: p.liste_id }); }
+  if(p.liste_id !== to.id) p.liste_seit = new Date().toISOString(); // Erinnerung zählt ab jetzt (in der DB per Trigger)
   p.liste_id = to.id; p.gruppe_id = z.dataset.grp || null; p.sortierung = zwischen(vor?.sortierung, nach?.sortierung);
   zeichne(); upd('pendenz', p.id, { liste_id: p.liste_id, gruppe_id: p.gruppe_id, sortierung: p.sortierung }); });
 
