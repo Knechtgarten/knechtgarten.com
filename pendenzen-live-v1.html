@@ -498,8 +498,10 @@ function zeichne(){
     } else { const h = Math.max(0, ...ls.map(l => l.y + estH(l))) + 200;
       inhalt = `<div class="canvas" data-cv="${zn}" data-modus="frei"><div class="sheet" style="height:${h}px">${ls.map(listHtml).join('')}</div></div>`; }
     // Trennlinie verstellt immer den Seitenbereich daneben (die Mitte nimmt den Rest)
-    const vor = reihe()[i - 1], fest = vor === 'mitte' ? zn : vor, links = fest === vor;
-    return (i ? `<div class="split${S.splitOn === fest ? ' on' : ''}" data-split="${fest}" data-links="${links ? 1 : 0}" role="separator" aria-label="Breite ändern"><span class="grip"></span></div>` : '')
+    // Linie neben den Pendenzenarten: verstellt den festen Bereich daneben (Pendenzenarten nehmen den Rest).
+    // Linie zwischen zwei festen Bereichen: der eine wird breiter, der andere gleich viel schmaler – nur diese Linie bewegt sich.
+    const vor = reihe()[i - 1], paar = vor !== 'mitte' && zn !== 'mitte', fest = vor === 'mitte' ? zn : vor, links = fest === vor;
+    return (i ? `<div class="split${S.splitOn === (paar ? vor + '|' + zn : fest) ? ' on' : ''}" ${paar ? `data-paar="${vor}|${zn}"` : `data-split="${fest}" data-links="${links ? 1 : 0}"`} role="separator" aria-label="Breite ändern"><span class="grip"></span></div>` : '')
       + `<div class="pane ${zn === 'mitte' ? 'flex' : 'seite'}${modus === 'schmal' ? ' schmal' : ''}" data-pane="${zn}"${zn !== 'mitte' ? ` style="width:${w}px"` : ''}><div class="ptitle"><span class="pgriff" data-pgriff="${zn}" title="Bereich verschieben: ziehen und auf einen anderen Bereich fallen lassen">${KG.icon('griff', 14)}</span>${A(BEREICHE[zn][1], 13)}<span>${BEREICHE[zn][0]}</span></div>${inhalt}</div>`; }).join('')}</div>`;
   document.querySelectorAll('[data-cv]').forEach(c => { const s = sc[c.dataset.cv]; if(s){ c.scrollLeft = s[0]; c.scrollTop = s[1]; } });
   platziereLeiste();
@@ -832,11 +834,22 @@ document.addEventListener('pointerdown', e => {
   if(rzh){ const l = listeById(rzh.dataset.rz); rz = { l, el:rzh.parentElement, x0:e.clientX, w0:l.breite || LW }; e.preventDefault(); return; }
   const sp = e.target.closest('[data-split]');
   if(sp){ const k = sp.dataset.split; sd = { k, links: sp.dataset.links === '1', x0:e.clientX, w0:anzeigeBreiten()[k] }; S.splitOn = k; sp.classList.add('on'); e.preventDefault(); return; }
+  const pr = e.target.closest('[data-paar]');
+  if(pr){ const [a, b] = pr.dataset.paar.split('|'), bw = anzeigeBreiten(); sd = { paar:[a, b], x0:e.clientX, wa:bw[a], wb:bw[b] }; S.splitOn = pr.dataset.paar; pr.classList.add('on'); e.preventDefault(); return; }
   const h = e.target.closest('[data-drag]'); if(!h || e.target.closest('button')) return;
   const l = listeById(h.dataset.drag), r = h.parentElement.getBoundingClientRect();
   ld = { l, el:h.parentElement, gx:e.clientX - r.left, gy:e.clientY - r.top, w:r.width, moved:false }; e.preventDefault();
 });
 document.addEventListener('pointermove', e => {
+  if(sd?.paar){ // zwischen zwei festen Bereichen: Summe bleibt gleich; unter 200 px schnappt einer auf «hochkant» zu
+    const [a, b] = sd.paar, summe = sd.wa + sd.wb, dx = e.clientX - sd.x0, min = LW + 24;
+    let wa = sd.wa + dx;
+    wa = wa < 200 ? 46 : summe - wa < 200 ? summe - 46 : Math.max(Math.min(min, summe - 46), Math.min(summe - min, Math.round(wa)));
+    const wb = summe - wa;
+    if(wa !== breite(a) || wb !== breite(b)){
+      if(breite(a) > 60 && wa <= 60) S.pwLast[a] = sd.wa; if(breite(b) > 60 && wb <= 60) S.pwLast[b] = sd.wb;
+      S.ein.breiten[a] = wa; S.ein.breiten[b] = wb; zeichne(); }
+    return; }
   if(sd){ // aussen: mindestens eine Listenbreite, darunter schnappt der Bereich auf «hochkant» zu; die Mitte behält eine Listenbreite
     const bw = anzeigeBreiten(), andere = reihe().filter(z => z !== 'mitte' && z !== sd.k).reduce((s, z) => s + bw[z], 0), max = platz() - andere - MITTE_MIN;
     let w = sd.links ? sd.w0 + e.clientX - sd.x0 : sd.w0 - (e.clientX - sd.x0);
