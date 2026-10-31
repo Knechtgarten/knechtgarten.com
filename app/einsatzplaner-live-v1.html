@@ -1096,7 +1096,7 @@ function render(){
 // PLANER
 // ---------------------------------------------------------------------------
 let zoom = lsGet('zoom', 'monat'), dayW = 26, query = '', plFilter = null, selId = null, drag = null;
-// Monat/Quartal: Wochenenden schmaler (WEK = Anteil eines Werktags). X(u) = Pixel ab Planbeginn, UX(px) = Tag (Bruch)
+// Monat/Quartal: Wochenenden schmaler, Jahr: ohne Wochenenden (WEK = 0, Freitag direkt an Montag) (WEK = Anteil eines Werktags). X(u) = Pixel ab Planbeginn, UX(px) = Tag (Bruch)
 let WEK = 1;
 const wdW = d => ((d % 7 + 7) % 7 >= 5 ? WEK : 1) * dayW;
 const X = u => { const d = Math.floor(u), q = Math.floor(d / 7), r = d - 7 * q; return (q * (5 + 2 * WEK) + (r <= 5 ? r : 5 + (r - 5) * WEK)) * dayW + (u - d) * wdW(d); };
@@ -1111,7 +1111,7 @@ const NAMEW = 170;
 const visW = () => Math.max(300, ($('tl')?.clientWidth || innerWidth) - NAMEW);
 // Breite eines Tages: Monat ≈ 5 Wochen, Quartal ≈ 13 Wochen, Jahr ≈ 53 Wochen im sichtbaren Bereich (mindestens die bisherigen Werte)
 // Ganze Pixel (Jahr: ganze Wochenbreite), sonst werden die Trennlinien im Hintergrund unscharf oder fallen weg
-function calcDayW(){ const v = visW(); WEK = zoom === 'monat' ? .4 : zoom === 'quartal' ? .35 : 1; const w = { jahr: Math.max(3.2, Math.floor(v / 53) / 7), quartal: Math.max(9, Math.round(v / (13 * (5 + 2 * WEK)))), monat: Math.max(26, Math.round(v / (4 * (5 + 2 * WEK)))), woche: Math.max(60, Math.round(v / 7.2)), tag: Math.max(500, v - 10) }[zoom]; if(WEK !== 1) WEK = Math.max(zoom === 'quartal' ? 3 : 8, Math.round(w * WEK)) / w; return w; }
+function calcDayW(){ const v = visW(); WEK = zoom === 'monat' ? .4 : zoom === 'quartal' ? .35 : zoom === 'jahr' ? 0 : 1; const w = { jahr: Math.max(3.2, Math.floor(v / 53) / 5), quartal: Math.max(9, Math.round(v / (13 * (5 + 2 * WEK)))), monat: Math.max(26, Math.round(v / (4 * (5 + 2 * WEK)))), woche: Math.max(60, Math.round(v / 7.2)), tag: Math.max(500, v - 10) }[zoom]; if(WEK !== 1 && WEK > 0) WEK = Math.max(zoom === 'quartal' ? 3 : 8, Math.round(w * WEK)) / w; return w; }
 
 function renderPlan(){
   const main = $('appMain');
@@ -1227,11 +1227,11 @@ function headerHTML(W){
 function laneBg(){
   // Wochenenden grau, Tagestrennlinien ab Monat, Stundenlinien im Tag
   // Als gekachelte Bilder (background-size) statt repeating-gradient: so bleiben die 1-px-Linien auch bei Browser-Zoom überall sichtbar
-  if(WEK !== 1){ // Monat mit schmalen Wochenenden: eigene Wochen-Kachel mit Tageslinien
+  if(WEK !== 1 && zoom !== 'jahr'){ // Monat/Quartal mit schmalen Wochenenden: eigene Wochen-Kachel mit Tageslinien
     const wk = X(7), xs = [0, 1, 2, 3, 4, 5, 6].map(i => X(i)), c = '#E3E7EA';
     const lin = xs.map(x => `transparent ${x}px,${c} ${x}px,${c} ${x + 1}px,transparent ${x + 1}px`).join(",") + `,transparent ${wk}px`; // harte Kanten, kein Verlauf
     return `background-image:linear-gradient(90deg,${lin}),linear-gradient(90deg,transparent ${xs[5]}px,#F3F5F7 ${xs[5]}px);background-size:${wk}px 100%,${wk}px 100%;background-position:0 0;`; }
-  const wk = 7 * dayW, we = `linear-gradient(90deg,transparent ${5 * dayW}px,#F3F5F7 ${5 * dayW}px)`;
+  const wk = X(7), we = `linear-gradient(90deg,transparent ${5 * dayW}px,#F3F5F7 ${5 * dayW}px)`;
   const [col, step] = zoom === 'tag' ? ['#EEF1F3', dayW / 12] : (zoom === 'woche' || zoom === 'monat') ? ['#E3E7EA', dayW] : ['#EEF1F3', wk];
   return `background-image:linear-gradient(90deg,${col} 1px,transparent 1px),${we};background-size:${step}px 100%,${wk}px 100%;background-position:0 0;`;
 }
@@ -1276,8 +1276,10 @@ function personRow(p, W, bgx){
     const cntH = abw ? ` · <span class="bwt">${fmtN(L.n)} von ${fmtN(it.soll)} T</span>` : '';
     const tip = `${titleOf(it)}\n${p.name}${it.e - it.s > 1 + 1e-6 ? `\n${fmtN(L.n)} Arbeitstage` : ''}${it.allein ? '\nArbeitet allein' : ''}${it.ok === false ? '\nNoch nicht abgemacht' : ''}${isRep ? '\nWiederkehrend' : ''}${it.fix ? `\nStart fix${it.fixg ? ': ' + it.fixg : ''}` : ''}${abw ? `\nGeplant ${tageTxt(it.soll)}, aktuell ${tageTxt(L.n)}` : ''}`;
     // Beschriftung läuft über Wochenenden weiter
-    // Woche/Monat/Quartal: Balken füllen ganze Halbtage (Vormittag/Nachmittag nur 1 px auseinander), damit mehr Text Platz hat
-    const voll = (zoom === 'monat' || zoom === 'woche' || zoom === 'quartal') && !L.mini, sV = voll ? L.segs.map(([a, b]) => [Math.floor(a * 2 + 1e-9) / 2, Math.ceil(b * 2 - 1e-9) / 2]) : L.segs, rd = voll ? .5 : 1;
+    // Woche bis Jahr: Balken füllen ganze Halbtage (Vormittag/Nachmittag nur 1 px auseinander), damit mehr Text Platz hat
+    const voll = zoom !== 'tag' && !L.mini, sV = voll ? L.segs.map(([a, b]) => [Math.floor(a * 2 + 1e-9) / 2, Math.ceil(b * 2 - 1e-9) / 2]) : L.segs, rd = voll ? .5 : 1;
+    // Jahr (ohne Wochenenden): über das Wochenende laufende Stücke zu einem Balken verschmelzen
+    if(zoom === 'jahr' && voll) for(let i = sV.length - 1; i > 0; i--) if(XW(sV[i - 1][1], sV[i][0]) < 1){ sV[i - 1] = [sV[i - 1][0], sV[i][1]]; sV.splice(i, 1); }
     const x0 = X(sV[0][0]) + 3, tw = Math.max(0, XW(sV[0][0], sV[sV.length - 1][1]) - 5);
     const prov = it.ok === false;
     const lab1 = `${it.fix ? I('lock') : ''}${isRep ? I('repeat') : ''}${esc(lab)}${cntH}`;
@@ -1304,7 +1306,7 @@ function personRow(p, W, bgx){
     const mw = MW.bau[it.id]; if(mw && L.segs.length) bars += `<span class="mwarn ${mw.l}" style="left:${X(mw.k / 2)}px" title="${mw.l === 'r' ? 'Maschine doppelt fest belegt' : 'Maschinen-Überschneidung (vorläufig)'} – Maschinen aufklappen">${I('digger')}</span>`;
     // Punkte oben am Balken: rot = Personal fehlt, blau = allein okay, blau mit rotem Rand = trotzdem jemand eingeteilt.
     // Klick schaltet rot ↔ blau; leere Halbtage zeigen beim Darüberfahren graue Platzhalter (Klick = blau). Ziehen = mehrere.
-    if(L.vorarb || L.miss.length){ const slotW = dayW / 2, klick = ed && L.vorarb && zoom !== 'quartal' && zoom !== 'jahr', solo = new Set(L.solo || []), miss = new Set(L.miss);
+    if(zoom !== 'jahr' && (L.vorarb || L.miss.length)){ const slotW = dayW / 2, klick = ed && L.vorarb && zoom !== 'quartal' && zoom !== 'jahr', solo = new Set(L.solo || []), miss = new Set(L.miss);
       const dot = (k, x, tag) => { const s = solo.has(k), m = miss.has(k); if(!s && !m && !klick) return;
         const cls = s ? 'rdot blau' + (L.soloCf?.has(k) ? ' cf' : '') : m ? 'rdot' : 'rdot ph';
         const t = s ? (L.soloCf?.has(k) ? 'Allein okay – aber Mithilfe eingeteilt!' : 'Allein okay') : m ? 'Personal fehlt' : 'Allein okay setzen';
@@ -1725,7 +1727,7 @@ function vehOn(mid){ const per = {}; RES.forEach(r => { if(r.typ !== 'fahrzeug' 
 // Lieferwagen pro Tag unten am Baustellenbalken: roter Wagen = an diesem Tag keiner, zwei graue = zwei oder mehr (Info, auch bei 3+).
 // Ein Wagen = kein Icon. In Quartal/Jahr (schmale Tage) nur rot und nicht jeden Tag.
 function vehIcons(p){
-  if(!RES.some(r => r.typ === 'fahrzeug' && r.aktiv)) return '';
+  if(zoom === 'jahr' || !RES.some(r => r.typ === 'fahrzeug' && r.aktiv)) return ''; // Jahr: Grobplanung ohne Lieferwagen-Icons
   const per = vehOn(p.id), tage = new Set();
   ALL.filter(it => it.kind === 'baustelle' && it.mid === p.id && LAY[it.id]).forEach(it => LAY[it.id].free.forEach(k => tage.add(k >> 1)));
   const eng = dayW < 14, sz = eng ? 11 : 14; let h = '', j = 0;
