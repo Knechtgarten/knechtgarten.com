@@ -393,7 +393,9 @@ const AI = {
   stift:'<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
   doks:'<path d="M9 3h8l4 4v11H9z"/><path d="M16 3v5h5"/><path d="M6 6v15h10"/>',
   schloss:'<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
-  haken:'<path d="M5 12.5l4.5 4.5L19 7.5"/>'
+  haken:'<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  sammel:'<path d="M3 13h5l1.5 3h5l1.5-3h5"/><path d="M5.5 5h13L21 13v6H3v-6z"/>',
+  handy:'<rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M11 18.5h2"/>'
 };
 // Board-Auswahl: Icon pro Board (Mein Board = Person, Büro = Stift wie auf dem Laptop, Offerten = Dokument / Stapel)
 const boardIcon = (b, meine) => b.typ === 'person' ? 'person' : b.typ === 'offerten' ? (meine ? 'dok' : 'doks') : 'stift';
@@ -418,7 +420,7 @@ const listeById = id => S.listen.find(l => l.id === id);
 const OF = id => !!id && id.startsWith('of_'); // Listen des Offerten-Boards (Zugestellt … Abgesagt)
 const istOfferten = () => S.board?.typ === 'offerten';
 const ofBoard = () => S.boards.find(b => b.typ === 'offerten');
-const fixListe = l => l.art_id === 'team' || l.art_id === 'notizen' || OF(l.art_id); // Eingangs-Listen: fester Name, nicht löschbar
+const fixListe = l => l.art_id === 'team' || l.art_id === 'notizen' || l.art_id === 'sammel' || OF(l.art_id); // Eingangs-Listen: fester Name, nicht löschbar
 const CHANCE = ['offen', 'tief', 'mittel', 'hoch'];
 // Offerte fällig: 14 Tage in Zugestellt / Nachgefasst, oder «wieder anschauen am» erreicht (Meldet sich wieder ohne Datum: 14 Tage)
 function faellig(p, l){ if(!l) return false; const tage = (Date.now() - new Date(p.liste_seit || p.erstellt_am)) / 864e5;
@@ -436,7 +438,7 @@ const breite = b => { const v = S.ein.breiten[b] ?? STD_BREITE[b]; return v <= 6
 // Reihenfolge pro Person (am Griff tauschbar), gespeichert in pendenz_benutzer.breiten._reihe / _reiheG
 const reihe = () => { if(S.board && S.board.typ !== 'person') return ['mitte']; const eigen = S.board?.typ === 'person', std = eigen ? ['zeit', 'mitte', 'team'] : ['mitte', 'team'], r = S.ein.breiten[eigen ? '_reihe' : '_reiheG'];
   return Array.isArray(r) && r.length === std.length && std.every(z => r.includes(z)) ? r : std; };
-const bereichFuerArt = artId => artId === 'team' || artId === 'notizen' ? 'team' : 'mitte'; // rechts: Team-box und Dauernde Notizen
+const bereichFuerArt = artId => artId === 'team' || artId === 'notizen' || artId === 'sammel' ? 'team' : 'mitte'; // rechts: Team-box, Sammelbox, Dauernde Notizen
 const platz = () => innerWidth - 9 * (reihe().length - 1);
 // Seitenbereiche haben ihre Breite, die Mitte bekommt den Rest; bei schmalem Fenster klappen zuerst rechts, dann links hochkant zu
 function anzeigeBreiten(){ const seiten = reihe().filter(z => z !== 'mitte'), w = {};
@@ -503,7 +505,8 @@ async function eigenesBoard(uid = ME){
   const arten = Object.values(S.arten).filter(a => a.aktiv).sort((x, y) => x.sortierung - y.sortierung);
   const rows = [1, 2, 3].map((z, i) => ({ board_id: b.id, zeit: z, titel: ZEIT[z].t, bereich: 'zeit', x: R, y: R + i * 120 }));
   rows.push({ board_id: b.id, art_id: 'team', titel: art('team').titel, bereich: 'team', x: R, y: R });
-  rows.push({ board_id: b.id, art_id: 'notizen', titel: art('notizen').titel, bereich: 'team', x: R, y: R + 140 });
+  rows.push({ board_id: b.id, art_id: 'sammel', titel: art('sammel').titel, bereich: 'team', x: R, y: R + 130 });
+  rows.push({ board_id: b.id, art_id: 'notizen', titel: art('notizen').titel, bereich: 'team', x: R, y: R + 260 });
   arten.filter(a => !a.funktion).forEach((a, i) => rows.push({ board_id: b.id, art_id: a.id, titel: a.titel, bereich: 'mitte', x: R + (i % 3) * (LW + R), y: R + Math.floor(i / 3) * 140 }));
   const { error: e2 } = await sb.from('pendenz_liste').insert(rows); if(e2) throw e2;
   return b;
@@ -620,6 +623,7 @@ function listHtml(l){
       return pdHtml(x.p, { gruppe: akt }); }).join('')}</div>`
       + (l.art_id === 'team' || (OF(l.art_id) && l.art_id !== 'of_zugestellt') ? '' : `<div class="ladd"><input type="text" id="add-${l.id}" placeholder="${l.art_id === 'notizen' ? '+ Notiz' : '+ Pendenz'}" aria-label="Neue ${l.art_id === 'notizen' ? 'Notiz' : 'Pendenz'} in ${esc(l.titel)}"><button class="kg-ibtn${recZiel === 'add-' + l.id ? ' on' : ''}" data-mic="add-${l.id}" aria-label="Sprechen" title="Sprechen">${K('mikrofon')}</button><button class="kg-ibtn" data-add="${l.id}" aria-label="Hinzufügen">${K('plus')}</button></div>`)
       + (l.art_id === 'team' && !ps.length ? '<div class="zhint">Hier landet, was dir Kollegen zuschieben.</div>' : '')
+      + (l.art_id === 'sammel' && !ps.length ? '<div class="zhint">Hier landet, was du unterwegs mit der Pendenzen-App erfasst. Von hier in die richtige Liste ziehen.</div>' : '')
       + (l.art_id === 'of_abgesagt' ? '<div class="zhint">Kommt nach 30 Tagen automatisch ins Archiv.</div>' : '')
       + (l.art_id === 'of_keine' ? '<div class="zhint">Kommt nach 120 Tagen automatisch ins Archiv.</div>' : '')
       + (l.art_id === 'of_zugesagt' ? '<div class="zhint">Liegt auch im Büro-Board unter «Planung».</div>' : '');
