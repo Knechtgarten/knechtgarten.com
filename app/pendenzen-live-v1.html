@@ -49,6 +49,15 @@ header.app .userbar button.lo{font-size:11.5px;color:#c7ccd1;background:none;bor
 body.zieht-pendenz .dz{border-color:var(--primary);background:var(--soft);}
 .dz.hot{border-style:solid;border-color:var(--primary) !important;background:var(--accent-blue) !important;}
 .pick{width:100%;max-width:420px;background:#fff;border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:6px;box-shadow:0 18px 50px rgba(35,43,53,.25);max-height:85vh;overflow:auto;}
+.pick.breit{max-width:760px;}
+.hkreihe{display:flex;flex-wrap:wrap;gap:6px;}
+.hkspalten{display:grid;grid-template-columns:repeat(3,1fr);gap:4px 12px;align-items:start;}
+.hkspalte{display:flex;flex-direction:column;gap:4px;}
+.hk{display:flex;align-items:center;gap:7px;padding:5px 9px;border:1px solid var(--line);border-radius:7px;cursor:pointer;font-size:12.5px;background:#fff;}
+.hk:hover{border-color:var(--primary);}
+.hk:has(input:checked){border-color:var(--primary);background:var(--soft);font-weight:700;}
+.hk input{accent-color:var(--primary);margin:0;}
+.hk i{width:10px;height:10px;border-radius:50%;flex:none;}
 .pick h2{font-size:14px;display:flex;align-items:center;gap:8px;}
 .pick .was{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .pick .sec{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700;margin-top:8px;}
@@ -339,7 +348,7 @@ const listeById = id => S.listen.find(l => l.id === id);
 const listFarbe = l => l.farbe || artFarbe(l.art_id); // eigene Listenfarbe, sonst Farbe der Pendenzenart
 const bereichOf = l => l.bereich || 'mitte';
 // Drei Bereiche (zeit, mitte, team) in frei wählbarer Reihenfolge: aussen eingestellte Breite, Mitte = Rest
-const STD_BREITE = { zeit:360, mitte:680, team:380 }, MITTE_MIN = LW + 24;
+const STD_BREITE = { zeit:LW + 24, mitte:680, team:LW + 24 }, MITTE_MIN = LW + 24;
 const breite = b => S.ein.breiten[b] ?? STD_BREITE[b];
 // fest für alle; eigenes Board: Zeit | Arten | Team, gemeinsame Boards: Arten | Team. Jede Liste bleibt in ihrem Bereich
 // Reihenfolge pro Person (am Griff tauschbar), gespeichert in pendenz_benutzer.breiten._reihe / _reiheG
@@ -397,11 +406,12 @@ $('pendingLogoutBtn').addEventListener('click', async () => { await sb.auth.sign
 // ---------------------------------------------------------------------------
 // Daten laden; eigenes Board beim ersten Mal mit Startlisten anlegen
 // ---------------------------------------------------------------------------
-async function eigenesBoard(){
-  let { data: b, error } = await sb.from('pendenz_board').select('*').eq('typ', 'person').eq('besitzer_id', ME).maybeSingle();
+// Board einer Person (eigenes oder das eines Kollegen, z. B. um in seine Team-box zu schreiben)
+async function eigenesBoard(uid = ME){
+  let { data: b, error } = await sb.from('pendenz_board').select('*').eq('typ', 'person').eq('besitzer_id', uid).maybeSingle();
   if(error) throw error;
   if(b) return b;
-  ({ data: b, error } = await sb.from('pendenz_board').insert({ name: 'Mein Board', typ: 'person', besitzer_id: ME }).select().single());
+  ({ data: b, error } = await sb.from('pendenz_board').insert({ name: 'Mein Board', typ: 'person', besitzer_id: uid }).select().single());
   if(error) throw error;
   const arten = Object.values(S.arten).filter(a => a.aktiv).sort((x, y) => x.sortierung - y.sortierung);
   const rows = [1, 2, 3].map((z, i) => ({ board_id: b.id, zeit: z, titel: ZEIT[z].t, bereich: 'zeit', x: R, y: R + i * 120 }));
@@ -525,8 +535,10 @@ function platziereLeiste(){
   const bar = $('bbar'), b0 = bar.getBoundingClientRect(), slots = [...bar.querySelectorAll('.bslot')];
   slots.forEach(s => { s.classList.remove('bpos'); s.style.left = s.style.width = ''; });
   const rechts = bar.querySelector('.brechts').getBoundingClientRect();
-  if(b0.left + R + slots.length * (LW + R) > rechts.left - 8) return;
-  slots.forEach((s, i) => { s.classList.add('bpos'); s.style.left = (R + i * (LW + R)) + 'px'; s.style.width = LW + 'px'; });
+  // Standard-Geometrie: Zeit-Bereich LW+24 breit (Liste bei 12), Trennlinie 9, Pendenzen-Spalten bei 12 + i·(LW+12)
+  const links = i => i === 0 ? 12 : (LW + 24) + 9 + 12 + (i - 1) * (LW + 12);
+  if(b0.left + links(slots.length - 1) + LW > rechts.left - 8) return;
+  slots.forEach((s, i) => { s.classList.add('bpos'); s.style.left = links(i) + 'px'; s.style.width = LW + 'px'; });
 }
 function editorHtml(id, html, ph, klein){
   const b = (cmd, ic, lab) => `<button class="eb" data-ex="${cmd}" data-ed="${id}" aria-label="${lab}" title="${lab}">${ic}</button>`, sep = klein ? '' : '<span class="sepv"></span>';
@@ -602,15 +614,14 @@ function zeichneOver(){
       body = `<div class="row"><label class="small muted" for="pdatum">Tag</label><input type="date" id="pdatum" value="${esc(pk.datum)}"><input type="text" id="pq" placeholder="Person suchen …" value="${esc(pk.q)}" style="flex:1;min-width:0" aria-label="Person suchen"></div>`
         + [...gruppen, { id:null, name:'Ohne Gruppe' }].map(g => { const ps = treffer.filter(x => (x.gruppe_id || null) === g.id); return ps.length ? `<div class="sec">${esc(g.name)}</div>${ps.map(x => `<button class="opt" data-pperson="${x.id}">${K('kalender', 14)}${esc(x.name)}</button>`).join('')}` : ''; }).join('')
         + (treffer.length ? '' : '<div class="muted small">Keine Person gefunden.</div>');
-    } else if(pk.daten){ const { boards, listen } = pk.daten, zugang = S.boards.filter(b => b.id !== S.board.id);
-      if(pk.ziel){ const b = boards.find(x => x.id === pk.ziel) || zugang.find(x => x.id === pk.ziel);
-        body = `<button class="opt" data-pbzback>${K('senden', 14)}← zurück</button><div class="sec">${esc(b.typ === 'person' ? 'Mein Board' : b.name)}: in welche Liste?</div>`
-          + listen.filter(l => l.board_id === b.id).sort((x, y) => (x.bereich === 'team') - (y.bereich === 'team') || x.titel.localeCompare(y.titel)).map(l => `<button class="opt" data-pliste="${l.id}" data-plabel="${esc((b.typ === 'person' ? 'Mein Board' : b.name) + ' · ' + l.titel)}"><span class="ty" style="background:${listFarbe(l)}">${A(art(l.art_id).icon)}</span>${esc(l.titel)}</button>`).join(''); }
-      else { const teamboxen = boards.filter(b => b.typ === 'person' && b.besitzer_id !== ME).map(b => ({ b, l: listen.find(l => l.board_id === b.id && l.art_id === 'team') })).filter(x => x.l).sort((x, y) => name(x.b.besitzer_id).localeCompare(name(y.b.besitzer_id)));
-        body = (zugang.length ? `<div class="sec">Boards</div>${zugang.map(b => `<button class="opt" data-pbz="${b.id}">${K('senden', 14)}${esc(b.typ === 'person' ? 'Mein Board' : b.name)}</button>`).join('')}` : '')
-          + `<div class="sec">Team-box von …</div>${teamboxen.map(x => `<button class="opt" data-pliste="${x.l.id}" data-plabel="${esc('Team-box ' + name(x.b.besitzer_id))}">${avatar(x.b.besitzer_id)}${esc(name(x.b.besitzer_id))}</button>`).join('') || '<div class="muted small">Noch niemand sonst hat ein Board. Es entsteht beim ersten Öffnen der Pendenzen.</div>'}`; }
+    } else if(pk.daten){ const { boards, buero, spalten } = pk.daten, sel = pk.sel;
+      const haken = (key, inhalt, punkt) => `<label class="hk"><input type="checkbox" data-pk="${key}"${sel.has(key) ? ' checked' : ''}>${punkt ? `<i style="background:${punkt}"></i>` : ''}<span>${inhalt}</span></label>`;
+      body = `<div class="sec">Boards</div><div class="hkreihe">${boards.map(b => haken('b:' + b.id, esc(b.typ === 'person' ? 'Mein Board' : b.name))).join('') || '<span class="muted small">Keine weiteren Boards</span>'}</div>`
+        + `<div class="sec">Büro-Team (in die Team-box)</div><div class="hkreihe">${buero.map(x => haken('u:' + x.benutzer_id, esc(x.name.split(' ')[0]), S.pfarbe?.[x.benutzer_id] || x.farbe)).join('')}</div>`
+        + `<div class="sec">Mitarbeitende (in ihre Pendenzen im Planer, «Heute»)</div><div class="hkspalten">${spalten.map(l => `<div class="hkspalte">${l.map(x => haken('p:' + x.id, esc(x.name.split(' ')[0]), x.farbe || '#C9CFD5')).join('')}</div>`).join('')}</div>`
+        + `<div class="row" style="margin-top:6px"><span class="sp"></span><button class="btn btn-ghost" data-pickx>Abbrechen</button><button class="btn btn-primary" data-psenden${sel.size ? '' : ' disabled style="opacity:.45;cursor:default"'}>${K('senden', 15)}Senden${sel.size ? ` (${sel.size})` : ''}</button></div>`;
     }
-    h += `<div class="dbg" data-bg="pick"><div class="pick" role="dialog" aria-label="Auswahl"><h2>${K(pk.art === 'planer' ? 'kalender' : 'senden', 16)}${pk.art === 'planer' ? 'In den Planer: offener Auftrag bei …' : 'In anderes Board'}<span class="sp"></span><button class="kg-ibtn" data-pickx aria-label="Abbrechen">${K('x')}</button></h2>
+    h += `<div class="dbg" data-bg="pick"><div class="pick${pk.art === 'board' ? ' breit' : ''}" role="dialog" aria-label="Auswahl"><h2>${K(pk.art === 'planer' ? 'kalender' : 'senden', 16)}${pk.art === 'planer' ? 'In den Planer: offener Auftrag bei …' : 'In anderes Board'}<span class="sp"></span><button class="kg-ibtn" data-pickx aria-label="Abbrechen">${K('x')}</button></h2>
       <div class="was">${esc(p ? p.titel : '')}</div>${body}</div></div>`; }
   if(S.zettel) h += `<div class="zettel" role="dialog" aria-label="Notizzettel">${editorHtml('zet', S.ein.notizzettel, 'Einfach schreiben …', true)}</div>`;
   if(S.toast) h += `<div class="toast${S.toast.err ? ' err' : ''}">${esc(S.toast.t)}${S.toast.undo ? '<button id="undo">Rückgängig</button>' : ''}</div>`;
@@ -644,10 +655,49 @@ async function oeffnePick(artZiel, p){
     const [rp, rg] = await Promise.all([sb.from('planer_person').select('id,name,gruppe_id').eq('aktiv', true).order('name'), sb.from('planer_gruppe').select('id,name,sortierung').order('sortierung')]);
     if(rp.error) return fehler(rp.error, 'Planer'); if(S.pick) S.pick.daten = { personen: rp.data, gruppen: rg.data || [] };
   } else {
-    const [rb, rl] = await Promise.all([sb.from('pendenz_board').select('id,name,typ,besitzer_id'), sb.from('pendenz_liste').select('id,board_id,art_id,titel,bereich,farbe').is('zeit', null)]);
-    if(rb.error) return fehler(rb.error, 'Boards'); if(S.pick) S.pick.daten = { boards: rb.data, listen: rl.data || [] };
+    // drei Teile: gemeinsame Boards · Büro-Team (Team-box) · Mitarbeitende (Pendenzen im Einsatzplaner), wie «Mithilfe» im Planer geordnet
+    const [rp, rg] = await Promise.all([sb.from('planer_person').select('id,name,farbe,gruppe_id,benutzer_id,ist_projektleiter,aktiv').eq('aktiv', true).order('name'), sb.from('planer_gruppe').select('id,name')]);
+    if(rp.error) return fehler(rp.error, 'Personen');
+    const gname = id => (rg.data || []).find(g => g.id === id)?.name || '';
+    const buero = rp.data.filter(x => /büro/i.test(gname(x.gruppe_id)) && x.benutzer_id && x.benutzer_id !== ME);
+    const ma = rp.data.filter(x => !x.ist_projektleiter && !/büro|allgemein|planungshilfe/i.test(gname(x.gruppe_id)));
+    const spalte = { rest: [], pflege: [], bau: [] }; ma.forEach(x => spalte[farbSpalte(x.farbe)].push(x));
+    Object.values(spalte).forEach(l => l.sort((u, v) => hellwert(u.farbe) - hellwert(v.farbe)));
+    if(S.pick) S.pick.daten = { boards: S.boards.filter(b => b.id !== S.board.id), buero, spalten: [spalte.rest, spalte.pflege, spalte.bau] };
+    if(S.pick) S.pick.sel = new Set();
   }
   zeichneOver();
+}
+// Farbfamilie wie im Einsatzplaner («Mithilfe»): violett = Bau, kräftiges Orange/Gelb = Unterhalt/Pflege, übrige (braun, blau) = rest
+const rgbVon = hex => { const d = parseInt((hex || '#000000').slice(1), 16) || 0; return [d >> 16, (d >> 8) & 255, d & 255]; };
+const hellwert = hex => { const [r, g, b] = rgbVon(hex); return 0.299 * r + 0.587 * g + 0.114 * b; };
+function farbSpalte(hex){
+  const [r, g, b] = rgbVon(hex), mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  let h = 0; if(d){ h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; h = (h * 60 + 360) % 360; }
+  const s = d / Math.max(1, mx), l = hellwert(hex) / 255;
+  if(h >= 250 && h <= 300) return 'bau';
+  if(h >= 18 && h <= 60 && l > .4 && (s > .65 || h > 40)) return 'pflege';
+  return 'rest';
+}
+// Senden an alle angehakten Ziele: erstes Pendenzen-Ziel bekommt die Pendenz selbst (mit Fotos), weitere eine Kopie;
+// Mitarbeitende bekommen sie in ihre Pendenzen im Einsatzplaner («Heute»). Nur Mitarbeitende gewählt = Pendenz hier archivieren.
+async function sendePick(){
+  const pk = S.pick, p = S.pz.find(x => x.id === pk.id); if(!p || !pk.sel.size) return;
+  const ziele = [...pk.sel], listen = [], namen = [];
+  try {
+    for(const z of ziele){ const [typ, id] = z.split(':');
+      if(typ === 'b'){ const b = S.boards.find(x => x.id === id); const { data } = await sb.from('pendenz_liste').select('id,art_id').eq('board_id', id); const l = (data || []).find(x => x.art_id === 'team') || (data || [])[0]; if(l){ listen.push(l.id); namen.push(b.typ === 'person' ? 'Mein Board' : b.name); } }
+      if(typ === 'u'){ const b = await eigenesBoard(id); const { data } = await sb.from('pendenz_liste').select('id').eq('board_id', b.id).eq('art_id', 'team').maybeSingle(); if(data){ listen.push(data.id); namen.push(name(id)); } } }
+    const ma = ziele.filter(z => z.startsWith('p:')).map(z => z.slice(2));
+    if(ma.length){ const { error } = await sb.from('planer_pendenz').insert(ma.map(pid => ({ person_id: pid, spalte: 'tag', tag: isoTag(new Date()), text: p.titel, erstellt_von: ME }))); if(error) throw error;
+      ma.forEach(pid => namen.push(pk.daten.spalten.flat().find(x => x.id === pid)?.name.split(' ')[0] || '')); }
+    if(listen.length){
+      const { error } = await sb.from('pendenz').update({ liste_id: listen[0], gruppe_id: null, zeit_sortierung: null }).eq('id', p.id); if(error) throw error;
+      if(listen.length > 1){ const { error: e2 } = await sb.from('pendenz').insert(listen.slice(1).map(lid => ({ liste_id: lid, titel: p.titel, notiz: p.notiz, sortierung: Date.now() / 1000, erstellt_von: p.erstellt_von || ME }))); if(e2) throw e2; }
+    } else { const { error } = await sb.from('pendenz').update({ erledigt: true, erledigt_am: new Date().toISOString(), erledigt_von: ME }).eq('id', p.id); if(error) throw error; }
+    S.pz = S.pz.filter(x => x !== p); if(S.sel === p.id) S.sel = null; S.pick = null; zeichne();
+    toast(`Gesendet an ${namen.filter(Boolean).join(', ')}`);
+  } catch(e){ fehler(e, 'Senden'); }
 }
 async function verschiebeInListe(p, listeId, label){
   const alt = { liste_id: p.liste_id, gruppe_id: p.gruppe_id, zeit_sortierung: p.zeit_sortierung };
@@ -764,9 +814,7 @@ document.addEventListener('click', async e => {
     S.archiv.rows = S.archiv.rows.filter(x => x.id !== id); S.archiv.del = null; zeichneOver(); return toast('Endgültig gelöscht'); }
   // Auswahl nach dem Ablegen: anderes Board / Planer
   if('pickx' in d || d.bg === 'pick'){ S.pick = null; return zeichneOver(); }
-  if(d.pbz){ S.pick.ziel = d.pbz; return zeichneOver(); }
-  if('pbzback' in d){ S.pick.ziel = null; return zeichneOver(); }
-  if(d.pliste){ const p = S.pz.find(x => x.id === S.pick.id); return verschiebeInListe(p, d.pliste, d.plabel); }
+  if('psenden' in d){ return sendePick(); }
   if(d.pperson){ const p = S.pz.find(x => x.id === S.pick.id), pe = S.pick.daten.personen.find(x => x.id === d.pperson); return inPlaner(p, pe); }
   if(d.tog){ e.stopPropagation(); const l = listeById(d.tog); l.zu = !l.zu; zeichne(); return upd('pendenz_liste', l.id, { zu: l.zu }); }
   if(d.gtog){ const g = S.gruppen.find(x => x.id === d.gtog); g.zu = !g.zu; zeichne(); return upd('pendenz_gruppe', g.id, { zu: g.zu }); }
@@ -813,6 +861,7 @@ document.addEventListener('change', async e => { const t = e.target;
   if(t.id === 'dupload'){ const fs = [...t.files]; t.value = ''; return hochladen(fs); }
   if(t.id === 'bsel'){ const b = S.boards.find(x => x.id === t.value); if(!b) return; S.board = b; S.sel = null; S.pop = null; try { localStorage.setItem('pz_board', b.id); } catch(err){} return ladeBoard(); }
   if(t.id === 'pdatum' && S.pick){ S.pick.datum = t.value; return; }
+  if(t.dataset.pk && S.pick?.sel){ t.checked ? S.pick.sel.add(t.dataset.pk) : S.pick.sel.delete(t.dataset.pk); return zeichneOver(); }
   if(t.dataset.mitglied){ const uid = t.dataset.mitglied;
     const r = t.checked ? await sb.from('pendenz_board_mitglied').insert({ board_id: S.board.id, benutzer_id: uid }) : await sb.from('pendenz_board_mitglied').delete().eq('board_id', S.board.id).eq('benutzer_id', uid);
     if(r.error){ t.checked = !t.checked; return fehler(r.error, 'Mitglieder'); }
