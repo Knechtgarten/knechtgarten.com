@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script src="/kg-pw-schutz.js?v=5"></script>
-<script src="/kg-stil.js?v=5"></script>
+<script src="/kg-stil.js?v=6"></script>
 <title>Pendenzen – Knechtgarten</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
@@ -93,6 +93,11 @@ button:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
 .pane.flex{flex:1;}
 .pane.seite{background:#EFF2F5;}
 .ptitle{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700;padding:8px 20px 0;display:flex;gap:6px;align-items:center;flex:none;}
+.pgriff{cursor:grab;display:inline-flex;margin-left:-14px;color:#B8BEC4;border-radius:4px;touch-action:none;}
+.pgriff:hover{color:var(--primary);background:rgba(50,62,78,.08);}
+.pgriff:active{cursor:grabbing;}
+.pane.schmal .pgriff{margin-left:0;}
+.pane.ziel{box-shadow:inset 0 0 0 2px var(--primary);background:var(--accent-blue) !important;}
 .ptitle svg{width:13px;height:13px;}
 .pane.schmal .ptitle{padding:8px 0 0;justify-content:center;}
 .pane.schmal .ptitle span{display:none;}
@@ -325,7 +330,9 @@ const bereichOf = l => l.bereich || 'mitte';
 const STD_BREITE = { zeit:360, mitte:680, team:380 }, MITTE_MIN = LW + 24;
 const breite = b => S.ein.breiten[b] ?? STD_BREITE[b];
 // fest für alle; eigenes Board: Zeit | Arten | Team, gemeinsame Boards: Arten | Team. Jede Liste bleibt in ihrem Bereich
-const reihe = () => S.board?.typ === 'person' ? ['zeit', 'mitte', 'team'] : ['mitte', 'team'];
+// Reihenfolge pro Person (am Griff tauschbar), gespeichert in pendenz_benutzer.breiten._reihe / _reiheG
+const reihe = () => { const eigen = S.board?.typ === 'person', std = eigen ? ['zeit', 'mitte', 'team'] : ['mitte', 'team'], r = S.ein.breiten[eigen ? '_reihe' : '_reiheG'];
+  return Array.isArray(r) && r.length === std.length && std.every(z => r.includes(z)) ? r : std; };
 const bereichFuerArt = artId => artId === 'team' ? 'team' : 'mitte';
 const platz = () => innerWidth - 9 * (reihe().length - 1);
 // Seitenbereiche haben ihre Breite, die Mitte bekommt den Rest; bei schmalem Fenster klappen zuerst rechts, dann links hochkant zu
@@ -492,7 +499,7 @@ function zeichne(){
     // Trennlinie verstellt immer den Seitenbereich daneben (die Mitte nimmt den Rest)
     const vor = reihe()[i - 1], fest = vor === 'mitte' ? zn : vor, links = fest === vor;
     return (i ? `<div class="split${S.splitOn === fest ? ' on' : ''}" data-split="${fest}" data-links="${links ? 1 : 0}" role="separator" aria-label="Breite ändern"><span class="grip"></span></div>` : '')
-      + `<div class="pane ${zn === 'mitte' ? 'flex' : 'seite'}${modus === 'schmal' ? ' schmal' : ''}" data-pane="${zn}"${zn !== 'mitte' ? ` style="width:${w}px"` : ''}><div class="ptitle">${A(BEREICHE[zn][1], 13)}<span>${BEREICHE[zn][0]}</span></div>${inhalt}</div>`; }).join('')}</div>`;
+      + `<div class="pane ${zn === 'mitte' ? 'flex' : 'seite'}${modus === 'schmal' ? ' schmal' : ''}" data-pane="${zn}"${zn !== 'mitte' ? ` style="width:${w}px"` : ''}><div class="ptitle"><span class="pgriff" data-pgriff="${zn}" title="Bereich verschieben: ziehen und auf einen anderen Bereich fallen lassen">${KG.icon('griff', 14)}</span>${A(BEREICHE[zn][1], 13)}<span>${BEREICHE[zn][0]}</span></div>${inhalt}</div>`; }).join('')}</div>`;
   document.querySelectorAll('[data-cv]').forEach(c => { const s = sc[c.dataset.cv]; if(s){ c.scrollLeft = s[0]; c.scrollTop = s[1]; } });
   platziereLeiste();
   zeichneOver();
@@ -510,7 +517,7 @@ function platziereLeiste(){
   const ziele = [zl ? rect(zl) : spalten.shift(), ...spalten.slice(0, 3)];
   if(ziele.length < 4 || ziele.some(r => !r || r.width < 150)) return;
   const rechts = rect(bar.querySelector('.brechts'));
-  if(ziele[3].right > rechts.left - 8) return;
+  if(ziele.some(r => r.right > rechts.left - 8)) return;
   slots.forEach((s, i) => { s.classList.add('bpos'); s.style.left = (ziele[i].left - b0.left) + 'px'; s.style.width = ziele[i].width + 'px'; });
 }
 function editorHtml(id, html, ph, klein){
@@ -813,9 +820,11 @@ async function neueListe(artId, pos){
 // ---------------------------------------------------------------------------
 // Trennlinien und Listen ziehen
 // ---------------------------------------------------------------------------
-let ld = null, sd = null, rz = null;
+let ld = null, sd = null, rz = null, pd = null;
 document.addEventListener('dblclick', e => { const h = e.target.closest('[data-rz]'); if(!h) return; const l = listeById(h.dataset.rz); l.breite = null; zeichne(); upd('pendenz_liste', l.id, { breite: null }); });
 document.addEventListener('pointerdown', e => {
+  const pg = e.target.closest('[data-pgriff]'); // Bereich am Griff packen und auf einen anderen Bereich ziehen = Plätze tauschen
+  if(pg){ pd = { zn: pg.dataset.pgriff }; e.preventDefault(); return; }
   const rzh = e.target.closest('[data-rz]'); // Listenbreite am rechten Rand ziehen (nur in der freien Anordnung sichtbar)
   if(rzh){ const l = listeById(rzh.dataset.rz); rz = { l, el:rzh.parentElement, x0:e.clientX, w0:l.breite || LW }; e.preventDefault(); return; }
   const sp = e.target.closest('[data-split]');
@@ -831,12 +840,17 @@ document.addEventListener('pointermove', e => {
     w = w < 200 ? 46 : Math.max(Math.min(LW + 24, max), Math.min(max, Math.round(w)));
     if(w !== breite(sd.k)){ if(breite(sd.k) > 60 && w <= 60) S.pwLast[sd.k] = sd.w0 > 60 ? sd.w0 : STD_BREITE[sd.k]; S.ein.breiten[sd.k] = w; zeichne(); }
     return; }
+  if(pd){ const t = document.elementsFromPoint(e.clientX, e.clientY).map(x => x.closest?.('[data-pane]')).find(Boolean), z = t && t.dataset.pane !== pd.zn ? t.dataset.pane : null;
+    if(z !== pd.ziel){ pd.ziel = z; document.querySelectorAll('[data-pane]').forEach(p => p.classList.toggle('ziel', p.dataset.pane === z)); } return; }
   if(rz){ const w = Math.max(240, Math.min(900, Math.round((rz.w0 + e.clientX - rz.x0) / R) * R)); rz.l.breite = w; rz.el.style.width = w + 'px'; return; }
   if(!ld) return;
   if(!ld.moved){ if(Math.abs(e.movementX) + Math.abs(e.movementY) < 1) return; ld.moved = true; ld.el.classList.add('flieg'); ld.el.style.width = ld.w + 'px'; document.body.appendChild(ld.el); document.querySelector(`.canvas[data-cv="${bereichOf(ld.l)}"]`)?.classList.add('ziehen'); }
   ld.el.style.left = (e.clientX - ld.gx) + 'px'; ld.el.style.top = (e.clientY - ld.gy) + 'px'; });
 document.addEventListener('pointerup', e => {
   if(sd){ sd = null; S.splitOn = null; speichereEin(); return zeichne(); }
+  if(pd){ const { zn, ziel } = pd; pd = null;
+    if(ziel){ const r = [...reihe()], a = r.indexOf(zn), b = r.indexOf(ziel); r[a] = ziel; r[b] = zn; S.ein.breiten[S.board.typ === 'person' ? '_reihe' : '_reiheG'] = r; speichereEin(); }
+    return zeichne(); }
   if(rz){ const { l } = rz; rz = null; if(l.breite === LW) l.breite = null; upd('pendenz_liste', l.id, { breite: l.breite }); return zeichne(); }
   if(!ld) return; const { l, el, gx, gy, moved } = ld; ld = null; if(!moved) return;
   // Liste bleibt in ihrem Bereich: nur dort ablegen, sonst zurück an den alten Platz
