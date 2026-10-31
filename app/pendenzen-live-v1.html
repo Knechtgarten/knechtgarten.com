@@ -172,8 +172,10 @@ button:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
 .cards{display:flex;flex-direction:column;gap:4px;padding:6px 6px 2px;min-height:12px;}
 .gh{display:flex;align-items:center;gap:4px;margin:6px 6px 0;padding:3px 4px;font-size:11.5px;font-weight:700;color:var(--primary);border-radius:6px;cursor:pointer;user-select:none;}
 .gh:hover{background:rgba(50,62,78,.06);}
-.gcards{padding-left:12px;}
-.gh.zu + .gcards{display:none;}
+.cards .gh{margin:6px 0 0;cursor:grab;}
+.cards .gh.dragging{opacity:.35;}
+.card.ingr{margin-left:12px;}
+.card.gzu{display:none;}
 .card{background:#fff;border-radius:6px;height:30px;display:flex;align-items:center;gap:6px;padding:0 6px 0 0;cursor:pointer;border:1px solid transparent;overflow:hidden;flex:none;}
 .card:hover{border-color:var(--line);}
 .card.sel{border-color:var(--primary);}
@@ -586,7 +588,7 @@ function pdHtml(p, opt = {}){
   if(!gemeinsam && p.erstellt_von && p.erstellt_von !== ME) ind.push(kuerzel(p.erstellt_von));
   // Team-box: vorne die Herkunft – rotes Mail-Icon (per Mail), Pfeil (von einem Kollegen im Tool zugeschoben)
   const herkunft = l.art_id === 'team' && p.herkunft ? `<span class="herk ${p.herkunft}" title="${p.herkunft === 'mail' ? 'Per Mail gekommen' : 'Von einem Kollegen zugeschoben'}">${p.herkunft === 'mail' ? A('brief') : K('senden', 14)}</span>` : '';
-  return `<div class="card${S.sel === p.id ? ' sel' : ''}${gemeinsam ? ' ohnepr' : ''}" draggable="true" data-card="${p.id}">
+  return `<div class="card${S.sel === p.id ? ' sel' : ''}${gemeinsam ? ' ohnepr' : ''}${opt.gruppe ? ' ingr' + (opt.gruppe.zu ? ' gzu' : '') : ''}" draggable="true" data-card="${p.id}">
     ${gemeinsam ? (istOfferten() && S.ofMeine ? '' : kuerzel(wer))
       : opt.zeit ? '' // in Wann? kein Zeit-Streifen – die Liste sagt ja schon wann
       : notiz ? '<span class="pr person"></span>' // Notizen haben keine Zeit
@@ -605,8 +607,12 @@ function listHtml(l){
   } else { const a = art(l.art_id), gs = S.gruppen.filter(g => g.liste_id === l.id), zu = l.art_id === 'of_zugesagt';
     const ps = zu ? S.pz.filter(p => p.offerte_status === 'zugesagt' && listeById(p.liste_id)?.versteckt) : sortiert(l);
     kopf = `<div class="lh${zu ? ' hell' : ''}" data-drag="${l.id}" style="background:${listFarbe(l)}"><button class="tog" data-tog="${l.id}" aria-label="Auf-/zuklappen">${K('chev')}</button>${A(a.icon)}<b>${esc(l.titel)}</b><button class="kg-ibtn" data-set="${l.id}" aria-label="Liste einstellen">${K('gear')}</button></div>`;
-    body = `<div class="cards" data-drop="${l.id}">${ps.filter(p => !p.gruppe_id).map(p => pdHtml(p)).join('')}</div>`
-      + gs.map(g => `<div class="gh${g.zu ? ' zu' : ''}" data-gtog="${g.id}"><span class="tog">${K('chev')}</span>${esc(g.titel)}</div><div class="cards gcards" data-drop="${l.id}" data-grp="${g.id}">${ps.filter(p => p.gruppe_id === g.id).map(p => pdHtml(p)).join('')}</div>`).join('')
+    // Gruppentitel = Trenner: Titel und Pendenzen in einer Reihenfolge, alles unter einem Titel gehört zu dieser Gruppe
+    let akt = null;
+    const folge = [...ps.map(p => ({ p, s: p.sortierung })), ...gs.map(g => ({ g, s: g.sortierung }))].sort((a, b) => a.s - b.s || (a.g ? -1 : 1));
+    body = `<div class="cards" data-drop="${l.id}">${folge.map(x => { if(x.g){ akt = x.g;
+        return `<div class="gh${x.g.zu ? ' zu' : ''}" draggable="true" data-ghead="${x.g.id}" data-gtog="${x.g.id}" title="Ziehen = Gruppe verschieben, Klick = auf-/zuklappen"><span class="tog">${K('chev')}</span>${esc(x.g.titel)}</div>`; }
+      return pdHtml(x.p, { gruppe: akt }); }).join('')}</div>`
       + (l.art_id === 'team' || (OF(l.art_id) && l.art_id !== 'of_zugestellt') ? '' : `<div class="ladd"><input type="text" id="add-${l.id}" placeholder="${l.art_id === 'notizen' ? '+ Notiz' : '+ Pendenz'}" aria-label="Neue ${l.art_id === 'notizen' ? 'Notiz' : 'Pendenz'} in ${esc(l.titel)}"><button class="kg-ibtn${recZiel === 'add-' + l.id ? ' on' : ''}" data-mic="add-${l.id}" aria-label="Sprechen" title="Sprechen">${K('mikrofon')}</button><button class="kg-ibtn" data-add="${l.id}" aria-label="Hinzufügen">${K('plus')}</button></div>`)
       + (l.art_id === 'team' && !ps.length ? '<div class="zhint">Hier landet, was dir Kollegen zuschieben.</div>' : '')
       + (l.art_id === 'of_abgesagt' ? '<div class="zhint">Kommt nach 30 Tagen automatisch ins Archiv.</div>' : '')
@@ -780,8 +786,12 @@ function zeichneOver(){
 // Speichern
 // ---------------------------------------------------------------------------
 async function upd(tab, id, patch, key = 'id'){ const { error } = await sb.from(tab).update(patch).eq(key, id); if(error){ fehler(error, 'Speichern'); return false; } return true; }
+// höchste Stelle in einer Liste (Pendenzen und Gruppentitel teilen sich die Reihenfolge)
+const letzteSort = lid => Math.max(0, ...S.pz.filter(p => p.liste_id === lid).map(p => p.sortierung), ...S.gruppen.filter(g => g.liste_id === lid).map(g => g.sortierung));
 async function neuePendenz(l, titel, gruppe_id = null){
-  const max = Math.max(0, ...S.pz.filter(p => p.liste_id === l.id).map(p => p.sortierung));
+  // kommt unten an die Liste und gehört damit zum letzten Gruppentitel (falls es Gruppen gibt)
+  const max = letzteSort(l.id), letzte = S.gruppen.filter(g => g.liste_id === l.id).sort((a, b) => b.sortierung - a.sortierung)[0];
+  if(!gruppe_id && letzte) gruppe_id = letzte.id;
   // in einer Zeitliste erfasst: gehört direkt zu ihr (ohne Pendenzenart) und hat deren Zeit
   const { data, error } = await sb.from('pendenz').insert({ liste_id: l.id, gruppe_id, titel, zeit: l.zeit || 0, sortierung: max + 1, erstellt_von: ME, ...(OF(l.art_id) ? { offerte_von: ME } : {}) }).select().single();
   if(error) return fehler(error, 'Erfassen');
@@ -1022,7 +1032,7 @@ document.addEventListener('click', async e => {
   if('popx' in d){ await gruppeAusFeld(); S.pop = null; return zeichne(); }
   if('gadd' in d){ if(!$('gname').value.trim()) return $('gname').focus(); await gruppeAusFeld(); return $('gname')?.focus(); }
   if(d.gdel){ const g = S.gruppen.find(x => x.id === d.gdel); const { error } = await sb.from('pendenz_gruppe').delete().eq('id', g.id); if(error) return fehler(error);
-    S.gruppen = S.gruppen.filter(x => x !== g); S.pz.forEach(p => { if(p.gruppe_id === g.id) p.gruppe_id = null; }); return zeichne(); }
+    S.gruppen = S.gruppen.filter(x => x !== g); gruppenNeu(g.liste_id); return zeichne(); } // Pendenzen gehören dann zum Titel darüber
   if('ldel' in d){ S.delListe = true; return zeichneOver(); }
   if('ldelno' in d){ S.delListe = false; return zeichneOver(); }
   if('ldelyes' in d){ const l = listeById(S.pop); const { error } = await sb.from('pendenz_liste').delete().eq('id', l.id); if(error) return fehler(error, 'Liste löschen');
@@ -1079,7 +1089,8 @@ document.addEventListener('paste', e => { // Fotos direkt ins offene Pendenz-Fen
 async function gruppeAusFeld(){
   const f = $('gname'), v = f?.value.trim(); if(!v || !S.pop) return;
   f.value = '';
-  const { data, error } = await sb.from('pendenz_gruppe').insert({ liste_id: S.pop, titel: v, sortierung: S.gruppen.filter(g => g.liste_id === S.pop).length }).select().single();
+  // neuer Gruppentitel kommt unten an die Liste; von dort an die gewünschte Stelle ziehen
+  const { data, error } = await sb.from('pendenz_gruppe').insert({ liste_id: S.pop, titel: v, sortierung: letzteSort(S.pop) + 1 }).select().single();
   if(error) return fehler(error, 'Gruppe');
   S.gruppen.push(data); zeichne(); toast(`Gruppe «${v}» hinzugefügt`);
 }
@@ -1171,14 +1182,29 @@ document.addEventListener('pointerup', e => {
   el.remove(); zeichne(); });
 
 // Pendenzen ziehen: in Liste/Gruppe (wechselt Liste), in Zeitliste (setzt Zeit); Pendenzenart aufs Blatt = neue Liste
-let dc = null, dArt = null;
+let dc = null, dArt = null, dg = null;
 document.addEventListener('dragstart', e => {
   const a = e.target.closest('[data-neuart]'); if(a){ dArt = a.dataset.neuart; e.dataTransfer.setData('text/plain', dArt); document.querySelectorAll('.canvas').forEach(c => c.classList.add('ziehen')); return; }
+  // Gruppentitel ziehen: nur innerhalb seiner Liste verschieben
+  const gh = e.target.closest('[data-ghead]'); if(gh){ dg = S.gruppen.find(g => g.id === gh.dataset.ghead); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dg.id); setTimeout(() => gh.classList.add('dragging')); return; }
   const c = e.target.closest('[data-card]'); if(!c) return; dc = c.dataset.card; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dc); document.body.classList.add('zieht-pendenz'); setTimeout(() => c.classList.add('dragging')); });
-document.addEventListener('dragend', () => { dc = null; dArt = null; document.body.classList.remove('zieht-pendenz'); document.querySelectorAll('.dz.hot').forEach(z => z.classList.remove('hot')); document.querySelectorAll('.ph').forEach(p => p.remove()); document.querySelectorAll('.ziehen').forEach(c => c.classList.remove('ziehen')); document.querySelectorAll('.dragging').forEach(c => c.classList.remove('dragging')); });
-const dropIdx = (zone, y) => { const cs = [...zone.querySelectorAll(':scope > [data-card]:not(.dragging)')]; const i = cs.findIndex(c => { const r = c.getBoundingClientRect(); return y < r.top + r.height / 2; }); return { cs, i: i < 0 ? cs.length : i }; };
+document.addEventListener('dragend', () => { dc = null; dArt = null; dg = null; document.body.classList.remove('zieht-pendenz'); document.querySelectorAll('.dz.hot').forEach(z => z.classList.remove('hot')); document.querySelectorAll('.ph').forEach(p => p.remove()); document.querySelectorAll('.ziehen').forEach(c => c.classList.remove('ziehen')); document.querySelectorAll('.dragging').forEach(c => c.classList.remove('dragging')); });
+// Zeilen der Liste (Pendenzen und Gruppentitel, ohne zugeklappte), Einfügestelle nach Mausposition
+const dropIdx = (zone, y) => { const cs = [...zone.querySelectorAll(':scope > [data-card]:not(.dragging):not(.gzu), :scope > [data-ghead]:not(.dragging)')]; const i = cs.findIndex(c => { const r = c.getBoundingClientRect(); return y < r.top + r.height / 2; }); return { cs, i: i < 0 ? cs.length : i }; };
+const sortVon = el => el ? (el.dataset.ghead ? S.gruppen.find(g => g.id === el.dataset.ghead)?.sortierung : S.pz.find(x => x.id === el.dataset.card)?.sortierung) : undefined;
+// Gruppe einer Stelle = letzter Gruppentitel darüber
+const gruppeVor = (cs, i) => { for(let k = i - 1; k >= 0; k--) if(cs[k].dataset.ghead) return S.gruppen.find(g => g.id === cs[k].dataset.ghead) || null; return null; };
+// nach dem Verschieben eines Gruppentitels: Gruppe jeder Pendenz der Liste aus der Reihenfolge neu bestimmen und speichern
+function gruppenNeu(listeId){
+  const gs = S.gruppen.filter(g => g.liste_id === listeId).sort((a, b) => a.sortierung - b.sortierung);
+  S.pz.filter(p => p.liste_id === listeId).forEach(p => { let gid = null; for(const g of gs) if(g.sortierung < p.sortierung) gid = g.id;
+    if((p.gruppe_id || null) !== gid){ p.gruppe_id = gid; upd('pendenz', p.id, { gruppe_id: gid }); } });
+}
 document.addEventListener('dragover', e => {
   if(dArt){ if(e.target.closest('[data-cv]')) e.preventDefault(); return; }
+  if(dg){ const z = e.target.closest('[data-drop]'); if(!z || z.dataset.drop !== dg.liste_id) return; e.preventDefault();
+    document.querySelectorAll('.ph').forEach(p => p.remove()); const { cs, i } = dropIdx(z, e.clientY); const ph = document.createElement('div'); ph.className = 'ph';
+    if(cs[i]) z.insertBefore(ph, cs[i]); else z.appendChild(ph); return; }
   if(!dc) return;
   const dz = e.target.closest('[data-dzone]'); // Ablageflächen oben: Archivieren, anderes Board, Planer
   document.querySelectorAll('.dz.hot').forEach(x => { if(x !== dz) x.classList.remove('hot'); });
@@ -1189,6 +1215,9 @@ document.addEventListener('dragover', e => {
 document.addEventListener('drop', async e => {
   if(dArt){ const cv = e.target.closest('[data-cv]'); if(!cv) return; e.preventDefault(); const r = cv.getBoundingClientRect(), id = dArt; dArt = null; S.neuListe = false;
     return neueListe(id, { bereich: cv.dataset.cv, x: Math.max(0, Math.round((e.clientX - r.left + cv.scrollLeft - 20) / R) * R), y: Math.max(0, Math.round((e.clientY - r.top + cv.scrollTop - 15) / R) * R) }); }
+  if(dg){ const g = dg, z = e.target.closest('[data-drop]'); dg = null; if(!z || z.dataset.drop !== g.liste_id) return; e.preventDefault();
+    const { cs, i } = dropIdx(z, e.clientY); g.sortierung = zwischen(sortVon(cs[i - 1]), sortVon(cs[i]));
+    gruppenNeu(g.liste_id); zeichne(); return upd('pendenz_gruppe', g.id, { sortierung: g.sortierung }); }
   if(!dc) return;
   const dz = e.target.closest('[data-dzone]');
   if(dz){ e.preventDefault(); const p = S.pz.find(x => x.id === dc); dc = null; dz.classList.remove('hot'); if(!p) return;
@@ -1207,10 +1236,13 @@ document.addEventListener('drop', async e => {
     zeichne(); return upd('pendenz', p.id, { zeit: p.zeit, zeit_sortierung: p.zeit_sortierung, liste_id: p.liste_id }); }
   // Offerten: in «Zugesagt» = zugesagt (wandert nach Büro-Board «Planung»); aus «Zugesagt» zurück = Status weg
   if(to.art_id === 'of_zugesagt'){ if(p.offerte_status === 'zugesagt') return zeichne(); return zusagen(p); }
-  if(p.offerte_status === 'zugesagt' && OF(to.art_id)){ p.offerte_status = null; p.liste_seit = new Date().toISOString(); p.liste_id = to.id; p.gruppe_id = null; p.sortierung = zwischen(vor?.sortierung, nach?.sortierung);
+  const sNeu = zwischen(sortVon(cs[i - 1]), sortVon(cs[i]));
+  if(p.offerte_status === 'zugesagt' && OF(to.art_id)){ p.offerte_status = null; p.liste_seit = new Date().toISOString(); p.liste_id = to.id; p.gruppe_id = null; p.sortierung = sNeu;
     zeichne(); return upd('pendenz', p.id, { liste_id: p.liste_id, gruppe_id: null, sortierung: p.sortierung, offerte_status: null }); }
   if(p.liste_id !== to.id) p.liste_seit = new Date().toISOString(); // Erinnerung zählt ab jetzt (in der DB per Trigger)
-  p.liste_id = to.id; p.gruppe_id = z.dataset.grp || null; p.sortierung = zwischen(vor?.sortierung, nach?.sortierung);
+  // Gruppe = Titel darüber; direkt unter einen zugeklappten Titel gelegt → Gruppe aufklappen, damit die Pendenz sichtbar bleibt
+  const gr = gruppeVor(cs, i); if(gr?.zu){ gr.zu = false; upd('pendenz_gruppe', gr.id, { zu: false }); }
+  p.liste_id = to.id; p.gruppe_id = gr ? gr.id : null; p.sortierung = sNeu;
   zeichne(); upd('pendenz', p.id, { liste_id: p.liste_id, gruppe_id: p.gruppe_id, sortierung: p.sortierung }); });
 
 pruefeAnmeldung();
