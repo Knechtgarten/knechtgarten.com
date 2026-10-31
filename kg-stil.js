@@ -25,6 +25,7 @@
     eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
     notiz: '<path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h6"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
+    mikrofon: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
     chev: '<path d="M6 9l6 6 6-6"/>',
     fett: '<path d="M7 5h6a3.5 3.5 0 0 1 0 7H7zM7 12h7a3.5 3.5 0 0 1 0 7H7z"/>',
     kursiv: '<path d="M10 5h8M6 19h8M14 5l-4 14"/>',
