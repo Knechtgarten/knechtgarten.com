@@ -164,6 +164,10 @@ button:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
 .card .pr{all:unset;cursor:pointer;width:6px;align-self:stretch;flex:none;background:#EEF1F4;}
 .card .pr:hover{width:9px;}
 .card .pr.person,.card .pr.person:hover{cursor:inherit;width:6px;}
+.card.ohnepr{padding-left:6px;}
+.kz{width:20px;height:20px;border-radius:50%;border:1.2px solid #C9CFD5;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:#8B9097;flex:none;box-sizing:border-box;}
+.kz.leer{border-style:dashed;}
+.det .hd .vonk{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;flex:none;margin-top:8px;white-space:nowrap;}
 .herk{display:inline-flex;flex:none;}
 .herk svg{width:15px;height:15px;}
 .herk.mail{color:var(--red);}
@@ -427,6 +431,8 @@ const avatar = uid => { const b = S.benutzer[uid]; if(!b) return ''; const n = b
   let h = 0; for(const c of uid) h = (h * 31 + c.charCodeAt(0)) >>> 0; const pf = S.pfarbe?.[uid]; // Personenfarbe, sonst feste Ersatzfarbe
   return `<span class="av" style="background:${pf || AVF[h % AVF.length]}${pf ? ';color:var(--ink)' : ''}" title="${esc(n)}">${esc(k)}</span>`; };
 const name = uid => { const b = S.benutzer[uid]; return b ? (b.anzeigename || b.email) : ''; };
+// wer hat's eingetragen: Anfangsbuchstabe in hellem Ring (S Stefan, B Benno, F Fabian, P Pascal), voller Name beim Drüberfahren
+const kuerzel = uid => { const n = name(uid); return n ? `<span class="kz" title="von ${esc(n)}">${esc(n.trim()[0].toUpperCase())}</span>` : '<span class="kz leer"></span>'; };
 function fehler(e, was){ console.error(e); toast((was ? was + ': ' : '') + (e?.message || e), null, true); }
 function toast(t, undo, err){ S.toast = { t, undo, err }; zeichneOver(); clearTimeout(toast.h); toast.h = setTimeout(() => { S.toast = null; zeichneOver(); }, 4500); }
 // Reihenfolge: neuer Wert zwischen den Nachbarn
@@ -546,17 +552,18 @@ function pdHtml(p, opt = {}){
   if(p.notiz && p.notiz.replace(/<[^>]*>/g, '').trim()) ind.push(K('notiz', 12));
   if(fs.some(d => d.art !== 'mail')) ind.push(K('foto', 12));
   if(p.planer_einsatz_id) ind.push(`<span title="Im Einsatzplaner">${K('kalender', 12)}</span>`);
-  // gemeinsames Board: keine Zeit, Streifen links in der Pendenzen-Farbe der Person, die sie eingetragen hat; eigenes Board: Zeit-Streifen, Avatar bei fremden
-  const gemeinsam = S.board.typ !== 'person', pf = gemeinsam && S.pfarbe?.[istOfferten() ? ofVon(p) : p.erstellt_von], notiz = l.art_id === 'notizen';
+  // gemeinsames Board: keine Zeit, vorne der Anfangsbuchstabe der Person im Ring (bei «Meine Offerten» nicht nötig);
+  // eigenes Board: Zeit-Streifen, Ring hinten bei Pendenzen von Kollegen
+  const gemeinsam = S.board.typ !== 'person', notiz = l.art_id === 'notizen', wer = istOfferten() ? ofVon(p) : p.erstellt_von;
   // Offerten: «wieder anschauen am», rotes Telefon wenn fällig, Chance als drei Balken (Klick = nächste Stufe)
   if(OF(l.art_id)){ if(p.wieder_am) ind.push(`<span class="wdat" title="Wieder anschauen am">${esc(new Date(p.wieder_am).toLocaleDateString('de-CH', { day:'numeric', month:'numeric' }))}</span>`);
     if(faellig(p, l)) ind.push(`<span class="faellig" title="Nachfassen fällig">${A('telefon')}</span>`);
     ind.push(`<button class="chance c${p.chance || 0}" data-chance="${p.id}" aria-label="Chance: ${CHANCE[p.chance || 0]}" title="Chance: ${CHANCE[p.chance || 0]}"><i></i><i></i><i></i></button>`); }
-  if(!gemeinsam && p.erstellt_von && p.erstellt_von !== ME) ind.push(avatar(p.erstellt_von));
+  if(!gemeinsam && p.erstellt_von && p.erstellt_von !== ME) ind.push(kuerzel(p.erstellt_von));
   // Team-box: vorne die Herkunft – rotes Mail-Icon (per Mail), Pfeil (von einem Kollegen im Tool zugeschoben)
   const herkunft = l.art_id === 'team' && p.herkunft ? `<span class="herk ${p.herkunft}" title="${p.herkunft === 'mail' ? 'Per Mail gekommen' : 'Von einem Kollegen zugeschoben'}">${p.herkunft === 'mail' ? A('brief') : K('senden', 14)}</span>` : '';
-  return `<div class="card${S.sel === p.id ? ' sel' : ''}" draggable="true" data-card="${p.id}">
-    ${gemeinsam ? `<span class="pr person" style="${pf ? `background:${pf}` : ''}"></span>`
+  return `<div class="card${S.sel === p.id ? ' sel' : ''}${gemeinsam ? ' ohnepr' : ''}" draggable="true" data-card="${p.id}">
+    ${gemeinsam ? (istOfferten() && S.ofMeine ? '' : kuerzel(wer))
       : notiz ? '<span class="pr person"></span>' // Notizen haben keine Zeit
       : `<button class="pr" data-zp="${p.id}" style="${p.zeit ? `background:${ZEIT[p.zeit].c}` : ''}" aria-label="Zeit: ${p.zeit ? ZEIT[p.zeit].t : 'irgendwann'}"></button>`}
     ${opt.zeit && a ? `<span class="ty" style="background:${listFarbe(l)}" title="${esc(l.titel)}">${A(a.icon)}</span>` : ''}${herkunft}
@@ -669,14 +676,12 @@ function dateiTile(d){
 function detHtml(){
   const p = S.pz.find(x => x.id === S.sel); if(!p) return ''; const l = listeById(p.liste_id), a = l.zeit ? { icon: ZEIT[l.zeit].icon } : art(l.art_id), kopfFarbe = l.zeit ? ZEIT[l.zeit].c : listFarbe(l);
   const fs = S.dateien.filter(d => d.pendenz_id === p.id), mails = fs.filter(d => d.art === 'mail'), rest = fs.filter(d => d.art !== 'mail');
-  const dd = S.delDatei && fs.find(d => d.id === S.delDatei);
+  const dd = S.delDatei && fs.find(d => d.id === S.delDatei), vonWer = istOfferten() ? ofVon(p) : p.erstellt_von;
   return `<aside class="det ${S.ein.oeffnen}" role="dialog" aria-label="Pendenz">
-    <div class="hd"><span class="ty" style="background:${kopfFarbe}" title="${esc(l.titel)}">${A(a.icon)}</span><input type="text" id="dtxt" value="${esc(p.titel)}" aria-label="Titel"><button class="kg-ibtn" data-close aria-label="Schliessen">${K('x')}</button></div>
-    ${p.erstellt_von && p.erstellt_von !== ME ? `<div class="von">von ${avatar(p.erstellt_von)} ${esc(name(p.erstellt_von))}</div>` : ''}
+    <div class="hd"><span class="ty" style="background:${kopfFarbe}" title="${esc(l.titel)}">${A(a.icon)}</span><input type="text" id="dtxt" value="${esc(p.titel)}" aria-label="Titel">${vonWer && (S.board.typ !== 'person' || vonWer !== ME) ? `<span class="vonk">${kuerzel(vonWer)}von ${esc(name(vonWer).split(' ')[0])}</span>` : ''}<button class="kg-ibtn" data-close aria-label="Schliessen">${K('x')}</button></div>
     ${S.board.typ === 'person' && l.art_id !== 'notizen' ? `<div class="seg" role="group" aria-label="Zeit">${[1,2,3,0].map(z => `<button data-dz="${z}" aria-pressed="${p.zeit === z}">${z ? `<i style="background:${ZEIT[z].c}"></i>${ZEIT[z].t}` : 'Irgendwann'}</button>`).join('')}</div>` : ''}
     ${OF(l.art_id) ? `<div class="ofrow"><span class="small muted">Chance</span><div class="seg" role="group" aria-label="Chance">${[1,2,3,0].map(c => `<button data-dchance="${c}" aria-pressed="${(p.chance || 0) === c}">${c ? `<span class="chance c${c}"><i></i><i></i><i></i></span>` : ''}${CHANCE[c]}</button>`).join('')}</div>
-      ${l.art_id === 'of_meldet' || l.art_id === 'of_aufgeschoben' ? `<label class="small muted" for="dwieder">Wieder anschauen am</label><input type="date" id="dwieder" value="${esc(p.wieder_am || '')}">` : ''}
-      ${p.offerte_von && p.offerte_von !== ME ? `<span class="small muted">Offerte von ${esc(name(p.offerte_von))}</span>` : ''}</div>` : ''}
+      ${l.art_id === 'of_meldet' || l.art_id === 'of_aufgeschoben' ? `<label class="small muted" for="dwieder">Wieder anschauen am</label><input type="date" id="dwieder" value="${esc(p.wieder_am || '')}">` : ''}</div>` : ''}
     <div class="ed">${editorHtml('det', p.notiz, 'Notiz schreiben …')}</div>
     <div class="strip"><div class="lab">${K('foto', 13)}Fotos und Dateien</div><div class="tiles">${rest.map(dateiTile).join('')}<label class="fadd" title="Fotos oder Dateien hinzufügen">${K('plus')}<input type="file" id="dupload" multiple hidden></label></div></div>
     ${mails.length ? `<div class="strip"><div class="lab">${A('brief', 13)}Mails und Anhänge</div><div class="tiles">${mails.map(dateiTile).join('')}</div></div>` : ''}
@@ -708,8 +713,6 @@ function zeichneOver(){
     <div class="fld"><label>Pendenz öffnen als</label><div class="seg"><button data-oeffnen="fenster" aria-pressed="${S.ein.oeffnen === 'fenster'}">Fenster</button><button data-oeffnen="rechts" aria-pressed="${S.ein.oeffnen === 'rechts'}">Rechts angeheftet</button></div></div>
     <div class="fld"><label>Meine Farben (nur für dich, Icons bleiben fix)</label>${Object.values(S.arten).sort((x, y) => x.sortierung - y.sortierung).map(a => `<div class="artrow"><span class="ty" style="background:${artFarbe(a.id)}">${A(a.icon)}</span><span class="n">${esc(a.titel)}</span>
       <div class="sws">${FARBEN.map(f => `<button class="sw" style="background:${f}" data-farbe="${a.id}|${f}" aria-pressed="${artFarbe(a.id) === f}" aria-label="Farbe ${f}"></button>`).join('')}</div>${S.ein.farben[a.id] ? `<button class="btn btn-ghost" style="padding:2px 8px;font-size:11px" data-farbe="${a.id}|">Standard</button>` : ''}</div>`).join('')}</div>
-    ${ROLLE === 'admin' || ROLLE === 'buero_team' ? `<div class="fld"><label>Pendenzen-Farbe pro Person (in gemeinsamen Boards, für alle gleich)</label>${Object.values(S.benutzer).filter(b => b.email).sort((x, y) => (x.anzeigename || x.email).localeCompare(y.anzeigename || y.email)).map(b => `<div class="artrow"><span class="n">${esc(b.anzeigename || b.email)}</span>
-      <div class="sws">${PFARBEN.map(f => `<button class="sw" style="background:${f}" data-pfarbe="${b.id}|${f}" aria-pressed="${S.pfarbe?.[b.id] === f}" aria-label="Farbe ${f}"></button>`).join('')}</div>${S.pfarbe?.[b.id] ? `<button class="btn btn-ghost" style="padding:2px 8px;font-size:11px" data-pfarbe="${b.id}|">Keine</button>` : ''}</div>`).join('')}</div>` : ''}
     ${S.board.typ !== 'person' ? `<div class="fld"><label>Mitglieder «${esc(S.board.name)}»</label>${Object.values(S.benutzer).filter(b => b.email).sort((x, y) => (x.anzeigename || x.email).localeCompare(y.anzeigename || y.email)).map(b => `<label class="row small"><input type="checkbox" data-mitglied="${b.id}"${S.mitglieder.includes(b.id) ? ' checked' : ''}>${esc(b.anzeigename || b.email)}</label>`).join('')}</div>` : ''}</div></div>`;
   if(S.archiv){ const a = S.archiv;
     h += `<div class="dbg" data-bg="archiv"><div class="set" role="dialog" aria-label="Archiv"><h2>Archiv<button class="kg-ibtn" data-archivx aria-label="Schliessen">${K('x')}</button></h2>
@@ -884,7 +887,7 @@ const notizText = html => { const d = document.createElement('textarea'); d.inne
 document.addEventListener('mouseover', e => { const c = e.target.closest('[data-card]');
   if(!c || ld || dc || sd){ if(!c) tipZu(); return; } if(c === tipKarte) return; tipZu(); tipKarte = c;
   tipT = setTimeout(() => { const p = S.pz.find(x => x.id === c.dataset.card); if(!p || !document.body.contains(c)) return;
-    const n = notizText(p.notiz), von = p.erstellt_von && (S.board.typ !== 'person' || p.erstellt_von !== ME) ? name(p.erstellt_von) : '';
+    const wer = istOfferten() ? ofVon(p) : p.erstellt_von, n = notizText(p.notiz), von = wer && (S.board.typ !== 'person' || wer !== ME) ? name(wer) : '';
     tipEl.innerHTML = `<b>${esc(p.titel)}</b>${von ? `<span>eingetragen von ${esc(von)}</span>` : ''}${n ? `<span>${esc(n.length > 400 ? n.slice(0, 400) + ' …' : n)}</span>` : ''}`;
     tipEl.hidden = false; const r = c.getBoundingClientRect(), h = tipEl.offsetHeight;
     tipEl.style.left = Math.max(8, Math.min(innerWidth - tipEl.offsetWidth - 8, r.left)) + 'px';
