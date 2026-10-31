@@ -404,13 +404,14 @@ function faellig(p, l){ if(!l) return false; const tage = (Date.now() - new Date
   return false; }
 const ofVon = p => p.offerte_von || p.erstellt_von;
 const listFarbe = l =>l.farbe || artFarbe(l.art_id); // eigene Listenfarbe, sonst Farbe der Pendenzenart
-const bereichOf = l => l.bereich || 'mitte';
+// nur das eigene Board hat drei Bereiche; gemeinsame Boards (Büro, Offerten) haben nur die eine Fläche
+const bereichOf = l => l.versteckt ? '_aus' : S.board?.typ === 'person' ? l.bereich || 'mitte' : 'mitte';
 // Drei Bereiche (zeit, mitte, team) in frei wählbarer Reihenfolge: aussen eingestellte Breite, Mitte = Rest
 const SEITE_MIN = LW + 2 * R, STD_BREITE = { zeit:SEITE_MIN, mitte:680, team:SEITE_MIN }, MITTE_MIN = SEITE_MIN; // Seitenbereich = eine Liste plus 20 px Rand
 const breite = b => { const v = S.ein.breiten[b] ?? STD_BREITE[b]; return v <= 60 || b === 'mitte' ? v : Math.max(v, SEITE_MIN); };
 // fest für alle; eigenes Board: Zeit | Arten | Team, gemeinsame Boards: Arten | Team. Jede Liste bleibt in ihrem Bereich
 // Reihenfolge pro Person (am Griff tauschbar), gespeichert in pendenz_benutzer.breiten._reihe / _reiheG
-const reihe = () => { if(istOfferten()) return ['mitte']; const eigen = S.board?.typ === 'person', std = eigen ? ['zeit', 'mitte', 'team'] : ['mitte', 'team'], r = S.ein.breiten[eigen ? '_reihe' : '_reiheG'];
+const reihe = () => { if(S.board && S.board.typ !== 'person') return ['mitte']; const eigen = S.board?.typ === 'person', std = eigen ? ['zeit', 'mitte', 'team'] : ['mitte', 'team'], r = S.ein.breiten[eigen ? '_reihe' : '_reiheG'];
   return Array.isArray(r) && r.length === std.length && std.every(z => r.includes(z)) ? r : std; };
 const bereichFuerArt = artId => artId === 'team' || artId === 'notizen' ? 'team' : 'mitte'; // rechts: Team-box und Dauernde Notizen
 const platz = () => innerWidth - 9 * (reihe().length - 1);
@@ -628,7 +629,7 @@ function zeichne(){
     // Linie zwischen zwei festen Bereichen: der eine wird breiter, der andere gleich viel schmaler – nur diese Linie bewegt sich.
     const vor = reihe()[i - 1], paar = vor !== 'mitte' && zn !== 'mitte', fest = vor === 'mitte' ? zn : vor, links = fest === vor;
     return (i ? `<div class="split${S.splitOn === (paar ? vor + '|' + zn : fest) ? ' on' : ''}" ${paar ? `data-paar="${vor}|${zn}"` : `data-split="${fest}" data-links="${links ? 1 : 0}"`} role="separator" aria-label="Breite ändern"><span class="grip"></span></div>` : '')
-      + `<div class="pane ${zn === 'mitte' ? 'flex' : 'seite'}${modus === 'schmal' ? ' schmal' : ''}" data-pane="${zn}"${zn !== 'mitte' ? ` style="width:${w}px"` : ''}><div class="ptitle">${istOfferten() ? `${A('dok', 13)}<span>Offerten${S.ofMeine ? ' – meine' : ' – alle'}</span>` : `<span class="pgriff" data-pgriff="${zn}" title="Bereich verschieben: ziehen und auf einen anderen Bereich fallen lassen">${KG.icon('griff', 14)}</span>${A(BEREICHE[zn][1], 13)}<span>${BEREICHE[zn][0]}</span>`}${zn === 'mitte' && !istOfferten() ? `<button class="btn btn-primary bneu" data-neuliste>${K('plus', 13)}Liste</button>` : ''}</div>${inhalt}</div>`; }).join('')}</div>`;
+      + `<div class="pane ${zn === 'mitte' ? 'flex' : 'seite'}${modus === 'schmal' ? ' schmal' : ''}" data-pane="${zn}"${zn !== 'mitte' ? ` style="width:${w}px"` : ''}><div class="ptitle">${istOfferten() ? `${A('dok', 13)}<span>Offerten${S.ofMeine ? ' – meine' : ' – alle'}</span>` : `${reihe().length > 1 ? `<span class="pgriff" data-pgriff="${zn}" title="Bereich verschieben: ziehen und auf einen anderen Bereich fallen lassen">${KG.icon('griff', 14)}</span>` : ''}${A(BEREICHE[zn][1], 13)}<span>${BEREICHE[zn][0]}</span>`}${zn === 'mitte' && !istOfferten() ? `<button class="btn btn-primary bneu" data-neuliste>${K('plus', 13)}Liste</button>` : ''}</div>${inhalt}</div>`; }).join('')}</div>`;
   KAPPE = Infinity;
   document.querySelectorAll('[data-cv]').forEach(c => { const s = sc[c.dataset.cv]; if(s){ c.scrollLeft = s[0]; c.scrollTop = s[1]; } });
   entzerren();
@@ -1105,7 +1106,7 @@ document.addEventListener('pointerup', e => {
       l.x = Math.max(0, Math.min(Math.round((e.clientX - gx - r.left + t.scrollLeft) / R) * R, Math.floor((t.offsetWidth - Math.min(l.breite || LW, bereichOf(l) === 'mitte' ? Infinity : t.offsetWidth - 2 * R) - R) / R) * R)); l.y = Math.max(0, Math.round((e.clientY - gy - r.top + t.scrollTop) / R) * R); }
     else { // gestapelt: vor die Liste unter dem Zeiger, sonst ans Ende
       const unter = document.elementsFromPoint(e.clientX, e.clientY).map(x => x.closest?.('[data-list]')).find(x => x && x.dataset.list !== l.id), tl = unter && listeById(unter.dataset.list);
-      if(tl){ l.x = tl.x; l.y = tl.y - 1; } else { l.x = R; l.y = Math.max(0, ...S.listen.filter(x => bereichOf(x) === l.bereich && x !== l).map(x => x.y + estH(x))) + R; } }
+      if(tl){ l.x = tl.x; l.y = tl.y - 1; } else { l.x = R; l.y = Math.max(0, ...S.listen.filter(x => bereichOf(x) === bereichOf(l) && x !== l).map(x => x.y + estH(x))) + R; } }
     upd('pendenz_liste', l.id, { x: l.x, y: l.y }); }
   el.remove(); zeichne(); });
 
