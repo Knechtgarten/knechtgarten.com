@@ -974,6 +974,22 @@ input[type=number]{-moz-appearance:textfield;}
     </div>
   </div>
 
+  <div class="card hidden" id="formenToolCard">
+    <div class="cardheader" onclick="toggleCard(this)"><span class="cardchevron">&#9656;</span><div class="cardlabel">Formen-Tool</div></div>
+    <div class="hint">Skizzen-Auswahl in Tool A (Rechteck, Viertelrund, Halbrund, Oval, Freiform). Der Code liefert nur Flächen und Längen, alles andere sind normale Optionen und Formeln.</div>
+    <div class="cardbody hidden">
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:12px;">
+        <input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="checkbox" id="formenAktivInput" style="width:auto;">
+        Formen-Tool in Tool A anzeigen
+      </label>
+      <table>
+        <thead><tr><th>Wert aus dem Formen-Tool</th><th>Name (änderbar)</th></tr></thead>
+        <tbody id="formenWerteBody"></tbody>
+      </table>
+      <div class="hint" style="margin-top:10px;">Diese Werte stehen im Formel-Auswahlfenster zur Verfügung (Menge-Formeln, Werte). Die Mauerlängen kommen nicht von hier: Bei der Option «Option bearbeiten» → Tabellenverweis → «Formen-Tool: Tiefenzone» wählen, dann hakt der Mitarbeiter die Umfangsstücke in einer Skizze an.</div>
+    </div>
+  </div>
+
   <div class="card" id="deponieDistanzCard">
     <div class="cardheader" onclick="toggleCard(this)"><span class="cardchevron">&#9656;</span><div class="cardlabel">Deponien (Distanzberechnung)</div></div>
     <div class="hint">Adressen für den Systemwert "Fahrt Baustelle zu nächster Deponie" - das System nimmt automatisch die nächstgelegene zur Kunden-PLZ.</div>
@@ -1275,7 +1291,7 @@ function einheitOptionsHtml(selected, mitLeerOption){
   ).join('');
 }
 async function loadOffertentypen(){
-  const { data, error } = await sb.from('offertentyp').select('id,name,berechnungsmodell,papierkorb_am,vorarbeiter_typ_standard,zugaenglichkeit_aktiv,icon_key,farbe_key').order('reihenfolge');
+  const { data, error } = await sb.from('offertentyp').select('id,name,berechnungsmodell,papierkorb_am,vorarbeiter_typ_standard,zugaenglichkeit_aktiv,icon_key,farbe_key,formen_aktiv').order('reihenfolge');
   if(error){ console.error(error); return; }
   OFFERTENTYPEN = data;
   if(!currentOffertentypId){
@@ -1551,6 +1567,7 @@ async function loadFormelBibliothek(){
   renderEingabefelder();
   renderTerms();
   renderSystemwerte();
+  renderFormenKarte();
   renderDistanzAdresslisten();
 }
 
@@ -1587,6 +1604,63 @@ function renderSystemwerte(){
       <td class="hint">im Code erstellt</td>
     </tr>`).join('');
 }
+
+// Formen-Tool (z.B. Naturteich/Schwimmteich): Schalter pro Offertentyp. Der Code (Tool A) liefert nur Flaechen und
+// Umfaenge der gewaehlten Formen als Systemwerte - alles andere (Aushub, Folie, Mauer ...) sind normale Optionen/Formeln.
+// Die fuenf Systemwert-Terms werden beim Einschalten fuer diesen Offertentyp angelegt; ihre Namen sind aenderbar.
+const FORMEN_WERTE_FIX = [
+  { key: 'form_flaeche_teich', name: 'Fläche Teichform (laut Formen-Tool)', einheit: 'm²' },
+  { key: 'form_umfang_teich', name: 'Umfang Teichform (laut Formen-Tool)', einheit: 'm' },
+  { key: 'form_flaeche_tief', name: 'Fläche Tiefenzone (laut Formen-Tool)', einheit: 'm²' },
+  { key: 'form_umfang_tief', name: 'Umfang Tiefenzone (laut Formen-Tool)', einheit: 'm' },
+  { key: 'form_flaeche_rand', name: 'Fläche Randzone (laut Formen-Tool)', einheit: 'm²' }
+];
+function formenOffertentyp(){ return OFFERTENTYPEN.find(o => o.id === formelBibliothekKategorie); }
+function formenTerms(){ return TERMS.filter(t => t.typ === 'systemwert' && (t.systemwert_key || '').startsWith('form_')); }
+function renderFormenKarte(){
+  const ot = formenOffertentyp();
+  const sichtbar = formelBibliothekKategorie !== 'allgemein' && !!ot && ot.berechnungsmodell !== 'tagessatz';
+  $('formenToolCard').classList.toggle('hidden', !sichtbar);
+  if(!sichtbar) return;
+  $('formenAktivInput').checked = !!ot.formen_aktiv;
+  const terms = formenTerms();
+  $('formenWerteBody').innerHTML = FORMEN_WERTE_FIX.map(f => {
+    const t = terms.find(x => x.systemwert_key === f.key);
+    return `<tr><td>${f.einheit === 'm²' ? 'Fläche' : 'Länge'} (${f.einheit})</td><td>${t
+      ? `<input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="text" class="formenwertname" data-id="${t.id}" value="${escapeHtml(t.name)}">`
+      : '<span class="hint">wird beim Einschalten angelegt</span>'}</td></tr>`;
+  }).join('');
+  $('formenWerteBody').querySelectorAll('.formenwertname').forEach(inp => inp.addEventListener('change', async () => {
+    const name = inp.value.trim();
+    const t = TERMS.find(x => x.id === inp.dataset.id);
+    if(!name){ inp.value = t?.name || ''; return; }
+    const { error } = await sb.from('term').update({ name }).eq('id', inp.dataset.id);
+    if(error){ console.error(error); showToast(friendlyError(error), true); inp.value = t?.name || ''; return; }
+    if(t) t.name = name;
+    const a = ALLE_TERMS.find(x => x.id === inp.dataset.id); if(a) a.name = name;
+    showToast('Name gespeichert.');
+  }));
+}
+$('formenAktivInput').addEventListener('change', async () => {
+  const ot = formenOffertentyp();
+  if(!ot) return;
+  const an = $('formenAktivInput').checked;
+  if(an){
+    for(const f of FORMEN_WERTE_FIX){
+      if(formenTerms().some(t => t.systemwert_key === f.key)) continue;
+      const { data: neu, error } = await sb.from('term')
+        .insert({ offertentyp_id: ot.id, name: f.name, typ: 'systemwert', systemwert_key: f.key, einheit: f.einheit })
+        .select().single();
+      if(error){ console.error(error); showToast(friendlyError(error), true); $('formenAktivInput').checked = false; return; }
+      TERMS.push(neu); ALLE_TERMS.push(neu);
+    }
+  }
+  const { error } = await sb.from('offertentyp').update({ formen_aktiv: an }).eq('id', ot.id);
+  if(error){ console.error(error); showToast(friendlyError(error), true); $('formenAktivInput').checked = !an; return; }
+  ot.formen_aktiv = an;
+  renderFormenKarte();
+  showToast(an ? 'Formen-Tool ist in Tool A aktiv.' : 'Formen-Tool ist ausgeschaltet.');
+});
 
 // Standort der Firma - Ausgangspunkt fuer "Fahrzeit/Fahrstrecke zur
 // Baustelle" (Systemwerte oben) UND fuer die Lieferwagenfahrzeit-
@@ -3127,10 +3201,20 @@ $('addOptMengenoptionInput').addEventListener('change', () => {
 // Tabellenverweis: eine oder mehrere Tabellen dieser Vorlage, je mit der Spalte,
 // deren Wert pro angehakter Zeile zaehlt (z.B. Tabelle "Flaechen", Spalte "Flaeche").
 let addOptVerweis = [];
+// Formen-Tool: virtuelle "Tabelle" mit den Umfangsstuecken (U1, U2 ...) der Tiefenzone. Nur sichtbar, wenn der
+// Offertentyp das Formen-Tool eingeschaltet hat. Tool A zeigt dann das Skizzen-Pop-up statt des Zeilen-Fensters.
+const FORMEN_TIEF_ID = 'formen:tief';
 function verweisTabellenDieserVorlage(){
-  return ALLE_TABELLEN.filter(t => t.offertentyp_id === currentOffertentypId);
+  const tabellen = ALLE_TABELLEN.filter(t => t.offertentyp_id === currentOffertentypId);
+  const ot = OFFERTENTYPEN.find(o => o.id === currentOffertentypId);
+  if(ot?.formen_aktiv) tabellen.push({ id: FORMEN_TIEF_ID, name: 'Formen-Tool: Tiefenzone (Umfangsstücke)', offertentyp_id: currentOffertentypId });
+  return tabellen;
 }
 function verweisSpaltenVon(tabelleId){
+  if(tabelleId === FORMEN_TIEF_ID) return [
+    { id: 'laenge', name: 'Länge', einheit: 'm' },
+    { id: 'gerade', name: 'Länge gerade (nur gerade Stücke, z.B. Kofra)', einheit: 'm' }
+  ];
   return ALLE_TABELLE_SPALTEN.filter(s => s.eingabefeld_id === tabelleId && !s.ist_dropdown);
 }
 function renderAddOptVerweisListe(){
@@ -3177,6 +3261,7 @@ function renderAddOptVerweisListe(){
 }
 // Vorschlag: Spalte mit "Fläche" im Namen, sonst mit Einheit m², sonst die erste
 function standardVerweisSpalte(tabelleId){
+  if(tabelleId === FORMEN_TIEF_ID) return 'laenge';
   const sp = verweisSpaltenVon(tabelleId);
   return (sp.find(s => /fl(ä|ae)che/i.test(s.name)) || sp.find(s => /^m\s*[²2]$/i.test((s.einheit || '').trim())) || sp[0])?.id || null;
 }
