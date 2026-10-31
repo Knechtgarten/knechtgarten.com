@@ -2467,10 +2467,11 @@ function renderAuswahlfeld(tsId, af){
 // optionsgruppe_id erscheinen in Tool B unter einem Balken, in Tool A als EIN
 // Button mit Dropdown. Der Gruppenname steht an jeder Option der Gruppe.
 // ---------------------------------------------------------------------------
-// EINE Regel fuer alle: Gruppen gibt es nur im Formel-Modell (Tagesrechner/Tagessatz kennt keine) und nur fuer
-// Optionen OHNE Haken "Mehrfachauswahl" (Zusatzoptionen schliessen sich nicht gegenseitig aus). Tool A wendet
-// dieselbe Regel beim Laden an (optionsgruppeId = null bei Mehrfachauswahl).
-function optionGruppierbar(o){ return currentBerechnungsmodell !== 'tagessatz' && !o.mehrfachauswahl; }
+// EINE Regel fuer alle: Gruppen gibt es nur im Formel-Modell (Tagesrechner/Tagessatz kennt keine).
+// Eine Gruppe besteht entweder nur aus Optionen OHNE Haken "Mehrfachauswahl" (gegenseitig exklusiv im ganzen Auswahlfeld)
+// oder nur aus Optionen MIT Haken (unabhaengige Einzelwahl, z.B. "Nische" oder "Blende": hoechstens ein Mitglied,
+// frei kombinierbar mit allem anderen im Auswahlfeld). Gemischte Gruppen gibt es nicht.
+function optionGruppierbar(o){ return currentBerechnungsmodell !== 'tagessatz'; }
 function optionsgruppeId(o){ return optionGruppierbar(o) ? (o.optionsgruppe_id || null) : null; }
 function findeAuswahlfeld(afId){
   for(const as of ARBEITSSCHRITTE) for(const ts of (as.teilschritt || [])) if(ts.auswahlfeld?.id === afId) return ts.auswahlfeld;
@@ -2523,10 +2524,19 @@ async function klickOptionsEcke(afId, optId){
   const sel = (optGruppeAuswahl[afId] = optGruppeAuswahl[afId] || new Set());
   [...sel].forEach(id => { if(!optionen.some(x => x.id === id && !x.optionsgruppe_id)) sel.delete(id); });
   if(o.optionsgruppe_id){
-    if(sel.size) return gruppeErweitern(af, o.optionsgruppe_id, [...sel]);
+    if(sel.size){
+      const passt = [...sel].every(id => !!optionen.find(x => x.id === id)?.mehrfachauswahl === !!o.mehrfachauswahl);
+      if(!passt){ showToast('Eine Gruppe kann nicht Optionen mit und ohne «Mehrfachauswahl» mischen.', true); return; }
+      return gruppeErweitern(af, o.optionsgruppe_id, [...sel]);
+    }
     return optionAusGruppeNehmen(af, o);
   }
-  if(sel.has(optId)) sel.delete(optId); else sel.add(optId);
+  if(sel.has(optId)) sel.delete(optId);
+  else{
+    // Markierte Optionen muessen gleichartig sein (alle mit oder alle ohne Haken "Mehrfachauswahl")
+    [...sel].forEach(id => { if(!!optionen.find(x => x.id === id)?.mehrfachauswahl !== !!o.mehrfachauswahl) sel.delete(id); });
+    sel.add(optId);
+  }
   if(sel.size >= 2) return gruppeErstellen(af, [...sel]);
   renderArbeitsschritte();
 }
@@ -3235,13 +3245,14 @@ $('addOptConfirm').addEventListener('click', async () => {
   const eigenePosition = $('addOptEigenePositionInput').checked;
   const eigenePositionTitel = $('addOptEigenePositionTitelInput').value.trim() || null;
   if(addOptEditingId){
-    // Zusatzoption (Mehrfachauswahl) kann nicht in einer Optionsgruppe bleiben - vorher nachfragen
+    // Eine Optionsgruppe mischt keine Optionen mit und ohne Mehrfachauswahl - wuerde sie dadurch gemischt, vorher nachfragen
     let ausGruppe = null;
-    if(mehrfachauswahl){
+    {
       const afAlt = findeAuswahlfeldZuOption(addOptEditingId);
       const optAlt = afAlt?.auswahloption?.find(x => x.id === addOptEditingId);
-      if(optAlt?.optionsgruppe_id){
-        if(!(await confirmDialog(`Mit «Mehrfachauswahl» kann die Option «${name}» nicht in der Gruppe «${optAlt.optionsgruppe_name || 'Gruppe'}» bleiben. Sie wird aus der Gruppe entfernt. Fortfahren?`))) return;
+      const andere = optAlt?.optionsgruppe_id ? (afAlt.auswahloption || []).filter(x => x.optionsgruppe_id === optAlt.optionsgruppe_id && x.id !== optAlt.id) : [];
+      if(andere.some(x => !!x.mehrfachauswahl !== !!mehrfachauswahl)){
+        if(!(await confirmDialog(`Mit dieser Einstellung von «Mehrfachauswahl» kann die Option «${name}» nicht in der Gruppe «${optAlt.optionsgruppe_name || 'Gruppe'}» bleiben. Sie wird aus der Gruppe entfernt. Fortfahren?`))) return;
         ausGruppe = { af: afAlt, opt: optAlt };
       }
     }
