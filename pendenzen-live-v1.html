@@ -369,7 +369,8 @@ const AI = {
   absage:'<circle cx="12" cy="12" r="9"/><path d="M9 9l6 6M15 9l-6 6"/>',
   stift:'<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
   doks:'<path d="M9 3h8l4 4v11H9z"/><path d="M16 3v5h5"/><path d="M6 6v15h10"/>',
-  schloss:'<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>'
+  schloss:'<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  haken:'<path d="M5 12.5l4.5 4.5L19 7.5"/>'
 };
 // Board-Auswahl: Icon pro Board (Mein Board = Person, Büro = Stift wie auf dem Laptop, Offerten = Dokument / Stapel)
 const boardIcon = (b, meine) => b.typ === 'person' ? 'person' : b.typ === 'offerten' ? (meine ? 'dok' : 'doks') : 'stift';
@@ -518,10 +519,16 @@ async function ladeBoard(){
   ]);
   if(rg.error) return fehler(rg.error); if(rp.error) return fehler(rp.error);
   S.gruppen = rg.data; S.pz = rp.data;
-  if(istOfferten()){ // abgesagte Offerten nach 30 Tagen ins Archiv; Ansicht «meine» = nur eigene Offerten
-    const ab = ls.find(l => l.art_id === 'of_abgesagt'), alt = ab ? S.pz.filter(p => p.liste_id === ab.id && Date.now() - new Date(p.liste_seit) > 30 * 864e5) : [];
-    if(alt.length){ const { error: ea } = await sb.from('pendenz').update({ erledigt: true, erledigt_am: new Date().toISOString(), offerte_status: 'abgesagt' }).in('id', alt.map(p => p.id));
+  if(istOfferten()){ // Abgesagt nach 30, Funkstille nach 120 Tagen ins Archiv; Ansicht «meine» = nur eigene Offerten
+    for(const [artId, tage, status] of [['of_abgesagt', 30, 'abgesagt'], ['of_keine', 120, 'funkstille']]){
+      const li = ls.find(l => l.art_id === artId), alt = li ? S.pz.filter(p => p.liste_id === li.id && Date.now() - new Date(p.liste_seit) > tage * 864e5) : [];
+      if(!alt.length) continue;
+      const { error: ea } = await sb.from('pendenz').update({ erledigt: true, erledigt_am: new Date().toISOString(), offerte_status: status }).in('id', alt.map(p => p.id));
       if(!ea) S.pz = S.pz.filter(p => !alt.includes(p)); }
+    // «Zugesagt» zeigt die zugesagten Offerten aus Büro-Board «Planung» (dieselben Karten, Liste selbst hier unsichtbar)
+    const { data: pl } = await sb.from('pendenz_liste').select('*').eq('rolle', 'planung').maybeSingle();
+    if(pl){ S.listen.push({ ...pl, bereich: '_aus', versteckt: true });
+      const { data: zp } = await sb.from('pendenz').select('*').eq('liste_id', pl.id).eq('erledigt', false).eq('offerte_status', 'zugesagt'); S.pz.push(...(zp || [])); }
     if(S.ofMeine) S.pz = S.pz.filter(p => ofVon(p) === ME); }
   S.erinn = S.board.typ === 'person' ? await ladeErinnerungen() : [];
   S.mitglieder = [];
@@ -576,13 +583,16 @@ function listHtml(l){
     const erinn = l.zeit === 1 ? S.erinn.map(({ p, l: ol }) => `<button class="erinn" data-erinn="${p.id}" title="Im Offerten-Board öffnen"><span class="ty" style="background:${ol.farbe || artFarbe(ol.art_id)}">${A(art(ol.art_id).icon)}</span><span class="tx">${esc(p.titel)}</span><span class="etag">${ol.art_id === 'of_aufgeschoben' || (ol.art_id === 'of_meldet' && p.wieder_am) ? 'wieder anschauen' : 'nachfassen'}</span></button>`).join('') : '';
     body = `<div class="cards" data-drop="${l.id}">${erinn}${ps.map(p => pdHtml(p, { zeit:true })).join('')}</div>`
       + `<div class="ladd"><input type="text" id="add-${l.id}" placeholder="+ Pendenz" aria-label="Neue Pendenz für ${esc(z.t)}"><button class="kg-ibtn${recZiel === 'add-' + l.id ? ' on' : ''}" data-mic="add-${l.id}" aria-label="Sprechen" title="Sprechen">${K('mikrofon')}</button><button class="kg-ibtn" data-add="${l.id}" aria-label="Hinzufügen">${K('plus')}</button></div>`;
-  } else { const a = art(l.art_id), gs = S.gruppen.filter(g => g.liste_id === l.id), ps = sortiert(l);
-    kopf = `<div class="lh" data-drag="${l.id}" style="background:${listFarbe(l)}"><button class="tog" data-tog="${l.id}" aria-label="Auf-/zuklappen">${K('chev')}</button>${A(a.icon)}<b>${esc(l.titel)}</b><button class="kg-ibtn" data-set="${l.id}" aria-label="Liste einstellen">${K('gear')}</button></div>`;
+  } else { const a = art(l.art_id), gs = S.gruppen.filter(g => g.liste_id === l.id), zu = l.art_id === 'of_zugesagt';
+    const ps = zu ? S.pz.filter(p => p.offerte_status === 'zugesagt' && listeById(p.liste_id)?.versteckt) : sortiert(l);
+    kopf = `<div class="lh${zu ? ' hell' : ''}" data-drag="${l.id}" style="background:${listFarbe(l)}"><button class="tog" data-tog="${l.id}" aria-label="Auf-/zuklappen">${K('chev')}</button>${A(a.icon)}<b>${esc(l.titel)}</b><button class="kg-ibtn" data-set="${l.id}" aria-label="Liste einstellen">${K('gear')}</button></div>`;
     body = `<div class="cards" data-drop="${l.id}">${ps.filter(p => !p.gruppe_id).map(p => pdHtml(p)).join('')}</div>`
       + gs.map(g => `<div class="gh${g.zu ? ' zu' : ''}" data-gtog="${g.id}"><span class="tog">${K('chev')}</span>${esc(g.titel)}</div><div class="cards gcards" data-drop="${l.id}" data-grp="${g.id}">${ps.filter(p => p.gruppe_id === g.id).map(p => pdHtml(p)).join('')}</div>`).join('')
       + (l.art_id === 'team' || (OF(l.art_id) && l.art_id !== 'of_zugestellt') ? '' : `<div class="ladd"><input type="text" id="add-${l.id}" placeholder="${l.art_id === 'notizen' ? '+ Notiz' : '+ Pendenz'}" aria-label="Neue ${l.art_id === 'notizen' ? 'Notiz' : 'Pendenz'} in ${esc(l.titel)}"><button class="kg-ibtn${recZiel === 'add-' + l.id ? ' on' : ''}" data-mic="add-${l.id}" aria-label="Sprechen" title="Sprechen">${K('mikrofon')}</button><button class="kg-ibtn" data-add="${l.id}" aria-label="Hinzufügen">${K('plus')}</button></div>`)
       + (l.art_id === 'team' && !ps.length ? '<div class="zhint">Hier landet, was dir Kollegen zuschieben.</div>' : '')
-      + (l.art_id === 'of_abgesagt' ? '<div class="zhint">Kommt nach 30 Tagen automatisch ins Archiv.</div>' : '');
+      + (l.art_id === 'of_abgesagt' ? '<div class="zhint">Kommt nach 30 Tagen automatisch ins Archiv.</div>' : '')
+      + (l.art_id === 'of_keine' ? '<div class="zhint">Kommt nach 120 Tagen automatisch ins Archiv.</div>' : '')
+      + (l.art_id === 'of_zugesagt' ? '<div class="zhint">Liegt auch im Büro-Board unter «Planung».</div>' : '');
   }
   // Pendenzenarten in der Mitte: Hintergrund ganz fein in der Titelfarbe
   const tint = !l.zeit && bereichOf(l) === 'mitte' ? `;background:color-mix(in srgb, ${listFarbe(l)} 9%, #F5F7F9)` : '';
@@ -598,8 +608,8 @@ function zeichne(){
     ...S.boards.filter(b => b.typ === 'offerten').flatMap(b => [{ v: b.id + '|m', t: 'Meine Offerten', icon: 'dok', an: b.id === S.board.id && S.ofMeine, trenn: true }, { v: b.id, t: 'Alle Offerten', icon: 'doks', an: b.id === S.board.id && !S.ofMeine }])];
   const akt = S.bopts.find(o => o.an) || { t: bname(S.board), icon: boardIcon(S.board, S.ofMeine) };
   const sel = S.bopts.length > 1 ? `<button class="bsel bwahl" data-bmenu aria-haspopup="menu" aria-expanded="${!!S.bmenu}">${A(akt.icon, 17)}<span>${esc(akt.t)}</span>${K('chev', 13)}</button>` : `<span class="bname bsel bwahl">${A(akt.icon, 17)}<span>${esc(akt.t)}</span></span>`;
-  // Offerten-Board: nur Archivieren und Zugesagt (hellblau = wichtig); «In anderes Board» braucht es dort nicht
-  const dzs = (istOfferten() ? [['archiv', 'archiv', 'Archivieren'], ['zusage', 'check', 'Zugesagt → Planung']] : [['archiv', 'archiv', 'Archivieren'], ['board', 'senden', 'In anderes Board'], ['planer', 'kalender', 'In den Planer']]).map(([z, ic, t]) => `<span class="dz bslot${z === 'zusage' ? ' wichtig' : ''}" data-dzone="${z}">${K(ic, 15)}${t}</span>`).join('');
+  // Offerten-Board: nur Archivieren (Zugesagt ist dort eine Liste); «In anderes Board» braucht es dort nicht
+  const dzs = (istOfferten() ? [['archiv', 'archiv', 'Archivieren']] : [['archiv', 'archiv', 'Archivieren'], ['board', 'senden', 'In anderes Board'], ['planer', 'kalender', 'In den Planer']]).map(([z, ic, t]) => `<span class="dz bslot${z === 'zusage' ? ' wichtig' : ''}" data-dzone="${z}">${K(ic, 15)}${t}</span>`).join('');
   $('bbar').innerHTML = `<span class="bflow"><span class="bslot bselw">${sel}</span>${dzs}</span>`
     + '<span class="brechts"></span>';
   $('main').innerHTML = `<div class="zones">${reihe().map((zn, i) => { const ls = S.listen.filter(l => bereichOf(l) === zn), w = bw[zn], modus = modusFuer(ls, w, zn); KAPPE = zn === 'mitte' ? Infinity : w - 2 * R;
@@ -774,9 +784,12 @@ async function zusagen(p){
   const { data: pl, error } = await sb.from('pendenz_liste').select('id').eq('rolle', 'planung').maybeSingle();
   if(error) return fehler(error, 'Planung'); if(!pl) return toast('Liste «Planung» im Büro-Board nicht gefunden.', null, true);
   const alt = { liste_id: p.liste_id, gruppe_id: p.gruppe_id, offerte_status: p.offerte_status || null };
-  if(!(await upd('pendenz', p.id, { liste_id: pl.id, gruppe_id: null, offerte_status: 'zugesagt', offerte_von: ofVon(p) }))) return;
-  S.pz = S.pz.filter(x => x !== p); if(S.sel === p.id) S.sel = null; zeichne();
-  toast('Zugesagt – liegt jetzt im Büro-Board unter «Planung»', async () => { if(await upd('pendenz', p.id, alt)){ Object.assign(p, alt); S.pz.push(p); zeichne(); } });
+  const neu = { liste_id: pl.id, gruppe_id: null, offerte_status: 'zugesagt', offerte_von: ofVon(p) };
+  if(!(await upd('pendenz', p.id, neu))) return;
+  // im Offerten-Board bleibt sie sichtbar (Liste «Zugesagt»), sonst verschwindet sie hier
+  if(istOfferten()) Object.assign(p, neu); else { S.pz = S.pz.filter(x => x !== p); if(S.sel === p.id) S.sel = null; }
+  zeichne();
+  toast('Zugesagt – liegt jetzt auch im Büro-Board unter «Planung»', async () => { if(await upd('pendenz', p.id, alt)){ Object.assign(p, alt); if(!S.pz.includes(p)) S.pz.push(p); zeichne(); } });
 }
 const isoTag = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const naechsterWerktag = () => { const d = new Date(); d.setDate(d.getDate() + 1); while(d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1); return isoTag(d); };
@@ -948,7 +961,7 @@ document.addEventListener('click', async e => {
     await wechsleBoard(ob.id + '|m'); S.sel = S.pz.some(p => p.id === d.erinn) ? d.erinn : null; zeichne(); return ladeUrls(); }
   // Archiv-Ansicht
   if('archivo' in d){ S.archiv = { rows:null, del:null }; zeichneOver();
-    const { data, error } = await sb.from('pendenz').select('*').in('liste_id', S.listen.map(l => l.id)).eq('erledigt', true).order('erledigt_am', { ascending:false }).limit(300);
+    const { data, error } = await sb.from('pendenz').select('*').in('liste_id', S.listen.filter(l => !l.versteckt).map(l => l.id)).eq('erledigt', true).order('erledigt_am', { ascending:false }).limit(300);
     if(error) return fehler(error, 'Archiv'); if(S.archiv){ S.archiv.rows = data; zeichneOver(); } return; }
   if('archivx' in d || d.bg === 'archiv'){ S.archiv = null; return zeichneOver(); }
   if(d.zurueck){ const p = S.archiv.rows.find(x => x.id === d.zurueck);
@@ -1131,6 +1144,10 @@ document.addEventListener('drop', async e => {
   if(to.zeit){ p.zeit = to.zeit; p.zeit_sortierung = zwischen(vor?.zeit_sortierung ?? (vor ? i - 1 : null), nach?.zeit_sortierung ?? (nach ? i + 1 : null));
     if(von?.zeit) p.liste_id = to.id; // direkt in einer Zeitliste erfasst: wandert mit
     zeichne(); return upd('pendenz', p.id, { zeit: p.zeit, zeit_sortierung: p.zeit_sortierung, liste_id: p.liste_id }); }
+  // Offerten: in «Zugesagt» = zugesagt (wandert nach Büro-Board «Planung»); aus «Zugesagt» zurück = Status weg
+  if(to.art_id === 'of_zugesagt'){ if(p.offerte_status === 'zugesagt') return zeichne(); return zusagen(p); }
+  if(p.offerte_status === 'zugesagt' && OF(to.art_id)){ p.offerte_status = null; p.liste_seit = new Date().toISOString(); p.liste_id = to.id; p.gruppe_id = null; p.sortierung = zwischen(vor?.sortierung, nach?.sortierung);
+    zeichne(); return upd('pendenz', p.id, { liste_id: p.liste_id, gruppe_id: null, sortierung: p.sortierung, offerte_status: null }); }
   if(p.liste_id !== to.id) p.liste_seit = new Date().toISOString(); // Erinnerung zählt ab jetzt (in der DB per Trigger)
   p.liste_id = to.id; p.gruppe_id = z.dataset.grp || null; p.sortierung = zwischen(vor?.sortierung, nach?.sortierung);
   zeichne(); upd('pendenz', p.id, { liste_id: p.liste_id, gruppe_id: p.gruppe_id, sortierung: p.sortierung }); });
