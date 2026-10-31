@@ -67,13 +67,10 @@ button:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
 .pane{display:flex;flex-direction:column;min-width:0;flex:none;}
 .pane.pos1{flex:1;}
 .pane.pos0,.pane.pos2{background:#EFF2F5;}
-.pane.ziel{box-shadow:inset 0 0 0 2px var(--primary);background:var(--accent-blue);}
 .ptitle{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700;padding:8px 20px 0;display:flex;gap:6px;align-items:center;flex:none;}
 .ptitle svg{width:13px;height:13px;}
 .pane.schmal .ptitle{padding:8px 0 0;justify-content:center;}
 .pane.schmal .ptitle span{display:none;}
-.ptitle{cursor:grab;user-select:none;}
-.ptitle:active{cursor:grabbing;}
 .canvas{position:relative;overflow-x:hidden;overflow-y:auto;flex:1;min-height:0;}
 .sheet{position:relative;}
 .canvas.ziehen .sheet{background-image:radial-gradient(circle,#C5CCD3 1px,transparent 1.2px);background-size:20px 20px;}
@@ -289,7 +286,8 @@ const bereichOf = l => l.bereich || 'mitte';
 // Drei Bereiche (zeit, mitte, team) in frei wählbarer Reihenfolge: aussen eingestellte Breite, Mitte = Rest
 const STD_BREITE = { zeit:360, mitte:680, team:380 }, MITTE_MIN = LW + 24;
 const breite = b => S.ein.breiten[b] ?? STD_BREITE[b];
-const reihe = () => { const r = S.ein.breiten._reihe; return Array.isArray(r) && r.length === 3 ? r : ['zeit', 'mitte', 'team']; };
+const reihe = () => ['zeit', 'mitte', 'team']; // fest für alle; jede Liste bleibt in ihrem Bereich
+const bereichFuerArt = artId => artId === 'team' || artId === 'besprechen' ? 'team' : 'mitte';
 const platz = () => innerWidth - 18;
 // bei schmalem Fenster klappen zuerst rechts, dann links hochkant zu (gespeicherte Breite bleibt)
 function anzeigeBreiten(){ const [a, m, c] = reihe(); let l = breite(a), r = breite(c);
@@ -411,7 +409,9 @@ function listHtml(l){
       + gs.map(g => `<div class="gh${g.zu ? ' zu' : ''}" data-gtog="${g.id}"><span class="tog">${K('chev')}</span>${esc(g.titel)}</div><div class="cards gcards" data-drop="${l.id}" data-grp="${g.id}">${ps.filter(p => p.gruppe_id === g.id).map(p => pdHtml(p)).join('')}</div>`).join('')
       + `<div class="ladd"><input type="text" id="add-${l.id}" placeholder="+ Pendenz" aria-label="Neue Pendenz in ${esc(l.titel)}"><button class="kg-ibtn" data-add="${l.id}" aria-label="Hinzufügen">${K('plus')}</button></div>`;
   }
-  return `<div class="list${l.zu ? ' zu' : ''}" data-list="${l.id}" style="left:${l.x}px;top:${l.y}px">${kopf}<div class="body">${body}</div></div>`;
+  // Pendenzenarten in der Mitte: Hintergrund ganz fein in der Titelfarbe
+  const tint = !l.zeit && bereichOf(l) === 'mitte' ? `;background:color-mix(in srgb, ${artFarbe(l.art_id)} 9%, #F5F7F9)` : '';
+  return `<div class="list${l.zu ? ' zu' : ''}" data-list="${l.id}" style="left:${l.x}px;top:${l.y}px${tint}">${kopf}<div class="body">${body}</div></div>`;
 }
 function zeichne(){
   const sc = {}; document.querySelectorAll('[data-cv]').forEach(c => sc[c.dataset.cv] = [c.scrollLeft, c.scrollTop]);
@@ -430,7 +430,7 @@ function zeichne(){
     } else { const h = Math.max(0, ...ls.map(l => l.y + estH(l))) + 200;
       inhalt = `<div class="canvas" data-cv="${zn}" data-modus="frei"><div class="sheet" style="height:${h}px">${ls.map(listHtml).join('')}</div></div>`; }
     return (i ? `<div class="split${S.splitOn === i ? ' on' : ''}" data-split="${i}" role="separator" aria-label="Breite ändern"><span class="grip"></span></div>` : '')
-      + `<div class="pane pos${i}${modus === 'schmal' ? ' schmal' : ''}${S.paneZiel === zn ? ' ziel' : ''}" data-pane="${zn}"${i !== 1 ? ` style="width:${w}px"` : ''}><div class="ptitle" data-pdrag="${zn}" title="Bereich verschieben: am Titel ziehen">${A(BEREICHE[zn][1], 13)}<span>${BEREICHE[zn][0]}</span></div>${inhalt}</div>`; }).join('')}</div>`;
+      + `<div class="pane pos${i}${modus === 'schmal' ? ' schmal' : ''}" data-pane="${zn}"${i !== 1 ? ` style="width:${w}px"` : ''}><div class="ptitle">${A(BEREICHE[zn][1], 13)}<span>${BEREICHE[zn][0]}</span></div>${inhalt}</div>`; }).join('')}</div>`;
   document.querySelectorAll('[data-cv]').forEach(c => { const s = sc[c.dataset.cv]; if(s){ c.scrollLeft = s[0]; c.scrollTop = s[1]; } });
   zeichneOver();
 }
@@ -600,8 +600,9 @@ document.addEventListener('paste', e => { // Fotos direkt ins offene Pendenz-Fen
   if(!S.sel || e.target.id === 'eb-det') return; const fs = [...(e.clipboardData?.files || [])]; if(fs.length){ e.preventDefault(); hochladen(fs); } });
 
 async function neueListe(artId, pos){
-  const a = art(artId), mitte = S.listen.filter(l => bereichOf(l) === 'mitte');
-  const ziel = pos || { bereich:'mitte', x:R, y: Math.ceil((Math.max(0, ...mitte.map(l => l.y + estH(l))) + R) / R) * R };
+  const a = art(artId), bereich = bereichFuerArt(artId), dort = S.listen.filter(l => bereichOf(l) === bereich);
+  // aufs Blatt gezogen: nur im passenden Bereich an diese Stelle, sonst ans Ende des richtigen Bereichs
+  const ziel = pos && pos.bereich === bereich ? pos : { bereich, x:R, y: Math.ceil((Math.max(0, ...dort.map(l => l.y + estH(l))) + R) / R) * R };
   const { data, error } = await sb.from('pendenz_liste').insert({ board_id: S.board.id, art_id: artId, titel: a.titel, bereich: ziel.bereich, x: ziel.x, y: ziel.y }).select().single();
   if(error) return fehler(error, 'Neue Liste');
   S.listen.push(data); zeichne(); toast(`Liste «${a.titel}» erstellt`);
@@ -610,12 +611,10 @@ async function neueListe(artId, pos){
 // ---------------------------------------------------------------------------
 // Trennlinien und Listen ziehen
 // ---------------------------------------------------------------------------
-let ld = null, sd = null, pd = null;
+let ld = null, sd = null;
 document.addEventListener('pointerdown', e => {
   const sp = e.target.closest('[data-split]');
   if(sp){ const i = +sp.dataset.split, k = reihe()[i === 1 ? 0 : 2]; sd = { i, k, x0:e.clientX, w0:anzeigeBreiten()[k] }; S.splitOn = i; sp.classList.add('on'); e.preventDefault(); return; }
-  const pt = e.target.closest('[data-pdrag]'); // Bereich am Titel packen: links / Mitte / rechts tauschen
-  if(pt){ pd = { zn: pt.dataset.pdrag, moved:false }; e.preventDefault(); return; }
   const h = e.target.closest('[data-drag]'); if(!h || e.target.closest('button')) return;
   const l = listeById(h.dataset.drag), r = h.parentElement.getBoundingClientRect();
   ld = { l, el:h.parentElement, gx:e.clientX - r.left, gy:e.clientY - r.top, w:r.width, moved:false }; e.preventDefault();
@@ -627,28 +626,21 @@ document.addEventListener('pointermove', e => {
     w = w < 200 ? 46 : Math.max(Math.min(LW + 24, max), Math.min(max, Math.round(w)));
     if(w !== breite(sd.k)){ if(breite(sd.k) > 60 && w <= 60) S.pwLast[sd.k] = sd.w0 > 60 ? sd.w0 : STD_BREITE[sd.k]; S.ein.breiten[sd.k] = w; zeichne(); }
     return; }
-  if(pd){ pd.moved = true; const t = document.elementsFromPoint(e.clientX, e.clientY).map(x => x.closest?.('[data-pane]')).find(Boolean);
-    const z = t && t.dataset.pane !== pd.zn ? t.dataset.pane : null; if(z !== S.paneZiel){ S.paneZiel = z; document.querySelectorAll('[data-pane]').forEach(p => p.classList.toggle('ziel', p.dataset.pane === z)); }
-    return; }
   if(!ld) return;
-  if(!ld.moved){ if(Math.abs(e.movementX) + Math.abs(e.movementY) < 1) return; ld.moved = true; ld.el.classList.add('flieg'); ld.el.style.width = ld.w + 'px'; document.body.appendChild(ld.el); document.querySelectorAll('.canvas').forEach(c => c.classList.add('ziehen')); }
+  if(!ld.moved){ if(Math.abs(e.movementX) + Math.abs(e.movementY) < 1) return; ld.moved = true; ld.el.classList.add('flieg'); ld.el.style.width = ld.w + 'px'; document.body.appendChild(ld.el); document.querySelector(`.canvas[data-cv="${bereichOf(ld.l)}"]`)?.classList.add('ziehen'); }
   ld.el.style.left = (e.clientX - ld.gx) + 'px'; ld.el.style.top = (e.clientY - ld.gy) + 'px'; });
 document.addEventListener('pointerup', e => {
   if(sd){ sd = null; S.splitOn = null; speichereEin(); return zeichne(); }
-  if(pd){ const { zn } = pd, z = S.paneZiel; pd = null; S.paneZiel = null;
-    if(z){ const r = [...reihe()], a = r.indexOf(zn), b = r.indexOf(z); r[a] = z; r[b] = zn; S.ein.breiten._reihe = r; speichereEin(); }
-    return zeichne(); }
   if(!ld) return; const { l, el, gx, gy, moved } = ld; ld = null; if(!moved) return;
-  // Ziel-Bereich unter dem Zeiger: Liste wandert dorthin
-  const t = document.elementsFromPoint(e.clientX, e.clientY).find(x => x.dataset?.cv);
-  if(t){ l.bereich = t.dataset.cv;
+  // Liste bleibt in ihrem Bereich: nur dort ablegen, sonst zurück an den alten Platz
+  const t = document.elementsFromPoint(e.clientX, e.clientY).find(x => x.dataset?.cv === bereichOf(l));
+  if(t){
     if(t.dataset.modus === 'frei'){ const r = t.getBoundingClientRect(); // rastet im Raster ein
       l.x = Math.max(0, Math.round((e.clientX - gx - r.left + t.scrollLeft) / R) * R); l.y = Math.max(0, Math.round((e.clientY - gy - r.top + t.scrollTop) / R) * R); }
     else { // gestapelt: vor die Liste unter dem Zeiger, sonst ans Ende
       const unter = document.elementsFromPoint(e.clientX, e.clientY).map(x => x.closest?.('[data-list]')).find(x => x && x.dataset.list !== l.id), tl = unter && listeById(unter.dataset.list);
       if(tl){ l.x = tl.x; l.y = tl.y - 1; } else { l.x = R; l.y = Math.max(0, ...S.listen.filter(x => bereichOf(x) === l.bereich && x !== l).map(x => x.y + estH(x))) + R; } }
-    if(breite(l.bereich) <= 60 && reihe()[1] !== l.bereich){ S.ein.breiten[l.bereich] = S.pwLast[l.bereich] || STD_BREITE[l.bereich]; speichereEin(); }
-    upd('pendenz_liste', l.id, { bereich: l.bereich, x: l.x, y: l.y }); }
+    upd('pendenz_liste', l.id, { x: l.x, y: l.y }); }
   el.remove(); zeichne(); });
 
 // Pendenzen ziehen: in Liste/Gruppe (wechselt Liste), in Zeitliste (setzt Zeit); Pendenzenart aufs Blatt = neue Liste
