@@ -65,18 +65,21 @@ button:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
 /* Bereiche */
 .zones{display:flex;height:calc(100vh - 106px);min-height:480px;}
 .pane{display:flex;flex-direction:column;min-width:0;flex:none;}
-.pane.mitte{flex:1;}
-.pane.zeit,.pane.team{background:#EFF2F5;}
+.pane.pos1{flex:1;}
+.pane.pos0,.pane.pos2{background:#EFF2F5;}
+.pane.ziel{box-shadow:inset 0 0 0 2px var(--primary);background:var(--accent-blue);}
 .ptitle{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700;padding:8px 20px 0;display:flex;gap:6px;align-items:center;flex:none;}
 .ptitle svg{width:13px;height:13px;}
 .pane.schmal .ptitle{padding:8px 0 0;justify-content:center;}
 .pane.schmal .ptitle span{display:none;}
-.canvas{position:relative;overflow:auto;flex:1;min-height:0;}
-.pane.zeit .canvas,.pane.team .canvas{overflow-x:hidden;}
+.ptitle{cursor:grab;user-select:none;}
+.ptitle:active{cursor:grabbing;}
+.canvas{position:relative;overflow-x:hidden;overflow-y:auto;flex:1;min-height:0;}
 .sheet{position:relative;}
 .canvas.ziehen .sheet{background-image:radial-gradient(circle,#C5CCD3 1px,transparent 1.2px);background-size:20px 20px;}
-.canvas.stack .sheet{display:flex;flex-direction:column;gap:12px;padding:12px;width:auto !important;height:auto !important;}
-.canvas.stack .list{position:relative;left:auto !important;top:auto !important;width:100%;max-width:var(--listw);}
+.scols{display:flex;gap:12px;padding:12px;align-items:flex-start;}
+.scol{flex:1;min-width:0;max-width:var(--listw);display:flex;flex-direction:column;gap:12px;}
+.canvas.spalten .list{position:relative;left:auto !important;top:auto !important;width:100%;}
 .split{width:9px;flex:none;cursor:col-resize;position:relative;touch-action:none;}
 .split::before{content:"";position:absolute;left:4px;top:0;bottom:0;width:1px;background:#C9D0D7;}
 .split:hover::before,.split.on::before{background:var(--primary);width:2px;left:3.5px;}
@@ -283,10 +286,17 @@ const art = id => S.arten[id] || { titel:'?', icon:'dok', farbe:'#8B9097' };
 const artFarbe = id => S.ein.farben[id] || art(id).farbe;
 const listeById = id => S.listen.find(l => l.id === id);
 const bereichOf = l => l.bereich || 'mitte';
-const breite = b => S.ein.breiten[b] ?? (b === 'zeit' ? 360 : 380);
-// Angezeigte Breite: bei schmalem Fenster klappen zuerst Team, dann Zeit hochkant zu (gespeicherte Breite bleibt)
-function anzeigeBreite(b){ let z = breite('zeit'), t = breite('team'); const platz = innerWidth - 18 - 360;
-  if(z + t > platz && t > 60) t = 46; if(z + t > platz && z > 60) z = 46; return b === 'zeit' ? z : t; }
+// Drei Bereiche (zeit, mitte, team) in frei wählbarer Reihenfolge: aussen eingestellte Breite, Mitte = Rest
+const STD_BREITE = { zeit:360, mitte:680, team:380 }, MITTE_MIN = LW + 24;
+const breite = b => S.ein.breiten[b] ?? STD_BREITE[b];
+const reihe = () => { const r = S.ein.breiten._reihe; return Array.isArray(r) && r.length === 3 ? r : ['zeit', 'mitte', 'team']; };
+const platz = () => innerWidth - 18;
+// bei schmalem Fenster klappen zuerst rechts, dann links hochkant zu (gespeicherte Breite bleibt)
+function anzeigeBreiten(){ const [a, m, c] = reihe(); let l = breite(a), r = breite(c);
+  if(platz() - l - r < MITTE_MIN && r > 60) r = 46; if(platz() - l - r < MITTE_MIN && l > 60) l = 46;
+  return { [a]: l, [c]: r, [m]: Math.max(46, platz() - l - r) }; }
+// Darstellung je nach Breite: frei (eigene Anordnung), Spalten (automatisch gestapelt), schmal (Titel hochkant)
+function modusFuer(ls, w){ if(w <= 60) return 'schmal'; return w >= Math.max(0, ...ls.map(l => l.x + LW)) + R + 16 ? 'frei' : 'spalten'; }
 const sortiert = l => S.pz.filter(p => p.liste_id === l.id).sort((a, b) => a.sortierung - b.sortierung || a.erstellt_am.localeCompare(b.erstellt_am));
 const zeitIds = z => S.pz.filter(p => p.zeit === z).sort((a, b) => (a.zeit_sortierung ?? 1e12) - (b.zeit_sortierung ?? 1e12) || a.sortierung - b.sortierung);
 const estH = l => 44 + (l.zu ? 0 : (l.zeit ? zeitIds(l.zeit) : sortiert(l)).length * 34 + S.gruppen.filter(g => g.liste_id === l.id).length * 30 + 46);
@@ -407,16 +417,20 @@ function zeichne(){
   const sc = {}; document.querySelectorAll('[data-cv]').forEach(c => sc[c.dataset.cv] = [c.scrollLeft, c.scrollTop]);
   $('hknoepfe').innerHTML = `<button class="hbtn" data-zettel aria-pressed="${S.zettel}" aria-label="Notizzettel" title="Notizzettel">${K('notiz', 16)}</button><button class="hbtn" data-seto aria-label="Einstellungen" title="Einstellungen">${K('gear', 16)}</button>`;
   $('bbar').innerHTML = `<span class="bname">${esc(S.board.name)}</span><span class="sp"></span><button class="btn btn-primary" data-neuliste>${K('plus', 15)}Liste</button>`;
-  $('main').innerHTML = `<div class="zones">${['zeit','mitte','team'].map((zn, i) => { const ls = S.listen.filter(l => bereichOf(l) === zn), w = zn === 'mitte' ? 0 : anzeigeBreite(zn);
-    const maxX = Math.max(0, ...ls.map(l => l.x + LW)), h = Math.max(0, ...ls.map(l => l.y + estH(l))) + 200;
-    // Seitenbereiche: frei, wenn genug Platz; sonst gestapelt; ganz zu = Titel hochkant
-    const modus = zn === 'mitte' ? 'frei' : w <= 60 ? 'schmal' : w < maxX + R ? 'stapel' : 'frei';
-    const reihe = modus === 'frei' ? ls : [...ls].sort((a, c) => a.y - c.y || a.x - c.x);
+  const bw = anzeigeBreiten();
+  $('main').innerHTML = `<div class="zones">${reihe().map((zn, i) => { const ls = S.listen.filter(l => bereichOf(l) === zn), w = bw[zn], modus = modusFuer(ls, w);
+    const geordnet = [...ls].sort((a, c) => a.y - c.y || a.x - c.x);
     const strip = l => { const z = l.zeit && ZEIT[l.zeit], a = !l.zeit && art(l.art_id); return `<button class="vstrip${z?.hell ? ' hell' : ''}" data-open="${zn}" style="background:${z ? z.c : artFarbe(l.art_id)}" title="${esc(l.titel)}">${A(z ? z.icon : a.icon)}${esc(l.titel)}</button>`; };
-    const inhalt = modus === 'schmal' ? `<div class="vstack" data-cv="${zn}">${reihe.map(strip).join('')}</div>`
-      : `<div class="canvas${modus === 'stapel' ? ' stack' : ''}" data-cv="${zn}"><div class="sheet" style="width:${maxX + 200}px;height:${h}px">${reihe.map(listHtml).join('')}</div></div>`;
-    return (i ? `<div class="split${S.splitOn === (i === 1 ? 'zeit' : 'team') ? ' on' : ''}" data-split="${i === 1 ? 'zeit' : 'team'}" role="separator" aria-label="Breite ändern"><span class="grip"></span></div>` : '')
-      + `<div class="pane ${zn}${modus === 'schmal' ? ' schmal' : ''}" data-pane="${zn}"${zn !== 'mitte' ? ` style="width:${w}px"` : ''}><div class="ptitle">${A(BEREICHE[zn][1], 13)}<span>${BEREICHE[zn][0]}</span></div>${inhalt}</div>`; }).join('')}</div>`;
+    let inhalt;
+    if(modus === 'schmal') inhalt = `<div class="vstack" data-cv="${zn}" data-modus="schmal">${geordnet.map(strip).join('')}</div>`;
+    else if(modus === 'spalten'){ // so viele Spalten wie Platz haben, jede Liste in die gerade kürzeste Spalte
+      const n = Math.max(1, Math.floor((w - 24 + 12) / (LW + 12))), cols = Array.from({ length: n }, () => ({ h: 0, ls: [] }));
+      geordnet.forEach(l => { const c = cols.reduce((a, b) => b.h < a.h ? b : a); c.ls.push(l); c.h += estH(l) + 12; });
+      inhalt = `<div class="canvas spalten" data-cv="${zn}" data-modus="spalten"><div class="scols">${cols.map(c => `<div class="scol">${c.ls.map(listHtml).join('')}</div>`).join('')}</div></div>`;
+    } else { const h = Math.max(0, ...ls.map(l => l.y + estH(l))) + 200;
+      inhalt = `<div class="canvas" data-cv="${zn}" data-modus="frei"><div class="sheet" style="height:${h}px">${ls.map(listHtml).join('')}</div></div>`; }
+    return (i ? `<div class="split${S.splitOn === i ? ' on' : ''}" data-split="${i}" role="separator" aria-label="Breite ändern"><span class="grip"></span></div>` : '')
+      + `<div class="pane pos${i}${modus === 'schmal' ? ' schmal' : ''}${S.paneZiel === zn ? ' ziel' : ''}" data-pane="${zn}"${i !== 1 ? ` style="width:${w}px"` : ''}><div class="ptitle" data-pdrag="${zn}" title="Bereich verschieben: am Titel ziehen">${A(BEREICHE[zn][1], 13)}<span>${BEREICHE[zn][0]}</span></div>${inhalt}</div>`; }).join('')}</div>`;
   document.querySelectorAll('[data-cv]').forEach(c => { const s = sc[c.dataset.cv]; if(s){ c.scrollLeft = s[0]; c.scrollTop = s[1]; } });
   zeichneOver();
 }
@@ -595,32 +609,44 @@ async function neueListe(artId, pos){
 // ---------------------------------------------------------------------------
 // Trennlinien und Listen ziehen
 // ---------------------------------------------------------------------------
-let ld = null, sd = null;
+let ld = null, sd = null, pd = null;
 document.addEventListener('pointerdown', e => {
   const sp = e.target.closest('[data-split]');
-  if(sp){ const k = sp.dataset.split; sd = { k, x0:e.clientX, w0:breite(k) }; S.splitOn = k; sp.classList.add('on'); e.preventDefault(); return; }
+  if(sp){ const i = +sp.dataset.split, k = reihe()[i === 1 ? 0 : 2]; sd = { i, k, x0:e.clientX, w0:anzeigeBreiten()[k] }; S.splitOn = i; sp.classList.add('on'); e.preventDefault(); return; }
+  const pt = e.target.closest('[data-pdrag]'); // Bereich am Titel packen: links / Mitte / rechts tauschen
+  if(pt){ pd = { zn: pt.dataset.pdrag, moved:false }; e.preventDefault(); return; }
   const h = e.target.closest('[data-drag]'); if(!h || e.target.closest('button')) return;
   const l = listeById(h.dataset.drag), r = h.parentElement.getBoundingClientRect();
   ld = { l, el:h.parentElement, gx:e.clientX - r.left, gy:e.clientY - r.top, w:r.width, moved:false }; e.preventDefault();
 });
 document.addEventListener('pointermove', e => {
-  if(sd){ // Seitenbereich: mindestens eine Listenbreite, darunter schnappt er auf «hochkant» zu
-    const other = sd.k === 'zeit' ? 'team' : 'zeit', max = innerWidth - breite(other) - 380;
-    let w = sd.k === 'zeit' ? sd.w0 + e.clientX - sd.x0 : sd.w0 - (e.clientX - sd.x0);
-    w = w < 200 ? 46 : Math.max(LW + 24, Math.min(max, Math.round(w)));
-    if(w !== breite(sd.k)){ if(breite(sd.k) > 60 && w <= 60) S.pwLast[sd.k] = sd.w0 > 60 ? sd.w0 : 360; S.ein.breiten[sd.k] = w; zeichne(); }
+  if(sd){ // aussen: mindestens eine Listenbreite, darunter schnappt der Bereich auf «hochkant» zu; die Mitte behält eine Listenbreite
+    const other = reihe()[sd.i === 1 ? 2 : 0], max = platz() - anzeigeBreiten()[other] - MITTE_MIN;
+    let w = sd.i === 1 ? sd.w0 + e.clientX - sd.x0 : sd.w0 - (e.clientX - sd.x0);
+    w = w < 200 ? 46 : Math.max(Math.min(LW + 24, max), Math.min(max, Math.round(w)));
+    if(w !== breite(sd.k)){ if(breite(sd.k) > 60 && w <= 60) S.pwLast[sd.k] = sd.w0 > 60 ? sd.w0 : STD_BREITE[sd.k]; S.ein.breiten[sd.k] = w; zeichne(); }
+    return; }
+  if(pd){ pd.moved = true; const t = document.elementsFromPoint(e.clientX, e.clientY).map(x => x.closest?.('[data-pane]')).find(Boolean);
+    const z = t && t.dataset.pane !== pd.zn ? t.dataset.pane : null; if(z !== S.paneZiel){ S.paneZiel = z; document.querySelectorAll('[data-pane]').forEach(p => p.classList.toggle('ziel', p.dataset.pane === z)); }
     return; }
   if(!ld) return;
   if(!ld.moved){ if(Math.abs(e.movementX) + Math.abs(e.movementY) < 1) return; ld.moved = true; ld.el.classList.add('flieg'); ld.el.style.width = ld.w + 'px'; document.body.appendChild(ld.el); document.querySelectorAll('.canvas').forEach(c => c.classList.add('ziehen')); }
   ld.el.style.left = (e.clientX - ld.gx) + 'px'; ld.el.style.top = (e.clientY - ld.gy) + 'px'; });
 document.addEventListener('pointerup', e => {
   if(sd){ sd = null; S.splitOn = null; speichereEin(); return zeichne(); }
+  if(pd){ const { zn } = pd, z = S.paneZiel; pd = null; S.paneZiel = null;
+    if(z){ const r = [...reihe()], a = r.indexOf(zn), b = r.indexOf(z); r[a] = z; r[b] = zn; S.ein.breiten._reihe = r; speichereEin(); }
+    return zeichne(); }
   if(!ld) return; const { l, el, gx, gy, moved } = ld; ld = null; if(!moved) return;
-  // Ziel-Bereich unter dem Zeiger: Liste wandert dorthin, rastet im Raster ein
+  // Ziel-Bereich unter dem Zeiger: Liste wandert dorthin
   const t = document.elementsFromPoint(e.clientX, e.clientY).find(x => x.dataset?.cv);
-  if(t){ const r = t.getBoundingClientRect(); l.bereich = t.dataset.cv;
-    l.x = Math.max(0, Math.round((e.clientX - gx - r.left + t.scrollLeft) / R) * R); l.y = Math.max(0, Math.round((e.clientY - gy - r.top + t.scrollTop) / R) * R);
-    if(l.bereich !== 'mitte' && breite(l.bereich) <= 60){ S.ein.breiten[l.bereich] = S.pwLast[l.bereich] || 360; speichereEin(); }
+  if(t){ l.bereich = t.dataset.cv;
+    if(t.dataset.modus === 'frei'){ const r = t.getBoundingClientRect(); // rastet im Raster ein
+      l.x = Math.max(0, Math.round((e.clientX - gx - r.left + t.scrollLeft) / R) * R); l.y = Math.max(0, Math.round((e.clientY - gy - r.top + t.scrollTop) / R) * R); }
+    else { // gestapelt: vor die Liste unter dem Zeiger, sonst ans Ende
+      const unter = document.elementsFromPoint(e.clientX, e.clientY).map(x => x.closest?.('[data-list]')).find(x => x && x.dataset.list !== l.id), tl = unter && listeById(unter.dataset.list);
+      if(tl){ l.x = tl.x; l.y = tl.y - 1; } else { l.x = R; l.y = Math.max(0, ...S.listen.filter(x => bereichOf(x) === l.bereich && x !== l).map(x => x.y + estH(x))) + R; } }
+    if(breite(l.bereich) <= 60 && reihe()[1] !== l.bereich){ S.ein.breiten[l.bereich] = S.pwLast[l.bereich] || STD_BREITE[l.bereich]; speichereEin(); }
     upd('pendenz_liste', l.id, { bereich: l.bereich, x: l.x, y: l.y }); }
   el.remove(); zeichne(); });
 
