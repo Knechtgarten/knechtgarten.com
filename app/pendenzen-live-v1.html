@@ -369,7 +369,10 @@ function anzeigeBreiten(){ const seiten = reihe().filter(z => z !== 'mitte'), w 
   [...seiten].reverse().forEach(z => { if(rest() < MITTE_MIN && w[z] > 60) w[z] = 46; });
   w.mitte = Math.max(46, rest()); return w; }
 // Darstellung je nach Breite: frei (eigene Anordnung), Spalten (automatisch gestapelt), schmal (Titel hochkant)
-function modusFuer(ls, w){ if(w <= 60) return 'schmal'; return w >= Math.max(0, ...ls.map(l => l.x + (l.breite || LW))) + R ? 'frei' : 'spalten'; }
+// Wann? und Allgemein: immer frei anordnen – zu breite Listen werden auf die Bereichsbreite gekürzt, Überlappungen rutschen nach unten
+let KAPPE = Infinity;
+const lBreite = l => Math.min(l.breite || LW, KAPPE), lX = l => Math.max(0, Math.min(l.x, Math.floor((KAPPE + R - lBreite(l)) / R) * R));
+function modusFuer(ls, w, zn){ if(w <= 60) return 'schmal'; if(zn !== 'mitte') return 'frei'; return w >= Math.max(0, ...ls.map(l => l.x + (l.breite || LW))) + R ? 'frei' : 'spalten'; }
 const sortiert = l => S.pz.filter(p => p.liste_id === l.id).sort((a, b) => a.sortierung - b.sortierung || a.erstellt_am.localeCompare(b.erstellt_am));
 const zeitIds = z => S.pz.filter(p => p.zeit === z).sort((a, b) => (a.zeit_sortierung ?? 1e12) - (b.zeit_sortierung ?? 1e12) || a.sortierung - b.sortierung);
 const estH = l => 44 + (l.zu ? 0 : (l.zeit ? zeitIds(l.zeit) : sortiert(l)).length * 34 + S.gruppen.filter(g => g.liste_id === l.id).length * 30 + 46);
@@ -508,7 +511,7 @@ function listHtml(l){
   }
   // Pendenzenarten in der Mitte: Hintergrund ganz fein in der Titelfarbe
   const tint = !l.zeit && bereichOf(l) === 'mitte' ? `;background:color-mix(in srgb, ${listFarbe(l)} 9%, #F5F7F9)` : '';
-  return `<div class="list${l.zu ? ' zu' : ''}" data-list="${l.id}" style="left:${l.x}px;top:${l.y}px;width:${l.breite || LW}px${tint}">${kopf}<div class="body">${body}</div><div class="lresize" data-rz="${l.id}" title="Breite ziehen, Doppelklick = Standard"></div></div>`;
+  return `<div class="list${l.zu ? ' zu' : ''}" data-list="${l.id}" style="left:${lX(l)}px;top:${l.y}px;width:${lBreite(l)}px${tint}">${kopf}<div class="body">${body}</div><div class="lresize" data-rz="${l.id}" title="Breite ziehen, Doppelklick = Standard"></div></div>`;
 }
 function zeichne(){
   const sc = {}; document.querySelectorAll('[data-cv]').forEach(c => sc[c.dataset.cv] = [c.scrollLeft, c.scrollTop]);
@@ -519,7 +522,7 @@ function zeichne(){
   const dzs = [['archiv', 'archiv', 'Archivieren'], ['board', 'senden', 'In anderes Board'], ['planer', 'kalender', 'In den Planer']].map(([z, ic, t]) => `<span class="dz bslot" data-dzone="${z}">${K(ic, 15)}${t}</span>`).join('');
   $('bbar').innerHTML = `<span class="bflow"><span class="bslot bselw">${sel}</span>${dzs}</span>`
     + '<span class="brechts"></span>';
-  $('main').innerHTML = `<div class="zones">${reihe().map((zn, i) => { const ls = S.listen.filter(l => bereichOf(l) === zn), w = bw[zn], modus = modusFuer(ls, w);
+  $('main').innerHTML = `<div class="zones">${reihe().map((zn, i) => { const ls = S.listen.filter(l => bereichOf(l) === zn), w = bw[zn], modus = modusFuer(ls, w, zn); KAPPE = zn === 'mitte' ? Infinity : w - 2 * R;
     const geordnet = [...ls].sort((a, c) => a.y - c.y || a.x - c.x);
     const strip = l => { const z = l.zeit && ZEIT[l.zeit], a = !l.zeit && art(l.art_id); return `<button class="vstrip${z?.hell ? ' hell' : ''}" data-open="${zn}" style="background:${z ? z.c : listFarbe(l)}" title="${esc(l.titel)}">${A(z ? z.icon : a.icon)}${esc(l.titel)}</button>`; };
     let inhalt;
@@ -536,6 +539,7 @@ function zeichne(){
     const vor = reihe()[i - 1], paar = vor !== 'mitte' && zn !== 'mitte', fest = vor === 'mitte' ? zn : vor, links = fest === vor;
     return (i ? `<div class="split${S.splitOn === (paar ? vor + '|' + zn : fest) ? ' on' : ''}" ${paar ? `data-paar="${vor}|${zn}"` : `data-split="${fest}" data-links="${links ? 1 : 0}"`} role="separator" aria-label="Breite ändern"><span class="grip"></span></div>` : '')
       + `<div class="pane ${zn === 'mitte' ? 'flex' : 'seite'}${modus === 'schmal' ? ' schmal' : ''}" data-pane="${zn}"${zn !== 'mitte' ? ` style="width:${w}px"` : ''}><div class="ptitle"><span class="pgriff" data-pgriff="${zn}" title="Bereich verschieben: ziehen und auf einen anderen Bereich fallen lassen">${KG.icon('griff', 14)}</span>${A(BEREICHE[zn][1], 13)}<span>${BEREICHE[zn][0]}</span>${zn === 'mitte' ? `<button class="btn btn-primary bneu" data-neuliste>${K('plus', 13)}Liste</button>` : ''}</div>${inhalt}</div>`; }).join('')}</div>`;
+  KAPPE = Infinity;
   document.querySelectorAll('[data-cv]').forEach(c => { const s = sc[c.dataset.cv]; if(s){ c.scrollLeft = s[0]; c.scrollTop = s[1]; } });
   entzerren();
   platziereLeiste();
@@ -976,7 +980,7 @@ document.addEventListener('pointerup', e => {
   const t = document.elementsFromPoint(e.clientX, e.clientY).find(x => x.dataset?.cv === bereichOf(l));
   if(t){
     if(t.dataset.modus === 'frei'){ const r = t.getBoundingClientRect(); // rastet im Raster ein
-      l.x = Math.max(0, Math.min(Math.round((e.clientX - gx - r.left + t.scrollLeft) / R) * R, Math.floor((t.offsetWidth - (l.breite || LW) - R) / R) * R)); l.y = Math.max(0, Math.round((e.clientY - gy - r.top + t.scrollTop) / R) * R); }
+      l.x = Math.max(0, Math.min(Math.round((e.clientX - gx - r.left + t.scrollLeft) / R) * R, Math.floor((t.offsetWidth - Math.min(l.breite || LW, bereichOf(l) === 'mitte' ? Infinity : t.offsetWidth - 2 * R) - R) / R) * R)); l.y = Math.max(0, Math.round((e.clientY - gy - r.top + t.scrollTop) / R) * R); }
     else { // gestapelt: vor die Liste unter dem Zeiger, sonst ans Ende
       const unter = document.elementsFromPoint(e.clientX, e.clientY).map(x => x.closest?.('[data-list]')).find(x => x && x.dataset.list !== l.id), tl = unter && listeById(unter.dataset.list);
       if(tl){ l.x = tl.x; l.y = tl.y - 1; } else { l.x = R; l.y = Math.max(0, ...S.listen.filter(x => bereichOf(x) === l.bereich && x !== l).map(x => x.y + estH(x))) + R; } }
