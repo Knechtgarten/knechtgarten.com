@@ -950,7 +950,7 @@ document.addEventListener('click', async e => {
   if(!ME) return;
   const t = e.target.closest('button,[data-card],[data-gtog],[data-bg]');
   const menusZu = keep => document.querySelectorAll('.emenu').forEach(m => { if(m.id !== keep) m.hidden = true; });
-  if(!t){ menusZu(); if(S.zpick || S.neuListe || S.bmenu || S.druck || (S.pop && !e.target.closest('.pop'))){ S.zpick = null; S.neuListe = false; S.bmenu = false; S.druck = false; if(!e.target.closest('.pop')){ S.pop = null; S.delListe = false; } zeichneOver(); } return; }
+  if(!t){ menusZu(); if(S.zpick || S.neuListe || S.bmenu || S.druck || (S.pop && !e.target.closest('.pop'))){ S.zpick = null; S.neuListe = false; S.bmenu = false; S.druck = false; if(S.pop && !e.target.closest('.pop')){ await gruppeAusFeld(); S.pop = null; S.delListe = false; } zeichne(); } return; }
   const d = t.dataset;
   if(d.bg && e.target !== t){ menusZu(); return; }
   if(d.mic){ sprechen(d.mic); return; }
@@ -1004,14 +1004,13 @@ document.addEventListener('click', async e => {
   if(d.pperson){ const p = S.pz.find(x => x.id === S.pick.id), pe = S.pick.daten.personen.find(x => x.id === d.pperson); return inPlaner(p, pe); }
   if(d.tog){ e.stopPropagation(); const l = listeById(d.tog); l.zu = !l.zu; zeichne(); return upd('pendenz_liste', l.id, { zu: l.zu }); }
   if(d.gtog){ const g = S.gruppen.find(x => x.id === d.gtog); g.zu = !g.zu; zeichne(); return upd('pendenz_gruppe', g.id, { zu: g.zu }); }
-  if(d.set){ S.pop = S.pop === d.set ? null : d.set; S.delListe = false; return zeichneOver(); }
+  if(d.set){ if(S.pop) await gruppeAusFeld(); S.pop = S.pop === d.set ? null : d.set; S.delListe = false; return zeichneOver(); }
   if('lfarbo' in d){ S.farbwahl = S.pop; return zeichneOver(); }
   if('fwx' in d || d.bg === 'farbwahl'){ S.farbwahl = null; return zeichneOver(); }
   if(d.lfarbe != null && S.farbwahl){ const l = listeById(S.farbwahl); l.farbe = d.lfarbe || null; S.farbwahl = null; zeichne(); return upd('pendenz_liste', l.id, { farbe: l.farbe }); }
-  if('popx' in d){ S.pop = null; return zeichneOver(); }
-  if('gadd' in d){ const v = $('gname').value.trim(); if(!v) return $('gname').focus(); const n = S.gruppen.filter(g => g.liste_id === S.pop).length;
-    const { data, error } = await sb.from('pendenz_gruppe').insert({ liste_id: S.pop, titel: v, sortierung: n }).select().single(); if(error) return fehler(error, 'Gruppe');
-    S.gruppen.push(data); zeichne(); return $('gname')?.focus(); }
+  // «Fertig» übernimmt einen noch nicht hinzugefügten Gruppennamen, statt ihn wegzuwerfen
+  if('popx' in d){ await gruppeAusFeld(); S.pop = null; return zeichne(); }
+  if('gadd' in d){ if(!$('gname').value.trim()) return $('gname').focus(); await gruppeAusFeld(); return $('gname')?.focus(); }
   if(d.gdel){ const g = S.gruppen.find(x => x.id === d.gdel); const { error } = await sb.from('pendenz_gruppe').delete().eq('id', g.id); if(error) return fehler(error);
     S.gruppen = S.gruppen.filter(x => x !== g); S.pz.forEach(p => { if(p.gruppe_id === g.id) p.gruppe_id = null; }); return zeichne(); }
   if('ldel' in d){ S.delListe = true; return zeichneOver(); }
@@ -1066,6 +1065,14 @@ document.addEventListener('keydown', e => {
 document.addEventListener('paste', e => { // Fotos direkt ins offene Pendenz-Fenster einfügen
   if(!S.sel || e.target.id === 'eb-det') return; const fs = [...(e.clipboardData?.files || [])]; if(fs.length){ e.preventDefault(); hochladen(fs); } });
 
+// Gruppe aus dem Feld «Gruppe hinzufügen» der offenen Listen-Einstellung anlegen (falls etwas drinsteht)
+async function gruppeAusFeld(){
+  const f = $('gname'), v = f?.value.trim(); if(!v || !S.pop) return;
+  f.value = '';
+  const { data, error } = await sb.from('pendenz_gruppe').insert({ liste_id: S.pop, titel: v, sortierung: S.gruppen.filter(g => g.liste_id === S.pop).length }).select().single();
+  if(error) return fehler(error, 'Gruppe');
+  S.gruppen.push(data); zeichne(); toast(`Gruppe «${v}» hinzugefügt`);
+}
 // Wann?-Listen drucken: schlichte A4-Seite (Titel, Datum, Pendenzen mit Kästchen zum Abhaken auf Papier)
 function drucken(wahl){
   const zs = wahl === 'alle' ? [1, 2, 3] : [+wahl], heute = new Date().toLocaleDateString('de-CH', { weekday:'long', day:'numeric', month:'long', year:'numeric' });
