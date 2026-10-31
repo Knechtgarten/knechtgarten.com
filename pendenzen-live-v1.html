@@ -153,6 +153,10 @@ button:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
 .card .pr{all:unset;cursor:pointer;width:6px;align-self:stretch;flex:none;background:#EEF1F4;}
 .card .pr:hover{width:9px;}
 .card .pr.person,.card .pr.person:hover{cursor:inherit;width:6px;}
+.herk{display:inline-flex;flex:none;}
+.herk svg{width:15px;height:15px;}
+.herk.mail{color:var(--red);}
+.herk.board{color:var(--primary-l);}
 .card .ck{all:unset;width:14px;height:14px;border:1.5px solid #B8BEC4;border-radius:4px;flex:none;display:flex;align-items:center;justify-content:center;color:#fff;cursor:pointer;margin-left:2px;}
 .card .ck:hover{border-color:var(--primary);}
 .card .ty{width:21px;height:21px;border-radius:5px;display:inline-flex;align-items:center;justify-content:center;color:#fff;flex:none;}
@@ -345,7 +349,8 @@ const S = { boards:[], mitglieder:[], archiv:null, pick:null, arten:{}, board:nu
 const art = id => S.arten[id] || { titel:'?', icon:'dok', farbe:'#8B9097' };
 const artFarbe = id => S.ein.farben[id] || art(id).farbe;
 const listeById = id => S.listen.find(l => l.id === id);
-const listFarbe = l => l.farbe || artFarbe(l.art_id); // eigene Listenfarbe, sonst Farbe der Pendenzenart
+const fixListe = l => l.art_id === 'team' || l.art_id === 'notizen'; // Eingangs-Listen: fester Name, nicht löschbar
+const listFarbe = l =>l.farbe || artFarbe(l.art_id); // eigene Listenfarbe, sonst Farbe der Pendenzenart
 const bereichOf = l => l.bereich || 'mitte';
 // Drei Bereiche (zeit, mitte, team) in frei wählbarer Reihenfolge: aussen eingestellte Breite, Mitte = Rest
 const STD_BREITE = { zeit:LW + 24, mitte:680, team:LW + 24 }, MITTE_MIN = LW + 24;
@@ -476,12 +481,15 @@ function pdHtml(p, opt = {}){
   if(fs.some(d => d.art !== 'mail')) ind.push(K('foto', 12));
   if(p.planer_einsatz_id) ind.push(`<span title="Im Einsatzplaner">${K('kalender', 12)}</span>`);
   // gemeinsames Board: keine Zeit, Streifen links in der Pendenzen-Farbe der Person, die sie eingetragen hat; eigenes Board: Zeit-Streifen, Avatar bei fremden
-  const gemeinsam = S.board.typ !== 'person', pf = gemeinsam && S.pfarbe?.[p.erstellt_von];
+  const gemeinsam = S.board.typ !== 'person', pf = gemeinsam && S.pfarbe?.[p.erstellt_von], notiz = l.art_id === 'notizen';
   if(!gemeinsam && p.erstellt_von && p.erstellt_von !== ME) ind.push(avatar(p.erstellt_von));
+  // Team-box: vorne die Herkunft – rotes Mail-Icon (per Mail), Pfeil (von einem Kollegen im Tool zugeschoben)
+  const herkunft = l.art_id === 'team' && p.herkunft ? `<span class="herk ${p.herkunft}" title="${p.herkunft === 'mail' ? 'Per Mail gekommen' : 'Von einem Kollegen zugeschoben'}">${p.herkunft === 'mail' ? A('brief') : K('senden', 14)}</span>` : '';
   return `<div class="card${S.sel === p.id ? ' sel' : ''}" draggable="true" data-card="${p.id}">
     ${gemeinsam ? `<span class="pr person" style="${pf ? `background:${pf}` : ''}"></span>`
+      : notiz ? '<span class="pr person"></span>' // Notizen haben keine Zeit
       : `<button class="pr" data-zp="${p.id}" style="${p.zeit ? `background:${ZEIT[p.zeit].c}` : ''}" aria-label="Zeit: ${p.zeit ? ZEIT[p.zeit].t : 'irgendwann'}"></button>`}
-    ${opt.zeit && a ? `<span class="ty" style="background:${listFarbe(l)}" title="${esc(l.titel)}">${A(a.icon)}</span>` : ''}
+    ${opt.zeit && a ? `<span class="ty" style="background:${listFarbe(l)}" title="${esc(l.titel)}">${A(a.icon)}</span>` : ''}${herkunft}
     <span class="tx">${esc(p.titel)}</span><span class="ind">${ind.join('')}</span></div>`;
 }
 function listHtml(l){
@@ -493,7 +501,8 @@ function listHtml(l){
     kopf = `<div class="lh" data-drag="${l.id}" style="background:${listFarbe(l)}"><button class="tog" data-tog="${l.id}" aria-label="Auf-/zuklappen">${K('chev')}</button>${A(a.icon)}<b>${esc(l.titel)}</b><button class="kg-ibtn" data-set="${l.id}" aria-label="Liste einstellen">${K('gear')}</button></div>`;
     body = `<div class="cards" data-drop="${l.id}">${ps.filter(p => !p.gruppe_id).map(p => pdHtml(p)).join('')}</div>`
       + gs.map(g => `<div class="gh${g.zu ? ' zu' : ''}" data-gtog="${g.id}"><span class="tog">${K('chev')}</span>${esc(g.titel)}</div><div class="cards gcards" data-drop="${l.id}" data-grp="${g.id}">${ps.filter(p => p.gruppe_id === g.id).map(p => pdHtml(p)).join('')}</div>`).join('')
-      + `<div class="ladd"><input type="text" id="add-${l.id}" placeholder="+ Pendenz" aria-label="Neue Pendenz in ${esc(l.titel)}"><button class="kg-ibtn${recZiel === 'add-' + l.id ? ' on' : ''}" data-mic="add-${l.id}" aria-label="Sprechen" title="Sprechen">${K('mikrofon')}</button><button class="kg-ibtn" data-add="${l.id}" aria-label="Hinzufügen">${K('plus')}</button></div>`;
+      + (l.art_id === 'team' ? '' : `<div class="ladd"><input type="text" id="add-${l.id}" placeholder="${l.art_id === 'notizen' ? '+ Notiz' : '+ Pendenz'}" aria-label="Neue ${l.art_id === 'notizen' ? 'Notiz' : 'Pendenz'} in ${esc(l.titel)}"><button class="kg-ibtn${recZiel === 'add-' + l.id ? ' on' : ''}" data-mic="add-${l.id}" aria-label="Sprechen" title="Sprechen">${K('mikrofon')}</button><button class="kg-ibtn" data-add="${l.id}" aria-label="Hinzufügen">${K('plus')}</button></div>`)
+      + (l.art_id === 'team' && !ps.length ? '<div class="zhint">Hier landet, was dir Kollegen zuschieben.</div>' : '');
   }
   // Pendenzenarten in der Mitte: Hintergrund ganz fein in der Titelfarbe
   const tint = !l.zeit && bereichOf(l) === 'mitte' ? `;background:color-mix(in srgb, ${listFarbe(l)} 9%, #F5F7F9)` : '';
@@ -566,7 +575,7 @@ function detHtml(){
   return `<aside class="det ${S.ein.oeffnen}" role="dialog" aria-label="Pendenz">
     <div class="hd"><span class="ty" style="background:${listFarbe(l)}" title="${esc(l.titel)}">${A(a.icon)}</span><input type="text" id="dtxt" value="${esc(p.titel)}" aria-label="Titel"><button class="kg-ibtn" data-close aria-label="Schliessen">${K('x')}</button></div>
     ${p.erstellt_von && p.erstellt_von !== ME ? `<div class="von">von ${avatar(p.erstellt_von)} ${esc(name(p.erstellt_von))}</div>` : ''}
-    ${S.board.typ === 'person' ? `<div class="seg" role="group" aria-label="Zeit">${[1,2,3,0].map(z => `<button data-dz="${z}" aria-pressed="${p.zeit === z}">${z ? `<i style="background:${ZEIT[z].c}"></i>${ZEIT[z].t}` : 'Irgendwann'}</button>`).join('')}</div>` : ''}
+    ${S.board.typ === 'person' && l.art_id !== 'notizen' ? `<div class="seg" role="group" aria-label="Zeit">${[1,2,3,0].map(z => `<button data-dz="${z}" aria-pressed="${p.zeit === z}">${z ? `<i style="background:${ZEIT[z].c}"></i>${ZEIT[z].t}` : 'Irgendwann'}</button>`).join('')}</div>` : ''}
     <div class="ed">${editorHtml('det', p.notiz, 'Notiz schreiben …')}</div>
     <div class="strip"><div class="lab">${K('foto', 13)}Fotos und Dateien</div><div class="tiles">${rest.map(dateiTile).join('')}<label class="fadd" title="Fotos oder Dateien hinzufügen">${K('plus')}<input type="file" id="dupload" multiple hidden></label></div></div>
     ${mails.length ? `<div class="strip"><div class="lab">${A('brief', 13)}Mails und Anhänge</div><div class="tiles">${mails.map(dateiTile).join('')}</div></div>` : ''}
@@ -581,11 +590,11 @@ function zeichneOver(){
   if(S.zpick){ const p = S.pz.find(x => x.id === S.zpick.id); if(p) h += `<div class="pop" style="left:${S.zpick.x}px;top:${S.zpick.y}px">${[1,2,3,0].map(z => `<button class="zopt" data-zset="${z}" aria-pressed="${p.zeit === z}"><i style="background:${z ? ZEIT[z].c : '#fff'}"></i>${z ? ZEIT[z].t : 'Irgendwann'}</button>`).join('')}</div>`; }
   if(S.pop){ const l = listeById(S.pop), el = document.querySelector(`[data-list="${S.pop}"]`); if(l && el){ const r = el.getBoundingClientRect();
     h += `<div class="pop" style="width:260px;left:${Math.max(8, Math.min(innerWidth - 270, r.right - 260))}px;top:${Math.min(innerHeight - 260, r.top + 40)}px">
-      <div class="fld"><label for="lname">Name</label><input type="text" id="lname" value="${esc(l.titel)}"></div>
+      ${fixListe(l) ? `<div class="fld"><label>Name</label><div class="small"><b>${esc(l.titel)}</b> <span class="muted">– fester Name</span></div></div>` : `<div class="fld"><label for="lname">Name</label><input type="text" id="lname" value="${esc(l.titel)}"></div>`}
       <div class="fld"><label for="gname">Gruppe hinzufügen</label><div class="row"><input type="text" id="gname" placeholder="Gruppenname" style="flex:1;min-width:0"><button class="kg-ibtn" data-gadd aria-label="Gruppe hinzufügen">${K('plus')}</button></div></div>
       ${S.gruppen.filter(g => g.liste_id === l.id).map(g => `<div class="row small"><input type="text" class="sp" style="min-width:0" id="gn-${g.id}" data-gname="${g.id}" value="${esc(g.titel)}" aria-label="Gruppenname"><button class="kg-ibtn danger" data-gdel="${g.id}" aria-label="Gruppe ${esc(g.titel)} löschen">${K('trash')}</button></div>`).join('')}
       ${S.delListe ? `<div class="confirm">Liste mit allen Pendenzen löschen?<span class="sp"></span><button class="btn btn-ghost" data-ldelno>Nein</button><button class="btn btn-danger" data-ldelyes>Löschen</button></div>` : ''}
-      <div class="row"><button class="kg-ibtn danger" data-ldel aria-label="Liste löschen">${K('trash')}</button><button class="lfknopf" data-lfarbo style="background:${listFarbe(l)}" aria-label="Farbe der Liste wählen" title="Farbe wählen"></button><span class="sp"></span><button class="btn btn-primary" data-popx>Fertig</button></div></div>`; } }
+      <div class="row">${fixListe(l) ? '' : `<button class="kg-ibtn danger" data-ldel aria-label="Liste löschen">${K('trash')}</button>`}<button class="lfknopf" data-lfarbo style="background:${listFarbe(l)}" aria-label="Farbe der Liste wählen" title="Farbe wählen"></button><span class="sp"></span><button class="btn btn-primary" data-popx>Fertig</button></div></div>`; } }
   // grosses Fenster nur mit den Farben für eine Liste
   if(S.farbwahl){ const l = listeById(S.farbwahl); if(l) h += `<div class="dbg oben" data-bg="farbwahl"><div class="farbwahl" role="dialog" aria-label="Farbe wählen">
     <h2>Farbe für «${esc(l.titel)}»<button class="kg-ibtn" data-fwx aria-label="Schliessen">${K('x')}</button></h2>
@@ -694,8 +703,8 @@ async function sendePick(){
     if(ma.length){ const { error } = await sb.from('planer_pendenz').insert(ma.map(pid => ({ person_id: pid, spalte: 'tag', tag: isoTag(new Date()), text: p.titel, erstellt_von: ME }))); if(error) throw error;
       ma.forEach(pid => namen.push(pk.daten.spalten.flat().find(x => x.id === pid)?.name.split(' ')[0] || '')); }
     if(listen.length){
-      const { error } = await sb.from('pendenz').update({ liste_id: listen[0], gruppe_id: null, zeit_sortierung: null }).eq('id', p.id); if(error) throw error;
-      if(listen.length > 1){ const { error: e2 } = await sb.from('pendenz').insert(listen.slice(1).map(lid => ({ liste_id: lid, titel: p.titel, notiz: p.notiz, sortierung: Date.now() / 1000, erstellt_von: p.erstellt_von || ME }))); if(e2) throw e2; }
+      const { error } = await sb.from('pendenz').update({ liste_id: listen[0], gruppe_id: null, zeit_sortierung: null, herkunft: 'board' }).eq('id', p.id); if(error) throw error;
+      if(listen.length > 1){ const { error: e2 } = await sb.from('pendenz').insert(listen.slice(1).map(lid => ({ liste_id: lid, titel: p.titel, notiz: p.notiz, sortierung: Date.now() / 1000, erstellt_von: p.erstellt_von || ME, herkunft: 'board' }))); if(e2) throw e2; }
     } else { const { error } = await sb.from('pendenz').update({ erledigt: true, erledigt_am: new Date().toISOString(), erledigt_von: ME }).eq('id', p.id); if(error) throw error; }
     S.pz = S.pz.filter(x => x !== p); if(S.sel === p.id) S.sel = null; S.pick = null; zeichne();
     toast(`Gesendet an ${namen.filter(Boolean).join(', ')}`);
@@ -973,6 +982,10 @@ document.addEventListener('drop', async e => {
   const z = e.target.closest('[data-drop]'); if(!z) return; e.preventDefault();
   const p = S.pz.find(x => x.id === dc), to = listeById(z.dataset.drop), { cs, i } = dropIdx(z, e.clientY); dc = null;
   const vor = cs[i - 1] && S.pz.find(x => x.id === cs[i - 1].dataset.card), nach = cs[i] && S.pz.find(x => x.id === cs[i].dataset.card);
+  const von = listeById(p.liste_id);
+  // Team-box nimmt nur von aussen (eigene Pendenzen nicht hineinziehen); Notizen bekommen keine Zeit
+  if(to.art_id === 'team' && von?.art_id !== 'team'){ zeichne(); return toast('In die Team-box kommt nur, was dir Kollegen zuschieben.'); }
+  if(to.zeit && von?.art_id === 'notizen'){ zeichne(); return toast('Notizen haben keine Zeit – sie bleiben in «Dauernde Notizen».'); }
   if(to.zeit){ p.zeit = to.zeit; p.zeit_sortierung = zwischen(vor?.zeit_sortierung ?? (vor ? i - 1 : null), nach?.zeit_sortierung ?? (nach ? i + 1 : null));
     zeichne(); return upd('pendenz', p.id, { zeit: p.zeit, zeit_sortierung: p.zeit_sortierung }); }
   p.liste_id = to.id; p.gruppe_id = z.dataset.grp || null; p.sortierung = zwischen(vor?.sortierung, nach?.sortierung);
