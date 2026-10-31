@@ -223,6 +223,26 @@ main.wrap{padding-top:48px;padding-bottom:60px;}
 .verweisbtn.leer{border-color:var(--danger);color:var(--danger);}
 .verweispop{position:absolute;z-index:60;width:280px;max-width:calc(100vw - 16px);background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 28px rgba(50,62,78,.22);padding:10px 12px;}
 .verweispop[hidden]{display:none;}
+.verweispop.vp-formen{width:340px;}
+.vp-formsvg{display:block;width:100%;height:auto;background:var(--bg);border:1px solid var(--line);border-radius:8px;margin:4px 0 6px;}
+/* Formen-Tool (Naturteich/Schwimmteich): Form-Auswahl mit Skizzen oben in der Konfiguration */
+.formenblock{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px;}
+.formzone{flex:1 1 340px;min-width:0;border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--card);}
+.formzonetitel{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-bottom:8px;}
+.formpicker{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;}
+.formshape{display:flex;flex-direction:column;align-items:center;gap:2px;width:64px;padding:4px 2px;border:1px solid var(--line);background:var(--card);border-radius:7px;cursor:pointer;font:inherit;font-size:10.5px;color:var(--ink);}
+.formshape svg{width:44px;height:30px;display:block;}
+.formshape:hover{border-color:var(--primary);}
+.formshape.on{background:var(--accent-blue);border-color:var(--primary);}
+.formbody{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start;}
+.formsvgwrap{flex:0 0 190px;max-width:100%;background:var(--bg);border:1px solid var(--line);border-radius:8px;}
+.formsvgwrap svg{display:block;width:100%;height:auto;}
+.formfelder{display:flex;flex-direction:column;gap:8px;min-width:0;flex:1 1 130px;}
+.formfeld{display:flex;flex-direction:column;gap:3px;font-size:11px;color:var(--muted);}
+.formeinheit{display:flex;align-items:center;gap:5px;color:var(--ink);font-size:12px;}
+.formeinheit input{width:var(--feldbreite);border:1px solid var(--line);border-radius:7px;padding:6px 8px;font:inherit;font-size:13px;color:var(--ink);}
+.formeinheit input:focus{outline:none;border-color:var(--primary);}
+.formstuecke{font-size:11px;color:var(--muted);line-height:1.5;}
 .vp-kopf{font-size:12px;font-weight:700;color:var(--ink);margin-bottom:6px;}
 .vp-titel{font-size:10.5px;font-weight:700;letter-spacing:.02em;color:var(--muted);text-transform:uppercase;margin:8px 0 3px;}
 .vp-zeile{display:flex;align-items:center;gap:8px;padding:4px 2px;font-size:12px;color:var(--ink);cursor:pointer;border-radius:4px;}
@@ -1767,6 +1787,11 @@ async function ladeSystemwertTerms(){
 async function berechneSystemwerteMap(){
   const map = {};
   if(!SYSTEMWERT_TERMS.length) return map;
+  // Formen-Tool: Flaechen/Umfaenge der gewaehlten Formen (haengen nicht von der PLZ ab)
+  if(formenAktivFuerOffertentyp){
+    const fw = formenWerte();
+    SYSTEMWERT_TERMS.forEach(t => { if(t.systemwert_key && fw[t.systemwert_key] !== undefined) map[t.id] = fw[t.systemwert_key]; });
+  }
   const plz = $('kundePlz').value.trim();
   if(!plz) return map;
 
@@ -3267,6 +3292,7 @@ async function ladeDatenFuerOffertentyp(otId){
   const ot = OFFERTENTYPEN.find(o => o.id === otId);
   offertentypId = otId;
   zugaenglichkeitAktivFuerOffertentyp = ot?.zugaenglichkeit_aktiv ?? true;
+  formenAktivFuerOffertentyp = !!ot?.formen_aktiv && ot.berechnungsmodell !== 'tagessatz';
   $bauteiltitel.textContent = ot ? ot.name : '';
   $('totalLabel').textContent = 'Total ' + (ot ? ot.name : '');
   if(ot && ot.berechnungsmodell === 'tagessatz'){
@@ -3294,6 +3320,8 @@ function initBereich(){
   vorauswahlBearbeitet = false;
   bereichZugaenglichkeitStufe = 2;
   transportWahl = { kies: null, beton: null };
+  bereichFormen = formenStandard();
+  bereichFormenZuordnung = {};
   bereichKonfigEingeklappt = false;
   bereichAfOffenState = {};
   bereichZwischentitelZu = {};
@@ -3334,6 +3362,7 @@ function renderBereich(){
         <span class="konfiglabel">Konfiguration</span>
       </div>
       <div class="konfigbody">
+        ${formenAktivFuerOffertentyp ? '<div class="formenblock" id="formenBlock"></div>' : ''}
         <div class="dimsrows"></div>
         ${(zugaenglichkeitAktivFuerOffertentyp || transportWahlRelevant()) ? '<div class="zugRow">' : ''}
         ${zugaenglichkeitAktivFuerOffertentyp ? `<div class="afblock zugblock">
@@ -3366,6 +3395,7 @@ function renderBereich(){
     </div>`;
 
   renderTransportWahl();
+  renderFormenBlock();
   $teilbereiche.querySelector('.konfighead')?.addEventListener('click', () => {
     bereichKonfigEingeklappt = !bereichKonfigEingeklappt;
     $teilbereiche.querySelector('.konfigblock').classList.toggle('collapsed', bereichKonfigEingeklappt);
@@ -3653,7 +3683,9 @@ function renderBereich(){
         const neuGewaehlt = af.optionen.find(o => OPTION_VERWEIS[o.id] && bereichSelectedOptions.has(o.id) && !vorherGewaehlt.has(o.id));
         if(neuGewaehlt){
           const knopf = $teilbereiche.querySelector(`.verweisbtn[data-opt="${neuGewaehlt.id}"]`);
-          const hatFlaechen = verweisSummen(neuGewaehlt).eintraege.some(e => e.zeilen.some(z => verweisWert(z, e.spalte) > 0));
+          const hatFlaechen = formenIstMauerOption(neuGewaehlt.id)
+            ? formenBerechne(bereichFormen.tief).stuecke.some(s => s.laenge > 0)
+            : verweisSummen(neuGewaehlt).eintraege.some(e => e.zeilen.some(z => verweisWert(z, e.spalte) > 0));
           if(knopf && hatFlaechen) setTimeout(() => oeffneVerweisPopup(knopf, neuGewaehlt), 0);
         }
     };
@@ -4055,9 +4087,11 @@ function bereinigeVerweisZuordnungen(){
 }
 function berechneVerweisMengen(){
   bereinigeVerweisZuordnungen();
+  bereinigeFormenZuordnung();
   VERWEIS_MENGEN = {};
   bereichSelectedOptions.forEach(optId => {
     if(!OPTION_VERWEIS[optId]) return;
+    if(formenIstMauerOption(optId)){ VERWEIS_MENGEN[optId] = formenSumme(optId); return; }
     VERWEIS_MENGEN[optId] = verweisEintraege(optId).reduce((summe, e) =>
       summe + e.zeilen.filter(z => zHat(z, optId)).reduce((s, z) => s + verweisWert(z, e.spalte), 0), 0);
   });
@@ -4093,6 +4127,12 @@ function standardOptionenFuerNeueZeile(efId){
 }
 // Summe der angehakten Zeilen, uebrige freie Menge und Einheit einer Verweis-Option
 function verweisSummen(opt){
+  // Formen-Tool (Mauer): Summe der angehakten Umfangsstuecke der Tiefenzone
+  if(formenIstMauerOption(opt.id)){
+    const sp = formenSpalte(opt.id);
+    const offen = formenBerechne(bereichFormen.tief).stuecke.filter(s => !bereichFormenZuordnung[s.id] && formenStueckZaehlt(s, sp)).reduce((a, s) => a + s.laenge, 0);
+    return { eintraege: [], summe: formenSumme(opt.id), offen, einheit: 'm' };
+  }
   const eintraege = verweisEintraege(opt.id);
   const gr = verweisGruppe(opt.id);
   let summe = 0, offen = 0;
@@ -4106,6 +4146,7 @@ const verweisFmt = n => n.toLocaleString('de-CH', { maximumFractionDigits: 2 });
 // Kleiner Knopf neben dem Belag-Button: zeigt die Summe, Klick oeffnet das Pop-up
 // Wort fürs Zuordnungsfenster: aus dem Tabellenverweis (wort, z.B. Mauer), sonst Fläche bei m², sonst Zeile
 function verweisWort(opt){
+  if(formenIstMauerOption(opt.id)) return { sg: 'Umfangsstück', pl: 'Umfangsstücke' };
   const w = OPTION_VERWEIS[opt.id]?.[0]?.wort;
   if(w) return { sg: w, pl: w + 'n' };
   return verweisSummen(opt).einheit === 'm²' ? { sg: 'Fläche', pl: 'Flächen' } : { sg: 'Zeile', pl: 'Zeilen' };
@@ -4143,6 +4184,8 @@ function fuelleVerweisPopup(){
   const pop = document.getElementById('verweisPop');
   const opt = verweisPopOptId && findeOptionPerId(verweisPopOptId);
   if(!pop || !opt) return;
+  pop.classList.toggle('vp-formen', formenIstMauerOption(opt.id));
+  if(formenIstMauerOption(opt.id)){ fuelleFormenPopup(pop, opt); return; }
   const { eintraege, summe, offen, einheit } = verweisSummen(opt);
   const gr = verweisGruppe(opt.id);
   if(!eintraege.length){
@@ -4218,6 +4261,204 @@ function aktualisiereVerweisBloecke(){
   aktualisiereZeilenMarkierung();
 }
 
+// ===================== Formen-Tool (Naturteich/Schwimmteich) =====================
+// Der Code liefert NUR Flaechen und Umfaenge: je Zone (Teichform, Tiefenzone) eine Form mit Massen.
+// Fuenf Systemwerte (Flaeche/Umfang Teichform, Flaeche/Umfang Tiefenzone, Flaeche Randzone) stehen in den
+// Formeln wie jeder andere Wert zur Verfuegung (Systemwert-Terms, siehe berechneSystemwerteMap).
+// Mauern sind normale Optionen mit Tabellenverweis "Formen-Tool: Tiefenzone": der Mitarbeiter hakt in einer
+// Skizze die Umfangsstuecke U1, U2 ... an (ein Stueck gehoert hoechstens einer Mauer-Option).
+// A = laengste Laenge, B = laengste Breite; Umfangsstuecke U1..Uk je nach Form (siehe formenBerechne).
+const FORMEN_DEF = {
+  rechteck: { name: 'Rechteck', dims: [['A', 'Länge (A)', 'm'], ['B', 'Breite (B)', 'm']] },
+  viertel:  { name: 'Viertelrund', dims: [['A', 'obere Seite (A)', 'm'], ['B', 'seitliche Seite (B)', 'm']] },
+  halbrund: { name: 'Halbrund', dims: [['A', 'gerade Seite (A)', 'm'], ['B', 'Tiefe (B)', 'm']] },
+  oval:     { name: 'Oval', dims: [['A', 'Länge (A)', 'm'], ['B', 'Breite (B)', 'm']] },
+  freiform: { name: 'Freiform', dims: [['F', 'Fläche', 'm²'], ['U', 'Umfang', 'm']] }
+};
+const FORMEN_ICON = {
+  keine: '<circle cx="26" cy="18" r="11" stroke-dasharray="3 3"/><path d="M18 26 L34 10"/>',
+  rechteck: '<rect x="6" y="7" width="40" height="22"/>',
+  viertel: '<path d="M6 7 H46 V29 A40 22 0 0 1 6 7 Z"/>',
+  halbrund: '<path d="M6 7 H46 A20 22 0 0 1 6 7 Z"/>',
+  oval: '<ellipse cx="26" cy="18" rx="20" ry="12"/>',
+  freiform: '<path d="M8 20 C6 10 16 5 26 8 C36 6 46 10 44 20 C46 28 34 32 26 29 C16 32 8 28 8 20 Z"/>'
+};
+const FORMEN_TIEF_ID = 'formen:tief';
+let formenAktivFuerOffertentyp = false;
+function formenStandard(){ return { teich: { form: 'rechteck', masse: {} }, tief: { form: 'keine', masse: {} } }; }
+let bereichFormen = formenStandard();
+let bereichFormenZuordnung = {}; // 'U1' (Tiefenzone) -> optionId der Mauer-Option
+const formenFnum = v => { v = parseFloat(v); return isFinite(v) && v > 0 ? v : 0; };
+const formenFmt = n => n.toLocaleString('de-CH', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+// Umfang einer Ellipse mit Halbachsen a, b (Naeherung pi*(a+b)*(1+h/4), h=((a-b)/(a+b))^2, Fehler unter 1 %)
+function formenEllU(a, b){ const s = a + b; if(s <= 0) return 0; const h = Math.pow((a - b) / s, 2); return Math.PI * s * (1 + h / 4); }
+function formenBerechne(z){
+  if(!z || !FORMEN_DEF[z.form]) return { flaeche: 0, umfang: 0, stuecke: [] };
+  const m = z.masse || {}, A = formenFnum(m.A), B = formenFnum(m.B);
+  let flaeche = 0, st = [];
+  if(z.form === 'rechteck'){ flaeche = A * B; st = [['gerade', A], ['gerade', B], ['gerade', A], ['gerade', B]]; }
+  else if(z.form === 'viertel'){ flaeche = Math.PI / 4 * A * B; st = [['gerade', A], ['gerade', B], ['bogen', formenEllU(A, B) / 4]]; }
+  else if(z.form === 'halbrund'){ flaeche = Math.PI / 4 * A * B; const b = formenEllU(A / 2, B) / 4; st = [['gerade', A], ['bogen', b], ['bogen', b]]; }
+  else if(z.form === 'oval'){ flaeche = Math.PI / 4 * A * B; const q = formenEllU(A / 2, B / 2) / 4; st = [['bogen', q], ['bogen', q], ['bogen', q], ['bogen', q]]; }
+  else if(z.form === 'freiform'){ flaeche = formenFnum(m.F); const q = formenFnum(m.U) / 4; st = [['bogen', q], ['bogen', q], ['bogen', q], ['bogen', q]]; }
+  const stuecke = st.map((s, i) => ({ id: 'U' + (i + 1), art: s[0], laenge: s[1] }));
+  return { flaeche, umfang: stuecke.reduce((a, s) => a + s.laenge, 0), stuecke };
+}
+function formenWerte(){
+  const t = formenBerechne(bereichFormen.teich), d = formenBerechne(bereichFormen.tief);
+  return { form_flaeche_teich: t.flaeche, form_umfang_teich: t.umfang, form_flaeche_tief: d.flaeche, form_umfang_tief: d.umfang, form_flaeche_rand: Math.max(0, t.flaeche - d.flaeche) };
+}
+function formenDatenFuerSpeichern(){
+  return formenAktivFuerOffertentyp ? { teich: bereichFormen.teich, tief: bereichFormen.tief, zuordnung: bereichFormenZuordnung } : null;
+}
+function formenDatenLaden(fd){
+  const std = formenStandard();
+  bereichFormen = { teich: fd?.teich?.form ? fd.teich : std.teich, tief: fd?.tief?.form ? fd.tief : std.tief };
+  bereichFormenZuordnung = { ...(fd?.zuordnung || {}) };
+}
+// --- Vorschau-Zeichnung (massstaeblich) mit anklickbaren Umfangsstuecken ---
+// stil(id) -> { col, w, dash } je Stueck; hit = true erzeugt zusaetzlich breite, unsichtbare Klickflaechen
+function formenSvg(z, stil, hit){
+  const W = 300, H = 190, d = z.masse || {};
+  let wM = formenFnum(d.A), hM = formenFnum(d.B);
+  if(z.form === 'freiform'){ const F = formenFnum(d.F) || 1; wM = Math.sqrt(F * 1.5); hM = F / wM; }
+  if(wM <= 0 || hM <= 0){ wM = 1; hM = 0.6; }
+  const sc = Math.min((W - 90) / wM, (H - 64) / hM), x0 = (W - wM * sc) / 2, y0 = (H - hM * sc) / 2, x1 = x0 + wM * sc, y1 = y0 + hM * sc, mx = (x0 + x1) / 2, my = (y0 + y1) / 2;
+  const P = n => Math.round(n * 10) / 10, rx = wM * sc / 2, ry = hM * sc / 2;
+  let fill = '', pieces = [], labels = [];
+  if(z.form === 'rechteck'){
+    fill = `M${P(x0)} ${P(y0)} H${P(x1)} V${P(y1)} H${P(x0)} Z`;
+    pieces = [['U1', `M${P(x0)} ${P(y0)} H${P(x1)}`], ['U2', `M${P(x1)} ${P(y0)} V${P(y1)}`], ['U3', `M${P(x1)} ${P(y1)} H${P(x0)}`], ['U4', `M${P(x0)} ${P(y1)} V${P(y0)}`]];
+    labels = [['U1', mx, y0 - 9], ['U2', x1 + 16, my + 4], ['U3', mx, y1 + 17], ['U4', x0 - 16, my + 4]];
+  }else if(z.form === 'viertel'){
+    fill = `M${P(x0)} ${P(y0)} H${P(x1)} V${P(y1)} A${P(wM * sc)} ${P(hM * sc)} 0 0 1 ${P(x0)} ${P(y0)} Z`;
+    pieces = [['U1', `M${P(x0)} ${P(y0)} H${P(x1)}`], ['U2', `M${P(x1)} ${P(y0)} V${P(y1)}`], ['U3', `M${P(x1)} ${P(y1)} A${P(wM * sc)} ${P(hM * sc)} 0 0 1 ${P(x0)} ${P(y0)}`]];
+    labels = [['U1', mx, y0 - 9], ['U2', x1 + 16, my + 4], ['U3', x1 - wM * sc * 0.707 - 14, y0 + hM * sc * 0.707 + 15]];
+  }else if(z.form === 'halbrund'){
+    const hx = wM * sc / 2, hy = hM * sc;
+    fill = `M${P(x0)} ${P(y0)} H${P(x1)} A${P(hx)} ${P(hy)} 0 0 1 ${P(x0)} ${P(y0)} Z`;
+    pieces = [['U1', `M${P(x0)} ${P(y0)} H${P(x1)}`], ['U2', `M${P(x1)} ${P(y0)} A${P(hx)} ${P(hy)} 0 0 1 ${P(mx)} ${P(y1)}`], ['U3', `M${P(mx)} ${P(y1)} A${P(hx)} ${P(hy)} 0 0 1 ${P(x0)} ${P(y0)}`]];
+    labels = [['U1', mx, y0 - 9], ['U2', mx + hx * 0.707 + 14, y0 + hy * 0.707 + 14], ['U3', mx - hx * 0.707 - 14, y0 + hy * 0.707 + 14]];
+  }else if(z.form === 'oval'){
+    fill = `M${P(x0)} ${P(my)} A${P(rx)} ${P(ry)} 0 1 1 ${P(x1)} ${P(my)} A${P(rx)} ${P(ry)} 0 1 1 ${P(x0)} ${P(my)} Z`;
+    pieces = [['U1', `M${P(mx)} ${P(y0)} A${P(rx)} ${P(ry)} 0 0 1 ${P(x1)} ${P(my)}`], ['U2', `M${P(x1)} ${P(my)} A${P(rx)} ${P(ry)} 0 0 1 ${P(mx)} ${P(y1)}`], ['U3', `M${P(mx)} ${P(y1)} A${P(rx)} ${P(ry)} 0 0 1 ${P(x0)} ${P(my)}`], ['U4', `M${P(x0)} ${P(my)} A${P(rx)} ${P(ry)} 0 0 1 ${P(mx)} ${P(y0)}`]];
+    labels = [['U1', mx + rx * 0.707 + 15, my - ry * 0.707 - 3], ['U2', mx + rx * 0.707 + 15, my + ry * 0.707 + 13], ['U3', mx - rx * 0.707 - 15, my + ry * 0.707 + 13], ['U4', mx - rx * 0.707 - 15, my - ry * 0.707 - 3]];
+  }else if(z.form === 'freiform'){
+    const bx = (u, v) => P(x0 + u * (x1 - x0)) + ' ' + P(y0 + v * (y1 - y0));
+    fill = `M${bx(0.04, 0.55)} C${bx(0, 0.2)} ${bx(0.3, 0)} ${bx(0.5, 0.12)} C${bx(0.7, 0)} ${bx(1, 0.15)} ${bx(0.96, 0.5)} C${bx(1, 0.85)} ${bx(0.7, 1)} ${bx(0.45, 0.9)} C${bx(0.25, 1)} ${bx(0, 0.9)} ${bx(0.04, 0.55)} Z`;
+    pieces = [['U1', fill, ' pathLength="4" stroke-dasharray="1 3" stroke-dashoffset="-1"'], ['U2', fill, ' pathLength="4" stroke-dasharray="1 3" stroke-dashoffset="-2"'], ['U3', fill, ' pathLength="4" stroke-dasharray="1 3" stroke-dashoffset="-3"'], ['U4', fill, ' pathLength="4" stroke-dasharray="1 3" stroke-dashoffset="0"']];
+    labels = [['U1', x1 - 16, y0 + 18], ['U2', x1 - 16, y1 - 8], ['U3', x0 + 16, y1 - 8], ['U4', x0 + 16, y0 + 18]];
+  }
+  let h = `<path d="${fill}" fill="var(--accent-blue)" stroke="none"/>`;
+  pieces.forEach(([id, dd, extra]) => {
+    const s = stil(id);
+    // bei der Freiform waehlt das Dash-Muster (extra) das jeweilige Viertel des Randes
+    const dash = extra ? extra : (s.dash ? ` stroke-dasharray="${s.dash}"` : '');
+    h += `<path d="${dd}" fill="none" stroke="${s.col}" stroke-width="${s.w}" stroke-linecap="butt"${dash}/>`;
+    if(hit) h += `<path d="${dd}" fill="none" stroke="transparent" stroke-width="18" style="cursor:pointer;pointer-events:stroke" data-stueck="${id}"${extra || ''}/>`;
+  });
+  labels.forEach(([id, x, y]) => { h += `<text x="${P(x)}" y="${P(y)}" text-anchor="middle" font-size="11" font-weight="700" fill="var(--primary)">${id}</text>`; });
+  return h;
+}
+function formenIstMauerOption(optId){ return (OPTION_VERWEIS[optId] || []).some(v => v.eingabefeld_id === FORMEN_TIEF_ID); }
+function formenSpalte(optId){ return ((OPTION_VERWEIS[optId] || []).find(v => v.eingabefeld_id === FORMEN_TIEF_ID) || {}).spalte_id || 'laenge'; }
+function formenStueckZaehlt(st, spalte){ return spalte === 'gerade' ? st.art === 'gerade' : true; }
+function formenSumme(optId){
+  const sp = formenSpalte(optId);
+  return formenBerechne(bereichFormen.tief).stuecke.filter(s => bereichFormenZuordnung[s.id] === optId && formenStueckZaehlt(s, sp)).reduce((a, s) => a + s.laenge, 0);
+}
+// Zuordnungen zu nicht mehr vorhandenen Stuecken, nicht (mehr) gewaehlten oder ungeeigneten Optionen fallen weg
+function bereinigeFormenZuordnung(){
+  const stuecke = formenBerechne(bereichFormen.tief).stuecke;
+  Object.keys(bereichFormenZuordnung).forEach(id => {
+    const optId = bereichFormenZuordnung[id], st = stuecke.find(s => s.id === id);
+    if(!st || !bereichSelectedOptions.has(optId) || !formenIstMauerOption(optId) || !formenStueckZaehlt(st, formenSpalte(optId))) delete bereichFormenZuordnung[id];
+  });
+}
+function formenToggleStueck(optId, id){
+  const st = formenBerechne(bereichFormen.tief).stuecke.find(s => s.id === id);
+  if(!st) return;
+  if(bereichFormenZuordnung[id] === optId) delete bereichFormenZuordnung[id];
+  else if(!bereichFormenZuordnung[id] && formenStueckZaehlt(st, formenSpalte(optId))) bereichFormenZuordnung[id] = optId;
+  else return;
+  aktualisiereVerweisBloecke();
+  aktualisiereFormenAnzeige();
+  recalc();
+  planAutosave();
+}
+function fuelleFormenPopup(pop, opt){
+  const z = bereichFormen.tief, b = formenBerechne(z), sp = formenSpalte(opt.id);
+  const kopf = `<div class="vp-kopf">Umfangsstücke für «${escHtml(opt.name)}»</div>`;
+  if(!b.stuecke.length){
+    pop.innerHTML = kopf + '<div class="vp-hint">Es ist keine Tiefenzone eingegeben. Bitte oben Form und Masse der Tiefenzone eintragen.</div>';
+    return;
+  }
+  const status = st => { const o = bereichFormenZuordnung[st.id]; return !o ? 'frei' : (o === opt.id ? 'meine' : 'fremd'); };
+  const stil = id => {
+    const st = b.stuecke.find(s => s.id === id), s = st ? status(st) : 'frei', ok = st && formenStueckZaehlt(st, sp);
+    return s === 'meine' ? { col: 'var(--primary)', w: 5 } : s === 'fremd' ? { col: 'var(--muted)', w: 5 } : { col: ok ? 'var(--primary-l)' : 'var(--line)', w: 1.8, dash: '5 4' };
+  };
+  const zeilen = b.stuecke.map(st => {
+    const s = status(st), ok = formenStueckZaehlt(st, sp), fremd = s === 'fremd' ? findeOptionPerId(bereichFormenZuordnung[st.id])?.name : null;
+    const txt = `${st.id} · ${st.art} · ${formenFmt(st.laenge)} m`;
+    if(fremd) return `<div class="vp-zeile vp-gesperrt" title="Erst bei «${escHtml(fremd)}» abhaken, dann ist es hier frei"><span class="vp-name">${txt} <span class="vp-bei">– ${escHtml(fremd)}</span></span></div>`;
+    if(!ok) return `<div class="vp-zeile vp-gesperrt" title="Bögen sind hier nicht möglich"><span class="vp-name">${txt} <span class="vp-bei">– nur gerade Stücke</span></span></div>`;
+    return `<label class="vp-zeile"><input type="checkbox" data-stueck="${st.id}" ${s === 'meine' ? 'checked' : ''}><span class="vp-name">${txt}</span></label>`;
+  }).join('');
+  const summe = formenSumme(opt.id), frei = b.stuecke.filter(s => !bereichFormenZuordnung[s.id] && formenStueckZaehlt(s, sp)).reduce((a, s) => a + s.laenge, 0);
+  pop.innerHTML = `${kopf}<svg viewBox="0 0 300 190" class="vp-formsvg" role="img" aria-label="Tiefenzone mit Umfangsstücken">${formenSvg(z, stil, true)}</svg>${zeilen}
+    <div class="vp-fuss${summe <= 0 ? ' warn' : ''}"><span>Zugeordnet: <b>${formenFmt(summe)} m</b>${frei > 0 ? `<br>noch frei: ${formenFmt(frei)} m` : ''}</span><button type="button" class="vp-fertig">Fertig</button></div>`;
+  pop.querySelector('.vp-fertig').addEventListener('click', versucheVerweisPopupZuSchliessen);
+  pop.querySelectorAll('[data-stueck]').forEach(el => el.addEventListener(el.tagName === 'INPUT' ? 'change' : 'click', () => formenToggleStueck(opt.id, el.dataset.stueck)));
+}
+// --- Eingabebereich oben in der Konfiguration ---
+function formenZonenHtml(){
+  const zonen = [['teich', 'Teichform (Gesamtfläche Wasser)', false], ['tief', 'Tiefenzone (Badebereich)', true]];
+  return zonen.map(([zid, titel, mitKeine]) => {
+    const z = bereichFormen[zid], formen = (mitKeine ? ['keine'] : []).concat(Object.keys(FORMEN_DEF));
+    const picker = formen.map(f => `<button type="button" class="formshape${z.form === f ? ' on' : ''}" data-zone="${zid}" data-form="${f}" aria-pressed="${z.form === f}"><svg viewBox="0 0 52 36" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round">${FORMEN_ICON[f]}</svg>${f === 'keine' ? 'keine' : FORMEN_DEF[f].name}</button>`).join('');
+    const felder = FORMEN_DEF[z.form] ? FORMEN_DEF[z.form].dims.map(([k, label, einheit]) =>
+      `<label class="formfeld">${label}<span class="formeinheit"><input type="number" inputmode="decimal" min="0" step="0.1" data-zone="${zid}" data-mass="${k}" value="${z.masse[k] ?? ''}" placeholder="0">${einheit}</span></label>`).join('') : '<div class="formstuecke">Keine Tiefenzone: der Teich hat nur die Teichform.</div>';
+    return `<div class="formzone" data-zid="${zid}"><div class="formzonetitel">${titel}</div><div class="formpicker">${picker}</div>
+      <div class="formbody">${FORMEN_DEF[z.form] ? `<div class="formsvgwrap"><svg viewBox="0 0 300 190" id="formsvg-${zid}" role="img" aria-label="${titel}"></svg></div>` : ''}
+      <div class="formfelder">${felder}<div class="formstuecke" id="formsum-${zid}"></div></div></div></div>`;
+  }).join('');
+}
+function renderFormenBlock(){
+  const wrap = document.getElementById('formenBlock');
+  if(!wrap) return;
+  wrap.innerHTML = formenZonenHtml();
+  wrap.querySelectorAll('.formshape').forEach(btn => btn.addEventListener('click', () => {
+    const z = bereichFormen[btn.dataset.zone];
+    if(z.form === btn.dataset.form) return;
+    z.form = btn.dataset.form;
+    renderFormenBlock();
+    formenGeaendert();
+  }));
+  wrap.querySelectorAll('input[data-mass]').forEach(inp => inp.addEventListener('input', () => {
+    bereichFormen[inp.dataset.zone].masse[inp.dataset.mass] = inp.value === '' ? '' : parseFloat(inp.value);
+    formenGeaendert();
+  }));
+  aktualisiereFormenAnzeige();
+}
+// Zeichnung und Kennzahlen unter den Feldern auffrischen (ohne die Eingabefelder neu aufzubauen)
+function aktualisiereFormenAnzeige(){
+  ['teich', 'tief'].forEach(zid => {
+    const z = bereichFormen[zid], b = formenBerechne(z), svg = document.getElementById('formsvg-' + zid), sum = document.getElementById('formsum-' + zid);
+    if(svg) svg.innerHTML = formenSvg(z, id => zid === 'tief' && bereichFormenZuordnung[id] ? { col: 'var(--primary)', w: 5 } : { col: 'var(--primary-l)', w: zid === 'tief' ? 1.8 : 2.2, dash: zid === 'tief' ? '5 4' : '' }, false);
+    if(sum && b.stuecke.length){
+      sum.innerHTML = `Fläche <b>${formenFmt(b.flaeche)} m²</b> · Umfang <b>${formenFmt(b.umfang)} m</b><br>` + b.stuecke.map(s => `${s.id} ${formenFmt(s.laenge)} m`).join(' · ');
+    }
+  });
+}
+function formenGeaendert(){
+  bereinigeFormenZuordnung();
+  aktualisiereFormenAnzeige();
+  aktualisiereVerweisBloecke();
+  recalc();
+  planAutosave();
+}
+
 let offertenListe = [];
 
 async function loadOfferteListe(){
@@ -4273,7 +4514,7 @@ function setMode(neu){
 
 async function ladeBestehendeOfferte(offerteId){
   const { data: offerte, error: oErr } = await sb
-    .from('offerte').select('id, titel, datum, status, notiz, offertentyp_id, lieferwagen_modus, lieferwagen_budget, lieferwagen_frequenz, vorarbeiter_frequenz, vorarbeiter_typ, gartenarbeiter_frequenz, zugaenglichkeit_stufe, beschreibung_block, beschreibung_manuell, optionen_text_liste, optionen_text_manuell, kosten_snapshot, offertnummer, easybill_document_id, easybill_document_number, vorauswahl_id, transport_werk_kies_id, transport_werk_beton_id').eq('id', offerteId).single();
+    .from('offerte').select('id, titel, datum, status, notiz, offertentyp_id, lieferwagen_modus, lieferwagen_budget, lieferwagen_frequenz, vorarbeiter_frequenz, vorarbeiter_typ, gartenarbeiter_frequenz, zugaenglichkeit_stufe, beschreibung_block, beschreibung_manuell, optionen_text_liste, optionen_text_manuell, kosten_snapshot, offertnummer, easybill_document_id, easybill_document_number, vorauswahl_id, transport_werk_kies_id, transport_werk_beton_id, formen_daten').eq('id', offerteId).single();
   if(oErr){ console.error(oErr); $saveStatus.textContent = 'Fehler beim Laden: ' + oErr.message; $saveStatus.className='status err'; return; }
 
   lieferwagenModus = offerte.lieferwagen_modus || 'zeit';
@@ -4355,6 +4596,7 @@ async function ladeBestehendeOfferte(offerteId){
     bereichAuswahlgruppenWahl = Object.fromEntries((auswahlRows || []).filter(a => a.auswahlgruppe_option_id).map(a => [a.option_id, a.auswahlgruppe_option_id]));
     bereichZugaenglichkeitStufe = offerte.zugaenglichkeit_stufe ?? 2;
     transportWahl = { kies: offerte.transport_werk_kies_id || null, beton: offerte.transport_werk_beton_id || null };
+    formenDatenLaden(offerte.formen_daten);
     bereichKonfigEingeklappt = false;
     bereichAfOffenState = {};
     bereichZwischentitelZu = {};
@@ -4599,6 +4841,7 @@ async function speichereNeueOfferte(titelVal){
       betrag_total: letzterBruttoTotal, lieferwagen_modus: lieferwagenModus, lieferwagen_budget: lieferwagenBudget > 0 ? lieferwagenBudget : null,
       lieferwagen_frequenz: lieferwagenFrequenz, vorarbeiter_frequenz: vorarbeiterFrequenz, vorarbeiter_typ: vorarbeiterTyp, gartenarbeiter_frequenz: gartenarbeiterFrequenz,
       zugaenglichkeit_stufe: bereichZugaenglichkeitStufe ?? 2, vorauswahl_id: aktiveVorauswahlId, transport_werk_kies_id: transportWahl.kies || null, transport_werk_beton_id: transportWahl.beton || null,
+      formen_daten: formenDatenFuerSpeichern(),
       beschreibung_block: $beschreibungBlock.value.trim() || null, beschreibung_manuell: beschreibungManuellBearbeitet,
       optionen_text_liste: $optionenTextBlock.value.trim() || null, optionen_text_manuell: optionenTextManuellBearbeitet,
       kosten_snapshot: letzterKostenSnapshot, offertnummer
@@ -4665,6 +4908,7 @@ async function speichereAenderungen(titelVal){
     betrag_total: letzterBruttoTotal, lieferwagen_modus: lieferwagenModus, lieferwagen_budget: lieferwagenBudget > 0 ? lieferwagenBudget : null,
     lieferwagen_frequenz: lieferwagenFrequenz, vorarbeiter_frequenz: vorarbeiterFrequenz, vorarbeiter_typ: vorarbeiterTyp, gartenarbeiter_frequenz: gartenarbeiterFrequenz,
     zugaenglichkeit_stufe: bereichZugaenglichkeitStufe ?? 2, vorauswahl_id: aktiveVorauswahlId, transport_werk_kies_id: transportWahl.kies || null, transport_werk_beton_id: transportWahl.beton || null,
+    formen_daten: formenDatenFuerSpeichern(),
     beschreibung_block: $beschreibungBlock.value.trim() || null, beschreibung_manuell: beschreibungManuellBearbeitet,
     optionen_text_liste: $optionenTextBlock.value.trim() || null, optionen_text_manuell: optionenTextManuellBearbeitet,
     kosten_snapshot: letzterKostenSnapshot
@@ -4890,7 +5134,7 @@ async function init(){
     // hat sich bei mehreren gleichzeitigen Nutzern als spuerbar langsam
     // erwiesen (Latenzen summierten sich statt sich zu ueberlappen).
     const [otRes] = await Promise.all([
-      sb.from('offertentyp').select('id,name,berechnungsmodell,vorarbeiter_typ_standard,zugaenglichkeit_aktiv,farbe_key')
+      sb.from('offertentyp').select('id,name,berechnungsmodell,vorarbeiter_typ_standard,zugaenglichkeit_aktiv,farbe_key,formen_aktiv')
         .eq('ausgeblendet', false).is('papierkorb_am', null).order('reihenfolge'),
       ladeAlleKunden(),
       ladeLieferwagenKonfiguration(),
