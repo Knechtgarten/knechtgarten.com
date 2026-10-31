@@ -151,9 +151,8 @@ button:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
 .card .ind{display:flex;gap:3px;align-items:center;color:var(--muted);flex:none;}
 .card .ind svg{width:12px;height:12px;}
 .card.dragging{opacity:.35;}
-.card.farbig .pr{background:rgba(255,255,255,.35);}
-.card.farbig .ind{color:inherit;opacity:.85;}
-.card.farbig:hover{border-color:rgba(35,43,53,.35);}
+.card.farbig .pr{background:rgba(255,255,255,.55);}
+.card.farbig:hover{border-color:rgba(35,43,53,.3);}
 .card.farbig.sel{border-color:var(--primary);box-shadow:0 0 0 1px var(--primary);}
 .ph{height:3px;background:var(--primary);border-radius:2px;margin:-2px 0;}
 .ladd{display:flex;gap:4px;padding:4px 6px 8px;}
@@ -312,6 +311,7 @@ const A = (n, s) => `<svg class="i" viewBox="0 0 24 24"${s ? ` style="width:${s}
 const ZEIT = [null, { t:'Heute', c:'var(--z1)', icon:'sonne', hell:true }, { t:'Diese Woche', c:'var(--z2)', icon:'woche', hell:true }, { t:'Dieser Monat', c:'var(--z3)', icon:'monat', hell:true }];
 const BEREICHE = { zeit:['Zeit','sonne'], mitte:['Pendenzenarten','dok'], team:['Team','leute'] };
 const FARBEN = ['#323E4E','#4C5C70','#3F6E8C','#4F7C8A','#2F7A70','#5F8A6B','#7A8F4E','#9A8A3A','#B07A4A','#8A6F5F','#9A6B7E','#6B5F8A','#46505E','#5A7D9A','#3D8C8C','#556B5A','#6E8B3D','#8C7A5B','#8E5B4A','#7D6B9E'];
+const PFARBEN = ['#579DFF','#FEA362','#F5CD47','#4BCE97','#9F8FEF','#F87168','#6CC3E0','#94C748','#E774BB','#8590A2']; // Personenfarben (Trello-Töne)
 const AVF = ['#5F8A6B','#4F7C8A','#B07A4A','#6B5F8A','#9A6B7E','#3F6E8C','#7A8F4E','#8A6F5F'];
 const R = 20, LW = 320;
 
@@ -348,8 +348,6 @@ const zeitIds = z => S.pz.filter(p => p.zeit === z).sort((a, b) => (a.zeit_sorti
 const estH = l => 44 + (l.zu ? 0 : (l.zeit ? zeitIds(l.zeit) : sortiert(l)).length * 34 + S.gruppen.filter(g => g.liste_id === l.id).length * 30 + 46);
 const avatar = uid => { const b = S.benutzer[uid]; if(!b) return ''; const n = b.anzeigename || b.email || '?'; const k = n.split(/[\s.@]+/).filter(Boolean).slice(0, 2).map(x => x[0].toUpperCase()).join('');
   let h = 0; for(const c of uid) h = (h * 31 + c.charCodeAt(0)) >>> 0; return `<span class="av" style="background:${AVF[h % AVF.length]}" title="${esc(n)}">${esc(k)}</span>`; };
-// helle Farbe? (dann dunkle Schrift)
-const hell = hex => { const m = /^#?([0-9a-f]{6})$/i.exec(hex || ''); if(!m) return true; const n = parseInt(m[1], 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255; return (0.299 * r + 0.587 * g + 0.114 * b) > 150; };
 const name = uid => { const b = S.benutzer[uid]; return b ? (b.anzeigename || b.email) : ''; };
 function fehler(e, was){ console.error(e); toast((was ? was + ': ' : '') + (e?.message || e), null, true); }
 function toast(t, undo, err){ S.toast = { t, undo, err }; zeichneOver(); clearTimeout(toast.h); toast.h = setTimeout(() => { S.toast = null; zeichneOver(); }, 4500); }
@@ -409,8 +407,8 @@ async function ladeAlles(){
     if(ra.error) throw ra.error;
     S.arten = Object.fromEntries(ra.data.map(a => [a.id, a]));
     S.benutzer = Object.fromEntries((rb.data || []).map(b => [b.id, b]));
-    // Personenfarbe aus dem Einsatzplaner (für gemeinsame Boards: wer hat die Pendenz eingetragen)
-    const { data: pp } = await sb.from('planer_person').select('benutzer_id,farbe').not('benutzer_id', 'is', null).not('farbe', 'is', null);
+    // Pendenzen-Farbe pro Person (für gemeinsame Boards: wer hat die Pendenz eingetragen)
+    const { data: pp } = await sb.from('pendenz_person_farbe').select('benutzer_id,farbe');
     S.pfarbe = Object.fromEntries((pp || []).map(x => [x.benutzer_id, x.farbe]));
     if(re.data) S.ein = { oeffnen: re.data.oeffnen, breiten: re.data.breiten || {}, farben: re.data.farben || {}, notizzettel: re.data.notizzettel || '' };
     // eigenes Board + gemeinsame Boards, in denen ich Mitglied bin
@@ -453,10 +451,10 @@ function pdHtml(p, opt = {}){
   if(p.notiz && p.notiz.replace(/<[^>]*>/g, '').trim()) ind.push(K('notiz', 12));
   if(fs.some(d => d.art !== 'mail')) ind.push(K('foto', 12));
   if(p.planer_einsatz_id) ind.push(`<span title="Im Einsatzplaner">${K('kalender', 12)}</span>`);
-  // gemeinsames Board: ganze Zeile in der Planer-Farbe der Person, die sie eingetragen hat; eigenes Board: Avatar bei fremden
+  // gemeinsames Board: ganze Zeile hell in der Pendenzen-Farbe der Person, die sie eingetragen hat; eigenes Board: Avatar bei fremden
   const pf = S.board.typ !== 'person' && S.pfarbe?.[p.erstellt_von];
   if(!pf && p.erstellt_von && p.erstellt_von !== ME) ind.push(avatar(p.erstellt_von));
-  return `<div class="card${S.sel === p.id ? ' sel' : ''}${pf ? ' farbig' : ''}" draggable="true" data-card="${p.id}"${pf ? ` style="background:${pf};color:${hell(pf) ? 'var(--ink)' : '#fff'}"` : ''}>
+  return `<div class="card${S.sel === p.id ? ' sel' : ''}${pf ? ' farbig' : ''}" draggable="true" data-card="${p.id}"${pf ? ` style="background:color-mix(in srgb, ${pf} 30%, #fff)"` : ''}>
     <button class="pr" data-zp="${p.id}" style="${p.zeit ? `background:${ZEIT[p.zeit].c}` : ''}" aria-label="Zeit: ${p.zeit ? ZEIT[p.zeit].t : 'irgendwann'}"></button>
     ${opt.zeit && a ? `<span class="ty" style="background:${artFarbe(l.art_id)}" title="${esc(l.titel)}">${A(a.icon)}</span>` : ''}
     <span class="tx">${esc(p.titel)}</span><span class="ind">${ind.join('')}</span></div>`;
@@ -573,6 +571,8 @@ function zeichneOver(){
     <div class="fld"><label>Pendenz öffnen als</label><div class="seg"><button data-oeffnen="fenster" aria-pressed="${S.ein.oeffnen === 'fenster'}">Fenster</button><button data-oeffnen="rechts" aria-pressed="${S.ein.oeffnen === 'rechts'}">Rechts angeheftet</button></div></div>
     <div class="fld"><label>Meine Farben (nur für dich, Icons bleiben fix)</label>${Object.values(S.arten).sort((x, y) => x.sortierung - y.sortierung).map(a => `<div class="artrow"><span class="ty" style="background:${artFarbe(a.id)}">${A(a.icon)}</span><span class="n">${esc(a.titel)}</span>
       <div class="sws">${FARBEN.map(f => `<button class="sw" style="background:${f}" data-farbe="${a.id}|${f}" aria-pressed="${artFarbe(a.id) === f}" aria-label="Farbe ${f}"></button>`).join('')}</div>${S.ein.farben[a.id] ? `<button class="btn btn-ghost" style="padding:2px 8px;font-size:11px" data-farbe="${a.id}|">Standard</button>` : ''}</div>`).join('')}</div>
+    ${ROLLE === 'admin' || ROLLE === 'buero_team' ? `<div class="fld"><label>Pendenzen-Farbe pro Person (in gemeinsamen Boards, für alle gleich)</label>${Object.values(S.benutzer).filter(b => b.email).sort((x, y) => (x.anzeigename || x.email).localeCompare(y.anzeigename || y.email)).map(b => `<div class="artrow"><span class="n">${esc(b.anzeigename || b.email)}</span>
+      <div class="sws">${PFARBEN.map(f => `<button class="sw" style="background:${f}" data-pfarbe="${b.id}|${f}" aria-pressed="${S.pfarbe?.[b.id] === f}" aria-label="Farbe ${f}"></button>`).join('')}</div>${S.pfarbe?.[b.id] ? `<button class="btn btn-ghost" style="padding:2px 8px;font-size:11px" data-pfarbe="${b.id}|">Keine</button>` : ''}</div>`).join('')}</div>` : ''}
     ${S.board.typ !== 'person' ? `<div class="fld"><label>Mitglieder «${esc(S.board.name)}»</label>${Object.values(S.benutzer).filter(b => b.email).sort((x, y) => (x.anzeigename || x.email).localeCompare(y.anzeigename || y.email)).map(b => `<label class="row small"><input type="checkbox" data-mitglied="${b.id}"${S.mitglieder.includes(b.id) ? ' checked' : ''}>${esc(b.anzeigename || b.email)}</label>`).join('')}</div>` : ''}</div></div>`;
   if(S.archiv){ const a = S.archiv;
     h += `<div class="dbg" data-bg="archiv"><div class="set" role="dialog" aria-label="Archiv"><h2>Archiv<button class="kg-ibtn" data-archivx aria-label="Schliessen">${K('x')}</button></h2>
@@ -779,6 +779,9 @@ document.addEventListener('click', async e => {
   if('seto' in d){ S.set = true; return zeichneOver(); }
   if('setx' in d || d.bg === 'set'){ S.set = false; return zeichneOver(); }
   if(d.oeffnen){ S.ein.oeffnen = d.oeffnen; speichereEin(); return zeichneOver(); }
+  if(d.pfarbe){ const [uid, f] = d.pfarbe.split('|');
+    const r = f ? await sb.from('pendenz_person_farbe').upsert({ benutzer_id: uid, farbe: f }) : await sb.from('pendenz_person_farbe').delete().eq('benutzer_id', uid);
+    if(r.error) return fehler(r.error, 'Farbe'); if(f) S.pfarbe[uid] = f; else delete S.pfarbe[uid]; return zeichne(); }
   if(d.farbe){ const [aid, f] = d.farbe.split('|'); if(f) S.ein.farben[aid] = f; else delete S.ein.farben[aid]; speichereEin(); return zeichne(); }
   if('zettel' in d){ S.zettel = !S.zettel; return zeichne(); }
   if('zettelx' in d){ S.zettel = false; return zeichne(); }
