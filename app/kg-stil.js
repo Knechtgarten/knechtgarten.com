@@ -191,9 +191,10 @@ header.app .wrap{min-height:46px;}
     if(sicht) return sicht;
     sicht = { rolle: null, module: null, extern: [] };
     try {
-      // sb ist in jeder Seite als globale Konstante angelegt
-      const client = typeof sb !== 'undefined' ? sb : null; // eslint-disable-line no-undef
-      if(!client) return sicht;
+      // eigener Client (gleiche Anmeldung wie die Seite), weil nicht jede Seite sb global anlegt
+      if(!window.supabase || !window.supabase.createClient) return sicht;
+      KG._sb = KG._sb || window.supabase.createClient('https://oalapdxinqlnzwxhyuzy.supabase.co', 'sb_publishable_DoeD4uEnwemmnFu4AxE9uw_5lmQYc5P');
+      const client = KG._sb;
       const { data: { session } } = await client.auth.getSession();
       if(!session) return sicht;
       const [{ data: ben }, { data: mods }] = await Promise.all([
