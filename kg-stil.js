@@ -562,7 +562,7 @@ header.app.kg-leiste .kg-reiter .navic.on{box-shadow:inset 0 -2px 0 var(--kg-akz
   // Infos vom Büro (Balken auf der Startseite, Pop-ups in jedem Tool) – eigene Datei, hier für alle Seiten geladen.
   // Seiten, die KG.infos selbst brauchen (Startseite, Verwaltung): await KG.infosBereit
   KG.infosBereit = new Promise(ok => {
-    const s = document.createElement('script'); s.src = '/kg-infos.js?v=2';
+    const s = document.createElement('script'); s.src = '/kg-infos.js?v=3';
     s.onload = () => ok(KG.infos); s.onerror = () => ok(null);
     (document.head || document.documentElement).appendChild(s);
   });

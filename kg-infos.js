@@ -80,7 +80,7 @@
   /* ---------------- Empfänger: Balken + Pop-ups ---------------- */
   let gestartet = false, ich = null;
   async function start(){
-    if(gestartet) return;
+    if(gestartet || window.top !== window) return; // nicht im eingebetteten Planer (Startseite)
     const c = sb(); if(!c) return;
     const { data: { session } } = await c.auth.getSession();
     if(!session) return;
