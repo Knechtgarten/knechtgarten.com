@@ -37,6 +37,7 @@
     { k: 'verw', n: 'Verwaltung', icon: 'verw', bereiche: [
       B('personen', 'Personen', 'Eigene = nur das eigene Stammblatt'),
       S('personalien', 'Personalien sehen', 'Adresse, Geburtsdatum, Notfallkontakt'),
+      B('infos', 'Infos an Mitarbeitende', 'Anzeigen = Liste und «gelesen von», Erstellen = Info senden (Startseite, Verwaltung)'),
       S('rechte', 'Gruppen & Rechte ändern', 'sonst nur Administrator') ] }
   ];
   KG.rechteStufen = [['K', 'Keine'], ['E', 'Eigene'], ['G', 'Gruppe'], ['A', 'Alle']];
