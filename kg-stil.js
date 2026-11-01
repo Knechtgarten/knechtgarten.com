@@ -258,6 +258,7 @@ header.app.kg-leiste .kg-reiter .navic.on{box-shadow:inset 0 -2px 0 var(--kg-akz
 .kg-seite .kg-neben:hover{border-color:#323E4E;}
 .kg-seite .kg-haupt:disabled,.kg-seite .kg-neben:disabled{opacity:.45;cursor:not-allowed;}
 .kg-seite #kundeSucheWrap{flex:1 1 300px;max-width:480px;margin:0!important;}
+.kg-seite #kundeSucheWrap input{padding-left:10px!important;padding-right:10px!important;}
 .kg-seite .pathline{font-size:12.5px;color:#4C5C70;margin:0!important;}
 .kg-seite .pathline a{color:#323E4E;font-weight:600;}
 #kg-sperre{position:fixed;left:0;right:0;top:46px;bottom:0;z-index:9000;background:#F5F7F9;display:flex;align-items:flex-start;justify-content:center;padding-top:80px;}
@@ -466,6 +467,12 @@ header.app.kg-leiste .kg-reiter .navic.on{box-shadow:inset 0 -2px 0 var(--kg-akz
       const gear = kopfNav.querySelector('a.gear');
       const tabs = [...kopfNav.querySelectorAll(':scope > a:not(.icobtn):not(.gear)')];
       if(gear){ gear.textContent = 'Vorlagen & Berechnung'; gear.removeAttribute('title'); if(tabs.length) tabs[tabs.length - 1].after(gear); }
+      // Unterseiten ohne eigenen Reiter (z. B. Offerten-Eingabe, Tool B): passenden Reiter aktiv markieren
+      const mein = SEITENRECHT[seite];
+      if(mein && !kopfNav.querySelector('a.on')) kopfNav.querySelectorAll('a[href]').forEach(a => {
+        const z = SEITENRECHT[(a.getAttribute('href') || '').split(/[?#]/)[0].replace(/\.html?$/, '')];
+        if(z && z[0] === mein[0] && z[1].split('|').includes(mein[1].split('|')[0])) a.classList.add('on');
+      });
     } else if(sub && !head.contains(sub)){
       reiter = sub;
     }
