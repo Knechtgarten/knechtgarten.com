@@ -29,6 +29,11 @@ Jedes neue Tool übernimmt diesen Stil – nichts neu erfinden.
 ## Gemeinsame Leiste & Tool-Icons
 - `kg-stil.js` ersetzt in jedem `<header class="app">` «Zurück» + Titel durch den Tool-Umschalter (Icon + Name + Menü aller Tools).
   Neue Seite eines Tools → Dateiname in `TOOLS[].seiten` in `kg-stil.js` eintragen. Neues Haupttool → Eintrag in `TOOLS` + Icon in `TI`.
+- Aufbau der dunklen Leiste (macht `kg-stil.js` automatisch): [Tool-Umschalter][Reiter des Tools …][Tool-Icons] … [Hilfe ?][Personen-Menü].
+  Reiter = Hauptseiten des Tools, entweder `<nav>` im Kopf (Offertentool) oder `<nav class="subnav">` direkt nach dem Header (wird in die Leiste verschoben, `#subnav` bleibt erhalten).
+  Kein eigenes Zahnrad, kein eigener Abmelden-Knopf: persönliche Einstellungen eines Tools hängen am Knopf `[data-seto]` (erscheint als «Meine Einstellungen» im Personen-Menü),
+  Tool-Konfiguration ist ein normaler Reiter (z. B. «Vorlagen & Berechnung»), Firmenweites gehört in die Verwaltung.
+  Weisse zweite Zeile nur für Werkzeuge der aktuellen Seite (Filter, Ansicht, Aktionen), nie für Navigation.
 - Tool-Icons nur über `KG.toolIcon('pend', 26)`; Farbe = Palette Stufe 2. Mailassistent/Dokumentensuche haben kein eigenes Tool-Icon.
 
 ## Farben
