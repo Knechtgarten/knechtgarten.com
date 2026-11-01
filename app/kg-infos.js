@@ -25,7 +25,7 @@
 .kgi-balken button:hover{background:rgba(255,255,255,.18);opacity:1;}
 .kgi-balken button svg{width:18px;height:18px;}
 .kgi-ov{position:fixed;inset:0;background:rgba(35,43,53,.45);z-index:10050;display:grid;place-items:center;padding:16px;}
-.kgi-box{background:#fff;border-radius:14px;max-width:460px;width:100%;box-shadow:0 18px 50px rgba(0,0,0,.25);overflow:hidden;font-family:inherit;color:#232B35;}
+.kgi-box{background:#fff;border-radius:14px;max-width:460px;width:100%;max-height:calc(100vh - 32px);overflow:auto;box-shadow:0 18px 50px rgba(0,0,0,.25);overflow:hidden;font-family:inherit;color:#232B35;}
 .kgi-box .kopf{background:${FARBE};color:#fff;padding:14px 18px;font-size:16px;font-weight:700;line-height:1.35;}
 .kgi-box .kopf small{display:block;font-size:12px;font-weight:400;opacity:.85;margin-top:3px;}
 .kgi-box .inh{padding:16px 18px;font-size:14px;line-height:1.55;white-space:pre-wrap;}
