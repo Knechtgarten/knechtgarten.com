@@ -128,17 +128,17 @@
   };
   // Haupttools: Schlüssel, Name, Einstiegsseite, Icon, Farbe, Modul in modul_sichtbarkeit, zugehörige Seiten
   const TOOLS = [
-    { k: 'home', n: 'Startseite', url: 'index.html', farbe: PAL.oliv[1], seiten: ['index'] },
-    { k: 'offerten', n: 'Offertentool', url: 'tool-start-live-v1.html', farbe: PAL.blau[1], modul: 'offertentool',
+    { k: 'home', n: 'Startseite', url: 'index.html', farbe: PAL.oliv[1], akzent: PAL.oliv[3], seiten: ['index'] },
+    { k: 'offerten', n: 'Offertentool', url: 'tool-start-live-v1.html', farbe: PAL.blau[1], akzent: PAL.blau[3], modul: 'offertentool',
       seiten: ['tool-start-live-v1', 'tool-a-live-v1', 'tool-a2-allgemein-live-v1', 'tool-a3-artikel-live-v1', 'tool-b-live-v1', 'einstellungen-live-v1'] },
-    { k: 'artikel', n: 'Artikelstamm', url: 'tool-c-live-v1.html', farbe: PAL.blau[1], modul: 'offertentool', seiten: ['tool-c-live-v1', 'lieferant-abgleich-live-v1'] },
-    { k: 'kunden', n: 'Kunden', url: 'tool-d-kunden-live-v1.html', farbe: PAL.gold[0], modul: 'offertentool', seiten: ['tool-d-kunden-live-v1'] },
-    { k: 'pend', n: 'Pendenzen', url: 'pendenzen-live-v1.html', farbe: PAL.orange[1], modul: 'pendenzen', seiten: ['pendenzen-live-v1'] },
-    { k: 'plan', n: 'Einsatzplaner', url: 'einsatzplaner-live-v1.html', farbe: PAL.petrol[1], modul: 'einsatzplaner', seiten: ['einsatzplaner-live-v1'] },
-    { k: 'pflege', n: 'Pflege & Service', url: 'pflege-kunden-live-v1.html', farbe: PAL.gruen[1], modul: 'pflegetool',
+    { k: 'artikel', n: 'Artikelstamm', url: 'tool-c-live-v1.html', farbe: PAL.blau[1], akzent: PAL.blau[3], modul: 'offertentool', seiten: ['tool-c-live-v1', 'lieferant-abgleich-live-v1'] },
+    { k: 'kunden', n: 'Kunden', url: 'tool-d-kunden-live-v1.html', farbe: PAL.gold[0], akzent: PAL.gold[3], modul: 'offertentool', seiten: ['tool-d-kunden-live-v1'] },
+    { k: 'pend', n: 'Pendenzen', url: 'pendenzen-live-v1.html', farbe: PAL.orange[1], akzent: PAL.orange[3], modul: 'pendenzen', seiten: ['pendenzen-live-v1'] },
+    { k: 'plan', n: 'Einsatzplaner', url: 'einsatzplaner-live-v1.html', farbe: PAL.petrol[1], akzent: PAL.petrol[3], modul: 'einsatzplaner', seiten: ['einsatzplaner-live-v1'] },
+    { k: 'pflege', n: 'Pflege & Service', url: 'pflege-kunden-live-v1.html', farbe: PAL.gruen[1], akzent: PAL.gruen[3], modul: 'pflegetool',
       seiten: ['pflege-kunden-live-v1', 'pflege-kategorien-live-v1'] },
-    { k: 'wissen', n: 'Nachschlagewerk', url: 'wissen-live-v1.html', farbe: PAL.violett[1], modul: 'wissen', seiten: ['wissen-live-v1'] },
-    { k: 'verw', n: 'Verwaltung', url: 'verwaltung-live-v1.html', farbe: '#FFFFFF', admin: true,
+    { k: 'wissen', n: 'Nachschlagewerk', url: 'wissen-live-v1.html', farbe: PAL.violett[1], akzent: PAL.violett[3], modul: 'wissen', seiten: ['wissen-live-v1'] },
+    { k: 'verw', n: 'Verwaltung', url: 'verwaltung-live-v1.html', farbe: '#FFFFFF', akzent: PAL.grau[3], admin: true,
       seiten: ['verwaltung-live-v1', 'tools-live-v1', 'mailassistent-verwaltung-live-v1', 'dokumentensuche-verwaltung-live-v1'] }
   ];
   KG.tools = TOOLS;
@@ -224,6 +224,38 @@ header.app.kg-leiste .userbar.hidden{display:none!important;}
 .kg-pmenu svg{width:16px;height:16px;color:#6B7079;flex-shrink:0;}
 .kg-pmenu .kg-sep{margin:6px 0;}
 header.app.kg-leiste .kg-reiter a.kg-ohne{display:none!important;}
+/* aktiver Reiter in der Tool-Farbe */
+header.app.kg-leiste .kg-reiter a.on:not(.navic),header.app.kg-leiste .kg-reiter > .wrap > button.on:not(.navic){border-bottom-color:var(--kg-akzent,#D1DB5F)!important;}
+header.app.kg-leiste .kg-reiter .navic.on{box-shadow:inset 0 -2px 0 var(--kg-akzent,#D1DB5F)!important;}
+/* Weisse Leiste = Seite: [Ansicht-Segmente][Suche/Filter] … [Nebenaktionen][Hauptaktion] */
+.kg-seite{display:flex;align-items:center;gap:10px;min-height:50px;padding:8px 16px;box-sizing:border-box;background:#fff;border-bottom:1px solid #E1E5E9;flex-wrap:wrap;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;font-size:13px;}
+.kg-seite.hidden{display:none!important;}
+.kg-seite .kg-l,.kg-seite .kg-m,.kg-seite .kg-r{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.kg-seite .kg-m{flex:1 1 260px;min-width:0;}
+.kg-seite .kg-r{margin-left:auto;}
+.kg-seite .kg-r .kg-haupt{order:9;}
+.kg-seite .kg-m input[type="text"],.kg-seite .kg-m input[type="search"]{height:32px!important;box-sizing:border-box;border:1px solid #D5DBE1!important;border-radius:8px!important;
+  padding-top:0!important;padding-bottom:0!important;font:inherit!important;font-size:12.5px!important;width:100%;max-width:360px;margin:0!important;background:#fff;}
+.kg-seite .kg-m > *{margin-bottom:0!important;}
+.kg-seite input[type="text"]{background:#fff!important;}
+.kg-seite .kg-m > .filterbar{display:flex;align-items:center;gap:8px;flex:1;min-width:0;margin:0!important;flex-wrap:wrap;}
+.kg-seite .kundensearch-wrap{position:relative;flex:1 1 220px;max-width:380px;margin:0!important;}
+.kg-seite .kg-m > input[type="text"]{flex:1 1 220px;}
+.kg-seite .kg-m input[type="date"]{height:32px;box-sizing:border-box;border:1px solid #D5DBE1;border-radius:8px;padding:0 8px;font:inherit;font-size:12.5px;}
+.kg-seite .kg-seg,.kg-seg{display:inline-flex!important;border:1px solid #D5DBE1!important;border-radius:8px!important;overflow:hidden;height:32px;box-sizing:border-box;background:#fff;padding:0!important;gap:0!important;width:auto!important;margin:0!important;}
+.kg-seg > button,.kg-seg > a{all:unset;box-sizing:border-box;display:flex;align-items:center;gap:6px;padding:0 13px;font-size:12.5px;font-weight:600;color:#4C5C70;cursor:pointer;
+  border-left:1px solid #D5DBE1;white-space:nowrap;}
+.kg-seg > :first-child{border-left:0;}
+.kg-seg svg,.kg-seite .kg-haupt svg,.kg-seite .kg-neben svg{width:14px;height:14px;flex-shrink:0;}
+.kg-seg > button:hover,.kg-seg > a:hover{color:#232B35;background:#F5F7F9;}
+.kg-seg > .on,.kg-seg > [aria-pressed="true"]{background:var(--kg-tool,#323E4E)!important;color:#fff!important;}
+.kg-seite .kg-haupt{all:unset;box-sizing:border-box;display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 16px;border-radius:8px;background:#323E4E;color:#fff;
+  font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;}
+.kg-seite .kg-haupt:hover{background:#4C5C70;}
+.kg-seite .kg-neben{all:unset;box-sizing:border-box;display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;border-radius:8px;border:1px solid #D5DBE1;background:#fff;
+  color:#323E4E;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;}
+.kg-seite .kg-neben:hover{border-color:#323E4E;}
 #kg-sperre{position:fixed;left:0;right:0;top:46px;bottom:0;z-index:9000;background:#F5F7F9;display:flex;align-items:flex-start;justify-content:center;padding-top:80px;}
 #kg-sperre > div{background:#fff;border:1px solid #E1E5E9;border-radius:12px;padding:28px 32px;max-width:420px;text-align:center;font-size:14px;color:#232B35;}
 #kg-sperre b{font-size:18px;color:#323E4E;}
@@ -399,8 +431,29 @@ header.app.kg-leiste .kg-reiter a.kg-ohne{display:none!important;}
   const I_AUS = '<path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4"/><path d="M10 16l-4-4 4-4"/><path d="M6 12h10"/>';
   const I_PERSON = '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/>';
 
+  /* Weisse Leiste: Elemente mit data-kg-seite="links|mitte|rechts" werden (in Dokument-Reihenfolge)
+     in eine weisse Leiste direkt unter dem Kopf verschoben – Event-Handler bleiben erhalten.
+     Klassen: .kg-seg (Segment-Gruppe, aktives Kind .on), .kg-haupt (Hauptaktion), .kg-neben (Nebenaktion).
+     Die Leiste ist nur sichtbar, wenn #userbar sichtbar ist (also nach dem Login). */
+  function seitenleiste(head){
+    const els = [...document.querySelectorAll('[data-kg-seite]')];
+    if(!els.length || document.querySelector('.kg-seite')) return;
+    const bar = document.createElement('div'); bar.className = 'kg-seite';
+    const zone = {}; ['links', 'mitte', 'rechts'].forEach(z => { zone[z] = document.createElement('div'); zone[z].className = 'kg-' + z[0]; bar.appendChild(zone[z]); });
+    els.forEach(el => (zone[el.dataset.kgSeite] || zone.mitte).appendChild(el));
+    Object.values(zone).forEach(z => { if(!z.children.length) z.remove(); });
+    head.after(bar);
+    const ub = document.getElementById('userbar');
+    if(ub){ const sync = () => bar.classList.toggle('hidden', ub.classList.contains('hidden')); sync();
+      new MutationObserver(sync).observe(ub, { attributes: true, attributeFilter: ['class'] }); }
+  }
+  KG.seitenleiste = () => { const h = document.querySelector('header.app'); if(h) seitenleiste(h); };
+
   function vereinheitlichen(head, wrap, btn){
     head.classList.add('kg-leiste');
+    document.documentElement.style.setProperty('--kg-tool', aktuell.farbe === '#FFFFFF' ? '#323E4E' : aktuell.farbe);
+    document.documentElement.style.setProperty('--kg-akzent', aktuell.akzent || '#D1DB5F');
+    seitenleiste(head);
     const kopfNav = wrap.querySelector(':scope > nav:not(.subnav)');
     const sub = document.querySelector('nav.subnav');
     let reiter = null;
