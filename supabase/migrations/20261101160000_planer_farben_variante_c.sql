@@ -30,3 +30,5 @@ from neu n where p.name = n.name and p.aktiv and p.archiviert_am is null;
 
 -- Nachtrag: Raphael Walther ist Vorarbeiter (Bau-Familie, nächste freie Farbe Violett 5)
 update planer_person set farbe = '#DCD0F3' where name = 'Raphael Walther' and aktiv and archiviert_am is null;
+-- Nachtrag: Sandra Rufener und Dian Baumann haben gelegentlich eigene Baustellen → Pflege-Farben (Gold 5, Orange 5)
+update planer_person set farbe = case name when 'Sandra Rufener' then '#FAEBB0' when 'Dian Baumann' then '#F9D3B2' end where name in ('Sandra Rufener','Dian Baumann') and aktiv and archiviert_am is null;
