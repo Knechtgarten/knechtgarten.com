@@ -307,7 +307,6 @@ body.kopiert, body.kopiert *{cursor:copy !important;}
 .smitte input{width:100%;box-sizing:border-box;}
 .row.tools{background:#F5F7F9;border-top:1px solid var(--line);} /* Planungshilfe als Fussleiste */
 .row.tools > .nm.tlbl{background:#F5F7F9;color:var(--muted);font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;font-weight:600;align-items:flex-start;padding-top:10px;}
-.row.abl .nm .n{color:#8B9097;font-weight:400;font-style:italic;} .row.abl .nm{background:#FAFBFC;} /* Ablage-Zeilen */
 .ablz{font-size:10px;color:#C05A1C;font-weight:600;margin-left:6px;text-transform:none;letter-spacing:0;}
 .ablbar{all:unset;box-sizing:border-box;position:absolute;inset:0;z-index:2;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;background:#323E4E;color:#fff;} .ablbar:hover{filter:brightness(1.15);} .ablbar.on{background:var(--kg-tool,#2A7570);} /* Ablage ein/aus statt Allgemein-Kopf */
 .row.tools .tbox{flex-wrap:nowrap !important;width:max-content !important;min-width:calc(100vw - var(--namew) - 40px);gap:10px 30px !important;}
@@ -1571,7 +1570,7 @@ function renderRows(){
     h += `<div class="row grp${zu ? ' zu' : ''}${g === ph ? ' phk' : ''}${ablK ? ' ablk' : ''}" data-g="${g.id}"><div class="nm">${ablK ? `<button type="button" class="ablbar${ABLAGE ? ' on' : ''}" id="ablBtn" title="Drei leere Ablage-Zeilen unter jeder Gruppe ein-/ausblenden">Ablage ${ABLAGE ? 'eingeblendet' : 'ausgeblendet'}</button>` : ''}${I('chev')}${esc(g.name)} <span style="opacity:.6;font-weight:400">(${ps.length})</span>${ablHinweis(g.id)}${isBuero() && g.id !== '_ohne' ? `<button class="gadd" data-gadd="${g.id}" title="Zeile hinzufügen" aria-label="Zeile hinzufügen">${I('plus')}</button>` : ''}</div><div class="lane" style="width:${W}px;height:20px">${provBars('g:' + g.id)}</div></div>`;
     if(!zu) ps.forEach(p => { h += personRow(p, W, bgx); if(openMid === p.id) h += openTyp === 'maschine' ? ovRows(W, bgx, 'maschine', p.id) : vehFocusRows(W, bgx, p.id); }); // Anhänger nur in der Übersicht «Anhänger»
     // Ablage-Zeilen (eingeschaltet über den Knopf oben links)
-    if(!zu && ABLAGE && !EINGEBETTET) ABL.filter(a => a.gruppe_id === g.id).sort((a, b) => a.sortierung - b.sortierung).forEach(p => { h += personRow(p, W, bgx).replace('<div class="row', '<div class="row abl'); });
+    if(!zu && ABLAGE && !EINGEBETTET) ABL.filter(a => a.gruppe_id === g.id).sort((a, b) => a.sortierung - b.sortierung).forEach(p => { h += personRow(p, W, bgx).replace('<div class="row', '<div class="row ablrow'); }); // Ablage-Zeilen sehen aus wie Mitarbeitende
   });
   // Archiv: ehemalige Personen ganz unten, standardmässig zu, nach Jahr des Austritts unterteilt (jedes Jahr auf-/zuklappbar)
   const arch = PERSONEN.filter(p => p.archiviert_am);
@@ -3057,7 +3056,9 @@ function bindWindow(){
       // Baustelle verschoben: Arbeitstage bleiben gleich (Absenzen zählen wie Wochenende, Ende rutscht nach hinten)
       if(d.n0 != null && d.mode === 'move'){ const e0 = it.e, p = nachziehenPatch(it, d.n0); if(Object.keys(p).length){ if(!(await speichere(it, p))) Object.assign(it, { e: e0 }); renderRows(); } }
       const msg = it.mid !== d.mid0 ? `${labOf(it)} → ${P[it.mid].name}` : `Verschoben auf ${spanLabel(it)}`;
-      toast(msg, async () => { Object.assign(it, vorher); renderRows(); await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true), person_id: it.mid, ...(vorher.pz ? { pausen: it.pz } : {}) }); });
+      const trims = it._trims || []; // gekürzte Nachbarn gehören zum Rückgängig dazu
+      toast(msg + (trims.length ? ` · ${trims.map(t => labOf(t.o)).join(', ')} gekürzt` : ''), async () => { Object.assign(it, vorher); trims.forEach(t => Object.assign(t.o, { s: t.s, e: t.e, soll: t.soll })); renderRows(); await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true), person_id: it.mid, ...(vorher.pz ? { pausen: it.pz } : {}) });
+        for(const t of trims) await speichere(t.o, { beginn: fromU(t.o.s), ende: fromU(t.o.e, true), soll_tage: t.o.soll ?? null }); });
       if(selId === it.id) openPanel(it.id);
       return;
     }
@@ -3125,16 +3126,28 @@ async function pausenGeaendert(it, pz0, nV){
 // Liegt it ganz in einem längeren Termin (oder ein kürzerer ganz in it): Menü Reinschieben / Übereinander / Abbrechen.
 // Reinschieben verlängert nie automatisch – fehlen dem unterbrochenen Termin Tage, zeigt er «x von y T».
 async function ablegenPruefen(it, pt){
-  if(isShort(it)) return 'ok';
+  it._trims = []; if(isShort(it)) return 'ok';
   compute();
-  const reihe = ALL.filter(o => o.mid === it.mid && o !== it && !isShort(o) && o.e > it.s + 1e-6 && o.s < it.e - 1e-6);
+  const reihe0 = ALL.filter(o => o.mid === it.mid && o !== it && !isShort(o) && o.e > it.s + 1e-6 && o.s < it.e - 1e-6);
+  // Nur teilweise in den Nachbarn gezogen (Verlängern oder Verschieben): Nachbar auf dieser Seite kürzen, keine Überlappung.
+  // Absenzen, wiederkehrende und Termine mit fixem Start bleiben, wie sie sind.
+  const trims = []; it._trims = trims;
+  if(it.kind !== 'absenz') for(const o of reihe0){ if(o.rep || o.wdh || o.kind === 'absenz' || passtRein(o, it) || passtRein(it, o)) continue;
+    const vorne = o.s < it.s, ns = vorne ? o.s : it.e, ne = vorne ? it.s : o.e; if(ne - ns < .5 - 1e-6 || (o.fix && !vorne)) continue;
+    trims.push({ o, s: o.s, e: o.e, soll: o.soll, n0: LAY[o.id]?.n }); o.s = r48(ns); o.e = r48(ne); }
+  const zurueck = () => trims.forEach(t => Object.assign(t.o, { s: t.s, e: t.e, soll: t.soll }));
+  const reihe = reihe0.filter(o => !trims.some(t => t.o === o));
   const H = reihe.filter(o => passtRein(o, it)), E = reihe.filter(o => !o.rep && passtRein(it, o));
-  let wahl = 'ok'; if(H.length || E.length){ wahl = await reinFrage(pt); if(wahl === 'ab') return 'ab'; }
+  let wahl = 'ok'; if(H.length || E.length){ wahl = await reinFrage(pt); if(wahl === 'ab'){ zurueck(); return 'ab'; } }
   const alt = [it.ueber, ...E.map(o => o.ueber)];
   if(wahl !== 'ok'){ it.ueber = wahl === 'ueber'; E.forEach(o => o.ueber = wahl === 'ueber'); }
   compute(); const L = LAY[it.id];
   if(L && L.free.some(k => ALL.filter(o => o.mid === it.mid && !isShort(o) && LAY[o.id] && !LAY[o.id].mini && LAY[o.id].free.includes(k)).length > 2)){
-    it.ueber = alt[0]; E.forEach((o, i) => o.ueber = alt[i + 1]); toast('Dort liegen schon zwei Termine übereinander – ein dritter geht nicht.', null, true); return 'ab'; }
+    it.ueber = alt[0]; E.forEach((o, i) => o.ueber = alt[i + 1]); zurueck(); toast('Dort liegen schon zwei Termine übereinander – ein dritter geht nicht.', null, true); return 'ab'; }
+  // Gekürzte Nachbarn speichern; lange (mehrtägige) halten ihre Tage fest und zeigen rot «x von y T»
+  for(const t of trims){ const o = t.o, p = { beginn: fromU(o.s), ende: fromU(o.e, true) };
+    if(t.e - t.s > 1 + 1e-6 && !o.soll && t.n0 && Math.abs((LAY[o.id]?.n || 0) - t.n0) > .01){ o.soll = t.n0; p.soll_tage = o.soll; }
+    if(!(await speichere(o, p))) Object.assign(o, { s: t.s, e: t.e, soll: t.soll }); }
   for(const o of E) if(o.ueber !== alt[E.indexOf(o) + 1]) await speichere(o, { uebereinander: o.ueber });
   if(wahl === 'rein'){ // Tage des unterbrochenen Termins festhalten (ohne it gezählt), damit «x von y T» erscheint
     const mid0 = it.mid; it.mid = '_'; compute(); const n0 = {}; H.forEach(h => { if(!h.rep && !h.soll && h.kind !== 'absenz' && h.e - h.s > 1 + 1e-6) n0[h.id] = LAY[h.id]?.n; }); it.mid = mid0; compute();
