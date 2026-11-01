@@ -143,7 +143,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 .fel{position:absolute;top:0;bottom:0;background:rgba(214,190,120,.16);pointer-events:none;}
 .bar{position:absolute;top:2px;height:19px;border-radius:3px;border:1px solid;font-size:10.5px;font-weight:600;cursor:pointer;user-select:none;touch-action:none;overflow:hidden;z-index:1;}
 .bar.hilfe{font-weight:500;}
-html:not(.ep-eingebettet) .bar.kopf{font-weight:500;} html:not(.ep-eingebettet) .bar.kopf .t{max-width:calc(var(--kw,58px) - 4px);overflow:hidden;text-overflow:clip;} /* Aufträge wie Mithilfe: Name nur im Farbfeld, Rest abgeschnitten */ /* Mithilfe: Farbfeld mit Namen vorne, sonst weiss mit feinem farbigem Rahmen */
+html:not(.ep-eingebettet) .bar.kopf .t.tz{max-width:none;color:#4C5C70;} html:not(.ep-eingebettet) .bar.kopf{font-weight:500;} html:not(.ep-eingebettet) .bar.kopf .t{max-width:calc(var(--kw,58px) - 4px);overflow:hidden;text-overflow:clip;} /* Aufträge wie Mithilfe: Name nur im Farbfeld, Rest abgeschnitten */ /* Mithilfe: Farbfeld mit Namen vorne, sonst weiss mit feinem farbigem Rahmen */
 .bar.ed{cursor:pointer;}
 .bar .t,.brg .t{position:absolute;top:0;bottom:0;line-height:17px;white-space:nowrap;overflow:hidden;text-overflow:clip;font-weight:500;font-size:10.5px;pointer-events:none;}
 .bar .hl,.bar .hr{position:absolute;top:0;bottom:0;width:6px;cursor:ew-resize;z-index:2;}
@@ -980,7 +980,7 @@ const PALETTE = window.KG && KG.planerTeams
   ? ['projektleiter', 'selber', 'gartenpflege', 'gartenbau', 'pool'].flatMap(t => KG.planerTeams[t])
   : ['#3F7D3F','#62A055','#9CC98A','#D3EBC7','#A3AE3A','#C9D35E','#E0AE24','#E57E34','#F2CF5E','#F2A66B','#FAEBB0','#F9D3B2','#5C3F94','#3F9890','#2F5C9A','#AD95DD','#4F80C2','#8063BD','#DCD0F3','#CCDDF2','#C4E4DF'];
 const SELBER = (((window.KG && KG.tools) || []).find(t => t.k === 'plan') || {}).farbe || '#2A7570'; // selber abgemacht = Farbe des Planer-Icons
-const KW = () => zoom === 'tag' ? 140 : 58; // Breite des Farbfelds vorne (Tag breiter)
+const KW = () => zoom === 'tag' ? 140 : zoom === 'monat' ? Math.max(12, Math.round(dayW) - 2) : 58; // Breite des Farbfelds vorne (Tag breiter, Monat = ein Tag)
 
 function titleOf(it){
   if(it.kind === 'hilfe'){ const l = byId(it.link); return l ? `Mit ${first(P[l.mid]?.name)} · ${kShort(KUNDEN[l.kid]) || l.title}` : P[it.mp] ? `Mit ${first(P[it.mp].name)}` : (it.title || 'Mithilfe'); }
@@ -1347,7 +1347,9 @@ function personRow(p, W, bgx){
     const ohneKunde = istAuftrag(it) && !it.kid && !it.title; // rot umrandet, bis Kunde oder Titel erfasst ist
     const abw = it.soll && Math.abs(L.n - it.soll) > .01; // Arbeitstage fix, aber Plan weicht ab: rot «14 von 18 T»
     const mehr = it.e - it.s > 1 + 1e-6 && it.kind !== 'hilfe' && L.n >= 1;
-    const lab = (it._alt ? `seit ${dLab(Math.floor(it._alt.s))} · ` : '') + (ohneKunde ? 'Ohne Kunde' : it.kind === 'hilfe' ? hilfeKurz(it) : labOf(it)) + (mehr && !abw && zoom !== 'quartal' && zoom !== 'jahr' ? ` · ${fmtN(L.n)} T` : ''); // Quartal/Jahr: Anzahl Tage nur im Mouse-Over
+    const monKopf = zoom === 'monat' && (it.kind === 'baustelle' || it.kind === 'termin') && it.ok !== false; // Monat: Tage-Anzahl ins weisse Feld nach dem Farbfeld
+    const tz = monKopf && mehr && !abw ? `${fmtN(L.n)} T` : '';
+    const lab = (it._alt ? `seit ${dLab(Math.floor(it._alt.s))} · ` : '') + (ohneKunde ? 'Ohne Kunde' : it.kind === 'hilfe' ? hilfeKurz(it) : labOf(it)) + (mehr && !abw && zoom !== 'quartal' && zoom !== 'jahr' && !monKopf ? ` · ${fmtN(L.n)} T` : ''); // Quartal/Jahr: Anzahl Tage nur im Mouse-Over
     const cntH = abw ? ` · <span class="bwt">${fmtN(L.n)} von ${fmtN(it.soll)} T</span>` : '';
     const plTxt = it.kind === 'baustelle' || it.kind === 'termin' ? `\n${P[it.pl] ? 'Projektleiter: ' + P[it.pl].name : 'Selber abgemacht'}` : ''; // Mouse-over: wer zuständig ist
     const tip = `${titleOf(it)}\n${p.name}${plTxt}${it.e - it.s > 1 + 1e-6 ? `\n${fmtN(L.n)} Arbeitstage` : ''}${it.allein ? '\nArbeitet allein' : ''}${it.ok === false ? '\nNoch nicht abgemacht' : ''}${isRep ? '\nWiederkehrend' : ''}${it.fix ? `\nStart fix${it.fixg ? ': ' + it.fixg : ''}` : ''}${abw ? `\nGeplant ${tageTxt(it.soll)}, aktuell ${tageTxt(L.n)}` : ''}`;
@@ -1364,7 +1366,7 @@ function personRow(p, W, bgx){
     // Monat/Quartal: Beschriftung in jeder Woche neu, damit man nicht zum Anfang zurückscrollen muss
     const wl = []; if(zoom === 'monat' || zoom === 'quartal'){ let qa = null; const ende = sV[sV.length - 1][1];
       sV.forEach(([a, b]) => { for(let q = Math.floor(a / 7); q * 7 < b; q++){ if(q === qa) continue; qa = q; const s = Math.max(a, q * 7), e = Math.min(ende, q * 7 + 7); wl.push([X(s) + 3, XW(s, e) - 5]); } }); }
-    const txt = left => wl.length ? wl.filter(([, w]) => w > 14).map(([x, w]) => `<span class="t" style="left:${x - left}px;width:${w}px">${lab1}</span>`).join('')
+    const txt = left => wl.length ? wl.filter(([, w]) => w > 14).map(([x, w]) => `<span class="t" style="left:${x - left}px;width:${w}px">${lab1}</span>` + (tz && w > KW() + 16 ? `<span class="t tz" style="left:${x - left + KW()}px;width:${w - KW() - 2}px">${tz}</span>` : '')).join('')
       : tw > 14 ? `<span class="t" data-x0="${x0}" data-x1="${x0 + tw}" data-l="${left}" style="left:${x0 - left}px;width:${tw}px">${lab1}</span>` : '';
     const bgS = prov ? `background:repeating-linear-gradient(135deg,#7FC1B9 0 2px,#FFFFFF 2px 5px) left/${KW()}px 100% no-repeat,#fff;color:#1E5552` /* noch nicht abgemacht: wie offene Aufträge (schraffiertes Feld vorne) */ : `background:${st.bg};color:${st.fg}`;
     // Woche/Tag: Farbfeld und Name an jedem Tagesbeginn wiederholen (am Nachmittag nur, wenn dort etwas Neues beginnt)
