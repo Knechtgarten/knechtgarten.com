@@ -400,6 +400,11 @@ header.app.kg-leiste .kg-reiter .navic.on{box-shadow:inset 0 -2px 0 var(--kg-akz
     if(!st){ st = document.createElement('style'); st.id = 'kg-rechte-css'; document.head.appendChild(st); }
     st.textContent = sicht.rechte.admin ? '' : [...sicht.rechte.werte].filter(([, w]) => w === 'K' || w === 'N')
       .map(([k]) => `[data-kg-recht~="${k.split('|').join('.')}"]{display:none!important;}`).join('\n');
+    // Seiten, die man sehen, aber nicht bearbeiten darf: Hinweis «nur ansehen» (die Datenbank verhindert das Speichern)
+    const NURLESEN = { 'tool-b-live-v1': ['offerten', 'vorlagen'], 'einstellungen-live-v1': ['offerten', 'vorlagen'],
+      'pflege-kategorien-live-v1': ['pflege', 'kategorien'], 'pflege-kunden-live-v1': ['pflege', 'kunden'] };
+    const nl = NURLESEN[seite];
+    if(nl && !sicht.rechte.admin && KG.darf(nl[0], nl[1], 'bearbeiten') === 'K') KG.nurLesen('Du kannst diese Seite nur ansehen – Änderungen werden nicht gespeichert.');
     const ok = erlaubt(SEITENRECHT[seite]);
     const alt = document.getElementById('kg-sperre');
     if(ok === false && !alt){
