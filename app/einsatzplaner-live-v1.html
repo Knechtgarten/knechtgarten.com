@@ -860,7 +860,8 @@ function toast(msg, undo, isErr){
   const t = document.createElement('div');
   t.className = 'toast' + (isErr ? ' err' : '');
   t.innerHTML = `<span>${esc(msg)}</span>`;
-  if(undo){ const b = document.createElement('button'); b.textContent = 'Rückgängig'; b.onclick = () => { t.remove(); undo(); }; t.appendChild(b); }
+  // undo = Funktion («Rückgängig») oder Liste [{ l: Beschriftung, fn }] für mehrere Knöpfe
+  if(undo) (Array.isArray(undo) ? undo : [{ l: 'Rückgängig', fn: undo }]).forEach(k => { const b = document.createElement('button'); b.textContent = k.l; b.onclick = () => { t.remove(); k.fn(); }; t.appendChild(b); });
   $('toastwrap').appendChild(t);
   setTimeout(() => t.remove(), undo ? 10000 : isErr ? 6000 : 2200);
 }
@@ -971,8 +972,8 @@ async function ladeAlles(){
     syncPflegeErledigt();
   }catch(err){ fehler(err, 'Laden'); }
 }
-function rowToItem(r){ return { id: r.id, mid: r.person_id, kind: r.art, s: toU(r.beginn), e: toU(r.ende), kid: r.kunde_id, title: r.titel || '', text: r.notiz || '', pl: r.projektleiter_id, link: r.mit_einsatz_id, allein: r.allein, ok: r.abgemacht, soll: r.soll_tage, files: r.planer_datei || [], pkk: r.pflege_kunde_kategorie_id, pj: r.pflege_jahr, pkw: r.pflege_kw, fix: !!r.start_fix, fixg: r.start_fix_grund || '', kv: r.kopie_von, wdh: r.wdh || null, pz: r.pausen || [], at: r.allein_tage || [], mp: r.mit_person_id || null, serie: r.serie_id || null, ueber: !!r.uebereinander, frei: !!r.tage_frei }; }
-function itemToRow(it){ return { person_id: it.mid, art: it.kind, beginn: fromU(it.s), ende: fromU(it.e, true), kunde_id: it.kid || null, titel: it.title || null, notiz: it.text || null, projektleiter_id: it.pl || null, mit_einsatz_id: it.link || null, allein: !!it.allein, abgemacht: it.ok !== false, soll_tage: it.soll ?? null, pflege_kunde_kategorie_id: it.pkk || null, pflege_jahr: it.pj || null, pflege_kw: it.pkw || null, start_fix: !!it.fix, start_fix_grund: it.fixg || null, kopie_von: it.kv || null, wdh: it.wdh || null, pausen: it.pz || [], allein_tage: it.at || [], mit_person_id: it.mp || null, serie_id: it.serie || null, uebereinander: !!it.ueber, tage_frei: !!it.frei }; }
+function rowToItem(r){ return { id: r.id, mid: r.person_id, kind: r.art, s: toU(r.beginn), e: toU(r.ende), kid: r.kunde_id, title: r.titel || '', text: r.notiz || '', pl: r.projektleiter_id, link: r.mit_einsatz_id, allein: r.allein, ok: r.abgemacht, soll: r.soll_tage, files: r.planer_datei || [], pkk: r.pflege_kunde_kategorie_id, pj: r.pflege_jahr, pkw: r.pflege_kw, fix: !!r.start_fix, fixg: r.start_fix_grund || '', kv: r.kopie_von, wdh: r.wdh || null, pz: r.pausen || [], at: r.allein_tage || [], mp: r.mit_person_id || null, serie: r.serie_id || null, ueber: !!r.uebereinander, frei: !!r.tage_frei, weicht: !!r.weicht }; }
+function itemToRow(it){ return { person_id: it.mid, art: it.kind, beginn: fromU(it.s), ende: fromU(it.e, true), kunde_id: it.kid || null, titel: it.title || null, notiz: it.text || null, projektleiter_id: it.pl || null, mit_einsatz_id: it.link || null, allein: !!it.allein, abgemacht: it.ok !== false, soll_tage: it.soll ?? null, pflege_kunde_kategorie_id: it.pkk || null, pflege_jahr: it.pj || null, pflege_kw: it.pkw || null, start_fix: !!it.fix, start_fix_grund: it.fixg || null, kopie_von: it.kv || null, wdh: it.wdh || null, pausen: it.pz || [], allein_tage: it.at || [], mit_person_id: it.mp || null, serie_id: it.serie || null, uebereinander: !!it.ueber, tage_frei: !!it.frei, weicht: !!it.weicht }; }
 const kName = k => k ? (k.firma || [k.nachname, k.vorname].filter(Boolean).join(' ') || k.name) : '';
 const kShort = k => k ? (k.firma || k.nachname || k.name || '') : '';
 const kOrt = k => k ? [k.strasse, [k.plz, k.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ') : '';
@@ -1119,7 +1120,8 @@ const inPause = (it, k) => !!it.pz?.length && it.pz.some(([a, c]) => k / 2 >= it
 // Reingeschoben = o liegt ganz in it und ist kürzer (it wird dort unterbrochen). Alles andere liegt übereinander.
 // Ein Termin unterbricht nie eine Absenz (Termin auf Ferien = übereinander, rot).
 const passtRein = (it, o) => !(it.kind === 'absenz' && o.kind !== 'absenz') && o.s >= it.s - 1e-6 && o.e <= it.e + 1e-6 && o.e - o.s < it.e - it.s - 1e-6;
-const schneidet = (it, o) => isShort(o) ? !isShort(it) : (!o.ueber && passtRein(it, o)); // kurz auf kurz verdrängt nie (sonst verschwindet einer)
+// Wer sich zuletzt bewegt hat (weicht), gibt bei teilweiser Überlappung nach: dort wird er ausgespart, der bestehende bleibt.
+const schneidet = (it, o) => isShort(o) ? !isShort(it) : (!o.ueber && (passtRein(it, o) || (it.weicht && !o.weicht && it.kind !== 'absenz' && !passtRein(o, it)))); // kurz auf kurz verdrängt nie (sonst verschwindet einer)
 let DUPS = [];
 function compute(){
   floatOffene();
@@ -1129,16 +1131,16 @@ function compute(){
     list.forEach((it, i) => it._o = i);
     list.sort((a, b) => (b.e - b.s) - (a.e - a.s) || a._o - b._o);
     list.forEach((it, i) => {
-      const over = list.slice(i + 1).filter(o => o.s < it.e - 1e-6 && o.e > it.s + 1e-6);
+      const over = list.filter(o => o !== it && o.s < it.e - 1e-6 && o.e > it.s + 1e-6); // wer wen schneidet, entscheidet schneidet()
       const multi = it.e - it.s > 1 + 1e-6, free = [];
       const k0 = Math.floor(it.s * 2 + 1e-9), k1 = Math.ceil(it.e * 2 - 1e-9) - 1;
       for(let k = k0; k <= k1; k++){
         const d = k >> 1; if(multi && isOff(d)) continue;
         if(inPause(it, k)) continue;
         const a = Math.max(it.s, k / 2), b = Math.min(it.e, (k + 1) / 2); if(b - a < 1e-6) continue;
-        // Kurze Termine (unter einem Halbtag) unterbrechen nicht – ausser sie füllen zusammen mind. 4 Std. des Halbtags
+        // Auch kurze Termine (unter einem Halbtag) nehmen auf einem langen Termin den ganzen Halbtag ein
         const ov = over.filter(o => o.s < b - 1e-6 && o.e > a + 1e-6 && schneidet(it, o));
-        if(ov.length && (ov.some(o => !isShort(o)) || covered(ov, a, b) >= Math.min(b - a, 1 / 3) - 1e-6)) continue;
+        if(ov.length) continue;
         free.push(k);
       }
       const segs = []; free.forEach(k => { const a = Math.max(it.s, k / 2), b = Math.min(it.e, (k + 1) / 2); const L = segs[segs.length - 1]; if(L && Math.abs(L[1] - a) < 1e-6) L[1] = b; else segs.push([a, b]); });
@@ -2437,9 +2439,9 @@ function computeProv(){
 function provBars(key){ return (PROVLAY[key] || []).map(x => { const p = x.p, k = KUNDEN[p.kid]; const l = X(x.s) + 1, w = Math.max(4, XW(x.s, x.e) - 2);
   const tip = `${kName(k)} · ${p.kat.name}\n${k?.ort || ''} · KW ${p.w} · ${fmtN(p.min / 60)} Std.\n${p.arb.join(', ')}\nNoch nicht abgemacht${p.fehlt ? '\nZeit fehlt im Pflege-Tool – 1 Std. angenommen' : ''}${x.alt ? '\nOffen seit KW ' + p.w : ''}${VNOT[p.id]?.n ? '\nNotiz: ' + VNOT[p.id].n : ''}`;
   return `<div class="bar prov${x.alt ? ' over' : ''}${p.fehlt ? ' nozeit' : ''}" data-prov="${p.id}" style="left:${l}px;width:${w}px" title="${esc(tip)}">${w > 16 ? `<span class="t" style="left:3px;width:${w - 6}px">${x.alt && w > 60 ? `seit KW ${p.w} · ` : ''}${esc(kShort(k))}</span>` : ''}</div>`; }).join(''); }
-async function provToEinsatz(pid, mid, s, e, ok, pl, ueber){
+async function provToEinsatz(pid, mid, s, e, ok, pl, ueber, weicht){
   const p = PROV.find(x => x.id === pid); if(!p) return;
-  const neu = await neuerEinsatz({ mid, kind: 'termin', s: r48(s), e: r48(e), kid: p.kid, title: `${p.kat.name}: ${p.arb.join(', ')}`, text: VNOT[p.id]?.n || '', ok, pl: pl !== undefined ? pl : VNOT[p.id]?.pl || null, pkk: p.kk, pj: p.y, pkw: p.w, ueber: !!ueber }, false);
+  const neu = await neuerEinsatz({ mid, kind: 'termin', s: r48(s), e: r48(e), kid: p.kid, title: `${p.kat.name}: ${p.arb.join(', ')}`, text: VNOT[p.id]?.n || '', ok, pl: pl !== undefined ? pl : VNOT[p.id]?.pl || null, pkk: p.kk, pj: p.y, pkw: p.w, ueber: !!ueber, weicht: !!weicht }, false);
   if(neu && VNOT[p.id]){ await sb.from('planer_vorschlag_notiz').delete().eq('kunde_kategorie_id', p.kk).eq('jahr', p.y).eq('kw', p.w); delete VNOT[p.id]; }
   if(neu){ renderRows(); toast(`${kShort(KUNDEN[p.kid])}: ${ok ? 'abgemacht' : 'angeheftet'} bei ${P[mid].name}`, () => loescheEinsatz(neu)); }
 }
@@ -2747,11 +2749,11 @@ function bindTimeline(t){
     const b = (k, ic, l, st = '') => `<button class="btn btn-ghost" data-cm="${k}" style="justify-content:flex-start;${st}">${I(ic)}${l}</button>`;
     const ib = (k, ic, l, cls = '') => `<button class="kg-ibtn${cls}" data-cm="${k}" title="${l}" aria-label="${l}">${I(ic)}</button>`;
     const mehrt = it.e - it.s > 1 + 1e-6 && !rep;
-    const pop = popAt({ left: x, bottom: e.clientY }, `<b>${esc(labOf(it))}</b>${b('det', 'file', 'Details')}${it.kind !== 'absenz' && zoom !== 'quartal' && zoom !== 'jahr' ? b('inf', 'info', infoAm(it, Math.floor(uAt(x))) ? 'Wichtige Info ändern' : 'Wichtige Info …') : ''}${ed && mehrt ? b('pz', 'pause', 'Hier unterbrechen') : ''}${ed && m.serie ? b('serx', 'trash', 'Ganze Serie löschen', 'color:var(--danger)') : ''}${ed
+    const pop = popAt({ left: x, bottom: e.clientY }, `<b>${esc(labOf(it))}</b>${b('det', 'file', 'Details')}${it.kind !== 'absenz' && zoom !== 'quartal' && zoom !== 'jahr' ? b('inf', 'info', infoAm(it, Math.floor(uAt(x))) ? 'Wichtige Info ändern' : 'Wichtige Info …') : ''}${ed && m.serie ? b('serx', 'trash', 'Ganze Serie löschen', 'color:var(--danger)') : ''}${ed
       ? (rep ? b('del1', 'trash', 'Nur diesen löschen', 'color:var(--danger)') + b('delf', 'trash', 'Diesen und alle folgenden löschen', 'color:var(--danger)') + b('dela', 'trash', 'Alle löschen', 'color:var(--danger)')
         : `<div class="cmrow">${ed ? mkKnoepfe(it.mid) : ''}${ed && !rep && it.kind !== 'absenz' && it.kind !== 'hilfe' ? (() => { const d = Math.floor(uAt(x)), ks = (LAY[it.id]?.free || []).filter(k => k >> 1 === d), S = soloSet(it), an = ks.length && ks.every(k => S.has(k)); return ks.length ? ib('solo', 'user', an ? 'Allein an diesem Tag – Klick: aufheben' : 'Allein an diesem Tag (blauer Punkt)', an ? ' on' : '') : ''; })() : ''}${istAuftrag(it) && it.ok !== false ? ib('fix', m.fix ? 'lock' : 'unlock', m.fix ? 'Start fix – Klick: lösen' : 'Start fixieren', m.fix ? ' on' : '') : ''}${istAuftrag(it) ? ib('cpy', 'copy', 'Auftrag kopieren') : ''}${ib('del', 'trash', 'Löschen', ' danger')}</div>`) : ''}`);
     pop.querySelectorAll('[data-cm]').forEach(bt => bt.onclick = () => { closePop(); const c = bt.dataset.cm;
-      if(c === 'det') openPanel(m.id); else if(c === 'solo'){ const d = Math.floor(uAt(x)), ks = (LAY[it.id]?.free || []).filter(k => k >> 1 === d), S = soloSet(it); soloSetzen(it, ks, !ks.every(k => S.has(k))); } else if(c === 'inf') infoPop(m.id, Math.floor(uAt(x)), ed, { left: x, bottom: e.clientY }); else if(c === 'pz') unterbrich(it, uAt(x)); else if(c === 'serx') serieFrage(m.serie); else if(c === 'mark') openMark(markAn(it.mid, uAt(x)), { left: x, bottom: e.clientY }); else if(c === 'fix'){ const v = !m.fix; m.fix = v; renderRows(); speichere(m, { start_fix: v }).then(ok => { if(!ok){ m.fix = !v; renderRows(); return; } if(selId === m.id) openPanel(m.id); toast(v ? 'Start fix: Balken lässt sich nicht mehr verschieben' : 'Start wieder frei'); }); } else if(c === 'cpy') kopiere(m);
+      if(c === 'det') openPanel(m.id); else if(c === 'solo'){ const d = Math.floor(uAt(x)), ks = (LAY[it.id]?.free || []).filter(k => k >> 1 === d), S = soloSet(it); soloSetzen(it, ks, !ks.every(k => S.has(k))); } else if(c === 'inf') infoPop(m.id, Math.floor(uAt(x)), ed, { left: x, bottom: e.clientY }); else if(c === 'serx') serieFrage(m.serie); else if(c === 'mark') openMark(markAn(it.mid, uAt(x)), { left: x, bottom: e.clientY }); else if(c === 'fix'){ const v = !m.fix; m.fix = v; renderRows(); speichere(m, { start_fix: v }).then(ok => { if(!ok){ m.fix = !v; renderRows(); return; } if(selId === m.id) openPanel(m.id); toast(v ? 'Start fix: Balken lässt sich nicht mehr verschieben' : 'Start wieder frei'); }); } else if(c === 'cpy') kopiere(m);
       else if(c === 'del1') wdhLoeschen(it, 'nur'); else if(c === 'delf') wdhLoeschen(it, 'folgende'); else if(c === 'dela') loescheEinsatz(m);
       else loescheEinsatz(m); }); // Löschen im Rechtsklick ohne Rückfrage (Rückgängig im Hinweis unten)
     pop.querySelectorAll('[data-mkm]').forEach(bt => bt.onclick = () => { closePop(); openMark({ ...markAn(it.mid, uAt(x)), art: bt.dataset.mkm }, { left: x, bottom: e.clientY }); });
@@ -2972,7 +2974,7 @@ function bindWindow(){
       if(p && ln && canEdit(ln.dataset.mid)){ const len = p.min / 60 / 12; const s = zoom === 'tag' || zoom === 'woche' ? Math.round(uAt(e.clientX) * 48) / 48 : Math.floor(uAt(e.clientX)) + 1 / 12;
         const tmp = { id: '_tmp', mid: ln.dataset.mid, kind: 'termin', s: r48(s), e: r48(s + len), title: '' }; EINS.push(tmp); // erst prüfen: übereinander / reinschieben / dritter Termin
         const pr = await ablegenPruefen(tmp, { x: e.clientX, y: e.clientY }); EINS = EINS.filter(x => x !== tmp); renderRows();
-        if(pr !== 'ab') await provToEinsatz(p.id, ln.dataset.mid, s, s + len, false, undefined, tmp.ueber); }
+        if(pr !== 'ab') await provToEinsatz(p.id, ln.dataset.mid, s, s + len, false, undefined, tmp.ueber, tmp.weicht); }
       return;
     }
     if(d.kind === 'mag'){
@@ -2987,7 +2989,7 @@ function bindWindow(){
       const tmp = byId(d.id); const ln = document.elementFromPoint(e.clientX, e.clientY)?.closest('.lane[data-mid]');
       const geht = tmp && ln && ln.dataset.mid === tmp.mid && canEdit(tmp.mid) && (await ablegenPruefen(tmp, { x: e.clientX, y: e.clientY })) !== 'ab';
       EINS = EINS.filter(x => x !== tmp); renderRows(); if(!tmp || !geht){ if(tmp && !(ln && ln.dataset.mid === tmp.mid && canEdit(tmp.mid))) toast('Kopie nur in eine Zeile, die du bearbeiten darfst.', null, true); return; }
-      const neu = await neuerEinsatz({ mid: tmp.mid, kind: tmp.kind, s: tmp.s, e: tmp.e, kid: tmp.kid, title: tmp.title, pl: tmp.pl, ok: tmp.ok, link: tmp.link, allein: tmp.allein, pz: tmp.pz, kv: d.orig, ueber: tmp.ueber }, false);
+      const neu = await neuerEinsatz({ mid: tmp.mid, kind: tmp.kind, s: tmp.s, e: tmp.e, kid: tmp.kid, title: tmp.title, pl: tmp.pl, ok: tmp.ok, link: tmp.link, allein: tmp.allein, pz: tmp.pz, kv: d.orig, ueber: tmp.ueber, weicht: tmp.weicht }, false);
       if(neu) toast(`Kopiert: ${labOf(neu)} · ${spanLabel(neu)}${neu.mid !== d.mid0 ? ' · ' + P[neu.mid]?.name : ''}`, () => loescheEinsatz(neu));
       return; }
     if(d.kind === 'bar' && d.moved && isBuero() && document.elementFromPoint(e.clientX, e.clientY)?.closest('#aufp')){
@@ -3046,8 +3048,7 @@ function bindWindow(){
     if(d.kind === 'bar'){
       const it = byId(d.id);
       if(!d.moved){ const now = Date.now();
-        if(lastBarClick && lastBarClick.id === d.id && now - lastBarClick.t < 400){ lastBarClick = null; // Doppelklick: mehrtägig = hier unterbrechen, sonst davor/danach einfügen
-          if(it.e - it.s > 1 + 1e-6 && !it.rep && !it.wdh){ unterbrich(it, uAt(e.clientX)); return; }
+        if(lastBarClick && lastBarClick.id === d.id && now - lastBarClick.t < 400){ lastBarClick = null; // Doppelklick: davor/danach einfügen (unterbrechen = etwas hineinziehen, z. B. «Frei»)
           const ln = document.querySelector(`.bar[data-id="${d.id}"]`)?.closest('.lane[data-mid]'); if(ln) einfuegen(ln, e.clientX, it); return; }
         lastBarClick = { id: d.id, t: now }; openPanel(it.rep || d.id); return; }
       if(d.occ){ // Wiederholung verschoben: Arbeitskopie weg, dann fragen
@@ -3058,18 +3059,20 @@ function bindWindow(){
       if(it.s === d.s0 && it.e === d.e0 && it.mid === d.mid0) return;
       const vorher = { s: d.s0, e: d.e0, mid: d.mid0, ...(d.pz0 ? { pz: d.pz0 } : {}), ...(d.at0 ? { at: d.at0 } : {}) };
       if((await ablegenPruefen(it, { x: e.clientX, y: e.clientY })) === 'ab'){ Object.assign(it, vorher); renderRows(); return; }
-      // Länge bewusst gezogen = neue Arbeitstage, altes Ziel (rot «X von Y T») fällt weg
-      const neuZiel = it.soll && d.mode !== 'move'; if(neuZiel) it.soll = null;
-      const ok = await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true), person_id: it.mid, uebereinander: !!it.ueber, ...(neuZiel ? { soll_tage: null } : {}), ...(d.pz0 && d.mode === 'l' ? { pausen: it.pz } : {}), ...(d.at0 && d.mode === 'l' ? { allein_tage: it.at } : {}) });
+      // Rand gezogen: fixe Arbeitstage bleiben (Abweichung = rot, «übernehmen» im Hinweis); nur wer nicht mehr lang ist, verliert sie
+      const keinLang = it.soll && !istLang(it); if(keinLang) it.soll = null;
+      const ok = await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true), person_id: it.mid, uebereinander: !!it.ueber, weicht: !!it.weicht, ...(keinLang ? { soll_tage: null } : {}), ...(d.pz0 && d.mode === 'l' ? { pausen: it.pz } : {}), ...(d.at0 && d.mode === 'l' ? { allein_tage: it.at } : {}) });
       if(!ok){ Object.assign(it, vorher); renderRows(); return; }
-      if(neuZiel) tageFixNachholen(); // neue Länge = neue fixe Arbeitstage
+      tageFixNachholen(); // neu lang geworden = fixe Arbeitstage
       if(it.kind === 'absenz') await ausgleich(it, vorher);
-      // Baustelle verschoben: Arbeitstage bleiben gleich (Absenzen zählen wie Wochenende, Ende rutscht nach hinten)
-      if(d.n0 != null && d.mode === 'move'){ const e0 = it.e, p = nachziehenPatch(it, d.n0); if(Object.keys(p).length){ if(!(await speichere(it, p))) Object.assign(it, { e: e0 }); renderRows(); } }
+      // Ganzer Termin verschoben (auch andere Zeile): Sprung-Regel Faktor 2 – Absenzen immer, höchstens ein Kundentermin
+      if(d.mode === 'move' && istLang(it) && it.soll && !it.frei){ compute(); const ne = sprungEnde(it, 2, it.s);
+        if(ne != null && Math.abs(ne - it.e) > 1e-6){ const e0 = it.e; it.e = ne; if(!(await speichere(it, { ende: fromU(it.e, true) }))) it.e = e0; } }
+      renderRows();
       const msg = it.mid !== d.mid0 ? `${labOf(it)} → ${P[it.mid].name}` : `Verschoben auf ${spanLabel(it)}`;
-      const trims = it._trims || []; // gekürzte Nachbarn gehören zum Rückgängig dazu
-      toast(msg + (trims.length ? ` · ${trims.map(t => labOf(t.o)).join(', ')} gekürzt` : ''), async () => { Object.assign(it, vorher); trims.forEach(t => Object.assign(t.o, { s: t.s, e: t.e, soll: t.soll })); renderRows(); await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true), person_id: it.mid, ...(vorher.pz ? { pausen: it.pz } : {}) });
-        for(const t of trims) await speichere(t.o, { beginn: fromU(t.o.s), ende: fromU(t.o.e, true), soll_tage: t.o.soll ?? null }); });
+      const undo = async () => { Object.assign(it, vorher); renderRows(); await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true), person_id: it.mid, ...(vorher.pz ? { pausen: it.pz } : {}) }); };
+      const nJetzt = LAY[it.id]?.n, abwR = d.mode !== 'move' && it.soll && nJetzt != null && Math.abs(nJetzt - it.soll) > .01;
+      toast(abwR ? `${labOf(it)}: ${fmtN(nJetzt)} statt ${fmtN(it.soll)} T` : msg, abwR ? [{ l: 'Als neue Länge übernehmen', fn: async () => { it.soll = nJetzt; renderRows(); await speichere(it, { soll_tage: it.soll }); if(selId === it.id) openPanel(it.id); } }, { l: 'Rückgängig', fn: undo }] : undo);
       if(selId === it.id) openPanel(it.id);
       return;
     }
@@ -3091,7 +3094,7 @@ function halbtageIn(b, list, e, stop){ let c = 0;
   return stop ? null : c; }
 // Unterbrüche des Auftrags selbst zählen wie eine Absenz (kein Arbeitstag, hinten nicht blockierend)
 const mitPausen = (b, list) => list.concat((b.pz || []).map(([a, c]) => ({ s: b.s + a, e: b.s + c, kind: 'absenz' })));
-const andereVon = b => EINS.filter(o => o.mid === b.mid && o !== b && o.id !== b.id && !isShort(o));
+const andereVon = b => EINS.filter(o => o.mid === b.mid && o !== b && o.id !== b.id && !o.ueber); // auch kurze nehmen ihren Halbtag
 // Ende so setzen, dass wieder «ziel» Halbtage drin sind; ist hinten kein Platz, bleibt das Ende und es wird rot «X von Y T»
 function nachziehenPatch(b, nVorher){
   const ziel = b.soll ? Math.round(b.soll * 2) : nVorher, r = halbtageIn(b, mitPausen(b, andereVon(b)), b.s + 400, ziel);
@@ -3103,12 +3106,15 @@ const halbtageJetzt = b => halbtageIn(b, mitPausen(b, andereVon(b)), b.e);
 async function ausgleich(abs, alt){
   const mids = new Set([abs?.mid, alt?.mid].filter(Boolean));
   for(const mid of mids){
-    for(const b of EINS.filter(x => x.mid === mid && x.kind === 'baustelle' && !x.wdh && x.e > TODAY && x.e - x.s > 1 + 1e-6)){
+    for(const b of EINS.filter(x => x.mid === mid && istLang(x) && !x.wdh && !x.frei && x.e > TODAY)){
       const andJ = mitPausen(b, andereVon(b)), andV = andJ.filter(o => o !== abs).concat(alt && alt.mid === mid ? [{ s: alt.s, e: alt.e, kind: 'absenz' }] : []);
       const nV = halbtageIn(b, andV, b.e), nJ = halbtageIn(b, andJ, b.e); if(nV === nJ) continue;
-      // Nie automatisch verlängern: geplante Tage festhalten, der Balken zeigt dann rot «x von y T»
       if(!b.soll){ b.soll = nV / 2; await speichere(b, { soll_tage: b.soll }); }
-      toast(`${labOf(b)}: jetzt ${tageTxt(nJ / 2)} statt ${tageTxt(b.soll)}`);
+      // Absenz hinein/heraus: Ende rutscht durch freie Tage nach (Absenzen immer überspringen); trifft es hinten auf einen
+      // Kundentermin, bleibt es und der Balken zeigt rot «x von y T»
+      const ne = sprungEnde(b, 3, b.e, 0);
+      if(ne != null && Math.abs(ne - b.e) > 1e-6){ const e0 = b.e; b.e = ne; if(await speichere(b, { ende: fromU(b.e, true) })) toast(`${labOf(b)}: Ende neu ${dLab(Math.floor(b.e - 1e-6))}, weiterhin ${tageTxt(b.soll)}`); else b.e = e0; }
+      else if(ne == null) toast(`${labOf(b)}: hinten kein Platz – jetzt ${tageTxt(nJ / 2)} statt ${tageTxt(b.soll)}`);
     }
   }
   if(VIEW === 'plan') renderRows(); else render();
@@ -3134,38 +3140,46 @@ async function pausenGeaendert(it, pz0, nV){
   if(patch.soll_tage) toast(`${labOf(it)}: hinten kein Platz – geplant ${tageTxt(it.soll)}`);
 }
 // Ablegen prüfen (it liegt schon am neuen Ort): höchstens zwei Termine pro Halbtag.
-// Liegt it ganz in einem längeren Termin (oder ein kürzerer ganz in it): Menü Reinschieben / Übereinander / Abbrechen.
-// Reinschieben verlängert nie automatisch – fehlen dem unterbrochenen Termin Tage, zeigt er «x von y T».
+// Liegt it ganz in einem längeren Termin: Menü Reinschieben / Übereinander / Abbrechen (kurze: immer reinschieben).
+// Beim Reinschieben rutscht das Ende des langen Termins nur nach Sprung-Regel (Faktor 3) nach hinten, sonst rot «x von y T».
 async function ablegenPruefen(it, pt){
-  it._trims = []; compute();
+  compute();
   const zuViele = () => { compute(); const L = LAY[it.id]; return !!L && L.free.some(k => ALL.filter(o => o.mid === it.mid && LAY[o.id]?.dup?.[k]).length > 2); };
   // Tage der unterbrochenen langen Termine festhalten (ohne it gezählt), damit rot «x von y T» erscheint
   const tageFesthalten = async H => { const mid0 = it.mid; it.mid = '_'; compute(); const n0 = {}; H.forEach(h => { if(!h.rep && !h.soll && h.kind !== 'absenz' && h.e - h.s > 1 + 1e-6) n0[h.id] = LAY[h.id]?.n; }); it.mid = mid0; compute();
     for(const h of H) if(n0[h.id] && Math.abs((LAY[h.id]?.n || 0) - n0[h.id]) > .01){ h.soll = n0[h.id]; await speichere(h, { soll_tage: h.soll }); } };
-  if(isShort(it)){ if(zuViele()){ toast('Dort liegen schon zwei Termine übereinander – ein dritter geht nicht.', null, true); return 'ab'; } // kurz: kein Menü, aber Höchstzahl und Tage prüfen
-    await tageFesthalten(ALL.filter(o => o.mid === it.mid && o !== it && !isShort(o) && passtRein(o, it))); return 'ok'; }
-  const reihe0 = ALL.filter(o => o.mid === it.mid && o !== it && !isShort(o) && o.e > it.s + 1e-6 && o.s < it.e - 1e-6);
-  // Nur teilweise in den Nachbarn gezogen (Verlängern oder Verschieben): Nachbar auf dieser Seite kürzen, keine Überlappung.
-  // Absenzen, wiederkehrende und Termine mit fixem Start bleiben, wie sie sind.
-  const trims = []; it._trims = trims;
-  if(it.kind !== 'absenz') for(const o of reihe0){ if(o.rep || o.wdh || o.kind === 'absenz' || passtRein(o, it) || passtRein(it, o)) continue;
-    const vorne = o.s < it.s, ns = vorne ? o.s : it.e, ne = vorne ? it.s : o.e; if(ne - ns < .5 - 1e-6 || (o.fix && !vorne)) continue;
-    trims.push({ o, s: o.s, e: o.e, soll: o.soll, n0: LAY[o.id]?.n }); o.s = r48(ns); o.e = r48(ne); }
-  const zurueck = () => trims.forEach(t => Object.assign(t.o, { s: t.s, e: t.e, soll: t.soll }));
-  const reihe = reihe0.filter(o => !trims.some(t => t.o === o));
-  const H = reihe.filter(o => passtRein(o, it)), E = reihe.filter(o => !o.rep && passtRein(it, o));
-  let wahl = 'ok'; if(H.length || E.length){ wahl = await reinFrage(pt); if(wahl === 'ab'){ zurueck(); return 'ab'; } }
-  const alt = [it.ueber, ...E.map(o => o.ueber)];
-  if(wahl !== 'ok'){ it.ueber = wahl === 'ueber'; E.forEach(o => o.ueber = wahl === 'ueber'); }
-  if(zuViele()){
-    it.ueber = alt[0]; E.forEach((o, i) => o.ueber = alt[i + 1]); zurueck(); toast('Dort liegen schon zwei Termine übereinander – ein dritter geht nicht.', null, true); return 'ab'; }
-  // Gekürzte Nachbarn speichern; lange (mehrtägige) halten ihre Tage fest und zeigen rot «x von y T»
-  for(const t of trims){ const o = t.o, p = { beginn: fromU(o.s), ende: fromU(o.e, true) };
-    if(t.e - t.s > 1 + 1e-6 && !o.soll && t.n0 && Math.abs((LAY[o.id]?.n || 0) - t.n0) > .01){ o.soll = t.n0; p.soll_tage = o.soll; }
-    if(!(await speichere(o, p))) Object.assign(o, { s: t.s, e: t.e, soll: t.soll }); }
-  for(const o of E) if(o.ueber !== alt[E.indexOf(o) + 1]) await speichere(o, { uebereinander: o.ueber });
-  if(wahl === 'rein') await tageFesthalten(H);
+  const reihe = ALL.filter(o => o.mid === it.mid && o !== it && !o.rep && o.e > it.s + 1e-6 && o.s < it.e - 1e-6);
+  // Ganz in einem längeren Termin = hineinschieben (Menü); teilweise überlappend = wer sich bewegt, gibt nach (weicht)
+  const H = it.kind === 'absenz' ? [] : reihe.filter(o => !isShort(o) && passtRein(o, it)), teil = reihe.filter(o => !passtRein(o, it) && !passtRein(it, o)); // Absenz: kein Menü, das Nachziehen macht ausgleich()
+  let wahl = H.length ? 'rein' : 'ok'; if(H.length && !isShort(it)){ wahl = await reinFrage(pt); if(wahl === 'ab') return 'ab'; } // kurz: immer reinschieben
+  const alt = { ueber: it.ueber, weicht: it.weicht };
+  if(H.length) it.ueber = wahl === 'ueber'; it.weicht = teil.length > 0;
+  if(zuViele()){ Object.assign(it, alt); compute(); toast('Dort liegen schon zwei Termine übereinander – ein dritter geht nicht.', null, true); return 'ab'; }
+  for(const o of teil) if(o.weicht){ o.weicht = false; await speichere(o, { weicht: false }); } // der bestehende ist jetzt der stärkere
+  if(wahl === 'rein'){ await tageFesthalten(H); await nachHinten(H, it.s); }
   return 'ok';
+}
+// Langer Termin, in den etwas hineingeschoben wurde: Ende rutscht nach hinten (Faktor 3), sonst bleibt er und ist rot
+async function nachHinten(H, ab){ compute();
+  for(const h of H){ if(!istLang(h) || !h.soll || h.frei || h.wdh || h.rep) continue; const ne = sprungEnde(h, 3, ab);
+    if(ne != null && Math.abs(ne - h.e) > 1e-6){ const e0 = h.e; h.e = ne; if(!(await speichere(h, { ende: fromU(h.e, true) }))) h.e = e0; } } }
+// Sprung-Regel: neues Ende, damit der Termin wieder seine fixen Arbeitstage hat.
+// Absenzen, Feiertage, Wochenende und eigene Unterbrüche werden immer übersprungen; belegte Halbtage vor «ab» gelten als
+// bestehend. Höchstens maxSpr Kundentermin(e) wird übersprungen – nur wenn danach noch mind. faktor × so viele Halbtage
+// der Baustelle folgen. Sonst null (Ende bleibt, der Termin zeigt rot «x von y T»).
+function sprungEnde(b, faktor, ab, maxSpr = 1){
+  const ziel = Math.round((b.soll || 0) * 2); if(!ziel) return null;
+  const list = mitPausen(b, EINS.filter(o => o.mid === b.mid && o !== b && o.id !== b.id && !o.ueber && !o.wdh));
+  let c = 0, spr = 0, block = 0;
+  for(let k = Math.floor(b.s * 2 + 1e-9), g = 0; g < 3000; k++, g++){
+    if(isOff(k >> 1)) continue;
+    const a = Math.max(b.s, k / 2), z = (k + 1) / 2, o = list.find(x => x.s < z - 1e-6 && x.e > a + 1e-6);
+    if(o && (o.kind === 'absenz' || z <= ab + 1e-6)) continue;
+    if(o){ if(!block && spr >= maxSpr) return null; block++; continue; }
+    if(block){ spr++; if(ziel - c < faktor * block) return null; block = 0; }
+    if(++c === ziel) return r48(z);
+  }
+  return null;
 }
 function reinFrage(pt){
   return new Promise(res => {
