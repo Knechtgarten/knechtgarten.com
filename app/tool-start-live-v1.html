@@ -143,6 +143,10 @@ tr.typ-artikel td:first-child{border-left:2px solid #6666ff;}
 .kpanel-reset{font-size:12.5px;font-weight:700;color:var(--ink);cursor:pointer;margin-bottom:4px;padding:7px 4px;border-radius:5px;display:none;}
 .kpanel-reset:hover{background:var(--soft);}
 .kpanel-reset.show{display:block;}
+.wahlschalter{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:#fff;}
+.wahlschalter button{flex:1;border:0;background:#fff;color:var(--muted);font:inherit;font-size:12.5px;font-weight:600;padding:7px 8px;cursor:pointer;}
+.wahlschalter button + button{border-left:1px solid var(--line);}
+.wahlschalter button.on{background:#323e4e;color:#fff;}
 .filterbar{display:flex;gap:14px;align-items:center;margin-bottom:12px;flex-wrap:wrap;}
 .filterbar .kundensearch-wrap{flex:1;min-width:200px;margin-bottom:0;}
 .daterange{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);white-space:nowrap;}
@@ -251,6 +255,10 @@ tr.typ-artikel td:first-child{border-left:2px solid #6666ff;}
   <div class="dashgrid">
     <div class="dashleft">
       <button type="button" class="btn" id="offerteNeuBtn" style="width:100%;padding:12px;font-size:13px;">+ Offerte neu</button>
+      <div class="wahlschalter" id="offWahlschalter" title="Welche Offerten angezeigt werden – bleibt gespeichert">
+        <button type="button" data-eigene="0" class="on">Alle Offerten</button>
+        <button type="button" data-eigene="1">Nur eigene</button>
+      </div>
 
       <div class="card">
         <div class="cardlabel">Kunden mit Offerten</div>
@@ -561,14 +569,45 @@ async function vergibOffertnummer(berechnungsmodell){
 let KUNDEN_MIT_OFFERTEN = [];
 let kpanelFilterId = null;
 
+// «Alle Offerten / Nur eigene»: pro Benutzer in benutzer_startseite_einstellung gespeichert.
+// Eigene = offerte.erstellt_von = angemeldeter Benutzer (ältere Offerten haben keinen Ersteller).
+let meineBenutzerId = null;
+let nurEigeneOfferten = false;
+
+function zeigeWahlschalter(){
+  document.querySelectorAll('#offWahlschalter button').forEach(b => b.classList.toggle('on', (b.dataset.eigene === '1') === nurEigeneOfferten));
+}
+
+async function ladeOffertenEinstellung(){
+  const { data: { session } } = await sb.auth.getSession();
+  meineBenutzerId = session?.user?.id || null;
+  if(!meineBenutzerId) return;
+  const { data } = await sb.from('benutzer_startseite_einstellung').select('offerten_nur_eigene').eq('benutzer_id', meineBenutzerId).maybeSingle();
+  nurEigeneOfferten = !!data?.offerten_nur_eigene;
+  zeigeWahlschalter();
+}
+
+document.querySelectorAll('#offWahlschalter button').forEach(b => b.addEventListener('click', async () => {
+  const neu = b.dataset.eigene === '1';
+  if(neu === nurEigeneOfferten || !meineBenutzerId) return;
+  nurEigeneOfferten = neu;
+  zeigeWahlschalter();
+  kpanelFilterId = null;
+  const { error } = await sb.from('benutzer_startseite_einstellung')
+    .upsert({ benutzer_id: meineBenutzerId, offerten_nur_eigene: neu }, { onConflict: 'benutzer_id' });
+  if(error) showToast('Einstellung konnte nicht gespeichert werden: ' + error.message, true);
+  await Promise.all([ladeKundenPanel(), ladeOfferten()]);
+}));
+
 async function ladeKundenPanel(){
   // Fuer "10 zuletzt aktive Kunden" reichen die neuesten paar hundert
   // Offerten voellig - die letzten 10 EINDEUTIGEN Kunden stehen praktisch
   // immer weit innerhalb der letzten 300 (nach Datum) - ein Voll-Scan der
   // ganzen, mit der Zeit immer groesser werdenden offerte-Tabelle nur fuer
   // dieses Panel war unnoetig teuer. .limit() statt .range(0,9999).
-  const { data: offerten, error: oErr } = await sb.from('offerte')
-    .select('kunde_id, erstellt_am')
+  let oQuery = sb.from('offerte').select('kunde_id, erstellt_am');
+  if(nurEigeneOfferten && meineBenutzerId) oQuery = oQuery.eq('erstellt_von', meineBenutzerId);
+  const { data: offerten, error: oErr } = await oQuery
     .order('erstellt_am', { ascending: false })
     .limit(300);
   if(oErr){ $('kpanelStatus').textContent = 'Fehler: ' + oErr.message; $('kpanelStatus').className = 'status err'; return; }
@@ -632,8 +671,10 @@ let offertenKundenMap = {};
 async function ladeOffertenSeite(anhaengen){
   const von = anhaengen ? ALLE_OFFERTEN.length : 0;
   const bis = von + OFFERTEN_SEITENGROESSE - 1;
-  const { data, error, count } = await sb.from('offerte')
-    .select('id, titel, datum, status, betrag_total, kunde_id, offertnummer, offertentyp(name, berechnungsmodell), easybill_document_id, easybill_document_number', { count: 'exact' })
+  let query = sb.from('offerte')
+    .select('id, titel, datum, status, betrag_total, kunde_id, offertnummer, offertentyp(name, berechnungsmodell), easybill_document_id, easybill_document_number', { count: 'exact' });
+  if(nurEigeneOfferten && meineBenutzerId) query = query.eq('erstellt_von', meineBenutzerId);
+  const { data, error, count } = await query
     .order('datum', { ascending:false })
     .range(von, bis);
   if(error){ $('offertenStatus').textContent = 'Fehler beim Laden: ' + error.message; $('offertenStatus').className = 'status err'; return; }
@@ -880,6 +921,11 @@ let kopierQuelle = null; // { id, offertentyp_id, berechnungsmodell }
 
 $('offerteNeuBtn').addEventListener('click', async () => {
   kwModus = 'neu';
+  // Links ist schon ein Kunde markiert: direkt für ihn eine neue Offerte eröffnen
+  if(kpanelFilterId){
+    const { data: kunde, error } = await sb.from('kunde').select('id,name,firma,nachname,vorname,strasse,plz,ort').eq('id', kpanelFilterId).maybeSingle();
+    if(!error && kunde){ await oeffneOffertentypWahl(kunde); return; }
+  }
   $('kwOvlMsg').textContent = 'Neue Offerte - zuerst einen Kunden auswählen';
   $('kwSearchInput').value = ''; kwSuchtext = '';
   $('kundeWahlOvl').classList.add('show');
@@ -1208,6 +1254,7 @@ async function kopiereOfferteFuerKunde(zielKunde){
 
 // ---------------------------------------------------------------------------
 async function init(){
+  await ladeOffertenEinstellung();
   await Promise.all([ladeKundenPanel(), ladeOfferten()]);
   // "Kopie erstellen" direkt aus Tool A heraus (siehe easybillWrap-Zeile dort):
   // verlinkt hierher mit ?kopieren=<offerteId> und oeffnet automatisch den
