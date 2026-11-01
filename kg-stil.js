@@ -261,6 +261,9 @@ header.app.kg-leiste .kg-reiter .navic.on{box-shadow:inset 0 -2px 0 var(--kg-akz
 .kg-seite #kundeSucheWrap input{padding-left:10px!important;padding-right:10px!important;}
 .kg-seite .pathline{font-size:12.5px;color:#4C5C70;margin:0!important;}
 .kg-seite .pathline a{color:#323E4E;font-weight:600;}
+#kg-nurlesen{display:flex;align-items:center;gap:8px;padding:9px 16px;background:#D6E7F4;color:#24405E;font-size:12.5px;font-weight:600;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;border-bottom:1px solid #C3D7E8;}
+#kg-nurlesen svg{width:16px;height:16px;flex-shrink:0;}
 #kg-sperre{position:fixed;left:0;right:0;top:46px;bottom:0;z-index:9000;background:#F5F7F9;display:flex;align-items:flex-start;justify-content:center;padding-top:80px;}
 #kg-sperre > div{background:#fff;border:1px solid #E1E5E9;border-radius:12px;padding:28px 32px;max-width:420px;text-align:center;font-size:14px;color:#232B35;}
 #kg-sperre b{font-size:18px;color:#323E4E;}
@@ -295,6 +298,9 @@ header.app.kg-leiste .kg-reiter .navic.on{box-shadow:inset 0 -2px 0 var(--kg-akz
         ]);
         sicht.rechte = { admin: !!(gr && gr.ist_admin) || sicht.rolle === 'admin',
           werte: new Map((ein || []).map(e => [e.tool_key + '|' + e.bereich_key + '|' + e.aktion, e.wert])) };
+        const { data: mitgl } = await client.rpc('meine_gruppen_mitglieder');
+        sicht.ich = session.user.id;
+        sicht.gruppe = new Set((mitgl || []).map(x => typeof x === 'string' ? x : x.meine_gruppen_mitglieder));
       }
       const spalte = { buero_team: 'fuer_buero_team', mitarbeitende: 'fuer_mitarbeitende', service_team: 'fuer_service_team' }[sicht.rolle];
       const darf = m => sicht.rolle === 'admin' || (spalte && m[spalte]);
@@ -339,6 +345,29 @@ header.app.kg-leiste .kg-reiter .navic.on{box-shadow:inset 0 -2px 0 var(--kg-akz
     return b.split('|').some(x => KG.darf(t, x, 'anzeigen') !== 'K' && KG.darf(t, x, 'anzeigen') !== null || KG.darf(t, x, 'an') === 'J');
   };
   KG.seiteErlaubt = seitenname => erlaubt(SEITENRECHT[seitenname]);
+  // Recht für einen bestimmten Datensatz (Eigene/Gruppe): true/false, null = ohne Gruppe (alte Logik = erlaubt)
+  KG.darfBei = (tool, bereich, aktion, besitzer) => {
+    const w = KG.darf(tool, bereich, aktion); if(w === null) return null;
+    if(w === 'A' || w === 'J') return true;
+    if(w === 'E') return !!besitzer && besitzer === sicht.ich;
+    if(w === 'G') return !!besitzer && !!sicht.gruppe && sicht.gruppe.has(besitzer);
+    return false;
+  };
+  // Hinweis «Nur ansehen» unter der weissen Leiste
+  KG.nurLesen = text => {
+    if(document.getElementById('kg-nurlesen')) return;
+    const d = document.createElement('div'); d.id = 'kg-nurlesen';
+    d.innerHTML = `${SVG(P.eye)}<span>${esc(text)}</span>`;
+    const ziel = document.querySelector('.kg-seite') || document.querySelector('header.app');
+    if(ziel) ziel.after(d); else document.body.prepend(d);
+  };
+  // Offerten-Eingabe: nach dem Laden prüfen, ob man diese Offerte bearbeiten darf
+  KG.pruefeOfferteBearbeiten = async offerteId => {
+    await ladeSichtbarkeit(); if(!sicht.rechte || sicht.rechte.admin || !offerteId) return;
+    const { data } = await KG._sb.from('offerte').select('erstellt_von').eq('id', offerteId).maybeSingle();
+    if(data && KG.darfBei('offerten', 'offerten', 'bearbeiten', data.erstellt_von) === false)
+      KG.nurLesen('Diese Offerte kannst du nur ansehen – Änderungen werden nicht gespeichert.');
+  };
   // Vorschau «Ansicht als Gruppe» (zum Prüfen, z. B. in der Konsole): KG.rechteVorschau('<gruppe-id>')
   KG.rechteVorschau = async gruppeId => {
     await ladeSichtbarkeit();
@@ -365,6 +394,12 @@ header.app.kg-leiste .kg-reiter .navic.on{box-shadow:inset 0 -2px 0 var(--kg-akz
       const ziel = (a.getAttribute('href') || '').split(/[?#]/)[0].replace(/\.html?$/, '');
       const ok = erlaubt(SEITENRECHT[ziel]); a.classList.toggle('kg-ohne', ok === false);
     });
+    // Elemente mit data-kg-recht="tool.bereich.aktion" ausblenden, wenn die Gruppe das nicht darf
+    // (als CSS-Regel, damit es auch für später gerenderte Zeilen gilt). Eigene/Gruppe = sichtbar, die DB prüft den Datensatz.
+    let st = document.getElementById('kg-rechte-css');
+    if(!st){ st = document.createElement('style'); st.id = 'kg-rechte-css'; document.head.appendChild(st); }
+    st.textContent = sicht.rechte.admin ? '' : [...sicht.rechte.werte].filter(([, w]) => w === 'K' || w === 'N')
+      .map(([k]) => `[data-kg-recht~="${k.split('|').join('.')}"]{display:none!important;}`).join('\n');
     const ok = erlaubt(SEITENRECHT[seite]);
     const alt = document.getElementById('kg-sperre');
     if(ok === false && !alt){
