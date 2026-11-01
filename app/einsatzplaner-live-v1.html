@@ -1148,7 +1148,10 @@ const wdW = d => ((d % 7 + 7) % 7 >= 5 ? WEK : 1) * dayW;
 const X = u => { const d = Math.floor(u), q = Math.floor(d / 7), r = d - 7 * q; return (q * (5 + 2 * WEK) + (r <= 5 ? r : 5 + (r - 5) * WEK)) * dayW + (u - d) * wdW(d); };
 const UX = x => { const W7 = (5 + 2 * WEK) * dayW, q = Math.floor(x / W7), rx = x - q * W7; return q * 7 + (rx < 5 * dayW ? rx / dayW : 5 + (rx - 5 * dayW) / (WEK * dayW)); };
 const XW = (a, b) => X(b) - X(a);
-const collapsed = new Set(lsGet('zu', []));
+// Zugeklappte Gruppen: im Widget (Startseite) eigene Liste, dort anfangs «Allgemein» und «Büro» zu
+const ZU_KEY = EINGEBETTET ? 'zuWidget' : 'zu';
+let zuNeu = EINGEBETTET && lsGet(ZU_KEY, null) === null;
+const collapsed = new Set(lsGet(ZU_KEY, null) || []);
 let archOffen = !!lsGet('archOffen', false); const archJahre = new Set(lsGet('archJahre', []));
 const SNAP = { jahr: 1, quartal: .5, monat: .5, woche: 1 / 12, tag: 1 / 48 };
 const ZL = { tag: 'Tag', woche: 'Woche', monat: 'Monat', quartal: 'Quartal', jahr: 'Jahr' };
@@ -1421,6 +1424,7 @@ function renderRows(){
   let h = headerHTML(W);
   if(layer !== 'p'){ h += ovRows(W, bgx); const sl = t.scrollLeft, stp = t.scrollTop; t.innerHTML = `<div class="grid" style="width:${W + NAMEW}px">${h}</div>`; t.scrollLeft = sl; t.scrollTop = stp; tlTopSync(); return; }
   // Planungshilfe: jeder kann sie für sich unter eine andere Gruppe ziehen (gemerkt im Browser); nur ganz unten auf-/zuklappbar
+  if(zuNeu && GRUPPEN.length){ zuNeu = false; GRUPPEN.filter(g => /allgemein|büro|buero/i.test(g.name)).forEach(g => collapsed.add(g.id)); lsSet(ZU_KEY, [...collapsed]); }
   const ph = phGruppe(), nach = phNach(); let grps = GRUPPEN.concat([{ id: '_ohne', name: 'Ohne Gruppe' }]);
   if(ph && nach){ grps = grps.filter(g => g !== ph); grps.splice(grps.findIndex(g => g.id === nach) + 1, 0, ph); }
   grps.forEach(g => {
@@ -1561,7 +1565,7 @@ const phGruppe = () => GRUPPEN.find(g => /planungshilfe/i.test(g.name));
 const PH_ZIELE = [['bau', 'Gartenbau'], ['pflege', 'Gartenpflege'], ['lehr', 'Lehrlinge / MA'], ['unten', 'Zurück nach unten']];
 const phZielGruppe = k => ({ bau: GRUPPEN.find(g => /gartenbau/i.test(g.name)), pflege: GRUPPEN.find(g => /gartenpflege/i.test(g.name)), lehr: GRUPPEN.find(g => /lehrling/i.test(g.name)) })[k] || null;
 function phSpringe(k){ const g = phZielGruppe(k), ph = phGruppe(); if(!ph) return;
-  lsSet('phNach', g ? g.id : null); if(g) collapsed.delete(ph.id); else collapsed.add(ph.id); lsSet('zu', [...collapsed]); renderRows();
+  lsSet('phNach', g ? g.id : null); if(g) collapsed.delete(ph.id); else collapsed.add(ph.id); lsSet(ZU_KEY, [...collapsed]); renderRows();
   const t = tlEl(), head = document.querySelector(`.row.grp[data-g="${g ? g.id : ph.id}"]`); if(t && head) t.scrollTop += head.getBoundingClientRect().top - t.getBoundingClientRect().top - 70; }
 const phNach = () => { const n = lsGet('phNach', null); return n && GRUPPEN.some(g => g.id === n) ? n : null; };
 // Ziel beim Verschieben: unter die Gruppe, über der die Maus ist (Archiv = wieder ganz unten)
@@ -2600,7 +2604,7 @@ function bindTimeline(t){
     // Archiv und seine Jahre auf-/zuklappen
     const ag = e.target.closest('.row.grp[data-ay], .row.grp[data-g="_archiv"]'); if(ag && !(drag && drag.kind === 'prow')){ if(ag.dataset.ay){ const y = ag.dataset.ay; archJahre.has(y) ? archJahre.delete(y) : archJahre.add(y); lsSet('archJahre', [...archJahre]); } else { archOffen = !archOffen; lsSet('archOffen', archOffen); } renderRows(); return; }
     const g = e.target.closest('.row.grp');
-    const toggle = id => { collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id); lsSet('zu', [...collapsed]); renderRows(); };
+    const toggle = id => { collapsed.has(id) ? collapsed.delete(id) : collapsed.add(id); lsSet(ZU_KEY, [...collapsed]); renderRows(); };
     // Büro: Gruppe am Kopf ziehen = ganze Gruppe verschieben (kurzer Klick = auf-/zuklappen)
     if(g){ const id = g.dataset.g; if(isBuero() && id !== '_ohne' && layer === 'p' && e.target.closest('.nm')){ drag = { kind: 'grow', gid: id, x0: e.clientX, y0: e.clientY, moved: false, toggle }; e.preventDefault(); return; } toggle(id); return; }
     // Büro: Person am Namen ziehen = umsortieren / andere Gruppe (kurzer Klick = bearbeiten)
@@ -2778,7 +2782,7 @@ function bindWindow(){
       if(d.tgt) await sortApply(d); return;
     }
     if(d.kind === "phmove"){ d.gh?.remove(); d.line?.remove();
-      if(!d.moved){ if(d.kopf && !phNach()){ collapsed.has(d.ph.id) ? collapsed.delete(d.ph.id) : collapsed.add(d.ph.id); lsSet('zu', [...collapsed]); renderRows(); } return; }
+      if(!d.moved){ if(d.kopf && !phNach()){ collapsed.has(d.ph.id) ? collapsed.delete(d.ph.id) : collapsed.add(d.ph.id); lsSet(ZU_KEY, [...collapsed]); renderRows(); } return; }
       if(d.tgt){ lsSet('phNach', d.tgt.nach); if(d.tgt.nach) collapsed.delete(d.ph.id); renderRows(); toast(d.tgt.nach ? 'Planungshilfe verschoben – bleibt hier, bis du sie wieder ziehst' : 'Planungshilfe wieder ganz unten'); } return; }
     if(d.kind === "tool"){ d.gh?.remove(); document.querySelectorAll(".lane.drop").forEach(l => l.classList.remove("drop"));
       if(!d.moved){ toast("Knopf auf eine Person und einen Tag ziehen."); return; }
