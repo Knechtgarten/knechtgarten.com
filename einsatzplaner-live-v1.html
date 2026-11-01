@@ -695,6 +695,8 @@ table.ft td{padding:7px 10px;border-bottom:1px solid var(--soft);}
 @media (max-width:760px){ header.app .brand .sub,header.app .userbar span{display:none;} .sidepanel{width:100vw;} }
 /* Eingebettet (Startseite, Widget «Einsatzplaner»): nur der Plan, Wochenansicht, nur ansehen */
 html.ep-eingebettet header.app,html.ep-eingebettet #subnav,html.ep-eingebettet .bar-top,html.ep-eingebettet #aufp,html.ep-eingebettet .kg-seite,html.ep-eingebettet .toastwrap{display:none!important;}
+html.ep-eingebettet{--red:#C05A1C;}
+html.ep-eingebettet .bar{font-weight:500;} /* Punkte und Warnungen im Pendenzen-Rot */
 html.ep-eingebettet body{background:#fff;}
 html.ep-eingebettet main{padding:0!important;margin:0!important;max-width:none!important;}
 html.ep-eingebettet .tl,html.ep-eingebettet .tltop + .tl{height:calc(100vh - 14px)!important;min-height:0!important;border-top:0;}
@@ -806,6 +808,8 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt
 // ?eingebettet = Widget auf der Startseite: nur der Plan in der Wochenansicht, nur ansehen, Einstellungen bleiben unverändert
 const EINGEBETTET = new URLSearchParams(location.search).has('eingebettet');
 if(EINGEBETTET) document.documentElement.classList.add('ep-eingebettet');
+// Farben im Widget: meine = nur eigene Einsätze farbig, alle = wie im Planer, aus = alles nur mit Rahmen
+let EFARBE = new URLSearchParams(location.search).get('farbe') || 'meine';
 const pad = n => String(n).padStart(2, '0');
 const lsGet = (k, d) => { try { const v = localStorage.getItem('ep_' + k); return v == null ? d : JSON.parse(v); } catch(e){ return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem('ep_' + k, JSON.stringify(v)); } catch(e){} };
@@ -965,6 +969,13 @@ function labOf(it){
   return kShort(KUNDEN[it.kid]) || it.title || ART[it.kind];
 }
 // Balken im Planer: Mithilfe nur «mit wem» (Kunde steht im Mouse-Over)
+// Eigener Einsatz (Widget «Meine»): eigene Zeile, eigenes Projekt oder Mithilfe bei mir
+function meinEinsatz(it){
+  const me = myPerson(); if(!me) return false;
+  if(it.mid === me.id || it.pl === me.id) return true;
+  if(it.kind === 'hilfe'){ const l = byId(it.link); return it.mp === me.id || !!(l && (l.mid === me.id || l.pl === me.id)); }
+  return false;
+}
 const hilfeKurz = it => { const l = byId(it.link), m = l ? l.mid : it.mp; return P[m] ? first(P[m].name) : labOf(it); };
 const txtOn = c => { const m = /^#?([0-9a-f]{6})$/i.exec(c || ''); if(!m) return '#FFFFFF'; const n = parseInt(m[1], 16); const l = (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255; return l > .62 ? '#232B35' : '#FFFFFF'; };
 // Absenz-Typen: 6 gut unterscheidbare Grautöne, optional gestreift (Seite «Feiertage & Absenzen»)
@@ -973,6 +984,7 @@ const GREYS = ['#E3E6E9', '#D0D4D8', '#BCC2C8', '#A6ADB4', '#8F969E', '#787F87']
 function absStyle(name){ const t = ABST.find(x => x.name.toLowerCase() === String(name || '').toLowerCase()); const c = GREYS[t ? t.grauton : 1];
   return { bg: t && t.gestreift ? `repeating-linear-gradient(135deg,${c} 0 5px,#FFFFFF77 5px 9px),${c}` : c, fg: (t ? t.grauton : 1) >= 4 ? '#FFFFFF' : '#323E4E', bd: 'rgba(35,43,53,.18)' }; }
 function barStyle(it){
+  if(EINGEBETTET && it.kind !== 'absenz' && EFARBE !== 'alle' && !(EFARBE === 'meine' && meinEinsatz(it))) return { bg: '#fff', fg: '#323E4E', bd: '#6E7F93' };
   if(it.kind === 'absenz') return absStyle(it.title);
   if(it.kind === 'intern') return { bg: '#E9ECEF', fg: '#323E4E', bd: '#C9CED4' };
   let c;
@@ -1225,7 +1237,7 @@ function scrollToU(u, mode){ const t = tlEl(); if(!t) return; t.scrollLeft = Mat
 function goToday(){ if(zoom === 'tag') scrollToU(TODAY, 'left'); else if(zoom === 'woche'){ const w = (dDate(TODAY).getDay() + 6) % 7; scrollToU(w >= 5 ? TODAY + 7 - w : TODAY - w, 'left'); } else scrollToU(TODAY - (zoom === 'jahr' ? 28 : zoom === 'quartal' ? 7 : 3), 'left'); }
 function step(dir){ const n = { jahr: 91, quartal: 28, monat: 14, woche: 7, tag: 1 }[zoom]; const t = tlEl(); t.scrollLeft = X(UX(t.scrollLeft) + dir * n); }
 // Widget auf der Startseite blättert die Woche über postMessage
-if(EINGEBETTET) addEventListener('message', e => { if(e.origin !== location.origin || !e.data) return; if(e.data.ep === 'zurueck') step(-1); else if(e.data.ep === 'weiter') step(1); else if(e.data.ep === 'heute') goToday(); });
+if(EINGEBETTET) addEventListener('message', e => { if(e.origin !== location.origin || !e.data) return; if(e.data.ep === 'farbe'){ EFARBE = e.data.v; renderRows(); } else if(e.data.ep === 'zurueck') step(-1); else if(e.data.ep === 'weiter') step(1); else if(e.data.ep === 'heute') goToday(); });
 
 let HR = [0, NDAYS];
 function headerHTML(W){
