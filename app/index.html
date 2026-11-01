@@ -100,6 +100,9 @@ section + section{margin-top:var(--kg-space-6);}
 .wp-bar{font-size:11px;font-weight:500;padding:0 6px;border-radius:5px;display:flex;align-items:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}
 .dw .tools-grid{grid-template-columns:repeat(auto-fill,minmax(250px,1fr))!important;}
 .dash-hinweis{font-size:12px;color:#6B7079;}
+.dash-hinweis b{color:#323E4E;}
+.dash-grid.handy{max-width:390px;margin:0 auto;}
+.dash-grid.handy .dw{grid-column:1 / -1!important;}
 .dash-add{position:fixed;z-index:9000;width:290px;background:#fff;border:1px solid #E1E5E9;border-radius:12px;box-shadow:0 12px 32px rgba(35,43,53,.16);padding:8px;}
 .dash-add button{all:unset;box-sizing:border-box;width:100%;display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer;font-size:13px;color:#232B35;}
 .dash-add button:hover{background:#F5F7F9;}
@@ -438,6 +441,7 @@ input[type=checkbox].kgcheck:checked::after{content:'';position:absolute;left:5p
   <button type="button" data-kg-seite="rechts" class="kg-neben hidden" id="dashReset">Auf Standard zurücksetzen</button>
   <button type="button" data-kg-seite="rechts" class="kg-neben hidden" id="dashAdd">+ Widget</button>
   <button type="button" data-kg-seite="rechts" class="kg-haupt hidden" id="dashEdit">Anpassen</button>
+  <a data-kg-seite="rechts" class="kg-neben hidden" id="dashZurueck" href="verwaltung-live-v1.html">Zurück zur Verwaltung</a>
   <section id="dash" class="hidden"><div class="dash-grid" id="dashGrid"></div></section>
   <div class="dash-add hidden" id="dashAddMenu"></div>
 
@@ -1181,10 +1185,19 @@ $('supportChatInput').addEventListener('keydown', (e) => {
 // «Anpassen»: Kopf ziehen = verschieben, Ecke = Grösse, × = entfernen, «+ Widget» = hinzufügen.
 // Widgets erscheinen nur, wenn die Gruppe das Tool sehen darf (KG.darf aus kg-stil.js).
 // ===========================================================================
-const DASH = { layout: [], edit: false, ich: null, gruppeId: null, istAdmin: false, drag: null, woche: 0, pers: null, speichernT: null };
+// modus = Admin bearbeitet den Standard einer Gruppe (index.html?standard=<gruppe>&geraet=desktop|handy)
+// handy = Startseite läuft auf dem Handy mit dem Handy-Standard der Gruppe (nur ansehen)
+const DASH = { layout: [], edit: false, ich: null, gruppeId: null, istAdmin: false, drag: null, woche: 0, pers: null, speichernT: null, modus: null, handy: false };
+const HANDY_STANDARD = [{ k: 'pend', x: 0, y: 0, w: 12, h: 5 }, { k: 'plan', x: 0, y: 5, w: 12, h: 6 }, { k: 'such', x: 0, y: 11, w: 12, h: 4 }, { k: 'kachel', x: 0, y: 15, w: 12, h: 6 }];
 const dEsc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
-const dTool = t => { const w = window.KG && KG.darf ? KG.darf(t, '_tool', 'sichtbar') : null; return w === null || w === 'J'; };
-const dBer = (t, b) => { if(!dTool(t)) return false; const w = KG.darf ? KG.darf(t, b, 'anzeigen') : null; return w === null || w !== 'K'; };
+// Rechte: im Standard-Modus die der bearbeiteten Gruppe, sonst die eigenen
+const dRecht = (t, b, a) => {
+  const m = DASH.modus; if(!m) return window.KG && KG.darf ? KG.darf(t, b, a) : null;
+  if(m.admin) return a === 'sichtbar' ? 'J' : 'A';
+  return m.werte.get(t + '|' + b + '|' + a) || (a === 'sichtbar' ? 'N' : 'K');
+};
+const dTool = t => { const w = dRecht(t, '_tool', 'sichtbar'); return w === null || w === 'J'; };
+const dBer = (t, b) => { if(!dTool(t)) return false; const w = dRecht(t, b, 'anzeigen'); return w === null || w !== 'K'; };
 const WIDGETS = {
   plan:   { n: 'Einsatzplaner · Woche', icon: 'plan', min: [6, 3], darf: () => dTool('plan'), link: 'einsatzplaner-live-v1.html' },
   pend:   { n: 'Meine Pendenzen heute', icon: 'pend', min: [3, 3], darf: () => dTool('pend'), link: 'pendenzen-live-v1.html' },
@@ -1212,13 +1225,33 @@ function dashPack(L, fest){
 async function dashStart(ben){
   if(window.KG && KG.ladeRechte) await KG.ladeRechte();
   DASH.ich = ben.id; DASH.istAdmin = ben.rolle === 'admin'; DASH.gruppeId = ben.recht_gruppe_id;
+  const par = new URLSearchParams(location.search);
+  if(DASH.istAdmin && par.get('standard')){
+    // Standard einer Gruppe festlegen (Link aus Verwaltung › Gruppen & Rechte)
+    const gid = par.get('standard'), geraet = par.get('geraet') === 'handy' ? 'handy' : 'desktop';
+    const [{ data: gr }, { data: ein }, { data: std }] = await Promise.all([
+      sb.from('recht_gruppe').select('id,name,ist_admin').eq('id', gid).maybeSingle(),
+      sb.from('recht_eintrag').select('tool_key,bereich_key,aktion,wert').eq('gruppe_id', gid),
+      sb.from('startseite_standard').select('layout').eq('recht_gruppe_id', gid).eq('geraet', geraet).maybeSingle()]);
+    if(gr){
+      DASH.modus = { gid, geraet, name: gr.name, admin: !!gr.ist_admin, werte: new Map((ein || []).map(e => [e.tool_key + '|' + e.bereich_key + '|' + e.aktion, e.wert])) };
+      DASH.edit = true;
+      const roh = (std && std.layout) || (geraet === 'handy' ? HANDY_STANDARD : DASH_STANDARD);
+      DASH.layout = dashPack(roh.filter(i => WIDGETS[i.k] && WIDGETS[i.k].darf()).map(i => geraet === 'handy' ? { ...i, x: 0, w: 12 } : i), null);
+      $('dash').classList.remove('hidden');
+      dashRender();
+      window.addEventListener('pointermove', dashMove); window.addEventListener('pointerup', dashUp);
+      return;
+    }
+  }
+  DASH.handy = window.innerWidth < 760;
   const [eig, std] = await Promise.all([
-    sb.from('startseite_layout').select('layout').eq('benutzer_id', ben.id).maybeSingle(),
-    ben.recht_gruppe_id ? sb.from('startseite_standard').select('layout').eq('recht_gruppe_id', ben.recht_gruppe_id).maybeSingle() : Promise.resolve({ data: null })
+    DASH.handy ? Promise.resolve({ data: null }) : sb.from('startseite_layout').select('layout').eq('benutzer_id', ben.id).maybeSingle(),
+    ben.recht_gruppe_id ? sb.from('startseite_standard').select('layout').eq('recht_gruppe_id', ben.recht_gruppe_id).eq('geraet', DASH.handy ? 'handy' : 'desktop').maybeSingle() : Promise.resolve({ data: null })
   ]);
-  const roh = (eig.data && eig.data.layout) || (std.data && std.data.layout) || DASH_STANDARD;
+  const roh = (eig.data && eig.data.layout) || (std.data && std.data.layout) || (DASH.handy ? HANDY_STANDARD : DASH_STANDARD);
   DASH.layout = dashPack(roh.filter(i => WIDGETS[i.k] && WIDGETS[i.k].darf()), null);
-  $('dash').classList.remove('hidden'); $('dashEdit').classList.remove('hidden');
+  $('dash').classList.remove('hidden'); $('dashEdit').classList.toggle('hidden', DASH.handy);
   if(DASH.istAdmin){
     const { data: gr } = await sb.from('recht_gruppe').select('id,name').order('sortierung');
     $('dashStdGruppe').innerHTML = (gr || []).map(g => `<option value="${g.id}"${g.id === DASH.gruppeId ? ' selected' : ''}>Standard für: ${dEsc(g.name)}</option>`).join('');
@@ -1228,6 +1261,7 @@ async function dashStart(ben){
 }
 
 function dashSpeichern(){
+  if(DASH.modus || DASH.handy) return; // Gruppen-Standard speichert der Knopf, auf dem Handy keine persönliche Anordnung
   clearTimeout(DASH.speichernT);
   DASH.speichernT = setTimeout(async () => {
     const { error } = await sb.from('startseite_layout').upsert({ benutzer_id: DASH.ich, layout: DASH.layout, geaendert_am: new Date().toISOString() });
@@ -1239,6 +1273,9 @@ function dashRender(){
   const g = $('dashGrid');
   // Kacheln (bestehender Bereich) zuerst sichern, damit sie beim Neuzeichnen nicht verloren gehen
   const tools = $('toolsSection'); if(tools && tools.parentElement !== document.querySelector('main')) document.querySelector('main').appendChild(tools);
+  const handyVorschau = DASH.modus && DASH.modus.geraet === 'handy';
+  g.classList.toggle('handy', !!handyVorschau);
+  DASH.layout.sort((a, b) => a.y - b.y || a.x - b.x); // DOM-Reihenfolge = Reihenfolge auf dem Handy
   g.innerHTML = DASH.layout.map(i => {
     const W = WIDGETS[i.k];
     return `<section class="dw${DASH.edit ? ' edit' : ''}" data-k="${i.k}" style="grid-column:${i.x + 1} / span ${i.w};grid-row:${i.y + 1} / span ${i.h}">
@@ -1251,6 +1288,13 @@ function dashRender(){
   ['dashHinweis', 'dashAdd', 'dashReset'].forEach(id => $(id).classList.toggle('hidden', !DASH.edit));
   ['dashStdGruppe', 'dashStdSpeichern'].forEach(id => $(id).classList.toggle('hidden', !(DASH.edit && DASH.istAdmin)));
   $('dashEdit').textContent = DASH.edit ? 'Fertig' : 'Anpassen';
+  if(DASH.modus){
+    // Standard einer Gruppe: nur «+ Widget», «Standard speichern», «Zurück zur Verwaltung»
+    $('dashHinweis').innerHTML = `<b>Standard «${dEsc(DASH.modus.name)}» · ${DASH.modus.geraet === 'handy' ? 'Handy' : 'Desktop'}</b> – Kopf ziehen = verschieben, Ecke = Grösse`;
+    ['dashReset', 'dashStdGruppe', 'dashEdit'].forEach(id => $(id).classList.add('hidden'));
+    $('dashStdSpeichern').textContent = 'Standard speichern'; $('dashStdSpeichern').className = 'kg-haupt';
+    $('dashZurueck').classList.remove('hidden');
+  }
   if(!DASH.edit) $('dashAddMenu').classList.add('hidden');
   g.querySelectorAll('.dw-kopf').forEach(k => k.addEventListener('pointerdown', e => dashStartDrag(e, k.parentElement.dataset.k, 'move')));
   g.querySelectorAll('[data-gross]').forEach(k => k.addEventListener('pointerdown', e => dashStartDrag(e, k.dataset.gross, 'size')));
@@ -1272,6 +1316,7 @@ function dashMove(e){
   const dx = Math.round((e.clientX - d.sx) / d.sxStep), dy = Math.round((e.clientY - d.sy) / d.syStep), n = { ...d.o }, min = WIDGETS[d.k].min;
   if(d.mode === 'move'){ n.x = Math.max(0, Math.min(12 - n.w, d.o.x + dx)); n.y = Math.max(0, d.o.y + dy); }
   else { n.w = Math.max(min[0], Math.min(12 - n.x, d.o.w + dx)); n.h = Math.max(min[1], Math.min(12, d.o.h + dy)); }
+  if(DASH.modus && DASH.modus.geraet === 'handy'){ n.x = 0; n.w = 12; } // Handy: eine Spalte, nur Reihenfolge und Höhe
   const cur = DASH.layout.find(i => i.k === d.k);
   if(cur.x === n.x && cur.y === n.y && cur.w === n.w && cur.h === n.h) return;
   DASH.layout = dashPack(d.basis.map(i => i.k === d.k ? n : i), d.k);
@@ -1290,14 +1335,15 @@ $('dashEdit').addEventListener('click', () => { DASH.edit = !DASH.edit; dashRend
 $('dashReset').addEventListener('click', async () => {
   if(!confirm('Eigene Anordnung verwerfen und den Standard deiner Gruppe übernehmen?')) return;
   await sb.from('startseite_layout').delete().eq('benutzer_id', DASH.ich);
-  const { data } = DASH.gruppeId ? await sb.from('startseite_standard').select('layout').eq('recht_gruppe_id', DASH.gruppeId).maybeSingle() : { data: null };
+  const { data } = DASH.gruppeId ? await sb.from('startseite_standard').select('layout').eq('recht_gruppe_id', DASH.gruppeId).eq('geraet', 'desktop').maybeSingle() : { data: null };
   DASH.layout = dashPack(((data && data.layout) || DASH_STANDARD).filter(i => WIDGETS[i.k] && WIDGETS[i.k].darf()), null);
   dashRender();
 });
 $('dashStdSpeichern').addEventListener('click', async () => {
-  const gid = $('dashStdGruppe').value, name = $('dashStdGruppe').selectedOptions[0]?.textContent.replace('Standard für: ', '');
-  if(!gid || !confirm(`Diese Anordnung als Standard für «${name}» speichern? Personen ohne eigene Anordnung sehen sie ab sofort.`)) return;
-  const { error } = await sb.from('startseite_standard').upsert({ recht_gruppe_id: gid, layout: DASH.layout, geaendert_am: new Date().toISOString() });
+  const m = DASH.modus, geraet = m ? m.geraet : 'desktop';
+  const gid = m ? m.gid : $('dashStdGruppe').value, name = m ? m.name : $('dashStdGruppe').selectedOptions[0]?.textContent.replace('Standard für: ', '');
+  if(!gid || !confirm(`Diese Anordnung als ${geraet === 'handy' ? 'Handy' : 'Desktop'}-Standard für «${name}» speichern? Personen ohne eigene Anordnung sehen sie ab sofort.`)) return;
+  const { error } = await sb.from('startseite_standard').upsert({ recht_gruppe_id: gid, geraet, layout: DASH.layout, geaendert_am: new Date().toISOString() });
   alert(error ? 'Fehler: ' + error.message : `Gespeichert als Standard für «${name}».`);
 });
 $('dashAdd').addEventListener('click', e => {
