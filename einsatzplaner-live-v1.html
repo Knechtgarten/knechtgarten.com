@@ -1119,7 +1119,7 @@ const inPause = (it, k) => !!it.pz?.length && it.pz.some(([a, c]) => k / 2 >= it
 // Reingeschoben = o liegt ganz in it und ist kürzer (it wird dort unterbrochen). Alles andere liegt übereinander.
 // Ein Termin unterbricht nie eine Absenz (Termin auf Ferien = übereinander, rot).
 const passtRein = (it, o) => !(it.kind === 'absenz' && o.kind !== 'absenz') && o.s >= it.s - 1e-6 && o.e <= it.e + 1e-6 && o.e - o.s < it.e - it.s - 1e-6;
-const schneidet = (it, o) => isShort(o) || (!o.ueber && passtRein(it, o));
+const schneidet = (it, o) => isShort(o) ? !isShort(it) : (!o.ueber && passtRein(it, o)); // kurz auf kurz verdrängt nie (sonst verschwindet einer)
 let DUPS = [];
 function compute(){
   floatOffene();
@@ -1148,8 +1148,10 @@ function compute(){
     list.forEach(o => { if(!isShort(o) || !LAY[o.id]) return; const k = Math.floor(o.s + o.e);
       const host = list.find(h => h !== o && h.kind !== 'absenz' && !isShort(h) && LAY[h.id] && LAY[h.id].free.includes(k)); LAY[o.id].mini = host ? host.id : null; });
     // Übereinander: zwei Termine im selben Halbtag = je halb hoch (1 oben, 2 unten), roter Rand
-    const kc = {}; list.forEach(it => { const L = LAY[it.id]; if(!L || L.mini || isShort(it)) return; L.free.forEach(k => (kc[k] ??= []).push(it)); });
-    Object.entries(kc).forEach(([k, g]) => { if(g.length < 2) return; k = +k;
+    // Nur wer sich im Halbtag zeitlich wirklich überschneidet (kurze Termine nacheinander = «2 Aufträge», kein Konflikt)
+    const kc = {}; list.forEach(it => { const L = LAY[it.id]; if(!L || L.mini) return; L.free.forEach(k => (kc[k] ??= []).push(it)); });
+    Object.entries(kc).forEach(([k, g0]) => { if(g0.length < 2) return; k = +k; const ha = k / 2, hb = (k + 1) / 2;
+      const ov = (x, y) => Math.max(x.s, y.s, ha) < Math.min(x.e, y.e, hb) - 1e-6, g = g0.filter(x => g0.some(y => y !== x && ov(x, y))); if(g.length < 2) return;
       g.sort((a, b) => a.s - b.s || String(a.id).localeCompare(String(b.id))).forEach((it, i) => { const L = LAY[it.id]; (L.dup ??= {})[k] = i ? 2 : 1; (L.dupMit ??= new Set()); g.forEach(o => { if(o !== it) L.dupMit.add(o.rep || o.id); }); });
       if(k >= TODAY * 2 && !P[g[0].mid]?.ist_ablage) DUPS.push({ mid: g[0].mid, k, n: g.length }); });
   });
@@ -1417,7 +1419,7 @@ function personRow(p, W, bgx){
   // Ab Wochenansicht: mehrere kurze Termine im selben Halbtag = ein Block «3 Termine»
   const grpd = new Set();
   if(zoom !== 'tag'){
-    const bk = {}; its.forEach(it => { const L = LAY[it.id]; if(!L || !L.segs.length || L.mini || !isShort(it) || it.ok === false) return; /* offene Termine nie in «2 Aufträge» verstecken */ (bk[Math.floor(it.s * 2)] ??= []).push(it); });
+    const bk = {}; its.forEach(it => { const L = LAY[it.id]; if(!L || !L.segs.length || L.mini || !isShort(it) || it.ok === false || L.dup) return; /* offene und übereinander liegende Termine nie in «2 Aufträge» verstecken */ (bk[Math.floor(it.s * 2)] ??= []).push(it); });
     Object.values(bk).forEach(g => { if(g.length < 2) return; g.sort((a, b) => a.s - b.s).forEach(i => grpd.add(i.id)); const d = Math.floor(g[0].s);
       const s = Math.floor(g[0].s * 2) / 2, e = Math.max(s + .5, ...g.map(i => i.e)); const l = X(s) + 1, w = Math.max(14, XW(s, e) - 2);
       const tip = g.map(i => `${hOf(i.s, d)}–${hOf(i.e, d)}  ${labOf(i)}`).join('\n') + '\n\nKlick: Tagesansicht';
@@ -3126,8 +3128,9 @@ async function pausenGeaendert(it, pz0, nV){
 // Liegt it ganz in einem längeren Termin (oder ein kürzerer ganz in it): Menü Reinschieben / Übereinander / Abbrechen.
 // Reinschieben verlängert nie automatisch – fehlen dem unterbrochenen Termin Tage, zeigt er «x von y T».
 async function ablegenPruefen(it, pt){
-  it._trims = []; if(isShort(it)) return 'ok';
-  compute();
+  it._trims = []; compute();
+  const zuViele = () => { compute(); const L = LAY[it.id]; return !!L && L.free.some(k => ALL.filter(o => o.mid === it.mid && LAY[o.id]?.dup?.[k]).length > 2); };
+  if(isShort(it)){ if(zuViele()){ toast('Dort liegen schon zwei Termine übereinander – ein dritter geht nicht.', null, true); return 'ab'; } return 'ok'; } // kurz: nur Höchstzahl prüfen
   const reihe0 = ALL.filter(o => o.mid === it.mid && o !== it && !isShort(o) && o.e > it.s + 1e-6 && o.s < it.e - 1e-6);
   // Nur teilweise in den Nachbarn gezogen (Verlängern oder Verschieben): Nachbar auf dieser Seite kürzen, keine Überlappung.
   // Absenzen, wiederkehrende und Termine mit fixem Start bleiben, wie sie sind.
@@ -3141,8 +3144,7 @@ async function ablegenPruefen(it, pt){
   let wahl = 'ok'; if(H.length || E.length){ wahl = await reinFrage(pt); if(wahl === 'ab'){ zurueck(); return 'ab'; } }
   const alt = [it.ueber, ...E.map(o => o.ueber)];
   if(wahl !== 'ok'){ it.ueber = wahl === 'ueber'; E.forEach(o => o.ueber = wahl === 'ueber'); }
-  compute(); const L = LAY[it.id];
-  if(L && L.free.some(k => ALL.filter(o => o.mid === it.mid && !isShort(o) && LAY[o.id] && !LAY[o.id].mini && LAY[o.id].free.includes(k)).length > 2)){
+  if(zuViele()){
     it.ueber = alt[0]; E.forEach((o, i) => o.ueber = alt[i + 1]); zurueck(); toast('Dort liegen schon zwei Termine übereinander – ein dritter geht nicht.', null, true); return 'ab'; }
   // Gekürzte Nachbarn speichern; lange (mehrtägige) halten ihre Tage fest und zeigen rot «x von y T»
   for(const t of trims){ const o = t.o, p = { beginn: fromU(o.s), ende: fromU(o.e, true) };
