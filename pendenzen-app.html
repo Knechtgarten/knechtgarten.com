@@ -33,8 +33,16 @@ main{flex:1;padding:16px;display:flex;flex-direction:column;gap:14px;max-width:5
 textarea{border:0;background:transparent;resize:none;font:inherit;font-size:19px;padding:14px;min-height:130px;outline:none;color:var(--ink);}
 .feld .unten{display:flex;align-items:center;gap:8px;padding:8px 10px;border-top:1px solid var(--line);}
 .feld .tipp{font-size:12px;color:var(--muted);flex:1;}
-.mic{width:44px;height:44px;border-radius:50%;border:1px solid var(--line);background:#fff;color:var(--primary);display:inline-flex;align-items:center;justify-content:center;}
-.mic.an{background:var(--rot);border-color:var(--rot);color:#fff;}
+.mic{width:52px;height:52px;border-radius:50%;border:0;background:var(--blau);color:var(--primary);display:inline-flex;align-items:center;justify-content:center;flex:none;}
+.mic.an{background:var(--rot);color:#fff;animation:puls 1.2s ease-in-out infinite;}
+@keyframes puls{0%,100%{box-shadow:0 0 0 0 rgba(192,57,43,.45);}50%{box-shadow:0 0 0 10px rgba(192,57,43,0);}}
+/* KI-Diktat: während der Aufnahme Pegel + Zeit statt Textfeld, danach «KI schreibt …» */
+.aufnahme{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:130px;padding:14px;}
+.pegel{display:flex;align-items:center;gap:3px;height:56px;}
+.pegel i{width:6px;border-radius:3px;background:var(--primary);height:4px;transition:height .08s;}
+.aufnahme .zeit{font-size:15px;color:var(--muted);font-variant-numeric:tabular-nums;}
+.aufnahme .zeit b{color:var(--rot);}
+.feld.schreibt textarea{opacity:.35;}
 .speichern{height:56px;border:0;border-radius:12px;background:var(--primary);color:#fff;font-size:18px;font-weight:700;display:flex;align-items:center;justify-content:center;gap:10px;}
 .speichern:active{transform:scale(.98);}
 .meldung{font-size:14px;text-align:center;color:var(--primary);min-height:20px;}
@@ -70,9 +78,10 @@ h2{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute
 </main>
 
 <main id="erfassen" class="hidden">
-  <div class="feld">
+  <div class="feld" id="feld">
     <textarea id="text" placeholder="Was soll nicht vergessen gehen?" aria-label="Neue Pendenz" enterkeyhint="done"></textarea>
-    <div class="unten"><span class="tipp">Tipp: Mikrofon der Tastatur zum Diktieren</span><button class="mic hidden" id="mic" aria-label="Sprechen"></button></div>
+    <div class="aufnahme hidden" id="aufnahme"><div class="pegel" id="pegel"></div><div class="zeit"><b>●</b> <span id="zeit">0:00</span> · zum Beenden nochmals tippen</div></div>
+    <div class="unten"><span class="tipp" id="tipp">Mikrofon antippen und sprechen – die KI schreibt es sauber auf.</span><button class="mic hidden" id="mic" aria-label="Diktieren"></button></div>
   </div>
   <button class="speichern" id="speichern"></button>
   <div class="meldung" id="meldung"></div>
@@ -113,7 +122,7 @@ function meldung(t, ok){ const m = $('meldung'); m.textContent = t; m.className 
 // Erfassen: sofort auf dem Handy speichern, dann senden versuchen
 function erfassen(){
   const t = $('text').value.trim(); if(!t){ $('text').focus(); return; }
-  const e = { id: uuid(), titel: t, am: new Date().toISOString() };
+  const e = { id: uuid(), titel: t, am: new Date().toISOString(), ...(diktatNotiz ? { wortlich: diktatNotiz } : {}) }; diktatNotiz = '';
   warte.push(e); zuletzt.unshift({ ...e, ok: false }); zuletzt = zuletzt.slice(0, 20);
   schreib('pzapp_warte', warte); schreib('pzapp_zuletzt', zuletzt);
   $('text').value = ''; $('text').focus(); zeichne();
@@ -139,11 +148,16 @@ async function sende(){
   try {
     const lid = await sammelListe();
     for(const w of [...warte]){
+      // Sprachnotiz ohne Netz aufgenommen: jetzt zuerst von der KI schreiben lassen
+      let titel = w.titel, wortlich = w.wortlich || '';
+      if(w.audio){ const blob = await audioHolen(w.id);
+        if(blob){ const r = await diktatAuswerten(blob); titel = r.titel || 'Sprachnotiz (nicht verstanden)'; wortlich = r.wortlich; } else titel = 'Sprachnotiz (Aufnahme fehlt)'; }
       // feste ID: wird ein Eintrag doppelt gesendet (Netz bricht ab), entsteht trotzdem nur eine Pendenz
-      const { error } = await sb.from('pendenz').insert({ id: w.id, liste_id: lid, titel: w.titel, sortierung: Date.parse(w.am) / 1000, erstellt_von: me, herkunft: 'handy' });
+      const { error } = await sb.from('pendenz').insert({ id: w.id, liste_id: lid, titel, notiz: notizHtml(wortlich), sortierung: Date.parse(w.am) / 1000, erstellt_von: me, herkunft: 'handy' });
       if(error && error.code !== '23505') throw error;
+      if(w.audio) audioWeg(w.id).catch(() => {});
       warte = warte.filter(x => x.id !== w.id); schreib('pzapp_warte', warte);
-      zuletzt.forEach(z => { if(z.id === w.id) z.ok = true; }); schreib('pzapp_zuletzt', zuletzt); zeichne();
+      zuletzt.forEach(z => { if(z.id === w.id){ z.ok = true; z.titel = titel; } }); schreib('pzapp_zuletzt', zuletzt); zeichne();
     }
   } catch(e){ console.error(e); if(navigator.onLine) meldung('Senden klappt gerade nicht – Eintrag ist gespeichert und geht später raus.'); }
   sendet = false; zeichne();
@@ -152,16 +166,78 @@ addEventListener('online', sende); addEventListener('offline', zeichne);
 document.addEventListener('visibilitychange', () => { if(!document.hidden) sende(); });
 setInterval(sende, 30000);
 
-// Diktieren im Browser (wo vorhanden); sonst das Mikrofon der Handy-Tastatur
-const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-if(SR){ const mic = $('mic'); mic.classList.remove('hidden'); mic.innerHTML = K('mikrofon', 22); let rec = null;
-  mic.addEventListener('click', () => {
-    if(rec){ rec.stop(); return; }
-    rec = new SR(); rec.lang = 'de-CH'; rec.interimResults = false; const vor = $('text').value;
-    rec.onresult = ev => { const t = [...ev.results].map(r => r[0].transcript).join(' '); $('text').value = (vor ? vor + ' ' : '') + t; };
-    rec.onend = () => { rec = null; mic.classList.remove('an'); $('text').focus(); };
-    rec.onerror = () => { meldung('Diktieren geht gerade nicht – Mikrofon der Tastatur verwenden.'); };
-    mic.classList.add('an'); rec.start(); }); }
+// ---------------------------------------------------------------------------
+// KI-Diktat: Aufnahme als WAV (16 kHz mono, läuft auf Android und iPhone gleich), Pegel + Zeit während dem Sprechen.
+// Mit Netz: Gemini (Edge Function pendenz-diktat) schreibt eine saubere Pendenz ins Feld, der wörtliche Text kommt in die Notiz.
+// Ohne Netz: Aufnahme bleibt auf dem Handy (IndexedDB) und wird ausgewertet + gesendet, sobald wieder Netz da ist.
+// ---------------------------------------------------------------------------
+const MAX_SEK = 120;
+let aufn = null, diktatNotiz = '';
+const idb = () => new Promise((ok, fehler) => { const r = indexedDB.open('pzapp', 1); r.onupgradeneeded = () => r.result.createObjectStore('audio'); r.onsuccess = () => ok(r.result); r.onerror = () => fehler(r.error); });
+const idbTun = async (modus, f) => { const db = await idb(); return new Promise((ok, fehler) => { const t = db.transaction('audio', modus), q = f(t.objectStore('audio')); t.oncomplete = () => ok(q?.result); t.onerror = () => fehler(t.error); }); };
+const audioLegen = (id, blob) => idbTun('readwrite', s => s.put(blob, id));
+const audioHolen = id => idbTun('readonly', s => s.get(id));
+const audioWeg = id => idbTun('readwrite', s => s.delete(id));
+const alsBase64 = blob => new Promise(ok => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1] || ''); r.readAsDataURL(blob); });
+const notizHtml = w => w ? `<p><em>Diktat wörtlich:</em> ${esc(w)}</p>` : null;
+
+// 16-Bit-WAV aus den aufgenommenen Stücken, auf 16 kHz heruntergerechnet (klein genug fürs Handy-Netz)
+function wav(teile, rate){
+  const roh = new Float32Array(teile.reduce((s, t) => s + t.length, 0)); let o = 0; teile.forEach(t => { roh.set(t, o); o += t.length; });
+  const ziel = 16000, f = rate / ziel, n = Math.floor(roh.length / f), daten = new Int16Array(n);
+  for(let i = 0; i < n; i++){ const v = Math.max(-1, Math.min(1, roh[Math.floor(i * f)])); daten[i] = v < 0 ? v * 0x8000 : v * 0x7FFF; }
+  const kopf = new DataView(new ArrayBuffer(44)), txt = (p, s) => [...s].forEach((c, i) => kopf.setUint8(p + i, c.charCodeAt(0)));
+  txt(0, 'RIFF'); kopf.setUint32(4, 36 + n * 2, true); txt(8, 'WAVE'); txt(12, 'fmt '); kopf.setUint32(16, 16, true); kopf.setUint16(20, 1, true); kopf.setUint16(22, 1, true);
+  kopf.setUint32(24, ziel, true); kopf.setUint32(28, ziel * 2, true); kopf.setUint16(32, 2, true); kopf.setUint16(34, 16, true); txt(36, 'data'); kopf.setUint32(40, n * 2, true);
+  return new Blob([kopf.buffer, daten.buffer], { type: 'audio/wav' });
+}
+async function aufnahmeStart(){
+  let stream; try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }); }
+  catch(e){ return meldung('Kein Zugriff aufs Mikrofon – bitte in den Handy-Einstellungen erlauben.'); }
+  const ctx = new (window.AudioContext || window.webkitAudioContext)(), src = ctx.createMediaStreamSource(stream), proc = ctx.createScriptProcessor(4096, 1, 1);
+  aufn = { stream, ctx, proc, teile: [], start: Date.now(), pegel: Array(18).fill(0) };
+  proc.onaudioprocess = e => { const d = e.inputBuffer.getChannelData(0); aufn.teile.push(new Float32Array(d));
+    let s = 0; for(let i = 0; i < d.length; i++) s += d[i] * d[i]; aufn.pegel.push(Math.min(1, Math.sqrt(s / d.length) * 6)); aufn.pegel.shift(); };
+  src.connect(proc); proc.connect(ctx.destination);
+  $('mic').classList.add('an'); $('text').classList.add('hidden'); $('aufnahme').classList.remove('hidden'); $('tipp').textContent = 'Hört zu …';
+  $('pegel').innerHTML = '<i></i>'.repeat(18);
+  const male = () => { if(!aufn) return; const sek = Math.floor((Date.now() - aufn.start) / 1000);
+    $('zeit').textContent = `${Math.floor(sek / 60)}:${String(sek % 60).padStart(2, '0')}`;
+    [...$('pegel').children].forEach((b, i) => b.style.height = (4 + aufn.pegel[i] * 52) + 'px');
+    if(sek >= MAX_SEK) return aufnahmeStopp(); requestAnimationFrame(male); };
+  male();
+}
+async function aufnahmeStopp(){
+  const a = aufn; if(!a) return; aufn = null;
+  a.proc.disconnect(); a.stream.getTracks().forEach(t => t.stop()); const rate = a.ctx.sampleRate; a.ctx.close().catch(() => {});
+  $('mic').classList.remove('an'); $('aufnahme').classList.add('hidden'); $('text').classList.remove('hidden'); $('tipp').textContent = 'Mikrofon antippen und sprechen – die KI schreibt es sauber auf.';
+  if(Date.now() - a.start < 700) return meldung('Zu kurz – Mikrofon antippen, sprechen, nochmals antippen.');
+  const blob = wav(a.teile, rate);
+  if(navigator.onLine && sb && me){
+    $('feld').classList.add('schreibt'); $('tipp').textContent = 'KI schreibt …';
+    try { const r = await diktatAuswerten(blob);
+      if(!r.titel) meldung('Nichts verstanden – bitte nochmals versuchen.');
+      else { const t = $('text').value.trim(); $('text').value = (t ? t + ' ' : '') + r.titel; diktatNotiz = [diktatNotiz, r.wortlich].filter(Boolean).join(' '); }
+      $('feld').classList.remove('schreibt'); $('tipp').textContent = 'Kontrollieren, dann «In die Sammelbox».'; $('text').focus(); return;
+    } catch(e){ console.error(e); $('feld').classList.remove('schreibt'); }
+  }
+  // ohne Netz (oder KI nicht erreichbar): Aufnahme direkt als Pendenz vormerken, wird später ausgewertet
+  const e = { id: uuid(), titel: 'Sprachnotiz – wird ausgewertet', am: new Date().toISOString(), audio: true };
+  try { await audioLegen(e.id, blob); } catch(err){ return meldung('Aufnahme konnte nicht gespeichert werden.'); }
+  warte.push(e); zuletzt.unshift({ ...e, ok: false }); zuletzt = zuletzt.slice(0, 20); schreib('pzapp_warte', warte); schreib('pzapp_zuletzt', zuletzt);
+  $('tipp').textContent = 'Mikrofon antippen und sprechen – die KI schreibt es sauber auf.'; zeichne();
+  meldung('Sprachnotiz gespeichert – wird ausgewertet, sobald wieder Netz da ist', true);
+}
+async function diktatAuswerten(blob){
+  const { data, error } = await sb.functions.invoke('pendenz-diktat', { body: { audio_base64: await alsBase64(blob), mime_type: 'audio/wav' } });
+  if(error || data?.error) throw new Error(data?.error || error?.message || 'Diktat fehlgeschlagen');
+  return { titel: data.titel || '', wortlich: data.wortlich || '' };
+}
+if(navigator.mediaDevices?.getUserMedia && (window.AudioContext || window.webkitAudioContext)){
+  const mic = $('mic'); mic.classList.remove('hidden'); mic.innerHTML = K('mikrofon', 24);
+  mic.addEventListener('click', () => aufn ? aufnahmeStopp() : aufnahmeStart());
+} else $('tipp').textContent = 'Tipp: Mikrofon der Tastatur zum Diktieren';
+$('text').addEventListener('input', () => { if(!$('text').value.trim()) diktatNotiz = ''; });
 
 // Anmeldung: Sitzung bleibt auf dem Handy gespeichert; ohne Netz geht Erfassen trotzdem (mit der gemerkten Person)
 async function start(){
