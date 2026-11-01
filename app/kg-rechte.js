@@ -21,7 +21,7 @@
       B('offerten', 'Offerten-Board', 'Meine Offerten / Alle Offerten'),
       S('listen', 'Listen & Pendenzenarten verwalten') ] },
     { k: 'plan', n: 'Einsatzplaner', icon: 'plan', bereiche: [
-      B('einsaetze', 'Einsätze', 'Gruppe = Einsätze meiner Gruppe'),
+      B('einsaetze', 'Einsätze', 'Eigene = eigene Zeile + Titelzeile der Gruppe, Gruppe = alle Zeilen der Planer-Gruppe'),
       B('abwesenheit', 'Abwesenheiten & Ferien'),
       S('einstellungen', 'Planer-Einstellungen', 'Personen, Fahrzeuge, Feiertage') ] },
     { k: 'pflege', n: 'Pflege & Service', icon: 'pflege', bereiche: [

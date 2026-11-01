@@ -828,6 +828,7 @@ async function pruefeAnmeldung(){
   const { data: b } = await sb.from('benutzer').select('rolle,email,anzeigename').eq('id', ME).maybeSingle();
   if(!b || !b.rolle){ zeigeNur('pendingWrap'); return; }
   ROLLE = b.rolle;
+  if(window.KG && KG.ladeRechte) await KG.ladeRechte(); // Gruppen & Rechte (kg-stil.js) für canEdit
   $('userbar').classList.remove('hidden');
   $('userbarText').textContent = `${b.anzeigename || b.email} (${ROLLE_LABEL[b.rolle] || b.rolle})`;
   $('subnav').classList.remove('hidden');
@@ -924,7 +925,18 @@ const kOrt = k => k ? [k.strasse, [k.plz, k.ort].filter(Boolean).join(' ')].filt
 const kLabel = k => `${kName(k)}${k.ort ? ' · ' + k.ort : ''}`;
 const byId = id => EINS.find(x => x.id === id) || (String(id).startsWith('R') ? ALL.find(x => x.id === id) : undefined); // R… = berechnete Wiederholung
 const first = n => String(n || '').split(' ')[0];
-const canEdit = mid => isBuero() || (P[mid] && P[mid].benutzer_id === ME);
+// Bearbeiten nach Gruppen & Rechte (Einsatzplaner › Einsätze › Bearbeiten):
+// Alle = jede Zeile, Eigene = nur die eigene Zeile, Gruppe = Zeilen der eigenen Planer-Gruppe, Keine = nur ansehen.
+// Die Titelzeile einer Gruppe darf bearbeiten, wer eine Zeile dieser Gruppe bearbeiten darf (siehe Team-Lane).
+// Ohne Gruppe (alte Konten): wie bisher Büro alles, sonst die eigene Zeile.
+const canEdit = mid => {
+  const w = window.KG && KG.darf ? KG.darf('plan', 'einsaetze', 'bearbeiten') : null;
+  if(w === null) return isBuero() || !!(P[mid] && P[mid].benutzer_id === ME);
+  if(w === 'A') return true;
+  if(w === 'E') return !!(P[mid] && P[mid].benutzer_id === ME);
+  if(w === 'G'){ const ich = PERSONEN.find(p => p.benutzer_id === ME && p.aktiv); return !!(ich && P[mid] && P[mid].gruppe_id === ich.gruppe_id); }
+  return false;
+};
 const myPerson = () => PERSONEN.find(p => p.benutzer_id === ME && p.aktiv);
 const ART = { baustelle: 'Auftrag', termin: 'Auftrag', absenz: 'Absenz', intern: 'Werkhof / intern', hilfe: 'Mithilfe' };
 // Personenfarben aus dem Gesamt-Farbkonzept (kg-stil.js, Variante C), nach Team geordnet:
