@@ -27,3 +27,6 @@ with neu(name, farbe) as (values
   ('Sandra Rufener', null), ('Dian Baumann', null))
 update planer_person p set farbe = n.farbe
 from neu n where p.name = n.name and p.aktiv and p.archiviert_am is null;
+
+-- Nachtrag: Raphael Walther ist Vorarbeiter (Bau-Familie, nächste freie Farbe Violett 5)
+update planer_person set farbe = '#DCD0F3' where name = 'Raphael Walther' and aktiv and archiviert_am is null;
