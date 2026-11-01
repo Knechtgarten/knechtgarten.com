@@ -3130,7 +3130,11 @@ async function pausenGeaendert(it, pz0, nV){
 async function ablegenPruefen(it, pt){
   it._trims = []; compute();
   const zuViele = () => { compute(); const L = LAY[it.id]; return !!L && L.free.some(k => ALL.filter(o => o.mid === it.mid && LAY[o.id]?.dup?.[k]).length > 2); };
-  if(isShort(it)){ if(zuViele()){ toast('Dort liegen schon zwei Termine übereinander – ein dritter geht nicht.', null, true); return 'ab'; } return 'ok'; } // kurz: nur Höchstzahl prüfen
+  // Tage der unterbrochenen langen Termine festhalten (ohne it gezählt), damit rot «x von y T» erscheint
+  const tageFesthalten = async H => { const mid0 = it.mid; it.mid = '_'; compute(); const n0 = {}; H.forEach(h => { if(!h.rep && !h.soll && h.kind !== 'absenz' && h.e - h.s > 1 + 1e-6) n0[h.id] = LAY[h.id]?.n; }); it.mid = mid0; compute();
+    for(const h of H) if(n0[h.id] && Math.abs((LAY[h.id]?.n || 0) - n0[h.id]) > .01){ h.soll = n0[h.id]; await speichere(h, { soll_tage: h.soll }); } };
+  if(isShort(it)){ if(zuViele()){ toast('Dort liegen schon zwei Termine übereinander – ein dritter geht nicht.', null, true); return 'ab'; } // kurz: kein Menü, aber Höchstzahl und Tage prüfen
+    await tageFesthalten(ALL.filter(o => o.mid === it.mid && o !== it && !isShort(o) && passtRein(o, it))); return 'ok'; }
   const reihe0 = ALL.filter(o => o.mid === it.mid && o !== it && !isShort(o) && o.e > it.s + 1e-6 && o.s < it.e - 1e-6);
   // Nur teilweise in den Nachbarn gezogen (Verlängern oder Verschieben): Nachbar auf dieser Seite kürzen, keine Überlappung.
   // Absenzen, wiederkehrende und Termine mit fixem Start bleiben, wie sie sind.
@@ -3151,9 +3155,7 @@ async function ablegenPruefen(it, pt){
     if(t.e - t.s > 1 + 1e-6 && !o.soll && t.n0 && Math.abs((LAY[o.id]?.n || 0) - t.n0) > .01){ o.soll = t.n0; p.soll_tage = o.soll; }
     if(!(await speichere(o, p))) Object.assign(o, { s: t.s, e: t.e, soll: t.soll }); }
   for(const o of E) if(o.ueber !== alt[E.indexOf(o) + 1]) await speichere(o, { uebereinander: o.ueber });
-  if(wahl === 'rein'){ // Tage des unterbrochenen Termins festhalten (ohne it gezählt), damit «x von y T» erscheint
-    const mid0 = it.mid; it.mid = '_'; compute(); const n0 = {}; H.forEach(h => { if(!h.rep && !h.soll && h.kind !== 'absenz' && h.e - h.s > 1 + 1e-6) n0[h.id] = LAY[h.id]?.n; }); it.mid = mid0; compute();
-    for(const h of H) if(n0[h.id] && Math.abs((LAY[h.id]?.n || 0) - n0[h.id]) > .01){ h.soll = n0[h.id]; await speichere(h, { soll_tage: h.soll }); } }
+  if(wahl === 'rein') await tageFesthalten(H);
   return 'ok';
 }
 function reinFrage(pt){
