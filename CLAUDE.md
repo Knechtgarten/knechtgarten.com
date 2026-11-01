@@ -7,7 +7,7 @@ Jedes neue Tool übernimmt diesen Stil – nichts neu erfinden.
 ## Pflicht in jeder Seite (`<head>`, direkt nach `<meta charset>`)
 ```html
 <script src="/kg-pw-schutz.js?v=5"></script>
-<script src="/kg-stil.js?v=2"></script>
+<script src="/kg-stil.js?v=8"></script>
 ```
 - `kg-pw-schutz.js`: hält Passwort-Manager (Dashlane …) von allen Feldern ausser dem Login fern.
 - `kg-stil.js`: gemeinsame Icons und Knopfstil (siehe unten).
@@ -26,9 +26,16 @@ Jedes neue Tool übernimmt diesen Stil – nichts neu erfinden.
   Mehrere Knöpfe einer Zeile rechts nebeneinander, Löschen immer mit Abfalleimer und Sicherheitsfrage.
 - Text-Knöpfe wie im Offerten-Tool: `btn btn-primary` (dunkelblau), `btn btn-ghost` (weiss mit Rand).
 
+## Gemeinsame Leiste & Tool-Icons
+- `kg-stil.js` ersetzt in jedem `<header class="app">` «Zurück» + Titel durch den Tool-Umschalter (Icon + Name + Menü aller Tools).
+  Neue Seite eines Tools → Dateiname in `TOOLS[].seiten` in `kg-stil.js` eintragen. Neues Haupttool → Eintrag in `TOOLS` + Icon in `TI`.
+- Tool-Icons nur über `KG.toolIcon('pend', 26)`; Farbe = Palette Stufe 2. Mailassistent/Dokumentensuche haben kein eigenes Tool-Icon.
+
 ## Farben
 Knechtgarten-Farbkonzept (Skill «knechtgarten-farbkonzept»): `#323E4E` Hauptfarbe, `#F5F7F9` Hintergrund,
-`#8B9097` grau, Akzente sparsam `#D6E7F4` (hellblau) und `#D1DB5F` (grün).
+`#8B9097` grau, Akzente sparsam `#D6E7F4` (hellblau) und `#D1DB5F` (grün). Im Code: `KG.grund`.
+Für alles, was unterscheidbar sein muss (Tool-Icons, Pendenzen-Listen, Personen im Planer, Kategorien): nur `KG.palette`
+(10 Familien × 5 Stufen), Planer-Teams aus `KG.planerTeams`, Schrift auf Farbe mit `KG.textAuf(hex)`. Keine eigenen Hex-Farben erfinden.
 
 ## Sprache
 Deutsch (Schweiz, ss statt ß), kurze, klare Beschriftungen, Du-Form.

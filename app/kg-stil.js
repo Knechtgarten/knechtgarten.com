@@ -74,4 +74,184 @@
 .kg-ibtn[disabled]{opacity:.35;cursor:default;}`;
   const st = document.createElement('style'); st.id = 'kg-stil'; st.textContent = css;
   (document.head || document.documentElement).appendChild(st);
+
+  /* ---------------------------------------------------------------------------
+     Farbkonzept (abgenommen 2026-11-01, Mockup «Gesamt-Tool»)
+     KG.grund:   Grundfarben für Aufbau, Menü, Knöpfe – überall gleich.
+     KG.palette: erweiterte Palette, 10 Familien × 5 Stufen (Index 0 = Stufe 1 dunkel … 4 = Stufe 5 hell)
+                 für Tool-Icons (Stufe 2), Pendenzen-Listen, Personen im Einsatzplaner usw.
+     KG.planerTeams: Farben pro Team im Einsatzplaner, in Vergabe-Reihenfolge (Variante C).
+     KG.textAuf(hex): weiss oder dunkel – was auf dieser Farbe besser lesbar ist.
+     --------------------------------------------------------------------------- */
+  const PAL = {
+    gruen:   ['#2E5A2F', '#3F7D3F', '#62A055', '#9CC98A', '#D3EBC7'],
+    oliv:    ['#5A6118', '#7C8726', '#A3AE3A', '#C9D35E', '#E8EDB0'],
+    gold:    ['#8A6410', '#B88A12', '#E0AE24', '#F2CF5E', '#FAEBB0'],
+    orange:  ['#8A3F12', '#C05A1C', '#E57E34', '#F2A66B', '#F9D3B2'],
+    beere:   ['#7A2638', '#A63A52', '#CC5E76', '#E596A6', '#F4CDD5'],
+    violett: ['#3E2A6B', '#5C3F94', '#8063BD', '#AD95DD', '#DCD0F3'],
+    blau:    ['#1F3F6E', '#2F5C9A', '#4F80C2', '#8CB0DE', '#CCDDF2'],
+    petrol:  ['#1E5552', '#2A7570', '#3F9890', '#7FC1B9', '#C4E4DF'],
+    erde:    ['#4E3524', '#6E4C35', '#94704F', '#BE9E80', '#E3D2C0'],
+    grau:    ['#323E4E', '#4C5C70', '#6E7F93', '#A3B0BE', '#DCE2E8']
+  };
+  KG.palette = PAL;
+  KG.grund = { primary: '#323E4E', primaryL: '#4C5C70', ink: '#232B35', muted: '#8B9097', mutedText: '#6B7079',
+    line: '#E1E5E9', bg: '#F5F7F9', accentBlue: '#D6E7F4', accentLime: '#D1DB5F', danger: '#B4655F' };
+  KG.planerTeams = {
+    projektleiter: [PAL.gruen[1], PAL.gruen[2], PAL.gruen[3], PAL.gruen[4]],
+    selber:        [PAL.oliv[2], PAL.oliv[3]],
+    gartenpflege:  [PAL.gold[2], PAL.orange[2], PAL.gold[3], PAL.orange[3], PAL.gold[4], PAL.orange[4]],
+    gartenbau:     [PAL.violett[1], PAL.petrol[2], PAL.blau[1], PAL.violett[3], PAL.blau[2], PAL.violett[2], PAL.violett[4]],
+    pool:          [PAL.blau[4], PAL.petrol[4]]
+  };
+  const lum = hex => { const n = parseInt(String(hex).replace('#', ''), 16) || 0;
+    const f = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
+    return 0.2126 * f(n >> 16) + 0.7152 * f((n >> 8) & 255) + 0.0722 * f(n & 255); };
+  KG.textAuf = hex => { const L = lum(hex); return 1.05 / (L + 0.05) >= (L + 0.05) / (lum('#232B35') + 0.05) ? '#FFFFFF' : '#232B35'; };
+
+  /* ---------------------------------------------------------------------------
+     Tool-Icons (Haupttools): Linien-Icon auf farbiger Kachel, Farbe = Stufe 2.
+     KG.toolIcon('pend', 26) liefert die fertige Kachel.
+     --------------------------------------------------------------------------- */
+  const TI = {
+    home: '<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>',
+    offerten: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/>',
+    artikel: '<path d="M4 5v14M7.5 5v14M10 5v14M13.5 5v14M17 5v14M20 5v14"/>',
+    kunden: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.5 2.9-6 6.5-6s6.5 2.5 6.5 6"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7"/><path d="M18 14.3c2 .8 3.5 2.9 3.5 5.7"/>',
+    pend: '<path d="M4 6l1.5 1.5L8 5"/><path d="M11 6h9"/><path d="M4 12l1.5 1.5L8 11"/><path d="M11 12h9"/><circle cx="6" cy="18" r="1.5"/><path d="M11 18h9"/>',
+    plan: '<path d="M3 4v16h18"/><rect x="6" y="6" width="8" height="3" rx="1"/><rect x="10" y="11" width="9" height="3" rx="1"/><rect x="7" y="15.5" width="6" height="2.5" rx="1"/>',
+    pflege: '<path d="M5 19c0-8 5-13 14-14 0 9-5 14-13 14z"/><path d="M5 19l8-8"/>',
+    wissen: '<path d="M3 5.5C5.5 4.5 9 4.5 12 6.5c3-2 6.5-2 9-1v13c-2.5-1-6-1-9 1-3-2-6.5-2-9-1z"/><path d="M12 6.5v13"/>',
+    rechner: '<rect x="5" y="3" width="14" height="18" rx="2"/><rect x="8" y="6" width="8" height="3" rx=".5"/><path d="M8 13h1M11.5 13h1M15 13h1M8 17h1M11.5 17h1M15 17h1"/>',
+    verw: P.gear
+  };
+  // Haupttools: Schlüssel, Name, Einstiegsseite, Icon, Farbe, Modul in modul_sichtbarkeit, zugehörige Seiten
+  const TOOLS = [
+    { k: 'home', n: 'Startseite', url: 'index.html', farbe: PAL.oliv[1], seiten: ['index'] },
+    { k: 'offerten', n: 'Offertentool', url: 'tool-start-live-v1.html', farbe: PAL.blau[1], modul: 'offertentool',
+      seiten: ['tool-start-live-v1', 'tool-a-live-v1', 'tool-a2-allgemein-live-v1', 'tool-a3-artikel-live-v1', 'tool-b-live-v1', 'einstellungen-live-v1'] },
+    { k: 'artikel', n: 'Artikelstamm', url: 'tool-c-live-v1.html', farbe: PAL.blau[1], modul: 'offertentool', seiten: ['tool-c-live-v1', 'lieferant-abgleich-live-v1'] },
+    { k: 'kunden', n: 'Kunden', url: 'tool-d-kunden-live-v1.html', farbe: PAL.gold[0], modul: 'offertentool', seiten: ['tool-d-kunden-live-v1'] },
+    { k: 'pend', n: 'Pendenzen', url: 'pendenzen-live-v1.html', farbe: PAL.orange[1], modul: 'pendenzen', seiten: ['pendenzen-live-v1'] },
+    { k: 'plan', n: 'Einsatzplaner', url: 'einsatzplaner-live-v1.html', farbe: PAL.petrol[1], modul: 'einsatzplaner', seiten: ['einsatzplaner-live-v1'] },
+    { k: 'pflege', n: 'Pflege & Service', url: 'pflege-kunden-live-v1.html', farbe: PAL.gruen[1], modul: 'pflegetool',
+      seiten: ['pflege-kunden-live-v1', 'pflege-jahresplan-live-v1', 'pflege-kategorien-live-v1'] },
+    { k: 'wissen', n: 'Nachschlagewerk', url: 'wissen-live-v1.html', farbe: PAL.violett[1], modul: 'wissen', seiten: ['wissen-live-v1'] },
+    { k: 'verw', n: 'Verwaltung', url: 'verwaltung-live-v1.html', farbe: '#FFFFFF', admin: true,
+      seiten: ['verwaltung-live-v1', 'tools-live-v1', 'mailassistent-verwaltung-live-v1', 'dokumentensuche-verwaltung-live-v1'] }
+  ];
+  KG.tools = TOOLS;
+  KG.toolIcons = TI;
+  KG.toolIcon = (k, size = 26) => {
+    const t = TOOLS.find(x => x.k === k) || {}; const hell = t.farbe === '#FFFFFF';
+    const g = Math.round(size * 0.74);
+    return `<span class="kg-ti" style="width:${size}px;height:${size}px;border-radius:${Math.round(size * 0.26)}px;background:${t.farbe || PAL.grau[1]};color:${hell ? '#323E4E' : '#FFFFFF'}">`
+      + `<svg width="${g}" height="${g}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${TI[k] || ''}</svg></span>`;
+  };
+
+  /* ---------------------------------------------------------------------------
+     Gemeinsame Leiste: in jedem <header class="app"> wird «Zurück» + Tool-Titel
+     durch den Tool-Umschalter ersetzt (Icon + Name + Pfeil, Klick = Menü aller Tools).
+     Rechte Seite (Reiter, Benutzer, Abmelden) bleibt wie im jeweiligen Tool.
+     Seiten ohne Eintrag in KG.tools (z. B. Datenschutz) bleiben unverändert.
+     --------------------------------------------------------------------------- */
+  const seite = (location.pathname.split('/').pop() || 'index.html').replace(/\.html?$/, '') || 'index';
+  const aktuell = TOOLS.find(t => t.seiten.includes(seite));
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+
+  const cssLeiste = `.kg-ti{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;box-sizing:border-box;}
+header.app .wrap{min-height:46px;}
+.kg-tw{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 10px 0 4px;border:0;border-radius:9px;background:rgba(255,255,255,.08);
+  color:#fff;font:inherit;font-size:14px;font-weight:600;cursor:pointer;flex-shrink:0;white-space:nowrap;}
+.kg-tw:hover,.kg-tw[aria-expanded="true"]{background:rgba(255,255,255,.16);}
+.kg-tw .kg-chev{width:14px;height:14px;opacity:.8;transition:transform .15s;}
+.kg-tw[aria-expanded="true"] .kg-chev{transform:rotate(180deg);}
+.kg-twmenu{position:fixed;z-index:9999;width:560px;max-width:calc(100vw - 24px);box-sizing:border-box;background:#fff;color:#232B35;
+  border:1px solid #E1E5E9;border-radius:12px;box-shadow:0 16px 40px rgba(35,43,53,.18);padding:14px;font-size:13px;}
+.kg-twmenu .kg-h{font-size:11px;font-weight:600;letter-spacing:.06em;color:#6B7079;text-transform:uppercase;padding:0 6px 8px;}
+.kg-twmenu .kg-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:4px;}
+.kg-twmenu .kg-it{display:flex;align-items:center;gap:10px;padding:8px;border-radius:8px;text-decoration:none;color:#232B35;font-weight:600;}
+.kg-twmenu .kg-it:hover{background:#F5F7F9;}
+.kg-twmenu .kg-it.on{background:#EEF3F7;}
+.kg-twmenu .kg-it .kg-ti[style*="#FFFFFF"]{border:1px solid #E1E5E9;}
+.kg-twmenu .kg-sep{height:1px;background:#E1E5E9;margin:12px 0;}
+.kg-twmenu .kg-ext{display:flex;flex-wrap:wrap;gap:6px;padding:0 4px;}
+.kg-twmenu .kg-ext a{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 10px;border:1px solid #E1E5E9;border-radius:13px;font-size:12px;color:#232B35;text-decoration:none;}
+.kg-twmenu .kg-ext a:hover{border-color:#323E4E;}
+.kg-twmenu .kg-ext svg{width:12px;height:12px;color:#6B7079;}
+@media (max-width:600px){.kg-twmenu .kg-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}`;
+  const st2 = document.createElement('style'); st2.id = 'kg-leiste'; st2.textContent = cssLeiste;
+  (document.head || document.documentElement).appendChild(st2);
+
+  const EXT = '<path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>';
+  let sicht = null; // { rolle, module: Map modul_key -> sichtbar, extern: [] } – erst beim ersten Öffnen geladen
+
+  async function ladeSichtbarkeit(){
+    if(sicht) return sicht;
+    sicht = { rolle: null, module: null, extern: [] };
+    try {
+      // sb ist in jeder Seite als globale Konstante angelegt
+      const client = typeof sb !== 'undefined' ? sb : null; // eslint-disable-line no-undef
+      if(!client) return sicht;
+      const { data: { session } } = await client.auth.getSession();
+      if(!session) return sicht;
+      const [{ data: ben }, { data: mods }] = await Promise.all([
+        client.from('benutzer').select('rolle').eq('id', session.user.id).maybeSingle(),
+        client.from('modul_sichtbarkeit').select('modul_key,name,kurzname,url,ist_extern,fuer_buero_team,fuer_mitarbeitende,fuer_service_team')
+      ]);
+      sicht.rolle = ben && ben.rolle;
+      const spalte = { buero_team: 'fuer_buero_team', mitarbeitende: 'fuer_mitarbeitende', service_team: 'fuer_service_team' }[sicht.rolle];
+      const darf = m => sicht.rolle === 'admin' || (spalte && m[spalte]);
+      sicht.module = new Map((mods || []).map(m => [m.modul_key, darf(m)]));
+      sicht.extern = (mods || []).filter(m => m.ist_extern && m.url && darf(m)).sort((a, b) => (a.kurzname || a.name).localeCompare(b.kurzname || b.name, 'de'));
+    } catch(e){ /* ohne Daten: alle Tools zeigen, die Seiten prüfen den Zugriff selbst */ }
+    return sicht;
+  }
+
+  function sichtbar(t, s){
+    if(t.k === 'home' || t.k === aktuell.k) return true;
+    if(t.admin) return s.rolle === 'admin' || (s.module && s.module.get('tools'));
+    if(!s.module || !t.modul) return true;
+    return s.module.get(t.modul) !== false;
+  }
+
+  function menuHtml(s){
+    const verwUrl = s.rolle && s.rolle !== 'admin' ? 'tools-live-v1.html' : 'verwaltung-live-v1.html';
+    const items = TOOLS.filter(t => sichtbar(t, s)).map(t =>
+      `<a class="kg-it${t.k === aktuell.k ? ' on' : ''}" href="${t.k === 'verw' ? verwUrl : t.url}">${KG.toolIcon(t.k, 32)}<span>${esc(t.n)}</span></a>`).join('');
+    const ext = s.extern.length ? `<div class="kg-sep"></div><div class="kg-h">Externe Links</div><div class="kg-ext">${s.extern.map(m =>
+      `<a href="${esc(m.url)}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${EXT}</svg>${esc(m.kurzname || m.name)}</a>`).join('')}</div>` : '';
+    return `<div class="kg-h">Tools</div><div class="kg-grid">${items}</div>${ext}`;
+  }
+
+  function leiste(){
+    const head = document.querySelector('header.app');
+    if(!head || !aktuell || head.querySelector('.kg-tw')) return;
+    const wrap = head.querySelector('.wrap') || head;
+    const back = wrap.querySelector('.backlink'), brand = wrap.querySelector('.brand');
+    const btn = document.createElement('button');
+    btn.type = 'button'; btn.className = 'kg-tw'; btn.setAttribute('aria-haspopup', 'true'); btn.setAttribute('aria-expanded', 'false');
+    btn.title = 'Tool wechseln';
+    btn.innerHTML = `${KG.toolIcon(aktuell.k, 28)}<span>${esc(aktuell.n)}</span><svg class="kg-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">${P.chev}</svg>`;
+    if(back) back.replaceWith(btn); else wrap.insertBefore(btn, wrap.firstChild);
+    if(brand) brand.style.display = 'none';
+
+    let menu = null;
+    const zu = () => { if(menu){ menu.remove(); menu = null; } btn.setAttribute('aria-expanded', 'false'); };
+    const auf = async () => {
+      menu = document.createElement('div'); menu.className = 'kg-twmenu'; menu.setAttribute('role', 'menu');
+      const r = btn.getBoundingClientRect();
+      menu.style.top = (r.bottom + 6) + 'px'; menu.style.left = Math.max(12, r.left) + 'px';
+      menu.innerHTML = menuHtml({ rolle: null, module: null, extern: [] });
+      document.body.appendChild(menu); btn.setAttribute('aria-expanded', 'true');
+      const s = await ladeSichtbarkeit();
+      if(menu) menu.innerHTML = menuHtml(s);
+    };
+    btn.addEventListener('click', e => { e.stopPropagation(); menu ? zu() : auf(); });
+    document.addEventListener('click', e => { if(menu && !menu.contains(e.target)) zu(); });
+    document.addEventListener('keydown', e => { if(e.key === 'Escape' && menu){ zu(); btn.focus(); } });
+    window.addEventListener('resize', zu);
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', leiste); else leiste();
 })();
