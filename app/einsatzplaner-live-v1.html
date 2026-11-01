@@ -1267,7 +1267,7 @@ function tlTopSync(){ const t = tlEl(), o = $('tlTop'); if(!t || !o) return; o.f
   if(!o._b){ o._b = 1; o.addEventListener('scroll', () => { const t2 = tlEl(); if(t2 && Math.abs(t2.scrollLeft - o.scrollLeft) > 1) t2.scrollLeft = o.scrollLeft; }, { passive: true }); } }
 const centerU = () => { const t = tlEl(); return t ? UX(t.scrollLeft + visW() / 2) : TODAY + .5; };
 function scrollToU(u, mode){ const t = tlEl(); if(!t) return; t.scrollLeft = Math.max(0, mode === 'center' ? X(u) - visW() / 2 : X(u)); }
-function goToday(){ if(zoom === 'tag') scrollToU(TODAY, 'left'); else if(zoom === 'woche'){ const w = (dDate(TODAY).getDay() + 6) % 7; scrollToU(w >= 5 ? TODAY + 7 - w : TODAY - w, 'left'); } else scrollToU(TODAY - (zoom === 'jahr' ? 28 : zoom === 'quartal' ? 7 : 3), 'left'); }
+function goToday(){ if(zoom === 'tag') scrollToU(TODAY + 1 / 12, 'left'); else if(zoom === 'woche'){ const w = (dDate(TODAY).getDay() + 6) % 7; scrollToU(w >= 5 ? TODAY + 7 - w : TODAY - w, 'left'); } else scrollToU(TODAY - (zoom === 'jahr' ? 28 : zoom === 'quartal' ? 7 : 3), 'left'); }
 function step(dir){ const n = { jahr: 91, quartal: 28, monat: 14, woche: 7, tag: 1 }[zoom]; const t = tlEl(); t.scrollLeft = X(UX(t.scrollLeft) + dir * n); }
 // Widget auf der Startseite blättert die Woche über postMessage
 if(EINGEBETTET) addEventListener('message', e => { if(e.origin !== location.origin || !e.data) return; if(e.data.ep === 'farbe'){ EFARBE = e.data.v; renderRows(); } else if(e.data.ep === 'zurueck') step(-1); else if(e.data.ep === 'weiter') step(1); else if(e.data.ep === 'heute') goToday(); });
@@ -1355,6 +1355,8 @@ function personRow(p, W, bgx){
     // Woche bis Jahr: Balken füllen ganze Halbtage (Vormittag/Nachmittag nur 1 px auseinander), damit mehr Text Platz hat
     const voll = zoom !== 'tag' && !L.mini, sV = voll ? L.segs.map(([a, b]) => [Math.floor(a * 2 + 1e-9) / 2, Math.ceil(b * 2 - 1e-9) / 2]) : L.segs, rd = voll ? .5 : 1;
     // Jahr (ohne Wochenenden): über das Wochenende laufende Stücke zu einem Balken verschmelzen
+    // Tagesansicht: ganze Tage (gespeichert ab 06:00) erst ab 07:00 zeigen, bündig mit den Pflege-Terminen
+    if(zoom === 'tag') for(let i = 0; i < sV.length; i++) if(sV[i][0] - Math.floor(sV[i][0]) < 1e-6 && sV[i][1] - sV[i][0] > 1 / 12) sV[i] = [sV[i][0] + 1 / 12, sV[i][1]];
     if(zoom === 'jahr' && voll) for(let i = sV.length - 1; i > 0; i--) if(XW(sV[i - 1][1], sV[i][0]) < 1){ sV[i - 1] = [sV[i - 1][0], sV[i][1]]; sV.splice(i, 1); }
     const x0 = X(sV[0][0]) + 3, tw = Math.max(0, XW(sV[0][0], sV[sV.length - 1][1]) - 5);
     const prov = it.ok === false;
@@ -1368,7 +1370,7 @@ function personRow(p, W, bgx){
     // Woche/Tag: Farbfeld und Name an jedem Tagesbeginn wiederholen (am Nachmittag nur, wenn dort etwas Neues beginnt)
     const tagKopf = !EINGEBETTET && (zoom === 'woche' || zoom === 'tag') && !L.mini && (it.kind === 'hilfe' || it.kind === 'baustelle' || it.kind === 'termin');
     const kopfFeld = o => prov ? `repeating-linear-gradient(135deg,#7FC1B9 0 2px,#FFFFFF 2px 5px) ${o}px 0/${KW()}px 100% no-repeat` : `linear-gradient(${st.bd},${st.bd}) ${o}px 0/${KW()}px 100% no-repeat`;
-    const tagesKoepfe = (sg, l) => { const o = []; if(tagKopf) for(let d = Math.ceil(sg[0] + 1e-6); d < sg[1] - .25; d++) o.push(X(d) - l); return o; };
+    const tagesKoepfe = (sg, l) => { const o = []; if(tagKopf) for(let d = Math.ceil(sg[0] + 1e-6); d < sg[1] - .25; d++) o.push(X(d + (zoom === 'tag' ? 1 / 12 : 0)) - l); return o; };
     sV.forEach((sg, i) => {
       const l = X(sg[0]) + rd, w = Math.max(3, XW(sg[0], sg[1]) - 2 * rd);
       const kd = tagesKoepfe(sg, l); // Positionen der weiteren Tagesanfänge im Balken
@@ -1397,8 +1399,8 @@ function personRow(p, W, bgx){
       // Tag: ein Punkt pro Halbtag. Woche/Monat: ein Punkt pro Tag und Auftrag in der Tagesmitte, links = Vormittag, rechts = Nachmittag
       // (betrifft es nur einen Halbtag, ist der Punkt nur halb gefüllt); Klick schaltet beide Halbtage
       // Tag: Punkt ein Stück nach dem Farbfeld (Nachmittag gleich daneben, wenn der Balken schon am Vormittag beginnt)
-      if(zoom === 'tag') L.free.forEach(k => { if(!(k >= TODAY * 2 || solo.has(k))) return; const h = k / 2, sg = L.segs.find(([a, b]) => b > h && a < h + .5), a0 = Math.max(Math.floor(h), sg ? sg[0] : h);
-        dot(k, X(a0) + KW() + 60 + (k % 2 && a0 < h ? 18 : 0)); });
+      if(zoom === 'tag') L.free.forEach(k => { if(!(k >= TODAY * 2 || solo.has(k))) return; const h = k / 2, sg = L.segs.find(([a, b]) => b > h && a < h + .5), a0r = Math.max(Math.floor(h), sg ? sg[0] : h), a0 = a0r - Math.floor(a0r) < 1e-6 ? a0r + 1 / 12 : a0r;
+        dot(k, X(a0) + KW() + 60 + (k % 2 && a0r < h ? 18 : 0)); });
       else if(dayW >= 7) [...new Set(L.free.map(k => k >> 1))].forEach(d => {
         // Woche: liegt der Auftrag nur einen Halbtag an diesem Tag, voller Punkt in der Mitte dieses Halbtags (halbe Punkte nur bei ganzem Tag)
         const nur = L.free.includes(d * 2) !== L.free.includes(d * 2 + 1) ? (L.free.includes(d * 2) ? d * 2 : d * 2 + 1) : null;
@@ -1826,7 +1828,7 @@ function vehIcons(p){
     if(n >= 2 && eng) return; if(eng && j++ % Math.max(1, Math.ceil(12 / dayW))) return;
     const zwei = n >= 2, w = zwei ? sz * 1.25 : sz;
     const t = zwei ? `${n} Lieferwagen: ${[...ws].map(id => resName(resById(id))).join(', ')}` : 'Kein Lieferwagen an diesem Tag – Klick: Lieferwagen aufklappen';
-    h += `<span class="vic${zwei ? ' zwei' : ''}" data-vic="${p.id}" style="top:${23 - sz}px;left:${zoom === 'woche' ? X(d) + 80 : zoom === 'tag' ? X(d) + KW() + 140 : X(d) + wdW(d) / 2 - w / 2}px;width:${w}px;height:${sz}px" title="${esc(t)}">${I(zwei ? 'truck2' : 'truckf')}</span>`; });
+    h += `<span class="vic${zwei ? ' zwei' : ''}" data-vic="${p.id}" style="top:${23 - sz}px;left:${zoom === 'woche' ? X(d) + 80 : zoom === 'tag' ? X(d + 1 / 12) + KW() + 140 : X(d) + wdW(d) / 2 - w / 2}px;width:${w}px;height:${sz}px" title="${esc(t)}">${I(zwei ? 'truck2' : 'truckf')}</span>`; });
   return h;
 }
 function ovRows(W, bgx, typ = layer, focusMid = null){
