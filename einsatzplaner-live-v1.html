@@ -1027,7 +1027,8 @@ function meinEinsatz(it){
   // Mithilfe auf meinen Projekten zählt nicht (nur Vorarbeiter direkt)
   return false;
 }
-const hilfeKurz = it => { const l = byId(it.link), m = l ? l.mid : it.mp; return P[m] ? first(P[m].name) : labOf(it); };
+// Mithilfe-Beschriftung: Vorname der Person; liegt der Termin gerade in einer Ablage-Zeile, der Kunde/Titel des Termins
+const hilfeKurz = it => { const l = byId(it.link), m = l ? l.mid : it.mp; return l && P[m]?.ist_ablage ? labOf(l) : P[m] ? first(P[m].name) : labOf(it); };
 const txtOn = c => { const m = /^#?([0-9a-f]{6})$/i.exec(c || ''); if(!m) return '#FFFFFF'; const n = parseInt(m[1], 16); const l = (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255; return l > .62 ? '#232B35' : '#FFFFFF'; };
 // Absenz-Typen: 6 gut unterscheidbare Grautöne, optional gestreift (Seite «Feiertage & Absenzen»)
 let ABST = [];
@@ -1047,8 +1048,8 @@ function barStyle(it){
   let c;
   // Baustelle = Farbe des Projektleiters, ohne Projektleiter = «selber abgemacht»; Mithilfe = Farbe der Person, mit der man arbeitet
   // Aufträge und Mithilfe voll in der Farbe (links frei für den Personal-Streifen rot/blau)
-  // Mithilfe = Farbe der Person, mit der man arbeitet; ohne Personenfarbe (z. B. Baustelle in der Ablage) neutral weiss mit grauem Rand
-  if(it.kind === 'hilfe'){ const l = byId(it.link); c = (l && P[l.mid]?.farbe) || (!l && P[it.mp]?.farbe); return c ? { bg: c, fg: txtOn(c), bd: c } : { bg: '#fff', fg: '#323E4E', bd: '#8B9097' }; }
+  // Mithilfe = Farbe der Person, mit der man arbeitet; liegt deren Termin gerade in der Ablage: Farbe des Auftrags (Projektleiter)
+  if(it.kind === 'hilfe'){ const l = byId(it.link); c = l && P[l.mid]?.ist_ablage ? (P[l.pl]?.farbe || SELBER) : (l && P[l.mid]?.farbe) || (!l && P[it.mp]?.farbe) || SELBER; return { bg: c, fg: txtOn(c), bd: c }; }
   else c = P[it.pl]?.farbe || SELBER;
 
   return { bg: c, fg: txtOn(c), bd: c }; // voll in der Farbe des Projektleiters bzw. «selber abgemacht»
@@ -1422,7 +1423,7 @@ function ablHinweis(gid){ if(ABLAGE && !EINGEBETTET) return ''; const ids = new 
 const istLang = it => it.e - it.s > 1 + 1e-6 && (it.kind === 'baustelle' || it.kind === 'termin');
 let tfLauf = false;
 async function tageFixNachholen(){ if(tfLauf) return;
-  const neu = EINS.filter(it => istLang(it) && !it.wdh && !it.soll && !it.frei && it.ok !== false && it.e > TODAY && LAY[it.id]?.n > 0 && canEdit(it.mid)); if(!neu.length) return;
+  const neu = EINS.filter(it => istLang(it) && !it.wdh && !it.soll && !it.frei && !P[it.mid]?.ist_ablage && it.ok !== false && it.e > TODAY && LAY[it.id]?.n > 0 && canEdit(it.mid)); if(!neu.length) return;
   tfLauf = true; neu.forEach(it => it.soll = LAY[it.id].n);
   try { for(const it of neu) if(!(await speichere(it, { soll_tage: it.soll }))){ it.soll = null; break; } } finally { tfLauf = false; } }
 // Zähler «2 Doppelbelegungen» in der Leiste (ab heute, pro Person und Tag); Klick springt der Reihe nach hin
@@ -1594,7 +1595,7 @@ function renderRows(){
     h += `<div class="row grp${zu ? ' zu' : ''}${g === ph ? ' phk' : ''}${ablK ? ' ablk' : ''}" data-g="${g.id}"><div class="nm">${ablK ? `<button type="button" class="ablbar${ABLAGE ? ' on' : ''}" id="ablBtn" title="Drei leere Ablage-Zeilen unter jeder Gruppe ein-/ausblenden">Ablage ${ABLAGE ? 'eingeblendet' : 'ausgeblendet'}</button>` : ''}${I('chev')}${esc(g.name)} <span style="opacity:.6;font-weight:400">(${ps.length})</span>${ablHinweis(g.id)}${isBuero() && g.id !== '_ohne' ? `<button class="gadd" data-gadd="${g.id}" title="Zeile hinzufügen" aria-label="Zeile hinzufügen">${I('plus')}</button>` : ''}</div><div class="lane" style="width:${W}px;height:20px">${provBars('g:' + g.id)}</div></div>`;
     if(!zu) ps.forEach(p => { h += personRow(p, W, bgx); if(openMid === p.id) h += openTyp === 'maschine' ? ovRows(W, bgx, 'maschine', p.id) : vehFocusRows(W, bgx, p.id); }); // Anhänger nur in der Übersicht «Anhänger»
     // Ablage-Zeilen (eingeschaltet über den Knopf oben links)
-    if(!zu && ABLAGE && !EINGEBETTET) ABL.filter(a => a.gruppe_id === g.id).sort((a, b) => a.sortierung - b.sortierung).forEach(p => { h += personRow(p, W, bgx).replace('<div class="row', '<div class="row ablrow'); }); // Ablage-Zeilen sehen aus wie Mitarbeitende
+    if(!zu && ABLAGE && !EINGEBETTET) ABL.filter(a => a.gruppe_id === g.id).sort((a, b) => a.sortierung - b.sortierung).forEach(p => { h += personRow({ ...p, name: '' }, W, bgx).replace('<div class="row', '<div class="row ablrow'); }); // Ablage-Zeilen: leer, ohne Namen, sonst wie Mitarbeitende
   });
   // Archiv: ehemalige Personen ganz unten, standardmässig zu, nach Jahr des Austritts unterteilt (jedes Jahr auf-/zuklappbar)
   const arch = PERSONEN.filter(p => p.archiviert_am);
@@ -2255,9 +2256,6 @@ async function neueMag(titel, files){
   if(files.length) await magHoch(data, files);
   toast(`Erfasst unter ${MAGK[magK][0]}, zuunterst`);
 }
-// Wie bestaetige, aber als Promise: true = Ja, false = Abbrechen / Esc / daneben geklickt
-const jaNein = (titel, html, ja) => new Promise(res => { bestaetige(titel, html, ja, () => res(true)); const d = [...document.querySelectorAll('.dlg')].pop();
-  new MutationObserver((m, o) => { if(!d || !d.isConnected){ o.disconnect(); res(false); } }).observe(document.body, { childList: true }); });
 function bestaetige(titel, html, ja, fn){
   const d = document.createElement('div'); d.className = 'dlg';
   d.innerHTML = `<div class="in" style="max-width:380px" role="dialog" aria-modal="true" aria-label="${esc(titel)}"><b style="font-size:15px">${esc(titel)}</b>${html}<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost" data-no>Abbrechen</button><button class="btn btn-primary" data-ja>${esc(ja)}</button></div></div>`;
@@ -3075,23 +3073,21 @@ function bindWindow(){
       if(d.fixHit) toast('Start ist fix. Zum Verschieben im Detailfeld das Schloss öffnen.');
       if(it.s === d.s0 && it.e === d.e0 && it.mid === d.mid0) return;
       const vorher = { s: d.s0, e: d.e0, mid: d.mid0, ...(d.pz0 ? { pz: d.pz0 } : {}), ...(d.at0 ? { at: d.at0 } : {}) };
-      // In eine Ablage-Zeile gibt es keine Mithilfe: vorher fragen und die Mithilfe löschen (sonst bleibt der Termin, wo er war)
-      if(P[it.mid]?.ist_ablage && it.mid !== d.mid0){ const hs = EINS.filter(h => h.kind === 'hilfe' && h.link === it.id);
-        if(hs.length){ const ok = await jaNein('Mithilfe entfernen?', `<span>${esc(labOf(it))} hat Mithilfe von ${esc([...new Set(hs.map(h => first(P[h.mid]?.name || '')))].join(', '))}. In der Ablage gibt es keine Mithilfe – sie wird gelöscht.</span>`, 'Mithilfe löschen');
-          if(!ok){ Object.assign(it, vorher); renderRows(); return; }
-          for(const h of hs){ const { error } = await sb.from('planer_einsatz').delete().eq('id', h.id); if(error){ fehler(error, 'Löschen'); Object.assign(it, vorher); renderRows(); return; } EINS = EINS.filter(x => x !== h); } } }
-      if((await ablegenPruefen(it, { x: e.clientX, y: e.clientY })) === 'ab'){ Object.assign(it, vorher); renderRows(); return; }
+      // In eine Ablage-Zeile hineingelegt (aus einer anderen Zeile): keine Prüfung, kein Kürzen, kein Nachziehen – der Termin bleibt
+      // unverändert. Innerhalb der Ablage (ziehen, verschieben, verlängern) gelten die normalen Regeln.
+      const inAblage = !!P[it.mid]?.ist_ablage && !P[d.mid0]?.ist_ablage;
+      if(!inAblage && (await ablegenPruefen(it, { x: e.clientX, y: e.clientY })) === 'ab'){ Object.assign(it, vorher); renderRows(); return; }
       // Rand gezogen: fixe Arbeitstage bleiben (Abweichung = rot, «übernehmen» im Hinweis); nur wer nicht mehr lang ist, verliert sie
-      const keinLang = it.soll && !istLang(it); if(keinLang) it.soll = null;
+      const keinLang = !inAblage && it.soll && !istLang(it); if(keinLang) it.soll = null;
       const ok = await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true), person_id: it.mid, uebereinander: !!it.ueber, weicht: !!it.weicht, ...(keinLang ? { soll_tage: null } : {}), ...(d.pz0 && d.mode === 'l' ? { pausen: it.pz } : {}), ...(d.at0 && d.mode === 'l' ? { allein_tage: it.at } : {}) });
       if(!ok){ Object.assign(it, vorher); renderRows(); return; }
       tageFixNachholen(); // neu lang geworden = fixe Arbeitstage
-      if(it.kind === 'absenz') await ausgleich(it, vorher);
+      if(it.kind === 'absenz' && !inAblage) await ausgleich(it, vorher);
       // Ganzer Termin verschoben (auch andere Zeile): Sprung-Regel Faktor 2 – Absenzen immer, höchstens ein Kundentermin
-      if(d.mode === 'move' && istLang(it) && it.soll && !it.frei){ compute(); const ne = sprungEnde(it, 2, it.s);
+      if(!inAblage && d.mode === 'move' && istLang(it) && it.soll && !it.frei){ compute(); const ne = sprungEnde(it, 2, it.s);
         if(ne != null && Math.abs(ne - it.e) > 1e-6){ const e0 = it.e; it.e = ne; if(!(await speichere(it, { ende: fromU(it.e, true) }))) it.e = e0; } }
       renderRows();
-      const msg = it.mid !== d.mid0 ? `${labOf(it)} → ${P[it.mid].name}` : `Verschoben auf ${spanLabel(it)}`;
+      const msg = it.mid !== d.mid0 ? (inAblage ? `${labOf(it)} in die Ablage gelegt` : `${labOf(it)} → ${P[it.mid].name}`) : `Verschoben auf ${spanLabel(it)}`;
       const undo = async () => { Object.assign(it, vorher); renderRows(); await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true), person_id: it.mid, ...(vorher.pz ? { pausen: it.pz } : {}) }); };
       const nJetzt = LAY[it.id]?.n, abwR = d.mode !== 'move' && it.soll && nJetzt != null && Math.abs(nJetzt - it.soll) > .01;
       toast(abwR ? `${labOf(it)}: ${fmtN(nJetzt)} statt ${fmtN(it.soll)} T` : msg, abwR ? [{ l: 'Als neue Länge übernehmen', fn: async () => { it.soll = nJetzt; renderRows(); await speichere(it, { soll_tage: it.soll }); if(selId === it.id) openPanel(it.id); } }, { l: 'Rückgängig', fn: undo }] : undo);
