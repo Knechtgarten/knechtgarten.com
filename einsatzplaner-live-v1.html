@@ -168,7 +168,7 @@ html:not(.ep-eingebettet) .bar.kopf .t.tz{max-width:none;color:#4C5C70;} html:no
 .tl.zm .rdot{top:7px;} .tl.zm .vic{top:5px!important;}
 .tl.zw .rdot,.tl.zm .rdot{width:7px;height:7px;top:4px;border-width:0;} /* Feld: Punkt oben links */
 .vsq{position:absolute;top:13px;width:7px;height:7px;border-radius:1px;background:var(--red);z-index:3;cursor:pointer;} .vsq.zwei{background:#2F5C9A;} /* Feld: Quadrat oben rechts (Lieferwagen) */
-.itri{position:absolute;top:3px;width:16px;height:16px;color:var(--red);z-index:3;cursor:pointer;display:flex;} .itri svg{width:100%;height:100%;} /* Warndreieck = wichtige Info, Klick öffnet sie */
+.itri{position:absolute;top:5px;width:12px;height:12px;color:var(--red);z-index:3;pointer-events:none;display:flex;} .itri svg{width:100%;height:100%;} /* nur Anzeige: Info steht im Termin */ /* Warndreieck = wichtige Info, Klick öffnet sie */
 .tl.zw .vic,.tl.zm .vic{transform:scale(.85);transform-origin:left center;}
 html:not(.ep-eingebettet) .tl .grid{margin-bottom:50vh;} /* unten Platz, damit auch die untersten Gruppen ganz aufgeklappt sichtbar sind */
 .tl.zq .rdot{top:7px;} .tl.zq .vic{display:none!important;} /* Quartal: grobe Übersicht */
@@ -1357,7 +1357,7 @@ function tagAnker(it, d){ const L = LAY[it.id], sg = L && L.segs.find(([a, b]) =
 function feldBreite(it, d){
   if(!FELD_ZOOM() || it.kind === 'absenz') return 0;
   const p = hatPunkt(it, d), w = (it.kind === 'baustelle' || it.kind === 'termin') && wagenTage(it.mid).has(d), i = !!infoAm(it, d);
-  return (p || w ? 8 : 0) + (i ? 17 : 0); // links Punkt über Quadrat, daneben das Warndreieck (wichtige Info)
+  return (p || w ? 8 : 0) + (i ? 13 : 0); // links Punkt über Quadrat, daneben das Warndreieck (wichtige Info)
 }
 const feldOff = (it, d) => { const fb = feldBreite(it, d); return fb ? fb + 3 : 0; }; // Text beginnt nach dem Feld
 // Wichtige Info für einen Termin an einem Tag: ansehen, erfassen, ändern, löschen
@@ -1371,6 +1371,11 @@ function infoPop(eid, d, ed, rect){
   const xb = pop.querySelector('#infX'); if(xb) xb.onclick = async () => { closePop(); await infoWeg(alt); };
   setTimeout(() => { const ta = pop.querySelector('#infT'); if(ta) ta.focus(); }, 30);
 }
+// Wichtige Info aus dem Seitenfenster speichern (leer = löschen)
+let panelTagU = 0; // Tag, an dem in den Termin geklickt wurde
+async function infoSpeichern(eid, d, text){ const tag = isoDate(d), alt = INFO.get(eid + '|' + tag); text = String(text || '').trim();
+  if(!text){ if(!alt) return; const { error } = await sb.from('planer_einsatz_info').delete().eq('id', alt.id); if(error) return fehler(error); INFO.delete(eid + '|' + tag); renderRows(); return; }
+  const { data, error } = await sb.from('planer_einsatz_info').upsert({ einsatz_id: eid, tag, text, erstellt_von: ME }, { onConflict: 'einsatz_id,tag' }).select().single(); if(error) return fehler(error); INFO.set(eid + '|' + tag, data); renderRows(); }
 async function infoWeg(alt){ if(!confirm('Wichtige Info löschen?')) return; const { error } = await sb.from('planer_einsatz_info').delete().eq('id', alt.id); if(error) return fehler(error); INFO.delete(alt.einsatz_id + '|' + alt.tag); renderRows(); }
 function personRow(p, W, bgx){
   const ed = canEdit(p.id), its = ALL.filter(i => i.mid === p.id); let bars = '';
@@ -2667,6 +2672,7 @@ function tagFarbe(d){
   });
 }
 function bindTimeline(t){
+  t.addEventListener('pointerdown', e => { if(e.target.closest('.bar')) panelTagU = uAt(e.clientX); }, true); // Tag für «Wichtige Info» im Seitenfenster
   // Gelbes Feld (wichtige Info): Klick oder Rechtsklick öffnet die Info, nichts anderes (kein Ziehen, kein neuer Eintrag)
   const infoAuf = (e, f) => { e.preventDefault(); e.stopPropagation(); const [eid, d] = f.dataset.info.split('|'); const it = byId(eid); infoPop(eid, +d, !!it && canEdit(it.mid), f.getBoundingClientRect()); };
   t.addEventListener('pointerdown', e => { if(e.target.closest('.itri')) e.stopPropagation(); }, true);
@@ -3269,6 +3275,9 @@ function openPanel(id, isNew){
     ${fixe}
     ${it.kind === 'absenz' ? `<div class="abs-chips">${ABST.map(t => `<button data-pabs="${esc(t.name)}" class="${t.name === it.title ? 'on' : ''}" ${dis}><i style="background:${absStyle(t.name).bg}"></i>${esc(t.name)}</button>`).join('')}</div>` : ''}
     <div class="fld"><label>${it.kind === 'absenz' ? 'Grund / Notiz' : 'Notiz'}</label><textarea id="pNotiz" placeholder="${it.kind === 'absenz' ? 'z. B. Arztzeugnis bis …' : 'Was ist zu tun, Zufahrt, Material …'}" ${dis}>${esc(it.text)}</textarea></div>
+    ${it.kind !== 'absenz' ? (() => { const ik = it.rep || it.id, tage = [...new Set(((LAY[it.id] || {}).free || []).map(k => k >> 1))].sort((a, b) => a - b); if(!tage.length) for(let d = Math.floor(it.s); d < Math.ceil(it.e - 1e-6); d++) tage.push(d);
+      const gew = tage.includes(Math.floor(panelTagU)) ? Math.floor(panelTagU) : (tage.find(d => INFO.has(ik + '|' + isoDate(d))) ?? tage[0]);
+      return `<div class="fld"><label style="display:flex;align-items:center;gap:6px">Wichtige Info${tage.length > 1 ? `<select id="pInfoTag" style="margin-left:auto;font-size:12px;padding:1px 4px" ${dis}>${tage.map(d => `<option value="${d}"${d === gew ? ' selected' : ''}>${esc(dLab(d))}${INFO.has(ik + '|' + isoDate(d)) ? ' ⚠' : ''}</option>`).join('')}</select>` : `<span class="small muted" style="margin-left:auto">${esc(dLab(gew))}</span><input type="hidden" id="pInfoTag" value="${gew}">`}</label><textarea id="pInfo" placeholder="z. B. Kran kommt um 7:30 – erscheint als Warndreieck an diesem Tag" ${dis}>${esc((INFO.get(ik + '|' + isoDate(gew)) || {}).text || '')}</textarea></div>`; })() : ''}
     ${secs}
     ${pflege}
     <div class="sd-foot">${ed ? `<button class="btn btn-danger" id="pDel">${I('trash')}Löschen</button>` : '<span class="small muted">Nur lesen</span>'}<span class="small muted" id="pSave"></span></div>
@@ -3293,6 +3302,10 @@ function openPanel(id, isNew){
   if(it.serie) serieInfo(it.serie).then(t => { const b = $('pWdh'); if(b) b.title = t; });
   on('#pSollWeg', 'onclick', () => save({ soll_tage: null }, { soll: null }).then(() => openPanel(id)));
   let nt; on('#pNotiz', 'oninput', e => { clearTimeout(nt); const v = e.target.value; nt = setTimeout(() => save({ notiz: v || null }, { text: v }), 700); });
+  // Wichtige Info pro Tag (Warndreieck im Termin)
+  const ikey = it.rep || it.id; let itm;
+  on('#pInfoTag', 'onchange', () => { const d = +$('pInfoTag').value; $('pInfo').value = (INFO.get(ikey + '|' + isoDate(d)) || {}).text || ''; });
+  on('#pInfo', 'oninput', e => { clearTimeout(itm); const v = e.target.value; itm = setTimeout(() => infoSpeichern(ikey, +$('pInfoTag').value, v), 700); });
   on('#pDel', 'onclick', () => loescheEinsatz(it));
   on('#pFixG', 'onchange', e => save({ start_fix_grund: e.target.value.trim() || null }, { fixg: e.target.value.trim() }));
   on('#pVomOrig', 'onclick', async () => { const o = byId(it.kv); if(!o) return;
