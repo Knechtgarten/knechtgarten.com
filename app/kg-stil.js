@@ -99,7 +99,7 @@
   KG.grund = { primary: '#323E4E', primaryL: '#4C5C70', ink: '#232B35', muted: '#8B9097', mutedText: '#6B7079',
     line: '#E1E5E9', bg: '#F5F7F9', accentBlue: '#D6E7F4', accentLime: '#D1DB5F', danger: '#B4655F' };
   KG.planerTeams = {
-    projektleiter: [PAL.gruen[1], PAL.gruen[2], PAL.gruen[3], PAL.gruen[4]],
+    projektleiter: [PAL.gruen[0], PAL.oliv[1], PAL.gruen[3], PAL.oliv[3]], // deutlich unterscheidbar (Grün dunkel, Oliv, Grün hell, Limette)
     selber:        [PAL.oliv[2], PAL.oliv[3]],
     gartenpflege:  [PAL.gold[2], PAL.orange[2], PAL.gold[3], PAL.orange[3], PAL.gold[4], PAL.orange[4]],
     gartenbau:     [PAL.violett[1], PAL.petrol[2], PAL.blau[1], PAL.violett[3], PAL.blau[2], PAL.violett[2], PAL.violett[4]],
