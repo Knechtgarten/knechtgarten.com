@@ -971,8 +971,8 @@ async function ladeAlles(){
     syncPflegeErledigt();
   }catch(err){ fehler(err, 'Laden'); }
 }
-function rowToItem(r){ return { id: r.id, mid: r.person_id, kind: r.art, s: toU(r.beginn), e: toU(r.ende), kid: r.kunde_id, title: r.titel || '', text: r.notiz || '', pl: r.projektleiter_id, link: r.mit_einsatz_id, allein: r.allein, ok: r.abgemacht, soll: r.soll_tage, files: r.planer_datei || [], pkk: r.pflege_kunde_kategorie_id, pj: r.pflege_jahr, pkw: r.pflege_kw, fix: !!r.start_fix, fixg: r.start_fix_grund || '', kv: r.kopie_von, wdh: r.wdh || null, pz: r.pausen || [], at: r.allein_tage || [], mp: r.mit_person_id || null, serie: r.serie_id || null, ueber: !!r.uebereinander }; }
-function itemToRow(it){ return { person_id: it.mid, art: it.kind, beginn: fromU(it.s), ende: fromU(it.e, true), kunde_id: it.kid || null, titel: it.title || null, notiz: it.text || null, projektleiter_id: it.pl || null, mit_einsatz_id: it.link || null, allein: !!it.allein, abgemacht: it.ok !== false, soll_tage: it.soll ?? null, pflege_kunde_kategorie_id: it.pkk || null, pflege_jahr: it.pj || null, pflege_kw: it.pkw || null, start_fix: !!it.fix, start_fix_grund: it.fixg || null, kopie_von: it.kv || null, wdh: it.wdh || null, pausen: it.pz || [], allein_tage: it.at || [], mit_person_id: it.mp || null, serie_id: it.serie || null, uebereinander: !!it.ueber }; }
+function rowToItem(r){ return { id: r.id, mid: r.person_id, kind: r.art, s: toU(r.beginn), e: toU(r.ende), kid: r.kunde_id, title: r.titel || '', text: r.notiz || '', pl: r.projektleiter_id, link: r.mit_einsatz_id, allein: r.allein, ok: r.abgemacht, soll: r.soll_tage, files: r.planer_datei || [], pkk: r.pflege_kunde_kategorie_id, pj: r.pflege_jahr, pkw: r.pflege_kw, fix: !!r.start_fix, fixg: r.start_fix_grund || '', kv: r.kopie_von, wdh: r.wdh || null, pz: r.pausen || [], at: r.allein_tage || [], mp: r.mit_person_id || null, serie: r.serie_id || null, ueber: !!r.uebereinander, frei: !!r.tage_frei }; }
+function itemToRow(it){ return { person_id: it.mid, art: it.kind, beginn: fromU(it.s), ende: fromU(it.e, true), kunde_id: it.kid || null, titel: it.title || null, notiz: it.text || null, projektleiter_id: it.pl || null, mit_einsatz_id: it.link || null, allein: !!it.allein, abgemacht: it.ok !== false, soll_tage: it.soll ?? null, pflege_kunde_kategorie_id: it.pkk || null, pflege_jahr: it.pj || null, pflege_kw: it.pkw || null, start_fix: !!it.fix, start_fix_grund: it.fixg || null, kopie_von: it.kv || null, wdh: it.wdh || null, pausen: it.pz || [], allein_tage: it.at || [], mit_person_id: it.mp || null, serie_id: it.serie || null, uebereinander: !!it.ueber, tage_frei: !!it.frei }; }
 const kName = k => k ? (k.firma || [k.nachname, k.vorname].filter(Boolean).join(' ') || k.name) : '';
 const kShort = k => k ? (k.firma || k.nachname || k.name || '') : '';
 const kOrt = k => k ? [k.strasse, [k.plz, k.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ') : '';
@@ -1405,6 +1405,14 @@ async function infoSpeichern(eid, d, text){ const tag = isoDate(d), alt = INFO.g
 async function infoWeg(alt){ if(!confirm('Wichtige Info löschen?')) return; const { error } = await sb.from('planer_einsatz_info').delete().eq('id', alt.id); if(error) return fehler(error); INFO.delete(alt.einsatz_id + '|' + alt.tag); renderRows(); }
 // Ausgeblendete Ablage: Zahl der Einträge darin am Gruppenkopf, damit nichts vergessen geht
 function ablHinweis(gid){ if(ABLAGE && !EINGEBETTET) return ''; const ids = new Set(ABL.filter(a => a.gruppe_id === gid).map(a => a.id)); const n = ALL.filter(it => ids.has(it.mid) && it.e > TODAY).length; return n ? `<span class="ablz" title="Einträge in den ausgeblendeten Ablage-Zeilen">· ${n} in Ablage</span>` : ''; }
+// Lange Termine (mehr als 1 Tag) halten ihre Arbeitstage immer fest: fehlt die Zahl (neu, länger/kürzer gezogen, «übernehmen»),
+// wird die aktuelle Zahl gespeichert. Ausnahme: im Seitenfenster ausgeschaltet (tage_frei). Offene erst, wenn abgemacht.
+const istLang = it => it.e - it.s > 1 + 1e-6 && (it.kind === 'baustelle' || it.kind === 'termin');
+let tfLauf = false;
+async function tageFixNachholen(){ if(tfLauf) return;
+  const neu = EINS.filter(it => istLang(it) && !it.wdh && !it.soll && !it.frei && it.ok !== false && it.e > TODAY && LAY[it.id]?.n > 0 && canEdit(it.mid)); if(!neu.length) return;
+  tfLauf = true; neu.forEach(it => it.soll = LAY[it.id].n);
+  try { for(const it of neu) if(!(await speichere(it, { soll_tage: it.soll }))){ it.soll = null; break; } } finally { tfLauf = false; } }
 // Zähler «2 Doppelbelegungen» in der Leiste (ab heute, pro Person und Tag); Klick springt der Reihe nach hin
 let dupI = 0;
 const dupTage = () => { const m = new Map(); DUPS.forEach(x => { const key = x.mid + '|' + (x.k >> 1); if(!m.has(key)) m.set(key, { mid: x.mid, d: x.k >> 1 }); }); return [...m.values()].sort((a, b) => a.d - b.d); };
@@ -1552,7 +1560,7 @@ function fokusRahmen(t){
 function tlFuellen(){ const t = tlEl(); if(!t || EINGEBETTET) return; const h = Math.max(300, Math.floor(innerHeight - t.getBoundingClientRect().top - 2)); t.style.setProperty('height', h + 'px', 'important'); }
 addEventListener('resize', () => tlFuellen());
 function renderRows(){
-  const t = tlEl(); if(!t) return; compute(); dupZeigen(); t.classList.toggle("fokus", !!openMid && layer === "p"); // aufgeklappt: Rest grau
+  const t = tlEl(); if(!t) return; compute(); dupZeigen(); tageFixNachholen(); t.classList.toggle("fokus", !!openMid && layer === "p"); // aufgeklappt: Rest grau
   tfTag = null; WT = {}; // Tag-Hervorhebung und Lieferwagen-Tage neu
   requestAnimationFrame(tlFuellen);
   t.classList.toggle("zm", zoom === "monat"); // Monat: Punkte und Lieferwagen im Feld des Termins
@@ -3054,6 +3062,7 @@ function bindWindow(){
       const neuZiel = it.soll && d.mode !== 'move'; if(neuZiel) it.soll = null;
       const ok = await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true), person_id: it.mid, uebereinander: !!it.ueber, ...(neuZiel ? { soll_tage: null } : {}), ...(d.pz0 && d.mode === 'l' ? { pausen: it.pz } : {}), ...(d.at0 && d.mode === 'l' ? { allein_tage: it.at } : {}) });
       if(!ok){ Object.assign(it, vorher); renderRows(); return; }
+      if(neuZiel) tageFixNachholen(); // neue Länge = neue fixe Arbeitstage
       if(it.kind === 'absenz') await ausgleich(it, vorher);
       // Baustelle verschoben: Arbeitstage bleiben gleich (Absenzen zählen wie Wochenende, Ende rutscht nach hinten)
       if(d.n0 != null && d.mode === 'move'){ const e0 = it.e, p = nachziehenPatch(it, d.n0); if(Object.keys(p).length){ if(!(await speichere(it, p))) Object.assign(it, { e: e0 }); renderRows(); } }
@@ -3352,7 +3361,8 @@ function openPanel(id, isNew){
   const abw = it.soll && Math.abs(L.n - it.soll) > .01;
   const fixe = auftrag && !offen ? `<div class="fixe">
     ${it.fix ? `<div class="fx fxinfo" title="Start fix – lösen per Rechtsklick auf den Balken">${I('lock')}<span>Start fix</span><input type="text" id="pFixG" class="fxg" value="${esc(it.fixg)}" placeholder="Grund, z. B. mit Kunde fix abgemacht" ${dis}></div>` : ''}
-    ${abw ? `<div class="fxw">Geplant ${tageTxt(it.soll)}, aktuell ${tageTxt(L.n)} – hinten kein Platz${ed ? ` <button class="lk" id="pSollWeg">${tageTxt(L.n)} übernehmen</button>` : ''}</div>` : ''}</div>` : '';
+    ${istLang(it) && !it.wdh ? `<label class="fx tfix"><input type="checkbox" id="pTageFix"${it.frei ? '' : ' checked'} ${dis}><span>Arbeitstage fix${!it.frei && it.soll ? ': ' + tageTxt(it.soll) : ''}</span></label>` : ''}
+    ${abw ? `<div class="fxw">Geplant ${tageTxt(it.soll)}, aktuell ${tageTxt(L.n)}${ed ? ` <button class="lk" id="pSollWeg">${tageTxt(L.n)} übernehmen</button>` : ''}</div>` : ''}</div>` : '';
   // Kopie: Herkunft zeigen; Notiz, Fotos und Dokumente erst auf Wunsch vom Original holen
   const orig = it.kv ? byId(it.kv) : null;
   const kopie = it.kv ? `<div class="kopie">${I('copy').replace('class="i"', 'class="i" style="width:13px;height:13px"')}Kopie${orig ? ` von ${esc(labOf(orig))}, ${esc(dLab(Math.floor(orig.s)))}` : ''}${ed && orig && (orig.text || (orig.files || []).length) && !it.text && !(it.files || []).length ? `<button class="btn btn-ghost" id="pVomOrig" style="padding:3px 9px;font-size:12px">Notiz, Fotos und Dokumente vom Original übernehmen</button>` : ''}</div>` : '';
@@ -3394,7 +3404,9 @@ function openPanel(id, isNew){
   on('#pPl', 'onchange', e => save({ projektleiter_id: e.target.value || null }, { pl: e.target.value || null }).then(() => openPanel(id)));
   on('#pAllein', 'onclick', async () => { const fr = (LAY[it.id] || {}).free || [], S = soloSet(it); await soloSetzen(it, fr, !fr.every(k => S.has(k))); openPanel(id); }); // ganzer Termin allein
   if(it.serie) serieInfo(it.serie).then(t => { const b = $('pWdh'); if(b) b.title = t; });
-  on('#pSollWeg', 'onclick', () => save({ soll_tage: null }, { soll: null }).then(() => openPanel(id)));
+  on('#pSollWeg', 'onclick', () => save({ soll_tage: L.n }, { soll: L.n }).then(() => { renderRows(); openPanel(id); }));
+  // Arbeitstage fix ein/aus: aus = keine roten «x von y T»; ein = aktuelle Zahl wird die neue fixe Zahl
+  on('#pTageFix', 'onchange', e => { const an = e.target.checked; save({ tage_frei: !an, soll_tage: an ? L.n : null }, { frei: !an, soll: an ? L.n : null }).then(() => { renderRows(); openPanel(id); }); });
   let nt; on('#pNotiz', 'oninput', e => { clearTimeout(nt); const v = e.target.value; nt = setTimeout(() => save({ notiz: v || null }, { text: v }), 700); });
   // Wichtige Info pro Tag (Warndreieck im Termin)
   const ikey = it.rep || it.id; let itm;
