@@ -299,7 +299,11 @@ body.kopiert, body.kopiert *{cursor:copy !important;}
 .smitte .s2sp{display:grid;grid-template-columns:1fr 1fr;gap:4px;}
 .smitte .s2sp .tchip{justify-content:center;}
 .smitte input{width:100%;box-sizing:border-box;}
-.row.tools{background:#F5F7F9;}
+.row.tools{background:#F5F7F9;position:sticky;bottom:0;z-index:6;border-top:1px solid var(--line);} /* Planungshilfe als Fussleiste */
+.row.tools > .nm.tlbl{background:#F5F7F9;color:var(--muted);font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;font-weight:600;align-items:flex-start;padding-top:10px;}
+.row.abl .nm .n{color:#8B9097;font-weight:400;font-style:italic;} .row.abl .nm{background:#FAFBFC;} /* Ablage-Zeilen */
+.ablz{font-size:10px;color:#C05A1C;font-weight:600;margin-left:6px;text-transform:none;letter-spacing:0;}
+.ablbtn{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:2px 7px;text-transform:none;letter-spacing:0;background:#fff;} .ablbtn.on{background:#323E4E;color:#fff;border-color:#323E4E;}
 .row.tools .tbox{flex-wrap:nowrap !important;width:max-content !important;min-width:calc(100vw - var(--namew) - 40px);gap:10px 30px !important;}
 .saus{max-width:290px;white-space:normal !important;}
 .saus button{all:unset;cursor:pointer;display:inline-flex;}
@@ -917,6 +921,7 @@ const r48 = u => Math.round(u * 48) / 48;
 // ---------------------------------------------------------------------------
 // Daten
 // ---------------------------------------------------------------------------
+let ABL = [], ABLAGE = !!lsGet('ablage', false); // Ablage-Zeilen unter jeder Gruppe (Knopf oben links, gemerkt im Browser)
 let INFO = new Map(); // wichtige Info pro Termin und Tag: «einsatz_id|JJJJ-MM-TT» -> Zeile
 let MARK = [], RES = [], RESE = [], GRUPPEN = [], PERSONEN = [], P = {}, EINS = [], FEIER = new Map(), KUNDEN = {}, KLIST = [], BENUTZER = [];
 async function fetchAll(mk){ let out = [], i = 0; for(;;){ const { data, error } = await mk().range(i, i + 999); if(error) throw error; out = out.concat(data); if(data.length < 1000) break; i += 1000; } return out; }
@@ -951,7 +956,7 @@ async function ladeAlles(){
     ]);
     MAG = au; PZ = pz; ABST = at; VNOT = {}; vn.forEach(x => VNOT[`${x.kunde_kategorie_id}_${x.jahr}_${x.kw}`] = { n: x.notiz || '', pl: x.projektleiter_id });
     MARK = mk || []; INFO = new Map((ei || []).map(x => [x.einsatz_id + '|' + x.tag, x])); RES = r; ladeTypen(wx, we); RESE = z.map(x => ({ id: x.id, rid: x.ressource_id || (x.typ_eintrag_id ? 'T:' + x.typ_eintrag_id : null), typ: x.typ_eintrag_id || null, art: x.art, eid: x.einsatz_id, mid: x.person_id, s: x.beginn ? toU(x.beginn) : null, e: x.ende ? toU(x.ende) : null, fest: !!x.fest, ab: x.ab_slot || 0, bv: x.bis_vor_ende_slot || 0, pz: x.pausen || [] }));
-    GRUPPEN = g; PERSONEN = p; P = {}; p.forEach(x => P[x.id] = x);
+    GRUPPEN = g; PERSONEN = p.filter(x => !x.ist_ablage); ABL = p.filter(x => x.ist_ablage && x.aktiv); P = {}; p.forEach(x => P[x.id] = x); // Ablage-Personen nur für die Ablage-Zeilen
     EINS = e.concat(s.filter(x => !e.some(y => y.id === x.id))).map(rowToItem); // s = wiederkehrende, auch wenn der erste Termin vor dem Bereich liegt
     FEIER = new Map(); f.forEach(x => FEIER.set(fromIso(x.datum), x.name));
     if(k){ KUNDEN = {}; k.forEach(x => KUNDEN[x.id] = x); KLIST = k.map(x => ({ id: x.id, lab: kLabel(x) })); }
@@ -1308,7 +1313,7 @@ function headerHTML(W){
     }
   }
   const H = zoom === 'woche' ? 56 : 41;
-  return `<div class="hdr"><div class="corner" style="height:${H}px">${layer === 'p' ? 'Mitarbeitende' : LAYERS[layer]}</div><div class="hlane" style="width:${W}px;height:${H}px">${t1}${t2}${t3}</div></div>`;
+  return `<div class="hdr"><div class="corner" style="height:${H}px">${layer === 'p' && !EINGEBETTET ? `<button type="button" class="ablbtn${ABLAGE ? ' on' : ''}" id="ablBtn" title="Drei leere Ablage-Zeilen unter jeder Gruppe ein-/ausblenden">${ABLAGE ? 'Ablage an' : 'Ablage aus'}</button><br>` : ''}${layer === 'p' ? 'Mitarbeitende' : LAYERS[layer]}</div><div class="hlane" style="width:${W}px;height:${H}px">${t1}${t2}${t3}</div></div>`;
 }
 function laneBg(){
   // Wochenenden grau, Tagestrennlinien ab Monat, Stundenlinien im Tag
@@ -1379,6 +1384,8 @@ async function infoSpeichern(eid, d, text){ const tag = isoDate(d), alt = INFO.g
   if(!text){ if(!alt) return; const { error } = await sb.from('planer_einsatz_info').delete().eq('id', alt.id); if(error) return fehler(error); INFO.delete(eid + '|' + tag); renderRows(); return; }
   const { data, error } = await sb.from('planer_einsatz_info').upsert({ einsatz_id: eid, tag, text, erstellt_von: ME }, { onConflict: 'einsatz_id,tag' }).select().single(); if(error) return fehler(error); INFO.set(eid + '|' + tag, data); renderRows(); }
 async function infoWeg(alt){ if(!confirm('Wichtige Info löschen?')) return; const { error } = await sb.from('planer_einsatz_info').delete().eq('id', alt.id); if(error) return fehler(error); INFO.delete(alt.einsatz_id + '|' + alt.tag); renderRows(); }
+// Ausgeblendete Ablage: Zahl der Einträge darin am Gruppenkopf, damit nichts vergessen geht
+function ablHinweis(gid){ if(ABLAGE && !EINGEBETTET) return ''; const ids = new Set(ABL.filter(a => a.gruppe_id === gid).map(a => a.id)); const n = ALL.filter(it => ids.has(it.mid) && it.e > TODAY).length; return n ? `<span class="ablz" title="Einträge in den ausgeblendeten Ablage-Zeilen">· ${n} in Ablage</span>` : ''; }
 function personRow(p, W, bgx){
   const ed = canEdit(p.id), its = ALL.filter(i => i.mid === p.id); let bars = '';
   const hitOf = it => (!query || (titleOf(it) + ' ' + kOrt(KUNDEN[it.kid]) + ' ' + (it.text || '') + ' ' + (it.title || '')).toLowerCase().includes(query)) && (!plFilter || it.pl === plFilter || (it.kind === 'hilfe' && byId(it.link)?.pl === plFilter));
@@ -1526,15 +1533,14 @@ function renderRows(){
   if(layer !== 'p'){ h += ovRows(W, bgx); const sl = t.scrollLeft, stp = t.scrollTop; t.innerHTML = `<div class="grid" style="width:${W + NAMEW}px">${h}</div>`; t.scrollLeft = sl; t.scrollTop = stp; tlTopSync(); return; }
   // Planungshilfe: jeder kann sie für sich unter eine andere Gruppe ziehen (gemerkt im Browser); nur ganz unten auf-/zuklappbar
   if(zuNeu && GRUPPEN.length){ zuNeu = false; GRUPPEN.filter(g => /allgemein|büro|buero/i.test(g.name)).forEach(g => collapsed.add(g.id)); lsSet(ZU_KEY, [...collapsed]); }
-  const ph = phGruppe(), nach = phNach(); let grps = GRUPPEN.concat([{ id: '_ohne', name: 'Ohne Gruppe' }]);
-  if(ph && nach){ grps = grps.filter(g => g !== ph); grps.splice(grps.findIndex(g => g.id === nach) + 1, 0, ph); }
-  if(EINGEBETTET) grps = grps.filter(g => g !== ph); // Widget: ohne Planungshilfe
+  const ph = phGruppe(); let grps = GRUPPEN.filter(g => g !== ph).concat([{ id: '_ohne', name: 'Ohne Gruppe' }]); // Planungshilfe = Fussleiste, keine Gruppe mehr
   grps.forEach(g => {
     const ps = act.filter(p => (p.gruppe_id || '_ohne') === g.id).sort((a, b) => a.sortierung - b.sortierung || a.name.localeCompare(b.name));
-    if(!ps.length && !(isBuero() && g.id !== '_ohne')) return; const zu = collapsed.has(g.id) && !(g === ph && nach); // Büro sieht auch leere Gruppen (zum Hinzufügen und Hineinziehen)
-    h += `<div class="row grp${zu ? ' zu' : ''}${g === ph ? ' phk' : ''}" data-g="${g.id}"><div class="nm">${I('chev')}${esc(g.name)} <span style="opacity:.6;font-weight:400">(${ps.length})</span>${isBuero() && g.id !== '_ohne' ? `<button class="gadd" data-gadd="${g.id}" title="Zeile hinzufügen" aria-label="Zeile hinzufügen">${I('plus')}</button>` : ''}</div><div class="lane" style="width:${W}px;height:20px">${provBars('g:' + g.id)}</div></div>`;
+    if(!ps.length && !(isBuero() && g.id !== '_ohne')) return; const zu = collapsed.has(g.id); // Büro sieht auch leere Gruppen (zum Hinzufügen und Hineinziehen)
+    h += `<div class="row grp${zu ? ' zu' : ''}${g === ph ? ' phk' : ''}" data-g="${g.id}"><div class="nm">${I('chev')}${esc(g.name)} <span style="opacity:.6;font-weight:400">(${ps.length})</span>${ablHinweis(g.id)}${isBuero() && g.id !== '_ohne' ? `<button class="gadd" data-gadd="${g.id}" title="Zeile hinzufügen" aria-label="Zeile hinzufügen">${I('plus')}</button>` : ''}</div><div class="lane" style="width:${W}px;height:20px">${provBars('g:' + g.id)}</div></div>`;
     if(!zu) ps.forEach(p => { h += personRow(p, W, bgx); if(openMid === p.id) h += openTyp === 'maschine' ? ovRows(W, bgx, 'maschine', p.id) : vehFocusRows(W, bgx, p.id); }); // Anhänger nur in der Übersicht «Anhänger»
-    if(!zu && g.name === "Planungshilfe") h += toolsRow(); // Werkzeugfeld zum Hineinziehen
+    // Ablage-Zeilen (eingeschaltet über den Knopf oben links)
+    if(!zu && ABLAGE && !EINGEBETTET) ABL.filter(a => a.gruppe_id === g.id).sort((a, b) => a.sortierung - b.sortierung).forEach(p => { h += personRow(p, W, bgx).replace('<div class="row', '<div class="row abl'); });
   });
   // Archiv: ehemalige Personen ganz unten, standardmässig zu, nach Jahr des Austritts unterteilt (jedes Jahr auf-/zuklappbar)
   const arch = PERSONEN.filter(p => p.archiviert_am);
@@ -1545,6 +1551,7 @@ function renderRows(){
         h += `<div class="row grp ajahr${auf ? '' : ' zu'}" data-ay="${y}"><div class="nm">${I('chev')}${y} <span style="opacity:.6;font-weight:400">(${jahre[y].length})</span></div><div class="lane" style="width:${W}px"></div></div>`;
         if(auf) jahre[y].sort((a, b) => a.name.localeCompare(b.name)).forEach(p => { h += personRow(p, W, bgx); }); }); }
   }
+  if(!EINGEBETTET) h += toolsRow(); // Planungshilfe: Werkzeuge als Fussleiste, immer offen
   const sl = t.scrollLeft, stp = t.scrollTop;
   t.innerHTML = `<div class="grid" style="width:${W + NAMEW}px">${h}</div>`;
   t.scrollLeft = sl; t.scrollTop = stp; fokusRahmen(t); stickLabels(); tlTopSync(); phBlock(t); swDropZeichnen();
@@ -1681,7 +1688,8 @@ function phZiel(y){
   const letzte = GRUPPEN.filter(g => g !== ph).slice(-1)[0]; // unter die letzte Gruppe = wieder ganz unten (auf-/zuklappbar)
   return { nach: gid === letzte?.id ? null : gid, y: last.getBoundingClientRect().bottom }; }
 // Linke Spalte der Planungshilfe = ein grosser grauer Block: das Feld der Werkzeugzeile reicht hinauf über die Ablagezeilen
-function phBlock(t){ const nm = t.querySelector('.row.tools > .nm'); if(!nm) return; let h = 0, r = nm.parentElement.previousElementSibling;
+function phBlock(t){ return; // Planungshilfe ist jetzt Fussleiste ohne eigene Zeilen
+  const nm = t.querySelector('.row.tools > .nm'); if(!nm) return; let h = 0, r = nm.parentElement.previousElementSibling;
   while(r && r.classList.contains('ph')){ h += r.getBoundingClientRect().height; r = r.previousElementSibling; } nm.style.marginTop = -h + 'px'; }
 function toolsRow(){
   const chip = (typ, val, inner, tip) => `<span class="tchip" data-tool="${typ}" data-val="${esc(val)}" title="${esc(tip)}">${inner}</span>`;
@@ -1689,7 +1697,7 @@ function toolsRow(){
   const mh = [o => o.sp === 'bau', o => o.sp === 'pflege', o => o.sp === 'rest' && o.n === 0, o => o.sp === 'rest' && o.n === 1].map(fn => mhl.filter(fn)).filter(l => l.length).map(l => `<div class="tcol">${l.map(mc).join('')}</div>`).join('');
   const ab = ABS_TYPEN().map(t => chip('abs', t, esc(t), `${t} – auf Person und Tag ziehen`)).join('');
   const mk = Object.keys(MARKART).map(a => chip('mk', a, I('m-' + a), `${MARKART[a]} – auf eine passende Zeile ziehen`)).join('');
-  return `<div class="row tools"><div class="nm phgrip" title="Ziehen: Planungshilfe unter eine andere Gruppe verschieben"><div class="phdrag">${I('grip')}ziehen</div><div class="phmid"><span class="phk1">Planungshilfe zu</span>${PH_ZIELE.map(([k, l]) => `<button class="phbtn${(phNach() || '_unten') === (phZielGruppe(k)?.id || '_unten') ? ' on' : ''}" data-phgo="${k}">${l}</button>`).join('')}</div><div class="phdrag">${I('grip')}ziehen</div></div><div class="tbox" style="width:${visW()}px">
+  return `<div class="row tools"><div class="nm tlbl">Planungshilfe</div><div class="tbox" style="width:${visW()}px">
     <div class="tsec"><b>Mithilfe</b><div class="tcols">${mh}</div></div><div class="tsec"><b>Absenzen</b><div class="tcol">${ab}</div></div><div class="tsec"><b>Icons</b><div class="tcol ticons">${mk}</div></div>
     ${isBuero() ? `<div class="tsec sbar" id="sbar">${sbarInner()}</div>` : ''}</div></div>`; }
 // Serientermin: Absenz, Auftrag oder Icon für eine oder mehrere Personen regelmässig eintragen (alle gleich oder abwechselnd).
@@ -2674,6 +2682,7 @@ function tagFarbe(d){
   });
 }
 function bindTimeline(t){
+  t.addEventListener('click', e => { if(!e.target.closest('#ablBtn')) return; e.preventDefault(); e.stopPropagation(); ABLAGE = !ABLAGE; lsSet('ablage', ABLAGE); renderRows(); }, true); // Ablage-Zeilen ein/aus
   t.addEventListener('pointerdown', e => { if(e.target.closest('.bar')) panelTagU = uAt(e.clientX); }, true); // Tag für «Wichtige Info» im Seitenfenster
   // Gelbes Feld (wichtige Info): Klick oder Rechtsklick öffnet die Info, nichts anderes (kein Ziehen, kein neuer Eintrag)
   const infoAuf = (e, f) => { e.preventDefault(); e.stopPropagation(); const [eid, d] = f.dataset.info.split('|'); const it = byId(eid); infoPop(eid, +d, !!it && canEdit(it.mid), f.getBoundingClientRect()); };
