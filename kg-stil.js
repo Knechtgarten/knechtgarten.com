@@ -180,7 +180,43 @@ header.app .wrap{min-height:46px;}
 .kg-twmenu .kg-ext a{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 10px;border:1px solid #E1E5E9;border-radius:13px;font-size:12px;color:#232B35;text-decoration:none;}
 .kg-twmenu .kg-ext a:hover{border-color:#323E4E;}
 .kg-twmenu .kg-ext svg{width:12px;height:12px;color:#6B7079;}
-@media (max-width:600px){.kg-twmenu .kg-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}`;
+@media (max-width:600px){.kg-twmenu .kg-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
+/* Einheitliche Leiste: [Umschalter][Reiter …][Tool-Icons] … [Hilfe][Person] */
+header.app.kg-leiste .wrap{max-width:none!important;padding:0 16px!important;margin:0!important;gap:14px!important;flex-wrap:nowrap!important;}
+header.app.kg-leiste .kg-reiter{display:flex!important;align-items:stretch;gap:2px;flex:1 1 auto;min-width:0;margin:0!important;background:transparent!important;border:0!important;overflow-x:auto;scrollbar-width:none;}
+header.app.kg-leiste .kg-reiter.hidden{visibility:hidden;}
+header.app.kg-leiste .kg-reiter .wrap{display:flex!important;align-items:stretch;gap:2px;flex:1;padding:0!important;min-height:0!important;}
+header.app.kg-leiste .kg-reiter a:not(.navic):not(.icobtn),header.app.kg-leiste .kg-reiter > .wrap > button:not(.navic){all:unset;box-sizing:border-box;display:flex;align-items:center;gap:6px;
+  height:46px;padding:0 12px;border-bottom:2px solid transparent;border-top:2px solid transparent;color:#C9D1DB;font-size:13px;font-weight:600;white-space:nowrap;cursor:pointer;}
+header.app.kg-leiste .kg-reiter a:not(.navic):not(.icobtn):hover,header.app.kg-leiste .kg-reiter > .wrap > button:not(.navic):hover{color:#fff;}
+header.app.kg-leiste .kg-reiter a.on:not(.navic),header.app.kg-leiste .kg-reiter > .wrap > button.on:not(.navic){color:#fff;border-bottom-color:#D1DB5F;}
+header.app.kg-leiste .kg-reiter a:not(.navic) svg,header.app.kg-leiste .kg-reiter > .wrap > button:not(.navic):not([data-act="handy"]) > svg{display:none;}
+header.app.kg-leiste .kg-reiter .hidden{display:none!important;}
+header.app.kg-leiste .kg-reiter .navsp,header.app.kg-leiste .kg-reiter .neu{flex:1;margin-left:auto;}
+header.app.kg-leiste .kg-reiter .navic,header.app.kg-leiste .kg-reiter .icobtn:not(#supportChatBtn){all:unset;box-sizing:border-box;cursor:pointer;display:flex;align-items:center;justify-content:center;
+  width:32px;height:46px;color:#C9D1DB;}
+header.app.kg-leiste .kg-reiter .navic:hover{color:#fff;}
+header.app.kg-leiste .kg-reiter .navic.on{color:#fff;box-shadow:inset 0 -2px 0 #D1DB5F;}
+header.app.kg-leiste .kg-reiter .navmodus{margin-left:auto;display:flex;align-items:center;background:rgba(255,255,255,.08);border-radius:8px;padding:2px;}
+header.app.kg-leiste .kg-reiter .navmodus button{all:unset;cursor:pointer;display:flex;align-items:center;gap:5px;height:28px;padding:0 10px;border-radius:6px;color:#C9D1DB;font-size:12px;font-weight:600;}
+header.app.kg-leiste .kg-reiter .navmodus button.on{background:#fff;color:#323E4E;}
+header.app.kg-leiste .kg-reiter .navmodus svg{width:14px;height:14px;}
+header.app.kg-leiste #supportChatBtn,header.app.kg-leiste #userbarText,header.app.kg-leiste #logoutBtn,header.app.kg-leiste #hknoepfe [data-seto]{display:none!important;}
+header.app.kg-leiste .userbar{display:flex;align-items:center;gap:8px;margin-left:auto!important;flex-shrink:0;}
+header.app.kg-leiste .userbar.hidden{display:none!important;}
+.kg-rund{all:unset;box-sizing:border-box;width:32px;height:32px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;
+  color:#C9D1DB;border:1px solid rgba(255,255,255,.22);font-size:12px;font-weight:700;}
+.kg-rund:hover,.kg-rund[aria-expanded="true"]{color:#fff;border-color:rgba(255,255,255,.55);}
+.kg-rund svg{width:16px;height:16px;}
+.kg-rund.kg-person{background:#4C5C70;color:#fff;}
+.kg-pmenu{width:260px;padding:8px;}
+.kg-pmenu .kg-pkopf{padding:8px 10px 10px;border-bottom:1px solid #E1E5E9;margin-bottom:6px;}
+.kg-pmenu .kg-pkopf b{display:block;font-size:13px;color:#232B35;}
+.kg-pmenu .kg-pkopf span{font-size:12px;color:#6B7079;}
+.kg-pmenu button,.kg-pmenu a{all:unset;box-sizing:border-box;width:100%;display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer;font-size:13px;color:#232B35;}
+.kg-pmenu button:hover,.kg-pmenu a:hover{background:#F5F7F9;}
+.kg-pmenu svg{width:16px;height:16px;color:#6B7079;flex-shrink:0;}
+.kg-pmenu .kg-sep{margin:6px 0;}`;
   const st2 = document.createElement('style'); st2.id = 'kg-leiste'; st2.textContent = cssLeiste;
   (document.head || document.documentElement).appendChild(st2);
 
@@ -238,21 +274,94 @@ header.app .wrap{min-height:46px;}
     if(back) back.replaceWith(btn); else wrap.insertBefore(btn, wrap.firstChild);
     if(brand) brand.style.display = 'none';
 
+    popup(btn, 'kg-twmenu', 'links', async setze => { setze(menuHtml({ rolle: null, module: null, extern: [] })); setze(menuHtml(await ladeSichtbarkeit())); });
+    vereinheitlichen(head, wrap, btn);
+  }
+
+  // Aufklappmenü unter einem Knopf (links- oder rechtsbündig), schliesst bei Klick daneben / Esc
+  function popup(btn, cls, seite, fuellen){
     let menu = null;
     const zu = () => { if(menu){ menu.remove(); menu = null; } btn.setAttribute('aria-expanded', 'false'); };
-    const auf = async () => {
-      menu = document.createElement('div'); menu.className = 'kg-twmenu'; menu.setAttribute('role', 'menu');
+    const auf = () => {
+      menu = document.createElement('div'); menu.className = 'kg-twmenu ' + cls; menu.setAttribute('role', 'menu');
       const r = btn.getBoundingClientRect();
-      menu.style.top = (r.bottom + 6) + 'px'; menu.style.left = Math.max(12, r.left) + 'px';
-      menu.innerHTML = menuHtml({ rolle: null, module: null, extern: [] });
+      menu.style.top = (r.bottom + 6) + 'px';
+      if(seite === 'rechts') menu.style.right = Math.max(12, window.innerWidth - r.right) + 'px'; else menu.style.left = Math.max(12, r.left) + 'px';
       document.body.appendChild(menu); btn.setAttribute('aria-expanded', 'true');
-      const s = await ladeSichtbarkeit();
-      if(menu) menu.innerHTML = menuHtml(s);
+      fuellen(html => { if(menu) menu.innerHTML = html; }, zu);
     };
+    btn.setAttribute('aria-haspopup', 'true'); btn.setAttribute('aria-expanded', 'false');
     btn.addEventListener('click', e => { e.stopPropagation(); menu ? zu() : auf(); });
     document.addEventListener('click', e => { if(menu && !menu.contains(e.target)) zu(); });
     document.addEventListener('keydown', e => { if(e.key === 'Escape' && menu){ zu(); btn.focus(); } });
     window.addEventListener('resize', zu);
+  }
+
+  /* Einheitliche Leiste:
+     - Reiter direkt nach dem Umschalter, links: Offertentool-Reiter aus <nav> im Kopf, sonst die weisse
+       <nav class="subnav"> wird als Ganzes in die Leiste verschoben (Element bleibt erhalten, damit die
+       Tool-Skripte es weiter über #subnav finden). Tool-Icons (.navic) stehen rechts in den Reitern.
+     - Offertentool: Zahnrad wird zum Reiter «Vorlagen & Berechnung».
+     - Rechts nur noch: Hilfe (wenn das Tool einen Support-Chat hat) und das Personen-Menü
+       (Meine Einstellungen, Verwaltung, Abmelden). Die alten Knöpfe bleiben versteckt im DOM und werden angeklickt. */
+  const SVG = p => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+  const I_HILFE = '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 0 1 4.9.7c0 1.7-2.4 2.1-2.4 3.6"/><path d="M12 17h.01"/>';
+  const I_AUS = '<path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4"/><path d="M10 16l-4-4 4-4"/><path d="M6 12h10"/>';
+  const I_PERSON = '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/>';
+
+  function vereinheitlichen(head, wrap, btn){
+    head.classList.add('kg-leiste');
+    const kopfNav = wrap.querySelector(':scope > nav:not(.subnav)');
+    const sub = document.querySelector('nav.subnav');
+    let reiter = null;
+    if(kopfNav){
+      reiter = kopfNav;
+      const gear = kopfNav.querySelector('a.gear');
+      const tabs = [...kopfNav.querySelectorAll(':scope > a:not(.icobtn):not(.gear)')];
+      if(gear){ gear.textContent = 'Vorlagen & Berechnung'; gear.removeAttribute('title'); if(tabs.length) tabs[tabs.length - 1].after(gear); }
+    } else if(sub && !head.contains(sub)){
+      reiter = sub;
+    }
+    if(reiter){ reiter.classList.add('kg-reiter'); btn.after(reiter); }
+
+    const ub = document.getElementById('userbar');
+    if(!ub) return;
+    wrap.appendChild(ub);
+    const hilfeOrig = document.getElementById('supportChatBtn');
+    if(hilfeOrig){
+      const h = document.createElement('button'); h.type = 'button'; h.className = 'kg-rund'; h.title = 'Hilfe & Support'; h.setAttribute('aria-label', 'Hilfe & Support');
+      h.innerHTML = SVG(I_HILFE); h.addEventListener('click', e => { e.stopPropagation(); hilfeOrig.click(); });
+      ub.appendChild(h);
+    }
+    const p = document.createElement('button'); p.type = 'button'; p.className = 'kg-rund kg-person'; p.title = 'Mein Konto'; p.setAttribute('aria-label', 'Mein Konto');
+    const txt = document.getElementById('userbarText');
+    const initialen = () => {
+      const t = (txt && txt.textContent || '').trim(); const n = t.replace(/\s*\(.*$/, '').split('@')[0];
+      p.innerHTML = n ? esc(n.split(/[\s.]+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('')) : SVG(I_PERSON);
+    };
+    initialen();
+    if(txt) new MutationObserver(initialen).observe(txt, { childList: true, characterData: true, subtree: true });
+    ub.appendChild(p);
+
+    popup(p, 'kg-pmenu', 'rechts', async (setze, zu) => {
+      const t = (txt && txt.textContent || '').trim();
+      const name = t.replace(/\s*\(.*$/, '') || 'Angemeldet', rolle = (t.match(/\(([^)]*)\)/) || [])[1] || '';
+      const eigene = document.querySelector('#hknoepfe [data-seto]');
+      const bau = s => {
+        const verw = s.rolle === 'admin' ? 'verwaltung-live-v1.html' : (s.module && s.module.get('tools') ? 'tools-live-v1.html' : null);
+        return `<div class="kg-pkopf"><b>${esc(name)}</b>${rolle ? `<span>${esc(rolle)}</span>` : ''}</div>`
+          + (eigene ? `<button type="button" data-k="eigene">${SVG(P.gear)}Meine Einstellungen · ${esc(aktuell.n)}</button>` : '')
+          + (verw && aktuell.k !== 'verw' ? `<a href="${verw}">${SVG(P.gear)}Verwaltung</a>` : '')
+          + `<div class="kg-sep"></div><button type="button" data-k="aus">${SVG(I_AUS)}Abmelden</button>`;
+      };
+      const binden = () => {
+        const m = document.querySelector('.kg-pmenu'); if(!m) return;
+        const e = m.querySelector('[data-k="eigene"]'); if(e) e.addEventListener('click', () => { zu(); const x = document.querySelector('#hknoepfe [data-seto]'); if(x) x.click(); });
+        const a = m.querySelector('[data-k="aus"]'); if(a) a.addEventListener('click', () => { zu(); const x = document.getElementById('logoutBtn'); if(x) x.click(); });
+      };
+      setze(bau({ rolle: null, module: null })); binden();
+      const s = await ladeSichtbarkeit(); setze(bau(s)); binden();
+    });
   }
   if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', leiste); else leiste();
 })();
