@@ -136,7 +136,7 @@
     { k: 'pend', n: 'Pendenzen', url: 'pendenzen-live-v1.html', farbe: PAL.orange[1], modul: 'pendenzen', seiten: ['pendenzen-live-v1'] },
     { k: 'plan', n: 'Einsatzplaner', url: 'einsatzplaner-live-v1.html', farbe: PAL.petrol[1], modul: 'einsatzplaner', seiten: ['einsatzplaner-live-v1'] },
     { k: 'pflege', n: 'Pflege & Service', url: 'pflege-kunden-live-v1.html', farbe: PAL.gruen[1], modul: 'pflegetool',
-      seiten: ['pflege-kunden-live-v1', 'pflege-jahresplan-live-v1', 'pflege-kategorien-live-v1'] },
+      seiten: ['pflege-kunden-live-v1', 'pflege-kategorien-live-v1'] },
     { k: 'wissen', n: 'Nachschlagewerk', url: 'wissen-live-v1.html', farbe: PAL.violett[1], modul: 'wissen', seiten: ['wissen-live-v1'] },
     { k: 'verw', n: 'Verwaltung', url: 'verwaltung-live-v1.html', farbe: '#FFFFFF', admin: true,
       seiten: ['verwaltung-live-v1', 'tools-live-v1', 'mailassistent-verwaltung-live-v1', 'dokumentensuche-verwaltung-live-v1'] }
