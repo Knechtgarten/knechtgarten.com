@@ -185,7 +185,13 @@ header.app .wrap{min-height:46px;}
 header.app.kg-leiste .wrap{max-width:none!important;padding:0 16px!important;margin:0!important;gap:14px!important;flex-wrap:nowrap!important;}
 header.app.kg-leiste .kg-reiter{display:flex!important;align-items:stretch;gap:2px;flex:1 1 auto;min-width:0;margin:0!important;background:transparent!important;border:0!important;overflow-x:auto;scrollbar-width:none;}
 header.app.kg-leiste .kg-reiter.hidden{visibility:hidden;}
-header.app.kg-leiste .kg-reiter .wrap{display:flex!important;align-items:stretch;gap:2px;flex:1;padding:0!important;min-height:0!important;}
+header.app.kg-leiste .kg-reiter::-webkit-scrollbar,header.app.kg-leiste .kg-reiter .wrap::-webkit-scrollbar{display:none;}
+header.app.kg-leiste .kg-reiter .wrap{display:flex!important;align-items:stretch;gap:2px;flex:1;padding:0!important;min-height:0!important;max-width:none!important;margin:0!important;
+  background:transparent!important;overflow:visible!important;}
+header.app.kg-leiste .userbar .kg-rund{width:32px!important;height:32px!important;padding:0!important;border-radius:50%!important;border:1px solid rgba(255,255,255,.22)!important;
+  background:transparent!important;color:#C9D1DB!important;font-size:12px!important;font-weight:700!important;opacity:1!important;}
+header.app.kg-leiste .userbar .kg-rund.kg-person{background:#4C5C70!important;color:#fff!important;}
+header.app.kg-leiste .userbar .kg-rund:hover,header.app.kg-leiste .userbar .kg-rund[aria-expanded="true"]{border-color:rgba(255,255,255,.55)!important;color:#fff!important;}
 header.app.kg-leiste .kg-reiter a:not(.navic):not(.icobtn),header.app.kg-leiste .kg-reiter > .wrap > button:not(.navic){all:unset;box-sizing:border-box;display:flex;align-items:center;gap:6px;
   height:46px;padding:0 12px;border-bottom:2px solid transparent;border-top:2px solid transparent;color:#C9D1DB;font-size:13px;font-weight:600;white-space:nowrap;cursor:pointer;}
 header.app.kg-leiste .kg-reiter a:not(.navic):not(.icobtn):hover,header.app.kg-leiste .kg-reiter > .wrap > button:not(.navic):hover{color:#fff;}
