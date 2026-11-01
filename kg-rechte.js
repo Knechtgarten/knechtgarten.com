@@ -26,7 +26,7 @@
       S('einstellungen', 'Planer-Einstellungen', 'Personen, Fahrzeuge, Feiertage') ] },
     { k: 'pflege', n: 'Pflege & Service', icon: 'pflege', bereiche: [
       B('kunden', 'Pflegekunden'),
-      B('jahresplan', 'Jahresplan & Einsätze', 'auch Handy-Ansicht'),
+      B('jahresplan', 'Einsätze (Handy-Ansicht)'),
       B('kategorien', 'Kategorien') ] },
     { k: 'wissen', n: 'Nachschlagewerk & Maschinen', icon: 'wissen', bereiche: [
       B('eintraege', 'Einträge', 'Maschinen, Produkte, Wissen'),
