@@ -182,7 +182,7 @@ header.app .wrap{min-height:46px;}
 .kg-twmenu .kg-ext svg{width:12px;height:12px;color:#6B7079;}
 @media (max-width:600px){.kg-twmenu .kg-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
 /* Einheitliche Leiste: [Umschalter][Reiter …][Tool-Icons] … [Hilfe][Person] */
-header.app.kg-leiste .wrap{max-width:none!important;padding:0 16px!important;margin:0!important;gap:14px!important;flex-wrap:nowrap!important;}
+header.app.kg-leiste .wrap{display:flex!important;align-items:center!important;max-width:none!important;padding:0 16px!important;margin:0!important;gap:14px!important;flex-wrap:nowrap!important;height:auto!important;}
 header.app.kg-leiste .kg-reiter{display:flex!important;align-items:stretch;gap:2px;flex:1 1 auto;min-width:0;margin:0!important;background:transparent!important;border:0!important;overflow-x:auto;scrollbar-width:none;}
 header.app.kg-leiste .kg-reiter.hidden{visibility:hidden;}
 header.app.kg-leiste .kg-reiter::-webkit-scrollbar,header.app.kg-leiste .kg-reiter .wrap::-webkit-scrollbar{display:none;}
