@@ -222,7 +222,13 @@ header.app.kg-leiste .userbar.hidden{display:none!important;}
 .kg-pmenu button,.kg-pmenu a{all:unset;box-sizing:border-box;width:100%;display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer;font-size:13px;color:#232B35;}
 .kg-pmenu button:hover,.kg-pmenu a:hover{background:#F5F7F9;}
 .kg-pmenu svg{width:16px;height:16px;color:#6B7079;flex-shrink:0;}
-.kg-pmenu .kg-sep{margin:6px 0;}`;
+.kg-pmenu .kg-sep{margin:6px 0;}
+header.app.kg-leiste .kg-reiter a.kg-ohne{display:none!important;}
+#kg-sperre{position:fixed;left:0;right:0;top:46px;bottom:0;z-index:9000;background:#F5F7F9;display:flex;align-items:flex-start;justify-content:center;padding-top:80px;}
+#kg-sperre > div{background:#fff;border:1px solid #E1E5E9;border-radius:12px;padding:28px 32px;max-width:420px;text-align:center;font-size:14px;color:#232B35;}
+#kg-sperre b{font-size:18px;color:#323E4E;}
+#kg-sperre p{color:#4C5C70;line-height:1.5;margin:10px 0 18px;}
+#kg-sperre a{display:inline-block;background:#323E4E;color:#fff;text-decoration:none;border-radius:8px;padding:9px 18px;font-weight:600;}`;
   const st2 = document.createElement('style'); st2.id = 'kg-leiste'; st2.textContent = cssLeiste;
   (document.head || document.documentElement).appendChild(st2);
 
@@ -240,10 +246,19 @@ header.app.kg-leiste .userbar.hidden{display:none!important;}
       const { data: { session } } = await client.auth.getSession();
       if(!session) return sicht;
       const [{ data: ben }, { data: mods }] = await Promise.all([
-        client.from('benutzer').select('rolle').eq('id', session.user.id).maybeSingle(),
+        client.from('benutzer').select('rolle,recht_gruppe_id').eq('id', session.user.id).maybeSingle(),
         client.from('modul_sichtbarkeit').select('modul_key,name,kurzname,url,ist_extern,fuer_buero_team,fuer_mitarbeitende,fuer_service_team')
       ]);
       sicht.rolle = ben && ben.rolle;
+      // Gruppen & Rechte: ohne Gruppe (alte Konten) gilt weiter die alte Rollen-Logik
+      if(ben && ben.recht_gruppe_id){
+        const [{ data: gr }, { data: ein }] = await Promise.all([
+          client.from('recht_gruppe').select('ist_admin').eq('id', ben.recht_gruppe_id).maybeSingle(),
+          client.from('recht_eintrag').select('tool_key,bereich_key,aktion,wert').eq('gruppe_id', ben.recht_gruppe_id)
+        ]);
+        sicht.rechte = { admin: !!(gr && gr.ist_admin) || sicht.rolle === 'admin',
+          werte: new Map((ein || []).map(e => [e.tool_key + '|' + e.bereich_key + '|' + e.aktion, e.wert])) };
+      }
       const spalte = { buero_team: 'fuer_buero_team', mitarbeitende: 'fuer_mitarbeitende', service_team: 'fuer_service_team' }[sicht.rolle];
       const darf = m => sicht.rolle === 'admin' || (spalte && m[spalte]);
       sicht.module = new Map((mods || []).map(m => [m.modul_key, darf(m)]));
@@ -252,12 +267,81 @@ header.app.kg-leiste .userbar.hidden{display:none!important;}
     return sicht;
   }
 
+  /* ---------------------------------------------------------------------------
+     Rechte abfragen (nach await KG.ladeRechte()):
+     KG.darf('offerten', 'artikel', 'anzeigen') -> 'K' | 'E' | 'G' | 'A'  (Erstellen/Schalter/sichtbar: 'J' | 'N')
+     null = keine Gruppe zugeteilt (dann alte Rollen-Logik). Administrator: immer alles.
+     --------------------------------------------------------------------------- */
+  KG.ladeRechte = ladeSichtbarkeit;
+  KG.darf = (tool, bereich, aktion) => {
+    const r = sicht && sicht.rechte; if(!r) return null;
+    const jn = aktion === 'erstellen' || aktion === 'an' || aktion === 'sichtbar';
+    if(r.admin) return jn ? 'J' : 'A';
+    return r.werte.get(tool + '|' + bereich + '|' + aktion) || (jn ? 'N' : 'K');
+  };
+  // Welche Seite gehört zu welchem Tool/Bereich (für Menü, Reiter und Seitenschutz)
+  const SEITENRECHT = {
+    'tool-start-live-v1': ['offerten', 'offerten'], 'tool-a-live-v1': ['offerten', 'offerten'],
+    'tool-a2-allgemein-live-v1': ['offerten', 'offerten'], 'tool-a3-artikel-live-v1': ['offerten', 'offerten'],
+    'tool-b-live-v1': ['offerten', 'vorlagen'], 'einstellungen-live-v1': ['offerten', 'vorlagen|einstellungen'],
+    'tool-c-live-v1': ['offerten', 'artikel'], 'lieferant-abgleich-live-v1': ['offerten', 'artikel'],
+    'tool-d-kunden-live-v1': ['offerten', 'kunden'],
+    'pendenzen-live-v1': ['pend', '_tool'], 'einsatzplaner-live-v1': ['plan', '_tool'],
+    'pflege-kunden-live-v1': ['pflege', 'kunden'], 'pflege-kategorien-live-v1': ['pflege', 'kategorien'],
+    'pflege-handy-live-v1': ['pflege', 'jahresplan'], 'wissen-live-v1': ['wissen', '_tool'],
+    'mailassistent-verwaltung-live-v1': ['mail', '_tool']
+  };
+  const TOOLRECHT = { offerten: ['offerten', 'offerten'], artikel: ['offerten', 'artikel'], kunden: ['offerten', 'kunden'],
+    pend: ['pend', '_tool'], plan: ['plan', '_tool'], pflege: ['pflege', '_tool'], wissen: ['wissen', '_tool'] };
+  const erlaubt = ziel => { // ziel = [tool, bereich]; true/false, null = ohne Gruppe
+    if(!ziel || !sicht || !sicht.rechte) return null;
+    if(sicht.rechte.admin) return true;
+    const [t, b] = ziel;
+    if(KG.darf(t, '_tool', 'sichtbar') !== 'J') return false;
+    if(b === '_tool') return true;
+    return b.split('|').some(x => KG.darf(t, x, 'anzeigen') !== 'K' && KG.darf(t, x, 'anzeigen') !== null || KG.darf(t, x, 'an') === 'J');
+  };
+  KG.seiteErlaubt = seitenname => erlaubt(SEITENRECHT[seitenname]);
+  // Vorschau «Ansicht als Gruppe» (zum Prüfen, z. B. in der Konsole): KG.rechteVorschau('<gruppe-id>')
+  KG.rechteVorschau = async gruppeId => {
+    await ladeSichtbarkeit();
+    const { data: ein } = await KG._sb.from('recht_eintrag').select('tool_key,bereich_key,aktion,wert').eq('gruppe_id', gruppeId);
+    sicht.rechte = { admin: false, werte: new Map((ein || []).map(e => [e.tool_key + '|' + e.bereich_key + '|' + e.aktion, e.wert])) };
+    vorschau = true; await rechteAnwenden();
+  };
+  let vorschau = false;
+
   function sichtbar(t, s){
     if(t.k === 'home' || t.k === aktuell.k) return true;
-    if(t.admin) return s.rolle === 'admin' || (s.module && s.module.get('tools'));
+    if(t.admin) return s.rolle === 'admin' || !!(s.rechte && s.rechte.admin) || !!(s.module && s.module.get('tools'));
+    const neu = erlaubt(TOOLRECHT[t.k]);
+    if(neu !== null) return neu;
     if(!s.module || !t.modul) return true;
     return s.module.get(t.modul) !== false;
   }
+
+  // Reiter ohne Recht ausblenden und Seite sperren, wenn die Gruppe sie nicht sehen darf
+  async function rechteAnwenden(){
+    if(!vorschau){ sicht = null; await ladeSichtbarkeit(); }
+    if(!sicht.rechte) return;
+    document.querySelectorAll('.kg-reiter a[href]').forEach(a => {
+      const ziel = (a.getAttribute('href') || '').split(/[?#]/)[0].replace(/\.html?$/, '');
+      const ok = erlaubt(SEITENRECHT[ziel]); a.classList.toggle('kg-ohne', ok === false);
+    });
+    const ok = erlaubt(SEITENRECHT[seite]);
+    const alt = document.getElementById('kg-sperre');
+    if(ok === false && !alt){
+      const d = document.createElement('div'); d.id = 'kg-sperre';
+      d.innerHTML = `<div><b>Kein Zugriff</b><p>Diese Seite ist für deine Gruppe nicht freigegeben. Wenn du sie brauchst, melde dich im Büro.</p><a href="index.html">Zur Startseite</a></div>`;
+      document.body.appendChild(d);
+    } else if(ok !== false && alt) alt.remove();
+  }
+  function rechteBeobachten(){
+    rechteAnwenden();
+    const ub = document.getElementById('userbar'); // wird von den Seiten nach dem Login eingeblendet
+    if(ub) new MutationObserver(() => { if(!ub.classList.contains('hidden')) rechteAnwenden(); }).observe(ub, { attributes: true, attributeFilter: ['class'] });
+  }
+  if(SEITENRECHT[seite]){ if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', rechteBeobachten); else rechteBeobachten(); }
 
   function menuHtml(s){
     const verwUrl = s.rolle && s.rolle !== 'admin' ? 'tools-live-v1.html' : 'verwaltung-live-v1.html';
