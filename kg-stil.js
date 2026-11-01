@@ -256,6 +256,10 @@ header.app.kg-leiste .kg-reiter .navic.on{box-shadow:inset 0 -2px 0 var(--kg-akz
 .kg-seite .kg-neben{all:unset;box-sizing:border-box;display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;border-radius:8px;border:1px solid #D5DBE1;background:#fff;
   color:#323E4E;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;}
 .kg-seite .kg-neben:hover{border-color:#323E4E;}
+.kg-seite .kg-haupt:disabled,.kg-seite .kg-neben:disabled{opacity:.45;cursor:not-allowed;}
+.kg-seite #kundeSucheWrap{flex:1 1 300px;max-width:480px;margin:0!important;}
+.kg-seite .pathline{font-size:12.5px;color:#4C5C70;margin:0!important;}
+.kg-seite .pathline a{color:#323E4E;font-weight:600;}
 #kg-sperre{position:fixed;left:0;right:0;top:46px;bottom:0;z-index:9000;background:#F5F7F9;display:flex;align-items:flex-start;justify-content:center;padding-top:80px;}
 #kg-sperre > div{background:#fff;border:1px solid #E1E5E9;border-radius:12px;padding:28px 32px;max-width:420px;text-align:center;font-size:14px;color:#232B35;}
 #kg-sperre b{font-size:18px;color:#323E4E;}
