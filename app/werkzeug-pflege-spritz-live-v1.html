@@ -75,13 +75,15 @@ KGW.werkzeug('pflege_spritz', async inhalt => {
     <div id="varianten"></div>
     <span class="kgw-klein" id="dosisText"></span>
     <a class="wlink hidden" id="wissenLink" target="_blank" rel="noopener">${KGW.svg(KG.pfad('link'), 15)}Im Nachschlagewerk (Anleitung, Sicherheitsdatenblatt)</a>`, 'mittelKarte'));
-  inhalt.insertAdjacentHTML('beforeend', KGW.karte('Menge Brühe', `${KGW.seg('modus', [['liter', 'Liter'], ['flaeche', 'Fläche m²']], g('seg-modus', 'liter'))}
-    <div id="mLiter" class="kgw-feld"><label for="liter">Brühe (L)</label>
-      <select class="wahl rad" id="liter">${LITER.map(l => `<option value="${l}"${String(l) === String(g('liter', '10')) ? ' selected' : ''}>${l} L</option>`).join('')}</select></div>
-    <div id="mFlaeche" style="display:flex;flex-direction:column;gap:10px">${KGW.feld('flaeche', 'Fläche (m²)', g('flaeche', '50'), 5)}
-      <div class="kgw-zeile kgw-trenn"><span id="l10Text"></span><b id="bruehe"></b></div>
-      <button type="button" class="wlink" id="l10Aendern" style="all:unset;cursor:pointer;font-size:13px;font-weight:600;color:#4C5C70;text-decoration:underline">Brühmenge ändern</button>
-      <div id="l10Feld" class="hidden">${KGW.feld('l10', 'Brühe pro 10 m² (L)', g('l10', '1'), 0.1)}</div></div>`, 'mengeKarte'));
+  // Fläche (freiwillig) und Liter in einer Karte: es gilt, was zuletzt angefasst wurde
+  inhalt.insertAdjacentHTML('beforeend', KGW.karte('Menge Brühe', `<div class="kgw-feld"><label for="flaeche">Fläche (m²)</label>
+      <div class="cb" style="width:150px"><input class="kgw-zahl" id="flaeche" inputmode="decimal" autocomplete="off" placeholder="optional" value="${KGW.esc(g('flaeche', ''))}" style="width:150px">
+        <button type="button" class="cbx" id="flLeer" aria-label="Fläche leeren">${KG.icon('x', 14)}</button></div></div>
+    <div class="kgw-klein hidden" id="flInfo" style="font-size:13px">× <span id="l10Text"></span> ·
+      <button type="button" id="l10Aendern" style="all:unset;cursor:pointer;font-weight:600;color:#4C5C70;text-decoration:underline">ändern</button></div>
+    <div id="l10Feld" class="hidden">${KGW.feld('l10', 'Brühe pro 10 m² (L)', g('l10', '1'), 0.1)}</div>
+    <div class="kgw-feld kgw-trenn"><label for="liter">Brühe (L)<span class="kgw-klein" id="lInfo" style="display:block"></span></label>
+      <select class="wahl rad" id="liter">${LITER.map(l => `<option value="${l}">${l} L</option>`).join('')}</select></div>`, 'mengeKarte'));
   inhalt.insertAdjacentHTML('beforeend', KGW.karte('In den Tank', `<span class="kgw-klein" style="font-size:13px" id="tankName"></span>
     <div class="kgw-gross"><b id="menge"></b><span id="einheit"></span></div>
     <span class="kgw-klein" id="weg"></span><div class="kgw-zeile hidden" id="umger"><span>entspricht etwa</span><b id="umgerW"></b></div>
@@ -96,6 +98,23 @@ KGW.werkzeug('pflege_spritz', async inhalt => {
       <table class="tab" id="kTab"></table></div>`, 'umKarte'));
   if(darfPflegen) inhalt.insertAdjacentHTML('beforeend', KGW.karte('Produktliste', '<div id="liste"></div><div class="knoepfe"><button type="button" class="k2" id="neuProdukt">' + KGW.svg(KG.pfad('plus'), 15) + 'Produkt</button></div>', 'listeKarte'));
 
+  let quelle = g('quelle', 'liter'), l10Offen = false;
+  // Liter ins Drehrad setzen; krumme Werte (aus der Fläche) bekommen einen eigenen Eintrag
+  const literSetzen = v => {
+    const s = $('liter'), w = String(+(+v).toFixed(1));
+    s.querySelectorAll('option[data-x]').forEach(o => o.remove());
+    if(!LITER.some(l => String(l) === w) && +w > 0){
+      const o = document.createElement('option'); o.value = w; o.textContent = f(+w, 1) + ' L'; o.dataset.x = '1';
+      const nach = [...s.options].find(x => +x.value > +w); s.insertBefore(o, nach || null);
+    }
+    s.value = w; if(s.value !== w) s.value = '10';
+  };
+  const ausFlaeche = () => {
+    const A = KGW.zahl('flaeche');
+    if(A > 0){ quelle = 'flaeche'; literSetzen(A * KGW.zahl('l10') / 10); KGW.lsSet('kgw-spritz-liter', $('liter').value); }
+    else quelle = 'liter';
+    KGW.lsSet('kgw-spritz-quelle', quelle);
+  };
   let selId = g('produkt', '');
   // Umrechner und Produktliste: zugeklappt, Klick auf den Kopf öffnet
   const klappbar = id => {
@@ -146,8 +165,8 @@ KGW.werkzeug('pflege_spritz', async inhalt => {
     }));
     // Brühmenge pro Fläche: vom Mittel übernehmen; fehlt sie, gleich das Feld zeigen
     if(p && p.bruehe_l_m2) $('l10').value = String(+(p.bruehe_l_m2 * 10).toFixed(2));
-    const ohne = !(p && p.bruehe_l_m2);
-    $('l10Feld').classList.toggle('hidden', !ohne); $('l10Aendern').classList.toggle('hidden', ohne);
+    l10Offen = !(p && p.bruehe_l_m2);
+    if(quelle === 'flaeche') ausFlaeche();
     if(p && p.dichte){ $('dichte').value = String(p.dichte); }
     $('wissenLink').classList.toggle('hidden', !(p && p.wissen_eintrag_id));
     if(p && p.wissen_eintrag_id) $('wissenLink').href = 'wissen-live-v1.html#e-' + p.wissen_eintrag_id;
@@ -164,12 +183,16 @@ KGW.werkzeug('pflege_spritz', async inhalt => {
   };
   const menge = (x, e) => x >= 1000 ? [f(x / 1000, 2), e === 'g' ? 'kg' : 'L'] : [f(x, x < 10 ? 1 : 0), e];
   const rechne = () => {
-    const p = akt(), d = dosis(), flaeche = KGW.segWert($('mengeKarte'), 'modus') === 'flaeche';
-    $('mLiter').classList.toggle('hidden', flaeche); $('mFlaeche').classList.toggle('hidden', !flaeche);
-    const L = flaeche ? KGW.zahl('flaeche') * KGW.zahl('l10') / 10 : KGW.zahl('liter');
-    $('bruehe').textContent = f(L, 1) + ' L Brühe';
+    const p = akt(), d = dosis(), A = KGW.zahl('flaeche'), mitFlaeche = A > 0;
+    const L = KGW.zahl('liter');
     const vomMittel = p && p.bruehe_l_m2 && Math.abs(p.bruehe_l_m2 * 10 - KGW.zahl('l10')) < 1e-9;
+    $('flInfo').classList.toggle('hidden', !mitFlaeche || l10Offen);
+    $('l10Feld').classList.toggle('hidden', !mitFlaeche || !l10Offen);
     $('l10Text').textContent = `${f(KGW.zahl('l10'), 2)} L pro 10 m²${vomMittel ? ' (Hersteller)' : ''}`;
+    $('flLeer').classList.toggle('hidden', !$('flaeche').value);
+    // Fläche ausgegraut, wenn danach die Liter von Hand gewählt wurden
+    $('flaeche').style.opacity = mitFlaeche && quelle === 'liter' ? '.45' : '';
+    $('lInfo').textContent = mitFlaeche && quelle === 'flaeche' ? `aus ${f(A, 0)} m²` : mitFlaeche ? 'von Hand gewählt' : '';
     const m = d.proL * L, [mw, me] = menge(m, d.e);
     $('tankName').textContent = p ? p.name : d.eigen ? 'Eigene Dosierung (ml bzw. g)' : 'Mittel';
     $('menge').textContent = d.leer ? '–' : mw; $('einheit').textContent = d.leer ? '' : me;
@@ -202,9 +225,11 @@ KGW.werkzeug('pflege_spritz', async inhalt => {
   $('mittel').addEventListener('blur', () => setTimeout(() => $('mittelListe').classList.add('hidden'), 150));
   $('mittel').addEventListener('keydown', e => { if(e.key === 'Enter'){ const b = $('mittelListe').querySelector('[data-pid]'); if(b && !eigeneDosis($('mittel').value)) waehlen(b.dataset.pid); else $('mittel').blur(); } });
   $('mittelLeer').addEventListener('click', () => { selId = ''; $('mittel').value = ''; KGW.lsSet('kgw-spritz-produkt', ''); KGW.lsSet('kgw-spritz-mittelText', ''); varianten(); rechne(); $('mittel').focus(); });
-  KGW.binden($('mengeKarte'), rechne, 'kgw-spritz-');
-  $('liter').addEventListener('change', () => { KGW.lsSet('kgw-spritz-liter', $('liter').value); rechne(); });
-  $('l10Aendern').addEventListener('click', () => { $('l10Feld').classList.remove('hidden'); $('l10Aendern').classList.add('hidden'); });
+  KGW.binden($('mengeKarte'), () => { ausFlaeche(); rechne(); }, 'kgw-spritz-');
+  $('liter').addEventListener('change', () => { quelle = 'liter'; KGW.lsSet('kgw-spritz-quelle', quelle); KGW.lsSet('kgw-spritz-liter', $('liter').value); rechne(); });
+  $('l10Aendern').addEventListener('click', () => { l10Offen = true; rechne(); $('l10').focus(); });
+  $('flLeer').addEventListener('click', () => { $('flaeche').value = ''; KGW.lsSet('kgw-spritz-flaeche', ''); quelle = 'liter'; KGW.lsSet('kgw-spritz-quelle', quelle); rechne(); });
+  literSetzen(g('liter', '10'));
   KGW.binden($('umKarte'), umrechnen, 'kgw-spritz-');
   ['uEinh', 'kEinh'].forEach(id => $(id).addEventListener('change', () => { KGW.lsSet('kgw-spritz-' + id, $(id).value); umrechnen(); }));
   rechne(); umrechnen();
