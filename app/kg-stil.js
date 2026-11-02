@@ -25,6 +25,7 @@
     eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
     notiz: '<path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h6"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
+    stern: '<path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/>',
     griff: '<circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/>',
     archiv:'<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4"/>',
     drucken:'<path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M7 14h10v7H7z"/>',
@@ -125,7 +126,7 @@
     wissen: '<path d="M3 5.5C5.5 4.5 9 4.5 12 6.5c3-2 6.5-2 9-1v13c-2.5-1-6-1-9 1-3-2-6.5-2-9-1z"/><path d="M12 6.5v13"/>',
     rechner: '<rect x="5" y="3" width="14" height="18" rx="2"/><rect x="8" y="6" width="8" height="3" rx=".5"/><path d="M8 13h1M11.5 13h1M15 13h1M8 17h1M11.5 17h1M15 17h1"/>',
     verw: P.gear,
-    // Neue Haupttools (noch ohne Seite / TOOLS-Eintrag): Werkzeuge = grosser Schraubenschlüssel (grau), Doku-Tools = Dokument mit Zahnrad (Beere)
+    // Werkzeuge = grosser Schraubenschlüssel (grau); Doku-Tools = Dokument mit Zahnrad (Beere, noch ohne Seite / TOOLS-Eintrag)
     werkzeuge: '<path d="M16.8 3.4a5.2 5.2 0 0 0-6.9 6.6L2.8 17.1a2.2 2.2 0 0 0 3.1 3.1l7.1-7.1a5.2 5.2 0 0 0 6.6-6.9l-3.1 3.1-2.8-.6-.6-2.8z"/>',
     doku: '<path d="M13 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h6"/><path d="M13 3v5h5v3"/><path d="M8 12h4M8 16h2"/><circle cx="18" cy="17.5" r="2"/><path d="M18 13.5v1.2M18 20.3v1.2M14 17.5h1.2M20.8 17.5H22M15.2 14.7l.8.8M20 19.5l.8.8M15.2 20.3l.8-.8M20 15.5l.8-.8"/>'
   };
@@ -141,6 +142,9 @@
     { k: 'pflege', n: 'Pflege & Service', url: 'pflege-kunden-live-v1.html', farbe: PAL.gruen[1], akzent: PAL.gruen[3], modul: 'pflegetool',
       seiten: ['pflege-kunden-live-v1', 'pflege-kategorien-live-v1'] },
     { k: 'wissen', n: 'Nachschlagewerk', url: 'wissen-live-v1.html', farbe: PAL.violett[1], akzent: PAL.violett[3], modul: 'wissen', seiten: ['wissen-live-v1'] },
+    { k: 'werkzeuge', n: 'Werkzeuge', url: 'werkzeuge-live-v1.html', farbe: PAL.grau[1], akzent: PAL.grau[3],
+      seiten: ['werkzeuge-live-v1', 'werkzeug-pool-chlor-live-v1', 'werkzeug-pool-salz-live-v1', 'werkzeug-pool-alk-live-v1', 'werkzeug-pool-afm-live-v1',
+        'werkzeug-pool-volumen-live-v1', 'werkzeug-allg-volumen-live-v1', 'werkzeug-allg-gefaelle-live-v1'] },
     { k: 'verw', n: 'Verwaltung', url: 'verwaltung-live-v1.html', farbe: '#FFFFFF', akzent: PAL.grau[3], admin: true,
       seiten: ['verwaltung-live-v1', 'tools-live-v1', 'mailassistent-verwaltung-live-v1', 'dokumentensuche-verwaltung-live-v1'] }
   ];
@@ -335,10 +339,15 @@ header.app.kg-leiste .kg-reiter .navic.on{box-shadow:inset 0 -2px 0 var(--kg-akz
     'pendenzen-live-v1': ['pend', '_tool'], 'einsatzplaner-live-v1': ['plan', '_tool'],
     'pflege-kunden-live-v1': ['pflege', 'kunden'], 'pflege-kategorien-live-v1': ['pflege', 'kategorien'],
     'pflege-handy-live-v1': ['pflege', 'jahresplan'], 'wissen-live-v1': ['wissen', '_tool'],
-    'mailassistent-verwaltung-live-v1': ['mail', '_tool']
+    'mailassistent-verwaltung-live-v1': ['mail', '_tool'],
+    'werkzeuge-live-v1': ['werkzeuge', '_tool'], 'werkzeug-pool-chlor-live-v1': ['werkzeuge', 'pool_chlor'],
+    'werkzeug-pool-salz-live-v1': ['werkzeuge', 'pool_salz'], 'werkzeug-pool-alk-live-v1': ['werkzeuge', 'pool_alk'],
+    'werkzeug-pool-afm-live-v1': ['werkzeuge', 'pool_afm'], 'werkzeug-pool-volumen-live-v1': ['werkzeuge', 'pool_volumen'],
+    'werkzeug-allg-volumen-live-v1': ['werkzeuge', 'allg_volumen'], 'werkzeug-allg-gefaelle-live-v1': ['werkzeuge', 'allg_gefaelle']
   };
   const TOOLRECHT = { offerten: ['offerten', 'offerten'], artikel: ['offerten', 'artikel'], kunden: ['offerten', 'kunden'],
-    pend: ['pend', '_tool'], plan: ['plan', '_tool'], pflege: ['pflege', '_tool'], wissen: ['wissen', '_tool'] };
+    pend: ['pend', '_tool'], plan: ['plan', '_tool'], pflege: ['pflege', '_tool'], wissen: ['wissen', '_tool'],
+    werkzeuge: ['werkzeuge', '_tool'] };
   const erlaubt = ziel => { // ziel = [tool, bereich]; true/false, null = ohne Gruppe
     if(!ziel || !sicht || !sicht.rechte) return null;
     if(sicht.rechte.admin) return true;

@@ -31,6 +31,14 @@
     { k: 'wissen', n: 'Nachschlagewerk & Maschinen', icon: 'wissen', bereiche: [
       B('eintraege', 'Einträge', 'Maschinen, Produkte, Wissen'),
       B('service', 'Maschinen-Service', 'Service erfassen und abhaken') ] },
+    { k: 'werkzeuge', n: 'Werkzeuge', icon: 'werkzeuge', bereiche: [
+      S('pool_chlor', 'Pool › Stosschlorung'),
+      S('pool_salz', 'Pool › Salzzugabe'),
+      S('pool_alk', 'Pool › Alkalinität'),
+      S('pool_afm', 'Pool › AFM Filterbefüllung'),
+      S('pool_volumen', 'Pool › Pool-Volumen'),
+      S('allg_volumen', 'Allgemein › Volumen', 'mehrere Teile zusammenzählen'),
+      S('allg_gefaelle', 'Allgemein › Gefälle') ] },
     { k: 'mail', n: 'Mailassistent', icon: 'verw', bereiche: [
       B('entwuerfe', 'Mail-Entwürfe'),
       B('wissen', 'Wissensstruktur & Vorlagen') ] },
