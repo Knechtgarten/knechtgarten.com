@@ -1407,7 +1407,7 @@ function mabKnopf(p){
 // Feld im Termin (Woche/Tag/Monat), gleich nach dem Farbstreifen: Punkt (allein / Personal fehlt), Lieferwagen,
 // gelb hinterlegt bei einer wichtigen Info für diesen Tag. Erscheint nur, wenn etwas drin ist.
 const FELD_ZOOM = () => !EINGEBETTET && (zoom === 'woche' || zoom === 'tag' || zoom === 'monat');
-let MK_VM = new Set(); // «Person|Tag» mit einem Icon am Vormittag (steht ganz links im Tag), beim Neuzeichnen gesetzt
+let MK_VM = new Map(); // «Person|Tag» mit einem Icon am Vormittag (steht ganz links im Tag), beim Neuzeichnen gesetzt
 const INFO_IM_TERMIN = false; // «Wichtige Info» im Termin (Warndreieck) ersetzt durch freie Icons bei den Mitarbeitenden (2026-11-02)
 const infoAm = (it, d) => INFO_IM_TERMIN ? INFO.get((it.rep || it.id) + '|' + isoDate(d)) : null;
 let WT = {}; // Lieferwagen-Tage pro Person (beim Neuzeichnen geleert)
@@ -1424,8 +1424,8 @@ function hatPunkt(it, d){ const L = LAY[it.id]; if(!L || !(L.vorarb || L.miss.le
 function tagAnker(it, d){ const L = LAY[it.id], sg = L && L.segs.find(([a, b]) => b > d + 1e-6 && a < d + 1 - 1e-6); let u = Math.max(d, sg ? sg[0] : d); if(zoom !== 'tag') u = Math.floor(u * 2 + 1e-9) / 2; /* wie die Balken auf Halbtage ausgerichtet */ else if(u - Math.floor(u) < 1e-6) u += 1 / 12; return X(u) + 6; }
 function feldBreite(it, d){
   if(!FELD_ZOOM() || it.kind === 'absenz') return 0;
-  const p = hatPunkt(it, d), i = !!infoAm(it, d), m = dayW >= 14 && MK_VM.has(it.mid + '|' + d);
-  return m ? 18 : (p ? 4 : 0) + (i ? 14 : 0); // Icon am Vormittag: steht über dem Streifen, Text direkt daneben // links der Personal-Streifen (rot/blau), dann Warndreieck bzw. ein Icon am Vormittag – der Text weicht aus
+  const p = hatPunkt(it, d), i = !!infoAm(it, d), m = dayW >= 14 && MK_VM.get(it.mid + '|' + d);
+  return m ? (m === 'info' ? 12 : m === 'kran' ? 15 : 18) : (p ? 4 : 0) + (i ? 14 : 0); // Icon am Vormittag: steht über dem Streifen, Text direkt daneben // links der Personal-Streifen (rot/blau), dann Warndreieck bzw. ein Icon am Vormittag – der Text weicht aus
 }
 const feldOff = (it, d) => { const fb = feldBreite(it, d); return fb ? fb + 3 : 0; }; // Text beginnt nach dem Feld
 // Wichtige Info für einen Termin an einem Tag: ansehen, erfassen, ändern, löschen
@@ -1611,7 +1611,7 @@ function tlFuellen(){ const t = tlEl(); if(!t || EINGEBETTET) return; const h = 
 addEventListener('resize', () => tlFuellen());
 function renderRows(){
   const t = tlEl(); if(!t) return; compute(); dupZeigen(); tageFixNachholen(); t.style.setProperty('--rand', RAND() + 'px');
-  MK_VM = new Set(MARK.filter(m => m.teil === 'vm').map(m => m.person_id + '|' + fromIso(m.tag))); t.classList.toggle("fokus", !!openMid && layer === "p"); // aufgeklappt: Rest grau
+  MK_VM = new Map(MARK.filter(m => m.teil === 'vm' && m.art !== 'allein').map(m => [m.person_id + '|' + fromIso(m.tag), m.art])); t.classList.toggle("fokus", !!openMid && layer === "p"); // aufgeklappt: Rest grau
   tfTag = null; WT = {}; // Tag-Hervorhebung und Lieferwagen-Tage neu
   requestAnimationFrame(tlFuellen);
   t.classList.toggle("zm", zoom === "monat"); // Monat: Punkte und Lieferwagen im Feld des Termins
@@ -1724,7 +1724,7 @@ function markHTML(p){
   const eng = dayW < 14, sz = eng ? 16 : 22; let h = '';
   MARK.filter(m => m.person_id === p.id && m.art !== 'allein').forEach(m => { const d = fromIso(m.tag); if(d < 0 || d >= NDAYS) return; // «allein» = Vorab-Strich, kein Icon
     const a = X(d + (zoom === 'tag' ? 1 / 12 : 0)), b = zoom === 'tag' ? X(d + 11 / 12) : X(d) + wdW(d);
-    const l = eng || m.teil === 'ganz' ? (a + b) / 2 - sz / 2 : m.teil === 'vm' ? a + 3 : b - sz - 4;
+    const l = eng || m.teil === 'ganz' ? (a + b) / 2 - sz / 2 : m.teil === 'vm' ? a + (m.art === 'info' ? 0 : m.art === 'kran' ? 1.5 : 3) : b - sz - 4;
     h += `<span class="mk${eng ? ' eng' : ''}" data-mk="${m.id}" style="left:${l}px" title="${esc(m.art === 'liefer' ? 'Lieferung ' + (LIEFERANT[m.lieferant]?.name || '') : MARKART[m.art] || m.art)} · ${esc(dLab(d))} ${TEIL[m.teil] || ''}${m.text ? '\n' + esc(m.text) : ''}">${mkSvg(m.art, m.art === 'liefer' ? (LIEFERANT[m.lieferant] || LIEFERANT.diverse).farbe : m.art === 'info' || m.art === 'kran' ? 'var(--prot)' : null)}</span>`; });
   return h;
 }
