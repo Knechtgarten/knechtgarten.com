@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<script src="/kg-pw-schutz.js?v=5"></script>
+<script src="/kg-stil.js?v=30"></script>
+<title>Personen – Doku-Tools</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#323E4E">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="/kg-doku.js?v=1"></script>
+<style>
+.kgd-pers-seite{padding:18px 22px;display:flex;flex-direction:column;gap:12px;max-width:1100px;}
+.kgd-pers-seite h2{margin:0;font-size:18px;color:#323E4E;}
+.kgd-tab td .kgd-t{height:32px;font-size:13.5px;min-width:120px;}
+.kgd-tab td.nr .kgd-t{min-width:130px;}
+.kgd-tab td.ml .kgd-t{min-width:230px;}
+.kgd-tab tr.aus td{opacity:.55;}
+.kgd-tab td input[type=checkbox]{width:17px;height:17px;accent-color:#323E4E;}
+</style>
+</head>
+<body>
+<header class="app"><div class="wrap">
+  <a class="backlink" href="index.html">Startseite</a>
+  <div class="brand"><h1>Doku-Tools</h1></div>
+  <span class="userbar hidden" id="userbar"><span id="userbarText"></span><button id="logoutBtn">Abmelden</button></span>
+</div></header>
+<nav class="subnav"><div class="wrap">
+  <a href="doku-live-v1.html">Dokumente</a>
+  <a href="doku-personen-live-v1.html" class="on">Personen</a>
+</div></nav>
+<button type="button" class="kgd-btn prim kg-haupt" data-kg-seite="rechts" id="neuBtn">+ Person</button>
+<main id="appMain"></main>
+<script>
+// Zentrale Personenliste für alle Dokumente: wer hier steht, erscheint im Daten-Fenster
+// (Projektleiter + Bauführer bei «Projektleiter», Vorarbeiter bei «Vorarbeiter vor Ort»).
+// Login verknüpft = beim Ausfüllen als «ich» vorausgewählt. Änderungen werden sofort gespeichert.
+const $ = id => document.getElementById(id);
+async function aufbau(main){
+  const { esc, ic } = KGD, sb = KGD.sb, darf = KGD.darfPersonen;
+  const { data: ben } = await sb.from('benutzer').select('id,anzeigename,email').eq('aktiv', true).order('anzeigename');
+  const BEN = ben || [];
+  if(!darf) $('neuBtn').classList.add('hidden');
+  main.innerHTML = `<div class="kgd-pers-seite"><h2>Personen</h2><div id="liste"></div>
+    <span class="kgd-hinweis">Nur aktive Personen erscheinen im Daten-Fenster. Projektleiter und Bauführer stehen bei «Projektleiter», Vorarbeiter bei «Vorarbeiter vor Ort». Mit einem verknüpften Login ist die Person beim Ausfüllen als «ich» vorausgewählt.</span></div>`;
+  const zeichnen = () => {
+    const L = KGD.personen, dis = darf ? '' : ' disabled';
+    $('liste').innerHTML = L.length ? `<div class="kgd-tab"><table><thead><tr><th>Name</th><th>Rolle</th><th>Handy</th><th>Mail</th><th>Login</th><th>Aktiv</th><th></th></tr></thead><tbody>
+      ${L.map(p => `<tr data-id="${p.id}"${p.aktiv ? '' : ' class="aus"'}>
+        <td><input class="kgd-t" data-k="name" value="${esc(p.name)}" autocomplete="off"${dis}></td>
+        <td><select class="kgd-t" data-k="rolle"${dis}>${Object.entries(KGD.ROLLEN).map(([k, n]) => `<option value="${k}"${k === p.rolle ? ' selected' : ''}>${n}</option>`).join('')}</select></td>
+        <td class="nr"><input class="kgd-t" data-k="telefon" value="${esc(p.telefon || '')}" autocomplete="off" placeholder="079 …"${dis}></td>
+        <td class="ml"><input class="kgd-t" data-k="mail" value="${esc(p.mail || '')}" autocomplete="off" placeholder="optional"${dis}></td>
+        <td><select class="kgd-t" data-k="benutzer_id"${dis}><option value="">–</option>${BEN.map(b => `<option value="${b.id}"${b.id === p.benutzer_id ? ' selected' : ''}>${esc(b.anzeigename || b.email)}</option>`).join('')}</select></td>
+        <td><input type="checkbox" data-k="aktiv"${p.aktiv ? ' checked' : ''}${dis} aria-label="aktiv"></td>
+        <td class="akt">${darf ? `<button type="button" class="kg-ibtn danger" data-weg title="Löschen" aria-label="Löschen">${ic('trash')}</button>` : ''}</td></tr>`).join('')}
+      </tbody></table></div>` : '<div class="kgd-leer">Noch keine Personen erfasst.</div>';
+    $('liste').querySelectorAll('[data-k]').forEach(el => el.addEventListener('change', async () => {
+      const tr = el.closest('tr'), id = tr.dataset.id, k = el.dataset.k;
+      const wert = k === 'aktiv' ? el.checked : (el.value.trim() || (k === 'name' ? null : null));
+      if(k === 'name' && !wert){ KGD.toast('Der Name darf nicht leer sein.', true); zeichnen(); return; }
+      const { error } = await sb.from('doku_person').update({ [k]: wert }).eq('id', id);
+      if(error){ KGD.toast('Speichern fehlgeschlagen: ' + error.message, true); return; }
+      const p = KGD.personen.find(x => x.id === id); p[k] = wert;
+      if(k === 'aktiv') tr.classList.toggle('aus', !wert);
+      KGD.toast('Gespeichert');
+    }));
+    $('liste').querySelectorAll('[data-weg]').forEach(b => b.addEventListener('click', async () => {
+      const id = b.closest('tr').dataset.id, p = KGD.personen.find(x => x.id === id);
+      if(!confirm(`«${p.name}» löschen? In bestehenden Dokumenten fehlt die Person danach. Tipp: «Aktiv» ausschalten blendet sie nur aus.`)) return;
+      const { error } = await sb.from('doku_person').delete().eq('id', id);
+      if(error){ KGD.toast('Löschen fehlgeschlagen: ' + error.message, true); return; }
+      KGD.personen = KGD.personen.filter(x => x.id !== id); zeichnen();
+    }));
+  };
+  $('neuBtn').addEventListener('click', async () => {
+    const { data, error } = await sb.from('doku_person').insert({ name: 'Neue Person', rolle: 'vorarbeiter', sortierung: KGD.personen.length + 1 }).select('*').single();
+    if(error){ KGD.toast('Anlegen fehlgeschlagen: ' + error.message, true); return; }
+    KGD.personen.push(data); zeichnen();
+    const f = $('liste').querySelector(`tr[data-id="${data.id}"] [data-k="name"]`); if(f){ f.focus(); f.select(); }
+  });
+  zeichnen();
+}
+KGD.start(aufbau);
+</script>
+</body>
+</html>

@@ -44,6 +44,9 @@
       S('spritzmittel_pflegen', 'Spritzmittel-Liste bearbeiten', 'Produkte und Dosierungen ändern'),
       S('allg_volumen', 'Allgemein › Volumen', 'mehrere Teile zusammenzählen'),
       S('allg_gefaelle', 'Allgemein › Gefälle') ] },
+    { k: 'doku', n: 'Doku-Tools', icon: 'doku', bereiche: [
+      S('vorlagen', 'Vorlagen bearbeiten', 'Brieftexte ändern (Zahnrad beim Dokument)'),
+      S('personen', 'Personen pflegen', 'Projektleiter, Bauführer, Vorarbeiter mit Handy und Mail') ] },
     { k: 'mail', n: 'Mailassistent', icon: 'verw', bereiche: [
       B('entwuerfe', 'Mail-Entwürfe'),
       B('wissen', 'Wissensstruktur & Vorlagen') ] },
