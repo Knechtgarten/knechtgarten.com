@@ -183,14 +183,16 @@ html:not(.ep-eingebettet) .bar.kopf .t.tz{max-width:none;color:#4C5C70;} html:no
 .tl.zw .vic{top:5px!important;}
 .tl.zm .rdot{top:7px;} .tl.zm .vic{top:5px!important;}
 .tl.zq .rdot{width:2px!important;height:19px!important;top:2px!important;border-width:0!important;border-radius:0!important;transform:none!important;} /* Quartal: feiner Strich links im Tag */
-.tl.zw .rdot,.tl.zm .rdot{width:5px;height:19px;top:2px;margin-left:-6.5px;border-width:0;border-radius:3px 0 0 3px;} /* Personal: Streifen ganz links am Tagesanfang (rot = fehlt, blau = allein okay) */
+.tl.zw .rdot,.tl.zm .rdot{width:5px;height:19px;top:2px;margin-left:-6.5px;border-width:0;border-radius:3px 0 0 3px;} /* Personal: Streifen ganz links am Tagesanfang (rot = fehlt, blau = allein) */
 .tl.zw .rdot.klick:hover,.tl.zm .rdot.klick:hover,.tl.zw .rdot.wahl,.tl.zm .rdot.wahl{transform:none;filter:brightness(1.25);}.vsq{position:absolute;top:13px;width:7px;height:7px;border-radius:1px;background:var(--red);z-index:3;cursor:pointer;} .vsq.zwei{background:#2F5C9A;} /* Feld: Quadrat oben rechts (Lieferwagen) */
 .itri{position:absolute;top:5px;width:12px;height:12px;color:var(--red);z-index:3;pointer-events:none;display:flex;} .itri svg{width:100%;height:100%;} /* nur Anzeige: Info steht im Termin */ /* Warndreieck = wichtige Info, Klick öffnet sie */
 .tl.zw .vic,.tl.zm .vic{transform:scale(.85);transform-origin:left center;}
 html:not(.ep-eingebettet) .tl .grid{margin-bottom:50vh;} /* unten Platz, damit auch die untersten Gruppen ganz aufgeklappt sichtbar sind */
 .tl.zq .rdot{top:7px;} .tl.zq .vic{display:none!important;} /* Quartal: grobe Übersicht */
 .rdot.blau{background:#2F6F9F;}
-.rdot.blau.cf{border-color:var(--red);box-shadow:0 0 0 1px var(--red);}
+.avor{position:absolute;top:2px;height:19px;box-sizing:border-box;border:1px dashed #2F6F9F;border-left:5px solid #2F6F9F;border-radius:3px;background:#fff;z-index:0;font-size:10.5px;color:#2F6F9F;line-height:17px;padding-left:4px;overflow:hidden;white-space:nowrap;} .row[data-mid] .avor{top:1px;} .avor.ed{cursor:pointer;} /* Vorab «Allein»: leerer Termin mit blauem Strich */
+.rdot.blau.cf{background:#7B4FA0;border-color:#7B4FA0;}
+.sallein{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--ink);cursor:pointer;} .sallein input{accent-color:#2F6F9F;} /* violett: allein gewollt, aber trotzdem Mithilfe eingeteilt */
 .rdot.halb{border-width:1.5px;box-shadow:0 0 0 1px #fff;}
 .rdot.ph{background:#C3C8CE;opacity:0;transition:opacity .1s;}
 .lane:hover .rdot.ph{opacity:1;}
@@ -1126,6 +1128,28 @@ async function soloSetzen(b, ks, an){
   const k0 = Math.floor(b.s * 2 + 1e-9), A = soloSet(b); ks.forEach(k => an ? A.add(k) : A.delete(k));
   const vorher = { at: b.at, allein: b.allein }; b.at = [...A].map(k => k - k0).sort((x, y) => x - y); b.allein = false; renderRows();
   if(!(await speichere(b, { allein_tage: b.at, allein: false }))){ Object.assign(b, vorher); renderRows(); } }
+// Vorab «Allein» für eine Person (leere Fläche › Allein): pro Tag eine Markierung art 'allein' (ganz / vm / nm)
+async function alleinVorab(mid, a, b){
+  const tage = {}; for(let k = Math.floor(a * 2 + 1e-9); k < Math.ceil(b * 2 - 1e-9); k++){ const d = k >> 1; if(!isOff(d)) (tage[d] ??= new Set()).add(k & 1); }
+  const rows = Object.entries(tage).map(([d, h]) => ({ person_id: mid, tag: isoDate(+d), teil: h.size === 2 ? 'ganz' : h.has(0) ? 'vm' : 'nm', art: 'allein', erstellt_von: ME }))
+    .filter(r => !MARK.some(m => m.person_id === mid && m.art === 'allein' && m.tag === r.tag && (m.teil === 'ganz' || m.teil === r.teil)));
+  if(!rows.length) return;
+  const { data, error } = await sb.from('planer_markierung').insert(rows).select(); if(error) return fehler(error, 'Allein');
+  MARK.push(...data); renderRows();
+  for(const it of EINS.filter(x => x.mid === mid && x.e > a && x.s < b)) await vorabUebernehmen(it); // schon ein Termin da: gleich übernehmen
+  toast(`Allein vorgemerkt · ${P[mid]?.name || ''}`);
+}
+// Termin liegt auf vorgemerktem «Allein»: er übernimmt es für diese Halbtage, die Vorab-Markierung verschwindet
+async function vorabUebernehmen(it){
+  if(!it || !(it.kind === 'baustelle' || it.kind === 'termin') || it.wdh || it.rep || P[it.mid]?.ist_ablage) return;
+  compute(); const L = LAY[it.id]; if(!L) return;
+  const ms = MARK.filter(m => m.person_id === it.mid && m.art === 'allein'), ks = [], weg = [];
+  ms.forEach(m => { const d = fromIso(m.tag), hs = m.teil === 'ganz' ? [d * 2, d * 2 + 1] : [d * 2 + (m.teil === 'nm' ? 1 : 0)], tr = hs.filter(k => L.free.includes(k)); if(tr.length){ ks.push(...tr); weg.push(m); } });
+  if(!ks.length) return;
+  await soloSetzen(it, ks, true);
+  const { error } = await sb.from('planer_markierung').delete().in('id', weg.map(m => m.id)); if(error) return fehler(error);
+  MARK = MARK.filter(m => !weg.includes(m)); renderRows();
+}
 // Unterbruch eines Auftrags: [von, bis) in Tagen ab Beginn
 const inPause = (it, k) => !!it.pz?.length && it.pz.some(([a, c]) => k / 2 >= it.s + a - 1e-6 && (k + 1) / 2 <= it.s + c + 1e-6);
 // Reingeschoben = o liegt ganz in it und ist kürzer (it wird dort unterbrochen). Alles andere liegt übereinander.
@@ -1172,7 +1196,7 @@ function compute(){
   // Vorarbeiter-Baustelle oder -Termin (z. B. Pflege) ohne Mithilfe (und nicht «allein») = Personal fehlt (nur ab heute)
   // Mithilfe zählt pro Person und Halbtag: «Mit Cornelia» deckt alle Termine von Cornelia in diesem Halbtag
   const cover = {}; ALL.forEach(h => { if(h.kind !== 'hilfe' || !LAY[h.id]) return; const m = (h.link && byId(h.link)?.mid) || h.mp; if(m) LAY[h.id].free.forEach(k => (cover[m] ??= new Set()).add(k)); });
-  // Blau = an diesem Halbtag allein okay (kein Personal nötig); blau + Mithilfe eingeteilt = Konflikt (roter Rand)
+  // Blau = an diesem Halbtag allein (kein Personal nötig); blau + Mithilfe eingeteilt = Konflikt (roter Rand)
   ALL.forEach(b => { if(!(b.kind === 'baustelle' || (b.kind === 'termin' && b.e - b.s >= 2 / 12 - 1e-6)) || !P[b.mid]?.ist_vorarbeiter || !LAY[b.id] || LAY[b.id].mini) return; const c = cover[b.mid] || new Set(), A = soloSet(b), L = LAY[b.id];
     L.solo = L.free.filter(k => A.has(k)); L.soloCf = new Set(L.solo.filter(k => c.has(k)));
     L.miss = L.free.filter(k => !c.has(k) && !A.has(k) && k >= TODAY * 2); L.vorarb = true; });
@@ -1291,9 +1315,9 @@ function openInfo(btn){
     ${z(sw('#fff', 'border:1.5px solid #5C3F94'), 'Maschine / Lieferwagen – Rahmen in Farbe des Vorarbeiters')}
     ${z(sw('#C9CED4'), 'Absenz')}
     ${z(sw('#E9ECEF'), 'Werkhof / intern')}
-    ${z('<span class="rdot" style="position:static;display:inline-block"></span>', 'Personal fehlt (Klick = allein okay)')}
-    ${z('<span class="rdot blau" style="position:static;display:inline-block"></span>', 'Allein okay (Klick = aufheben; über leerem Balken erscheinen graue Punkte)')}
-    ${z('<span class="rdot blau cf" style="position:static;display:inline-block"></span>', 'Allein okay, aber Mithilfe eingeteilt')}
+    ${z('<span class="rdot" style="position:static;display:inline-block"></span>', 'Personal fehlt (Klick = allein)')}
+    ${z('<span class="rdot blau" style="position:static;display:inline-block"></span>', 'Allein (Klick = aufheben; über leerem Balken erscheinen graue Punkte)')}
+    ${z('<span class="rdot blau cf" style="position:static;display:inline-block"></span>', 'Allein, aber Mithilfe eingeteilt')}
     ${z('<span class="vic" style="position:static;width:14px;height:14px">' + I('truckf') + '</span>', 'Kein Lieferwagen an diesem Tag (unten am Baustellenbalken)')}
     ${z('<span class="vic zwei" style="position:static;width:18px;height:14px">' + I('truck2') + '</span>', 'Zwei oder mehr Lieferwagen (Info)')}
     ${z('<span class="bwarn" style="position:static;display:inline-block">!</span>', 'Arbeitstage weichen vom Geplanten ab')}
@@ -1515,13 +1539,13 @@ function personRow(p, W, bgx){
       if(!it.fix) bars += `<div class="bgrip" data-gid="${it.id}" data-side="l" style="left:${x0g - 6}px" title="Ziehen: Beginn ändern"></div>`; }
 
     const mw = MW.bau[it.id]; if(mw && L.segs.length) bars += `<span class="mwarn ${mw.l}" style="left:${X(mw.k / 2)}px" title="${mw.l === 'r' ? 'Maschine doppelt fest belegt' : 'Maschinen-Überschneidung (vorläufig)'} – Maschinen aufklappen">${I('digger')}</span>`;
-    // Punkte oben am Balken: rot = Personal fehlt, blau = allein okay, blau mit rotem Rand = trotzdem jemand eingeteilt.
+    // Punkte oben am Balken: rot = Personal fehlt, blau = allein, blau mit rotem Rand = trotzdem jemand eingeteilt.
     // Klick schaltet rot ↔ blau; leere Halbtage zeigen beim Darüberfahren graue Platzhalter (Klick = blau). Ziehen = mehrere.
     if(zoom !== 'jahr' && (L.vorarb || L.miss.length)){ const slotW = dayW / 2, klick = ed && L.vorarb && zoom !== 'quartal' && zoom !== 'jahr', solo = new Set(L.solo || []), miss = new Set(L.miss);
       const dot = (k, x, tag) => { const s = solo.has(k), m = miss.has(k); if(!s && !m && !klick) return;
         const cls = s ? 'rdot blau' + (L.soloCf?.has(k) ? ' cf' : '') : m ? 'rdot' : 'rdot ph';
-        const t = s ? (L.soloCf?.has(k) ? 'Allein okay – aber Mithilfe eingeteilt!' : 'Allein okay') : m ? 'Personal fehlt' : 'Allein okay setzen';
-        bars += `<span class="${cls}${klick ? ' klick' : ''}" ${klick ? `data-solo="${it.id}" data-k="${k}"${tag ? ' data-tag="1"' : ''}` : ''} style="left:${x - 4.5}px" title="${t}${klick ? (s ? ' · Klick: aufheben' : ' · Klick: allein okay') : ''}"></span>`; };
+        const t = s ? (L.soloCf?.has(k) ? 'Allein – aber Mithilfe eingeteilt!' : 'Allein') : m ? 'Personal fehlt' : 'Allein setzen';
+        bars += `<span class="${cls}${klick ? ' klick' : ''}" ${klick ? `data-solo="${it.id}" data-k="${k}"${tag ? ' data-tag="1"' : ''}` : ''} style="left:${x - 4.5}px" title="${t}${klick ? (s ? ' · Klick: aufheben' : ' · Klick: allein') : ''}"></span>`; };
       // Tag: ein Punkt pro Halbtag. Woche/Monat: ein Punkt pro Tag und Auftrag in der Tagesmitte, links = Vormittag, rechts = Nachmittag
       // (betrifft es nur einen Halbtag, ist der Punkt nur halb gefüllt); Klick schaltet beide Halbtage
       // Tag: Punkt ein Stück nach dem Farbfeld (Nachmittag gleich daneben, wenn der Balken schon am Vormittag beginnt)
@@ -1535,13 +1559,17 @@ function personRow(p, W, bgx){
         if((!rot && !blau && !klick) || !(d >= TODAY || blau)) return;
         const col = { r: 'var(--prot)', b: '#2F6F9F', '': '#fff' }, halb = a !== b && (rot || blau), cf = L.soloCf?.has(d * 2) || L.soloCf?.has(d * 2 + 1);
         const cls = rot ? 'rdot' : blau ? 'rdot blau' + (cf ? ' cf' : '') : 'rdot ph';
-        const was = { r: 'Personal fehlt', b: 'allein okay', '': 'besetzt' };
-        const t = halb ? `Vormittag: ${was[a]} · Nachmittag: ${was[b]}` : rot ? 'Personal fehlt (ganzer Tag)' : blau ? (cf ? 'Allein okay – aber Mithilfe eingeteilt!' : 'Allein okay') : 'Allein okay setzen';
+        const was = { r: 'Personal fehlt', b: 'allein', '': 'besetzt' };
+        const t = halb ? `Vormittag: ${was[a]} · Nachmittag: ${was[b]}` : rot ? 'Personal fehlt (ganzer Tag)' : blau ? (cf ? 'Allein – aber Mithilfe eingeteilt!' : 'Allein') : 'Allein setzen';
         const fz = FELD_ZOOM() || zoom === 'quartal', sty = halb && !fz ? `;background:linear-gradient(${fz ? '180deg' : '90deg'},${fz && !a ? 'transparent' : col[a]} 50%,${fz && !b ? 'transparent' : col[b]} 50%);border-color:${rot ? 'var(--prot)' : '#2F6F9F'}` /* Streifen: oben Vormittag, unten Nachmittag */ : '';
-        bars += `<span class="${cls}${halb ? ' halb' : ''}${klick ? ' klick' : ''}" ${klick ? `data-solo="${it.id}" data-k="${d * 2}" data-tag="1"` : ''} style="left:${FELD_ZOOM() ? tagAnker(it, d) + 1 : zoom === 'quartal' ? X(d) + 2 : zoom === 'woche' ? X(d) + wdW(d) - 16.5 : X(d) + wdW(d) / 2 - 4.5}px${sty}" title="${t}${klick ? (rot ? ' · Klick: allein okay' : blau ? ' · Klick: aufheben' : ' · Klick: allein okay') : ''}"></span>`; });
+        bars += `<span class="${cls}${halb ? ' halb' : ''}${klick ? ' klick' : ''}" ${klick ? `data-solo="${it.id}" data-k="${d * 2}" data-tag="1"` : ''} style="left:${FELD_ZOOM() ? tagAnker(it, d) + 1 : zoom === 'quartal' ? X(d) + 2 : zoom === 'woche' ? X(d) + wdW(d) - 16.5 : X(d) + wdW(d) / 2 - 4.5}px${sty}" title="${t}${klick ? (rot ? ' · Klick: allein' : blau ? ' · Klick: aufheben' : ' · Klick: allein') : ''}"></span>`; });
       else [...new Set(L.miss.map(k => k >> 1))].forEach((d, j) => { if(j % Math.max(1, Math.ceil(10 / dayW)) === 0) bars += `<span class="rdot" style="left:${zoom === 'quartal' ? X(d) + 2 : X(d) + wdW(d) / 2 - 4.5}px" title="Personal fehlt"></span>`; });
     }
   });
+  // Vorab «Allein» (noch ohne Termin): leerer Termin mit blauem Strich; ein Termin, der hineinkommt, übernimmt es
+  if(zoom !== 'jahr') MARK.filter(m => m.person_id === p.id && m.art === 'allein').forEach(m => { const d = fromIso(m.tag); if(d < 0 || d >= NDAYS) return;
+    const a = d + (m.teil === 'nm' ? .5 : 0), b = d + (m.teil === 'vm' ? .5 : 1), w = Math.max(4, XW(a, b) - 1);
+    bars += `<div class="avor${ed ? ' ed' : ''}" data-avor="${m.id}" style="left:${X(a) + .5}px;width:${w}px" title="Allein · ${esc(dLab(d))} ${TEIL[m.teil] || ''}${ed ? '\nKlick: entfernen' : ''}">${w > 46 ? '<span>Allein</span>' : ''}</div>`; });
   const mine = p.benutzer_id === ME;
   return `<div class="row${openMid === p.id ? " fokusp" : ""}${MARKS.includes(p.id) ? " mark" : ""}${P[p.id] && phGruppe()?.id === p.gruppe_id ? " ph" : ""}" data-mid="${p.id}"><div class="nm"${p.farbe ? ` style="--pf:${p.farbe};--pft:${txtOn(p.farbe)}"` : ''} title="${esc(p.name + (p.zusatz ? ' · ' + p.zusatz : ''))}">${isBuero() ? `<span class="pgrip" title="Ziehen: Reihenfolge oder Gruppe ändern">${I('grip')}</span>` : ''}<span class="n">${esc(p.name)}</span>${pzPunkt(p.id)}${p.zusatz ? `<span class="z">${esc(p.zusatz)}</span>` : ''}${mine ? '<span class="me">Ich</span>' : ''}${p.farbe && !p.ist_projektleiter ? `${mabKnopf(p)}<button class="mab mab2${openMid === p.id && openTyp === 'fahrzeug' ? ' on' : ''}" data-mab="${p.id}" data-typ="fahrzeug" title="Lieferwagen und Anhänger einteilen (aufklappen)" aria-label="Lieferwagen einteilen">${I('truck')}</button>` : ''}</div><div class="lane${ed ? ' ed' : ''}" data-mid="${p.id}" style="width:${W}px;${bgx}">${feierHTML()}${bars}${provBars('p:' + p.id)}${p.id === svcRowId() ? svcRowBars() : ''}${vehIcons(p)}${markHTML(p)}</div></div>`;
 }
@@ -1694,7 +1722,7 @@ const mkSvg = (art, col) => `<svg viewBox="0 0 24 24"><use href="#i-m-${art}" cl
 function markHTML(p){
   // Nacktes Icon mit dünnem weissem Rand. Vormittag = ganz links im Tag (Text des Termins weicht aus), ganzer Tag = Mitte, Nachmittag = rechts
   const eng = dayW < 14, sz = eng ? 16 : 22; let h = '';
-  MARK.filter(m => m.person_id === p.id).forEach(m => { const d = fromIso(m.tag); if(d < 0 || d >= NDAYS) return;
+  MARK.filter(m => m.person_id === p.id && m.art !== 'allein').forEach(m => { const d = fromIso(m.tag); if(d < 0 || d >= NDAYS) return; // «allein» = Vorab-Strich, kein Icon
     const a = X(d + (zoom === 'tag' ? 1 / 12 : 0)), b = zoom === 'tag' ? X(d + 11 / 12) : X(d) + wdW(d);
     const l = eng || m.teil === 'ganz' ? (a + b) / 2 - sz / 2 : m.teil === 'vm' ? a + 3 : b - sz - 4;
     h += `<span class="mk${eng ? ' eng' : ''}" data-mk="${m.id}" style="left:${l}px" title="${esc(m.art === 'liefer' ? 'Lieferung ' + (LIEFERANT[m.lieferant]?.name || '') : MARKART[m.art] || m.art)} · ${esc(dLab(d))} ${TEIL[m.teil] || ''}${m.text ? '\n' + esc(m.text) : ''}">${mkSvg(m.art, m.art === 'liefer' ? (LIEFERANT[m.lieferant] || LIEFERANT.diverse).farbe : m.art === 'info' || m.art === 'kran' ? 'var(--prot)' : null)}</span>`; });
@@ -1826,6 +1854,7 @@ function sbarInner(){
       ${f.aus ? `<span class="tchip saus" title="Ausnahmen (von der KI)">Ohne: ${esc(f.aus)}<button data-sausx="1" aria-label="Ausnahmen entfernen">${I('x')}</button></span>` : ''}</div>
     <div class="sbx smitte"><div class="s2sp">${was('auf', null, 'Auftrag')}${was('off', null, 'Offener Auftrag')}</div>
       ${f.art === 'auf' || f.art === 'off' ? `<input type="text" data-sin="kunde" list="sKList" value="${esc(f.kunde)}" placeholder="Kunde"><datalist id="sKList">${KLIST.map(x => `<option value="${esc(x.lab)}">`).join('')}</datalist><input type="text" data-sin="text" value="${esc(f.text)}" placeholder="Titel">` : ''}
+      ${f.art === 'auf' || f.art === 'off' ? `<label class="sallein"><input type="checkbox" data-sin="allein"${f.allein ? ' checked' : ''}>Allein</label>` : ''}
       <div class="s2sp sabs">${ABS_TYPEN().map(t => was('abs', t, esc(t))).join('')}</div></div>
     <div class="sbx"><div class="tcol ticons">${Object.keys(MARKART).map(a => `<button class="tchip${f.art === 'mk' && f.mk === a ? ' on' : ''}" data-sart="mk" data-sval="${a}" title="${MARKART[a]}">${I('m-' + a)}</button>`).join('')}</div>
       ${f.art === 'mk' ? `<input type="text" data-sin="text" value="${esc(f.text)}" placeholder="Hinweis (optional)" style="width:84px">` : ''}</div>
@@ -1907,7 +1936,7 @@ async function serieAnlegen(f, wer){
     if(f.art === 'mk'){ if(!mkArten(mid).includes(f.mk)){ falsch++; return; } marks.push({ person_id: mid, tag: isoDate(t), teil, art: f.mk, text: f.text.trim() || null, erstellt_von: ME, serie_id: sid }); return; }
     if(istAllg(mid)){ falsch++; return; }
     const s = t + (teil === 'nm' ? .5 : 0), e = t + (teil === 'vm' ? .5 : 1);
-    const row = itemToRow(f.art === 'abs' ? { mid, kind: 'absenz', s, e, title: f.abs, ok: true } : { mid, kind: 'termin', s, e, kid: k?.id || null, title: f.text.trim(), pl, ok: f.art !== 'off' });
+    const row = itemToRow(f.art === 'abs' ? { mid, kind: 'absenz', s, e, title: f.abs, ok: true } : { mid, kind: 'termin', s, e, kid: k?.id || null, title: f.text.trim(), pl, ok: f.art !== 'off', allein: !!f.allein });
     row.erstellt_von = ME; row.serie_id = sid; eins.push(row); }));
   const n = eins.length + marks.length; if(!n){ toast('Kein Eintrag möglich (Icon passt nicht zu diesen Zeilen).', null, true); return; }
   toast(`Serie wird angelegt (${n} Einträge) …`);
@@ -2398,7 +2427,7 @@ async function ladePflege(){
       fetchAll(() => sb.from('pflege_arbeit').select('id,kategorie_id,name,standard_kws,dauer_min,ablauf')),
       fetchAll(() => sb.from('pflege_kunde').select('kunde_id,abo_typ,wunsch_wochentage,notiz')),
       fetchAll(() => sb.from('pflege_kunde_kategorie').select('id,kunde_id,kategorie_id,werte,bewaesserung')),
-      fetchAll(() => sb.from('pflege_kunde_arbeit').select('id,kunde_kategorie_id,arbeit_id,titel,beschrieb,kws,kws_plus,kws_minus,abgewaehlte_jahre,dauer_min')),
+      fetchAll(() => sb.from('pflege_kunde_arbeit').select('id,kunde_kategorie_id,arbeit_id,titel,beschrieb,kws,kws_plus,kws_minus,abgewaehlte_jahre,dauer_min,allein')),
       fetchAll(() => sb.from('pflege_kunde_kategorie_zustaendig').select('*')),
       fetchAll(() => sb.from('pflege_einsatz_status').select('kunde_kategorie_id,jahr,kw').in('jahr', [y, y + 1])),
       fetchAll(() => sb.from('pflege_feld').select('id,kategorie_id,name,typ,einheit,reihenfolge'))
@@ -2431,12 +2460,12 @@ function computeProv(){
     const lane = zu.length ? 'p:' + zu[0].id : (teamLaneId() ? 'g:' + teamLaneId() : null); if(!lane) return;
     weeks.forEach(({ y, w, mon }) => {
       if(PF.st.has(`${kk.id}_${y}_${w}`) || linked.has(`${kk.id}_${y}_${w}`)) return;
-      const arb = []; let min = 0, fehlt = false;
+      const arb = []; let min = 0, fehlt = false, allein = false;
       (byKk[kk.id] || []).forEach(a => { if((a.abgewaehlte_jahre || []).includes(y)) return; const std = a.arbeit_id ? PF.arb[a.arbeit_id] : null;
         const kws = std ? new Set([...(std.standard_kws || []).filter(x => !(a.kws_minus || []).includes(x)), ...(a.kws_plus || [])]) : new Set(a.kws || []);
-        if(!kws.has(w)) return; arb.push(std ? std.name : a.titel); const dm = a.dauer_min ?? std?.dauer_min; if(dm == null) fehlt = true; min += dm ?? 60; });
+        if(!kws.has(w)) return; arb.push(std ? std.name : a.titel); if(a.allein) allein = true; const dm = a.dauer_min ?? std?.dauer_min; if(dm == null) fehlt = true; min += dm ?? 60; });
       if(!arb.length) return;
-      PROV.push({ id: `${kk.id}_${y}_${w}`, kk: kk.id, y, w, mon, kid: kk.kunde_id, kat, arb, min, fehlt, lane, wd: ku.wunsch_wochentage || [] });
+      PROV.push({ id: `${kk.id}_${y}_${w}`, kk: kk.id, y, w, mon, kid: kk.kunde_id, kat, arb, min, fehlt, allein, lane, wd: ku.wunsch_wochentage || [] });
     });
   });
   // Perlenkette pro Zeile
@@ -2464,7 +2493,7 @@ function provBars(key){ return (PROVLAY[key] || []).map(x => { const p = x.p, k 
   return `<div class="bar prov${x.alt ? ' over' : ''}${p.fehlt ? ' nozeit' : ''}" data-prov="${p.id}" style="left:${l}px;width:${w}px" title="${esc(tip)}">${w > 16 ? `<span class="t" style="left:3px;width:${w - 6}px">${x.alt && w > 60 ? `seit KW ${p.w} · ` : ''}${esc(kShort(k))}</span>` : ''}</div>`; }).join(''); }
 async function provToEinsatz(pid, mid, s, e, ok, pl, ueber, weicht){
   const p = PROV.find(x => x.id === pid); if(!p) return;
-  const neu = await neuerEinsatz({ mid, kind: 'termin', s: r48(s), e: r48(e), kid: p.kid, title: `${p.kat.name}: ${p.arb.join(', ')}`, text: VNOT[p.id]?.n || '', ok, pl: pl !== undefined ? pl : VNOT[p.id]?.pl || null, pkk: p.kk, pj: p.y, pkw: p.w, ueber: !!ueber, weicht: !!weicht }, false);
+  const neu = await neuerEinsatz({ mid, kind: 'termin', s: r48(s), e: r48(e), kid: p.kid, title: `${p.kat.name}: ${p.arb.join(', ')}`, text: VNOT[p.id]?.n || '', ok, pl: pl !== undefined ? pl : VNOT[p.id]?.pl || null, pkk: p.kk, pj: p.y, pkw: p.w, ueber: !!ueber, weicht: !!weicht, allein: !!p.allein }, false); // «Allein» aus dem Pflege-Tool
   if(neu && VNOT[p.id]){ await sb.from('planer_vorschlag_notiz').delete().eq('kunde_kategorie_id', p.kk).eq('jahr', p.y).eq('kw', p.w); delete VNOT[p.id]; }
   if(neu){ renderRows(); toast(`${kShort(KUNDEN[p.kid])}: ${ok ? 'abgemacht' : 'angeheftet'} bei ${P[mid].name}`, () => loescheEinsatz(neu)); }
 }
@@ -2579,7 +2608,7 @@ function openNeuLeiste(lane, mid, a, b, extra){ // extra = { lab, ic, fn }: zus�
 // Kompakte Auswahl direkt beim Eintrag: eine Zeile pro Möglichkeit, rechts die Taste, passende Wahl dunkel
 function drawNeuLeiste(){
   const L = neuL;
-  const arten = [['termin', 'Auftrag'], ['offen', 'Offener Auftrag'], ['hilfe', 'Mithilfe'], ['absenz', 'Absenz']];
+  const arten = [['termin', 'Auftrag'], ['offen', 'Offener Auftrag'], ['hilfe', 'Mithilfe'], ['absenz', 'Absenz'], ['allein', 'Allein']];
   const btn = (attr, lab, on) => `<button ${attr} class="${on ? 'on' : ''}">${lab}</button>`; // Tasten 1–4 / V funktionieren weiter, werden aber nicht angezeigt
   let kopf = '', list;
   if(L.step === 'absenz'){ kopf = 'Art der Absenz'; list = ABS_TYPEN().map((t, i) => btn(`data-abs="${esc(t)}"`, `<span>${esc(t)}</span>`, false)).join(''); }
@@ -2627,6 +2656,7 @@ function mithilfeWahl(mid, a, b){
 function waehleArt(art){
   const L = neuL; if(!L) return;
   if(art === 'termin' || art === 'offen'){ legeAn(art); return; }
+  if(art === 'allein'){ const { mid, a, b } = L; closeNeuLeiste(); alleinVorab(mid, a, b); return; }
   if(art === 'hilfe'){ L.baus = mithilfeWahl(L.mid, L.a, L.b);
     if(!L.baus.length){ toast('Niemand mit Farbe zum Mithelfen gefunden.', null, true); return; } }
   L.step = art; drawNeuLeiste();
@@ -2747,6 +2777,11 @@ function tagFarbe(d){
   });
 }
 function bindTimeline(t){
+  // Vorab «Allein» anklicken = entfernen (mit Rückfrage)
+  t.addEventListener('pointerdown', e => { const v = e.target.closest('.avor'); if(!v || e.button !== 0) return; e.preventDefault(); e.stopPropagation();
+    const m = MARK.find(x => x.id === v.dataset.avor); if(!m || !canEdit(m.person_id)) return;
+    bestaetige('Allein entfernen?', `<span>${esc(P[m.person_id]?.name || '')} · ${esc(dLab(fromIso(m.tag)))} ${esc(TEIL[m.teil] || '')}</span>`, 'Entfernen', async () => {
+      const { error } = await sb.from('planer_markierung').delete().eq('id', m.id); if(error) return fehler(error); MARK = MARK.filter(x => x !== m); renderRows(); }); }, true);
   t.addEventListener('pointerdown', e => { if(!e.target.closest('#ablBtn')) return; e.preventDefault(); e.stopPropagation(); ABLAGE = !ABLAGE; lsSet('ablage', ABLAGE); renderRows(); }, true); // Ablage-Zeilen ein/aus (schon beim Drücken, sonst startet der Gruppenkopf das Ziehen)
   t.addEventListener('pointerdown', e => { if(e.target.closest('.bar')) panelTagU = uAt(e.clientX); }, true); // Tag für «Wichtige Info» im Seitenfenster
   // Gelbes Feld (wichtige Info): Klick oder Rechtsklick öffnet die Info, nichts anderes (kein Ziehen, kein neuer Eintrag)
@@ -3090,6 +3125,7 @@ function bindWindow(){
       const ok = await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true), person_id: it.mid, uebereinander: !!it.ueber, weicht: !!it.weicht, ...(keinLang ? { soll_tage: null } : {}), ...(d.pz0 && d.mode === 'l' ? { pausen: it.pz } : {}), ...(d.at0 && d.mode === 'l' ? { allein_tage: it.at } : {}) });
       if(!ok){ Object.assign(it, vorher); renderRows(); return; }
       tageFixNachholen(); // neu lang geworden = fixe Arbeitstage
+      if(!inAblage) await vorabUebernehmen(it); // auf vorgemerktes «Allein» gezogen
       if(it.kind === 'absenz' && !inAblage) await ausgleich(it, vorher);
       // Ganzer Termin verschoben (auch andere Zeile): Sprung-Regel Faktor 2 – Absenzen immer, höchstens ein Kundentermin
       if(!inAblage && d.mode === 'move' && istLang(it) && it.soll && !it.frei){ compute(); const ne = sprungEnde(it, 2, it.s);
@@ -3231,6 +3267,7 @@ async function neuerEinsatz(it, open){
   const neu = rowToItem(data); EINS.push(neu);
   if(VIEW === 'plan') renderRows();
   if(neu.kind === 'absenz') await ausgleich(neu, null);
+  await vorabUebernehmen(neu); // auf vorgemerktem «Allein» angelegt
   if(open) openPanel(neu.id, true);
   return neu;
 }
@@ -3395,9 +3432,9 @@ function openPanel(id, isNew){
     else if(ed){ const baus = EINS.filter(b => b.kind === 'baustelle' && b.mid !== it.mid && b.s < it.e && b.e > it.s);
       secs += `<div class="fld"><label>Mithilfe bei</label><select id="pLink"><option value="">– Baustelle wählen –</option>${baus.map(b => `<option value="${b.id}">${esc(first(P[b.mid]?.name))} · ${esc(labOf(b))}</option>`).join('')}</select></div>`; }
   }
-  // Oben rechts: roter Punkt = Personal fehlt («allein okay» wird direkt an den Punkten im Plan gesetzt)
+  // Oben rechts: roter Punkt = Personal fehlt («allein» wird direkt an den Punkten im Plan gesetzt)
   const missT = new Set(L.miss.map(x => x >> 1)).size;
-  const punkte = it.kind === 'baustelle' && missT ? `<span class="pdot" title="Personal fehlt an ${missT} ${missT === 1 ? 'Tag' : 'Tagen'} – im Plan Punkt anklicken = allein okay" aria-label="Personal fehlt"></span>` : '';
+  const punkte = it.kind === 'baustelle' && missT ? `<span class="pdot" title="Personal fehlt an ${missT} ${missT === 1 ? 'Tag' : 'Tagen'} – im Plan Punkt anklicken = allein" aria-label="Personal fehlt"></span>` : '';
   // Start fix (Info + Grund) und Hinweis, wenn hinten kein Platz für alle Arbeitstage war (nur Aufträge, nicht offene)
   const abw = it.soll && Math.abs(L.n - it.soll) > .01;
   const fixe = auftrag && !offen ? `<div class="fixe">
