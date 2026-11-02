@@ -23,6 +23,7 @@
     W('pool_alk', 'pool', 'Alkalinität', 'Alca Plus dosieren'),
     W('pool_afm', 'pool', 'AFM Filterbefüllung', 'Säcke pro Apollo-Filter'),
     W('pool_volumen', 'pool', 'Pool-Volumen', 'Rechteck, rund, oval, Freiform'),
+    W('bau_kies', 'bau', 'Kies-Gewicht', 'm³ ↔ Tonnen nach Kiessorte'),
     W('bau_schalit', 'bau', 'Beton für Schalungssteine', 'SCHALIT: Füllbeton, Steine, Paletten'),
     W('pflege_spritz', 'pflege', 'Spritzmittel', 'Wie viel Mittel in den Tank, mit Umrechner'),
     W('allg_volumen', 'allg', 'Volumen', 'Mehrere Teile zusammenzählen'),
