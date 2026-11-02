@@ -433,6 +433,7 @@ body.kopiert, body.kopiert *{cursor:copy !important;}
 /* Maschinen-Reservierung: vorläufig gestrichelt, fest durchgezogen; Überschneidung orange (vorläufig) / rot (fest) */
 .band.mres{background:#fff;border:1.5px solid var(--c);color:var(--ink);}
 .band.mres.vorl{border-style:dashed;}
+.band.mres.ghost{background:transparent;opacity:.75;pointer-events:none;} /* vorläufig auf diese Nummer verteilt */
 .band.mres.cfo{background:repeating-linear-gradient(135deg,#F0A04B 0 3px,#fff 3px 7px);} /* vorläufige Überschneidung */
 .band.mres.cfr{background:repeating-linear-gradient(135deg,var(--red) 0 3px,#fff 3px 7px);} /* zugeteilte Überschneidung */
 .band.mres.cfo > span:not(.hl):not(.hr),.band.mres.cfr > span:not(.hl):not(.hr){background:rgba(255,255,255,.9);border-radius:2px;padding:0 2px;}
@@ -1696,8 +1697,24 @@ function computeRU(){
     const abw = new Set(); ALL.forEach(it => { if(it.mid === mid && it.kind === 'absenz' && LAY[it.id]) LAY[it.id].free.forEach(k => abw.add(k)); });
     RU[r.id].list.push({ id: 'stamm_' + r.id, stamm: true, mid, slots, evtl: new Set(slots.filter(k => abw.has(k))) }); });
   Object.values(RU).forEach(u => { u.cntF = {}; u.list.forEach(x => x.slots.forEach(k => { if(x.evtl?.has(k)) return; u.cnt[k] = (u.cnt[k] || 0) + 1; if(x.fest) u.cntF[k] = (u.cntF[k] || 0) + 1; })); });
-  computeMaschWarn();
+  typVerteilen(); computeMaschWarn(); setTimeout(autoFest);
 }
+// Typ-Reservierung (vorläufig): der Planer verteilt selber eine freie Nummer (früheste Baustelle zuerst, kleinste Nummer zuerst).
+// Feste Zuteilungen bleiben, wo sie sind; die Nummer der vorläufigen kann noch wechseln, wenn sich Baustellen verschieben.
+function typVerteilen(){
+  TYPEN.forEach(t => { const ms = t.ids.map(id => RES.find(r => r.id === id)).filter(m => m && m.aktiv !== false).sort((a, b) => String(a.nummer || '').localeCompare(String(b.nummer || ''), 'de', { numeric: true }));
+    const bel = {}; ms.forEach(m => { bel[m.id] = new Set(); (RU[m.id]?.list || []).forEach(x => x.slots.forEach(k => bel[m.id].add(k))); });
+    (RU[t.id]?.list || []).filter(x => x.masch && x.slots.length).sort((a, b) => Math.min(...a.slots) - Math.min(...b.slots) || String(a.id).localeCompare(String(b.id)))
+      .forEach(x => { const m = ms.find(m => x.slots.every(k => !bel[m.id].has(k))); x.auto = m ? m.id : null; if(m) x.slots.forEach(k => bel[m.id].add(k)); }); }); }
+// Baustelle hat begonnen: die verteilte Nummer bekommt automatisch das Schloss (einmal pro Reservierung und Laden)
+const AUTOFEST_VERSUCHT = new Set(); let autoFestLauf = false;
+async function autoFest(){
+  if(autoFestLauf || !canEditRes('maschine')) return; const jetzt = toU(new Date()), rows = [];
+  TYPEN.forEach(t => (RU[t.id]?.list || []).forEach(x => { if(!x.masch || x.fest || !x.auto || !x.slots.length || AUTOFEST_VERSUCHT.has(x.id)) return;
+    if(Math.min(...x.slots) / 2 <= jetzt) rows.push(x); }));
+  if(!rows.length) return; autoFestLauf = true; rows.forEach(x => AUTOFEST_VERSUCHT.add(x.id));
+  try { for(const x of rows){ const { error } = await sb.from('planer_ressource_einsatz').update({ ressource_id: x.auto, typ_eintrag_id: null, fest: true }).eq('id', x.id).eq('fest', false).not('typ_eintrag_id', 'is', null); if(error) fehler(error, 'Schloss'); }
+    await neuLaden(); toast(`${rows.length === 1 ? 'Eine Maschine' : rows.length + ' Maschinen'} automatisch fest zugeteilt (Baustelle hat begonnen)`); } finally { autoFestLauf = false; } }
 // Maschinen-Warnungen pro Baustelle und Person: rot = zwei feste auf derselben Maschine oder Baustelle läuft
 // mit nur vorläufiger Maschine; orange = vorläufige Überschneidung (Typ zu oft reserviert)
 // Typ: orange, wenn mehr vorläufige Reservierungen als freie Maschinen dieses Typs (fest belegte zählen ab)
@@ -2027,7 +2044,8 @@ function ovRows(W, bgx, typ = layer, focusMid = null){
   if(!rs.length) return `<div class="leer">Noch keine ${typ === 'maschine' ? 'Maschinen' : typ === 'fahrzeug' ? 'Fahrzeuge' : 'Anhänger'} erfasst.${isBuero() ? '<br><br><a class="btn btn-primary" href="#ressourcen">Fahrzeuge &amp; Maschinen erfassen</a>' : ''}</div>`;
   const ed = canEditRes(typ); let h = '';
   rs.forEach(r => { const u = RU[r.id] || { list: [], cnt: {}, cntF: {} };
-    const ents = u.list.filter(x => x.slots.length).map(x => ({ x, first: Math.min(...x.slots) })).sort((a, b) => a.first - b.first);
+    const gh = typ === 'maschine' && !r.istTyp && r.typ_eid ? (RU['T:' + r.typ_eid]?.list || []).filter(x => x.auto === r.id).map(x => ({ ...x, ghost: true })) : []; // vorläufig hierhin verteilt
+    const ents = u.list.concat(gh).filter(x => x.slots.length).map(x => ({ x, first: Math.min(...x.slots) })).sort((a, b) => a.first - b.first);
     const lanes = []; ents.forEach(o => { let l = lanes.findIndex(L => !o.x.slots.some(k => L.has(k))); if(l < 0){ l = lanes.length; lanes.push(new Set()); } o.x.slots.forEach(k => lanes[l].add(k)); o.ln = l; });
     const n = Math.max(1, lanes.length), bh = n === 1 ? 17 : 10, top0 = n === 1 ? 3 : 2;
     const sv = svcResList(r.id).length > 0, rowH = (n <= 1 ? 24 : n * 11 + 4) + (sv ? 13 : 0); // Service: schmaler Streifen unten
@@ -2035,13 +2053,14 @@ function ovRows(W, bgx, typ = layer, focusMid = null){
     ents.forEach(({ x, ln }) => {
       const b = x.bau ? byId(x.bau) : null;
       if(x.masch && b){ // Maschine: vorläufig gestrichelt, fest durchgezogen + Schloss; andere Baustellen (unter einer Person) grau
-        const grau = focusMid && b.mid !== focusMid, c = grau ? '#9AA1A8' : resCol(b.mid), mv = ed && !grau;
-        const stufe = k => r.istTyp ? (typZuViel(r, k) ? ' cfo' : '') : x.fest && (u.cntF[k] || 0) > 1 ? ' cfr' : (u.cnt[k] || 0) > 1 ? ' cfo' : '';
+        const grau = focusMid && b.mid !== focusMid, c = grau ? '#9AA1A8' : resCol(b.mid), mv = ed && !grau && !x.ghost;
+        const stufe = k => x.ghost ? '' : r.istTyp ? (typZuViel(r, k) ? ' cfo' : '') : x.fest && (u.cntF[k] || 0) > 1 ? ' cfr' : (u.cnt[k] || 0) > 1 ? ' cfo' : '';
         const gr = { '': [], ' cfo': [], ' cfr': [] }; x.slots.forEach(k => gr[stufe(k)].push(k));
-        const lab = `${x.fest ? I('lock') : ''}${esc(labOf(b))} · ${x.fest ? 'zugeteilt' : 'reserviert'}`; // Vorarbeiter steht im Tooltip
-        const tip = `${resName(r)}\n${titleOf(b)} · ${P[b.mid]?.name || ''}\n${x.fest ? 'Fest reserviert' : 'Vorläufig reserviert'}`;
+        const nr = r.istTyp && !x.fest ? (x.auto ? resById(x.auto)?.nummer || resById(x.auto)?.name : 'keine frei') : ''; // Typ-Zeile: welche Nummer der Planer vorgesehen hat
+        const lab = `${x.fest ? I('lock') : ''}${esc(labOf(b))} · ${x.fest ? 'zugeteilt' : x.ghost ? 'vorgesehen' : nr ? esc(nr) + ' · vorläufig' : 'reserviert'}`; // Vorarbeiter steht im Tooltip
+        const tip = `${resName(r)}\n${titleOf(b)} · ${P[b.mid]?.name || ''}\n${x.fest ? 'Fest reserviert' : x.ghost ? 'Vorläufig vorgesehen (Nummer kann noch wechseln, Schloss kommt beim Baustellenstart)' : 'Vorläufig reserviert' + (x.auto ? ' – vorgesehen: ' + resName(resById(x.auto)) : ' – keine Maschine frei!')}`;
         Object.entries(gr).forEach(([cls, sl]) => segsOf(sl).forEach(sg => { sg = [Math.max(sg[0], b.s), Math.min(sg[1], b.e)]; if(sg[1] - sg[0] < 1e-6) return; const l = X(sg[0]) + 1, w = Math.max(3, XW(sg[0], sg[1]) - 2);
-          bars += `<div class="band mres${x.fest ? ' fest' : ' vorl'}${cls}${mv ? ' ed' : ''}" data-rz="${x.id}" data-rid="${r.id}" style="left:${l}px;width:${w}px;top:${top0 + ln * (bh + 1)}px;height:${bh}px;--c:${c}" title="${esc(tip + (cls === ' cfr' ? '\nDoppelt fest belegt!' : cls === ' cfo' ? '\nÜberschneidung (vorläufig)' : ''))}">${mv && w >= 30 ? '<span class="hl"></span>' : ''}${w > 24 && bh > 9 ? `<span>${lab}</span>` : ''}${mv && w >= 30 ? '<span class="hr"></span>' : ''}</div>`; }));
+          bars += `<div class="band mres${x.fest ? ' fest' : ' vorl'}${x.ghost ? ' ghost' : ''}${cls}${mv ? ' ed' : ''}"${x.ghost ? '' : ` data-rz="${x.id}" data-rid="${r.id}"`} style="left:${l}px;width:${w}px;top:${top0 + ln * (bh + 1)}px;height:${bh}px;--c:${c}" title="${esc(tip + (cls === ' cfr' ? '\nDoppelt fest belegt!' : cls === ' cfo' ? '\nÜberschneidung (vorläufig)' : ''))}">${mv && w >= 30 ? '<span class="hl"></span>' : ''}${w > 24 && bh > 9 ? `<span>${lab}</span>` : ''}${mv && w >= 30 ? '<span class="hr"></span>' : ''}</div>`; }));
         return; }
       const lab = typ === 'maschine' ? (b ? `${first(P[b.mid]?.name)} · ${labOf(b)}` : '?') : `${first(P[x.mid]?.name)}`;
       const fremd = focusMid && typ === 'maschine' && b && b.mid !== focusMid; // unter einer Person: Baustellen anderer nur anzeigen, nicht bearbeiten
