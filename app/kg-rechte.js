@@ -37,6 +37,7 @@
       S('pool_alk', 'Pool › Alkalinität'),
       S('pool_afm', 'Pool › AFM Filterbefüllung'),
       S('pool_volumen', 'Pool › Pool-Volumen'),
+      S('bau_kies', 'Bau › Kies-Gewicht'),
       S('bau_schalit', 'Bau › Beton für Schalungssteine'),
       S('pflege_spritz', 'Pflege › Spritzmittel'),
       S('spritzmittel_pflegen', 'Spritzmittel-Liste bearbeiten', 'Produkte und Dosierungen ändern'),
