@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<script src="/kg-pw-schutz.js?v=5"></script>
+<script src="/kg-stil.js?v=30"></script>
+<title>Doku-Tools</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#323E4E">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="/kg-doku.js?v=1"></script>
+</head>
+<body>
+<header class="app"><div class="wrap">
+  <a class="backlink" href="index.html">Startseite</a>
+  <div class="brand"><h1>Doku-Tools</h1></div>
+  <span class="userbar hidden" id="userbar"><span id="userbarText"></span><button id="logoutBtn">Abmelden</button></span>
+</div></header>
+<nav class="subnav"><div class="wrap">
+  <a href="doku-live-v1.html" class="on">Dokumente</a>
+  <a href="doku-personen-live-v1.html">Personen</a>
+</div></nav>
+<main id="appMain"></main>
+<script>
+// Startseite: links die Ordner, rechts die Dokumenttypen des Ordners, darunter die zuletzt erstellten Dokumente
+// (nur Kopiervorlage, kein Archiv – das PDF gehört in den Kundenordner im Drive).
+async function aufbau(main){
+  const { esc, ic } = KGD, sb = KGD.sb;
+  const [o, v, d] = await Promise.all([
+    sb.from('doku_ordner').select('*').order('sortierung'),
+    sb.from('doku_vorlage').select('id,ordner_id,name,beschreibung').order('sortierung'),
+    sb.from('doku_dokument').select('id,vorlage_id,adresse,datum,geaendert_am,von:benutzer!doku_dokument_erstellt_von_fkey(anzeigename)').order('geaendert_am', { ascending: false }).limit(25)
+  ]);
+  const fehler = o.error || v.error || d.error;
+  if(fehler){ main.innerHTML = `<div class="kgd-typen"><p class="kgd-hinweis">Daten konnten nicht geladen werden: ${esc(fehler.message)}</p></div>`; return; }
+  const ORDNER = o.data, VORLAGEN = v.data;
+  let dokumente = d.data;
+  const farbe = f => (KG.palette[f] || KG.palette.grau)[1];
+  let ordner = KGD.lsGet('kgd-ordner', null);
+  if(!ORDNER.some(x => x.id === ordner)) ordner = ORDNER.length ? ORDNER[0].id : null;
+  main.innerHTML = `<div class="kgd-start"><nav class="kgd-ordner" id="ordnerListe" aria-label="Ordner"></nav>
+    <div class="kgd-typen"><h2 id="ordnerTitel"></h2><div class="kgd-typliste" id="typListe"></div>
+      <div class="kgd-zwtitel">Zuletzt erstellt</div><div id="letzte"></div></div></div>`;
+
+  function zeichnen(){
+    $('ordnerListe').innerHTML = '<div class="ueber">Ordner</div>' + ORDNER.map(x => `<button type="button" data-o="${x.id}" aria-pressed="${x.id === ordner}">
+      <span class="fi" style="color:${farbe(x.farbe)}">${ic('ordner', 18)}</span><span>${esc(x.name)}</span><small>${VORLAGEN.filter(t => t.ordner_id === x.id).length}</small></button>`).join('');
+    const akt = ORDNER.find(x => x.id === ordner), typen = VORLAGEN.filter(t => t.ordner_id === ordner);
+    $('ordnerTitel').textContent = akt ? akt.name : '';
+    $('typListe').innerHTML = typen.length ? typen.map(t => `<a class="kgd-typ" href="doku-dokument-live-v1.html?v=${t.id}">
+        <span class="bl" style="color:${farbe(akt.farbe)}">${ic('dokument', 18)}</span><span><b>${esc(t.name)}</b><small>${esc(t.beschreibung || '')}</small></span></a>`).join('')
+      : '<div class="kgd-leer">In diesem Ordner gibt es noch keine Dokumente.</div>';
+    $('ordnerListe').querySelectorAll('[data-o]').forEach(b => b.addEventListener('click', () => { ordner = b.dataset.o; KGD.lsSet('kgd-ordner', ordner); zeichnen(); }));
+    letzte();
+  }
+  function letzte(){
+    const name = id => (VORLAGEN.find(t => t.id === id) || {}).name || '–';
+    $('letzte').innerHTML = dokumente.length ? `<div class="kgd-tab"><table>
+      <thead><tr><th>Dokument</th><th>Adresse</th><th>Datum</th><th>Erstellt von</th><th>Geändert</th><th></th></tr></thead><tbody>
+      ${dokumente.map(x => `<tr><td>${esc(name(x.vorlage_id))}</td><td>${esc(x.adresse || '–')}</td><td>${esc(KGD.datumKurz(x.datum) || '–')}</td>
+        <td>${esc((x.von && x.von.anzeigename) || '–')}</td><td>${esc(KGD.datumKurz(x.geaendert_am))}</td>
+        <td class="akt"><a class="kg-ibtn" href="doku-dokument-live-v1.html?d=${x.id}" title="Öffnen" aria-label="Öffnen">${ic('edit')}</a><a class="kg-ibtn" href="doku-dokument-live-v1.html?kopie=${x.id}" title="Kopieren" aria-label="Kopieren">${ic('copy')}</a><button type="button" class="kg-ibtn danger" data-weg="${x.id}" title="Löschen" aria-label="Löschen">${ic('trash')}</button></td></tr>`).join('')}
+      </tbody></table></div>` : '<div class="kgd-leer">Noch keine Dokumente erstellt.</div>';
+    $('letzte').querySelectorAll('[data-weg]').forEach(b => b.addEventListener('click', async () => {
+      if(!confirm('Dieses Dokument aus der Liste löschen? Das PDF im Drive bleibt bestehen.')) return;
+      const { error } = await sb.from('doku_dokument').delete().eq('id', b.dataset.weg);
+      if(error){ KGD.toast('Löschen fehlgeschlagen: ' + error.message, true); return; }
+      dokumente = dokumente.filter(x => x.id !== b.dataset.weg); letzte();
+    }));
+  }
+  zeichnen();
+}
+const $ = id => document.getElementById(id);
+KGD.start(aufbau);
+</script>
+</body>
+</html>

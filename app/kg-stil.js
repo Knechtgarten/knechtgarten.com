@@ -36,6 +36,12 @@
     fett: '<path d="M7 5h6a3.5 3.5 0 0 1 0 7H7zM7 12h7a3.5 3.5 0 0 1 0 7H7z"/>',
     kursiv: '<path d="M10 5h8M6 19h8M14 5l-4 14"/>',
     aufzaehlung: '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r=".8"/><circle cx="4.5" cy="12" r=".8"/><circle cx="4.5" cy="18" r=".8"/>',
+    nummerierung: '<path d="M10 6h10M10 12h10M10 18h10"/><path d="M4 4.5h1.5V9M4 9h3M4 14.5a1.5 1.5 0 0 1 3 0c0 1.5-3 2-3 4h3"/>',
+    unterstrichen: '<path d="M7 4v7a5 5 0 0 0 10 0V4M5 20h14"/>',
+    leuchtstift: '<path d="M14.5 4.5l5 5-7.5 7.5H7v-5z"/><path d="M12.5 6.5l5 5M4 20h8"/>',
+    herunterladen: '<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
+    ordner: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+    dokument: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/>',
     link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
     hand: '<path d="M8 13V6a1.5 1.5 0 0 1 3 0v6"/><path d="M11 12.5V4a1.5 1.5 0 0 1 3 0v8.5"/><path d="M14 12.5V6a1.5 1.5 0 0 1 3 0v8"/><path d="M17 10.5a1.5 1.5 0 0 1 3 0V15c0 3.5-2 7-6.5 7h-1.5c-2.3 0-3.8-.7-5.1-2.1l-3-3.2a1.5 1.5 0 0 1 2.1-2.1L8 16"/>',
     gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/>'
@@ -145,6 +151,8 @@
     { k: 'werkzeuge', n: 'Werkzeuge', url: 'werkzeuge-live-v1.html', farbe: PAL.grau[1], akzent: PAL.grau[3],
       seiten: ['werkzeuge-live-v1', 'werkzeug-pool-chlor-live-v1', 'werkzeug-pool-salz-live-v1', 'werkzeug-pool-alk-live-v1', 'werkzeug-pool-afm-live-v1',
         'werkzeug-pool-volumen-live-v1', 'werkzeug-bau-diagonale-live-v1', 'werkzeug-bau-kies-live-v1', 'werkzeug-bau-schalit-live-v1', 'werkzeug-pflege-spritz-live-v1', 'werkzeug-allg-volumen-live-v1', 'werkzeug-allg-gefaelle-live-v1'] },
+    { k: 'doku', n: 'Doku-Tools', url: 'doku-live-v1.html', farbe: PAL.beere[1], akzent: PAL.beere[3],
+      seiten: ['doku-live-v1', 'doku-dokument-live-v1', 'doku-personen-live-v1'] },
     { k: 'verw', n: 'Verwaltung', url: 'verwaltung-live-v1.html', farbe: '#FFFFFF', akzent: PAL.grau[3], admin: true,
       seiten: ['verwaltung-live-v1', 'tools-live-v1', 'mailassistent-verwaltung-live-v1', 'dokumentensuche-verwaltung-live-v1'] }
   ];
@@ -343,11 +351,12 @@ header.app.kg-leiste .kg-reiter .navic.on{box-shadow:inset 0 -2px 0 var(--kg-akz
     'werkzeuge-live-v1': ['werkzeuge', '_tool'], 'werkzeug-pool-chlor-live-v1': ['werkzeuge', 'pool_chlor'],
     'werkzeug-pool-salz-live-v1': ['werkzeuge', 'pool_salz'], 'werkzeug-pool-alk-live-v1': ['werkzeuge', 'pool_alk'],
     'werkzeug-pool-afm-live-v1': ['werkzeuge', 'pool_afm'], 'werkzeug-pool-volumen-live-v1': ['werkzeuge', 'pool_volumen'],
-    'werkzeug-bau-diagonale-live-v1': ['werkzeuge', 'bau_diagonale'], 'werkzeug-bau-kies-live-v1': ['werkzeuge', 'bau_kies'], 'werkzeug-bau-schalit-live-v1': ['werkzeuge', 'bau_schalit'], 'werkzeug-pflege-spritz-live-v1': ['werkzeuge', 'pflege_spritz'], 'werkzeug-allg-volumen-live-v1': ['werkzeuge', 'allg_volumen'], 'werkzeug-allg-gefaelle-live-v1': ['werkzeuge', 'allg_gefaelle']
+    'werkzeug-bau-diagonale-live-v1': ['werkzeuge', 'bau_diagonale'], 'werkzeug-bau-kies-live-v1': ['werkzeuge', 'bau_kies'], 'werkzeug-bau-schalit-live-v1': ['werkzeuge', 'bau_schalit'], 'werkzeug-pflege-spritz-live-v1': ['werkzeuge', 'pflege_spritz'], 'werkzeug-allg-volumen-live-v1': ['werkzeuge', 'allg_volumen'], 'werkzeug-allg-gefaelle-live-v1': ['werkzeuge', 'allg_gefaelle'],
+    'doku-live-v1': ['doku', '_tool'], 'doku-dokument-live-v1': ['doku', '_tool'], 'doku-personen-live-v1': ['doku', 'personen']
   };
   const TOOLRECHT = { offerten: ['offerten', 'offerten'], artikel: ['offerten', 'artikel'], kunden: ['offerten', 'kunden'],
     pend: ['pend', '_tool'], plan: ['plan', '_tool'], pflege: ['pflege', '_tool'], wissen: ['wissen', '_tool'],
-    werkzeuge: ['werkzeuge', '_tool'] };
+    werkzeuge: ['werkzeuge', '_tool'], doku: ['doku', '_tool'] };
   const erlaubt = ziel => { // ziel = [tool, bereich]; true/false, null = ohne Gruppe
     if(!ziel || !sicht || !sicht.rechte) return null;
     if(sicht.rechte.admin) return true;

@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<script src="/kg-pw-schutz.js?v=5"></script>
+<script src="/kg-stil.js?v=30"></script>
+<title>Dokument – Doku-Tools</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#323E4E">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600;700&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="/kg-doku.js?v=1"></script>
+<style>
+.kgd-weg{display:flex;align-items:center;gap:6px;font-size:14px;color:#6B7079;flex-wrap:wrap;min-width:0;}
+.kgd-weg a{color:#A63A52;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:2px;}
+.kgd-weg b{color:#323E4E;font-size:15px;}
+.kgd-zurueck svg{transform:rotate(90deg);}
+</style>
+</head>
+<body>
+<header class="app"><div class="wrap">
+  <a class="backlink" href="index.html">Startseite</a>
+  <div class="brand"><h1>Doku-Tools</h1></div>
+  <span class="userbar hidden" id="userbar"><span id="userbarText"></span><button id="logoutBtn">Abmelden</button></span>
+</div></header>
+<nav class="subnav"><div class="wrap">
+  <a href="doku-live-v1.html" class="on">Dokumente</a>
+  <a href="doku-personen-live-v1.html">Personen</a>
+</div></nav>
+<span class="kgd-weg" data-kg-seite="links"><a class="kgd-zurueck" href="doku-live-v1.html" id="ordnerLink"></a><span>/</span><b id="docTitel"></b></span>
+<button type="button" class="kgd-btn ghost" data-kg-seite="rechts" id="datenBtn">Daten</button>
+<button type="button" class="kg-ibtn hidden" data-kg-seite="rechts" id="zahnrad" title="Vorlage bearbeiten" aria-label="Vorlage bearbeiten"></button>
+<button type="button" class="kgd-btn ghost" data-kg-seite="rechts" id="ladenBtn"></button>
+<button type="button" class="kgd-btn prim kg-haupt" data-kg-seite="rechts" id="druckBtn"></button>
+<main id="appMain"></main>
+<script>
+// Dokument ausfüllen: Brief wie gedruckt, Daten-Fenster schwebt darüber (Werte im Brief hellblau, solange offen).
+// Zahnrad (Recht doku/vorlagen): Brieftext direkt im Blatt bearbeiten, Felder sind fix (KGD.FELDER).
+const $ = id => document.getElementById(id);
+const P = new URLSearchParams(location.search);
+async function aufbau(main){
+  const { esc, ic } = KGD, sb = KGD.sb;
+  $('zahnrad').innerHTML = ic('gear'); $('ladenBtn').innerHTML = ic('herunterladen') + 'Herunterladen'; $('druckBtn').innerHTML = ic('drucken') + 'Drucken';
+  $('ordnerLink').innerHTML = KG.icon('chev', 14);
+
+  // Dokument / Kopie / neues Dokument laden
+  let dokId = null, werte = null, vorlageId = P.get('v');
+  const quelle = P.get('d') || P.get('kopie');
+  if(quelle){
+    const { data, error } = await sb.from('doku_dokument').select('*').eq('id', quelle).maybeSingle();
+    if(error || !data){ main.innerHTML = '<div class="kgd-typen"><p class="kgd-hinweis">Dokument nicht gefunden.</p></div>'; return; }
+    vorlageId = data.vorlage_id; werte = data.werte || {};
+    if(P.get('d')) dokId = data.id;
+  }
+  const { data: V, error: ve } = await sb.from('doku_vorlage').select('*, ordner:doku_ordner(name)').eq('id', vorlageId).maybeSingle();
+  if(ve || !V){ main.innerHTML = '<div class="kgd-typen"><p class="kgd-hinweis">Vorlage nicht gefunden.</p></div>'; return; }
+  const TYP = KGD.TYPEN[V.schluessel] || { daten: [], pflicht: () => '', dateiname: () => V.name };
+  document.title = V.name + ' – Doku-Tools';
+  $('docTitel').textContent = V.name; $('ordnerLink').insertAdjacentText('beforeend', V.ordner ? V.ordner.name : 'Dokumente');
+  const PL = KGD.personen.filter(p => p.aktiv && p.rolle !== 'vorarbeiter'), VA = KGD.personen.filter(p => p.aktiv && p.rolle === 'vorarbeiter');
+  if(!werte){
+    const ich = PL.find(p => p.benutzer_id === KGD.ich) || PL[0];
+    werte = { pl: ich ? ich.id : null, va: null, offen: false };
+  }
+  let gespeichert = dokId ? JSON.stringify(werte) : null, admin = false;
+
+  main.innerHTML = `<div class="kgd-adminband hidden" id="adminBand">${ic('gear')}<span class="t">Vorlage bearbeiten: Klick in den Text und ändere ihn direkt. Gilt für alle neuen Dokumente «${esc(V.name)}».</span>
+      <button type="button" class="kgd-btn ghost" id="adminZu">Abbrechen</button><button type="button" class="kgd-btn prim" id="adminOk">Vorlage speichern</button></div>
+    <div class="kgd-flaeche" id="flaeche"><div id="leisteSlot"></div><div class="kgd-rand" id="rand"></div>
+      <div class="kgd-schleier" id="schleier"></div>
+      <div class="kgd-daten" id="daten" role="dialog" aria-label="Daten ausfüllen"><header><b>Daten</b><span class="kgd-hinweis">alles andere steht schon</span></header>
+        <div class="kgd-felder" id="felder"></div>
+        <footer><button type="button" class="kgd-btn ghost" id="datenZu">Schliessen</button><button type="button" class="kgd-btn prim" id="datenOk">Fertig</button></footer></div></div>`;
+
+  // Daten-Fenster je nach Dokumenttyp
+  const opt = (liste, wert, leer) => (leer ? `<option value="">${leer}</option>` : '') + liste.map(p => `<option value="${p.id}"${p.id === wert ? ' selected' : ''}>${esc(p.name)}${p.benutzer_id === KGD.ich ? ' (ich)' : ''} · ${esc(KGD.ROLLEN[p.rolle])}</option>`).join('');
+  const BAU = {
+    kunde: () => `<div class="kgd-feld"><label for="kunde">Kunde oder Adresse</label><input class="kgd-t" id="kunde" autocomplete="off" placeholder="Name, Strasse oder Ort suchen">
+      <div class="kgd-menue hidden" id="kundeMenue"></div><span class="kgd-hinweis" id="kundeInfo"></span></div>`,
+    termin: () => `<div class="kgd-reihe"><div class="kgd-feld"><label for="datum">Datum</label><input class="kgd-t" type="date" id="datum" value="${esc(werte.datum || '')}"></div>
+      <div class="kgd-feld zeitf"><label for="von">von <small class="opt">optional</small></label><input class="kgd-t" type="time" id="von" value="${esc(werte.von || '')}"></div>
+      <div class="kgd-feld zeitf"><label for="bis">bis <small class="opt">optional</small></label><input class="kgd-t" type="time" id="bis" value="${esc(werte.bis || '')}"></div></div>
+      <label class="kgd-schalter"><input type="checkbox" id="offen"${werte.offen ? ' checked' : ''}>Zeit noch nicht bekannt</label>`,
+    pl: () => `<div class="kgd-feld"><label for="pl">Projektleiter</label><select class="kgd-t" id="pl">${opt(PL, werte.pl, PL.length ? '' : 'keine Personen erfasst')}</select></div>`,
+    va: () => `<div class="kgd-feld"><label for="va">Vorarbeiter vor Ort <small class="opt">optional</small></label><select class="kgd-t" id="va">${opt(VA, werte.va, 'keiner')}</select></div>`
+  };
+  $('felder').innerHTML = TYP.daten.map(k => BAU[k] ? BAU[k]() : '').join('');
+  const zeitFelder = () => document.querySelectorAll('.zeitf').forEach(f => f.classList.toggle('hidden', !!werte.offen));
+  zeitFelder();
+
+  let ed = null;
+  const zeichnen = () => { ed = KGD.brief($('rand'), V.html, werte, admin ? 'admin' : ($('daten').classList.contains('hidden') ? 'druck' : 'fuellen')); };
+  const geaendert = () => zeichnen();
+  const an = (id, ev, fn) => { const el = $(id); if(el) el.addEventListener(ev, fn); };
+  an('datum', 'input', e => { werte.datum = e.target.value; geaendert(); });
+  an('von', 'input', e => { werte.von = e.target.value; geaendert(); });
+  an('bis', 'input', e => { werte.bis = e.target.value; geaendert(); });
+  an('offen', 'change', e => { werte.offen = e.target.checked; zeitFelder(); geaendert(); });
+  an('pl', 'change', e => { werte.pl = e.target.value || null; geaendert(); });
+  an('va', 'change', e => { werte.va = e.target.value || null; geaendert(); });
+
+  // Kunde suchen (Kundenliste, nur lesen) oder Adresse frei eingeben; aufs Blatt kommen nur Strasse und Ort
+  if($('kunde')){
+    const k = $('kunde'), m = $('kundeMenue');
+    const anzeigen = () => {
+      k.value = werte.kunde_name || KGD.adresse(werte);
+      $('kundeInfo').textContent = werte.kunde_id ? `Aufs Blatt: ${KGD.adresse(werte) || 'keine Adresse hinterlegt'} (ohne Name)` : KGD.adresse(werte) ? 'Adresse von Hand, kein Kunde verknüpft' : '';
+    };
+    const kname = x => x.name || x.firma || [x.vorname, x.nachname].filter(Boolean).join(' ') || '(ohne Name)';
+    let lauf = 0, treffer = [];
+    const suchen = async () => {
+      const q = k.value.trim().replace(/[,()%*]/g, ' ').trim(), nr = ++lauf;
+      if(q.length < 2){ m.classList.add('hidden'); return; }
+      const { data } = await sb.from('kunde').select('id,name,firma,vorname,nachname,strasse,plz,ort')
+        .or(`name.ilike.%${q}%,firma.ilike.%${q}%,nachname.ilike.%${q}%,strasse.ilike.%${q}%,ort.ilike.%${q}%`).order('name').limit(8);
+      if(nr !== lauf) return;
+      treffer = data || [];
+      m.innerHTML = '<div class="kopfzeile">Kunden aus der Kundenliste</div>' + treffer.map((x, i) => `<button type="button" data-i="${i}"><b>${esc(kname(x))}</b><small>${esc([x.strasse, [x.plz, x.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ') || 'keine Adresse')}</small></button>`).join('')
+        + `<button type="button" data-frei="1"><b>«${esc(k.value.trim())}» als Adresse übernehmen</b><small>Strasse Nr., PLZ Ort</small></button>`;
+      m.classList.remove('hidden');
+    };
+    let warte = null;
+    k.addEventListener('input', () => { clearTimeout(warte); warte = setTimeout(suchen, 220); });
+    k.addEventListener('focus', () => k.select());
+    k.addEventListener('blur', () => setTimeout(() => { m.classList.add('hidden'); anzeigen(); }, 180));
+    m.addEventListener('mousedown', e => {
+      const b = e.target.closest('button'); if(!b) return; e.preventDefault();
+      if(b.dataset.frei){ const t = k.value.split(','); werte.kunde_id = null; werte.kunde_name = ''; werte.strasse = t[0].trim(); werte.ort = (t.slice(1).join(',') || '').trim(); }
+      else { const x = treffer[+b.dataset.i]; werte.kunde_id = x.id; werte.kunde_name = kname(x); werte.strasse = x.strasse || ''; werte.ort = [x.plz, x.ort].filter(Boolean).join(' '); }
+      m.classList.add('hidden'); k.blur(); anzeigen(); geaendert();
+    });
+    anzeigen();
+  }
+
+  // Daten-Fenster auf/zu
+  const fenster = auf => { $('daten').classList.toggle('hidden', !auf); $('schleier').classList.toggle('hidden', !auf); zeichnen(); };
+  an('datenBtn', 'click', () => fenster(true));
+  an('datenOk', 'click', () => { fenster(false); speichern(); });
+  an('datenZu', 'click', () => fenster(false));
+  an('schleier', 'click', () => fenster(false));
+
+  // Speichern (Kopiervorlage in «Zuletzt erstellt»), nur wenn sich etwas geändert hat
+  async function speichern(){
+    const json = JSON.stringify(werte); if(json === gespeichert) return true;
+    const zeile = { vorlage_id: V.id, kunde_id: werte.kunde_id || null, werte, adresse: KGD.adresse(werte) || null, datum: werte.datum || null, geaendert_am: new Date().toISOString() };
+    const r = dokId ? await sb.from('doku_dokument').update(zeile).eq('id', dokId).select('id').single() : await sb.from('doku_dokument').insert(zeile).select('id').single();
+    if(r.error){ KGD.toast('Speichern fehlgeschlagen: ' + r.error.message, true); return false; }
+    dokId = r.data.id; gespeichert = json;
+    history.replaceState(null, '', 'doku-dokument-live-v1.html?d=' + dokId);
+    return true;
+  }
+  const bereit = () => { const f = TYP.pflicht(werte); if(f){ KGD.toast(f + ' Bitte im Daten-Fenster ergänzen.', true); fenster(true); return false; } return true; };
+  an('druckBtn', 'click', async () => { if(!bereit()) return; await speichern(); KGD.drucken(V.html, werte); });
+  an('ladenBtn', 'click', async () => {
+    if(!bereit()) return; await speichern();
+    const b = $('ladenBtn'); b.disabled = true;
+    try { await KGD.pdf(V.html, werte, TYP.dateiname(werte)); } catch(e){ KGD.toast(e.message || String(e), true); }
+    b.disabled = false;
+  });
+
+  // Vorlage bearbeiten (Zahnrad)
+  $('zahnrad').classList.toggle('hidden', !KGD.darfVorlagen);
+  const adminSetzen = auf => {
+    admin = auf;
+    document.body.classList.toggle('kgd-admin', auf);
+    $('adminBand').classList.toggle('hidden', !auf);
+    ['datenBtn', 'zahnrad', 'ladenBtn', 'druckBtn'].forEach(id => $(id).classList.toggle('hidden', auf || (id === 'zahnrad' && !KGD.darfVorlagen)));
+    $('leisteSlot').innerHTML = auf ? KGD.leisteHtml() : '';
+    $('daten').classList.add('hidden'); $('schleier').classList.add('hidden');
+    zeichnen();
+    if(auf) KGD.editor(ed, $('kgdLeiste'));
+  };
+  an('zahnrad', 'click', () => adminSetzen(true));
+  an('adminZu', 'click', () => adminSetzen(false));
+  an('adminOk', 'click', async () => {
+    const html = KGD.vorlageLesen(ed), b = $('adminOk'); b.disabled = true;
+    const { error } = await sb.from('doku_vorlage').update({ html, geaendert_am: new Date().toISOString(), geaendert_von: KGD.ich }).eq('id', V.id);
+    b.disabled = false;
+    if(error){ KGD.toast('Vorlage konnte nicht gespeichert werden: ' + error.message, true); return; }
+    V.html = html; KGD.toast('Vorlage gespeichert'); adminSetzen(false);
+  });
+
+  // neues Dokument: Daten-Fenster offen; geöffnetes Dokument: Brief wie gedruckt
+  fenster(!dokId);
+}
+KGD.start(aufbau);
+</script>
+</body>
+</html>
