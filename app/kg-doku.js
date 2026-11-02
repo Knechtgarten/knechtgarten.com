@@ -28,8 +28,8 @@
   // Felder (Platzhalter im Brief) ---------------------------------------------------------------
   const FELDER = {
     datum:         { chip: 'Datum', wert: w => datumLang(w.datum) },
-    zeit:          { chip: 'Zeit', wert: w => w.offen ? '(die genaue Zeit geben wir kurzfristig bekannt)'
-                       : w.von && w.bis ? `zwischen ${uhr(w.von)} und ${uhr(w.bis)} Uhr` : w.von ? `ab ${uhr(w.von)} Uhr` : '' },
+    zeit:          { chip: 'Zeit', wert: w => w.von && w.bis ? `zwischen ${uhr(w.von)} und ${uhr(w.bis)} Uhr` : w.von ? `ab ${uhr(w.von)} Uhr`
+                       : w.bis ? `bis ${uhr(w.bis)} Uhr` : '(die genaue Zeit geben wir kurzfristig bekannt)' },
     kunde_adresse: { chip: 'Kunde · Adresse', wert: w => adresse(w) || '…' },
     kunde_name:    { chip: 'Kunde · Name', wert: w => w.kunde_name || '' },
     pl_name:       { chip: 'Projektleiter · Name', wert: w => (person(w.pl) || {}).name || '…' },
@@ -43,7 +43,7 @@
   };
   // Dokumenttypen: welche Felder das Daten-Fenster zeigt, Dateiname, Pflichtangaben
   const TYPEN = {
-    helikopter: { daten: ['kunde', 'termin', 'pl', 'va'], pflicht: w => !w.datum ? 'Datum fehlt.' : !adresse(w) ? 'Adresse fehlt.' : '',
+    helikopter: { daten: ['adresse', 'termin', 'pl', 'va'], pflicht: w => !w.datum ? 'Datum fehlt.' : !adresse(w) ? 'Adresse fehlt.' : '',
                   dateiname: w => `${w.datum || ''} Helikoptereinsatz ${w.strasse || ''}`.trim() }
   };
   const FMT = ['fb', 'fi', 'fu', 'fl']; // Format eines Chips: fett, kursiv, unterstrichen, Leuchtstift
@@ -84,11 +84,19 @@ nav.subnav a.on{color:#323E4E;border-bottom-color:#323E4E;}
 .kgd-start{display:grid;grid-template-columns:230px minmax(0,1fr);min-height:calc(100vh - 100px);}
 .kgd-ordner{background:#EEF1F4;border-right:1px solid #D5DBE1;padding:12px 8px;display:flex;flex-direction:column;gap:2px;}
 .kgd-ordner .ueber{font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:#8B9097;font-weight:600;padding:6px 10px;}
-.kgd-ordner button{all:unset;box-sizing:border-box;cursor:pointer;display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;font-size:14px;color:#323E4E;}
-.kgd-ordner button span{flex:1;} .kgd-ordner button small{color:#8B9097;font-size:12px;}
-.kgd-ordner button:hover{background:#E3E7EC;}
-.kgd-ordner button[aria-pressed="true"]{background:#fff;box-shadow:0 1px 3px rgba(35,43,53,.1);font-weight:600;}
-.kgd-ordner .fi{display:inline-flex;flex:none!important;}
+.kgd-oz{display:flex;align-items:center;gap:2px;border-radius:8px;}
+.kgd-oz .griff{color:#A3B0BE;cursor:grab;display:inline-flex;padding:0 2px;flex:none;}
+.kgd-oz.zieht{opacity:.4;} .kgd-oz.ueber-ziel{box-shadow:inset 0 2px 0 #323E4E;}
+.kgd-oz .wahl{all:unset;box-sizing:border-box;cursor:pointer;flex:1;min-width:0;display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;font-size:14px;color:#323E4E;}
+.kgd-oz .wahl span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;} .kgd-oz .wahl small{color:#8B9097;font-size:12px;}
+.kgd-oz .wahl:hover{background:#E3E7EC;}
+.kgd-oz .wahl[aria-pressed="true"]{background:#fff;box-shadow:0 1px 3px rgba(35,43,53,.1);font-weight:600;}
+.kgd-oz .wahl .fi{display:inline-flex;flex:none;}
+.kgd-oz .aktion{display:flex;gap:3px;flex:none;opacity:.5;}
+.kgd-oz:hover .aktion,.kgd-oz:focus-within .aktion{opacity:1;}
+.kgd-neu{all:unset;cursor:pointer;color:#6B7079;font-size:13.5px;padding:8px 10px;margin-top:4px;border-radius:8px;}
+.kgd-neu:hover{background:#E3E7EC;color:#323E4E;}
+.kgd-tab tr.klick{cursor:pointer;} .kgd-tab tr.klick:hover td{background:#F5F7F9;}
 .kgd-typen{padding:18px 22px;display:flex;flex-direction:column;gap:16px;min-width:0;max-width:1100px;}
 .kgd-typen h2{margin:0;font-size:18px;color:#323E4E;}
 .kgd-typliste{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,250px),1fr));gap:12px;}
@@ -154,6 +162,7 @@ nav.subnav a.on{color:#323E4E;border-bottom-color:#323E4E;}
 .kgd-phb{font-family:-apple-system,"Segoe UI",sans-serif;display:flex;align-items:center;gap:.6em;margin:1.2em 0 0;padding:.6em .9em;border:1.5px dashed #A3AE3A;background:#F6F8DF;border-radius:8px;font-size:.9em;color:#323E4E;cursor:grab;user-select:none;}
 .kgd-phb b{font-weight:600;} .kgd-phb small{color:#6B7079;} .kgd-phb svg{flex:none;color:#7C8726;}
 .kgd-ph.zieht,.kgd-phb.zieht{opacity:.4;}
+.kgd-ph.sel{background:#B4D5FE;border-color:#2F5C9A;}
 /* Dialoge, Drive-Status */
 .kgd-dlgs{position:fixed;inset:0;background:rgba(35,43,53,.35);z-index:50;display:flex;align-items:flex-start;justify-content:center;padding:90px 12px 12px;}
 .kgd-dlg{width:min(480px,100%);max-height:calc(100vh - 110px);overflow-y:auto;background:#fff;border-radius:12px;box-shadow:0 18px 50px rgba(20,28,38,.3);padding:18px;display:flex;flex-direction:column;gap:12px;}
@@ -293,6 +302,13 @@ nav.subnav a.on{color:#323E4E;border-bottom-color:#323E4E;}
       let gezogen = null, auswahl = null;
       const merken = () => { const s = getSelection(); if(s.rangeCount && ed.contains(s.anchorNode)) auswahl = s.getRangeAt(0).cloneRange(); };
       ed.addEventListener('keyup', merken); ed.addEventListener('mouseup', merken);
+      // Felder in der Markierung sichtbar hervorheben (Chips selbst lassen sich nicht markieren)
+      const markierung = () => {
+        if(!ed.isConnected){ document.removeEventListener('selectionchange', markierung); return; }
+        const s = getSelection(), r = s.rangeCount && !s.isCollapsed && ed.contains(s.anchorNode) ? s.getRangeAt(0) : null;
+        ed.querySelectorAll('.kgd-ph').forEach(c => c.classList.toggle('sel', !!r && r.intersectsNode(c)));
+      };
+      document.addEventListener('selectionchange', markierung);
       // Klick auf einen Chip markiert ihn ganz, damit Fett/Kursiv/Leuchtstift auf ihn wirken
       ed.addEventListener('click', e => {
         const c = e.target.closest('.kgd-ph'); if(!c) return;
