@@ -73,7 +73,9 @@ header.app .brand h1{font-size:15px;margin:0;}
 .kgw-zeile{display:flex;justify-content:space-between;gap:10px;font-size:13.5px;color:#6B7079;}
 .kgw-zeile b{color:#232B35;}
 .kgw-trenn{border-top:1px solid #EEF1F4;padding-top:10px;}
-.kgw-gross{display:flex;align-items:baseline;gap:6px;color:#323E4E;}
+/* Resultate rechtsbündig – gerechnet wird rechts */
+.kgw-gross{display:flex;align-items:baseline;justify-content:flex-end;gap:6px;color:#323E4E;}
+.kgw-gross ~ .kgw-klein{align-self:flex-end;text-align:right;}
 .kgw-gross b{font-size:40px;line-height:1.05;font-weight:700;}
 .kgw-gross span{font-size:18px;}
 .kgw-klein{font-size:12px;color:#6B7079;}
