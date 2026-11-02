@@ -60,6 +60,12 @@ h1{font-size:19px;color:var(--primary);margin-bottom:2px;}
 .ps-grid .ck{flex-direction:row;align-items:center;gap:8px;font-size:12.5px;font-weight:400;color:var(--ink);}
 .ps-grid .ck input{height:auto;width:16px;accent-color:#323E4E;}
 .ps-note{font-size:12px;color:#6B7079;margin:12px 0 0;line-height:1.45;}
+.ps-tempbtn{width:100%;justify-content:center;margin-bottom:8px;font-size:12.5px;padding:5px 10px;}
+.ps-zugang{margin-top:18px;padding-top:14px;border-top:1px solid #E1E5EA;max-width:720px;} .ps-zugang .lb{font-size:11px;font-weight:600;color:#4C5C70;margin-bottom:8px;text-transform:uppercase;letter-spacing:.04em;}
+.ps-zugang .row{display:flex;gap:8px;flex-wrap:wrap;}
+.ps-linkbox{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:10px;padding:10px;background:#F5F7F9;border:1px solid #E1E5EA;border-radius:8px;}
+.ps-linkbox input{flex:1;min-width:220px;height:30px;border:1px solid #D5DBE1;border-radius:6px;padding:0 8px;font:inherit;font-size:12px;background:#fff;}
+.ps-linkbox .btn{font-size:12px;padding:5px 10px;text-decoration:none;}
 .ps-farben{display:flex;flex-direction:column;gap:8px;}
 .ps-frow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
 .ps-frow .lb{width:120px;font-size:11.5px;color:#4C5C70;font-weight:600;}
@@ -314,6 +320,7 @@ input[type=checkbox].modulCheck:checked::after{content:'';position:absolute;left
       <div class="ps-wrap">
         <aside class="ps-liste">
           <input type="text" id="psSuche" class="ps-suche" placeholder="Person suchen …" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other">
+          <button type="button" class="btn btn-ghost ps-tempbtn" id="psTempBtn" title="Temporären Mitarbeitenden erfassen: Name und Handy genügen, Anmeldung über einen persönlichen Link">+ Temporär</button>
           <div id="psListe"></div>
         </aside>
         <div class="ps-detail" id="psDetail"></div>
@@ -921,7 +928,7 @@ const psPP = id => PS.pp.find(p => p.benutzer_id === id && p.aktiv !== false && 
 
 async function ladePersonen(){
   const [b, g, pp, pg] = await Promise.all([
-    sb.from('benutzer').select('id,email,anzeigename,rolle,aktiv,ist_platzhalter,pflege_zustaendig,recht_gruppe_id,erstellt_am,strasse,plz_ort,telefon,geburtsdatum,eintritt,pensum,notfallkontakt,notizen'),
+    sb.from('benutzer').select('id,email,anzeigename,rolle,aktiv,ist_platzhalter,ist_temporaer,pflege_zustaendig,recht_gruppe_id,erstellt_am,strasse,plz_ort,telefon,geburtsdatum,eintritt,pensum,notfallkontakt,notizen'),
     sb.from('recht_gruppe').select('id,name,schluessel,bereich,sortierung').order('sortierung'),
     sb.from('planer_person').select('id,name,kuerzel,farbe,gruppe_id,ist_vorarbeiter,ist_projektleiter,benutzer_id,aktiv,archiviert_am,sortierung').eq('ist_ablage', false),
     sb.from('planer_gruppe').select('id,name,sortierung').order('sortierung')
@@ -945,11 +952,60 @@ function psRender(){
     const f = psFarbeVon(b);
     return `<button type="button" class="ps-p${b.id === PS.sel ? ' on' : ''}" data-id="${b.id}"><span class="dot" style="background:${f || '#fff'}"></span><span class="n">${grEsc(psName(b))}</span>${b.ist_platzhalter ? '<span class="z">ohne Login</span>' : (b.aktiv === false ? '<span class="z">gesperrt</span>' : '')}</button>`;
   }).join('')).join('') || '<div class="hint">Keine Person gefunden.</div>';
-  $('psListe').querySelectorAll('.ps-p').forEach(btn => btn.addEventListener('click', () => { PS.sel = btn.dataset.id; psRender(); }));
+  $('psListe').querySelectorAll('.ps-p').forEach(btn => btn.addEventListener('click', () => { PS.sel = btn.dataset.id; PS.neuTemp = false; psRender(); }));
   psDetail();
 }
 
+// Temporären erfassen: nur Name und Handy; Anmeldung später über den persönlichen Link
+function psTempForm(){
+  const pw = 'autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other"';
+  $('psDetail').innerHTML = `<div class="ps-kopf"><div><h3>Temporär erfassen</h3><div class="meta"><span class="ps-pill">Temporär</span><span class="ps-pill">nur Planer ansehen</span></div></div></div>
+    <div class="ps-body"><div class="ps-grid"><label>Name<input type="text" id="tmpName" ${pw} placeholder="Vorname Name"></label><label>Handy<input type="tel" id="tmpTel" ${pw} placeholder="079 123 45 67"></label></div>
+    <div class="ps-zugang"><div class="row"><button type="button" class="btn btn-primary" id="tmpOk">Erfassen und Link erstellen</button><button type="button" class="btn btn-ghost" id="tmpNo">Abbrechen</button></div><div id="psLink"></div>
+    <p class="ps-note">Die Person bekommt einen persönlichen Link (ohne Passwort) und erscheint im Einsatzplaner im Block «Schnupper / Temporär». Sie kann nur ansehen.</p></div></div>`;
+  $('tmpName').focus();
+  $('tmpNo').onclick = () => { PS.neuTemp = false; psRender(); };
+  $('tmpOk').onclick = async () => { const name = $('tmpName').value.trim(), telefon = $('tmpTel').value.trim(); if(!name){ showToast('Bitte einen Namen eingeben.', true); return; }
+    $('tmpOk').disabled = true; const r = await psZugangAufruf({ aktion: 'temporaer', name, telefon }); $('tmpOk').disabled = false; if(!r) return;
+    PS.neuTemp = false; PS.sel = r.id; PS.tab = 'gruppe'; await ladePersonen(); psLinkZeigen(r.link, { anzeigename: name, telefon, ist_temporaer: true }); };
+}
+// Server-Funktion «benutzer-einladen» (legt Logins an, erzeugt Links – Service-Rolle nur auf dem Server)
+async function psZugangAufruf(body){
+  const { data, error } = await sb.functions.invoke('benutzer-einladen', { body: { ...body, basis: location.origin } });
+  if(error || data?.error){ showToast(data?.error || friendlyError(error), true); return null; }
+  return data;
+}
+// Link anzeigen: kopieren, per E-Mail oder WhatsApp schicken
+function psLinkZeigen(link, b){
+  const box = $('psLink'); if(!box || !link) return;
+  const name = (b.anzeigename || '').split(' ')[0], text = b.ist_temporaer
+    ? `Hallo ${name}, mit diesem Link siehst du deine Einsätze bei Knechtgarten (einfach öffnen, kein Passwort nötig): ${link}`
+    : `Hallo ${name}, hier ist dein Zugang zu den Knechtgarten-Tools. Link öffnen und ein Passwort festlegen: ${link}`;
+  const tel = String(b.telefon || '').replace(/[^\d+]/g, '').replace(/^0/, '41').replace(/^\+/, '');
+  box.innerHTML = `<div class="ps-linkbox"><input type="text" readonly value="${grEsc(link)}" id="psLinkIn"><button type="button" class="btn btn-primary" id="psLinkCp">Kopieren</button>
+    ${!b.ist_temporaer && b.email ? `<a class="btn btn-ghost" href="mailto:${encodeURIComponent(b.email)}?subject=${encodeURIComponent('Dein Zugang zu den Knechtgarten-Tools')}&body=${encodeURIComponent(text)}">Per E-Mail</a>` : ''}
+    <a class="btn btn-ghost" target="_blank" rel="noopener" href="https://wa.me/${tel}?text=${encodeURIComponent(text)}">Per WhatsApp</a></div>`;
+  $('psLinkCp').onclick = async () => { try { await navigator.clipboard.writeText(link); showToast('Link kopiert.'); } catch(e){ $('psLinkIn').select(); document.execCommand('copy'); showToast('Link kopiert.'); } };
+}
+function psZugangHTML(b){
+  const k = b.ist_temporaer ? [['link-neu', 'Persönlichen Link neu erstellen', 'btn-primary'], ['sperren', 'Link sperren', 'btn-ghost']]
+    : b.ist_platzhalter ? [['einladen', 'Einladungslink erstellen', 'btn-primary']] : [['einladen', 'Link zum Passwort festlegen', 'btn-ghost']];
+  const note = b.ist_temporaer ? 'Temporär: meldet sich ohne Passwort über den persönlichen Link an und kann nur ansehen. Ein neuer Link macht den alten sofort ungültig.'
+    : b.ist_platzhalter ? 'Der Link meldet die Person an, sie legt nur noch ein Passwort fest – ohne E-Mail-Bestätigung und ohne Freischaltung. Gruppe und Angaben bleiben.'
+    : 'Passwort vergessen? Link erstellen und der Person schicken – sie legt damit ein neues Passwort fest.';
+  return `<div class="ps-zugang"><div class="lb">Zugang</div><div class="row">${k.map(([a, l, c]) => `<button type="button" class="btn ${c}" data-zug="${a}">${l}</button>`).join('')}</div><div id="psLink"></div><p class="ps-note">${note}</p></div>`;
+}
+async function psZugang(b, aktion){
+  if(aktion === 'sperren' && !confirm(`Link von ${psName(b)} sperren? Der Zugang funktioniert danach nicht mehr, bis du einen neuen Link erstellst.`)) return;
+  if(aktion === 'einladen' && b.ist_platzhalter && !(b.email || '').includes('@')){ showToast('Bitte zuerst unter «Personalien» eine E-Mail-Adresse erfassen.', true); return; }
+  const r = await psZugangAufruf({ aktion, id: b.id }); if(!r) return;
+  if(aktion === 'sperren'){ showToast('Link gesperrt.'); return; }
+  if(r.id && r.id !== b.id){ PS.sel = r.id; await ladePersonen(); } // Platzhalter wurde zum Login (neue ID)
+  psLinkZeigen(r.link, b);
+}
+
 function psDetail(){
+  if(PS.neuTemp){ psTempForm(); return; }
   const b = PS.personen.find(x => x.id === PS.sel);
   if(!b){ $('psDetail').innerHTML = ''; return; }
   const p = psPP(b.id), farbe = p && p.farbe;
@@ -972,7 +1028,7 @@ function psDetail(){
     h += `<div class="ps-grid"><label>Gruppe (Rechte)<select data-gruppe>${b.recht_gruppe_id ? '' : '<option value="">– ohne Gruppe –</option>'}${PS.gruppen.map(g => `<option value="${g.id}"${g.id === b.recht_gruppe_id ? ' selected' : ''}>${grEsc(g.name)}</option>`).join('')}</select></label>
       <label>Login<input type="text" value="${login}${b.erstellt_am ? ' · seit ' + new Date(b.erstellt_am).toLocaleDateString('de-CH') : ''}" readonly></label>
       <label class="ck voll"><input type="checkbox" data-bck="pflege_zustaendig"${b.pflege_zustaendig ? ' checked' : ''}>Im Pflege-Tool bei «Zuständig» auswählbar</label></div>
-      <p class="ps-note">Was die Gruppe darf, steht unter «Gruppen & Rechte». ${b.ist_platzhalter ? 'Diese Person hat kein Login. Registriert sie sich mit ihrer E-Mail, wird sie automatisch übernommen.' : 'Login sperren, freischalten oder löschen: unter «Benutzerverwaltung».'}</p>`;
+      <p class="ps-note">Was die Gruppe darf, steht unter «Gruppen & Rechte». ${b.ist_platzhalter ? 'Diese Person hat noch kein Login. Mit «Einladungslink erstellen» bekommt sie eines.' : 'Login sperren, freischalten oder löschen: unter «Benutzerverwaltung».'}</p>${psZugangHTML(b)}`;
   } else {
     const frei = PS.pp.filter(x => x.aktiv !== false && !x.archiviert_am && (!x.benutzer_id || x.id === (p && p.id)));
     h += `<div class="ps-grid"><label class="voll">Zeile im Einsatzplaner<select data-ppwahl><option value="">– keine Zeile –</option>${frei.sort((x, y) => x.name.localeCompare(y.name, 'de')).map(x => `<option value="${x.id}"${p && x.id === p.id ? ' selected' : ''}>${grEsc(x.name)} (${grEsc((PS.pg.find(g => g.id === x.gruppe_id) || {}).name || 'ohne Gruppe')})</option>`).join('')}</select></label>`;
@@ -1008,6 +1064,7 @@ function psFarbwahl(p){
 
 function psBinden(b, p){
   const d = $('psDetail');
+  d.querySelectorAll('[data-zug]').forEach(bt => bt.addEventListener('click', () => psZugang(b, bt.dataset.zug)));
   d.querySelectorAll('.ps-tabs button').forEach(t => t.addEventListener('click', () => { PS.tab = t.dataset.tab; psDetail(); }));
   const setB = async (feld, wert) => {
     const { error } = await sb.from('benutzer').update({ [feld]: wert }).eq('id', b.id);
@@ -1636,6 +1693,7 @@ async function pruefeAnmeldung(){
   $appMain.classList.remove('hidden');
   await ladeEigeneLinks();
   $('psSuche').addEventListener('input', e => { PS.suche = e.target.value; psRender(); });
+  $('psTempBtn').addEventListener('click', () => { PS.neuTemp = true; psDetail(); });
   KG.infosBereit.then(inf => { if(!inf) return; $('infoNeuBtn').addEventListener('click', () => inf.neu()); inf.liste($('infoListe'), { alle: true }); });
   await Promise.all([loadBenutzer(), ladeGruppenRechte(), ladePersonen(), loadModulSichtbarkeit(), loadDomains(), renderMeineKacheln(), ladeGroesse()]);
   return true;
