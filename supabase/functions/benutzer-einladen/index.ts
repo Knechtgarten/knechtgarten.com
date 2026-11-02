@@ -59,6 +59,7 @@ Deno.serve(async (req) => {
       if (!email || !email.includes('@')) return json({ error: 'Bitte zuerst eine E-Mail-Adresse erfassen.' }, 400);
       let neuId = b.id;
       if (b.ist_platzhalter) { // Auth-Konto anlegen – der Trigger übernimmt den Platzhalter (Rolle, Gruppe, Angaben bleiben)
+        await sb.from('benutzer_einladung').upsert({ email, erstellt_am: new Date().toISOString() }); // Freigabe für den Trigger
         const { data: au, error } = await sb.auth.admin.createUser({ email, email_confirm: true, app_metadata: { eingeladen: true } });
         if (error && !/already|registered|exists/i.test(error.message)) return json({ error: error.message }, 500);
         if (au?.user) neuId = au.user.id;
@@ -77,6 +78,7 @@ Deno.serve(async (req) => {
     if (body.aktion === 'temporaer') {
       const name = String(body.name || '').trim(); if (!name) return json({ error: 'Name fehlt.' }, 400);
       const email = `temp-${crypto.randomUUID().slice(0, 12)}@temp.knechtgarten.ch`;
+      await sb.from('benutzer_einladung').upsert({ email, erstellt_am: new Date().toISOString() }); // Freigabe für den Trigger
       const { data: au, error } = await sb.auth.admin.createUser({ email, email_confirm: true, password: zufall(24), app_metadata: { eingeladen: true, temporaer: true } });
       if (error || !au?.user) return json({ error: error?.message || 'Konto nicht angelegt.' }, 500);
       const id = au.user.id;
