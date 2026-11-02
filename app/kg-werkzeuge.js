@@ -27,7 +27,8 @@
     W('allg_gefaelle', 'allg', 'Gefälle', 'Prozent ↔ Höhe ↔ Länge')
   ];
   // Welche Kategorie beim Öffnen schon offen ist (recht_gruppe.schluessel); Hilfsarbeitende: alle zu
-  const START_OFFEN = { pool: 'pool', va_pflege: 'pflege', va_bau: 'bau', buero: 'buero', admin: 'buero' };
+  // (eine leere Kategorie bleibt trotzdem zu, siehe werkzeuge-live-v1.html)
+  const START_OFFEN = { pool: 'pool', va_pflege: 'pflege', va_bau: 'bau', buero: 'buero', admin: 'pool' };
 
   const $ = id => document.getElementById(id);
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
