@@ -17,7 +17,7 @@ select * from (values
    'Nicht bei kaltem Wetter, nach 10–15 Tagen wiederholen',
    'https://www.biocontrol.ch/ABCS/Dokumente/Gebrauchsanleitungen/Delfin%20Gebrauchsanleitung.pdf', 40),
   ('Promanal Neu', 'Andermatt Biocontrol', 'Insektizid', 'ml',
-   '[{"n":"Bäume, Sträucher 2 %","menge":200,"pro_l":10},{"n":"Schrank-Etikett","menge":150,"pro_l":50}]', 0.16, 0.9,
+   '[{"n":"Bäume, Sträucher 2 %","menge":200,"pro_l":10}]', 0.16, 0.9,
    'Nicht mit Schwefel mischen, nicht in praller Sonne spritzen',
    'https://www.biocontrol.ch/ABCS/Dokumente/Gebrauchsanleitungen/Promanal%20Neu%20Gebrauchsanleitung.pdf', 50),
   ('Weissöl S', 'Andermatt Biocontrol', 'Insektizid', 'ml',
