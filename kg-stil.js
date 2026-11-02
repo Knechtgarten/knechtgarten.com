@@ -144,7 +144,7 @@
     { k: 'wissen', n: 'Nachschlagewerk', url: 'wissen-live-v1.html', farbe: PAL.violett[1], akzent: PAL.violett[3], modul: 'wissen', seiten: ['wissen-live-v1'] },
     { k: 'werkzeuge', n: 'Werkzeuge', url: 'werkzeuge-live-v1.html', farbe: PAL.grau[1], akzent: PAL.grau[3],
       seiten: ['werkzeuge-live-v1', 'werkzeug-pool-chlor-live-v1', 'werkzeug-pool-salz-live-v1', 'werkzeug-pool-alk-live-v1', 'werkzeug-pool-afm-live-v1',
-        'werkzeug-pool-volumen-live-v1', 'werkzeug-bau-schalit-live-v1', 'werkzeug-allg-volumen-live-v1', 'werkzeug-allg-gefaelle-live-v1'] },
+        'werkzeug-pool-volumen-live-v1', 'werkzeug-bau-schalit-live-v1', 'werkzeug-pflege-spritz-live-v1', 'werkzeug-allg-volumen-live-v1', 'werkzeug-allg-gefaelle-live-v1'] },
     { k: 'verw', n: 'Verwaltung', url: 'verwaltung-live-v1.html', farbe: '#FFFFFF', akzent: PAL.grau[3], admin: true,
       seiten: ['verwaltung-live-v1', 'tools-live-v1', 'mailassistent-verwaltung-live-v1', 'dokumentensuche-verwaltung-live-v1'] }
   ];
@@ -343,7 +343,7 @@ header.app.kg-leiste .kg-reiter .navic.on{box-shadow:inset 0 -2px 0 var(--kg-akz
     'werkzeuge-live-v1': ['werkzeuge', '_tool'], 'werkzeug-pool-chlor-live-v1': ['werkzeuge', 'pool_chlor'],
     'werkzeug-pool-salz-live-v1': ['werkzeuge', 'pool_salz'], 'werkzeug-pool-alk-live-v1': ['werkzeuge', 'pool_alk'],
     'werkzeug-pool-afm-live-v1': ['werkzeuge', 'pool_afm'], 'werkzeug-pool-volumen-live-v1': ['werkzeuge', 'pool_volumen'],
-    'werkzeug-bau-schalit-live-v1': ['werkzeuge', 'bau_schalit'], 'werkzeug-allg-volumen-live-v1': ['werkzeuge', 'allg_volumen'], 'werkzeug-allg-gefaelle-live-v1': ['werkzeuge', 'allg_gefaelle']
+    'werkzeug-bau-schalit-live-v1': ['werkzeuge', 'bau_schalit'], 'werkzeug-pflege-spritz-live-v1': ['werkzeuge', 'pflege_spritz'], 'werkzeug-allg-volumen-live-v1': ['werkzeuge', 'allg_volumen'], 'werkzeug-allg-gefaelle-live-v1': ['werkzeuge', 'allg_gefaelle']
   };
   const TOOLRECHT = { offerten: ['offerten', 'offerten'], artikel: ['offerten', 'artikel'], kunden: ['offerten', 'kunden'],
     pend: ['pend', '_tool'], plan: ['plan', '_tool'], pflege: ['pflege', '_tool'], wissen: ['wissen', '_tool'],
