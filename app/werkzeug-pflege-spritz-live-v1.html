@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<script src="/kg-pw-schutz.js?v=5"></script>
+<script src="/kg-stil.js?v=27"></script>
+<title>Spritzmittel – Werkzeuge</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#323E4E">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="/kg-werkzeuge.js?v=4"></script>
+<style>
+.wahl{height:48px;border:1px solid #B9C0C8;border-radius:8px;padding:0 10px;font:inherit;font-size:16px;background:#fff;width:100%;color:#232B35;}
+.chips{display:flex;flex-wrap:wrap;gap:6px;}
+.chips button{all:unset;cursor:pointer;height:36px;padding:0 14px;border:1px solid #D5DBE1;border-radius:18px;font-size:13.5px;font-weight:600;color:#4C5C70;}
+.chips button:hover{border-color:#323E4E;}
+.reihe{display:grid;grid-template-columns:minmax(0,1fr) 110px;gap:8px;}
+.reihe .kgw-zahl{width:100%;}
+.tab{width:100%;border-collapse:collapse;font-size:14px;}
+.tab td{padding:7px 0;border-bottom:1px solid #F1F3F5;}
+.tab td:last-child{text-align:right;font-weight:700;color:#323E4E;}
+.tab tr:last-child td{border-bottom:0;}
+.pz{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #F1F3F5;}
+.pz:last-child{border-bottom:0;}
+.pz span{flex:1;min-width:0;}
+.pz small{display:block;color:#6B7079;font-size:12px;}
+.pz.aus span{opacity:.5;}
+.form{display:flex;flex-direction:column;gap:8px;}
+.form label{display:flex;flex-direction:column;gap:3px;font-size:12px;color:#6B7079;}
+.form .zwei{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;}
+.dos{display:grid;grid-template-columns:minmax(0,1fr) 70px 70px 28px;gap:6px;align-items:center;}
+.knoepfe{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;}
+.k1,.k2{all:unset;box-sizing:border-box;cursor:pointer;height:40px;padding:0 16px;border-radius:8px;font-weight:600;font-size:13.5px;display:inline-flex;align-items:center;gap:6px;}
+.k1{background:#323E4E;color:#fff;} .k2{border:1px solid #D5DBE1;color:#323E4E;background:#fff;}
+</style>
+</head>
+<body>
+<header class="app"><div class="wrap">
+  <a class="backlink" href="index.html">Startseite</a>
+  <div class="brand"><h1>Werkzeuge</h1></div>
+  <span class="userbar hidden" id="userbar"><span id="userbarText"></span><button id="logoutBtn">Abmelden</button></span>
+</div></header>
+<main id="appMain"></main>
+<script>
+// Spritzmittel: Dosierung (Menge auf L Wasser) × Liter Brühe = Mittel in den Tank.
+// Liter Brühe direkt oder aus der Fläche (L Brühe pro m² vom Produkt bzw. von Hand).
+// Produkte in werkzeug_spritzmittel, bearbeiten mit Recht werkzeuge.spritzmittel_pflegen.
+KGW.werkzeug('pflege_spritz', async inhalt => {
+  const $ = id => document.getElementById(id), g = (id, alt) => KGW.lsGet('kgw-spritz-' + id, alt), f = KGW.fmt;
+  let produkte = [], alle = [];
+  const darfPflegen = !window.KG || !KG.darf || KG.darf('werkzeuge', 'spritzmittel_pflegen', 'an') !== 'N';
+  const laden = async () => {
+    const { data, error } = await KGW.sb.from('werkzeug_spritzmittel').select('*').order('sortierung').order('name');
+    if(error) KGW.toast('Produkte konnten nicht geladen werden: ' + error.message, true);
+    alle = data || []; produkte = alle.filter(p => p.aktiv);
+  };
+  await laden();
+
+  inhalt.insertAdjacentHTML('beforeend', KGW.karte('Mittel', `<select class="wahl" id="produkt" aria-label="Mittel"></select>
+    <div id="varianten"></div>
+    <div id="eigen" style="display:flex;flex-direction:column;gap:10px">
+      ${KGW.seg('eTyp', [['proz', '%'], ['prom', '‰'], ['proL', 'pro L']], g('seg-eTyp', 'proz'))}
+      <div class="reihe"><input class="kgw-zahl" id="eWert" inputmode="decimal" autocomplete="off" value="${KGW.esc(g('eWert', '0.2'))}" aria-label="Dosierung">
+        ${KGW.seg('eEinh', [['ml', 'ml'], ['g', 'g']], g('seg-eEinh', 'ml'))}</div></div>
+    <span class="kgw-klein" id="dosisText"></span>`, 'mittelKarte'));
+  inhalt.insertAdjacentHTML('beforeend', KGW.karte('Menge Brühe', `${KGW.seg('modus', [['liter', 'Liter'], ['flaeche', 'Fläche m²']], g('seg-modus', 'liter'))}
+    <div id="mLiter" style="display:flex;flex-direction:column;gap:10px">${KGW.feld('liter', 'Brühe (L)', g('liter', '10'), 1)}
+      <div class="chips" id="chips">${[5, 10, 15, 50].map(l => `<button type="button" data-l="${l}">${l} L</button>`).join('')}</div></div>
+    <div id="mFlaeche" style="display:flex;flex-direction:column;gap:10px">${KGW.feld('flaeche', 'Fläche (m²)', g('flaeche', '50'), 5)}
+      ${KGW.feld('l10', 'Brühe pro 10 m² (L)', g('l10', '1'), 0.1)}<span class="kgw-hinweis" id="l10Hinweis"></span>
+      <div class="kgw-zeile kgw-trenn"><span>Brühe total</span><b id="bruehe"></b></div></div>`, 'mengeKarte'));
+  inhalt.insertAdjacentHTML('beforeend', KGW.karte('In den Tank', `<span class="kgw-klein" style="font-size:13px" id="tankName"></span>
+    <div class="kgw-gross"><b id="menge"></b><span id="einheit"></span></div>
+    <span class="kgw-klein" id="weg"></span><div class="kgw-zeile hidden" id="umger"><span>entspricht etwa</span><b id="umgerW"></b></div>
+    <div class="kgw-warn hidden" id="hinweis" style="font-weight:600"></div>`));
+  inhalt.insertAdjacentHTML('beforeend', KGW.karte('Umrechner', `<div class="reihe"><input class="kgw-zahl" id="uWert" inputmode="decimal" autocomplete="off" value="${KGW.esc(g('uWert', '100'))}" aria-label="Wert">
+      <select class="wahl" id="uEinh" aria-label="Einheit">${['mg', 'g', 'kg', 'ml', 'L'].map(e => `<option${e === g('uEinh', 'g') ? ' selected' : ''}>${e}</option>`).join('')}</select></div>
+    ${KGW.feld('dichte', 'Dichte (g pro ml)', g('dichte', '1'), 0.05)}<span class="kgw-hinweis">Wasser = 1. Ohne genaue Dichte ist g ↔ ml nur ungefähr.</span>
+    <table class="tab" id="uTab"></table>
+    <div class="kgw-trenn" style="display:flex;flex-direction:column;gap:10px">
+      <div class="reihe"><input class="kgw-zahl" id="kWert" inputmode="decimal" autocomplete="off" value="${KGW.esc(g('kWert', '0.5'))}" aria-label="Konzentration">
+        <select class="wahl" id="kEinh" aria-label="Konzentration in">${[['proz', '%'], ['prom', '‰'], ['proL', 'ml pro L']].map(([v, t]) => `<option value="${v}"${v === g('kEinh', 'proz') ? ' selected' : ''}>${t}</option>`).join('')}</select></div>
+      <table class="tab" id="kTab"></table></div>`, 'umKarte'));
+  if(darfPflegen) inhalt.insertAdjacentHTML('beforeend', KGW.karte('Produktliste', '<div id="liste"></div><div class="knoepfe"><button type="button" class="k2" id="neuProdukt">' + KGW.svg(KG.pfad('plus'), 15) + 'Produkt</button></div>', 'listeKarte'));
+
+  const akt = () => produkte.find(p => p.id === $('produkt').value);
+  const produktListe = () => {
+    const wert = $('produkt').value || g('produkt', '');
+    const arten = [...new Set(produkte.map(p => p.art || 'Weitere'))];
+    $('produkt').innerHTML = arten.map(a => `<optgroup label="${KGW.esc(a)}">${produkte.filter(p => (p.art || 'Weitere') === a)
+      .map(p => `<option value="${p.id}">${KGW.esc(p.name)}</option>`).join('')}</optgroup>`).join('') + '<option value="">Eigene Dosierung</option>';
+    $('produkt').value = produkte.some(p => p.id === wert) ? wert : (produkte[0] ? produkte[0].id : '');
+  };
+  const varianten = () => {
+    const p = akt(), d = (p && p.dosierungen) || [];
+    $('eigen').classList.toggle('hidden', !!p);
+    $('varianten').innerHTML = d.length > 1 ? KGW.seg('variante', d.map((x, i) => [i, x.n || 'Variante ' + (i + 1)]), 0) : '';
+    $('varianten').querySelectorAll('[data-seg]').forEach(b => b.addEventListener('click', () => {
+      $('varianten').querySelectorAll('[data-seg]').forEach(x => x.setAttribute('aria-pressed', x === b)); rechne();
+    }));
+    if(p && p.bruehe_l_m2) $('l10').value = String(+(p.bruehe_l_m2 * 10).toFixed(2));
+    $('l10Hinweis').textContent = p && p.bruehe_l_m2 ? `Vorschlag vom Produkt: ${f(p.bruehe_l_m2 * 10, 2)} L pro 10 m²` : 'Für dieses Mittel ist keine Brühmenge pro Fläche hinterlegt – Wert von Hand eingeben.';
+    if(p && p.dichte){ $('dichte').value = String(p.dichte); }
+  };
+  // Dosierung als Menge pro Liter Wasser
+  const dosis = () => {
+    const p = akt();
+    if(p){
+      const d = p.dosierungen || [], i = +(KGW.segWert($('varianten'), 'variante') || 0), x = d[i] || d[0];
+      return x ? { proL: KGW.num(x.menge) / (KGW.num(x.pro_l) || 1), e: p.einheit, text: `${f(KGW.num(x.menge), 0)} ${p.einheit} auf ${f(KGW.num(x.pro_l), 0)} L` } : { proL: 0, e: p.einheit, text: 'Keine Dosierung hinterlegt' };
+    }
+    const w = KGW.zahl('eWert'), t = KGW.segWert($('mittelKarte'), 'eTyp'), e = KGW.segWert($('mittelKarte'), 'eEinh');
+    return { proL: t === 'proz' ? w * 10 : t === 'prom' ? w : w, e, text: '' };
+  };
+  const menge = (x, e) => x >= 1000 ? [f(x / 1000, 2), e === 'g' ? 'kg' : 'L'] : [f(x, x < 10 ? 1 : 0), e];
+  const rechne = () => {
+    const p = akt(), d = dosis(), flaeche = KGW.segWert($('mengeKarte'), 'modus') === 'flaeche';
+    $('mLiter').classList.toggle('hidden', flaeche); $('mFlaeche').classList.toggle('hidden', !flaeche);
+    const L = flaeche ? KGW.zahl('flaeche') * KGW.zahl('l10') / 10 : KGW.zahl('liter');
+    $('bruehe').textContent = f(L, 1) + ' L';
+    const m = d.proL * L, [mw, me] = menge(m, d.e);
+    $('tankName').textContent = p ? p.name : 'Mittel';
+    $('menge').textContent = mw; $('einheit').textContent = me;
+    $('weg').textContent = `auf ${f(L, 1)} L Wasser · ${f(d.proL / 10, 2)} % (${f(d.proL, 1)} ${d.e} pro L)`;
+    $('dosisText').textContent = d.text ? `Dosierung: ${d.text} = ${f(d.proL / 10, 2)} %` : '';
+    const dichte = p && p.dichte;
+    $('umger').classList.toggle('hidden', !dichte);
+    if(dichte){ const [uw, ue] = menge(d.e === 'g' ? m / dichte : m * dichte, d.e === 'g' ? 'ml' : 'g'); $('umgerW').textContent = `${uw} ${ue}`; }
+    $('hinweis').classList.toggle('hidden', !(p && p.hinweis)); $('hinweis').textContent = p && p.hinweis ? p.hinweis : '';
+  };
+  const umrechnen = () => {
+    const w = KGW.zahl('uWert'), e = $('uEinh').value, di = KGW.zahl('dichte') || 1;
+    const gramm = { mg: w / 1000, g: w, kg: w * 1000, ml: w * di, L: w * 1000 * di }[e];
+    const r = [['mg', gramm * 1000], ['g', gramm], ['kg', gramm / 1000], ['ml', gramm / di], ['L', gramm / di / 1000]].filter(([u]) => u !== e);
+    $('uTab').innerHTML = r.map(([u, v]) => `<tr><td>${u}</td><td>${f(v, v < 1 ? 4 : v < 100 ? 2 : 0)}</td></tr>`).join('');
+    const k = KGW.zahl('kWert'), ke = $('kEinh').value, proL = ke === 'proz' ? k * 10 : k;
+    // 1 ‰ = 1 ml (bzw. g) pro L
+    $('kTab').innerHTML = [['proz', '%', proL / 10], ['prom', '‰ = ml (bzw. g) pro L', proL], ['p10', 'ml (bzw. g) auf 10 L', proL * 10]]
+      .filter(([v]) => v !== ke && !(ke === 'proL' && v === 'prom'))
+      .map(([, t, v]) => `<tr><td>${t}</td><td>${f(v, 2)}</td></tr>`).join('');
+  };
+
+  produktListe(); varianten();
+  $('produkt').addEventListener('change', () => { KGW.lsSet('kgw-spritz-produkt', $('produkt').value); varianten(); rechne(); });
+  KGW.binden($('mittelKarte'), rechne, 'kgw-spritz-');
+  KGW.binden($('mengeKarte'), rechne, 'kgw-spritz-');
+  $('chips').querySelectorAll('[data-l]').forEach(b => b.addEventListener('click', () => { $('liter').value = b.dataset.l; KGW.lsSet('kgw-spritz-liter', b.dataset.l); rechne(); }));
+  KGW.binden($('umKarte'), umrechnen, 'kgw-spritz-');
+  ['uEinh', 'kEinh'].forEach(id => $(id).addEventListener('change', () => { KGW.lsSet('kgw-spritz-' + id, $(id).value); umrechnen(); }));
+  rechne(); umrechnen();
+
+  // --- Produktliste bearbeiten ------------------------------------------------
+  if(!darfPflegen) return;
+  const liste = () => {
+    $('liste').innerHTML = alle.map(p => `<div class="pz${p.aktiv ? '' : ' aus'}"><span><b>${KGW.esc(p.name)}</b><small>${KGW.esc([p.art, p.hersteller].filter(Boolean).join(' · '))}${p.aktiv ? '' : ' · ausgeblendet'}</small></span>
+      <button type="button" class="kg-ibtn" data-bearb="${p.id}" aria-label="Bearbeiten" title="Bearbeiten">${KG.icon('edit', 14)}</button>
+      <button type="button" class="kg-ibtn danger" data-loesch="${p.id}" aria-label="Löschen" title="Löschen">${KG.icon('trash', 14)}</button></div>`).join('') || '<div class="kgw-leer">Noch keine Produkte.</div>';
+    $('liste').querySelectorAll('[data-bearb]').forEach(b => b.addEventListener('click', () => formular(alle.find(p => p.id === b.dataset.bearb))));
+    $('liste').querySelectorAll('[data-loesch]').forEach(b => b.addEventListener('click', async () => {
+      const p = alle.find(x => x.id === b.dataset.loesch);
+      if(!confirm(`«${p.name}» wirklich löschen?`)) return;
+      const { error } = await KGW.sb.from('werkzeug_spritzmittel').delete().eq('id', p.id);
+      if(error){ KGW.toast('Löschen ging nicht: ' + error.message, true); return; }
+      await neuLaden();
+    }));
+  };
+  const neuLaden = async () => { await laden(); produktListe(); varianten(); rechne(); liste(); };
+  const dosZeile = x => `<div class="dos"><input class="kgw-text" data-d="n" value="${KGW.esc(x.n || '')}" placeholder="Bezeichnung" aria-label="Bezeichnung">
+    <input class="kgw-text" data-d="menge" inputmode="decimal" value="${KGW.esc(x.menge ?? '')}" placeholder="Menge" aria-label="Menge">
+    <input class="kgw-text" data-d="pro_l" inputmode="decimal" value="${KGW.esc(x.pro_l ?? '')}" placeholder="auf L" aria-label="auf Liter">
+    <button type="button" class="kg-ibtn danger" data-dweg aria-label="Dosierung entfernen">${KG.icon('x', 12)}</button></div>`;
+  const formular = p => {
+    p = p || { name: '', einheit: 'ml', dosierungen: [{ n: 'Standard', menge: '', pro_l: 10 }], aktiv: true };
+    $('liste').innerHTML = `<div class="form">
+      <label>Name<input class="kgw-text" id="fName" value="${KGW.esc(p.name)}"></label>
+      <div class="zwei"><label>Art<input class="kgw-text" id="fArt" value="${KGW.esc(p.art || '')}" placeholder="z. B. Fungizid"></label>
+        <label>Hersteller<input class="kgw-text" id="fHerst" value="${KGW.esc(p.hersteller || '')}"></label></div>
+      <div class="zwei"><label>Einheit<select class="kgw-text" id="fEinh"><option${p.einheit === 'ml' ? ' selected' : ''}>ml</option><option${p.einheit === 'g' ? ' selected' : ''}>g</option></select></label>
+        <label>Dichte (g pro ml)<input class="kgw-text" id="fDichte" inputmode="decimal" value="${KGW.esc(p.dichte ?? '')}"></label></div>
+      <label>Dosierungen (Menge auf L Wasser)</label><div id="fDos" style="display:flex;flex-direction:column;gap:6px">${(p.dosierungen || []).map(dosZeile).join('')}</div>
+      <button type="button" class="k2" id="fDosNeu" style="align-self:flex-start">${KGW.svg(KG.pfad('plus'), 15)}Dosierung</button>
+      <label>Brühe pro 10 m² (L)<input class="kgw-text" id="fBruehe" inputmode="decimal" value="${p.bruehe_l_m2 ? +(p.bruehe_l_m2 * 10).toFixed(3) : ''}"></label>
+      <label>Wichtiger Hinweis<input class="kgw-text" id="fHinweis" value="${KGW.esc(p.hinweis || '')}" placeholder="nur wenn wirklich wichtig"></label>
+      <label>Quelle (Link)<input class="kgw-text" id="fQuelle" value="${KGW.esc(p.quelle || '')}"></label>
+      <label class="kgw-schalter"><input type="checkbox" id="fAktiv"${p.aktiv ? ' checked' : ''}>Im Rechner anzeigen</label>
+      <div class="knoepfe"><button type="button" class="k2" id="fAbbr">Abbrechen</button><button type="button" class="k1" id="fSpeichern">${KG.icon('check', 15)}Speichern</button></div></div>`;
+    const dosBinden = () => $('fDos').querySelectorAll('[data-dweg]').forEach(b => b.onclick = () => b.parentElement.remove());
+    dosBinden();
+    $('fDosNeu').addEventListener('click', () => { $('fDos').insertAdjacentHTML('beforeend', dosZeile({ pro_l: 10 })); dosBinden(); });
+    $('fAbbr').addEventListener('click', liste);
+    $('fSpeichern').addEventListener('click', async () => {
+      const name = $('fName').value.trim(); if(!name){ KGW.toast('Name fehlt', true); return; }
+      const dos = [...$('fDos').querySelectorAll('.dos')].map(z => ({ n: z.querySelector('[data-d="n"]').value.trim(),
+        menge: KGW.num(z.querySelector('[data-d="menge"]').value), pro_l: KGW.num(z.querySelector('[data-d="pro_l"]').value) })).filter(x => x.menge && x.pro_l);
+      const b10 = KGW.num($('fBruehe').value), di = KGW.num($('fDichte').value);
+      const zeile = { name, art: $('fArt').value.trim() || null, hersteller: $('fHerst').value.trim() || null, einheit: $('fEinh').value, dosierungen: dos,
+        bruehe_l_m2: b10 ? b10 / 10 : null, dichte: di || null, hinweis: $('fHinweis').value.trim() || null, quelle: $('fQuelle').value.trim() || null,
+        aktiv: $('fAktiv').checked, geaendert_am: new Date().toISOString() };
+      const { error } = p.id ? await KGW.sb.from('werkzeug_spritzmittel').update(zeile).eq('id', p.id) : await KGW.sb.from('werkzeug_spritzmittel').insert(zeile);
+      if(error){ KGW.toast('Speichern ging nicht: ' + error.message, true); return; }
+      KGW.toast('Gespeichert'); await neuLaden();
+    });
+  };
+  $('neuProdukt').addEventListener('click', () => formular());
+  liste();
+});
+</script>
+</body>
+</html>

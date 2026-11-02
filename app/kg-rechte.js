@@ -38,6 +38,8 @@
       S('pool_afm', 'Pool › AFM Filterbefüllung'),
       S('pool_volumen', 'Pool › Pool-Volumen'),
       S('bau_schalit', 'Bau › Beton für Schalungssteine'),
+      S('pflege_spritz', 'Pflege › Spritzmittel'),
+      S('spritzmittel_pflegen', 'Spritzmittel-Liste bearbeiten', 'Produkte und Dosierungen ändern'),
       S('allg_volumen', 'Allgemein › Volumen', 'mehrere Teile zusammenzählen'),
       S('allg_gefaelle', 'Allgemein › Gefälle') ] },
     { k: 'mail', n: 'Mailassistent', icon: 'verw', bereiche: [
