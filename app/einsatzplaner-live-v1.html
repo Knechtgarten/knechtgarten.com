@@ -433,8 +433,9 @@ body.kopiert, body.kopiert *{cursor:copy !important;}
 /* Maschinen-Reservierung: vorläufig gestrichelt, fest durchgezogen; Überschneidung orange (vorläufig) / rot (fest) */
 .band.mres{background:#fff;border:1.5px solid var(--c);color:var(--ink);}
 .band.mres.vorl{border-style:dashed;}
-.row.mgrpk > .nm{cursor:pointer;gap:5px;font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);background:#EEF1F4;} .row.mgrpk > .lane{background:#EEF1F4!important;}
-.row.mgrpk .nm .i{width:12px;height:12px;transition:transform .15s;} .row.mgrpk.zu .nm .i{transform:rotate(-90deg);}
+.row.mgrpk > .nm{cursor:pointer;background:#EEF1F4;padding-top:3px;padding-bottom:3px;}
+.row.mgrpk .mgb{display:inline-flex;align-items:center;gap:5px;background:var(--kg-tool,var(--primary));color:#fff;border-radius:6px;padding:2px 10px 2px 6px;font-size:12px;font-weight:600;} .row.mgrpk .mgb:hover{filter:brightness(1.1);} /* Bagger / Dumper: grüner Knopf, auf und zu */ .row.mgrpk > .lane{background:#EEF1F4!important;}
+.row.mgrpk .nm .i{width:12px;height:12px;color:#fff;transition:transform .15s;} .row.mgrpk.zu .nm .i{transform:rotate(-90deg);}
 .row.ov > .nm[data-mvorl]{cursor:pointer;}
 .band.mres.mgeist{background:transparent;opacity:.75;pointer-events:none;} /* vorläufig auf diese Nummer verteilt */
 .band.mres.cfo{background:repeating-linear-gradient(135deg,#F0A04B 0 3px,#fff 3px 7px);} /* vorläufige Überschneidung */
@@ -1627,6 +1628,7 @@ function tlFuellen(){ const t = tlEl(); if(!t || EINGEBETTET) return; const h = 
 addEventListener('resize', () => tlFuellen());
 function renderRows(){
   const t = tlEl(); if(!t) return; compute(); dupZeigen(); tageFixNachholen(); t.style.setProperty('--rand', RAND() + 'px');
+  if(!openMid || openTyp !== 'maschine') MGRP_AUF = new Set(); // Bagger-Modus zu: nächstes Mal wieder alle Blöcke zu
   MK_VM = new Map(MARK.filter(m => m.teil === 'vm' && m.art !== 'allein').map(m => [m.person_id + '|' + fromIso(m.tag), m.art])); t.classList.toggle("fokus", !!openMid && layer === "p"); // aufgeklappt: Rest grau
   tfTag = null; WT = {}; // Tag-Hervorhebung und Lieferwagen-Tage neu
   requestAnimationFrame(tlFuellen);
@@ -2047,8 +2049,8 @@ function ovRows(W, bgx, typ = layer, focusMid = null){
   if(!rs.length) return `<div class="leer">Noch keine ${typ === 'maschine' ? 'Maschinen' : typ === 'fahrzeug' ? 'Fahrzeuge' : 'Anhänger'} erfasst.${isBuero() ? '<br><br><a class="btn btn-primary" href="#ressourcen">Fahrzeuge &amp; Maschinen erfassen</a>' : ''}</div>`;
   const ed = canEditRes(typ); let h = '';
   if(typ === 'maschine'){ const gs = { Bagger: [], Dumper: [], Weitere: [] }; rs.forEach(r => gs[maschGruppe(r)].push(r)); rs = [];
-    Object.entries(gs).forEach(([g, l]) => { if(!l.length) return; const zu = MGRP_ZU.has(g); rs.push({ kopf: g, n: l.length, zu }); if(!zu) rs.push(...l); }); }
-  rs.forEach(r => { if(r.kopf){ h += `<div class="row ov mgrpk${focusMid ? ' fov' : ''}${r.zu ? ' zu' : ''}" data-mgrp="${r.kopf}"><div class="nm">${I('chev')}${r.kopf} <span style="opacity:.6;font-weight:400">(${r.n})</span></div><div class="lane" style="width:${W}px;height:20px;${bgx}"></div></div>`; return; }
+    Object.entries(gs).forEach(([g, l]) => { if(!l.length) return; const zu = focusMid ? !MGRP_AUF.has(g) : MGRP_ZU.has(g); rs.push({ kopf: g, n: l.length, zu }); if(!zu) rs.push(...l); }); }
+  rs.forEach(r => { if(r.kopf){ h += `<div class="row ov mgrpk${focusMid ? ' fov' : ''}${r.zu ? ' zu' : ''}" data-mgrp="${r.kopf}"><div class="nm"><span class="mgb">${I('chev')}${r.kopf} <span style="opacity:.75;font-weight:400">(${r.n})</span></span></div><div class="lane" style="width:${W}px;height:26px;${bgx}"></div></div>`; return; }
     const u = RU[r.id] || { list: [], cnt: {}, cntF: {} };
     const gh = typ === 'maschine' && !r.istTyp && r.typ_eid ? (RU['T:' + r.typ_eid]?.list || []).filter(x => x.masch && (x.auto === r.id || (!x.auto && (x.z?.wunsch || TYPEN.find(t => t.eid === r.typ_eid)?.ids[0]) === r.id))).map(x => ({ ...x, ghost: true })) : []; // vorläufig hierhin verteilt
     const ents = u.list.concat(gh).filter(x => x.slots.length).map(x => ({ x, first: Math.min(...x.slots) })).sort((a, b) => a.first - b.first);
@@ -2150,7 +2152,8 @@ function slotIdx(all, u){ const k = Math.floor(u * 2); let i = all.findIndex(x =
 // (macht aus einer vorläufigen Typ-Reservierung eine feste, Lage und Unterbrüche bleiben)
 // Maschinen-Blöcke statt Typ-Titel: Bagger, Dumper, Rest (erkannt am Typ- bzw. Maschinennamen)
 const maschGruppe = r => { const t = (r.typ_planung || '') + ' ' + (r.name || ''); return /dumper/i.test(t) ? 'Dumper' : /bagger/i.test(t) ? 'Bagger' : 'Weitere'; };
-const MGRP_ZU = new Set(lsGet('mgrpZu', []));
+const MGRP_ZU = new Set(lsGet('mgrpZu', [])); // Übersicht Maschinen: gemerkt
+let MGRP_AUF = new Set(); // Bagger-Modus einer Person: beim Öffnen alle zu, aufgeklappt wird nach Bedarf
 // Klick auf Maschine (Name oder Feld) = für die aktive Baustelle vorläufig reservieren bzw. wieder weg; Schloss = fest
 async function maschVorl(rid){
   const r = resById(rid), akt = aktiveBaustelle(); if(!r) return;
@@ -2914,7 +2917,7 @@ function bindTimeline(t){
     // Übersicht Maschinen / Fahrzeuge / Anhänger
     const mr = e.target.closest('[data-mres]'); if(mr){ e.stopPropagation(); maschToggle(mr.dataset.mres, mr.dataset.art, mr.getBoundingClientRect()); return; }
     const mvl = e.target.closest('[data-mvorl]'); if(mvl){ maschVorl(mvl.dataset.mvorl); return; } // Klick auf den Maschinen-Namen = vorläufig an/aus
-    const mg = e.target.closest('[data-mgrp]'); if(mg){ const g = mg.dataset.mgrp; MGRP_ZU.has(g) ? MGRP_ZU.delete(g) : MGRP_ZU.add(g); lsSet('mgrpZu', [...MGRP_ZU]); renderRows(); return; }
+    const mg = e.target.closest('[data-mgrp]'); if(mg){ const g = mg.dataset.mgrp; if(mg.classList.contains('fov')) MGRP_AUF.has(g) ? MGRP_AUF.delete(g) : MGRP_AUF.add(g); else { MGRP_ZU.has(g) ? MGRP_ZU.delete(g) : MGRP_ZU.add(g); lsSet('mgrpZu', [...MGRP_ZU]); } renderRows(); return; }
     const mkx = e.target.closest('[data-mk]'); if(mkx){ const m = MARK.find(x => x.id === mkx.dataset.mk); if(!m) return; // Markierung: Klick = ändern, ziehen = verschieben (Tag, Halbtag, andere Zeile gleicher Art)
       drag = canEdit(m.person_id) || e.altKey ? { kind: 'mk', m, el: mkx, copy: e.altKey, x0: e.clientX, y0: e.clientY, moved: false, rect: mkx.getBoundingClientRect() } : { kind: 'click', fn: () => openMark(m, mkx.getBoundingClientRect()) }; e.preventDefault(); return; }
     const vic = e.target.closest('[data-vic]'); if(vic){ openMid = vic.dataset.vic; openTyp = 'fahrzeug'; renderRows(); return; }
