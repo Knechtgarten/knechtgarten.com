@@ -363,6 +363,9 @@ body.kopiert, body.kopiert *{cursor:copy !important;}
 .phgrip .phdrag{width:100%;box-sizing:border-box;min-height:46px;display:flex;align-items:center;justify-content:center;gap:5px;border:1.5px dashed #C3C8CE;border-radius:8px;color:var(--muted);font-size:11px;}
 .phgrip .phdrag:hover{border-color:var(--primary);color:var(--primary);background:#fff;}
 .phgrip .phdrag .i{width:16px !important;height:16px !important;}
+.phpanel{background:#F5F7F9;border-bottom:1px solid var(--line);overflow-x:auto;} /* Planungshilfe: oben unter der Werkzeugzeile, per Knopf ein/aus */
+.phpanel .tbox{display:flex;flex-wrap:nowrap;gap:10px 30px;width:max-content;box-sizing:border-box;padding:10px 16px 12px;}
+#phB[aria-pressed="true"]{background:var(--primary);color:#fff;border-color:var(--primary);}
 .row.tools .tbox{position:sticky;left:var(--namew);box-sizing:border-box;display:flex;flex-wrap:wrap;gap:10px 22px;padding:10px 12px 12px;background:#F5F7F9;}
 .tsec b{display:block;font-size:10.5px;color:var(--muted);font-weight:600;margin-bottom:5px;text-transform:uppercase;letter-spacing:.04em;}
 .tsec > div:not(.tcol):not(.tcols):not(.sbar-in){display:flex;flex-wrap:wrap;gap:4px;max-width:520px;}
@@ -1248,6 +1251,7 @@ const XW = (a, b) => X(b) - X(a);
 const ZU_KEY = EINGEBETTET ? 'zuWidget' : 'zu';
 let zuNeu = EINGEBETTET && lsGet(ZU_KEY, null) === null;
 const collapsed = new Set(lsGet(ZU_KEY, null) || []);
+let PHOFFEN = !!lsGet('phOffen', false); // Planungshilfe oben aufgeklappt (gemerkt im Browser)
 let archOffen = !!lsGet('archOffen', false); const archJahre = new Set(lsGet('archJahre', []));
 const SNAP = { jahr: 1, quartal: .5, monat: .5, woche: 1 / 12, tag: 1 / 48 };
 const ZL = { tag: 'Tag', woche: 'Woche', monat: 'Monat', quartal: 'Quartal', jahr: 'Jahr' };
@@ -1269,17 +1273,21 @@ function renderPlan(){
         <button class="icon-btn" id="nextB" aria-label="Weiter">${I('next')}</button>
         <div class="seg" id="laySeg" style="margin-left:8px">${Object.entries(LAYERS).map(([k, l]) => `<button data-l="${k}">${l}</button>`).join('')}</div>
         <select id="plSel" class="plsel" aria-label="Zuständig"></select>
+        ${EINGEBETTET ? '' : `<button type="button" class="btn btn-ghost" id="phB" style="padding:4px 10px" aria-pressed="${PHOFFEN}" title="Planungshilfe und Serientermin ein-/ausblenden">Planungshilfe</button>`}
         <input type="search" id="qIn" placeholder="Kunde, Ort, Notiz suchen" style="width:260px">
         <button type="button" class="dupz" id="dupZ" hidden title="Klick: zur nächsten Doppelbelegung springen"></button>
         <span class="sp"></span>
         <span class="cpychip" id="cpyChip" hidden></span>
       </div>
+      ${EINGEBETTET ? '' : `<div class="phpanel" id="phPanel"${PHOFFEN ? '' : ' hidden'}></div>`}
       <div class="planwrap"><div class="tlcol"><div class="tltop" id="tlTop" aria-hidden="true"><div></div></div><div class="tl${isBuero() ? ' sortable' : ''}" id="tl"></div></div><aside class="aufp" id="aufp"></aside></div>`;
     main.querySelectorAll('#zoomSeg button').forEach(b => b.onclick = () => setZoom(b.dataset.z));
     main.querySelectorAll('#laySeg button').forEach(b => b.onclick = () => { layer = b.dataset.l; lsSet('layer', layer); closePanel(); renderRows(); main.querySelectorAll('#laySeg button').forEach(x => x.setAttribute('aria-pressed', x.dataset.l === layer)); });
     $('prevB').onclick = () => step(-1); $('nextB').onclick = () => step(1);
     $('todayB').onclick = () => goToday();
     $('dupZ').onclick = () => dupSpringen();
+    if($('phB')) $('phB').onclick = () => { PHOFFEN = !PHOFFEN; lsSet('phOffen', PHOFFEN); $('phB').setAttribute('aria-pressed', PHOFFEN); phPanelZeichnen(); swDropZeichnen(); };
+    if($('phPanel')) new ResizeObserver(() => tlFuellen()).observe($('phPanel'));
     $('qIn').oninput = e => { query = e.target.value.trim().toLowerCase(); renderRows(); };
     bindTimeline($('tl')); bindWindow();
     dayW = calcDayW(); renderRows(); goToday();
@@ -1644,10 +1652,9 @@ function renderRows(){
         h += `<div class="row grp ajahr${auf ? '' : ' zu'}" data-ay="${y}"><div class="nm">${I('chev')}${y} <span style="opacity:.6;font-weight:400">(${jahre[y].length})</span></div><div class="lane" style="width:${W}px"></div></div>`;
         if(auf) jahre[y].sort((a, b) => a.name.localeCompare(b.name)).forEach(p => { h += personRow(p, W, bgx); }); }); }
   }
-  if(!EINGEBETTET) h += toolsRow(); // Planungshilfe: Werkzeuge als Fussleiste, immer offen
   const sl = t.scrollLeft, stp = t.scrollTop;
   t.innerHTML = `<div class="grid" style="width:${W + NAMEW}px">${h}</div>`;
-  t.scrollLeft = sl; t.scrollTop = stp; fokusRahmen(t); stickLabels(); tlTopSync(); phBlock(t); swDropZeichnen();
+  t.scrollLeft = sl; t.scrollTop = stp; phPanelZeichnen(); fokusRahmen(t); stickLabels(); tlTopSync(); phBlock(t); swDropZeichnen();
 }
 
 // ---------------------------------------------------------------------------
@@ -1791,9 +1798,10 @@ function toolsRow(){
   const mh = [o => o.sp === 'bau', o => o.sp === 'pflege', o => o.sp === 'rest' && o.n === 0, o => o.sp === 'rest' && o.n === 1].map(fn => mhl.filter(fn)).filter(l => l.length).map(l => `<div class="tcol">${l.map(mc).join('')}</div>`).join('');
   const ab = ABS_TYPEN().map(t => chip('abs', t, esc(t), `${t} – auf Person und Tag ziehen`)).join('');
   const mk = Object.keys(MARKART).map(a => chip('mk', a, I('m-' + a), `${MARKART[a]} – auf eine passende Zeile ziehen`)).join('');
-  return `<div class="row tools"><div class="nm tlbl">Planungshilfe</div><div class="tbox" style="width:${visW()}px">
+  return `<div class="tbox">
     <div class="tsec"><b>Mithilfe</b><div class="tcols">${mh}</div></div><div class="tsec"><b>Absenzen</b><div class="tcol">${ab}</div></div><div class="tsec"><b>Icons</b><div class="tcol ticons">${mk}</div></div>
-    ${isBuero() ? `<div class="tsec sbar" id="sbar">${sbarInner()}</div>` : ''}</div></div>`; }
+    ${isBuero() ? `<div class="tsec sbar" id="sbar">${sbarInner()}</div>` : ''}</div>`; }
+function phPanelZeichnen(){ const pp = $('phPanel'); if(!pp) return; pp.hidden = !PHOFFEN; pp.innerHTML = PHOFFEN ? toolsRow() : ''; }
 // Serientermin: Absenz, Auftrag oder Icon für eine oder mehrere Personen regelmässig eintragen (alle gleich oder abwechselnd).
 // Jede Serie wird als einzelne Einträge gespeichert, zusammengehalten durch serie_id.
 const WDK = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
@@ -2818,14 +2826,17 @@ function bindTimeline(t){
       else loescheEinsatz(m); }); // Löschen im Rechtsklick ohne Rückfrage (Rückgängig im Hinweis unten)
     pop.querySelectorAll('[data-mkm]').forEach(bt => bt.onclick = () => { closePop(); openMark({ ...markAn(it.mid, uAt(x)), art: bt.dataset.mkm }, { left: x, bottom: e.clientY }); });
     pop.querySelectorAll('[data-mkp]').forEach(bt => bt.onclick = () => { closePop(); mkEinfuegen(it.mid, uAt(x)); }); });
-  t.addEventListener('click', e => { if(e.target.closest('#sbar')) sbarKlick(e); }); // Serien-Leiste
+  const pp = $('phPanel'); if(pp) pp.addEventListener('pointerdown', e => { if(e.button !== 0) return; closePop();
+    const tc = e.target.closest("[data-tool]"); if(tc){ drag = { kind: "tool", typ: tc.dataset.tool, val: tc.dataset.val, lab: tc.textContent.trim() || MARKART[tc.dataset.val] || "", x0: e.clientX, y0: e.clientY, moved: false }; e.preventDefault(); } });
+  [t, pp].filter(Boolean).forEach(t => { // Serien-Leiste (im Planungshilfe-Feld oben)
+  t.addEventListener('click', e => { if(e.target.closest('#sbar')) sbarKlick(e); });
   t.addEventListener('input', e => { if(e.target.closest('#sbar')) sbarEingabe(e); });
   // KI-Feld: Dateien reinziehen oder Bild mit Ctrl+V einfügen
   t.addEventListener('dragover', e => { const k = e.target.closest?.('#sbar .sright'); if(!k || ![...(e.dataTransfer?.types || [])].includes('Files')) return; e.preventDefault(); k.classList.add('drop'); });
   t.addEventListener('dragleave', e => { const k = e.target.closest?.('#sbar .sright'); if(k && !k.contains(e.relatedTarget)) k.classList.remove('drop'); });
   t.addEventListener('drop', e => { const k = e.target.closest?.('#sbar .sright'); if(!k || !e.dataTransfer?.files?.length) return; e.preventDefault(); k.classList.remove('drop'); skiDateien(e.dataTransfer.files); });
   t.addEventListener('paste', e => { if(!e.target.dataset?.ski) return; const fl = [...(e.clipboardData?.files || [])]; if(!fl.length) return; e.preventDefault(); skiDateien(fl); });
-  t.addEventListener('keydown', e => { if(e.target.dataset?.ski && e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); SKI.text = e.target.value; sbarKI(); } }); t.addEventListener('change', e => { if(e.target.closest('#sbar')) sbarEingabe(e); });
+  t.addEventListener('keydown', e => { if(e.target.dataset?.ski && e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); SKI.text = e.target.value; sbarKI(); } }); t.addEventListener('change', e => { if(e.target.closest('#sbar')) sbarEingabe(e); }); });
   let stT = 0; t.addEventListener('scroll', () => { const o = $('tlTop'); if(o && Math.abs(o.scrollLeft - t.scrollLeft) > 1) o.scrollLeft = t.scrollLeft; if(!stT) stT = requestAnimationFrame(() => { stT = 0; stickLabels(); }); clearTimeout(t._aT); t._aT = setTimeout(aktivNachScroll, 150); }, { passive: true });
   let scT; t.addEventListener('scroll', () => { closePop(); if(zoom === 'tag'){ clearTimeout(scT); scT = setTimeout(() => { const c = Math.floor(UX(t.scrollLeft)); if(c < HR[0] + 3 || c > HR[1] - 4) renderRows();
       // Tagesansicht: links immer ein Tagesbeginn (06:00) – nach dem Scrollen zum nächsten Tagesanfang einrasten
