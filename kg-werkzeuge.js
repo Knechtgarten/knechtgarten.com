@@ -23,6 +23,7 @@
     W('pool_alk', 'pool', 'Alkalinität', 'Alca Plus dosieren'),
     W('pool_afm', 'pool', 'AFM Filterbefüllung', 'Säcke pro Apollo-Filter'),
     W('pool_volumen', 'pool', 'Pool-Volumen', 'Rechteck, rund, oval, Freiform'),
+    W('bau_schalit', 'bau', 'Beton für Schalungssteine', 'SCHALIT: Füllbeton, Steine, Paletten'),
     W('allg_volumen', 'allg', 'Volumen', 'Mehrere Teile zusammenzählen'),
     W('allg_gefaelle', 'allg', 'Gefälle', 'Prozent ↔ Höhe ↔ Länge')
   ];
