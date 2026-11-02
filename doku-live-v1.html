@@ -8,7 +8,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#323E4E">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="/kg-doku.js?v=2"></script>
+<script src="/kg-doku.js?v=3"></script>
 </head>
 <body>
 <header class="app"><div class="wrap">
@@ -18,8 +18,9 @@
 </div></header>
 <nav class="subnav"><div class="wrap">
   <a href="doku-live-v1.html" class="on">Dokumente</a>
-  <a href="doku-personen-live-v1.html">Personen</a>
+  <a href="doku-personen-live-v1.html">Stammdaten</a>
 </div></nav>
+<span class="kg-seg" data-kg-seite="rechts" id="ansicht" role="group" aria-label="Ansicht"><button type="button" data-a="kacheln" aria-pressed="true">Kacheln</button><button type="button" data-a="liste" aria-pressed="false">Liste</button></span>
 <main id="appMain"></main>
 <script>
 // Startseite: links die Ordner, rechts die Dokumenttypen des Ordners, darunter die zuletzt erstellten Dokumente
@@ -39,19 +40,78 @@ async function aufbau(main){
   let ordner = KGD.lsGet('kgd-ordner', null);
   if(!ORDNER.some(x => x.id === ordner)) ordner = ORDNER.length ? ORDNER[0].id : null;
   main.innerHTML = `<div class="kgd-start"><nav class="kgd-ordner" id="ordnerListe" aria-label="Ordner"></nav>
-    <div class="kgd-typen"><h2 id="ordnerTitel"></h2><div class="kgd-typliste" id="typListe"></div>
+    <div class="kgd-typen"><h2 id="ordnerTitel"></h2><div id="typListe"></div>
       <div class="kgd-zwtitel">Zuletzt erstellt</div><div id="letzte"></div></div></div>`;
+  const admin = KGD.darfVorlagen; // Ordner verwalten = gleiches Recht wie Vorlagen bearbeiten
+  let ansicht = KGD.lsGet('kgd-ansicht', 'kacheln'), gezogen = null;
+  document.querySelectorAll('#ansicht [data-a]').forEach(b => {
+    b.setAttribute('aria-pressed', b.dataset.a === ansicht);
+    b.addEventListener('click', () => { ansicht = b.dataset.a; KGD.lsSet('kgd-ansicht', ansicht); document.querySelectorAll('#ansicht [data-a]').forEach(x => x.setAttribute('aria-pressed', x === b)); zeichnen(); });
+  });
 
   function zeichnen(){
-    $('ordnerListe').innerHTML = '<div class="ueber">Ordner</div>' + ORDNER.map(x => `<button type="button" data-o="${x.id}" aria-pressed="${x.id === ordner}">
-      <span class="fi" style="color:${farbe(x.farbe)}">${ic('ordner', 18)}</span><span>${esc(x.name)}</span><small>${VORLAGEN.filter(t => t.ordner_id === x.id).length}</small></button>`).join('');
+    const anzahl = id => VORLAGEN.filter(t => t.ordner_id === id).length;
+    $('ordnerListe').innerHTML = '<div class="ueber">Ordner</div>' + ORDNER.map(x => `<div class="kgd-oz" data-o="${x.id}"${admin ? ' draggable="true"' : ''}>
+        ${admin ? `<span class="griff" title="Ziehen zum Verschieben">${ic('griff', 14)}</span>` : ''}
+        <button type="button" class="wahl" data-wahl="${x.id}" aria-pressed="${x.id === ordner}"><span class="fi" style="color:${farbe(x.farbe)}">${ic('ordner', 18)}</span><span>${esc(x.name)}</span><small>${anzahl(x.id)}</small></button>
+        ${admin ? `<span class="aktion"><button type="button" class="kg-ibtn" data-umb="${x.id}" title="Umbenennen" aria-label="Umbenennen">${ic('edit')}</button><button type="button" class="kg-ibtn danger" data-loe="${x.id}"${anzahl(x.id) ? ' disabled title="Nur leere Ordner lassen sich löschen"' : ' title="Löschen"'} aria-label="Löschen">${ic('trash')}</button></span>` : ''}</div>`).join('')
+      + (admin ? '<button type="button" class="kgd-neu" id="ordnerNeu">+ Ordner</button>' : '');
     const akt = ORDNER.find(x => x.id === ordner), typen = VORLAGEN.filter(t => t.ordner_id === ordner);
     $('ordnerTitel').textContent = akt ? akt.name : '';
-    $('typListe').innerHTML = typen.length ? typen.map(t => `<a class="kgd-typ" href="doku-dokument-live-v1.html?v=${t.id}">
-        <span class="bl" style="color:${farbe(akt.farbe)}">${ic('dokument', 18)}</span><span><b>${esc(t.name)}</b><small>${esc(t.beschreibung || '')}</small></span></a>`).join('')
-      : '<div class="kgd-leer">In diesem Ordner gibt es noch keine Dokumente.</div>';
-    $('ordnerListe').querySelectorAll('[data-o]').forEach(b => b.addEventListener('click', () => { ordner = b.dataset.o; KGD.lsSet('kgd-ordner', ordner); zeichnen(); }));
+    $('typListe').innerHTML = !typen.length ? '<div class="kgd-leer">In diesem Ordner gibt es noch keine Dokumente.</div>'
+      : ansicht === 'liste' ? `<div class="kgd-tab"><table><thead><tr><th>Dokument</th><th>Beschreibung</th></tr></thead><tbody>${typen.map(t => `<tr class="klick" data-href="doku-dokument-live-v1.html?v=${t.id}"><td><b>${esc(t.name)}</b></td><td style="white-space:normal">${esc(t.beschreibung || '')}</td></tr>`).join('')}</tbody></table></div>`
+      : `<div class="kgd-typliste">${typen.map(t => `<a class="kgd-typ" href="doku-dokument-live-v1.html?v=${t.id}">
+        <span class="bl" style="color:${farbe(akt.farbe)}">${ic('dokument', 18)}</span><span><b>${esc(t.name)}</b><small>${esc(t.beschreibung || '')}</small></span></a>`).join('')}</div>`;
+    $('typListe').querySelectorAll('[data-href]').forEach(tr => tr.addEventListener('click', () => location.href = tr.dataset.href));
+    const L = $('ordnerListe');
+    L.querySelectorAll('[data-wahl]').forEach(b => b.addEventListener('click', () => { ordner = b.dataset.wahl; KGD.lsSet('kgd-ordner', ordner); zeichnen(); }));
+    if(admin){
+      L.querySelectorAll('[data-umb]').forEach(b => b.addEventListener('click', () => ordnerName(ORDNER.find(x => x.id === b.dataset.umb))));
+      L.querySelectorAll('[data-loe]').forEach(b => b.addEventListener('click', () => ordnerLoeschen(ORDNER.find(x => x.id === b.dataset.loe))));
+      $('ordnerNeu').addEventListener('click', () => ordnerName(null));
+      L.querySelectorAll('.kgd-oz').forEach(z => {
+        z.addEventListener('dragstart', e => { gezogen = z.dataset.o; z.classList.add('zieht'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', ''); });
+        z.addEventListener('dragend', () => { z.classList.remove('zieht'); gezogen = null; L.querySelectorAll('.ueber-ziel').forEach(x => x.classList.remove('ueber-ziel')); });
+        z.addEventListener('dragover', e => { if(gezogen && gezogen !== z.dataset.o){ e.preventDefault(); z.classList.add('ueber-ziel'); } });
+        z.addEventListener('dragleave', () => z.classList.remove('ueber-ziel'));
+        z.addEventListener('drop', e => { e.preventDefault(); if(gezogen) verschieben(gezogen, z.dataset.o, e.clientY > z.getBoundingClientRect().top + z.offsetHeight / 2); });
+      });
+    }
     letzte();
+  }
+  async function verschieben(von, zu, danach){
+    const a = ORDNER.findIndex(x => x.id === von); const [o] = ORDNER.splice(a, 1);
+    ORDNER.splice(ORDNER.findIndex(x => x.id === zu) + (danach ? 1 : 0), 0, o);
+    zeichnen();
+    const fehler = (await Promise.all(ORDNER.map((x, i) => (x.sortierung = i + 1, sb.from('doku_ordner').update({ sortierung: i + 1 }).eq('id', x.id))))).find(r => r.error);
+    if(fehler) KGD.toast('Reihenfolge nicht gespeichert: ' + fehler.error.message, true);
+  }
+  async function ordnerName(x){
+    let feld = null;
+    const ok = await KGD.dialog(`<h3>${x ? 'Ordner umbenennen' : 'Neuer Ordner'}</h3><div class="kgd-feld"><label for="oName">Name</label><input class="kgd-t" id="oName" value="${esc(x ? x.name : '')}" autocomplete="off"></div>`,
+      [['Abbrechen', 'ghost', null], ['Speichern', 'prim', 'ok']], el => { feld = el.querySelector('#oName'); setTimeout(() => { feld.focus(); feld.select(); }, 0); });
+    const name = feld && feld.value.trim();
+    if(ok !== 'ok' || !name) return;
+    if(x){
+      const { error } = await sb.from('doku_ordner').update({ name }).eq('id', x.id);
+      if(error){ KGD.toast('Umbenennen fehlgeschlagen: ' + error.message, true); return; }
+      x.name = name;
+    } else {
+      const farben = ['beere', 'erde', 'violett', 'blau', 'petrol', 'gruen', 'orange', 'gold', 'oliv'];
+      const { data, error } = await sb.from('doku_ordner').insert({ name, farbe: farben[ORDNER.length % farben.length], sortierung: ORDNER.length + 1 }).select('*').single();
+      if(error){ KGD.toast('Anlegen fehlgeschlagen: ' + error.message, true); return; }
+      ORDNER.push(data); ordner = data.id;
+    }
+    zeichnen();
+  }
+  async function ordnerLoeschen(x){
+    if(VORLAGEN.some(t => t.ordner_id === x.id)){ KGD.toast('Nur leere Ordner lassen sich löschen.', true); return; }
+    if(!confirm(`Ordner «${x.name}» löschen?`)) return;
+    const { error } = await sb.from('doku_ordner').delete().eq('id', x.id);
+    if(error){ KGD.toast('Löschen fehlgeschlagen: ' + error.message, true); return; }
+    ORDNER.splice(ORDNER.indexOf(x), 1);
+    if(ordner === x.id) ordner = ORDNER.length ? ORDNER[0].id : null;
+    zeichnen();
   }
   function letzte(){
     const name = id => (VORLAGEN.find(t => t.id === id) || {}).name || '–';
