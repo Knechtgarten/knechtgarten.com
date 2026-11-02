@@ -9,7 +9,7 @@
 <meta name="theme-color" content="#323E4E">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600;700&display=swap">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="/kg-doku.js?v=1"></script>
+<script src="/kg-doku.js?v=2"></script>
 <style>
 .kgd-weg{display:flex;align-items:center;gap:6px;font-size:14px;color:#6B7079;flex-wrap:wrap;min-width:0;}
 .kgd-weg a{color:#A63A52;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:2px;}
@@ -30,6 +30,8 @@
 <span class="kgd-weg" data-kg-seite="links"><a class="kgd-zurueck" href="doku-live-v1.html" id="ordnerLink"></a><span>/</span><b id="docTitel"></b></span>
 <button type="button" class="kgd-btn ghost" data-kg-seite="rechts" id="datenBtn">Daten</button>
 <button type="button" class="kg-ibtn hidden" data-kg-seite="rechts" id="zahnrad" title="Vorlage bearbeiten" aria-label="Vorlage bearbeiten"></button>
+<a class="kgd-status nein" data-kg-seite="rechts" id="driveStatus" target="_blank" rel="noopener">nicht im Drive</a>
+<button type="button" class="kgd-btn ghost" data-kg-seite="rechts" id="driveBtn"></button>
 <button type="button" class="kgd-btn ghost" data-kg-seite="rechts" id="ladenBtn"></button>
 <button type="button" class="kgd-btn prim kg-haupt" data-kg-seite="rechts" id="druckBtn"></button>
 <main id="appMain"></main>
@@ -40,17 +42,17 @@ const $ = id => document.getElementById(id);
 const P = new URLSearchParams(location.search);
 async function aufbau(main){
   const { esc, ic } = KGD, sb = KGD.sb;
-  $('zahnrad').innerHTML = ic('gear'); $('ladenBtn').innerHTML = ic('herunterladen') + 'Herunterladen'; $('druckBtn').innerHTML = ic('drucken') + 'Drucken';
+  $('zahnrad').innerHTML = ic('gear'); $('driveBtn').innerHTML = ic('ordner') + 'In Drive ablegen'; $('ladenBtn').innerHTML = ic('herunterladen') + 'Herunterladen'; $('druckBtn').innerHTML = ic('drucken') + 'Drucken';
   $('ordnerLink').innerHTML = KG.icon('chev', 14);
 
   // Dokument / Kopie / neues Dokument laden
-  let dokId = null, werte = null, vorlageId = P.get('v');
+  let dokId = null, werte = null, vorlageId = P.get('v'), drive = null; // drive = Ablage-Spalten von doku_dokument
   const quelle = P.get('d') || P.get('kopie');
   if(quelle){
     const { data, error } = await sb.from('doku_dokument').select('*').eq('id', quelle).maybeSingle();
     if(error || !data){ main.innerHTML = '<div class="kgd-typen"><p class="kgd-hinweis">Dokument nicht gefunden.</p></div>'; return; }
     vorlageId = data.vorlage_id; werte = data.werte || {};
-    if(P.get('d')) dokId = data.id;
+    if(P.get('d')){ dokId = data.id; drive = data; }
   }
   const { data: V, error: ve } = await sb.from('doku_vorlage').select('*, ordner:doku_ordner(name)').eq('id', vorlageId).maybeSingle();
   if(ve || !V){ main.innerHTML = '<div class="kgd-typen"><p class="kgd-hinweis">Vorlage nicht gefunden.</p></div>'; return; }
@@ -90,7 +92,13 @@ async function aufbau(main){
 
   let ed = null;
   const zeichnen = () => { ed = KGD.brief($('rand'), V.html, werte, admin ? 'admin' : ($('daten').classList.contains('hidden') ? 'druck' : 'fuellen')); };
-  const geaendert = () => zeichnen();
+  const geaendert = () => { zeichnen(); statusZeigen(); };
+  function statusZeigen(){
+    const s = KGD.driveStatus(drive, werte), el = $('driveStatus');
+    el.className = 'kgd-status ' + s.art + (admin ? ' hidden' : '');
+    el.innerHTML = s.art === 'ja' ? ic('check', 13) + esc('im Drive · ' + ((drive.drive_pfad || '').split(' › ').pop() || 'abgelegt')) : esc(s.text);
+    if(s.link){ el.href = s.link; el.title = 'Im Drive öffnen: ' + (drive.drive_pfad || ''); } else { el.removeAttribute('href'); el.removeAttribute('title'); }
+  }
   const an = (id, ev, fn) => { const el = $(id); if(el) el.addEventListener(ev, fn); };
   an('datum', 'input', e => { werte.datum = e.target.value; geaendert(); });
   an('von', 'input', e => { werte.von = e.target.value; geaendert(); });
@@ -150,9 +158,76 @@ async function aufbau(main){
     return true;
   }
   const bereit = () => { const f = TYP.pflicht(werte); if(f){ KGD.toast(f + ' Bitte im Daten-Fenster ergänzen.', true); fenster(true); return false; } return true; };
-  an('druckBtn', 'click', async () => { if(!bereit()) return; await speichern(); KGD.drucken(V.html, werte); });
+
+  // In Drive ablegen: mit Google verbinden (einmal), Kundenordner vorschlagen, bestätigen, PDF hochladen
+  async function ablegen(){
+    if(!bereit() || !await speichern()) return false;
+    let token;
+    try { token = await KGD.googleToken(); } catch(e){ KGD.toast(e.message, true); return false; }
+    if(!token){
+      try { await KGD.gsiLaden(); } catch(e){ KGD.toast(e.message, true); return false; }
+      const ok = await KGD.dialog(`<h3>Mit Google verbinden</h3><p>Damit das Tool PDFs in die Kundenordner ablegen kann, braucht es einmal deine Erlaubnis für Google Drive. Danach geht es ohne Nachfrage.</p>`,
+        [['Abbrechen', 'ghost', null], ['Mit Google verbinden', 'prim', 'los']], (el, zu) => {
+          el.querySelector('[data-i="1"]').addEventListener('click', e => { e.stopPropagation(); KGD.googleVerbinden().then(() => zu('ok'), f => { KGD.toast(f.message, true); zu(null); }); });
+        });
+      if(ok !== 'ok') return false;
+    }
+    let vorschlaege;
+    $('driveBtn').disabled = true; KGD.toast('Suche Kundenordner …');
+    try {
+      vorschlaege = await KGD.ordnerVorschlag(werte);
+      vorschlaege = await Promise.all(vorschlaege.map(async v => ({ ...v, ziel: await KGD.zielOrdner(v) })));
+    } catch(e){ KGD.toast(e.message, true); $('driveBtn').disabled = false; return false; }
+    $('driveBtn').disabled = false;
+    const name = KGD.dateiName(TYP.dateiname(werte)), schon = drive && drive.drive_datei_id;
+    const wahl = (vorschlaege.map((v, i) => `<label><input type="radio" name="ziel" value="${i}"${i === 0 && !schon ? ' checked' : ''}><span><b>${esc(v.ziel.pfad)}</b><small>${esc(v.gruende.join(' · ') || 'ähnlicher Name')}</small></span></label>`).join(''))
+      + `<label><input type="radio" name="ziel" value="link"${!vorschlaege.length && !schon ? ' checked' : ''}><span><b>Anderer Ordner</b><small>Link des Drive-Ordners einfügen</small>
+          <input class="kgd-t" id="zielLink" placeholder="https://drive.google.com/drive/folders/…" style="margin-top:6px" autocomplete="off"></span></label>`;
+    let form = null;
+    const los = await KGD.dialog(`<h3>In Drive ablegen</h3>
+      ${schon ? `<div class="kgd-wahl"><label><input type="radio" name="ziel" value="ersetzen" checked><span><b>Datei ersetzen</b><small>liegt schon in ${esc(drive.drive_pfad || 'Drive')}</small></span></label></div><p class="kgd-hinweis">oder neu ablegen in:</p>` : ''}
+      ${vorschlaege.length ? '' : '<p>Kein passender Kundenordner gefunden.</p>'}
+      <div class="kgd-wahl">${wahl}</div>
+      <div class="kgd-feld"><label for="zielName">Dateiname</label><input class="kgd-t" id="zielName" value="${esc(name)}" autocomplete="off"></div>`,
+      [['Abbrechen', 'ghost', null], ['Ablegen', 'prim', 'los']], el => {
+        form = el;
+        const link = el.querySelector('#zielLink');
+        link.addEventListener('focus', () => { el.querySelector('input[value="link"]').checked = true; });
+      });
+    if(los !== 'los') return false;
+    const sel = (form.querySelector('input[name="ziel"]:checked') || {}).value, dname = KGD.dateiName(form.querySelector('#zielName').value.replace(/\.pdf$/i, '') || TYP.dateiname(werte));
+    let ziel, ersetzen = null;
+    try {
+      if(sel === 'ersetzen'){ ziel = { id: drive.drive_ordner_id, pfad: drive.drive_pfad }; ersetzen = drive.drive_datei_id; }
+      else if(sel === 'link') ziel = await KGD.ordnerAusLink(form.querySelector('#zielLink').value.trim());
+      else if(sel != null) ziel = vorschlaege[+sel].ziel;
+      else { KGD.toast('Bitte einen Ordner wählen.', true); return false; }
+      $('driveBtn').disabled = true; KGD.toast('Lege ab …');
+      const pdf = await KGD.pdf(V.html, werte, dname, true);
+      const r = await KGD.hochladen(pdf.output('blob'), dname, ziel.id, ersetzen);
+      const zeile = { drive_datei_id: r.id, drive_ordner_id: ziel.id, drive_pfad: ziel.pfad, drive_stand: JSON.stringify(werte), drive_abgelegt_am: new Date().toISOString() };
+      const { error } = await sb.from('doku_dokument').update(zeile).eq('id', dokId);
+      if(error) throw new Error('Abgelegt, aber nicht vermerkt: ' + error.message);
+      drive = { ...(drive || {}), ...zeile }; statusZeigen();
+      KGD.toast('Abgelegt in ' + ziel.pfad);
+      return true;
+    } catch(e){ KGD.toast(e.message || String(e), true); return false; }
+    finally { $('driveBtn').disabled = false; }
+  }
+  // Drucken/Herunterladen ohne aktuelle Ablage: nachfragen, ob zusätzlich ablegen
+  async function nachfrage(was){
+    const s = KGD.driveStatus(drive, werte).art;
+    if(s === 'ja') return true;
+    const w = await KGD.dialog(`<h3>${s === 'alt' ? 'Geändert seit der Ablage' : 'Noch nicht im Drive'}</h3>
+      <p>${s === 'alt' ? 'Das Dokument im Drive ist nicht mehr aktuell. Willst du die neue Fassung auch ablegen?' : 'Willst du das Dokument zusätzlich im Kundenordner ablegen?'}</p>`,
+      [['Abbrechen', 'ghost', null], ['Nur ' + was.toLowerCase(), 'ghost', 'nur'], ['Ablegen und ' + was.toLowerCase(), 'prim', 'beides']]);
+    if(w === 'beides') await ablegen();
+    return w !== null;
+  }
+  an('driveBtn', 'click', () => ablegen());
+  an('druckBtn', 'click', async () => { if(!bereit()) return; await speichern(); if(!await nachfrage('Drucken')) return; KGD.drucken(V.html, werte); });
   an('ladenBtn', 'click', async () => {
-    if(!bereit()) return; await speichern();
+    if(!bereit()) return; await speichern(); if(!await nachfrage('Herunterladen')) return;
     const b = $('ladenBtn'); b.disabled = true;
     try { await KGD.pdf(V.html, werte, TYP.dateiname(werte)); } catch(e){ KGD.toast(e.message || String(e), true); }
     b.disabled = false;
@@ -164,7 +239,7 @@ async function aufbau(main){
     admin = auf;
     document.body.classList.toggle('kgd-admin', auf);
     $('adminBand').classList.toggle('hidden', !auf);
-    ['datenBtn', 'zahnrad', 'ladenBtn', 'druckBtn'].forEach(id => $(id).classList.toggle('hidden', auf || (id === 'zahnrad' && !KGD.darfVorlagen)));
+    ['datenBtn', 'zahnrad', 'driveBtn', 'driveStatus', 'ladenBtn', 'druckBtn'].forEach(id => $(id).classList.toggle('hidden', auf || (id === 'zahnrad' && !KGD.darfVorlagen)));
     $('leisteSlot').innerHTML = auf ? KGD.leisteHtml() : '';
     $('daten').classList.add('hidden'); $('schleier').classList.add('hidden');
     zeichnen();
@@ -181,7 +256,7 @@ async function aufbau(main){
   });
 
   // neues Dokument: Daten-Fenster offen; geöffnetes Dokument: Brief wie gedruckt
-  fenster(!dokId);
+  fenster(!dokId); statusZeigen();
 }
 KGD.start(aufbau);
 </script>

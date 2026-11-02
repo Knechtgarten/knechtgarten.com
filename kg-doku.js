@@ -154,6 +154,22 @@ nav.subnav a.on{color:#323E4E;border-bottom-color:#323E4E;}
 .kgd-phb{font-family:-apple-system,"Segoe UI",sans-serif;display:flex;align-items:center;gap:.6em;margin:1.2em 0 0;padding:.6em .9em;border:1.5px dashed #A3AE3A;background:#F6F8DF;border-radius:8px;font-size:.9em;color:#323E4E;cursor:grab;user-select:none;}
 .kgd-phb b{font-weight:600;} .kgd-phb small{color:#6B7079;} .kgd-phb svg{flex:none;color:#7C8726;}
 .kgd-ph.zieht,.kgd-phb.zieht{opacity:.4;}
+/* Dialoge, Drive-Status */
+.kgd-dlgs{position:fixed;inset:0;background:rgba(35,43,53,.35);z-index:50;display:flex;align-items:flex-start;justify-content:center;padding:90px 12px 12px;}
+.kgd-dlg{width:min(480px,100%);max-height:calc(100vh - 110px);overflow-y:auto;background:#fff;border-radius:12px;box-shadow:0 18px 50px rgba(20,28,38,.3);padding:18px;display:flex;flex-direction:column;gap:12px;}
+.kgd-dlg h3{margin:0;font-size:17px;color:#323E4E;}
+.kgd-dlg p{margin:0;font-size:14px;line-height:1.45;}
+.kgd-dlg .knoepfe{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;}
+.kgd-wahl{display:flex;flex-direction:column;gap:6px;}
+.kgd-wahl label{display:flex;gap:10px;align-items:flex-start;border:1px solid #D5DBE1;border-radius:8px;padding:9px 10px;cursor:pointer;font-size:13.5px;}
+.kgd-wahl label:has(input:checked){border-color:#323E4E;background:#F5F7F9;}
+.kgd-wahl input{margin-top:2px;accent-color:#323E4E;}
+.kgd-wahl b{color:#323E4E;} .kgd-wahl small{display:block;color:#6B7079;font-size:12px;margin-top:2px;}
+.kgd-status{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:600;padding:4px 9px;border-radius:99px;white-space:nowrap;text-decoration:none;}
+.kgd-status.nein{background:#F5F7F9;color:#6B7079;border:1px solid #D5DBE1;}
+.kgd-status.ja{background:#D3EBC7;color:#2E5A2F;}
+.kgd-status.alt{background:#FAEBB0;color:#8A6410;}
+.kgd-status svg{width:13px;height:13px;}
 /* Drucken: nur das Blatt, A4 */
 #kgdDruck{display:none;}
 @page{size:A4;margin:0;}
@@ -369,8 +385,119 @@ nav.subnav a.on{color:#323E4E;border-bottom-color:#323E4E;}
         const doc = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
         doc.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, 0, 210, 297);
         if(blob) return doc;
-        doc.save(name.replace(/[\\/:*?"<>|]/g, '') + '.pdf');
+        doc.save(KGD.dateiName(name));
       } finally { halter.remove(); }
+    },
+    dateiName: name => name.replace(/[\\/:*?"<>|]/g, '').trim() + '.pdf',
+
+    // Dialog: html + Knöpfe [[text, art, wert]] → Promise mit wert (Schliessen/Esc = null)
+    dialog(html, knoepfe, beimOeffnen){
+      return new Promise(ok => {
+        const s = document.createElement('div'); s.className = 'kgd-dlgs';
+        s.innerHTML = `<div class="kgd-dlg" role="dialog">${html}<div class="knoepfe">${knoepfe.map(([t, a], i) => `<button type="button" class="kgd-btn ${a || 'ghost'}" data-i="${i}">${t}</button>`).join('')}</div></div>`;
+        const zu = w => { s.remove(); document.removeEventListener('keydown', esc_); ok(w); };
+        const esc_ = e => { if(e.key === 'Escape') zu(null); };
+        s.addEventListener('click', e => { if(e.target === s) zu(null); const b = e.target.closest('[data-i]'); if(b) zu(knoepfe[+b.dataset.i][2]); });
+        document.addEventListener('keydown', esc_);
+        document.body.appendChild(s);
+        if(beimOeffnen) beimOeffnen(s.querySelector('.kgd-dlg'), zu);
+      });
+    },
+
+    // Google Drive (Ablage im Kundenordner) -----------------------------------------------------
+    // Kundenbereich = geteilte Ablage «01_Kundendaten / Projekte»: Jahresordner > Kundenordner > 06-Notitzen
+    DRIVE: { root: '0AEZm9ALFx3sgUk9PVA', unterordner: /^06\b/, clientId: '689526517764-f2727pi1nglt5lkbttec3ssjqkgl47k5.apps.googleusercontent.com' },
+    _gtoken: null,
+    async googleToken(){
+      if(KGD._gtoken && KGD._gtoken.bis > Date.now() + 60000) return KGD._gtoken.wert;
+      const { data, error } = await KGD.sb.functions.invoke('doku-google', { body: { aktion: 'token' } });
+      if(error) throw new Error('Google-Verbindung: ' + (error.message || error));
+      if(!data || !data.verbunden) return null;
+      KGD._gtoken = { wert: data.accessToken, bis: Date.now() + (data.expiresIn || 3000) * 1000 };
+      return data.accessToken;
+    },
+    gsiLaden(){
+      if(window.google && google.accounts && google.accounts.oauth2) return Promise.resolve();
+      return new Promise((ok, fehler) => { const s = document.createElement('script'); s.src = 'https://accounts.google.com/gsi/client'; s.onload = ok; s.onerror = () => fehler(new Error('Google-Anmeldung konnte nicht geladen werden.')); document.head.appendChild(s); });
+    },
+    // muss direkt aus einem Klick kommen (Popup); gsiLaden() vorher erledigen
+    googleVerbinden(){
+      return new Promise((ok, fehler) => {
+        const c = google.accounts.oauth2.initCodeClient({ client_id: KGD.DRIVE.clientId, scope: 'https://www.googleapis.com/auth/drive', ux_mode: 'popup',
+          callback: async r => {
+            if(r.error){ fehler(new Error('Google: ' + r.error)); return; }
+            const { data, error } = await KGD.sb.functions.invoke('doku-google', { body: { aktion: 'tauschen', code: r.code } });
+            if(error || !data || data.error){ fehler(new Error('Google-Verbindung: ' + ((data && data.error) || (error && error.message) || 'unbekannter Fehler'))); return; }
+            KGD._gtoken = { wert: data.accessToken, bis: Date.now() + (data.expiresIn || 3000) * 1000 }; ok(data.accessToken);
+          },
+          error_callback: e => fehler(new Error(e && e.type === 'popup_closed' ? 'Google-Fenster geschlossen.' : 'Google-Anmeldung abgebrochen.')) });
+        c.requestCode();
+      });
+    },
+    async gapi(pfad, opt = {}){
+      const t = await KGD.googleToken(); if(!t) throw new Error('Nicht mit Google verbunden.');
+      const r = await fetch((pfad.startsWith('http') ? '' : 'https://www.googleapis.com/drive/v3/') + pfad, { ...opt, headers: { Authorization: 'Bearer ' + t, ...(opt.headers || {}) } });
+      const d = await r.json().catch(() => ({}));
+      if(!r.ok) throw new Error('Google Drive: ' + ((d.error && d.error.message) || r.status));
+      return d;
+    },
+    async ordnerListe(q){
+      const p = new URLSearchParams({ q: `mimeType='application/vnd.google-apps.folder' and trashed=false and (${q})`, corpora: 'drive', driveId: KGD.DRIVE.root,
+        includeItemsFromAllDrives: 'true', supportsAllDrives: 'true', fields: 'files(id,name,parents,modifiedTime)', pageSize: '100' });
+      return (await KGD.gapi('files?' + p)).files || [];
+    },
+    // Kundenordner suchen: Name/Firma, Ort und Strasse gegen die Ordnernamen in den Jahresordnern
+    async ordnerVorschlag(w){
+      const jahre = (await KGD.ordnerListe(`'${KGD.DRIVE.root}' in parents`)).filter(f => /^\d{4}$/.test(f.name));
+      const jahrVon = new Map(jahre.map(j => [j.id, j.name]));
+      const woerter = s => String(s || '').toLowerCase().split(/[^a-zäöüéèàß0-9-]+/i).filter(x => x.length >= 3 && !/^\d+$/.test(x) && !['und', 'gmbh', 'ag', 'familie', 'herr', 'frau'].includes(x));
+      const namen = woerter(w.kunde_name), orte = woerter(ortOhnePlz(w.ort)), strassen = woerter(String(w.strasse || '').replace(/\d.*$/, ''));
+      const alle = [...new Set([...namen, ...orte, ...strassen])].slice(0, 8);
+      if(!alle.length) return [];
+      const q = alle.map(x => `name contains '${x.replace(/'/g, "\\'")}'`).join(' or ');
+      const treffer = (await KGD.ordnerListe(q)).filter(f => (f.parents || []).some(p => jahrVon.has(p)));
+      const jahrSoll = (w.datum || '').slice(0, 4) || String(new Date().getFullYear());
+      return treffer.map(f => {
+        const n = f.name.toLowerCase(), jahr = jahrVon.get(f.parents.find(p => jahrVon.has(p))), gruende = [];
+        let punkte = 0;
+        if(namen.some(x => n.includes(x))){ punkte += 4; gruende.push('Name passt'); }
+        if(orte.some(x => n.includes(x))){ punkte += 2; gruende.push('Ort passt'); }
+        if(strassen.some(x => n.includes(x))){ punkte += 2; gruende.push('Strasse passt'); }
+        if(jahr === jahrSoll){ punkte += 1; gruende.push('Jahr ' + jahr); }
+        return { id: f.id, name: f.name, jahr, punkte, gruende, geaendert: f.modifiedTime };
+      }).sort((a, b) => b.punkte - a.punkte || (b.jahr || '').localeCompare(a.jahr || '') || (b.geaendert || '').localeCompare(a.geaendert || '')).slice(0, 6);
+    },
+    // Unterordner 06-Notitzen im Kundenordner (fehlt er: Kundenordner selbst)
+    async zielOrdner(kundenOrdner){
+      const kinder = await KGD.ordnerListe(`'${kundenOrdner.id}' in parents`);
+      const u = kinder.find(k => KGD.DRIVE.unterordner.test(k.name));
+      return u ? { id: u.id, pfad: `${kundenOrdner.jahr ? kundenOrdner.jahr + ' › ' : ''}${kundenOrdner.name} › ${u.name}` }
+               : { id: kundenOrdner.id, pfad: `${kundenOrdner.jahr ? kundenOrdner.jahr + ' › ' : ''}${kundenOrdner.name}` };
+    },
+    async ordnerAusLink(text){
+      const m = String(text).match(/folders\/([\w-]{10,})/) || String(text).match(/^([\w-]{20,})$/);
+      if(!m) throw new Error('Das ist kein Link auf einen Drive-Ordner.');
+      const f = await KGD.gapi(`files/${m[1]}?supportsAllDrives=true&fields=id,name,mimeType`);
+      if(f.mimeType !== 'application/vnd.google-apps.folder') throw new Error('Der Link zeigt nicht auf einen Ordner.');
+      return { id: f.id, pfad: f.name };
+    },
+    // PDF hochladen (neu oder bestehende Datei ersetzen); gibt { id, link } zurück
+    async hochladen(blob, name, ordnerId, ersetzenId){
+      if(ersetzenId){
+        const d = await KGD.gapi(`https://www.googleapis.com/upload/drive/v3/files/${ersetzenId}?uploadType=media&supportsAllDrives=true&fields=id,webViewLink`, { method: 'PATCH', headers: { 'Content-Type': 'application/pdf' }, body: blob });
+        await KGD.gapi(`files/${ersetzenId}?supportsAllDrives=true`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+        return { id: d.id, link: d.webViewLink };
+      }
+      const form = new FormData();
+      form.append('metadata', new Blob([JSON.stringify({ name, parents: [ordnerId], mimeType: 'application/pdf' })], { type: 'application/json' }));
+      form.append('file', blob);
+      const d = await KGD.gapi('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id,webViewLink', { method: 'POST', body: form });
+      return { id: d.id, link: d.webViewLink };
+    },
+    driveStatus(dok, werte){
+      if(!dok || !dok.drive_datei_id) return { art: 'nein', text: 'nicht im Drive' };
+      if(werte && dok.drive_stand !== JSON.stringify(werte)) return { art: 'alt', text: 'geändert seit Ablage' };
+      return { art: 'ja', text: 'im Drive', link: 'https://drive.google.com/file/d/' + dok.drive_datei_id + '/view' };
     }
   };
 })();
