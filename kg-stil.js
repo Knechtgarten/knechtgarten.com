@@ -124,7 +124,10 @@
     pflege: '<path d="M5 19c0-8 5-13 14-14 0 9-5 14-13 14z"/><path d="M5 19l8-8"/>',
     wissen: '<path d="M3 5.5C5.5 4.5 9 4.5 12 6.5c3-2 6.5-2 9-1v13c-2.5-1-6-1-9 1-3-2-6.5-2-9-1z"/><path d="M12 6.5v13"/>',
     rechner: '<rect x="5" y="3" width="14" height="18" rx="2"/><rect x="8" y="6" width="8" height="3" rx=".5"/><path d="M8 13h1M11.5 13h1M15 13h1M8 17h1M11.5 17h1M15 17h1"/>',
-    verw: P.gear
+    verw: P.gear,
+    // Neue Haupttools (noch ohne Seite / TOOLS-Eintrag): Werkzeuge = grosser Schraubenschlüssel (grau), Doku-Tools = Dokument mit Zahnrad (Beere)
+    werkzeuge: '<path d="M16.8 3.4a5.2 5.2 0 0 0-6.9 6.6L2.8 17.1a2.2 2.2 0 0 0 3.1 3.1l7.1-7.1a5.2 5.2 0 0 0 6.6-6.9l-3.1 3.1-2.8-.6-.6-2.8z"/>',
+    doku: '<path d="M13 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h6"/><path d="M13 3v5h5v3"/><path d="M8 12h4M8 16h2"/><circle cx="18" cy="17.5" r="2"/><path d="M18 13.5v1.2M18 20.3v1.2M14 17.5h1.2M20.8 17.5H22M15.2 14.7l.8.8M20 19.5l.8.8M15.2 20.3l.8-.8M20 15.5l.8-.8"/>'
   };
   // Haupttools: Schlüssel, Name, Einstiegsseite, Icon, Farbe, Modul in modul_sichtbarkeit, zugehörige Seiten
   const TOOLS = [
