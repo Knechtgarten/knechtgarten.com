@@ -37,6 +37,7 @@
       S('pool_alk', 'Pool › Alkalinität'),
       S('pool_afm', 'Pool › AFM Filterbefüllung'),
       S('pool_volumen', 'Pool › Pool-Volumen'),
+      S('bau_schalit', 'Bau › Beton für Schalungssteine'),
       S('allg_volumen', 'Allgemein › Volumen', 'mehrere Teile zusammenzählen'),
       S('allg_gefaelle', 'Allgemein › Gefälle') ] },
     { k: 'mail', n: 'Mailassistent', icon: 'verw', bereiche: [
