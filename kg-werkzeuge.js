@@ -13,8 +13,7 @@
       d: '<path d="M2 16c2 0 2-1.5 4-1.5s2 1.5 4 1.5 2-1.5 4-1.5 2 1.5 4 1.5 2-1.5 4-1.5M2 20c2 0 2-1.5 4-1.5s2 1.5 4 1.5 2-1.5 4-1.5 2 1.5 4 1.5 2-1.5 4-1.5"/><path d="M8 13V5a2 2 0 0 1 4 0M16 13V5a2 2 0 0 0-4 0M8 8h8"/>' },
     { k: 'bau', n: 'Bau', farbe: farbe('erde', 1, '#6E4C35'), d: '<path d="M3 6h18v12H3zM3 12h18M9 6v6M15 12v6"/>' },
     { k: 'pflege', n: 'Pflege', farbe: farbe('gruen', 1, '#3F7D3F'), d: '<path d="M5 19c0-8 5-13 14-14 0 9-5 14-13 14z"/><path d="M5 19l8-8"/>' },
-    { k: 'buero', n: 'Büro', farbe: farbe('violett', 1, '#5C3F94'), d: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/>' },
-    { k: 'allg', n: 'Allgemein', farbe: farbe('grau', 1, '#4C5C70'), d: '<path d="M3 17L17 3l4 4L7 21H3z"/><path d="M7 13l2 2M10 10l2 2M13 7l2 2"/>' }
+    { k: 'buero', n: 'Büro', farbe: farbe('violett', 1, '#5C3F94'), d: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/>' }
   ];
   const W = (k, kat, n, h) => ({ k, kat, n, h, seite: 'werkzeug-' + k.replace('_', '-') + '-live-v1' });
   const LISTE = [
@@ -25,10 +24,10 @@
     W('pool_volumen', 'pool', 'Pool-Volumen', 'Rechteck, rund, oval, Freiform'),
     W('bau_diagonale', 'bau', 'Rechter Winkel', 'Diagonale aus zwei Seiten'),
     W('bau_kies', 'bau', 'Kies-Gewicht', 'm³ in Tonnen, nach Kiessorte'),
+    W('bau_stahl', 'bau', 'Stahl', 'Gewicht von Gefäss, Blech, Rohr, Winkel'),
     W('bau_schalit', 'bau', 'Beton für Schalungssteine', 'SCHALIT: Füllbeton, Steine, Paletten'),
     W('pflege_spritz', 'pflege', 'Spritzmittel', 'Wie viel Mittel in den Tank, mit Umrechner'),
-    W('allg_volumen', 'allg', 'Volumen', 'Mehrere Teile zusammenzählen'),
-    W('allg_gefaelle', 'allg', 'Gefälle', 'Prozent ↔ Höhe ↔ Länge')
+    W('allg_gefaelle', 'bau', 'Gefälle', 'Prozent ↔ Höhe ↔ Länge')
   ];
   // Welche Kategorie beim Öffnen schon offen ist (recht_gruppe.schluessel); Hilfsarbeitende: alle zu
   // (eine leere Kategorie bleibt trotzdem zu, siehe werkzeuge-live-v1.html)
