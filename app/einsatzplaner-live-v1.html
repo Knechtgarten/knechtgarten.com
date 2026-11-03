@@ -206,6 +206,28 @@ html:not(.ep-eingebettet) .tl .grid{margin-bottom:50vh;} /* unten Platz, damit a
 .tltop{overflow-x:auto;overflow-y:hidden;height:auto;min-height:14px;flex:none;background:#fff;border-top:1px solid var(--line);}
 .tltop > div{height:1px;}
 .tltop + .tl{border-top:0;height:calc(100vh - 214px);}
+/* Arbeitsvorrat oben: eigene Achse (Wochen 1, 2, 3 …), eigener Scroll, Balken stapeln sich selber */
+.vorrat{display:flex;flex:none;background:#fff;border-top:1px solid var(--line);}
+.vnm{width:170px;flex:none;box-sizing:border-box;border-right:1px solid var(--line);background:#F5F7F9;padding:6px 8px;display:flex;flex-direction:column;gap:5px;font-size:12px;color:#6B7079;}
+.vorrat.zu .vnm{flex-direction:row;align-items:center;width:auto;border-right:0;background:#fff;padding:3px 8px;}
+.vtog{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:5px;color:#323E4E;font-size:11.5px;letter-spacing:.04em;text-transform:uppercase;} .vtog .i{width:13px;height:13px;}
+.vsum{font-variant-numeric:tabular-nums;} .vleg{display:flex;align-items:center;gap:5px;font-size:11px;} .vleg i{width:10px;height:10px;border-radius:3px;display:inline-block;margin-left:4px;}
+.vneu{align-self:flex-start;padding:2px 8px!important;height:24px!important;font-size:12px!important;}
+.vsc{flex:1;min-width:0;overflow:auto;max-height:240px;}
+.vin{position:relative;}
+.vw{position:absolute;top:1px;height:14px;font-size:10.5px;font-weight:700;color:#323E4E;padding-left:4px;box-sizing:border-box;}
+.vt{position:absolute;top:15px;height:14px;font-size:9.5px;color:#8B9097;text-align:center;}
+.vwl{position:absolute;top:0;bottom:0;width:0;border-left:1px solid #DCE1E6;}
+.vwe{position:absolute;top:0;bottom:0;background:#F1F3F5;}
+.vfeld{position:absolute;left:0;right:0;bottom:0;border-top:1px solid #DCE1E6;background:repeating-linear-gradient(to bottom,transparent 0 19px,#F1F3F5 19px 20px);cursor:crosshair;}
+.vbar{position:absolute;height:16px;border-radius:4px;font-size:11px;font-weight:600;line-height:16px;padding:0 6px;box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:grab;z-index:1;}
+.vbar.gesch{border:1.5px dashed rgba(255,255,255,.9);line-height:13px;}
+.vbar.ziehe{opacity:.35;}
+.vgeist{position:fixed;z-index:500;pointer-events:none;box-shadow:0 6px 18px rgba(35,43,53,.3);}
+.vneuz{background:#D6E7F4;color:#323E4E;border:1.5px dashed #323E4E;line-height:13px;pointer-events:none;}
+.lane.vziel{box-shadow:inset 0 0 0 2px #323E4E;background:rgba(214,231,244,.45);}
+.vpop{width:290px;} .vpop input[type=text]{width:100%;box-sizing:border-box;} .vpop .vrow{display:flex;align-items:center;gap:8px;} .vpop .vrow .sp{flex:1;}
+.vpop #vD{width:70px;} .vpop .vchk{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;}
 body.kopiert, body.kopiert *{cursor:copy !important;}
 .aufp{width:300px;flex:none;border-left:1px solid var(--line);border-top:1px solid var(--line);background:#fff;overflow:auto;height:calc(100vh - 200px);min-height:300px;font-size:12px;}
 .aufp.zu{width:34px;overflow:hidden;}
@@ -976,6 +998,126 @@ function bpFenster(eid){
 async function bpZu(){ const w = $('bpWrap'); if(!w) return; w.remove(); await ladeBP(); renderRows(); }
 addEventListener('message', e => { if(e.origin !== location.origin || !e.data) return; if(e.data.bp === 'zu') bpZu(); else if(e.data.bp === 'gross'){ const fr = document.querySelector('#bpWrap .bpw-f'); if(fr) fr.classList.remove('klein'); } });
 addEventListener('keydown', e => { if(e.key === 'Escape' && $('bpWrap')) bpZu(); });
+// ---------------------------------------------------------------- Arbeitsvorrat (Streifen oben, nur Büro)
+// Zugesagte, noch nicht terminierte Arbeiten in richtiger Länge, ohne Datum: Wochen 1, 2, 3 … und Wochentage.
+// Stapeln sich selber: älteste oben links, jeweils in die Zeile, die am wenigsten weit reicht (max. VZ Zeilen, dann in die Breite).
+// Runterziehen auf eine Person = Planer-Balken, der Vorrat-Eintrag verschwindet. Leere Fläche ziehen/klicken = neu.
+let VOR = [], VOR_OFFEN = lsGet('vorratOffen', true), vDrag = null;
+const VZ = 10, VH = 20, VKOPF = 30;
+const VFARBE = { bau: KG.palette.blau[1], pflege: KG.palette.gruen[3] };
+const vorratAn = () => !EINGEBETTET && isBuero();
+async function ladeVorrat(){ if(!vorratAn()) return; const { data, error } = await sb.from('planer_vorrat').select('*').order('erstellt_am'); if(!error) VOR = data || []; }
+const vX = i => { const q = Math.floor(i / 5), r = i - 5 * q; return (q * (5 + 2 * WEK) + r) * dayW; };
+const vI = x => { const W7 = (5 + 2 * WEK) * dayW, q = Math.floor(x / W7), rx = x - q * W7; return q * 5 + Math.min(4.999, rx / dayW); };
+const vTage = v => Math.max(1, Math.ceil(Number(v.tage) - 1e-9));
+const vLab = v => { const k = KUNDEN[v.kunde_id]; return [k ? kShort(k) : '', v.titel || ''].filter(Boolean).join(' · ') || 'Ohne Kunde'; };
+const vSort = () => VOR.sort((a, b) => String(a.erstellt_am).localeCompare(String(b.erstellt_am)));
+function vorratLage(){
+  const ende = new Array(VZ).fill(0);
+  return VOR.map(v => { let z = 0; ende.forEach((x, i) => { if(x < ende[z]) z = i; }); const a = ende[z], n = vTage(v); ende[z] = a + n; return { v, z, a, n }; });
+}
+function vorratZeichnen(){
+  const el = $('vorrat'); if(!el) return;
+  const L = vorratLage(), sum = VOR.reduce((s, v) => s + Number(v.tage || 0), 0), W7 = (5 + 2 * WEK) * dayW;
+  const sc = el.querySelector('.vsc'), alt = sc ? sc.scrollLeft : 0;
+  const wochen = Math.max(Math.ceil(visW() / W7) + 1, Math.ceil(Math.max(0, ...L.map(x => x.a + x.n)) / 5) + 3);
+  let kopf = '';
+  for(let w = 0; w < wochen; w++){
+    kopf += `<span class="vwl" style="left:${w * W7}px"></span><span class="vw" style="left:${w * W7}px;width:${5 * dayW}px">${w + 1}</span>`;
+    if(dayW >= 11) ['M', 'D', 'M', 'D', 'F'].forEach((t, r) => { kopf += `<span class="vt" style="left:${(w * (5 + 2 * WEK) + r) * dayW}px;width:${dayW}px">${t}</span>`; });
+    if(WEK) kopf += `<span class="vwe" style="left:${w * W7 + 5 * dayW}px;width:${2 * WEK * dayW}px"></span>`;
+  }
+  const bars = L.map(({ v, z, a, n }) => {
+    const x = vX(a), w = vX(a + n - 1) + dayW - x, f = VFARBE[v.bereich] || VFARBE.bau, lab = vLab(v), t = `${v.geschaetzt ? '≈ ' : ''}${fmtN(Number(v.tage))} T`;
+    return `<div class="vbar${v.geschaetzt ? ' gesch' : ''}" data-v="${v.id}" style="left:${x + 1}px;top:${VKOPF + z * VH + 2}px;width:${Math.max(8, w - 2)}px;background:${f};color:${KG.textAuf(f)}" title="${esc(lab)} · ${t}${v.geschaetzt ? ' (geschätzt)' : ''} · ${v.bereich === 'pflege' ? 'Pflege' : 'Bau'}&#10;Runterziehen = einplanen · Klick = ändern">${esc(lab)} · ${t}</div>`;
+  }).join('');
+  el.classList.toggle('zu', !VOR_OFFEN);
+  el.innerHTML = `<div class="vnm"><button type="button" class="vtog" id="vTog" aria-expanded="${VOR_OFFEN}" title="Vorrat ${VOR_OFFEN ? 'zuklappen' : 'aufklappen'}">${I(VOR_OFFEN ? 'down' : 'next')}<b>Vorrat</b></button>
+      <span class="vsum">${VOR.length ? `${VOR.length} Arbeit${VOR.length > 1 ? 'en' : ''} · ${fmtN(sum)} T` : 'leer'}</span>
+      ${VOR_OFFEN ? `<span class="vleg"><i style="background:${VFARBE.bau}"></i>Bau <i style="background:${VFARBE.pflege}"></i>Pflege</span><button type="button" class="btn btn-ghost vneu" id="vNeu">${I('plus')}Arbeit</button>` : ''}</div>
+    ${VOR_OFFEN ? `<div class="vsc"><div class="vin" style="width:${wochen * W7}px;height:${VKOPF + VZ * VH + 4}px">${kopf}<div class="vfeld" style="top:${VKOPF}px"></div>${bars}</div></div>` : ''}`;
+  const sc2 = el.querySelector('.vsc'); if(sc2) sc2.scrollLeft = alt;
+  $('vTog').onclick = () => { VOR_OFFEN = !VOR_OFFEN; lsSet('vorratOffen', VOR_OFFEN); vorratZeichnen(); requestAnimationFrame(tlFuellen); };
+  if($('vNeu')) $('vNeu').onclick = e => vorratDialog(null, 5, e.currentTarget.getBoundingClientRect());
+}
+// Neu / ändern: kleines Fenster
+function vorratDialog(v, tage, rect){
+  if(!document.getElementById('kListV')){ const d = document.createElement('datalist'); d.id = 'kListV'; d.innerHTML = KLIST.map(x => `<option value="${esc(x.lab)}">`).join(''); document.body.appendChild(d); }
+  const k = v && KUNDEN[v.kunde_id], ber = v ? v.bereich : 'bau';
+  const pop = popAt(rect, `<b>${v ? 'Vorrat ändern' : 'Arbeit in den Vorrat'}</b>
+    <input type="text" id="vK" list="kListV" placeholder="Kunde suchen" value="${esc(k ? kLabel(k) : '')}">
+    <input type="text" id="vT" placeholder="Titel (optional)" value="${esc(v?.titel || '')}">
+    <div class="vrow"><label>Tage <input type="number" id="vD" min="0.5" step="0.5" value="${v ? Number(v.tage) : tage}"></label>
+      <label class="vchk"><input type="checkbox" id="vG"${v?.geschaetzt ? ' checked' : ''}> geschätzt</label></div>
+    <div class="seg" id="vB"><button type="button" data-b="bau" aria-pressed="${ber === 'bau'}">Bau</button><button type="button" data-b="pflege" aria-pressed="${ber === 'pflege'}">Pflege</button></div>
+    <div class="vrow">${v ? `<button type="button" class="kg-ibtn danger" id="vX" title="Aus dem Vorrat löschen" aria-label="Löschen">${I('trash')}</button>` : ''}<span class="sp"></span><button type="button" class="btn btn-ghost" id="vA">Abbrechen</button><button type="button" class="btn btn-primary" id="vS">${v ? 'Speichern' : 'In den Vorrat'}</button></div>`);
+  pop.classList.add('vpop');
+  let bereich = ber;
+  pop.querySelectorAll('#vB [data-b]').forEach(b => b.onclick = () => { bereich = b.dataset.b; pop.querySelectorAll('#vB [data-b]').forEach(x => x.setAttribute('aria-pressed', x === b)); });
+  pop.querySelector('#vA').onclick = closePop;
+  setTimeout(() => pop.querySelector(v ? '#vD' : '#vK')?.focus(), 0);
+  const speichern = async () => {
+    const kv = pop.querySelector('#vK').value.trim(), hit = KLIST.find(x => x.lab === kv) || (kv.length > 2 ? KLIST.find(x => x.lab.toLowerCase().includes(kv.toLowerCase())) : null);
+    const titel = pop.querySelector('#vT').value.trim() || (kv && !hit ? kv : '');
+    const row = { kunde_id: hit ? hit.id : null, titel: titel || null, tage: Math.max(.5, Number(pop.querySelector('#vD').value) || 1), bereich, geschaetzt: pop.querySelector('#vG').checked };
+    if(!row.kunde_id && !row.titel){ toast('Bitte einen Kunden oder Titel angeben.'); return; }
+    closePop();
+    if(v){ const { error } = await sb.from('planer_vorrat').update(row).eq('id', v.id); if(error){ fehler(error, 'Vorrat'); return; } Object.assign(v, row); }
+    else { const pl = myPerson(); const { data, error } = await sb.from('planer_vorrat').insert({ ...row, projektleiter_id: pl?.ist_projektleiter ? pl.id : null, erstellt_von: ME }).select('*').single(); if(error){ fehler(error, 'Vorrat'); return; } VOR.push(data); }
+    vorratZeichnen();
+  };
+  pop.querySelector('#vS').onclick = speichern;
+  pop.querySelectorAll('input').forEach(i => i.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); speichern(); } else if(e.key === 'Escape') closePop(); }));
+  if(v) pop.querySelector('#vX').onclick = async () => {
+    closePop(); const { error } = await sb.from('planer_vorrat').delete().eq('id', v.id); if(error){ fehler(error, 'Vorrat'); return; }
+    VOR = VOR.filter(x => x !== v); vorratZeichnen();
+    toast(`Aus dem Vorrat gelöscht: ${vLab(v)}`, async () => { const { error: e2 } = await sb.from('planer_vorrat').insert(v); if(e2){ fehler(e2); return; } VOR.push(v); vSort(); vorratZeichnen(); });
+  };
+}
+// Einplanen: Vorrat-Balken auf eine Personenzeile ziehen (Beginn = Tag unter der Maus, Länge = Arbeitstage)
+async function vorratEinplanen(v, mid, u){
+  if(!canEdit(mid)){ toast('Diese Zeile darfst du nicht bearbeiten.'); return; }
+  let d = Math.floor(u + 1e-9); while(isOff(d)) d++;
+  let last = d, n = vTage(v) - 1; while(n > 0){ last++; if(!isOff(last)) n--; }
+  const p = P[mid], ich = myPerson(), pl = v.projektleiter_id || (p?.ist_projektleiter ? mid : (ich?.ist_projektleiter ? ich.id : null));
+  const neu = await neuerEinsatz({ mid, kind: 'baustelle', s: d, e: last + 1, kid: v.kunde_id || null, title: v.titel || '', text: v.notiz || '', pl, ok: true, soll: Number(v.tage) }, false);
+  if(!neu) return;
+  const { error } = await sb.from('planer_vorrat').delete().eq('id', v.id); if(error){ fehler(error, 'Vorrat'); return; }
+  VOR = VOR.filter(x => x !== v); vorratZeichnen();
+  toast(`Eingeplant: ${vLab(v)}${p ? ' · ' + first(p.name) : ''}`, async () => { await loescheEinsatz(neu); const { error: e2 } = await sb.from('planer_vorrat').insert(v); if(!e2){ VOR.push(v); vSort(); vorratZeichnen(); } });
+}
+// Ziehen: Balken runter in den Planer, leere Fläche = neue Arbeit mit gezogener Länge
+addEventListener('pointerdown', e => {
+  if(e.button !== 0) return; const el = $('vorrat'); if(!el || !el.contains(e.target)) return;
+  const b = e.target.closest('.vbar'), f = e.target.closest('.vfeld');
+  if(b){ const v = VOR.find(x => x.id === b.dataset.v); if(!v) return; e.preventDefault(); vDrag = { art: 'bar', v, b, x0: e.clientX, y0: e.clientY, moved: false }; return; }
+  if(f){ e.preventDefault(); const r = f.getBoundingClientRect(); vDrag = { art: 'neu', f, r, x0: e.clientX, y0: e.clientY, i0: Math.floor(vI(e.clientX - r.left)), moved: false }; }
+});
+addEventListener('pointermove', e => {
+  if(!vDrag) return; const d = vDrag;
+  if(!d.moved && Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < 5) return;
+  d.moved = true;
+  if(d.art === 'bar'){
+    if(!d.g){ d.g = d.b.cloneNode(true); d.g.className = 'vbar vgeist'; d.g.style.width = d.b.offsetWidth + 'px'; document.body.appendChild(d.g); d.b.classList.add('ziehe'); }
+    d.g.style.left = (e.clientX - 12) + 'px'; d.g.style.top = (e.clientY - 9) + 'px';
+    const lane = document.elementFromPoint(e.clientX, e.clientY)?.closest('#tl .lane[data-mid]');
+    document.querySelectorAll('.lane.vziel').forEach(x => { if(x !== lane) x.classList.remove('vziel'); }); if(lane) lane.classList.add('vziel');
+  } else {
+    if(!d.g){ d.g = document.createElement('div'); d.g.className = 'vbar vneuz'; d.f.appendChild(d.g); }
+    const i1 = Math.floor(vI(e.clientX - d.r.left)), a = Math.min(d.i0, i1), n = Math.abs(i1 - d.i0) + 1;
+    d.n = n; d.g.style.left = vX(a) + 'px'; d.g.style.width = (vX(a + n - 1) + dayW - vX(a)) + 'px'; d.g.style.top = '2px'; d.g.textContent = n + ' T';
+  }
+});
+addEventListener('pointerup', e => {
+  if(!vDrag) return; const d = vDrag; vDrag = null;
+  document.querySelectorAll('.lane.vziel').forEach(x => x.classList.remove('vziel'));
+  if(d.g) d.g.remove(); if(d.b) d.b.classList.remove('ziehe');
+  if(d.art === 'bar'){
+    if(!d.moved){ vorratDialog(d.v, null, d.b.getBoundingClientRect()); return; }
+    const lane = document.elementFromPoint(e.clientX, e.clientY)?.closest('#tl .lane[data-mid]');
+    if(lane) vorratEinplanen(d.v, lane.dataset.mid, uAt(e.clientX));
+  } else vorratDialog(null, d.moved ? d.n : 5, { left: e.clientX, bottom: e.clientY });
+});
 function ladeTypen(wx, we){
   const tit = {}; (we || []).forEach(x => tit[x.id] = x.titel); const by = {};
   (wx || []).forEach(x => { const r = RES.find(m => m.id === x.planer_ressource_id); if(r){ r.wx = x.id; r.w_eid = x.eintrag_id; } if(!r || r.typ !== 'maschine' || !tit[x.eintrag_id]) return; r.typ_eid = x.eintrag_id; r.typ_planung = tit[x.eintrag_id]; (by[x.eintrag_id] ||= []).push(r.id); });
@@ -1012,7 +1154,7 @@ async function ladeAlles(){
     if(!PF || Date.now() - (PF.t || 0) > 300000){ await ladePflege(); if(PF) PF.t = Date.now(); }
     if(!WS || Date.now() - (WS.t || 0) > 60000){ await ladeService(); if(WS) WS.t = Date.now(); }
     syncPflegeErledigt();
-    await ladeBP();
+    await ladeBP(); await ladeVorrat();
   }catch(err){ fehler(err, 'Laden'); }
 }
 function rowToItem(r){ return { id: r.id, mid: r.person_id, kind: r.art, s: toU(r.beginn), e: toU(r.ende), kid: r.kunde_id, title: r.titel || '', text: r.notiz || '', pl: r.projektleiter_id, link: r.mit_einsatz_id, allein: r.allein, ok: r.abgemacht, soll: r.soll_tage, files: r.planer_datei || [], pkk: r.pflege_kunde_kategorie_id, pj: r.pflege_jahr, pkw: r.pflege_kw, fix: !!r.start_fix, fixg: r.start_fix_grund || '', kv: r.kopie_von, wdh: r.wdh || null, pz: r.pausen || [], at: r.allein_tage || [], mp: r.mit_person_id || null, serie: r.serie_id || null, ueber: !!r.uebereinander, frei: !!r.tage_frei, weicht: !!r.weicht }; }
@@ -1310,7 +1452,7 @@ function renderPlan(){
         <span class="cpychip" id="cpyChip" hidden></span>
       </div>
       ${EINGEBETTET ? '' : `<div class="phpanel" id="phPanel"${PHOFFEN ? '' : ' hidden'}></div>`}
-      <div class="planwrap"><div class="tlcol"><div class="tltop" id="tlTop" aria-hidden="true"><div></div></div><div class="tl${isBuero() ? ' sortable' : ''}" id="tl"></div></div><aside class="aufp" id="aufp"></aside></div>`;
+      <div class="planwrap"><div class="tlcol">${vorratAn() ? '<div class="vorrat" id="vorrat"></div>' : ''}<div class="tltop" id="tlTop" aria-hidden="true"><div></div></div><div class="tl${isBuero() ? ' sortable' : ''}" id="tl"></div></div><aside class="aufp" id="aufp"></aside></div>`;
     main.querySelectorAll('#zoomSeg button').forEach(b => b.onclick = () => setZoom(b.dataset.z));
     main.querySelectorAll('#laySeg button').forEach(b => b.onclick = () => { layer = b.dataset.l; lsSet('layer', layer); closePanel(); renderRows(); main.querySelectorAll('#laySeg button').forEach(x => x.setAttribute('aria-pressed', x.dataset.l === layer)); });
     $('prevB').onclick = () => step(-1); $('nextB').onclick = () => step(1);
@@ -1654,7 +1796,7 @@ function renderRows(){
   if(!openMid || openTyp !== 'maschine') MGRP_AUF = new Set(); // Bagger-Modus zu: nächstes Mal wieder alle Blöcke zu
   MK_VM = new Map(MARK.filter(m => m.teil === 'vm' && m.art !== 'allein').map(m => [m.person_id + '|' + fromIso(m.tag), m.art])); t.classList.toggle("fokus", !!openMid && layer === "p"); // aufgeklappt: Rest grau
   tfTag = null; WT = {}; // Tag-Hervorhebung und Lieferwagen-Tage neu
-  requestAnimationFrame(tlFuellen);
+  requestAnimationFrame(tlFuellen); vorratZeichnen();
   t.classList.toggle("zm", ZMON()); // Monat: Punkte und Lieferwagen im Feld des Termins
   t.classList.toggle("zw", zoom === "woche" || zoom === "tag"); t.style.setProperty("--kw", KW() + "px"); // Woche/Tag: Punkte und Lieferwagen im Balken, Breite Farbfeld 
   t.classList.toggle("zq", zoom === "quartal"); // Quartal: Punkte mittig, keine Lieferwagen
