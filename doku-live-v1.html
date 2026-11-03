@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <script src="/kg-pw-schutz.js?v=5"></script>
-<script src="/kg-stil.js?v=32"></script>
+<script src="/kg-stil.js?v=33"></script>
 <title>Doku-Tools</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#323E4E">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="/kg-doku.js?v=6"></script>
+<script src="/kg-doku.js?v=7"></script>
 </head>
 <body>
 <header class="app"><div class="wrap">
@@ -18,7 +18,6 @@
 </div></header>
 <nav class="subnav"><div class="wrap">
   <a href="doku-live-v1.html" class="on">Dokumente</a>
-  <a href="doku-personen-live-v1.html">Stammdaten</a>
 </div></nav>
 <span class="kg-seg" data-kg-seite="rechts" id="ansicht" role="group" aria-label="Ansicht"><button type="button" data-a="kacheln" aria-pressed="true">Kacheln</button><button type="button" data-a="liste" aria-pressed="false">Liste</button></span>
 <main id="appMain"></main>
@@ -29,7 +28,8 @@ async function aufbau(main){
   const { esc, ic } = KGD, sb = KGD.sb;
   const [o, v, d] = await Promise.all([
     sb.from('doku_ordner').select('*').order('sortierung'),
-    sb.from('doku_vorlage').select('id,ordner_id,name,beschreibung').order('sortierung'),
+    sb.from('doku_vorlage').select('id,ordner_id,name,beschreibung,art,stand').order('sortierung'),
+    !KGD.darfBriefe ? Promise.resolve({ data: [], error: null }) :
     sb.from('doku_dokument').select('id,vorlage_id,adresse,datum,geaendert_am,werte,drive_datei_id,drive_stand,drive_pfad,von:benutzer!doku_dokument_erstellt_von_fkey(anzeigename)').order('geaendert_am', { ascending: false }).limit(25)
   ]);
   const fehler = o.error || v.error || d.error;
@@ -41,8 +41,11 @@ async function aufbau(main){
   if(!ORDNER.some(x => x.id === ordner)) ordner = ORDNER.length ? ORDNER[0].id : null;
   main.innerHTML = `<div class="kgd-start"><nav class="kgd-ordner" id="ordnerListe" aria-label="Ordner"></nav>
     <div class="kgd-typen"><h2 id="ordnerTitel"></h2><div id="typListe"></div>
-      <div class="kgd-zwtitel">Zuletzt erstellt</div><div id="letzte"></div></div></div>`;
+      ${KGD.darfBriefe ? '<div class="kgd-zwtitel">Zuletzt erstellt</div><div id="letzte"></div>' : ''}</div></div>`;
   const admin = KGD.darfVorlagen; // Ordner verwalten = gleiches Recht wie Vorlagen bearbeiten
+  // Briefe → Ausfüllen; PDF (GAV) und Abschnitte (Reglement) → eigene Seite mit PDF, Versionen und Bearbeiten
+  const ziel = t => (t.art && t.art !== 'brief' ? 'doku-datei-live-v1.html?v=' : 'doku-dokument-live-v1.html?v=') + t.id;
+  VORLAGEN.forEach(t => { if(t.stand) t.beschreibung = [t.beschreibung, 'Stand ' + KGD.datumKurz(t.stand)].filter(Boolean).join(' · '); });
   let ansicht = KGD.lsGet('kgd-ansicht', 'kacheln'), gezogen = null;
   document.querySelectorAll('#ansicht [data-a]').forEach(b => {
     b.setAttribute('aria-pressed', b.dataset.a === ansicht);
@@ -59,8 +62,8 @@ async function aufbau(main){
     const akt = ORDNER.find(x => x.id === ordner), typen = VORLAGEN.filter(t => t.ordner_id === ordner);
     $('ordnerTitel').textContent = akt ? akt.name : '';
     $('typListe').innerHTML = !typen.length ? '<div class="kgd-leer">In diesem Ordner gibt es noch keine Dokumente.</div>'
-      : ansicht === 'liste' ? `<div class="kgd-tab"><table><thead><tr><th>Dokument</th><th>Beschreibung</th></tr></thead><tbody>${typen.map(t => `<tr class="klick" data-href="doku-dokument-live-v1.html?v=${t.id}"><td><b>${esc(t.name)}</b></td><td style="white-space:normal">${esc(t.beschreibung || '')}</td></tr>`).join('')}</tbody></table></div>`
-      : `<div class="kgd-typliste">${typen.map(t => `<a class="kgd-typ" href="doku-dokument-live-v1.html?v=${t.id}">
+      : ansicht === 'liste' ? `<div class="kgd-tab"><table><thead><tr><th>Dokument</th><th>Beschreibung</th></tr></thead><tbody>${typen.map(t => `<tr class="klick" data-href="${ziel(t)}"><td><b>${esc(t.name)}</b></td><td style="white-space:normal">${esc(t.beschreibung || '')}</td></tr>`).join('')}</tbody></table></div>`
+      : `<div class="kgd-typliste">${typen.map(t => `<a class="kgd-typ" href="${ziel(t)}">
         <span class="bl" style="color:${farbe(akt.farbe)}">${ic('dokument', 18)}</span><span><b>${esc(t.name)}</b><small>${esc(t.beschreibung || '')}</small></span></a>`).join('')}</div>`;
     $('typListe').querySelectorAll('[data-href]').forEach(tr => tr.addEventListener('click', () => location.href = tr.dataset.href));
     const L = $('ordnerListe');
@@ -77,7 +80,7 @@ async function aufbau(main){
         z.addEventListener('drop', e => { e.preventDefault(); if(gezogen) verschieben(gezogen, z.dataset.o, e.clientY > z.getBoundingClientRect().top + z.offsetHeight / 2); });
       });
     }
-    letzte();
+    if(KGD.darfBriefe) letzte();
   }
   async function verschieben(von, zu, danach){
     const a = ORDNER.findIndex(x => x.id === von); const [o] = ORDNER.splice(a, 1);

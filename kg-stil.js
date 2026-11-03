@@ -152,7 +152,7 @@
       seiten: ['werkzeuge-live-v1', 'werkzeug-pool-chlor-live-v1', 'werkzeug-pool-salz-live-v1', 'werkzeug-pool-alk-live-v1', 'werkzeug-pool-afm-live-v1',
         'werkzeug-pool-volumen-live-v1', 'werkzeug-bau-diagonale-live-v1', 'werkzeug-bau-kies-live-v1', 'werkzeug-bau-schalit-live-v1', 'werkzeug-pflege-spritz-live-v1', 'werkzeug-allg-volumen-live-v1', 'werkzeug-allg-gefaelle-live-v1'] },
     { k: 'doku', n: 'Doku-Tools', url: 'doku-live-v1.html', farbe: PAL.beere[1], akzent: PAL.beere[3],
-      seiten: ['doku-live-v1', 'doku-dokument-live-v1', 'doku-personen-live-v1'] },
+      seiten: ['doku-live-v1', 'doku-dokument-live-v1', 'doku-datei-live-v1', 'doku-personen-live-v1'] },
     { k: 'verw', n: 'Verwaltung', url: 'verwaltung-live-v1.html', farbe: '#FFFFFF', akzent: PAL.grau[3], admin: true,
       seiten: ['verwaltung-live-v1', 'tools-live-v1', 'mailassistent-verwaltung-live-v1', 'dokumentensuche-verwaltung-live-v1'] }
   ];
@@ -356,7 +356,7 @@ header.app.kg-leiste ~ main.wrap{margin-left:0!important;margin-right:auto!impor
     'werkzeug-pool-salz-live-v1': ['werkzeuge', 'pool_salz'], 'werkzeug-pool-alk-live-v1': ['werkzeuge', 'pool_alk'],
     'werkzeug-pool-afm-live-v1': ['werkzeuge', 'pool_afm'], 'werkzeug-pool-volumen-live-v1': ['werkzeuge', 'pool_volumen'],
     'werkzeug-bau-diagonale-live-v1': ['werkzeuge', 'bau_diagonale'], 'werkzeug-bau-kies-live-v1': ['werkzeuge', 'bau_kies'], 'werkzeug-bau-schalit-live-v1': ['werkzeuge', 'bau_schalit'], 'werkzeug-pflege-spritz-live-v1': ['werkzeuge', 'pflege_spritz'], 'werkzeug-allg-volumen-live-v1': ['werkzeuge', 'allg_volumen'], 'werkzeug-allg-gefaelle-live-v1': ['werkzeuge', 'allg_gefaelle'],
-    'doku-live-v1': ['doku', '_tool'], 'doku-dokument-live-v1': ['doku', '_tool'], 'doku-personen-live-v1': ['doku', 'personen']
+    'doku-live-v1': ['doku', '_tool'], 'doku-dokument-live-v1': ['doku', '_tool'], 'doku-datei-live-v1': ['doku', '_tool'], 'doku-personen-live-v1': ['doku', 'personen']
   };
   const TOOLRECHT = { offerten: ['offerten', 'offerten'], artikel: ['offerten', 'artikel'], kunden: ['offerten', 'kunden'],
     pend: ['pend', '_tool'], plan: ['plan', '_tool'], pflege: ['pflege', '_tool'], wissen: ['wissen', '_tool'],
