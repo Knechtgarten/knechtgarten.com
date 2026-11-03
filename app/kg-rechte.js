@@ -45,8 +45,8 @@
       S('allg_volumen', 'Allgemein › Volumen', 'mehrere Teile zusammenzählen'),
       S('allg_gefaelle', 'Allgemein › Gefälle') ] },
     { k: 'doku', n: 'Doku-Tools', icon: 'doku', bereiche: [
-      S('vorlagen', 'Vorlagen bearbeiten', 'Brieftexte ändern (Zahnrad beim Dokument)'),
-      S('personen', 'Personen pflegen', 'Projektleiter, Bauführer, Vorarbeiter mit Handy und Mail') ] },
+      S('briefe', 'Briefe erstellen', 'alle Ordner; ohne diesen Schalter nur Ordner «für alle» (z. B. Mitarbeiter: GAV, Reglement)'),
+      S('vorlagen', 'Vorlagen bearbeiten', 'Brieftexte, Reglement, PDFs hochladen, Ordner verwalten') ] },
     { k: 'mail', n: 'Mailassistent', icon: 'verw', bereiche: [
       B('entwuerfe', 'Mail-Entwürfe'),
       B('wissen', 'Wissensstruktur & Vorlagen') ] },

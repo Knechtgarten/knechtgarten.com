@@ -204,7 +204,7 @@ nav.subnav a.on{color:#323E4E;border-bottom-color:#323E4E;}
 
   const KGD = window.KGD = {
     ROLLEN, FELDER, TYPEN, esc, ic, lsGet, lsSet, datumKurz, adresse,
-    sb: null, ich: null, personen: [], darfVorlagen: false, darfPersonen: false,
+    sb: null, ich: null, personen: [], darfVorlagen: false, darfBriefe: false,
 
     toast(text, err){
       const t = document.createElement('div'); t.className = 'kgd-toast' + (err ? ' err' : ''); t.textContent = text;
@@ -223,17 +223,19 @@ nav.subnav a.on{color:#323E4E;border-bottom-color:#323E4E;}
       if(!b || !b.rolle || b.aktiv === false){ main.innerHTML = '<div class="loginwrap"><div class="logincard"><h2>Noch nicht freigeschaltet</h2><p class="kgd-hinweis">Dein Konto wartet auf Freischaltung durch einen Admin.</p></div></div>'; return; }
       KGD.ich = session.user.id;
       await (KG.ladeRechte ? KG.ladeRechte() : null);
-      // ohne Gruppe (alte Konten): nur Admin darf Vorlagen und Personen ändern
-      const schalter = k => { const r = KG.darf ? KG.darf('doku', k, 'an') : null; return r === null ? b.rolle === 'admin' : r === 'J'; };
-      KGD.darfVorlagen = schalter('vorlagen'); KGD.darfPersonen = schalter('personen');
-      await KGD.ladePersonen();
+      // ohne Gruppe (alte Konten): Vorlagen nur Admin, Briefe Admin + Büro
+      const schalter = (k, alt) => { const r = KG.darf ? KG.darf('doku', k, 'an') : null; return r === null ? alt.includes(b.rolle) : r === 'J'; };
+      KGD.darfVorlagen = schalter('vorlagen', ['admin']); KGD.darfBriefe = schalter('briefe', ['admin', 'buero_team']);
+      if(KGD.darfBriefe) await KGD.ladePersonen();
       const ub = $('userbar'); if(ub){ ub.classList.remove('hidden'); const t = $('userbarText'); if(t) t.textContent = b.anzeigename || b.email || ''; }
       fertig(main);
     },
+    // Personen = Benutzer mit Merkmalen (Verwaltung › Personen › Merkmale); rolle = wichtigstes Merkmal für den Brief
     async ladePersonen(){
-      const { data, error } = await KGD.sb.from('doku_person').select('*').order('sortierung').order('name');
+      const { data, error } = await KGD.sb.rpc('doku_personen');
       if(error) KGD.toast('Personen konnten nicht geladen werden: ' + error.message, true);
-      KGD.personen = data || [];
+      KGD.personen = (data || []).map(p => ({ ...p, merkmale: p.merkmale || [], rolle: ['projektleiter', 'bauleiter', 'vorarbeiter'].find(k => (p.merkmale || []).includes(k)) || '' }))
+        .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'de'));
     },
 
     login(main, fertig){

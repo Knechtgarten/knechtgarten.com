@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <script src="/kg-pw-schutz.js?v=5"></script>
-<script src="/kg-stil.js?v=32"></script>
-<script src="/kg-rechte.js?v=4"></script>
+<script src="/kg-stil.js?v=33"></script>
+<script src="/kg-rechte.js?v=5"></script>
 <title>Verwaltung (live) – Adminverwaltung</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
@@ -60,6 +60,13 @@ h1{font-size:19px;color:var(--primary);margin-bottom:2px;}
 .ps-grid .ck{flex-direction:row;align-items:center;gap:8px;font-size:12.5px;font-weight:400;color:var(--ink);}
 .ps-grid .ck input{height:auto;width:16px;accent-color:#323E4E;}
 .ps-note{font-size:12px;color:#6B7079;margin:12px 0 0;line-height:1.45;}
+.ps-merkmale{display:flex;flex-wrap:wrap;gap:8px;max-width:720px;}
+.ps-mk{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 13px;border-radius:16px;border:1px solid var(--line,#D5DBE1);background:#fff;font-size:13px;font-weight:600;color:#4C5C70;}
+.ps-mk:hover{border-color:var(--primary,#323E4E);}
+.ps-mk.on{background:var(--primary,#323E4E);border-color:var(--primary,#323E4E);color:#fff;}
+.ps-mk.neu{border-style:dashed;color:#8B9097;}
+.ps-mk .weg{font-size:15px;line-height:1;opacity:.6;} .ps-mk .weg:hover{opacity:1;}
+.ps-grid label small{font-weight:400;color:#8B9097;}
 .ps-tempbtn{width:100%;justify-content:center;margin-bottom:8px;font-size:12.5px;padding:5px 10px;}
 .ps-zugang{margin-top:18px;padding-top:14px;border-top:1px solid #E1E5EA;max-width:720px;} .ps-zugang .lb{font-size:11px;font-weight:600;color:#4C5C70;margin-bottom:8px;text-transform:uppercase;letter-spacing:.04em;}
 .ps-zugang .row{display:flex;gap:8px;flex-wrap:wrap;}
@@ -922,18 +929,21 @@ const GR = { gruppen: [], werte: new Map(), benutzer: [], sel: null, offen: { of
 // Personalien | Gruppe & Login | Einsatzplaner. Eine Person = Zeile in benutzer
 // (mit Login oder «ohne Login»), verknüpft mit ihrer Zeile im Planer (planer_person.benutzer_id).
 // ---------------------------------------------------------------------------
-const PS = { personen: [], gruppen: [], pp: [], pg: [], sel: null, tab: 'personalien', alleFarben: false, suche: '' };
+const PS = { personen: [], gruppen: [], pp: [], pg: [], merkmale: [], bm: [], sel: null, tab: 'personalien', alleFarben: false, suche: '' };
 const psName = b => b.anzeigename || (b.email || '').split('@')[0] || '?';
 const psPP = id => PS.pp.find(p => p.benutzer_id === id && p.aktiv !== false && !p.archiviert_am);
 
 async function ladePersonen(){
-  const [b, g, pp, pg] = await Promise.all([
-    sb.from('benutzer').select('id,email,anzeigename,rolle,aktiv,ist_platzhalter,ist_temporaer,pflege_zustaendig,recht_gruppe_id,erstellt_am,strasse,plz_ort,telefon,geburtsdatum,eintritt,pensum,notfallkontakt,notizen'),
+  const [b, g, pp, pg, mk, bm] = await Promise.all([
+    sb.from('benutzer').select('id,email,anzeigename,rolle,aktiv,ist_platzhalter,ist_temporaer,pflege_zustaendig,recht_gruppe_id,erstellt_am,strasse,plz_ort,telefon,geburtsdatum,eintritt,pensum,notfallkontakt,notizen,name_dokumente,mail_dokumente'),
     sb.from('recht_gruppe').select('id,name,schluessel,bereich,sortierung').order('sortierung'),
     sb.from('planer_person').select('id,name,kuerzel,farbe,gruppe_id,ist_vorarbeiter,ist_projektleiter,benutzer_id,aktiv,archiviert_am,sortierung').eq('ist_ablage', false),
-    sb.from('planer_gruppe').select('id,name,sortierung').order('sortierung')
+    sb.from('planer_gruppe').select('id,name,sortierung').order('sortierung'),
+    sb.from('merkmal').select('id,name,schluessel,sortierung').order('sortierung').order('name'),
+    sb.from('benutzer_merkmal').select('benutzer_id,merkmal_id')
   ]);
-  const err = b.error || g.error || pp.error || pg.error;
+  const err = b.error || g.error || pp.error || pg.error || mk.error || bm.error;
+  PS.merkmale = mk.data || []; PS.bm = bm.data || [];
   if(err){ console.error(err); $('psDetail').innerHTML = '<div class="hint" style="padding:16px;">Personen konnten nicht geladen werden.</div>'; return; }
   PS.personen = b.data.sort((x, y) => psName(x).localeCompare(psName(y), 'de'));
   PS.gruppen = g.data; PS.pp = pp.data; PS.pg = pg.data;
@@ -1013,7 +1023,7 @@ function psDetail(){
   const ini = psName(b).split(/[\s.]+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('');
   const txtAuf = farbe && window.KG && KG.textAuf ? KG.textAuf(farbe) : '#fff';
   const login = b.ist_platzhalter ? 'ohne Login' : !b.rolle ? 'wartet' : b.aktiv === false ? 'gesperrt' : 'Login aktiv';
-  const tabs = [['personalien', 'Personalien'], ['gruppe', 'Gruppe & Login'], ['planer', 'Einsatzplaner']];
+  const tabs = [['personalien', 'Personalien'], ['merkmale', 'Merkmale'], ['gruppe', 'Gruppe & Login'], ['planer', 'Einsatzplaner']];
   let h = `<div class="ps-kopf"><span class="ps-av" style="background:${farbe || '#4C5C70'};color:${farbe ? txtAuf : '#fff'}">${grEsc(ini)}</span>
     <div><h3>${grEsc(psName(b))}</h3><div class="meta"><span class="ps-pill">${grEsc(gr ? gr.name : 'ohne Gruppe')}</span><span class="ps-pill">${login}</span>${p ? `<span class="ps-pill">Planer: ${grEsc((PS.pg.find(x => x.id === p.gruppe_id) || {}).name || '–')}</span>` : ''}</div></div></div>
     <div class="ps-tabs">${tabs.map(([k, n]) => `<button type="button" data-tab="${k}" class="${PS.tab === k ? 'on' : ''}">${n}</button>`).join('')}</div><div class="ps-body">`;
@@ -1024,6 +1034,13 @@ function psDetail(){
       ${f('eintritt', 'Eintritt', 'date')}${f('pensum', 'Pensum')}${f('notfallkontakt', 'Notfallkontakt (Name, Beziehung, Telefon)', 'text', ' class="voll"')}
       <label class="voll">Interne Notizen<textarea data-b="notizen">${grEsc(b.notizen || '')}</textarea></label></div>
       <p class="ps-note">Personalien sieht nur der Administrator (und die Person selbst ihr eigenes Blatt).</p>`;
+  } else if(PS.tab === 'merkmale'){
+    // Merkmale (firmenweit): wer Projektleiter, Vorarbeiter, Lernende … ist – für Dokumente, Listen, Planer
+    const hat = new Set(PS.bm.filter(x => x.benutzer_id === b.id).map(x => x.merkmal_id));
+    h += `<div class="ps-merkmale">${PS.merkmale.map(m => `<button type="button" class="ps-mk${hat.has(m.id) ? ' on' : ''}" data-mk="${m.id}" aria-pressed="${hat.has(m.id)}">${grEsc(m.name)}${!m.schluessel && !PS.bm.some(x => x.merkmal_id === m.id) ? `<span class="weg" data-mkweg="${m.id}" title="Merkmal löschen">×</span>` : ''}</button>`).join('')}
+        <button type="button" class="ps-mk neu" data-mkneu>+ Merkmal</button></div>
+      <div class="ps-grid" style="margin-top:14px">${f('name_dokumente', 'Name auf Dokumenten <small>optional</small>')}${f('mail_dokumente', 'Mail auf Dokumenten <small>optional</small>', 'email')}</div>
+      <p class="ps-note">Auf Briefen der Doku-Tools stehen dieser Name, das Handy aus «Personalien» und diese Mail. Leer = Anzeigename bzw. Login-Mail @knechtgarten.ch. Projektleiter und Vorarbeiter sind mit den Haken im Einsatzplaner verbunden.</p>`;
   } else if(PS.tab === 'gruppe'){
     h += `<div class="ps-grid"><label>Gruppe (Rechte)<select data-gruppe>${b.recht_gruppe_id ? '' : '<option value="">– ohne Gruppe –</option>'}${PS.gruppen.map(g => `<option value="${g.id}"${g.id === b.recht_gruppe_id ? ' selected' : ''}>${grEsc(g.name)}</option>`).join('')}</select></label>
       <label>Login<input type="text" value="${login}${b.erstellt_am ? ' · seit ' + new Date(b.erstellt_am).toLocaleDateString('de-CH') : ''}" readonly></label>
@@ -1095,7 +1112,40 @@ function psBinden(b, p){
     showToast(pw.value ? 'Mit der Planer-Zeile verknüpft.' : 'Verknüpfung entfernt.'); psRender();
   });
   d.querySelectorAll('[data-pp]').forEach(el => el.addEventListener('change', async () => { if(await setP(el.dataset.pp, el.value.trim() || null)) psRender(); }));
-  d.querySelectorAll('[data-ppck]').forEach(el => el.addEventListener('change', () => setP(el.dataset.ppck, el.checked)));
+  // Planer-Haken und Merkmal gleich halten (eine Stelle zum Pflegen)
+  const MK_PP = { projektleiter: 'ist_projektleiter', vorarbeiter: 'ist_vorarbeiter' };
+  const mkSetzen = async (m, an) => {
+    const r = an ? await sb.from('benutzer_merkmal').insert({ benutzer_id: b.id, merkmal_id: m.id })
+                 : await sb.from('benutzer_merkmal').delete().eq('benutzer_id', b.id).eq('merkmal_id', m.id);
+    if(r.error && r.error.code !== '23505'){ showToast(friendlyError(r.error), true); return false; }
+    PS.bm = PS.bm.filter(x => !(x.benutzer_id === b.id && x.merkmal_id === m.id)); if(an) PS.bm.push({ benutzer_id: b.id, merkmal_id: m.id });
+    return true;
+  };
+  d.querySelectorAll('[data-ppck]').forEach(el => el.addEventListener('change', async () => {
+    if(!await setP(el.dataset.ppck, el.checked)) return;
+    const m = PS.merkmale.find(x => MK_PP[x.schluessel] === el.dataset.ppck); if(m) await mkSetzen(m, el.checked);
+  }));
+  d.querySelectorAll('[data-mk]').forEach(el => el.addEventListener('click', async e => {
+    if(e.target.closest('[data-mkweg]')) return;
+    const m = PS.merkmale.find(x => x.id === el.dataset.mk), an = el.getAttribute('aria-pressed') !== 'true';
+    if(!await mkSetzen(m, an)) return;
+    if(p && MK_PP[m.schluessel]) await setP(MK_PP[m.schluessel], an); else showToast('Gespeichert.');
+    psDetail();
+  }));
+  d.querySelectorAll('[data-mkweg]').forEach(el => el.addEventListener('click', async e => {
+    e.stopPropagation(); const m = PS.merkmale.find(x => x.id === el.dataset.mkweg);
+    if(!confirm(`Merkmal «${m.name}» löschen?`)) return;
+    const { error } = await sb.from('merkmal').delete().eq('id', m.id);
+    if(error){ showToast(friendlyError(error), true); return; }
+    PS.merkmale = PS.merkmale.filter(x => x.id !== m.id); psDetail();
+  }));
+  const mkNeu = d.querySelector('[data-mkneu]');
+  if(mkNeu) mkNeu.addEventListener('click', async () => {
+    const name = (prompt('Neues Merkmal (z. B. Berufsbildner):') || '').trim(); if(!name) return;
+    const { data, error } = await sb.from('merkmal').insert({ name, sortierung: PS.merkmale.length + 1 }).select('id,name,schluessel,sortierung').single();
+    if(error){ showToast(friendlyError(error), true); return; }
+    PS.merkmale.push(data); psDetail();
+  });
   d.querySelectorAll('[data-farbe]').forEach(el => el.addEventListener('click', async () => { if(await setP('farbe', el.dataset.farbe || null)) psRender(); }));
   const af = d.querySelector('[data-allefarben]');
   if(af) af.addEventListener('click', () => { PS.alleFarben = !PS.alleFarben; psDetail(); });
