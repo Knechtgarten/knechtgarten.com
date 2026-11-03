@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<script src="/kg-pw-schutz.js?v=5"></script>
+<script src="/kg-stil.js?v=32"></script>
+<title>Bauprogramm – Einsatzplaner</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#323E4E">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<style>
+/* Bauprogramm: links die Tage von oben nach unten mit den Blöcken, rechts der Baum der Aufträge
+   (Auftragsbestätigung › Angebot › Arbeitsschritt › Teilschritt). Logik wie im abgesegneten Mockup. */
+body{margin:0;background:#F5F7F9;color:#232B35;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;font-size:14px;line-height:1.4;}
+*{box-sizing:border-box;}
+.hidden{display:none!important;}
+header.app{background:#323E4E;color:#fff;}
+header.app .wrap{display:flex;align-items:center;gap:16px;padding:0 16px;}
+header.app .brand h1{font-size:15px;margin:0;}
+nav.subnav{background:#fff;border-bottom:1px solid #E1E5E9;} nav.subnav .wrap{display:flex;gap:2px;padding:0 16px;}
+nav.subnav a{padding:12px 12px 10px;color:#6B7079;font-weight:600;text-decoration:none;font-size:13px;border-bottom:2px solid transparent;}
+nav.subnav a.on{color:#323E4E;border-bottom-color:#323E4E;}
+.loginwrap{min-height:70vh;display:flex;align-items:center;justify-content:center;}
+.logincard{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(35,43,53,.08),0 0 0 1px rgba(35,43,53,.04);padding:24px 22px;width:100%;max-width:340px;display:flex;flex-direction:column;gap:10px;}
+.logincard h2{font-size:17px;margin:0 0 4px;color:#323E4E;}
+.logincard label{font-size:12px;color:#6B7079;}
+.logincard input{height:40px;border:1px solid #B9C0C8;border-radius:8px;padding:0 10px;font:inherit;font-size:15px;width:100%;}
+.logincard button{all:unset;box-sizing:border-box;cursor:pointer;height:40px;border-radius:8px;background:#323E4E;color:#fff;font-weight:600;text-align:center;}
+.logincard .status{font-size:12.5px;color:#6B7079;min-height:16px;} .logincard .status.err{color:#B4655F;}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#323E4E;color:#fff;font-size:13px;padding:9px 14px;border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.2);z-index:100;}
+.toast.err{background:#B4655F;}
+.t{height:32px;border:1px solid #B9C0C8;border-radius:8px;padding:0 10px;font:inherit;font-size:13px;color:#232B35;background:#fff;}
+.t:focus{outline:none;border-color:#323E4E;}
+.btn{all:unset;box-sizing:border-box;cursor:pointer;height:32px;padding:0 12px;border-radius:8px;font-weight:600;font-size:13px;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;}
+.btn.prim{background:#323E4E;color:#fff;} .btn.ghost{background:#fff;border:1px solid #D5DBE1;color:#323E4E;} .btn.ghost:hover{border-color:#4C5C70;}
+.btn:focus-visible,.t:focus-visible{outline:2px solid #323E4E;outline-offset:2px;}
+.lbl{font-size:12.5px;color:#6B7079;display:inline-flex;align-items:center;gap:6px;}
+.kwahl{position:relative;}
+.kwahl input{width:280px;}
+.menue{position:absolute;left:0;top:100%;margin-top:4px;z-index:30;background:#fff;border:1px solid #D5DBE1;border-radius:8px;box-shadow:0 8px 24px rgba(20,28,38,.16);width:340px;max-height:380px;overflow-y:auto;font-size:13px;}
+.menue button{all:unset;box-sizing:border-box;cursor:pointer;display:flex;flex-direction:column;width:100%;padding:7px 10px;border-top:1px solid #EEF1F4;}
+.menue button:hover{background:#F5F7F9;} .menue small{color:#6B7079;font-size:12px;}
+.menue .kopfzeile{padding:6px 10px;font-size:11.5px;color:#8B9097;background:#F5F7F9;}
+.chips{display:flex;gap:6px;flex-wrap:wrap;padding:10px 16px;border-bottom:1px solid #EEF1F4;background:#fff;}
+.chip{font-size:12.5px;padding:4px 10px;border-radius:99px;background:#F5F7F9;border:1px solid #D5DBE1;color:#4C5C70;}
+.chip b{color:#323E4E;font-variant-numeric:tabular-nums;}
+.chip.warn{background:#F9D3B2;border-color:#E57E34;color:#8A3F12;}
+.haupt{display:grid;grid-template-columns:minmax(0,1fr) 340px;}
+.leer-start{padding:60px 20px;text-align:center;color:#6B7079;font-size:15px;line-height:1.5;}
+.prog{overflow:auto;height:calc(100vh - 150px);border-right:1px solid #D5DBE1;position:relative;background:#fff;}
+.raster{display:grid;grid-template-columns:118px minmax(230px,1.4fr) minmax(130px,.8fr) minmax(130px,.8fr) 130px;position:relative;min-width:780px;}
+.kopf{position:sticky;top:0;z-index:3;background:#F5F7F9;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:#8B9097;font-weight:600;padding:8px 10px;border-bottom:1px solid #D5DBE1;}
+.tag{font-size:12.5px;color:#4C5C70;padding:0 10px;display:flex;align-items:center;gap:6px;border-bottom:1px solid #EEF1F4;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.tag b{width:22px;color:#323E4E;}
+.tag.frei{background:#F5F7F9;color:#A3B0BE;font-size:11px;} .tag.frei b{color:#A3B0BE;}
+.tag.fei{background:#FAEBB0;color:#8A6410;font-size:11.5px;overflow:hidden;}
+.zelle{border-bottom:1px solid #EEF1F4;}
+.zelle.frei{background:#F5F7F9;} .zelle.fei{background:#FCF5D8;}
+.ziel-leer{grid-column:2/5;margin:8px;border:2px dashed #D5DBE1;border-radius:10px;display:flex;align-items:center;justify-content:center;text-align:center;padding:16px;color:#6B7079;font-size:14px;line-height:1.5;z-index:1;background:rgba(255,255,255,.85);}
+.ziel-leer.ziel,.ende.ziel{border-color:#323E4E;color:#323E4E;background:#D6E7F4;}
+.ende{grid-column:2/5;margin:4px 8px;border:1.5px dashed #D5DBE1;border-radius:8px;font-size:12px;color:#8B9097;display:flex;align-items:center;justify-content:center;z-index:1;}
+.block{margin:2px 6px;border-radius:7px;padding:5px 9px 12px;position:relative;cursor:grab;font-size:13px;line-height:1.3;display:flex;flex-direction:column;gap:2px;min-width:0;overflow:hidden;box-shadow:0 1px 2px rgba(35,43,53,.12);}
+.block b{font-weight:600;padding-right:34px;} .block small{font-size:11.5px;opacity:.85;}
+.block .dauer{position:absolute;top:5px;right:8px;font-size:11.5px;font-weight:700;font-variant-numeric:tabular-nums;}
+.block .fix{font-size:11px;font-weight:700;}
+.block.konflikt{outline:2px solid #B4655F;outline-offset:-2px;}
+.block .griff{position:absolute;left:0;right:0;bottom:0;height:9px;cursor:ns-resize;display:flex;justify-content:center;align-items:center;}
+.block .griff::before{content:"";width:28px;height:3px;border-radius:2px;background:currentColor;opacity:.45;}
+.block.zieht{opacity:.45;} .block.ziel{box-shadow:0 -3px 0 #323E4E inset,0 1px 2px rgba(35,43,53,.12);}
+.block.gewaehlt{outline:2px solid #323E4E;outline-offset:-2px;}
+.nurlesen .block{cursor:pointer;} .nurlesen .block .griff{display:none;}
+.info{margin:2px 6px;font-size:12.5px;padding:5px 4px 5px 8px;line-height:1.3;border-left:3px solid var(--fb);background:rgba(255,255,255,.6);white-space:pre-line;overflow:hidden;}
+.abw{margin:2px 4px;font-size:11.5px;color:#5C3F94;background:#DCD0F3;border-radius:6px;padding:4px 6px;line-height:1.25;overflow:hidden;}
+.seitel{background:#F5F7F9;padding:14px;display:flex;flex-direction:column;gap:10px;overflow:auto;height:calc(100vh - 150px);}
+.seitel h3{margin:0;font-size:14px;color:#323E4E;}
+.seitel .h{font-size:12px;color:#6B7079;line-height:1.4;}
+.baum{background:#fff;border-radius:10px;box-shadow:0 1px 3px rgba(35,43,53,.08),0 0 0 1px rgba(35,43,53,.04);overflow:hidden;}
+.kn{display:flex;align-items:center;gap:6px;padding:6px 8px 6px calc(8px + var(--tiefe) * 16px);border-top:1px solid #EEF1F4;font-size:13px;cursor:grab;user-select:none;}
+.baum > .kn:first-child{border-top:0;}
+.kn .auf{all:unset;cursor:pointer;width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;color:#8B9097;flex:none;transform:rotate(-90deg);transition:transform .12s;}
+.kn .auf.offen{transform:none;} .kn .auf.keine{visibility:hidden;}
+.kn .nm{flex:1;min-width:0;line-height:1.3;} .kn .nm small{display:block;font-size:11px;color:#6B7079;}
+.kn .tg{font-size:12px;color:#6B7079;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.kn .pkt{width:8px;height:8px;border-radius:2px;flex:none;}
+.kn.e0{background:#323E4E;color:#fff;font-weight:600;} .kn.e0 .tg,.kn.e0 .nm small,.kn.e0 .auf{color:#C9D1DB;}
+.kn.e1{background:#EEF1F4;font-weight:600;}
+.kn.drin{color:#A3B0BE;cursor:default;} .kn.drin .tg{color:#A3B0BE;}
+.kn.teils .tg::after{content:" · teils";}
+.kn .hk{color:#2A7570;width:24px;display:inline-flex;justify-content:center;flex:none;}
+.quelle{font-size:10px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;padding:1px 5px;border-radius:4px;background:#D6E7F4;color:#323E4E;white-space:nowrap;}
+.quelle.eb{background:#F9D3B2;color:#8A3F12;}
+.detail{position:sticky;bottom:0;z-index:4;background:#fff;border-top:1px solid #D5DBE1;padding:10px 16px;display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;box-shadow:0 -4px 16px rgba(20,28,38,.08);}
+.detail .feld{display:flex;flex-direction:column;gap:3px;font-size:12px;color:#4C5C70;font-weight:600;}
+.detail .feld small{font-weight:400;color:#8B9097;}
+.detail input.t{width:165px;} .detail .klein{width:66px!important;}
+.sp{flex:1;}
+.dlgs{position:fixed;inset:0;background:rgba(35,43,53,.35);z-index:50;display:flex;align-items:flex-start;justify-content:center;padding:90px 12px 12px;}
+.dlg{width:min(460px,100%);max-height:calc(100vh - 110px);overflow:auto;background:#fff;border-radius:12px;box-shadow:0 18px 50px rgba(20,28,38,.3);padding:18px;display:flex;flex-direction:column;gap:12px;}
+.dlg h3{margin:0;font-size:17px;color:#323E4E;} .dlg p{margin:0;font-size:13.5px;line-height:1.45;color:#6B7079;}
+.dlg .knoepfe{display:flex;gap:8px;justify-content:flex-end;}
+.wahl{display:flex;flex-direction:column;border:1px solid #D5DBE1;border-radius:8px;overflow:hidden;}
+.wahl label{display:flex;align-items:center;gap:10px;padding:8px 10px 8px calc(10px + var(--tiefe) * 18px);border-top:1px solid #EEF1F4;font-size:13.5px;cursor:pointer;}
+.wahl label:first-child{border-top:0;} .wahl label.gr{background:#F5F7F9;font-weight:600;}
+.wahl input{width:17px;height:17px;accent-color:#323E4E;}
+.wahl label span{flex:1;} .wahl label small{color:#6B7079;font-variant-numeric:tabular-nums;}
+.teilen{display:grid;grid-template-columns:1fr 80px;gap:8px;} .teilen .t{width:100%;}
+@media print{
+  header.app,nav.subnav,.kg-seite,.seitel,.detail,.chips,.ende,.block .griff{display:none!important;}
+  body{background:#fff;} .haupt{display:block;} .prog{height:auto;overflow:visible;border:0;}
+  .block{box-shadow:none;break-inside:avoid;} .druckkopf{display:block!important;}
+  @page{size:A4 portrait;margin:12mm;}
+}
+.druckkopf{display:none;padding:0 0 8px;font-size:16px;font-weight:700;color:#323E4E;}
+@media (max-width:900px){ .haupt{grid-template-columns:1fr;} .prog,.seitel{height:auto;max-height:none;border-right:0;} }
+@media (prefers-reduced-motion:reduce){ .kn .auf{transition:none;} }
+</style>
+</head>
+<body>
+<header class="app"><div class="wrap">
+  <a class="backlink" href="index.html">Startseite</a>
+  <div class="brand"><h1>Einsatzplaner</h1></div>
+  <span class="userbar hidden" id="userbar"><span id="userbarText"></span><button id="logoutBtn">Abmelden</button></span>
+</div></header>
+<nav class="subnav"><div class="wrap">
+  <a href="einsatzplaner-live-v1.html#plan">Planer</a>
+  <a href="bauprogramm-live-v1.html" class="on">Bauprogramm</a>
+</div></nav>
+<span class="kwahl" data-kg-seite="links"><input class="t" id="kundeSuche" placeholder="Baustelle / Kunde wählen …" autocomplete="off"><span class="menue hidden" id="kundeMenue"></span></span>
+<label class="lbl" data-kg-seite="mitte">Start <input class="t" type="date" id="start"></label>
+<button type="button" class="btn ghost" data-kg-seite="rechts" id="druckBtn">Drucken / PDF</button>
+<main id="appMain"></main>
+<script>
+// Bauprogramm pro Kunde/Baustelle. Quellen: Auftragsbestätigungen + Angebote aus dem Easybill-Abgleich (easybill_dokument)
+// und Offerten aus dem Offertentool (Teilschritt-Tage). Blöcke + Reihenfolge in bauprogramm / bauprogramm_block.
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const ic = (n, s = 14) => KG.icon(n, s);
+const TAG_H = 8.5, TEAM = 2;
+const FAM = ['erde', 'blau', 'petrol', 'gold', 'gruen', 'orange', 'violett', 'beere', 'oliv'];
+const farbe = f => { const p = KG.palette[f] || KG.palette.grau; return { f: p[1], h: p[4], t: p[0] }; };
+const WT = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+const iso = d => d.toISOString().slice(0, 10);
+const plus = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const kurz = d => `${d.getDate()}.${d.getMonth() + 1}.`;
+const toast = (t, err) => { const e = document.createElement('div'); e.className = 'toast' + (err ? ' err' : ''); e.textContent = t; document.body.appendChild(e); setTimeout(() => e.remove(), err ? 5000 : 2000); };
+let sb, ICH, DARF = true;
+
+// ---------------------------------------------------------------- Start / Login
+async function start(){
+  KG._sb = KG._sb || window.supabase.createClient('https://oalapdxinqlnzwxhyuzy.supabase.co', 'sb_publishable_DoeD4uEnwemmnFu4AxE9uw_5lmQYc5P');
+  sb = KG._sb;
+  $('logoutBtn').addEventListener('click', async () => { await sb.auth.signOut(); location.reload(); });
+  const { data: { session } } = await sb.auth.getSession();
+  if(!session) return login();
+  const { data: b } = await sb.from('benutzer').select('rolle,aktiv,email,anzeigename').eq('id', session.user.id).maybeSingle();
+  if(!b || !b.rolle || b.aktiv === false){ $('appMain').innerHTML = '<div class="loginwrap"><div class="logincard"><h2>Noch nicht freigeschaltet</h2></div></div>'; return; }
+  ICH = session.user.id;
+  if(KG.ladeRechte) await KG.ladeRechte();
+  const r = KG.darf ? KG.darf('plan', 'einsaetze', 'bearbeiten') : null; DARF = r === null || r !== 'K';
+  $('userbar').classList.remove('hidden'); $('userbarText').textContent = b.anzeigename || b.email || '';
+  await ladeGrund();
+  const k = new URLSearchParams(location.search).get('kunde');
+  if(k) await kundeOeffnen(k); else zeigeLeer();
+}
+function login(){
+  $('appMain').innerHTML = `<div class="loginwrap"><div class="logincard"><h2>Anmelden</h2>
+    <label for="lE">E-Mail</label><input autocomplete="username" id="lE" type="email"><label for="lP">Passwort</label><input autocomplete="current-password" id="lP" type="password">
+    <button type="button" id="lB">Anmelden</button><div class="status" id="lS"></div></div></div>`;
+  const los = async () => { $('lS').textContent = 'Melde an …';
+    const { error } = await sb.auth.signInWithPassword({ email: $('lE').value.trim(), password: $('lP').value });
+    if(error){ $('lS').textContent = 'Login fehlgeschlagen: ' + error.message; $('lS').className = 'status err'; return; } location.reload(); };
+  $('lB').addEventListener('click', los); $('lP').addEventListener('keydown', e => { if(e.key === 'Enter') los(); });
+}
+function zeigeLeer(){ $('appMain').innerHTML = '<div class="leer-start">Oben links eine Baustelle wählen.<br>Vorgeschlagen werden Kunden mit Auftragsbestätigung oder bestätigter Offerte.</div>'; }
+
+// ---------------------------------------------------------------- Grunddaten: Feiertage, Kunden mit Auftrag
+let FEIERTAGE = {}, VORSCHLAG = [];
+async function ladeGrund(){
+  const [f, ab, of, bp] = await Promise.all([
+    sb.from('planer_feiertag').select('datum,name'),
+    sb.from('easybill_dokument').select('kunde_id,datum,nummer').eq('typ', 'ORDER').not('kunde_id', 'is', null).order('datum', { ascending: false }),
+    sb.from('offerte').select('kunde_id,datum').eq('status', 'bestaetigt').not('kunde_id', 'is', null),
+    sb.from('bauprogramm').select('kunde_id,geaendert_am')
+  ]);
+  (f.data || []).forEach(x => FEIERTAGE[x.datum] = x.name);
+  const info = new Map();
+  (bp.data || []).forEach(x => info.set(x.kunde_id, { t: 'Bauprogramm vorhanden', d: x.geaendert_am }));
+  (ab.data || []).forEach(x => { if(!info.has(x.kunde_id)) info.set(x.kunde_id, { t: 'AB ' + x.nummer, d: x.datum }); });
+  (of.data || []).forEach(x => { if(!info.has(x.kunde_id)) info.set(x.kunde_id, { t: 'Offerte bestätigt', d: x.datum }); });
+  const ids = [...info.keys()];
+  const { data: ks } = ids.length ? await sb.from('kunde').select('id,name,firma,vorname,nachname,strasse,ort').in('id', ids.slice(0, 400)) : { data: [] };
+  VORSCHLAG = (ks || []).map(k => ({ ...k, info: info.get(k.id) })).sort((a, b) => String(b.info.d || '').localeCompare(String(a.info.d || '')));
+}
+const kname = k => k.name || k.firma || [k.vorname, k.nachname].filter(Boolean).join(' ') || '(ohne Name)';
+// Kunde wählen: Vorschläge + Suche in allen Kunden
+(function(){
+  const inp = $('kundeSuche'), m = $('kundeMenue'); let lauf = 0;
+  const zeig = (liste, kopf) => { m.innerHTML = `<div class="kopfzeile">${kopf}</div>` + (liste.map(k => `<button type="button" data-k="${k.id}"><b>${esc(kname(k))}</b><small>${esc([k.strasse, k.ort].filter(Boolean).join(', '))}${k.info ? ' · ' + esc(k.info.t) : ''}</small></button>`).join('') || '<div class="kopfzeile">Keine Treffer</div>'); m.classList.remove('hidden'); };
+  inp.addEventListener('focus', () => { inp.select(); if(inp.value.trim().length < 2) zeig(VORSCHLAG.slice(0, 40), 'Mit Auftrag'); });
+  inp.addEventListener('input', async () => {
+    const q = inp.value.trim().replace(/[,()%*]/g, ' ').trim(), nr = ++lauf;
+    if(q.length < 2){ zeig(VORSCHLAG.slice(0, 40), 'Mit Auftrag'); return; }
+    const lokal = VORSCHLAG.filter(k => (kname(k) + ' ' + (k.ort || '') + ' ' + (k.strasse || '')).toLowerCase().includes(q.toLowerCase()));
+    const { data } = await sb.from('kunde').select('id,name,firma,vorname,nachname,strasse,ort').or(`name.ilike.%${q}%,firma.ilike.%${q}%,nachname.ilike.%${q}%,ort.ilike.%${q}%,strasse.ilike.%${q}%`).order('name').limit(20);
+    if(nr !== lauf) return;
+    const ids = new Set(lokal.map(k => k.id)); zeig([...lokal, ...(data || []).filter(k => !ids.has(k.id))].slice(0, 40), 'Treffer');
+  });
+  inp.addEventListener('blur', () => setTimeout(() => m.classList.add('hidden'), 180));
+  m.addEventListener('mousedown', e => { const b = e.target.closest('[data-k]'); if(!b) return; e.preventDefault(); m.classList.add('hidden'); inp.blur(); kundeOeffnen(b.dataset.k); });
+})();
+
+// ---------------------------------------------------------------- Quellen eines Kunden → Baum
+let KUNDE = null, PROG = null, blocks = [], KNOTEN = {}, WURZELN = [], ABW = [], offen = new Set(), gewaehlt = null, gezogen = null;
+const blaetter = k => k.kinder ? k.kinder.flatMap(blaetter) : [k];
+const blattTage = (b, team) => b.tage != null ? b.tage : (b.std || 0) / ((team || TEAM) * TAG_H);
+const stdAusPositionen = pos => (pos || []).filter(p => p.typ === 'POSITION' && /^(std|h)\b/i.test(p.einheit || '') && !/projektleiter/i.test(p.text || ''))
+  .reduce((s, p) => s + (Number(p.menge) || 0), 0);
+const tagAusPositionen = pos => (pos || []).filter(p => p.typ === 'POSITION' && /^tag/i.test(p.einheit || '')).reduce((s, p) => s + (Number(p.menge) || 0), 0);
+const knoten = (k, eltern, tiefe) => { KNOTEN[k.id] = k; k.eltern = eltern; k.tiefe = tiefe; (k.kinder || []).forEach(c => knoten(c, k.id, tiefe + 1)); return k; };
+
+async function kundeOeffnen(kundeId){
+  history.replaceState(null, '', '?kunde=' + kundeId);
+  $('appMain').innerHTML = '<div class="leer-start">Lädt …</div>';
+  const [{ data: k }, { data: prog }, { data: abs }, { data: offBest }] = await Promise.all([
+    sb.from('kunde').select('id,name,firma,vorname,nachname,strasse,ort').eq('id', kundeId).maybeSingle(),
+    sb.from('bauprogramm').select('*').eq('kunde_id', kundeId).maybeSingle(),
+    sb.from('easybill_dokument').select('easybill_id,nummer,datum,angebot_nummern').eq('typ', 'ORDER').eq('kunde_id', kundeId).order('datum', { ascending: false }),
+    sb.from('offerte').select('id,titel,easybill_document_number,datum').eq('kunde_id', kundeId).eq('status', 'bestaetigt')
+  ]);
+  if(!k){ $('appMain').innerHTML = '<div class="leer-start">Kunde nicht gefunden.</div>'; return; }
+  KUNDE = k; $('kundeSuche').value = kname(k);
+  const nummern = [...new Set((abs || []).flatMap(a => a.angebot_nummern || []))];
+  const { data: angebote } = nummern.length ? await sb.from('easybill_dokument').select('easybill_id,nummer,titel,datum,positionen,offerte_id').eq('typ', 'OFFER').in('nummer', nummern) : { data: [] };
+  const offIds = [...new Set([...(angebote || []).map(a => a.offerte_id).filter(Boolean), ...(offBest || []).map(o => o.id)])];
+  const [{ data: offs }, { data: tage }] = offIds.length ? await Promise.all([
+    sb.from('offerte').select('id,titel,easybill_document_number').in('id', offIds),
+    sb.from('offerte_teilschritt_tage').select('offerte_id,anzahl_tage,teilschritt:teilschritt_id(id,name,reihenfolge,arbeitsschritt:arbeitsschritt_id(id,name,reihenfolge))').in('offerte_id', offIds).gt('anzahl_tage', 0)
+  ]) : [{ data: [] }, { data: [] }];
+  // Baum bauen
+  KNOTEN = {}; let fi = 0; const neueFarbe = () => FAM[fi++ % FAM.length];
+  const offerteKnoten = (o, titel, ebLeaf) => {
+    const ts = (tage || []).filter(t => t.offerte_id === o.id && t.teilschritt);
+    if(!ts.length) return ebLeaf;
+    const asMap = new Map();
+    ts.sort((a, b) => (a.teilschritt.arbeitsschritt?.reihenfolge ?? 0) - (b.teilschritt.arbeitsschritt?.reihenfolge ?? 0) || a.teilschritt.reihenfolge - b.teilschritt.reihenfolge)
+      .forEach(t => { const a = t.teilschritt.arbeitsschritt || { id: 'x', name: 'Weitere' };
+        if(!asMap.has(a.id)) asMap.set(a.id, { id: 'as:' + o.id + ':' + a.id, n: a.name, farbe: neueFarbe(), kinder: [] });
+        const g = asMap.get(a.id); g.kinder.push({ id: 'ts:' + o.id + ':' + t.teilschritt.id, n: t.teilschritt.name, tage: Number(t.anzahl_tage), farbe: g.farbe }); });
+    return { id: 'of:' + o.id, n: titel, quelle: 'ot', farbe: 'grau', kinder: [...asMap.values()] };
+  };
+  const angebotKnoten = a => {
+    const std = stdAusPositionen(a.positionen), tg = tagAusPositionen(a.positionen);
+    const titel = (a.positionen || []).find(p => p.typ === 'POSITION' && p.text)?.text?.split('\n')[0];
+    const ebLeaf = { id: 'eb:' + a.easybill_id, n: 'Angebot ' + a.nummer + (a.titel && !/^angebot$/i.test(a.titel) ? ' · ' + a.titel : ''), std: tg ? null : std, tage: tg || null, quelle: 'eb', farbe: neueFarbe(), klein: std ? `${std} h Vorarbeiter + Gartenarbeiter` : (tg ? `${tg} Tage` : 'keine Stunden im Angebot') };
+    const o = a.offerte_id && (offs || []).find(x => x.id === a.offerte_id);
+    return o ? offerteKnoten(o, 'Angebot ' + a.nummer + ' · ' + o.titel, ebLeaf) : ebLeaf;
+  };
+  WURZELN = (abs || []).map(ab => ({ id: 'ab:' + ab.easybill_id, n: 'AB ' + ab.nummer, klein: 'Auftragsbestätigung vom ' + (ab.datum || '').split('-').reverse().join('.'), farbe: 'grau',
+    kinder: (ab.angebot_nummern || []).map(nr => (angebote || []).find(a => a.nummer === nr)).filter(Boolean).map(angebotKnoten) })).filter(w => w.kinder.length);
+  const inAb = new Set((angebote || []).map(a => a.offerte_id).filter(Boolean));
+  const ohneAb = (offBest || []).filter(o => !inAb.has(o.id)).map(o => offerteKnoten(o, 'Offerte ' + (o.easybill_document_number || '') + ' · ' + o.titel, null)).filter(Boolean);
+  if(ohneAb.length) WURZELN.push({ id: 'best', n: 'Bestätigte Offerten', klein: 'ohne Auftragsbestätigung', farbe: 'grau', kinder: ohneAb });
+  WURZELN.forEach(w => knoten(w, null, 0));
+  offen = new Set(WURZELN.map(w => w.id));
+  // Programm + Blöcke
+  PROG = prog || null; blocks = [];
+  if(PROG){
+    const { data: bl } = await sb.from('bauprogramm_block').select('*').eq('programm_id', PROG.id).order('sortierung');
+    blocks = (bl || []).map(b => ({ ...b, teile: b.teile || [] }));
+  }
+  $('start').value = PROG ? PROG.start : iso(new Date());
+  await ladeAbwesenheiten(kundeId);
+  aufbau();
+}
+// Abwesenheiten der Leute, die bei dieser Baustelle eingeplant sind (aus dem Planer)
+async function ladeAbwesenheiten(kundeId){
+  ABW = [];
+  const { data: e } = await sb.from('planer_einsatz').select('person_id').eq('kunde_id', kundeId).neq('art', 'absenz');
+  const pids = [...new Set((e || []).map(x => x.person_id).filter(Boolean))];
+  if(!pids.length) return;
+  const [{ data: a }, { data: p }] = await Promise.all([
+    sb.from('planer_einsatz').select('person_id,beginn,ende,titel').eq('art', 'absenz').in('person_id', pids).gte('ende', iso(plus(new Date(), -400))),
+    sb.from('planer_person').select('id,name').in('id', pids)
+  ]);
+  ABW = (a || []).map(x => ({ von: String(x.beginn).slice(0, 10), bis: String(x.ende || x.beginn).slice(0, 10), t: ((p || []).find(y => y.id === x.person_id)?.name || '') + (x.titel ? ': ' + x.titel : ': abwesend') }));
+}
+
+// ---------------------------------------------------------------- Blöcke
+const imProgramm = id => blocks.some(b => b.teile.includes(id));
+const blockTage = b => Math.max(1, Math.ceil(b.teile.reduce((s, id) => s + (KNOTEN[id] ? blattTage(KNOTEN[id], b.team) : 0), 0) - 1e-9) + (b.extra || 0));
+const blockFix = b => b.fix || '';
+const blockMat = b => b.mat || '';
+const blockSub = b => b.sub || '';
+const hatStunden = b => b.teile.some(id => KNOTEN[id] && KNOTEN[id].std != null);
+const neuerBlock = (name, f, teile, mehr) => ({ id: crypto.randomUUID(), name, farbe: f || 'grau', teile, extra: 0, team: TEAM, fix: null, mat: null, sub: null, ursprung_id: null, ...mehr });
+function einfuegen(kid, vorId){
+  const k = KNOTEN[kid], teile = blaetter(k).map(b => b.id).filter(id => !imProgramm(id));
+  if(!teile.length) return;
+  const f = k.kinder && k.kinder.length > 1 && k.tiefe <= 1 ? 'grau' : (k.farbe || 'grau');
+  const nb = neuerBlock(k.n.replace(/^AB \S+$/, 'Gesamtauftrag'), f, teile);
+  const i = vorId ? blocks.findIndex(b => b.id === vorId) : -1;
+  if(i < 0) blocks.push(nb); else blocks.splice(i, 0, nb);
+  gewaehlt = nb.id; geaendert();
+}
+function rechnen(){
+  const arbeitstag = d => d.getDay() !== 0 && d.getDay() !== 6 && !FEIERTAGE[iso(d)];
+  const nexter = d => { let x = new Date(d); while(!arbeitstag(x)) x = plus(x, 1); return x; };
+  let d = nexter(startDatum());
+  blocks.forEach(b => {
+    b.konflikt = false; const fix = blockFix(b);
+    if(fix){ const f = nexter(new Date(fix + 'T12:00')); if(f < d) b.konflikt = true; else d = f; }
+    b.von = new Date(d); let rest = blockTage(b), e = new Date(d);
+    while(rest > 1){ e = plus(e, 1); if(arbeitstag(e)) rest--; }
+    b.bis = e; d = nexter(plus(e, 1));
+  });
+}
+const startDatum = () => new Date(($('start').value || iso(new Date())) + 'T12:00');
+const arbeitstag = d => d.getDay() !== 0 && d.getDay() !== 6 && !FEIERTAGE[iso(d)];
+
+// ---------------------------------------------------------------- Ansicht
+function aufbau(){
+  $('appMain').innerHTML = `<div class="chips" id="chips"></div><div class="haupt${DARF ? '' : ' nurlesen'}">
+      <div class="prog" id="prog"><div class="druckkopf">Bauprogramm ${esc(kname(KUNDE))}</div><div class="raster" id="raster"></div></div>
+      <aside class="seitel"><h3>Aufträge ${esc(kname(KUNDE))}</h3>
+        <div class="h">${DARF ? 'Ziehen oder «+»: wird ein Block. Hellgrau = schon im Programm.' : 'Nur ansehen (keine Berechtigung zum Planen).'}</div>
+        <div class="baum" id="baum"></div>
+        ${DARF ? '<button class="btn ghost" type="button" id="eigenBtn">+ Eigener Block (z. B. Reserve)</button>' : ''}
+        <div class="h">Easybill wird jede Nacht abgeglichen. Fehlt eine neue Auftragsbestätigung: Kunden-Übersicht › Kunde aufklappen › «Jetzt aus Easybill holen».</div></aside></div>
+    <div class="detail hidden" id="detail"></div>`;
+  if($('eigenBtn')) $('eigenBtn').addEventListener('click', () => { const nb = neuerBlock('Reserve', 'grau', [], { extra: 1 }); blocks.push(nb); gewaehlt = nb.id; geaendert(); });
+  zeichnen();
+}
+function zeichnen(){
+  rechnen();
+  const s = startDatum(), ende = blocks.length ? blocks[blocks.length - 1].bis : plus(s, 13);
+  const tage = []; for(let d = new Date(s); d <= plus(ende, blocks.length ? 3 : 0); d = plus(d, 1)) tage.push(new Date(d));
+  const zeile = d => tage.findIndex(x => iso(x) === iso(d)) + 2;
+  const R = $('raster');
+  R.style.gridTemplateRows = '34px ' + tage.map(d => arbeitstag(d) ? '34px' : '18px').join(' ');
+  let h = ['Tag', 'Arbeit', 'Spez. Material', 'Subunternehmer', 'Aus dem Planer'].map((t, i) => `<div class="kopf" style="grid-column:${i + 1};grid-row:1">${t}</div>`).join('');
+  tage.forEach((d, i) => {
+    const fei = FEIERTAGE[iso(d)], frei = !arbeitstag(d), kl = fei ? ' fei' : frei ? ' frei' : '';
+    h += `<div class="tag${kl}" data-i="${i}" style="grid-column:1;grid-row:${i + 2}"><b>${WT[d.getDay()]}</b>${fei ? esc(fei) : kurz(d)}</div>`;
+    for(let c = 2; c <= 5; c++) h += `<div class="zelle${kl}" style="grid-column:${c};grid-row:${i + 2}"></div>`;
+  });
+  if(!blocks.length) h += `<div class="ziel-leer" data-ende style="grid-row:2/${tage.length + 2}">Noch leer.<br>${DARF ? 'Zieh von rechts eine Auftragsbestätigung, ein Angebot,<br>einen Arbeitsschritt oder einen Teilschritt hierher – oder klick «+».' : ''}</div>`;
+  blocks.forEach(b => {
+    const a = farbe(b.farbe), r1 = zeile(b.von), r2 = zeile(b.bis) + 1, tg = blockTage(b), fix = blockFix(b);
+    const urs = b.ursprung_id && blocks.find(x => x.id === b.ursprung_id);
+    const herk = urs ? 'aus «' + urs.name + '»' : b.teile.length > 1 ? b.teile.length + ' Teile' : '';
+    h += `<div class="block${b.konflikt ? ' konflikt' : ''}${gewaehlt === b.id ? ' gewaehlt' : ''}" ${DARF ? 'draggable="true"' : ''} data-b="${b.id}" style="grid-column:2;grid-row:${r1}/${r2};background:${a.h};color:${a.t}">
+      <b>${esc(b.name)}</b><small>${kurz(b.von)}${tg > 1 ? '–' + kurz(b.bis) : ''}${herk ? ' · ' + esc(herk) : ''}${fix ? ' · <span class="fix">fix</span>' : ''}${b.konflikt ? ' · <span class="fix">davor zu spät fertig</span>' : ''}</small>
+      <span class="dauer">${tg} T</span>${DARF ? `<span class="griff" data-griff="${b.id}" title="Ziehen = länger/kürzer"></span>` : ''}</div>
+      <div class="info" style="grid-column:3;grid-row:${r1}/${r2};--fb:${a.h}">${esc(blockMat(b))}</div>
+      <div class="info" style="grid-column:4;grid-row:${r1}/${r2};--fb:${a.h}">${esc(blockSub(b))}</div>`;
+  });
+  if(blocks.length && DARF) h += `<div class="ende" data-ende style="grid-row:${zeile(ende) + 1}/span 2">hierher ziehen = ans Ende</div>`;
+  const last = tage[tage.length - 1];
+  ABW.forEach(x => { const v = new Date(x.von + 'T12:00'), b = new Date(x.bis + 'T12:00'); if(b < s || v > last) return;
+    h += `<div class="abw" style="grid-column:5;grid-row:${zeile(v < s ? s : v)}/${zeile(b > last ? last : b) + 1}">${esc(x.t)}</div>`; });
+  R.innerHTML = h;
+  baum(); chips(ende); binden(); detail();
+}
+function chips(ende){
+  const alle = WURZELN.flatMap(blaetter), gesamt = Math.ceil(alle.reduce((s, b) => s + blattTage(b), 0)), drin = blocks.reduce((s, b) => s + blockTage(b), 0);
+  const offenT = Math.ceil(alle.filter(b => !imProgramm(b.id)).reduce((s, b) => s + blattTage(b), 0)), konf = blocks.filter(b => b.konflikt).length;
+  $('chips').innerHTML = `<span class="chip">Aufträge <b>${gesamt} Tage</b></span><span class="chip">Im Programm <b>${drin} Tage</b> in <b>${blocks.length}</b> Blöcken</span>
+    ${blocks.length ? `<span class="chip">Start <b>${kurz(startDatum())}</b> · Ende <b>${WT[ende.getDay()]} ${kurz(ende)}</b></span>` : ''}
+    ${offenT ? `<span class="chip">noch nicht eingeplant <b>${offenT} Tage</b></span>` : ''}
+    ${konf ? `<span class="chip warn">${konf === 1 ? '1 fixer Termin ist' : konf + ' fixe Termine sind'} gefährdet</span>` : ''}`;
+}
+function baum(){
+  let h = '';
+  const zeile = k => {
+    const bl = blaetter(k), drin = bl.filter(b => imProgramm(b.id)).length, alleDrin = drin === bl.length, teils = drin && !alleDrin;
+    const tg = bl.reduce((s, b) => s + blattTage(b), 0), a = farbe(k.farbe);
+    h += `<div class="kn e${Math.min(k.tiefe, 2)}${alleDrin ? ' drin' : ''}${teils ? ' teils' : ''}" style="--tiefe:${k.tiefe}" ${alleDrin || !DARF ? '' : `draggable="true" data-kn="${k.id}"`}>
+      <button type="button" class="auf${k.kinder ? '' : ' keine'}${offen.has(k.id) ? ' offen' : ''}" data-auf="${k.id}" aria-label="aufklappen">${ic('chev', 12)}</button>
+      ${k.tiefe >= 1 && k.farbe !== 'grau' ? `<span class="pkt" style="background:${a.f}"></span>` : ''}
+      <span class="nm">${esc(k.n)}${k.quelle ? ` <span class="quelle${k.quelle === 'eb' ? ' eb' : ''}">${k.quelle === 'eb' ? 'Easybill' : 'Offertentool'}</span>` : ''}${k.klein ? `<small>${esc(k.klein)}</small>` : ''}</span>
+      <span class="tg">${Math.ceil(tg - 1e-9)} T</span>
+      ${alleDrin ? `<span class="hk">${ic('check', 14)}</span>` : DARF ? `<button class="kg-ibtn" type="button" data-plus="${k.id}" title="Ins Programm (ans Ende)" aria-label="Ins Programm">${ic('plus', 12)}</button>` : ''}</div>`;
+    if(k.kinder && offen.has(k.id)) k.kinder.forEach(zeile);
+  };
+  WURZELN.forEach(zeile);
+  $('baum').innerHTML = h || '<div class="kn" style="--tiefe:0;cursor:default;color:#6B7079">Für diesen Kunden gibt es noch keine Auftragsbestätigung und keine bestätigte Offerte. Eigene Blöcke gehen trotzdem.</div>';
+}
+function verschiebe(id, vorId){
+  const i = blocks.findIndex(b => b.id === id), [m] = blocks.splice(i, 1);
+  const j = vorId ? blocks.findIndex(b => b.id === vorId) : -1; if(j < 0) blocks.push(m); else blocks.splice(j, 0, m);
+}
+function binden(){
+  const R = $('raster');
+  const ablegen = vorId => { if(gezogen && gezogen.kn) einfuegen(gezogen.kn, vorId); else if(gezogen && gezogen.b && gezogen.b !== vorId){ verschiebe(gezogen.b, vorId); geaendert(); } gezogen = null; };
+  R.querySelectorAll('.block').forEach(el => {
+    el.addEventListener('click', e => { if(e.target.closest('.griff')) return; gewaehlt = gewaehlt === el.dataset.b ? null : el.dataset.b; zeichnen(); });
+    if(!DARF) return;
+    el.addEventListener('dragstart', e => { if(e.target.closest('.griff')){ e.preventDefault(); return; } gezogen = { b: el.dataset.b }; el.classList.add('zieht'); e.dataTransfer.setData('text/plain', ''); });
+    el.addEventListener('dragend', () => { gezogen = null; el.classList.remove('zieht'); });
+    el.addEventListener('dragover', e => { if(gezogen){ e.preventDefault(); el.classList.add('ziel'); } });
+    el.addEventListener('dragleave', () => el.classList.remove('ziel'));
+    el.addEventListener('drop', e => { e.preventDefault(); const z = el.dataset.b, unten = e.clientY > el.getBoundingClientRect().top + el.offsetHeight / 2;
+      ablegen(unten ? (blocks[blocks.findIndex(b => b.id === z) + 1] || {}).id : z); });
+  });
+  R.querySelectorAll('[data-ende]').forEach(el => {
+    el.addEventListener('dragover', e => { if(gezogen){ e.preventDefault(); el.classList.add('ziel'); } });
+    el.addEventListener('dragleave', () => el.classList.remove('ziel'));
+    el.addEventListener('drop', e => { e.preventDefault(); ablegen(null); });
+  });
+  R.querySelectorAll('[data-griff]').forEach(g => g.addEventListener('pointerdown', e => {
+    e.preventDefault(); e.stopPropagation(); const b = blocks.find(x => x.id === g.dataset.griff);
+    const bewegen = ev => {
+      const t = [...R.querySelectorAll('.tag')].find(x => { const r = x.getBoundingClientRect(); return ev.clientY >= r.top && ev.clientY < r.bottom; });
+      if(!t) return; const tagIso = iso(plus(startDatum(), +t.dataset.i));
+      let n = 0; for(let d = new Date(b.von); iso(d) <= tagIso; d = plus(d, 1)) if(arbeitstag(d)) n++;
+      n = Math.max(1, n); const alt = blockTage(b); if(n !== alt){ b.extra = (b.extra || 0) + n - alt; zeichnen(); }
+    };
+    const los = () => { document.removeEventListener('pointermove', bewegen); document.removeEventListener('pointerup', los); speichern(); };
+    document.addEventListener('pointermove', bewegen); document.addEventListener('pointerup', los);
+  }));
+  bindenBaum();
+}
+function bindenBaum(){
+  const B = $('baum');
+  B.querySelectorAll('[data-auf]').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); const id = b.dataset.auf; offen.has(id) ? offen.delete(id) : offen.add(id); baum(); bindenBaum(); }));
+  B.querySelectorAll('[data-kn]').forEach(el => { el.addEventListener('dragstart', e => { gezogen = { kn: el.dataset.kn }; e.dataTransfer.setData('text/plain', ''); }); el.addEventListener('dragend', () => gezogen = null); });
+  B.querySelectorAll('[data-plus]').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); einfuegen(b.dataset.plus); }));
+}
+function detail(){
+  const b = blocks.find(x => x.id === gewaehlt), D = $('detail');
+  if(!b){ D.classList.add('hidden'); return; }
+  D.classList.remove('hidden');
+  const urs = b.ursprung_id && blocks.find(x => x.id === b.ursprung_id), ro = DARF ? '' : ' disabled';
+  D.innerHTML = `<div class="feld">Arbeit<input class="t" id="dN" value="${esc(b.name)}"${ro}></div>
+    <div class="feld">Tage<input class="t klein" id="dT" type="number" min="1" value="${blockTage(b)}"${ro}></div>
+    ${hatStunden(b) ? `<div class="feld">Team <small>Personen</small><input class="t klein" id="dTeam" type="number" min="1" max="8" value="${b.team}"${ro}></div>` : ''}
+    <div class="feld">Fixes Datum <small>optional</small><input class="t" id="dF" type="date" value="${blockFix(b)}"${ro}></div>
+    <div class="feld">Spez. Material<input class="t" id="dM" value="${esc(blockMat(b))}"${ro}></div>
+    <div class="feld">Subunternehmer<input class="t" id="dS" value="${esc(blockSub(b))}"${ro}></div>
+    <span class="sp"></span>
+    ${DARF && b.teile.length > 1 ? '<button class="btn ghost" type="button" id="dLoes">Herauslösen …</button>' : ''}
+    ${DARF ? '<button class="btn ghost" type="button" id="dTeil">Teilen …</button>' : ''}
+    ${DARF && urs ? `<button class="btn ghost" type="button" id="dZur">Zurück in «${esc(urs.name)}»</button>` : ''}
+    ${DARF ? `<button class="kg-ibtn danger" type="button" id="dWeg" title="Aus dem Programm nehmen" aria-label="Aus dem Programm nehmen">${ic('trash')}</button>` : ''}
+    <button class="btn prim" type="button" id="dOk">Fertig</button>`;
+  const an = (id, fn) => { const el = $(id); if(el) el.addEventListener('change', e => { fn(e.target.value); geaendert(); }); };
+  an('dN', v => b.name = v.trim() || b.name);
+  an('dT', v => { const n = Math.max(1, parseInt(v) || 1); b.extra = (b.extra || 0) + n - blockTage(b); });
+  an('dTeam', v => b.team = Math.max(1, parseInt(v) || TEAM));
+  an('dF', v => b.fix = v || null); an('dM', v => b.mat = v.trim() || null); an('dS', v => b.sub = v.trim() || null);
+  const klick = (id, fn) => { const el = $(id); if(el) el.onclick = fn; };
+  klick('dLoes', () => herausloesen(b)); klick('dTeil', () => teilen(b));
+  klick('dZur', () => { urs.teile.push(...b.teile); urs.extra = (urs.extra || 0) + (b.extra || 0); blocks = blocks.filter(x => x.id !== b.id);
+    blocks.forEach(x => { if(x.ursprung_id === b.id) x.ursprung_id = urs.id; }); gewaehlt = urs.id; geaendert(); });
+  klick('dWeg', () => { if(!confirm(`«${b.name}» aus dem Programm nehmen?`)) return; blocks = blocks.filter(x => x.id !== b.id); blocks.forEach(x => { if(x.ursprung_id === b.id) x.ursprung_id = null; }); gewaehlt = null; geaendert(); });
+  klick('dOk', () => { gewaehlt = null; zeichnen(); });
+}
+function dialog(html, ok, nachher){
+  const s = document.createElement('div'); s.className = 'dlgs'; s.innerHTML = `<div class="dlg" role="dialog" aria-modal="true">${html}</div>`;
+  document.body.appendChild(s);
+  const zu = () => s.remove();
+  s.addEventListener('click', e => { if(e.target === s) zu(); });
+  s.querySelector('[data-zu]').onclick = zu;
+  s.querySelector('[data-ok]').onclick = () => { if(ok(s) !== false){ zu(); geaendert(); } };
+  if(nachher) nachher(s);
+}
+// Herauslösen: Teile nach Herkunft (Arbeitsschritt › Teilschritt) anhaken; jede angehakte Gruppe/Teil = eigener Block direkt darunter
+function herausloesen(b){
+  const gruppen = {}; b.teile.forEach(id => { const k = KNOTEN[id]; if(!k) return; const g = k.eltern || id; (gruppen[g] = gruppen[g] || []).push(id); });
+  const mehrere = Object.keys(gruppen).length > 1;
+  const t = (ids) => Math.ceil(ids.reduce((s, id) => s + blattTage(KNOTEN[id], b.team), 0) - 1e-9);
+  const h = Object.entries(gruppen).map(([gid, ids]) => (mehrere && KNOTEN[gid] && KNOTEN[gid].kinder ? `<label class="gr" style="--tiefe:0"><input type="checkbox" data-gr="${gid}"><span>${esc(KNOTEN[gid].n)}</span><small>${t(ids)} T</small></label>` : '')
+    + ids.map(id => `<label style="--tiefe:${mehrere ? 1 : 0}"><input type="checkbox" data-bl="${id}" data-in="${gid}"><span>${esc(KNOTEN[id].n)}</span><small>${t([id])} T</small></label>`).join('')).join('');
+  dialog(`<h3>Aus «${esc(b.name)}» herauslösen</h3><p>Was du anhakst, wird ein eigener Block direkt darunter. Ein ganzer Arbeitsschritt wird ein Block, einzelne Teilschritte je ein Block.</p>
+    <div class="wahl">${h}</div><div class="knoepfe"><button class="btn ghost" type="button" data-zu>Abbrechen</button><button class="btn prim" type="button" data-ok>Herauslösen</button></div>`, el => {
+    const neu = [];
+    el.querySelectorAll('[data-gr]:checked').forEach(c => { const ids = gruppen[c.dataset.gr]; if(ids.length < b.teile.length) neu.push(neuerBlock(KNOTEN[c.dataset.gr].n, KNOTEN[c.dataset.gr].farbe, ids, { ursprung_id: b.id, team: b.team })); });
+    const weg = new Set(neu.flatMap(n => n.teile));
+    el.querySelectorAll('[data-bl]:checked').forEach(c => { const id = c.dataset.bl; if(!weg.has(id) && b.teile.length - weg.size > 1){ neu.push(neuerBlock(KNOTEN[id].n, KNOTEN[id].farbe, [id], { ursprung_id: b.id, team: b.team })); weg.add(id); } });
+    if(!neu.length) return false;
+    b.teile = b.teile.filter(id => !weg.has(id));
+    if(!/\(Rest\)$/.test(b.name)) b.name += ' (Rest)';
+    blocks.splice(blocks.indexOf(b) + 1, 0, ...neu); gewaehlt = neu[0].id;
+  }, s => s.querySelectorAll('[data-gr]').forEach(c => c.addEventListener('change', () => s.querySelectorAll(`[data-in="${c.dataset.gr}"]`).forEach(x => x.checked = c.checked))));
+}
+function teilen(b){
+  const tg = blockTage(b), a = Math.max(1, Math.min(tg - 1, Math.floor(tg / 3) || 1));
+  dialog(`<h3>«${esc(b.name)}» teilen</h3><p>Zwei Blöcke statt einem. Der zweite steht direkt darunter und lässt sich wieder zurücklegen.</p>
+    <div class="teilen"><input class="t" id="tN1" value="${esc(b.name)}"><input class="t" id="tT1" type="number" min="1" value="${a}">
+      <input class="t" id="tN2" value="${esc(b.name)} (Teil 2)"><input class="t" id="tT2" type="number" min="1" value="${Math.max(1, tg - a)}"></div>
+    <div class="knoepfe"><button class="btn ghost" type="button" data-zu>Abbrechen</button><button class="btn prim" type="button" data-ok>Teilen</button></div>`, s => {
+    const t1 = Math.max(1, parseInt(s.querySelector('#tT1').value) || 1), t2 = Math.max(1, parseInt(s.querySelector('#tT2').value) || 1);
+    b.name = s.querySelector('#tN1').value.trim() || b.name; b.extra = (b.extra || 0) + t1 - blockTage(b);
+    const nb = neuerBlock(s.querySelector('#tN2').value.trim() || b.name, b.farbe, [], { extra: t2, ursprung_id: b.id });
+    blocks.splice(blocks.indexOf(b) + 1, 0, nb); gewaehlt = nb.id;
+  });
+}
+
+// ---------------------------------------------------------------- Speichern (nach jeder Änderung, kurz verzögert)
+let speicherTimer = null;
+function geaendert(){ zeichnen(); clearTimeout(speicherTimer); speicherTimer = setTimeout(speichern, 500); }
+async function speichern(){
+  clearTimeout(speicherTimer);
+  if(!DARF || !KUNDE) return;
+  if(!PROG){
+    const { data, error } = await sb.from('bauprogramm').insert({ kunde_id: KUNDE.id, start: $('start').value || iso(new Date()) }).select('*').single();
+    if(error){ toast('Speichern fehlgeschlagen: ' + error.message, true); return; }
+    PROG = data;
+  } else await sb.from('bauprogramm').update({ start: $('start').value, geaendert_am: new Date().toISOString() }).eq('id', PROG.id);
+  const zeilen = blocks.map((b, i) => ({ id: b.id, programm_id: PROG.id, sortierung: i, name: b.name, farbe: b.farbe, teile: b.teile, extra: b.extra || 0, team: b.team || TEAM, fix: b.fix || null, mat: b.mat || null, sub: b.sub || null, ursprung_id: b.ursprung_id || null }));
+  // zuerst ohne Ursprung speichern (Verweis auf Blöcke, die evtl. erst jetzt entstehen), dann Ursprung setzen
+  if(zeilen.length){
+    const { error } = await sb.from('bauprogramm_block').upsert(zeilen.map(z => ({ ...z, ursprung_id: null })));
+    if(error){ toast('Speichern fehlgeschlagen: ' + error.message, true); return; }
+    const mitU = zeilen.filter(z => z.ursprung_id);
+    if(mitU.length){ const { error: e2 } = await sb.from('bauprogramm_block').upsert(mitU); if(e2){ toast('Speichern fehlgeschlagen: ' + e2.message, true); return; } }
+  }
+  const ids = zeilen.map(z => z.id);
+  const q = sb.from('bauprogramm_block').delete().eq('programm_id', PROG.id);
+  const { error: e3 } = ids.length ? await q.not('id', 'in', `(${ids.join(',')})`) : await q;
+  if(e3) toast('Speichern fehlgeschlagen: ' + e3.message, true);
+}
+$('start').addEventListener('change', () => { if(KUNDE) geaendert(); });
+$('druckBtn').addEventListener('click', () => { if(!KUNDE) return toast('Zuerst eine Baustelle wählen.', true); gewaehlt = null; zeichnen(); window.print(); });
+window.addEventListener('beforeunload', () => { if(speicherTimer) speichern(); });
+start();
+</script>
+</body>
+</html>
