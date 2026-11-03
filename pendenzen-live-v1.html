@@ -189,6 +189,7 @@ button:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
 .card .vst.ein{background:#D6E7F4;color:#323E4E;} .card button.vst.neu{all:unset;cursor:pointer;font-size:10.5px;font-weight:600;line-height:16px;padding:0 7px;border-radius:99px;border:1px dashed #8B9097;color:#4C5C70;white-space:nowrap;} .card button.vst.neu:hover{border-color:#323E4E;color:#323E4E;}
 .card.vhell{opacity:.55;}
 .vset .vhint{font-size:13px;color:#6B7079;margin:0;} .vset .vfl{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#6B7079;} .vset input[type=text],.vset input[type=number]{height:34px;border:1px solid #D5DBE1;border-radius:8px;padding:0 10px;font:inherit;font-size:13.5px;box-sizing:border-box;width:100%;}
+.vset .vpj{padding:4px 0 0;flex-wrap:wrap;} .vset .vpj small{color:#8B9097;font-size:11.5px;}
 .vset .vrw{display:flex;align-items:flex-end;gap:12px;} .vset .vrw .sp{flex:1;} .vset .vrw .vfl{width:110px;} .vset .vck{display:inline-flex;align-items:center;gap:6px;font-size:13px;padding-bottom:8px;}
 .vks{position:relative;display:block;} .vkm{position:absolute;left:0;right:0;top:36px;background:#fff;border:1px solid #D5DBE1;border-radius:8px;box-shadow:0 8px 24px rgba(35,43,53,.15);z-index:5;display:flex;flex-direction:column;max-height:260px;overflow:auto;}
 .vkm button{all:unset;cursor:pointer;padding:6px 10px;display:flex;flex-direction:column;font-size:13px;color:#232B35;} .vkm button small{color:#8B9097;font-size:11.5px;} .vkm button:hover{background:#F5F7F9;} .vkl{padding:8px 10px;font-size:12.5px;color:#8B9097;}
@@ -888,11 +889,12 @@ function vorratPopup(p){
     <div class="vrw"><label class="vfl">Tage<input type="number" id="vpD" min="0.5" step="0.5" placeholder="z. B. 15"></label>
       <label class="vck"><input type="checkbox" id="vpG" checked> Länge geschätzt</label></div>
     <div class="vrw"><span class="seg vseg" id="vpB"><button type="button" data-vb="bau" aria-pressed="true">Bau</button><button type="button" data-vb="pflege" aria-pressed="false">Pflege</button></span></div>
+    <label class="vck vpj"><input type="checkbox" id="vpP" checked> Projekt-Ablauf starten <small>(AB, Baubewilligung, AVOR … bis zur Zahlung in Kontakte › Projekte)</small></label>
     <div class="vrw"><span class="sp"></span><button class="btn btn-ghost" data-vz>Abbrechen</button><button class="btn btn-primary" id="vpS">In den Vorrat</button></div></div>`;
   document.body.appendChild(w);
   let kunde = null, bereich = 'bau', lauf = 0;
   const zu = () => w.remove();
-  w.addEventListener('click', e => { if(e.target === w || e.target.closest('[data-vz]')) zu(); const b = e.target.closest('[data-vb]'); if(b){ bereich = b.dataset.vb; w.querySelectorAll('[data-vb]').forEach(x => x.setAttribute('aria-pressed', x === b)); } });
+  w.addEventListener('click', e => { if(e.target === w || e.target.closest('[data-vz]')) zu(); const b = e.target.closest('[data-vb]'); if(b){ bereich = b.dataset.vb; w.querySelectorAll('[data-vb]').forEach(x => x.setAttribute('aria-pressed', x === b)); w.querySelector('#vpP').checked = bereich === 'bau'; } });
   w.addEventListener('keydown', e => { if(e.key === 'Escape'){ e.stopPropagation(); zu(); } });
   const inp = w.querySelector('#vpK'), m = w.querySelector('#vpKm');
   inp.addEventListener('input', async () => { kunde = null; const q = inp.value.trim(), nr = ++lauf; if(q.length < 2){ m.hidden = true; return; }
@@ -909,7 +911,11 @@ function vorratPopup(p){
     const { data: pl } = await sb.from('planer_person').select('id').eq('benutzer_id', ME).eq('ist_projektleiter', true).maybeSingle();
     const { error } = await sb.from('planer_vorrat').insert({ kunde_id: kunde, titel: w.querySelector('#vpT').value.trim() || null, tage, bereich, geschaetzt: w.querySelector('#vpG').checked, projektleiter_id: pl ? pl.id : null, pendenz_id: p.id, erstellt_von: ME });
     if(error) return fehler(error, 'Vorrat');
-    zu(); S.vorrat.add(p.id); zeichne(); toast('Im Arbeitsvorrat des Einsatzplaners');
+    // Projekt-Ablauf (Kontakte › Projekte), einmal pro zugesagter Offerte
+    let pj = false;
+    if(w.querySelector('#vpP').checked){ const { data: da } = await sb.from('projekt').select('id').eq('pendenz_id', p.id).limit(1);
+      if(!(da || []).length){ const { error: ep } = await sb.from('projekt').insert({ kunde_id: kunde, titel: w.querySelector('#vpT').value.trim() || null, pendenz_id: p.id, projektleiter_id: ME, erstellt_von: ME }); if(ep) fehler(ep, 'Projekt'); else pj = true; } }
+    zu(); S.vorrat.add(p.id); zeichne(); toast(pj ? 'Im Arbeitsvorrat – Projekt gestartet' : 'Im Arbeitsvorrat des Einsatzplaners');
   };
 }
 // Offerte zugesagt → Büro-Board, Liste «Planung» (bleibt mit Status «zugesagt» für spätere Auswertungen)
