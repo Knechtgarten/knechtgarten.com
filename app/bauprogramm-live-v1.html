@@ -110,12 +110,10 @@ nav.subnav a.on{color:#323E4E;border-bottom-color:#323E4E;}
 .zelle[data-di]{cursor:text;} .zelle[data-di]:hover{background:#F5F7F9;}
 .zin{width:100%;height:100%;border:0;outline:1.5px solid #323E4E;outline-offset:-1.5px;font:inherit;font-size:12px;padding:0 10px;box-sizing:border-box;background:#fff;color:#232B35;}
 /* Material, Subunternehmer, Notizen: direkt hineinschreiben, gehört zum Arbeitsschritt und wandert beim Verschieben mit */
-.infot{margin:0;font:inherit;font-size:12px;line-height:1.3;padding:3px 8px;border:1px solid transparent;border-radius:4px;background:transparent;resize:none;color:transparent;caret-color:#232B35;min-height:0;z-index:3;overflow:hidden;cursor:text;}
-.infot:hover{border-color:#B9C0C8;}
-.infot.aktiv,.infot:focus{outline:none;color:#232B35;background:#fff;border-color:#323E4E;box-shadow:0 4px 14px rgba(35,43,53,.15);z-index:5;overflow:auto;}
-.infot[readonly]{cursor:default;}
-.zinfo{z-index:2;padding:0 8px;font-size:12px;line-height:23px;white-space:nowrap;overflow:hidden;text-overflow:clip;color:#232B35;pointer-events:none;min-width:0;}
-.zinfo.mehr{text-overflow:ellipsis;}
+.zinfo{z-index:2;margin:0;border:0;border-radius:0;background:transparent;padding:0 8px;font:inherit;font-size:12px;line-height:23px;height:100%;width:100%;box-sizing:border-box;color:#232B35;min-width:0;text-overflow:ellipsis;}
+.zinfo:hover{background:rgba(214,231,244,.25);}
+.zinfo:focus{outline:1.5px solid #323E4E;outline-offset:-1.5px;background:#fff;}
+.zinfo[readonly]{cursor:default;} .zinfo[readonly]:focus{outline:none;background:transparent;}
 .nurlesen .blk{cursor:pointer;}
 .leer-start{padding:60px 20px;text-align:center;color:#6B7079;font-size:15px;line-height:1.5;}
 .prog{overflow:auto;height:calc(100vh - 150px);border-right:1px solid #D5DBE1;position:relative;background:#fff;}
@@ -593,8 +591,7 @@ function zeichnen(){
       <span class="bk"><span class="dauer">${tg} T</span>${DARF ? `<button type="button" class="ib" data-zurueck="${p.id}" title="${p.teile.length ? 'Zurück ins Gerüst' : 'Eintrag löschen'}" aria-label="${p.teile.length ? 'Zurück ins Gerüst' : 'Eintrag löschen'}">${p.teile.length ? IC.zurueck : ic('trash', 12)}</button>` : ''}</span>
       ${DARF ? `<span class="griff" data-griff="${p.id}" title="Ziehen = länger/kürzer"></span>` : ''}</div>`;
     // Material/Subunternehmer/Notiz: Text Zeile für Zeile in den Tageszeilen (zinfo), Eingabefeld darüber (beim Tippen sichtbar)
-    W.forEach((d, j) => { ['mat', 'sub', 'notiz'].forEach((f, i) => { h += `<div class="zinfo" data-zi="${p.id}|${f}|${j}" style="grid-column:${cA + 1 + i};grid-row:${zeile(d)}"></div>`; }); });
-    h += ['mat', 'sub', 'notiz'].map((f, i) => `<textarea class="infot" data-feld="${f}" data-tp="${p.id}" style="grid-column:${cA + 1 + i};grid-row:${r1}/${r2}" aria-label="${['Spez. Material', 'Subunternehmer', 'Notiz'][i]} zu ${esc(teilName(p))}"${DARF ? '' : ' readonly'}>${esc(p[f] || '')}</textarea>`).join('');
+    W.forEach((d, j) => { ['mat', 'sub', 'notiz'].forEach((f, i) => { h += `<input class="zinfo" type="text" data-zi="${p.id}|${f}|${j}" data-tp="${p.id}" data-feld="${f}" data-j="${j}" style="grid-column:${cA + 1 + i};grid-row:${zeile(d)}" aria-label="${['Spez. Material', 'Subunternehmer', 'Notiz'][i]} ${kurz(d)}" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-form-type="other"${DARF ? '' : ' readonly'}>`; }); });
   });
   R.innerHTML = h;
   if($('lsInner')) $('lsInner').style.height = $('prog').scrollHeight + 'px';
@@ -638,16 +635,39 @@ function umbrechen(text, breite, font){
   while(out.length && !out[out.length - 1]) out.pop();
   return out;
 }
+// Material/Subunternehmer/Notiz: ein Eingabefeld pro Tageszeile (wie Excel). Gespeichert als Text, Zeile i = Arbeitstag i.
+const zGruppe = (pid, feld) => [...document.querySelectorAll(`#raster .zinfo[data-tp="${pid}"][data-feld="${feld}"]`)].sort((a, b) => a.dataset.j - b.dataset.j);
+const zBreite = z => { const cs = getComputedStyle(z); return { w: z.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - 2, font: cs.font }; };
 function infoVerteilen(nurP){
-  document.querySelectorAll('#raster .infot').forEach(t => {
-    if(nurP && t.dataset.tp !== nurP) return;
-    const zellen = [...document.querySelectorAll(`#raster .zinfo[data-zi^="${t.dataset.tp}|${t.dataset.feld}|"]`)];
-    if(!zellen.length) return;
-    const cs = getComputedStyle(zellen[0]), breite = zellen[0].clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
-    const zeilen = umbrechen(t.value, breite, cs.font);
-    zellen.forEach((z, i) => { const last = i === zellen.length - 1 && zeilen.length > zellen.length;
-      z.textContent = last ? zeilen.slice(i).join(' ') : (zeilen[i] || ''); z.title = last ? t.value : ''; z.classList.toggle('mehr', last); });
+  B.forEach(p => { if(nurP && p.id !== nurP) return;
+    ['mat', 'sub', 'notiz'].forEach(feld => {
+      const g = zGruppe(p.id, feld); if(!g.length) return;
+      const { w, font } = zBreite(g[0]), zeilen = umbrechen(p[feld], w, font);
+      g.forEach((z, i) => { const last = i === g.length - 1 && zeilen.length > g.length; if(document.activeElement === z) return;
+        z.value = last ? zeilen.slice(i).join(' ') : (zeilen[i] || ''); z.title = last ? p[feld] : ''; });
+    });
   });
+}
+// Beim Tippen: passt der Text nicht, rutscht das letzte Wort in die nächste Zeile (auch weiter nach unten)
+function zUmfliessen(g, i){
+  const { w, font } = zBreite(g[0]); messer.font = font; let sprung = false;
+  for(let k = i; k < g.length - 1; k++){
+    let moved = '';
+    while(messer.measureText(g[k].value).width > w && g[k].value.includes(' ')){
+      const pos = g[k].value.lastIndexOf(' '); moved = g[k].value.slice(pos + 1) + (moved ? ' ' + moved : ''); g[k].value = g[k].value.slice(0, pos);
+    }
+    if(!moved) break;
+    g[k + 1].value = moved + (g[k + 1].value ? ' ' + g[k + 1].value : '');
+    if(k === i) sprung = moved.split(' ')[0].length;
+  }
+  return sprung;
+}
+function zSpeichern(z){
+  const { p } = teilVon(z.dataset.tp); if(!p) return;
+  const zeilen = zGruppe(z.dataset.tp, z.dataset.feld).map(x => x.value.replace(/\s+$/, ''));
+  while(zeilen.length && !zeilen[zeilen.length - 1]) zeilen.pop();
+  p[z.dataset.feld] = zeilen.length ? zeilen.join('\n') : null;
+  clearTimeout(speicherTimer); speicherTimer = setTimeout(speichern, 800);
 }
 const teilVon = id => { const p = B.find(x => x.id === id); return p ? { p } : {}; };
 function binden(){
@@ -655,9 +675,22 @@ function binden(){
   R.querySelectorAll('.blk').forEach(el => el.addEventListener('click', e => { if(e.target.closest('.griff,.ib')) return; gewaehlt = gewaehlt === el.dataset.p ? null : el.dataset.p; zeichnen(); }));
   if(!DARF) return;
   // Material, Subunternehmer, Notizen direkt eintippen: speichern ohne neu zu zeichnen (Cursor bleibt im Feld)
-  R.querySelectorAll('.infot').forEach(t => { t.addEventListener('focus', () => t.classList.add('aktiv')); t.addEventListener('blur', () => { t.classList.remove('aktiv'); infoVerteilen(t.dataset.tp); }); });
-  R.querySelectorAll('.infot').forEach(t => t.addEventListener('input', () => { const { p } = teilVon(t.dataset.tp); if(!p) return;
-    p[t.dataset.feld] = t.value.trim() || null; clearTimeout(speicherTimer); speicherTimer = setTimeout(speichern, 800); }));
+  R.querySelectorAll('.zinfo').forEach(z => {
+    z.addEventListener('input', () => {
+      const g = zGruppe(z.dataset.tp, z.dataset.feld), i = g.indexOf(z), amEnde = z.selectionStart === z.value.length;
+      const sprung = zUmfliessen(g, i);
+      if(sprung && amEnde && g[i + 1]){ g[i + 1].focus(); g[i + 1].setSelectionRange(sprung, sprung); }
+      zSpeichern(z);
+    });
+    z.addEventListener('keydown', e => {
+      const g = zGruppe(z.dataset.tp, z.dataset.feld), i = g.indexOf(z);
+      const geh = k => { if(!g[k]) return; e.preventDefault(); g[k].focus(); const pos = e.key === 'Backspace' ? g[k].value.length : Math.min(z.selectionStart, g[k].value.length); g[k].setSelectionRange(pos, pos); };
+      if(e.key === 'Enter' || e.key === 'ArrowDown') geh(i + 1);
+      else if(e.key === 'ArrowUp') geh(i - 1);
+      else if(e.key === 'Backspace' && z.selectionStart === 0 && z.selectionEnd === 0 && i > 0) geh(i - 1);
+    });
+    z.addEventListener('blur', () => setTimeout(() => { if(!document.activeElement || !document.activeElement.classList.contains('zinfo') || document.activeElement.dataset.tp !== z.dataset.tp) infoVerteilen(z.dataset.tp); }, 0));
+  });
   R.querySelectorAll('[data-zurueck]').forEach(b => b.onclick = e => { e.stopPropagation(); zurueck(b.dataset.zurueck); });
   // Felder ziehen: auf ein anderes Feld = davor/danach, auf einen freien Tag = dort beginnen
   R.querySelectorAll('.blk').forEach(el => el.addEventListener('dragstart', e => { if(e.target.closest('.griff,.ib')){ e.preventDefault(); return; } ziehen = { feld: el.dataset.p }; e.dataTransfer.setData('text/plain', ''); el.classList.add('ziehe'); }));
