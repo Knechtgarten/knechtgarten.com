@@ -71,6 +71,7 @@ tr.offertenrow td{padding:0;border-bottom:1px solid var(--soft);}
 .offertenwrap .ebkopf{display:flex;align-items:center;gap:10px;margin:12px 0 4px;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);}
 .offertenwrap .ebkopf span{flex:1;}
 .ebtyp{font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;display:inline-block;width:62px;text-align:center;background:#D6E7F4;color:#323E4E;}
+.abdauer{display:inline-block;margin-left:6px;font-size:11px;font-weight:600;color:#323E4E;background:#D6E7F4;border-radius:99px;padding:0 7px;line-height:17px;white-space:nowrap;}
 .ebtyp.ab{background:#DCEEDC;color:#2f6b2f;}
 .ebstand{font-size:11.5px;color:var(--muted);white-space:nowrap;}
 .statuspill{font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;display:inline-block;width:62px;text-align:center;}
@@ -520,6 +521,15 @@ async function ladeEasybillDokumente(kundeId){
     .eq('kunde_id', kundeId).order('datum', { ascending: false });
   if(error){ showToast(friendlyError(error), true); return; }
   EB_PRO_KUNDE[kundeId] = data || [];
+  // Baustellendauer laut AB: Summe der Angebote (Teilschritt-Tage aus dem Offertentool, sonst Easybill-Stunden ÷ (2 Personen × 8,5 h), ohne Projektleiter)
+  const offIds = [...new Set((data || []).filter(d => d.typ === 'OFFER' && d.offerte_id).map(d => d.offerte_id))];
+  const { data: tt } = offIds.length ? await sb.from('offerte_teilschritt_tage').select('offerte_id,anzahl_tage').in('offerte_id', offIds) : { data: [] };
+  const otTage = {}; (tt || []).forEach(t => otTage[t.offerte_id] = (otTage[t.offerte_id] || 0) + Number(t.anzahl_tage || 0));
+  const angTage = a => { if(a.offerte_id && otTage[a.offerte_id] > 0) return otTage[a.offerte_id];
+    const pos = (a.positionen || []).filter(p => p.typ === 'POSITION'), std = pos.filter(p => /^(std|h)\b/i.test(p.einheit || '') && !/projektleiter/i.test(p.text || '')).reduce((s, p) => s + (Number(p.menge) || 0), 0);
+    return std / (2 * 8.5) + pos.filter(p => /^tag/i.test(p.einheit || '')).reduce((s, p) => s + (Number(p.menge) || 0), 0); };
+  (data || []).filter(d => d.typ === 'ORDER').forEach(ab => { const ang = (ab.angebot_nummern || []).map(nr => (data || []).find(x => x.typ === 'OFFER' && x.nummer === nr)).filter(Boolean);
+    const t = ang.reduce((s, a) => s + angTage(a), 0); ab.dauer = t > 0 ? Math.ceil(t * 2 - 1e-9) / 2 : null; ab.dauerUnvollst = ang.length < (ab.angebot_nummern || []).length; });
 }
 function renderEasybillDokumente(k){
   const liste = EB_PRO_KUNDE[k.id];
@@ -533,7 +543,7 @@ function renderEasybillDokumente(k){
   return kopf + `<table><tbody>${liste.map(d => `<tr>
       <td style="width:60px;padding-right:0;"><span class="ebtyp${d.typ === 'ORDER' ? ' ab' : ''}">${d.typ === 'ORDER' ? 'AB' : 'Angebot'}</span></td>
       <td style="white-space:nowrap">${d.nummer || ''}</td>
-      <td>${escHtml(titel(d))}${d.typ === 'ORDER' && d.angebot_nummern?.length ? ` <span style="color:var(--muted)">· Angebote ${d.angebot_nummern.join(', ')}</span>` : ''}${d.offerte_id ? ` <span style="color:var(--muted)">· aus dem Offertentool</span>` : ''}</td>
+      <td>${escHtml(titel(d))}${d.typ === 'ORDER' && d.angebot_nummern?.length ? ` <span style="color:var(--muted)">· Angebote ${d.angebot_nummern.join(', ')}</span>` : ''}${d.offerte_id ? ` <span style="color:var(--muted)">· aus dem Offertentool</span>` : ''}${d.typ === 'ORDER' && d.dauer ? ` <span class="abdauer" title="Baustellendauer laut AB: Teilschritt-Tage aus dem Offertentool, sonst Easybill-Stunden ÷ (2 Personen × 8,5 h)${d.dauerUnvollst ? ' – nicht alle Angebote gefunden' : ''}">≈ ${String(d.dauer).replace('.', ',')} Arbeitstage${d.dauerUnvollst ? ' (unvollständig)' : ''}</span>` : ''}</td>
       <td style="white-space:nowrap">${d.datum ? d.datum.split('-').reverse().join('.') : ''}</td>
       <td style="white-space:nowrap;text-align:right">${fmtCHF(d.betrag_netto)}</td></tr>`).join('')}</tbody></table>`;
 }
