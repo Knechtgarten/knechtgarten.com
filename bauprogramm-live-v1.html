@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script src="/kg-pw-schutz.js?v=5"></script>
-<script src="/kg-stil.js?v=35"></script>
+<script src="/kg-stil.js?v=36"></script>
 <title>Bauprogramm – Einsatzplaner</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#323E4E">
@@ -123,6 +123,7 @@ nav.subnav a.on{color:#323E4E;border-bottom-color:#323E4E;}
 .pls{margin:1px 4px;border-radius:4px;z-index:1;overflow:hidden;display:flex;justify-content:center;}
 .pls span{writing-mode:vertical-rl;transform:rotate(180deg);font-size:11px;font-weight:600;white-space:nowrap;padding:5px 0;}
 .pls.hilfe{opacity:.55;}
+.pls.lang{background-image:repeating-linear-gradient(135deg,rgba(255,255,255,.45) 0 4px,transparent 4px 8px)!important;}
 .pls.prov{background-image:repeating-linear-gradient(135deg,rgba(255,255,255,.6) 0 3px,transparent 3px 7px)!important;}
 .pls.abs{background:repeating-linear-gradient(135deg,#C9D1DB 0 4px,#E3E7EC 4px 8px);}
 .plende{height:0;border-top:2px dashed;align-self:end;z-index:2;position:relative;pointer-events:none;}
@@ -185,10 +186,11 @@ html.bp-fenster .prog,html.bp-fenster .lscroll,html.bp-fenster .geruest{height:a
 #druck td.wt{font-weight:700;color:#323E4E;} #druck td.dt{color:#6B7079;font-variant-numeric:tabular-nums;}
 #druck td.ar{font-weight:600;color:#232B35;} #druck td.ar small{display:block;font-weight:400;color:#8B9097;font-size:7pt;}
 #druck td.leer{color:#C4CBD3;}
-#druck tbody.wk{border:.35mm solid #8B9097;}
+#druck tbody.wk{border:.3mm solid #B9C0C8;}
 #druck tbody.wk tr:last-child td{border-bottom:0;}
 #druck tr.sa td{height:3.4mm;font-size:6.5pt;line-height:1.1;background:#F5F7F9;color:#A3B0BE;border-bottom:0;}
 #druck tr.sa td.wt{font-weight:600;color:#A3B0BE;} #druck tr.sa td.ar{font-weight:600;color:#4C5C70;}
+#druck tr.sa.voll td,#druck tr.sa.voll td.wt,#druck tr.sa.voll td.ar{color:#B4655F;font-weight:700;}
 #druck tbody.lz td{height:1.8mm;padding:0;border:0;background:transparent;}
 #druck tr.fei td:not(.kw){background:#FBF3D2;} #druck tr.fei td.ar{color:#8A6410;font-weight:600;}
 #druck tr.heute td.wt{color:#2A7570;}
@@ -478,13 +480,13 @@ let T0 = null; // erster Tag der Ansicht
 const D = v => new Date(v + 'T12:00');
 const atZwischen = (a, b) => { let n = 0; for(let d = plus(a, 1); d <= b; d = plus(d, 1)) if(arbeitstag(d)) n++; return n; };
 const SVGI = p => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
-const IC = { rein: SVGI('<path d="M5 12h14M13 6l6 6-6 6"/>'), zurueck: ic('undo', 12), griff: ic('griff', 12) };
+const IC = { rein: SVGI('<path d="M5 12h14M13 6l6 6-6 6"/>'), zurueck: ic('zurueck', 12), griff: ic('griff', 12) };
 const zLeaves = (el) => JSON.parse(el.dataset.leaves || '[]');
 // Gerüst: pro Angebot der Arbeitsschritt-Balken (bleibt immer) mit seinen Teilschritten; was im Programm ist, ist hellgrau
 function geruest(){
   const Gr = $('geruest'); if(!Gr) return;
   if(!GERUEST){ Gr.innerHTML = ''; return; }
-  let h = `<div class="gkopf"><b>Gerüst</b><span>Ziehen ins Programm → · zurück: Feld hierher ziehen</span></div>`;
+  let h = '';
   if(!ANG.length) h += '<div class="gleer">Keine Auftragsbestätigung und keine bestätigte Offerte. Mit «+ Eigener Block» kannst du trotzdem planen.</div>';
   ANG.forEach(A => {
     const p5 = pal(famVon(A.id)), alle = blaetter(A).map(b => b.id), offen = alle.filter(id => !imProgramm(id));
@@ -549,6 +551,18 @@ function zeichnen(){
       const tip = `${p.name}${x.hilfe ? ' (Mithilfe)' : ''}: ${kurz(D(x.von))}–${kurz(D(x.bis))}${x.prov ? ' · noch nicht abgemacht' : ''}`;
       h += `<div class="pls${x.hilfe ? ' hilfe' : ''}${x.prov ? ' prov' : ''}" style="grid-column:${i + 1};grid-row:${zeile(v)}/${zeile(b) + 1};background:${x.farbe};color:${KG.textAuf(x.farbe)}" title="${esc(tip)}">${j === 0 && zeile(b) > zeile(v) ? `<span>${esc(p.kurz)}</span>` : ''}</div>`; }));
   });
+  // Dauert das Programm länger als der Planer-Balken des Vorarbeiters: fehlende Tage am Anfang/Schluss orange dazuzeichnen
+  const vaI = sicht.findIndex(p => p.va), vaP = sicht[vaI];
+  if(vaP && B.length){
+    const ein = vaP.ein.filter(x => !x.hilfe);
+    if(ein.length){
+      const pv = ein.reduce((m, x) => D(x.von) < m ? D(x.von) : m, D(ein[0].von)), pb = ein.reduce((m, x) => D(x.bis) > m ? D(x.bis) : m, D(ein[0].bis));
+      const pStart = B[0].von, pEnde = B[B.length - 1].bis, warn = pal('orange');
+      const lang = (v, b, txt) => laeufe(iso(v), iso(b)).forEach(([x, y]) => { h += `<div class="pls lang" style="grid-column:${vaI + 1};grid-row:${zeile(x)}/${zeile(y) + 1};background:${warn[2]}" title="${esc(txt)}"></div>`; });
+      if(pEnde > pb) lang(plus(pb, 1), pEnde, `Programm geht ${atZwischen(pb, pEnde)} Arbeitstage länger als ${vaP.kurz} im Planer (bis ${kurz(pb)})`);
+      if(pStart < pv) lang(pStart, plus(pv, -1), `Programm beginnt ${atZwischen(plus(pStart, -1), plus(pv, -1))} Arbeitstage vor ${vaP.kurz} im Planer (ab ${kurz(pv)})`);
+    }
+  }
   if(!B.length) h += `<div class="ziel-leer" style="grid-column:${cA}/${cA + 1};grid-row:${zeile(s)}/span 12">Noch leer.<br>Zieh aus dem Gerüst links eine Offerte, einen Arbeitsschritt oder einen Teilschritt hierher.</div>`;
   // Programm wie eine Tabelle: in jeder Tageszeile der Text (Teilschritt des Tages), darüber ein durchsichtiger Rahmen,
   // der erst beim Überfahren sichtbar wird (ziehen = verschieben, unten ziehen = länger/kürzer)
@@ -581,9 +595,8 @@ function chips(ende){
   const offen = ANG.flatMap(a => blaetter(a).map(b => b.id)).filter(id => !imProgramm(id)).length;
   const pe = planerEnde(), diff = pe && B.length ? (ende > pe.bis ? atZwischen(pe.bis, ende) : -atZwischen(ende, pe.bis)) : 0;
   // Nur noch Warnungen (gefährdeter Fixtermin, Planer-Balken weicht ab); ohne Warnung bleibt die Zeile leer
-  $('chips').innerHTML = `${konf ? `<span class="chip warn">${konf === 1 ? '1 fixer Termin ist' : konf + ' fixe Termine sind'} gefährdet</span>` : ''}
-    ${diff ? `<span class="chip warn">Planer-Balken ${esc(pe.name)} ${Math.abs(diff)} Arbeitstage ${diff > 0 ? 'kürzer' : 'länger'} als das Programm</span>` : ''}`;
-  $('chips').classList.toggle('hidden', !konf && !diff);
+  $('chips').innerHTML = `${konf ? `<span class="chip warn">${konf === 1 ? '1 fixer Termin ist' : konf + ' fixe Termine sind'} gefährdet</span>` : ''}`;
+  $('chips').classList.toggle('hidden', !konf);
   const gt = $('gtog'); if(gt){ gt.querySelector('span').textContent = GERUEST ? '‹' : '›'; gt.title = GERUEST ? 'Gerüst ausblenden' : 'Gerüst einblenden';
     gt.onclick = () => { GERUEST = !GERUEST; try{ localStorage.setItem('bp-geruest', GERUEST ? '1' : '0'); }catch(e){} $('haupt').classList.toggle('ohne-geruest', !GERUEST); zeichnen(); }; }
   if($('hilfeBtn')) $('hilfeBtn').onclick = () => { HILFE = !HILFE; try{ localStorage.setItem('bp-hilfe', HILFE ? '1' : '0'); }catch(e){} zeichnen(); };
@@ -739,8 +752,9 @@ function druckTabelle(){
       for(let i = 0; i < 6; i++){
         const d = plus(w, i), t = iso(d), fei = FEIERTAGE[t], e = proTag[t] || [], ab = abw[t] || [], sa = i === 5;
         const z = k => e.map(x => esc(x[k] || '')).filter(Boolean).join('<br>');
-        const ar = fei ? esc(fei) : e.map(x => `${x.ueber ? `<small>${esc(x.ueber)}</small>` : ''}${esc(x.arbeit)}${x.fix ? '<span class="fix">FIX</span>' : ''}`).join('<br>');
-        rows += `<tr class="${[sa ? 'sa' : '', fei ? 'fei' : '', t === heute ? 'heute' : ''].join(' ').trim()}">${i === 0 ? `<td class="kw" rowspan="6"><span>KW ${kw(d)}</span></td>` : ''}
+        const ar = fei ? esc(fei) : e.map(x => `${x.ueber ? `<small>${esc(x.ueber)}</small>` : ''}${esc(x.arbeit)}`).join('<br>');
+        const voll = sa && (e.length || ab.length);
+        rows += `<tr class="${[sa ? 'sa' : '', voll ? 'voll' : '', fei ? 'fei' : '', t === heute ? 'heute' : ''].join(' ').trim()}">${i === 0 ? `<td class="kw" rowspan="6"><span>KW ${kw(d)}</span></td>` : ''}
           <td class="wt">${WTL[d.getDay()]}</td><td class="dt">${d.getDate()}. ${MON[d.getMonth()]}</td>
           <td class="ar"><div class="c">${ar}</div></td><td><div class="c">${z('mat')}</div></td><td><div class="c">${z('sub')}</div></td>
           <td class="no"><div class="c">${[z('notiz'), ...ab.map(esc)].filter(Boolean).join('<br>')}</div></td></tr>`;
