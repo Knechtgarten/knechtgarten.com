@@ -145,7 +145,7 @@
     { k: 'artikel', n: 'Artikelstamm', url: 'tool-c-live-v1.html', farbe: PAL.blau[1], akzent: PAL.blau[3], modul: 'offertentool', seiten: ['tool-c-live-v1', 'lieferant-abgleich-live-v1'] },
     // Kontakte = eigenes Haupttool: Kunden, Lieferanten und Pflegekunden (früher «Pflege & Service»)
     { k: 'kunden', n: 'Kontakte', url: 'tool-d-kunden-live-v1.html', farbe: PAL.gold[0], akzent: PAL.gold[3],
-      seiten: ['tool-d-kunden-live-v1', 'pflege-kunden-live-v1', 'pflege-kategorien-live-v1'] },
+      seiten: ['tool-d-kunden-live-v1', 'pflege-kunden-live-v1', 'pflege-kategorien-live-v1', 'projekt-einstellungen-live-v1'] },
     { k: 'pend', n: 'Pendenzen', url: 'pendenzen-live-v1.html', farbe: PAL.orange[1], akzent: PAL.orange[3], modul: 'pendenzen', seiten: ['pendenzen-live-v1'] },
     { k: 'plan', n: 'Einsatzplaner', url: 'einsatzplaner-live-v1.html', farbe: PAL.petrol[1], akzent: PAL.petrol[3], modul: 'einsatzplaner', seiten: ['einsatzplaner-live-v1', 'bauprogramm-live-v1'] },
     { k: 'wissen', n: 'Nachschlagewerk', url: 'wissen-live-v1.html', farbe: PAL.violett[1], akzent: PAL.violett[3], modul: 'wissen', seiten: ['wissen-live-v1'] },
@@ -350,7 +350,7 @@ header.app.kg-leiste ~ main.wrap{margin-left:0!important;margin-right:auto!impor
     'tool-c-live-v1': ['offerten', 'artikel'], 'lieferant-abgleich-live-v1': ['offerten', 'artikel'],
     'tool-d-kunden-live-v1': [['offerten', 'kunden'], ['pflege', 'kunden']], // Adressen oder Pflege genügt
     'pendenzen-live-v1': ['pend', '_tool'], 'einsatzplaner-live-v1': ['plan', '_tool'], 'bauprogramm-live-v1': ['plan', '_tool'],
-    'pflege-kunden-live-v1': ['pflege', 'kunden'], 'pflege-kategorien-live-v1': ['pflege', 'kategorien'],
+    'pflege-kunden-live-v1': ['pflege', 'kunden'], 'pflege-kategorien-live-v1': ['pflege', 'kategorien'], 'projekt-einstellungen-live-v1': ['offerten', 'kunden'],
     'pflege-handy-live-v1': ['pflege', 'jahresplan'], 'wissen-live-v1': ['wissen', '_tool'],
     'mailassistent-verwaltung-live-v1': ['mail', '_tool'],
     'werkzeuge-live-v1': ['werkzeuge', '_tool'], 'werkzeug-pool-chlor-live-v1': ['werkzeuge', 'pool_chlor'],
