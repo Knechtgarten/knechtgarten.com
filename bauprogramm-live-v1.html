@@ -239,6 +239,7 @@ html.bp-fenster #zuBtn:hover{background:rgba(255,255,255,.12)!important;color:#f
 // und Offerten aus dem Offertentool (Teilschritt-Tage). Blöcke + Reihenfolge in bauprogramm / bauprogramm_block.
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const NL = String.fromCharCode(10);
 const ic = (n, s = 14) => KG.icon(n, s);
 const TAG_H = 8.5, TEAM = 2;
 const FAM = ['erde', 'blau', 'petrol', 'gold', 'gruen', 'orange', 'violett', 'beere', 'oliv'];
@@ -254,7 +255,11 @@ const FENSTER = new URLSearchParams(location.search).has('fenster');
 if(FENSTER){ document.documentElement.classList.add('bp-fenster'); $('zuBtn').classList.remove('hidden'); $('zuBtn').innerHTML = ic('x'); }
 async function schliessen(){ if(speicherTimer) await speichern(); parent.postMessage({ bp: 'zu' }, location.origin); }
 $('zuBtn').addEventListener('click', schliessen);
-addEventListener('keydown', e => { if(FENSTER && e.key === 'Escape' && !document.querySelector('.dlgs')) schliessen(); });
+addEventListener('keydown', e => { if(e.key !== 'Escape' || document.querySelector('.dlgs')) return;
+  if(gewaehlt && !e.target.closest?.('input,textarea')){ gewaehlt = null; zeichnen(); return; }   // zuerst Auswahl aufheben
+  if(FENSTER) schliessen(); });
+// Klick daneben hebt die Auswahl auf (Rahmen + Leiste unten weg)
+document.addEventListener('click', e => { if(!gewaehlt || e.target.closest('.blk,#detail,.dlgs,.zelle[data-di],.zinfo')) return; gewaehlt = null; zeichnen(); });
 
 // ---------------------------------------------------------------- Start / Login
 async function start(){
@@ -405,7 +410,9 @@ async function ladePlaner(kundeId){
 // Programm = Liste einzelner Felder (B). Neues Programm startet leer, alles liegt im Gerüst (Vorrat).
 // Fehlende Angebote/Arbeitsschritte (neu dazugekommen) werden hinten angehängt, wenn schon ein Programm besteht.
 function aufbauGruppen(zeilen){
-  B = zeilen.map(r => ({ id: r.id, teile: r.teile || [], name: r.name, extra: r.extra || 0, team: r.team || TEAM, fix: r.fix, mat: r.mat, sub: r.sub, notiz: r.notiz }));
+  const neuAus = r => ({ id: r.id, teile: r.teile || [], name: r.name, extra: r.extra || 0, team: r.team || TEAM, fix: r.fix, mat: r.mat, sub: r.sub, notiz: r.notiz });
+  B = zeilen.filter(r => !r.los).map(neuAus);
+  VOR = zeilen.filter(r => r.los).map(neuAus);   // eigene Einträge im Vorrat (Gerüst)
   NEU = 0;
   if(zeilen.length) return;   // bestehendes Programm: nichts automatisch dazu, Neues steht im Gerüst
 }
@@ -416,15 +423,17 @@ const famVon = angId => { const i = ANG.findIndex(a => a.id === angId); return i
 const pal = f => KG.palette[f] || KG.palette.grau;
 
 // ---------------------------------------------------------------- Felder im Programm
-let B = [], ANG = [], NEU = 0, GERUEST = (() => { try{ return localStorage.getItem('bp-geruest') !== '0'; }catch(e){ return true; } })();
+let B = [], VOR = [], ANG = [], NEU = 0, GERUEST = (() => { try{ return localStorage.getItem('bp-geruest') !== '0'; }catch(e){ return true; } })();
 const neuerTeil = (teile, mehr) => ({ id: crypto.randomUUID(), teile, name: null, extra: 0, team: TEAM, fix: null, mat: null, sub: null, notiz: null, ...mehr });
 const imProgramm = leaf => B.some(p => p.teile.includes(leaf));
 const feldVon = leaf => B.find(p => p.teile.includes(leaf));
+// eigener Eintrag aus dem Vorrat zurück ins Programm (hinten anhängen, Ablegen setzt dann die Stelle)
+const vorHolen = id => { const p = VOR.find(x => x.id === id); if(!p) return; VOR = VOR.filter(x => x !== p); B.push(p); };
 const teilTage = p => Math.max(1, Math.ceil(p.teile.reduce((s, id) => s + (KNOTEN[id] ? blattTage(KNOTEN[id], p.team) : 0), 0) - 1e-9) + (p.extra || 0));
 const hatStunden = p => p.teile.some(id => KNOTEN[id] && KNOTEN[id].std != null);
 // Name eines Felds: ganzer Arbeitsschritt = sein Name, ein Teilschritt = dessen Name, Rest = Arbeitsschritt · n von m
 function teilName(p){
-  if(!p.teile.length) return p.name || 'Eigener Block';
+  if(!p.teile.length) return String(p.name || 'Eigener Block').split(NL)[0];
   const k = KNOTEN[p.teile[0]]; if(!k) return p.name || 'Block';
   const as = asVon(p.teile[0]);
   if(!as || p.teile.some(id => asVon(id) !== as)) return p.teile.length === 1 || !as ? k.n : (p.name || k.n);
@@ -465,10 +474,10 @@ function frage(titel, text, ja = 'Löschen'){
     addEventListener('keydown', taste, true); document.body.appendChild(w); w.querySelector('[data-a="1"]').focus();
   });
 }
-// Feld zurück ins Gerüst: Teilschritte gehen an ihren Ursprung zurück (= nicht mehr im Programm)
+// Feld zurück ins Gerüst: Teilschritte gehen an ihren Ursprung zurück (= nicht mehr im Programm), eigene Einträge in den Vorrat
 async function zurueck(id){
   const p = B.find(x => x.id === id); if(!p) return;
-  if(!p.teile.length && !(await frage(`«${teilName(p)}» löschen?`, 'Der eigene Eintrag wird aus dem Programm entfernt.'))) return;
+  if(!p.teile.length){ p.fix = null; VOR.push(p); }   // eigener Eintrag: in den Vorrat, nichts geht verloren
   B = B.filter(x => x !== p); if(gewaehlt === id) gewaehlt = null; geaendert();
 }
 
@@ -536,7 +545,7 @@ function geruest(){
   let h = '';
   if(!ANG.length) h += '<div class="gleer">Keine Auftragsbestätigung und keine bestätigte Offerte. In eine leere Zeile rechts tippen = eigener Eintrag.</div>';
   const rest = ANG.filter(A => blaetter(A).some(b => !imProgramm(b.id)));
-  if(ANG.length && !rest.length) h += `<div class="gleer gfertig">${ic('check', 14)} Alles eingeplant</div>`;
+  if(ANG.length && !rest.length && !VOR.length) h += `<div class="gleer gfertig">${ic('check', 14)} Alles eingeplant</div>`;
   rest.forEach(A => {
     const p5 = pal(famVon(A.id)), offen = blaetter(A).map(b => b.id).filter(id => !imProgramm(id)), auf = AUF_ANG === A.id && !!A.kinder;
     h += `<section class="gang${auf ? ' auf' : ''}"><div class="gah"${DARF ? ` draggable="true" data-leaves='${JSON.stringify(offen)}' data-proas="1"` : ''}${A.kinder ? ` data-aang="${A.id}"` : ''} title="${A.kinder ? 'Klick = auf-/zuklappen · ziehen = ganzes Angebot (je ein Feld pro Arbeitsschritt)' : esc(A.klein || 'nur Easybill') + ' · ziehen = ins Programm'}">
@@ -550,7 +559,12 @@ function geruest(){
     });
     h += '</section>';
   });
+  if(VOR.length) h += `<section class="gang auf"><div class="gah"><span class="adot" style="background:${pal('grau')[1]}"></span><span class="gan">Eigene Einträge</span></div>`
+    + VOR.map(p => `<div class="gasr"${DARF ? ` draggable="true" data-eigen="${p.id}"` : ''} title="${esc(teilName(p))} – ziehen: zurück ins Programm"><span class="gan">${esc(teilName(p))}</span><span class="gtg">${teilTage(p)} T</span>${DARF ? `<button type="button" class="kg-ibtn danger" data-weg="${p.id}" title="Löschen" aria-label="Löschen">${ic('trash', 12)}</button>` : ''}</div>`).join('') + '</section>';
   Gr.innerHTML = h;
+  Gr.querySelectorAll('[data-eigen]').forEach(el => el.addEventListener('dragstart', e => { ziehen = { feld: el.dataset.eigen }; e.dataTransfer.setData('text/plain', ''); el.classList.add('ziehe'); }));
+  Gr.querySelectorAll('[data-weg]').forEach(b => b.addEventListener('click', async e => { e.stopPropagation(); const p = VOR.find(x => x.id === b.dataset.weg); if(!p) return;
+    if(!(await frage(`«${teilName(p)}» löschen?`, 'Der eigene Eintrag wird endgültig gelöscht.'))) return; VOR = VOR.filter(x => x !== p); geaendert(); }));
   Gr.querySelectorAll('[data-leaves]').forEach(el => el.addEventListener('dragstart', e => {
     e.stopPropagation(); ziehen = { leaves: zLeaves(el), proAs: !!el.dataset.proas }; e.dataTransfer.setData('text/plain', ''); el.classList.add('ziehe'); }));
   Gr.querySelectorAll('[data-leaves]').forEach(el => el.addEventListener('dragend', () => { el.classList.remove('ziehe'); }));
@@ -648,6 +662,7 @@ function chips(ende){
 function tagTexte(p){
   const W = []; for(let d = new Date(p.von); d <= p.bis; d = plus(d, 1)) if(arbeitstag(d)) W.push(new Date(d));
   const ts = p.teile.filter(id => String(id).startsWith('ts:') && KNOTEN[id]), name = teilName(p), namen = new Array(W.length).fill(name);
+  if(!p.teile.length){ const zl = String(p.name || '').split(NL); if(zl.length > 1) W.forEach((d, i) => namen[i] = zl[i] || ''); }
   if(ts.length > 1){ let cum = 0; const tot = ts.reduce((s, id) => s + blattTage(KNOTEN[id], p.team), 0) || 1, f = W.length / tot;
     ts.forEach(id => { const x = blattTage(KNOTEN[id], p.team) * f, s0 = Math.floor(cum + 1e-9), e0 = Math.max(s0, Math.ceil(cum + x - 1e-9) - 1);
       for(let i = s0; i <= Math.min(e0, W.length - 1); i++) if(i === s0 || namen[i] === name) namen[i] = KNOTEN[id].n; cum += x; }); }
@@ -734,7 +749,7 @@ function binden(){
     el.addEventListener('dragover', e => { if(!ziehen || ziehen.feld === el.dataset.p) return; e.preventDefault(); weg(); el.classList.add(unten(e, el) ? 'ziel-u' : 'ziel-o'); });
     el.addEventListener('drop', e => { if(!ziehen) return; e.preventDefault(); e.stopPropagation(); weg(); let j = B.findIndex(x => x.id === el.dataset.p); if(unten(e, el)) j++;
       if(ziehen.leaves){ ausGeruest(j); return; }
-      const i = B.findIndex(x => x.id === ziehen.feld); ziehen = null; if(i < 0) return; const [m] = B.splice(i, 1); if(i < j) j--; m.fix = null; B.splice(j, 0, m); geaendert(); });
+      vorHolen(ziehen.feld); const i = B.findIndex(x => x.id === ziehen.feld); ziehen = null; if(i < 0) return; const [m] = B.splice(i, 1); if(i < j) j--; m.fix = null; B.splice(j, 0, m); geaendert(); });
   });
   R.querySelectorAll('.zelle[data-di]').forEach(c => {
     c.addEventListener('dragover', e => { if(!ziehen) return; e.preventDefault(); weg(); c.classList.add('ziel-tag'); });
@@ -744,27 +759,48 @@ function binden(){
       let j = B.findIndex(p => p.von > d); if(j < 0) j = B.length;
       const erst = j === 0;
       if(ziehen.leaves){ if(erst) $('start').value = iso(d); ausGeruest(j, erst ? null : iso(d)); return; }
-      const i = B.findIndex(x => x.id === ziehen.feld); ziehen = null; if(i < 0) return; const [m] = B.splice(i, 1); if(i < j) j--;
+      vorHolen(ziehen.feld); const i = B.findIndex(x => x.id === ziehen.feld); ziehen = null; if(i < 0) return; const [m] = B.splice(i, 1); if(i < j) j--;
       if(j === 0){ $('start').value = iso(d); m.fix = null; } else m.fix = iso(d);
       B.splice(j, 0, m); geaendert(); });
   });
-  // In eine leere Zeile tippen = eigener Eintrag an diesem Tag (1 Tag, unten ziehen = länger)
+  // In eine leere Zeile tippen = eigener Eintrag ab diesem Tag. Enter = nächste Zeile (ein Tag mehr),
+  // fertig mit Tab oder Klick daneben, Esc = abbrechen. Ist ein Feld angewählt, hebt der erste Klick nur die Auswahl auf.
   R.querySelectorAll('.zelle[data-di]').forEach(c => c.addEventListener('click', () => {
+    if(gewaehlt){ gewaehlt = null; zeichnen(); return; }
     if(c.querySelector('input')) return;
     let d = plus(T0, +c.dataset.di); if(!arbeitstag(d)) return;
-    c.innerHTML = '<input class="zin" type="text" placeholder="Arbeit eintippen, Enter" aria-label="Eigener Eintrag">';
-    const inp = c.querySelector('input'); inp.focus();
+    const felder = [];
     let fertig = false;
-    const ende = ok => { if(fertig) return; fertig = true; const t = inp.value.trim();
-      if(!ok || !t){ c.innerHTML = ''; return; }
+    const ende = ok => { if(fertig) return; fertig = true;
+      const z = felder.map(x => x.inp.value.trim()); while(z.length && !z[z.length - 1]) z.pop();
+      felder.forEach(x => { x.c.innerHTML = ''; });
+      if(!ok || !z.length || !z[0]) return;
       let j = B.findIndex(p => p.von > d); if(j < 0) j = B.length;
-      const neu = neuerTeil([], { name: t, extra: 1 });
-      // fixes Datum nur, wenn der Eintrag nicht direkt ans vorherige Feld anschliesst
+      const neu = neuerTeil([], { name: z.join('\n'), extra: z.length });
+      // Beginn merken, wenn der Eintrag nicht direkt ans vorherige Feld anschliesst
       let nat = j > 0 ? plus(B[j - 1].bis, 1) : null; if(nat) while(!arbeitstag(nat)) nat = plus(nat, 1);
       if(j === 0){ $('start').value = iso(d); if(B[0]) B[0].fix = B[0].fix || iso(B[0].von); } else if(iso(nat) !== iso(d)) neu.fix = iso(d);
       B.splice(j, 0, neu); geaendert(); };
-    inp.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); ende(true); } else if(e.key === 'Escape') ende(false); });
-    inp.addEventListener('blur', () => ende(true));
+    const zeileDazu = zc => {
+      zc.innerHTML = `<input class="zin" type="text" placeholder="${felder.length ? 'nächste Zeile …' : 'Arbeit eintippen · Enter = nächste Zeile'}" aria-label="Eigener Eintrag, Zeile ${felder.length + 1}">`;
+      const inp = zc.querySelector('input'), x = { c: zc, inp }; felder.push(x);
+      inp.addEventListener('click', e => e.stopPropagation());
+      inp.addEventListener('keydown', e => {
+        const i = felder.indexOf(x);
+        if(e.key === 'Enter'){ e.preventDefault();
+          if(felder[i + 1]){ felder[i + 1].inp.focus(); return; }
+          // nächster Arbeitstag
+          let k = +zc.dataset.di + 1; while(R.querySelector(`.zelle[data-di="${k}"]`) && !arbeitstag(plus(T0, k))) k++;
+          const nz = R.querySelector(`.zelle[data-di="${k}"]`); if(nz) zeileDazu(nz); }
+        else if(e.key === 'ArrowUp' && i > 0){ e.preventDefault(); felder[i - 1].inp.focus(); }
+        else if(e.key === 'ArrowDown' && felder[i + 1]){ e.preventDefault(); felder[i + 1].inp.focus(); }
+        else if(e.key === 'Backspace' && !inp.value && i > 0 && i === felder.length - 1){ e.preventDefault(); felder.pop(); zc.innerHTML = ''; felder[i - 1].inp.focus(); }
+        else if(e.key === 'Escape') ende(false);
+      });
+      inp.addEventListener('blur', () => setTimeout(() => { if(!felder.some(f2 => f2.inp === document.activeElement)) ende(true); }, 0));
+      inp.focus();
+    };
+    zeileDazu(c);
   }));
   // Länge: unten am Feld ziehen
   R.querySelectorAll('[data-griff]').forEach(gr => gr.addEventListener('pointerdown', e => {
@@ -785,13 +821,13 @@ function detail(){
   if(!p){ Dt.classList.add('hidden'); return; }
   Dt.classList.remove('hidden');
   const ro = DARF ? '' : ' disabled', eigen = !p.teile.length;
-  Dt.innerHTML = `${eigen ? `<div class="feld">Arbeit<input class="t" id="dN" value="${esc(p.name || '')}"${ro}></div>` : `<div class="feld">Arbeit<b style="font-size:14px;color:#232B35;padding:6px 0">${esc(teilName(p))}</b></div>`}
+  Dt.innerHTML = `${eigen ? `<div class="feld">Arbeit<input class="t" id="dN" value="${esc(teilName(p))}"${ro}></div>` : `<div class="feld">Arbeit<b style="font-size:14px;color:#232B35;padding:6px 0">${esc(teilName(p))}</b></div>`}
     <div class="feld">Tage<input class="t klein" id="dT" type="number" min="1" value="${teilTage(p)}"${ro}></div>
     ${hatStunden(p) ? `<div class="feld">Team <small>Personen</small><input class="t klein" id="dTeam" type="number" min="1" max="8" value="${p.team}"${ro}></div>` : ''}
     ${p.teile.length > 1 ? `<div class="feld">Teilschritte<small style="max-width:360px;white-space:normal">${esc(p.teile.map(id => KNOTEN[id] ? KNOTEN[id].n : '').join(' · '))}</small></div>` : ''}
     <span class="sp"></span><button class="btn prim" type="button" id="dOk">Fertig</button>`;
   const an = (id, fn) => { const el = $(id); if(el) el.addEventListener('change', e => { fn(e.target.value); geaendert(); }); };
-  an('dN', v => p.name = v.trim() || p.name);
+  an('dN', v => { const zl = String(p.name || '').split(NL); zl[0] = v.trim() || zl[0]; p.name = zl.join(NL); });
   an('dT', v => { const n = Math.max(1, parseInt(v) || 1); p.extra = (p.extra || 0) + n - teilTage(p); });
   an('dTeam', v => p.team = Math.max(1, parseInt(v) || TEAM));
   $('dOk').onclick = () => { gewaehlt = null; zeichnen(); };
@@ -810,7 +846,10 @@ async function speichern(){
   } else await sb.from('bauprogramm').update({ start: $('start').value, geaendert_am: new Date().toISOString() }).eq('id', PROG.id);
   const zeilen = B.map((p, i) => { const ang = p.teile.length ? angebotVon(p.teile[0]) : null;
     return { id: p.id, programm_id: PROG.id, sortierung: i, name: p.teile.length ? teilName(p) : (p.name || 'Eigener Block'), farbe: ang ? famVon(ang) : 'grau', teile: p.teile,
-      extra: p.extra || 0, team: p.team || TEAM, fix: p.fix || null, mat: p.mat || null, sub: p.sub || null, notiz: p.notiz || null, ursprung_id: null, gruppe: p.id, angebot: ang, los: false }; });
+      extra: p.extra || 0, team: p.team || TEAM, fix: p.fix || null, mat: p.mat || null, sub: p.sub || null, notiz: p.notiz || null, ursprung_id: null, gruppe: p.id, angebot: ang, los: false }; })
+    // eigene Einträge im Vorrat: los = true (liegen im Gerüst, nicht auf der Tagesachse)
+    .concat(VOR.map((p, i) => ({ id: p.id, programm_id: PROG.id, sortierung: 10000 + i, name: p.name || 'Eigener Block', farbe: 'grau', teile: [], extra: p.extra || 0, team: p.team || TEAM,
+      fix: null, mat: p.mat || null, sub: p.sub || null, notiz: p.notiz || null, ursprung_id: null, gruppe: p.id, angebot: null, los: true })));
   if(zeilen.length){
     const { error } = await sb.from('bauprogramm_block').upsert(zeilen);
     if(error){ toast('Speichern fehlgeschlagen: ' + error.message, true); return; }
