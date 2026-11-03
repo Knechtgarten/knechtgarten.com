@@ -89,7 +89,7 @@ async function aufbau(main){
     adresse: () => `<div class="kgd-feld"><label for="adresse">Strasse Nr., PLZ Ort</label>
       <div class="kgd-reihe" style="align-items:stretch"><input class="kgd-t" id="adresse" autocomplete="off" placeholder="Ländteweg 6, 3600 Thun" value="${esc([werte.strasse, werte.ort].filter(Boolean).join(', '))}">
         <button type="button" class="kgd-btn ghost" id="ebBtn" style="flex:none;height:36px">Aus Easybill</button></div>
-      <div class="kgd-feld hidden" id="ebSuche" style="margin-top:6px"><input class="kgd-t" id="ebQ" autocomplete="off" placeholder="Kunde in Easybill suchen (Name oder Firma)">
+      <div class="kgd-feld hidden" id="ebSuche" style="margin-top:6px"><input class="kgd-t" id="ebQ" autocomplete="off" placeholder="Kunde suchen (Name, Strasse, Ort oder Nummer)">
         <div class="kgd-menue hidden" id="ebMenue"></div></div>
       <span class="kgd-hinweis" id="adrInfo"></span></div>`,
     kunde: () => `<div class="kgd-feld"><label for="kunde">Kunde oder Adresse</label><input class="kgd-t" id="kunde" autocomplete="off" placeholder="Name, Strasse oder Ort suchen">
@@ -134,7 +134,7 @@ async function aufbau(main){
   // Adresse: «Strasse Nr., PLZ Ort»; der Easybill-Name bleibt unsichtbar und hilft nur beim Finden des Drive-Ordners
   if($('adresse')){
     const a = $('adresse');
-    const info = () => { $('adrInfo').textContent = werte.kunde_name ? `aus Easybill: ${werte.kunde_name} (Name kommt nicht aufs Blatt)` : ''; };
+    const info = () => { $('adrInfo').textContent = werte.kunde_name ? `Kunde: ${werte.kunde_name} (Name kommt nicht aufs Blatt)` : ''; };
     a.addEventListener('input', () => {
       const t = a.value.split(','); werte.strasse = t[0].trim(); werte.ort = t.slice(1).join(',').trim();
       werte.kunde_name = ''; werte.kunde_id = null; info(); geaendert();
@@ -143,19 +143,20 @@ async function aufbau(main){
     const q = $('ebQ'), m = $('ebMenue'); let lauf = 0, treffer = [], warte = null;
     q.addEventListener('input', () => { clearTimeout(warte); warte = setTimeout(async () => {
       const text = q.value.trim(), nr = ++lauf;
-      if(text.length < 3){ m.classList.add('hidden'); return; }
-      m.innerHTML = '<div class="kopfzeile">Suche in Easybill …</div>'; m.classList.remove('hidden');
-      const { data, error } = await sb.functions.invoke('easybill-kunden-suche', { body: { q: text } });
+      if(text.length < 2){ m.classList.add('hidden'); return; }
+      // Kundenliste (jede Nacht aus Easybill abgeglichen): schnell, und der Kunde wird beim Dokument gespeichert (Kontakte zeigen es dort)
+      const { data, error } = await sb.rpc('kunde_suche', { q: text, anzahl: 12 });
       if(nr !== lauf) return;
-      if(error || (data && data.error)){ m.innerHTML = `<div class="kopfzeile">Easybill-Fehler: ${esc((data && data.error) || error.message)}</div>`; return; }
-      treffer = (data && data.kunden) || [];
-      m.innerHTML = treffer.length ? treffer.slice(0, 10).map((k, i) => `<button type="button" data-i="${i}"><b>${esc(k.name || k.firma || '')}</b><small>${esc([k.strasse, [k.plz, k.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ') || 'keine Adresse in Easybill')}</small></button>`).join('')
-        : '<div class="kopfzeile">Keine Treffer in Easybill.</div>';
-    }, 350); });
+      if(error){ m.innerHTML = `<div class="kopfzeile">Suche fehlgeschlagen: ${esc(error.message)}</div>`; m.classList.remove('hidden'); return; }
+      treffer = data || [];
+      m.innerHTML = treffer.length ? treffer.map((k, i) => `<button type="button" data-i="${i}"><b>${esc(k.name || '')}</b><small>${esc([k.strasse, [k.plz, k.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ') || 'keine Adresse')}${k.kundennummer ? ' · Nr. ' + esc(k.kundennummer) : ''}</small></button>`).join('')
+        : '<div class="kopfzeile">Kein Kunde gefunden.</div>';
+      m.classList.remove('hidden');
+    }, 250); });
     m.addEventListener('mousedown', e => {
       const b = e.target.closest('button'); if(!b) return; e.preventDefault();
       const k = treffer[+b.dataset.i];
-      werte.strasse = k.strasse || ''; werte.ort = [k.plz, k.ort].filter(Boolean).join(' '); werte.kunde_name = k.name || k.firma || ''; werte.kunde_id = null;
+      werte.strasse = k.strasse || ''; werte.ort = [k.plz, k.ort].filter(Boolean).join(' '); werte.kunde_name = k.name || ''; werte.kunde_id = k.id;
       a.value = [werte.strasse, werte.ort].filter(Boolean).join(', ');
       m.classList.add('hidden'); $('ebSuche').classList.add('hidden'); q.value = ''; info(); geaendert();
     });
