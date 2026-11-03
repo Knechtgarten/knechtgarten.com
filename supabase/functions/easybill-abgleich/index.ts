@@ -1,7 +1,8 @@
 // ============================================================================
 // Easybill-Abgleich (nur lesend, in Easybill wird nichts geschrieben).
 // Holt den Kundenstamm in unsere Tabelle kunde (Zuordnung über easybill_id,
-// nur echte Kunden mit Kundennummer, keine Lieferanten) sowie die
+// nur echte Kunden mit Kundennummer), die Lieferanten (Lieferantennummer) in
+// easybill_lieferant (mit Zuordnung zu unserer Lieferantenliste) sowie die
 // Auftragsbestätigungen (ORDER) und die Angebote (OFFER), auf die sie
 // verweisen, in easybill_dokument.
 //
@@ -101,6 +102,34 @@ Deno.serve(async (req) => {
       const { error } = await db.from('kunde').upsert(zeilen.slice(i, i + 500), { onConflict: 'easybill_id' });
       if (error) throw new Error('Kunden speichern: ' + error.message);
     }
+    // Lieferanten (Easybill-Adressen mit Lieferantennummer) für die Kontakte, nur bei 'nacht'/'alles'
+    let lieferanten = 0, lz: any = {};
+    if (!kundeEb) {
+      const lz_zeilen = ebKunden.filter((k: any) => k && k.supplier_number).map((k: any) => ({
+        easybill_id: k.id,
+        nummer: k.supplier_number || null,
+        name: k.company_name || [k.first_name, k.last_name].filter(Boolean).join(' ') || k.display_name || null,
+        firma: k.company_name || null,
+        vorname: k.first_name || null,
+        nachname: k.last_name || null,
+        strasse: k.street || null,
+        plz: k.zip_code || null,
+        ort: k.city || null,
+        land: LAND[k.country] || k.country || null,
+        kontaktdaten: { telefon1: k.phone_1 || null, telefon2: k.phone_2 || null, fax: k.fax || null, mobil: k.mobile || null, emails: k.emails || [] },
+        archiviert: !!k.archived,
+        abgeglichen_am: new Date().toISOString(),
+      }));
+      for (let i = 0; i < lz_zeilen.length; i += 500) {
+        const { error } = await db.from('easybill_lieferant').upsert(lz_zeilen.slice(i, i + 500), { onConflict: 'easybill_id' });
+        if (error) throw new Error('Lieferanten speichern: ' + error.message);
+      }
+      lieferanten = lz_zeilen.length;
+      const { data, error } = await db.rpc('easybill_lieferanten_zuordnen');
+      if (error) throw new Error('Lieferanten zuordnen: ' + error.message);
+      lz = data || {};
+    }
+
     // Zuordnung easybill_id -> kunde.id (für die Dokumente)
     const kundeVon = new Map<number, string>();
     for (let von = 0; ; von += 1000) {
@@ -148,7 +177,7 @@ Deno.serve(async (req) => {
     const { data: vk, error: vkFehler } = await db.rpc('easybill_verknuepfen');
     if (vkFehler) throw new Error('Offerten verknüpfen: ' + vkFehler.message);
 
-    const ergebnis = { kunden: zeilen.length, auftragsbestaetigungen: abs.length, angebote: angebote.length, ...(vk || {}) };
+    const ergebnis = { kunden: zeilen.length, lieferanten, auftragsbestaetigungen: abs.length, angebote: angebote.length, ...lz, ...(vk || {}) };
     if (logId) await db.from('easybill_abgleich').update({ beendet: new Date().toISOString(), kunden: zeilen.length, dokumente: doks.length }).eq('id', logId);
     return json(ergebnis);
   } catch (e) {
