@@ -18,6 +18,7 @@
   const MON = ['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
   const TAGE = ['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'];
   const datumLang = v => { if(!v) return '…'; const d = new Date(v + 'T12:00'); return `${TAGE[d.getDay()]}, ${d.getDate()}. ${MON[d.getMonth()]} ${d.getFullYear()}`; };
+  const datumOhneTag = v => { const d = new Date(v + 'T12:00'); return `${d.getDate()}. ${MON[d.getMonth()]} ${d.getFullYear()}`; };
   const datumKurz = v => { if(!v) return ''; const [j, m, t] = v.slice(0, 10).split('-'); return `${+t}.${+m}.${j}`; };
   const heute = () => { const d = new Date(); return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`; };
   const uhr = t => (t || '').replace(':', '.');
@@ -32,6 +33,9 @@
                        : w.bis ? `bis ${uhr(w.bis)} Uhr` : '(die genaue Zeit geben wir kurzfristig bekannt)' },
     kunde_adresse: { chip: 'Kunde · Adresse', wert: w => adresse(w) || '…' },
     kunde_name:    { chip: 'Kunde · Name', wert: w => w.kunde_name || '' },
+    zeitraum:      { chip: 'Zeitraum', wert: w => w.von_datum && w.bis_datum ? `vom ${datumOhneTag(w.von_datum)} bis ${datumOhneTag(w.bis_datum)}`
+                       : w.von_datum ? `ab ${datumOhneTag(w.von_datum)}` : 'in nächster Zeit' },
+    arbeiten:      { chip: 'Arbeiten', wert: w => w.arbeiten || 'Umgebungsarbeiten' },
     pl_name:       { chip: 'Projektleiter · Name', wert: w => (person(w.pl) || {}).name || '…' },
     pl_telefon:    { chip: 'Projektleiter · Handy', wert: w => (person(w.pl) || {}).telefon || '' },
     pl_block:      { chip: 'Kontaktblock Projektleiter', info: 'Name, Rolle, Handy, Mail', block: true, html: w => {
@@ -47,6 +51,8 @@
   const TYPEN = {
     helikopter: { daten: ['adresse', 'termin', 'pl', 'va'], pflicht: w => !w.datum ? 'Datum fehlt.' : !adresse(w) ? 'Adresse fehlt.' : '',
                   dateiname: w => `${w.datum || ''} Helikoptereinsatz ${w.strasse || ''}`.trim() },
+    bauarbeiten: { daten: ['adresse', 'zeitraum', 'arbeiten', 'zusatz', 'pl', 'va'], pflicht: w => !adresse(w) ? 'Adresse fehlt.' : '',
+                  dateiname: w => `${w.von_datum || new Date().toISOString().slice(0, 10)} Bauarbeiten ${w.strasse || ''}`.trim() },
     kran:       { daten: ['adresse', 'termin', 'zusatz', 'pl', 'va'], pflicht: w => !w.datum ? 'Datum fehlt.' : !adresse(w) ? 'Adresse fehlt.' : '',
                   dateiname: w => `${w.datum || ''} Kraneinsatz ${w.strasse || ''}`.trim() }
   };
