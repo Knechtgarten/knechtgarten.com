@@ -37,6 +37,8 @@
     pl_block:      { chip: 'Kontaktblock Projektleiter', info: 'Name, Rolle, Handy, Mail', block: true, html: w => {
                        const p = person(w.pl); if(!p) return '<div class="kgd-pers w">…</div>';
                        return `<div class="kgd-pers w"><span>${esc(p.name)}</span><span>${esc(ROLLEN[p.rolle] || '')}</span>${p.telefon ? `<span>${esc(p.telefon)}</span>` : ''}${p.mail ? `<span class="kgd-mail">${esc(p.mail)}</span>` : ''}</div>`; } },
+    zusatz_block:  { chip: 'Zusatz (optional)', info: 'eigener Satz, z. B. Umleitung', block: true,
+                     html: w => w.zusatz ? `<p class="w" style="white-space:pre-line">${esc(w.zusatz)}</p>` : '' },
     va_block:      { chip: 'Kontaktblock Vorarbeiter vor Ort', info: 'nur wenn gewählt', block: true, html: w => {
                        const p = person(w.va); if(!p) return '';
                        return `<div class="kgd-pers w"><span>Vorarbeiter vor Ort:</span><span>${esc(p.name)}</span>${p.telefon ? `<span>${esc(p.telefon)}</span>` : ''}</div>`; } }
@@ -44,9 +46,11 @@
   // Dokumenttypen: welche Felder das Daten-Fenster zeigt, Dateiname, Pflichtangaben
   const TYPEN = {
     helikopter: { daten: ['adresse', 'termin', 'pl', 'va'], pflicht: w => !w.datum ? 'Datum fehlt.' : !adresse(w) ? 'Adresse fehlt.' : '',
-                  dateiname: w => `${w.datum || ''} Helikoptereinsatz ${w.strasse || ''}`.trim() }
+                  dateiname: w => `${w.datum || ''} Helikoptereinsatz ${w.strasse || ''}`.trim() },
+    kran:       { daten: ['adresse', 'termin', 'zusatz', 'pl', 'va'], pflicht: w => !w.datum ? 'Datum fehlt.' : !adresse(w) ? 'Adresse fehlt.' : '',
+                  dateiname: w => `${w.datum || ''} Kraneinsatz ${w.strasse || ''}`.trim() }
   };
-  const FMT = ['fb', 'fi', 'fu', 'fl']; // Format eines Chips: fett, kursiv, unterstrichen, Leuchtstift
+  const FMT = ['fb', 'fi', 'fu', 'fl', 'fg']; // Format eines Chips: fett, kursiv, unterstrichen, Leuchtstift, grösser
 
   const CSS = `
 body{margin:0;background:#F5F7F9;color:#232B35;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;font-size:14px;line-height:1.4;}
@@ -125,7 +129,8 @@ nav.subnav a.on{color:#323E4E;border-bottom-color:#323E4E;}
 .kgd-pers + .kgd-pers{margin-top:1.2em;}
 .kgd-mail{color:#2F5C9A;text-decoration:underline;}
 .kgd-fuss{padding:1em 9cqw 5cqw;text-align:center;font-size:.92em;}
-.fb{font-weight:700;} .fi{font-style:italic;} .fu{text-decoration:underline;} .fl{background:#E8EDB0;}
+.fb{font-weight:700;} .fi{font-style:italic;} .fu{text-decoration:underline;} .fl{background:#E8EDB0;} .fg{font-size:1.15em;}
+.kgd-wb.gross{font-weight:700;font-size:13px;width:auto;padding:0 6px;}
 .kgd-mark .w{background:#D6E7F4;border-radius:3px;box-shadow:0 0 0 2px #D6E7F4;}
 .kgd-mark .kgd-pers.w{box-shadow:0 0 0 6px #D6E7F4;}
 .kgd-mark .w.fl{background:#E8EDB0;}
@@ -275,12 +280,19 @@ nav.subnav a.on{color:#323E4E;border-bottom-color:#323E4E;}
       const ERLAUBT = new Set(['H2', 'P', 'UL', 'OL', 'LI', 'B', 'STRONG', 'I', 'EM', 'U', 'SPAN', 'BR', 'DIV']);
       const t = document.createElement('div'); t.innerHTML = html || '';
       const lauf = n => [...n.children].forEach(c => {
+        if(c.tagName === 'FONT'){ // aus «A+»: Grösse 4 und mehr = .fg, sonst normal
+          const s = document.createElement('span'); if(+c.getAttribute('size') >= 4) s.className = 'fg';
+          s.append(...c.childNodes); c.replaceWith(s); c = s;
+        }
         if(!ERLAUBT.has(c.tagName)){ c.replaceWith(...c.childNodes); lauf(n); return; }
         const f = c.getAttribute('data-f'), bg = (c.style && c.style.backgroundColor) || '';
         const kl = FMT.filter(x => c.classList.contains(x));
         [...c.attributes].forEach(a => c.removeAttribute(a.name));
         if(f && FELDER[f]){ c.setAttribute('data-f', f); if(kl.length) c.className = kl.join(' '); c.innerHTML = ''; return; }
-        if(c.tagName === 'SPAN' && bg && bg !== 'transparent' && !/rgba\(0, 0, 0, 0\)/.test(bg)) c.className = 'fl';
+        if(c.tagName === 'SPAN'){
+          if(bg && bg !== 'transparent' && !/rgba\(0, 0, 0, 0\)/.test(bg) && !kl.includes('fl')) kl.push('fl');
+          if(kl.length) c.className = kl.join(' ');
+        }
         lauf(c);
       });
       lauf(t);
@@ -293,7 +305,8 @@ nav.subnav a.on{color:#323E4E;border-bottom-color:#323E4E;}
         <button type="button" class="kgd-wb" data-cmd="bold" title="Fett">${ic('fett', 18)}</button>
         <button type="button" class="kgd-wb" data-cmd="italic" title="Kursiv">${ic('kursiv', 18)}</button>
         <button type="button" class="kgd-wb" data-cmd="underline" title="Unterstrichen">${ic('unterstrichen', 18)}</button>
-        <button type="button" class="kgd-wb leucht" data-cmd="leucht" title="Leuchtstift">${ic('leuchtstift', 18)}</button><span class="kgd-sep"></span>
+        <button type="button" class="kgd-wb leucht" data-cmd="leucht" title="Leuchtstift">${ic('leuchtstift', 18)}</button>
+        <button type="button" class="kgd-wb gross" data-cmd="gross" title="Grösser">A+</button><span class="kgd-sep"></span>
         <button type="button" class="kgd-wb" data-cmd="insertUnorderedList" title="Aufzählung">${ic('aufzaehlung', 18)}</button>
         <button type="button" class="kgd-wb" data-cmd="insertOrderedList" title="Nummerierung">${ic('nummerierung', 18)}</button><span class="kgd-sep"></span>
         <button type="button" class="kgd-wb" data-cmd="undo" title="Rückgängig">${ic('undo', 18)}</button>
@@ -338,7 +351,7 @@ nav.subnav a.on{color:#323E4E;border-bottom-color:#323E4E;}
         gezogen.classList.remove('zieht'); gezogen = null;
       });
       const chipsFormatieren = cmd => {
-        const k = { bold: 'fb', italic: 'fi', underline: 'fu', leucht: 'fl' }[cmd], s = getSelection();
+        const k = { bold: 'fb', italic: 'fi', underline: 'fu', leucht: 'fl', gross: 'fg' }[cmd], s = getSelection();
         if(!k || !s.rangeCount) return false;
         const r = s.getRangeAt(0), chips = [...ed.querySelectorAll('.kgd-ph')].filter(x => r.intersectsNode(x));
         if(!chips.length) return false;
@@ -355,6 +368,15 @@ nav.subnav a.on{color:#323E4E;border-bottom-color:#323E4E;}
           if(c === 'leucht'){
             const farbe = document.queryCommandValue('hiliteColor') || document.queryCommandValue('backColor') || '';
             document.execCommand('hiliteColor', false, /232, 237, 176|e8edb0/i.test(farbe) ? 'transparent' : '#E8EDB0');
+          } else if(c === 'gross'){
+            // Text grösser/normal: Markierung in <span class="fg"> (über <font size>), bzw. bestehendes .fg auflösen
+            const s = getSelection(), n = s.anchorNode && (s.anchorNode.nodeType === 3 ? s.anchorNode.parentElement : s.anchorNode);
+            const ist = n && n.closest && n.closest('.kgd-ed span.fg:not(.kgd-ph)');
+            if(ist) ist.replaceWith(...ist.childNodes);
+            else {
+              document.execCommand('fontSize', false, '4');
+              ed.querySelectorAll('font').forEach(f => { const sp = document.createElement('span'); sp.className = 'fg'; sp.append(...f.childNodes); f.replaceWith(sp); });
+            }
           } else document.execCommand(c, false, null);
         });
       });
