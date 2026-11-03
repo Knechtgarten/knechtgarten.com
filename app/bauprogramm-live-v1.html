@@ -214,7 +214,7 @@ html.bp-fenster .prog,html.bp-fenster .lscroll,html.bp-fenster .geruest{height:a
 </div></nav>
 <span class="kwahl" data-kg-seite="links"><input class="t" id="kundeSuche" placeholder="Baustelle / Kunde wählen …" autocomplete="off"><span class="menue hidden" id="kundeMenue"></span></span>
 <label class="lbl" data-kg-seite="mitte" style="display:none">Start <input class="t" type="date" id="start"></label>
-<button type="button" class="btn ghost" data-kg-seite="mitte" id="zumProgBtn" title="Zum Anfang des Programms scrollen">Zum Programm</button>
+<span class="kg-seg" data-kg-seite="mitte" id="springen"><button type="button" data-spr="anfang" title="Zum Anfang (mit einer Woche davor)">Anfang</button><button type="button" data-spr="mitte" title="In die Mitte von Programm und Planer-Balken">Mitte</button><button type="button" data-spr="ende" title="Zum Ende (mit einer Woche danach)">Ende</button></span>
 <button type="button" class="btn ghost" data-kg-seite="rechts" id="druckBtn">Drucken / PDF</button>
 <button type="button" class="kg-ibtn hidden" data-kg-seite="rechts" id="zuBtn" title="Schliessen (zurück zum Planer)" aria-label="Schliessen"></button>
 <main id="appMain"></main>
@@ -474,10 +474,23 @@ function aufbau(){
   zumProgramm();
 }
 // «Zum Programm»: zum ersten Feld scrollen
-function zumProgramm(){
-  const el = document.querySelector('#raster .blk'), P = $('prog');
-  if(el && P) P.scrollTop = Math.max(0, el.offsetTop - 50);
+// Springen: Anfang = eine leere Woche über dem Start, Ende = eine Woche unter dem letzten Eintrag,
+// Mitte = Mitte von Programm und Planer-Balken des Vorarbeiters
+function zeileOben(d){ const i = Math.round((d - T0) / 864e5), t = document.querySelector(`#raster .tag[data-i="${i}"]`); return t ? t.offsetTop : null; }
+function springen(wo){
+  const P = $('prog'); if(!P || !T0) return;
+  rechnen();
+  // nur Planer-Balken in der Nähe des Programms (gleicher Bereich wie in der Ansicht)
+  const s0 = B.length ? B[0].von : startDatum(), e0 = B.length ? B[B.length - 1].bis : s0;
+  const va = PL.find(x => x.va), ein = va ? va.ein.filter(x => !x.hilfe && D(x.bis) >= plus(s0, -45) && D(x.von) <= plus(e0, 90)) : [];
+  const von = [B.length ? B[0].von : null, ...ein.map(x => D(x.von))].filter(Boolean).reduce((a, b) => b < a ? b : a, B.length ? B[0].von : startDatum());
+  const bis = [B.length ? B[B.length - 1].bis : null, ...ein.map(x => D(x.bis))].filter(Boolean).reduce((a, b) => b > a ? b : a, B.length ? B[B.length - 1].bis : startDatum());
+  const kopf = 40;
+  if(wo === 'ende'){ const y = zeileOben(plus(bis, 8)); if(y != null) P.scrollTop = Math.max(0, y - P.clientHeight); return; }
+  if(wo === 'mitte'){ const y1 = zeileOben(von), y2 = zeileOben(bis); if(y1 != null && y2 != null) P.scrollTop = Math.max(0, (y1 + y2) / 2 - P.clientHeight / 2); return; }
+  const y = zeileOben(plus(von, -((von.getDay() + 6) % 7) - 7)); if(y != null) P.scrollTop = Math.max(0, y - kopf);
 }
+const zumProgramm = () => setTimeout(() => springen('anfang'), 30);
 let T0 = null; // erster Tag der Ansicht
 const D = v => new Date(v + 'T12:00');
 const atZwischen = (a, b) => { let n = 0; for(let d = plus(a, 1); d <= b; d = plus(d, 1)) if(arbeitstag(d)) n++; return n; };
@@ -578,9 +591,6 @@ function zeichnen(){
       ${DARF ? `<span class="griff" data-griff="${p.id}" title="Ziehen = länger/kürzer"></span>` : ''}</div>`;
     h += ['mat', 'sub', 'notiz'].map((f, i) => `<textarea class="infot" data-feld="${f}" data-tp="${p.id}" style="grid-column:${cA + 1 + i};grid-row:${r1}/${r2}" aria-label="${['Spez. Material', 'Subunternehmer', 'Notiz'][i]} zu ${esc(teilName(p))}"${DARF ? '' : ' readonly'}>${esc(p[f] || '')}</textarea>`).join('');
   });
-  // Linie, wo der Vorarbeiter-Balken im Planer endet
-  const pe = planerEnde();
-  if(pe && B.length && zeile(pe.bis) > 1) h += `<div class="plende" style="grid-column:1/-1;grid-row:${zeile(pe.bis)};border-color:${pe.farbe}"><span style="left:${nP * 28 + 110}px;background:${pe.farbe};color:${KG.textAuf(pe.farbe)}">${esc(pe.name)} im Planer bis ${kurz(pe.bis)}</span></div>`;
   R.innerHTML = h;
   if($('lsInner')) $('lsInner').style.height = $('prog').scrollHeight + 'px';
   geruest(); chips(ende); binden(); detail();
@@ -723,7 +733,7 @@ async function speichern(){
   if(e3) toast('Speichern fehlgeschlagen: ' + e3.message, true);
 }
 $('start').addEventListener('change', () => { if(KUNDE){ geaendert(); zumProgramm(); } });
-$('zumProgBtn').addEventListener('click', zumProgramm);
+document.querySelectorAll('[data-spr]').forEach(b => b.addEventListener('click', () => springen(b.dataset.spr)));
 // Ausdruck: eine Zeile pro Tag (Wochentag · Datum · Arbeiten · Spez. Material · Subunternehmer · Notizen), wie das Google-Sheet-Bauprogramm.
 // Arbeiten = Teilschritt des Tages (bei mehreren Teilschritten nach Tagen verteilt), Material/Subunternehmer/Notiz am ersten Tag des Felds,
 // Abwesenheiten der Leute aus dem Planer in den Notizen.
