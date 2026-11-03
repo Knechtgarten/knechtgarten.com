@@ -68,6 +68,11 @@ tr.offertenrow td{padding:0;border-bottom:1px solid var(--soft);}
 .offertenwrap td{padding:5px 8px 5px 0;font-size:12.5px;}
 .offertenwrap tr+tr td{border-top:1px solid var(--line);}
 .offertenwrap .leer{padding:10px 0;color:var(--muted);font-size:12px;}
+.offertenwrap .ebkopf{display:flex;align-items:center;gap:10px;margin:12px 0 4px;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);}
+.offertenwrap .ebkopf span{flex:1;}
+.ebtyp{font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;display:inline-block;width:62px;text-align:center;background:#D6E7F4;color:#323E4E;}
+.ebtyp.ab{background:#DCEEDC;color:#2f6b2f;}
+.ebstand{font-size:11.5px;color:var(--muted);white-space:nowrap;}
 .statuspill{font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;display:inline-block;width:62px;text-align:center;}
 .statuspill.bestaetigt{background:#DCEEDC;color:#2f6b2f;}
 .statuspill.abgelehnt{background:#F4DEDC;color:#a3453d;}
@@ -221,6 +226,8 @@ tr.offertenrow td{padding:0;border-bottom:1px solid var(--soft);}
   <div class="card">
     <div class="cardlabel">Kunden</div>
     <div class="addbtn-row">
+      <span class="ebstand" id="ebStand" data-kg-seite="rechts"></span>
+      <button type="button" class="btn kg-neben" id="ebAbgleichBtn" data-kg-seite="rechts" title="Kunden und Auftragsbestätigungen der letzten zwei Jahre aus Easybill holen (läuft auch jede Nacht)">Alles aus Easybill holen</button>
       <button type="button" class="btn kg-neben" id="kundeImportBtn" data-kg-seite="rechts" data-kg-recht="offerten.kunden.erstellen">Von Easybill importieren</button>
       <button type="button" class="btn kg-haupt" id="kundeNeuBtn" data-kg-seite="rechts" data-kg-recht="offerten.kunden.erstellen">+ Neuer Temp. Kunde</button>
     </div>
@@ -456,6 +463,49 @@ async function ladeOffertenFuerKunde(kundeId){
     .order('datum', { ascending:false });
   if(error){ showToast(friendlyError(error), true); return; }
   OFFERTEN_PRO_KUNDE[kundeId] = data || [];
+  await ladeEasybillDokumente(kundeId);
+}
+
+// Auftragsbestätigungen und Angebote aus dem Easybill-Abgleich (Tabelle easybill_dokument, nur lesend)
+let EB_PRO_KUNDE = {};
+async function ladeEasybillDokumente(kundeId){
+  const { data, error } = await sb.from('easybill_dokument')
+    .select('easybill_id,typ,nummer,titel,datum,betrag_netto,positionen,angebot_nummern')
+    .eq('kunde_id', kundeId).order('datum', { ascending: false });
+  if(error){ showToast(friendlyError(error), true); return; }
+  EB_PRO_KUNDE[kundeId] = data || [];
+}
+function renderEasybillDokumente(k){
+  const liste = EB_PRO_KUNDE[k.id];
+  const knopf = k.easybill_id ? `<button type="button" class="btn eb-kunde" data-id="${k.id}" style="padding:2px 8px;font-size:10.5px;line-height:1.6;">Jetzt aus Easybill holen</button>` : '';
+  const kopf = `<div class="ebkopf"><span>Aus Easybill · Auftragsbestätigungen und Angebote</span>${knopf}</div>`;
+  if(!k.easybill_id) return kopf + '<div class="leer">Nicht mit Easybill verknüpft.</div>';
+  if(!liste) return kopf + '<div class="leer">Lädt …</div>';
+  if(!liste.length) return kopf + '<div class="leer">Noch nichts geholt. Ältere Auftragsbestätigungen holst du mit «Jetzt aus Easybill holen».</div>';
+  const titel = d => d.titel && !/^Auftragsbest/i.test(d.titel) ? d.titel
+    : ((d.positionen || []).find(p => p.typ === 'POSITION' && p.text) || {}).text?.split('\n')[0] || '';
+  return kopf + `<table><tbody>${liste.map(d => `<tr>
+      <td style="width:60px;padding-right:0;"><span class="ebtyp${d.typ === 'ORDER' ? ' ab' : ''}">${d.typ === 'ORDER' ? 'AB' : 'Angebot'}</span></td>
+      <td style="white-space:nowrap">${d.nummer || ''}</td>
+      <td>${escHtml(titel(d))}${d.typ === 'ORDER' && d.angebot_nummern?.length ? ` <span style="color:var(--muted)">· Angebote ${d.angebot_nummern.join(', ')}</span>` : ''}</td>
+      <td style="white-space:nowrap">${d.datum ? d.datum.split('-').reverse().join('.') : ''}</td>
+      <td style="white-space:nowrap;text-align:right">${fmtCHF(d.betrag_netto)}</td></tr>`).join('')}</tbody></table>`;
+}
+const escHtml = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+async function easybillAbgleich(body, btn){
+  const alt = btn.textContent; btn.disabled = true; btn.textContent = 'Hole aus Easybill …';
+  const { data, error } = await sb.functions.invoke('easybill-abgleich', { body });
+  btn.disabled = false; btn.textContent = alt;
+  const fehler = (data && data.error) || (error && error.message);
+  if(fehler){ showToast('Easybill-Abgleich: ' + fehler, true); return null; }
+  showToast(`Aus Easybill geholt: ${data.kunden} Kunde${data.kunden === 1 ? '' : 'n'}, ${data.auftragsbestaetigungen} Auftragsbestätigungen, ${data.angebote} Angebote.`);
+  return data;
+}
+async function zeigeAbgleichStand(){
+  const { data } = await sb.from('easybill_abgleich').select('beendet,fehler,modus').in('modus', ['nacht', 'alles']).not('beendet', 'is', null).order('beendet', { ascending: false }).limit(1);
+  const l = data && data[0];
+  $('ebStand').textContent = !l ? 'Noch kein Abgleich' : l.fehler ? 'Letzter Abgleich fehlgeschlagen'
+    : 'Abgleich: ' + new Date(l.beendet).toLocaleString('de-CH', { day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 async function ladeKundenListe(){
@@ -561,7 +611,7 @@ function renderKundenTable(){
         <button type="button" class="icobtn danger km-delete" data-kg-recht="offerten.kunden.loeschen" data-id="${k.id}" title="Löschen">${ICON.trash}</button>
       </td>
     </tr>
-    ${geoeffneterKunde === k.id ? `<tr class="offertenrow"><td colspan="9"><div class="offertenwrap">${renderOffertenTabelle(k.id)}</div></td></tr>` : ''}
+    ${geoeffneterKunde === k.id ? `<tr class="offertenrow"><td colspan="9"><div class="offertenwrap">${renderOffertenTabelle(k.id)}${renderEasybillDokumente(k)}</div></td></tr>` : ''}
   `).join('') || '<tr><td colspan="9" class="leer" style="padding:14px;color:var(--muted);">Keine Kunden gefunden.</td></tr>';
 
   document.querySelectorAll('tr.kundenrow').forEach(tr => {
@@ -573,6 +623,13 @@ function renderKundenTable(){
         await ladeOffertenFuerKunde(id);
         if(geoeffneterKunde === id) renderKundenTable();
       }
+    });
+  });
+  document.querySelectorAll('.eb-kunde').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.id;
+      if(await easybillAbgleich({ modus: 'kunde', kunde_id: id }, btn)){ await ladeEasybillDokumente(id); renderKundenTable(); }
     });
   });
   document.querySelectorAll('.km-edit').forEach(btn => {
@@ -760,6 +817,9 @@ function openEasybillImport(kundeId){
   $('kvSearchInput').focus();
 }
 $('kundeImportBtn').addEventListener('click', () => openEasybillImport(null));
+$('ebAbgleichBtn').addEventListener('click', async e => {
+  if(await easybillAbgleich({ modus: 'alles' }, e.currentTarget)){ EB_PRO_KUNDE = {}; OFFERTEN_PRO_KUNDE = {}; await Promise.all([loadKunden(), zeigeAbgleichStand()]); }
+});
 $('kvCancel').addEventListener('click', () => $('kundeVerknuepfenOvl').classList.remove('show'));
 
 $('kvSearchInput').addEventListener('input', () => {
@@ -829,7 +889,7 @@ async function uebernehmeEasybillKunde(kundeId, ek){
 }
 
 async function init(){
-  await loadKunden();
+  await Promise.all([loadKunden(), zeigeAbgleichStand()]);
 }
 const $loginwrap = document.getElementById('loginwrap');
 const $pendingWrap = document.getElementById('pendingWrap');
