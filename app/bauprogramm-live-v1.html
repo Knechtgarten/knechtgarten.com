@@ -45,7 +45,8 @@ nav.subnav a.on{color:#323E4E;border-bottom-color:#323E4E;}
 .chip{font-size:12.5px;padding:4px 10px;border-radius:99px;background:#F5F7F9;border:1px solid #D5DBE1;color:#4C5C70;}
 .chip b{color:#323E4E;font-variant-numeric:tabular-nums;}
 .chip.warn{background:#F9D3B2;border-color:#E57E34;color:#8A3F12;}
-.haupt{display:grid;grid-template-columns:minmax(0,1fr);}
+.haupt{display:grid;grid-template-columns:14px minmax(0,1fr);}
+.lscroll{overflow-y:scroll;overflow-x:hidden;height:calc(100vh - 150px);border-right:1px solid #EEF1F4;background:#fff;} .lscroll > div{width:1px;}
 /* Drei Ebenen nebeneinander gestaffelt, je ein Drittel sichtbar: vorne Arbeitsschritt, Mitte Teilschritte, hinten Angebot.
    Ein Arbeitstag = 24 px hoch, Wochenende 10 px. */
 .ang{margin:1px 2px;border-radius:7px;z-index:1;position:relative;}
@@ -106,7 +107,7 @@ html.bp-fenster,html.bp-fenster body{height:100%;overflow:hidden;}
 html.bp-fenster body{display:flex;flex-direction:column;}
 html.bp-fenster #appMain{flex:1;min-height:0;display:flex;flex-direction:column;}
 html.bp-fenster .haupt{flex:1;min-height:0;grid-template-rows:minmax(0,1fr);}
-html.bp-fenster .prog{height:auto;min-height:0;}
+html.bp-fenster .prog,html.bp-fenster .lscroll{height:auto;min-height:0;}
 .kopf{position:sticky;top:0;z-index:3;background:#F5F7F9;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:#8B9097;font-weight:600;padding:8px 10px;border-bottom:1px solid #D5DBE1;}
 .tag{font-size:12.5px;color:#4C5C70;padding:0 10px;display:flex;align-items:center;gap:6px;border-bottom:1px solid #EEF1F4;font-variant-numeric:tabular-nums;white-space:nowrap;}
 .tag b{width:22px;color:#323E4E;}
@@ -114,6 +115,7 @@ html.bp-fenster .prog{height:auto;min-height:0;}
 .tag.fei{background:#FAEBB0;color:#8A6410;font-size:11.5px;overflow:hidden;}
 .zelle{border-bottom:1px solid #EEF1F4;}
 .zelle.frei{background:#F5F7F9;} .zelle.fei{background:#FCF5D8;}
+.zelle.ziel-tag{background:#D6E7F4!important;box-shadow:inset 0 2px 0 #323E4E;}
 .ziel-leer{grid-column:2/5;margin:8px;border:2px dashed #D5DBE1;border-radius:10px;display:flex;align-items:center;justify-content:center;text-align:center;padding:16px;color:#6B7079;font-size:14px;line-height:1.5;z-index:1;background:rgba(255,255,255,.85);}
 .ziel-leer.ziel,.ende.ziel{border-color:#323E4E;color:#323E4E;background:#D6E7F4;}
 .ende{grid-column:2/5;margin:4px 8px;border:1.5px dashed #D5DBE1;border-radius:8px;font-size:12px;color:#8B9097;display:flex;align-items:center;justify-content:center;z-index:1;}
@@ -128,7 +130,7 @@ html.bp-fenster .prog{height:auto;min-height:0;}
 .dlg h3{margin:0;font-size:17px;color:#323E4E;} .dlg p{margin:0;font-size:13.5px;line-height:1.45;color:#6B7079;}
 .dlg .knoepfe{display:flex;gap:8px;justify-content:flex-end;}
 @media print{
-  header.app,nav.subnav,.kg-seite,.detail,.chips,.as .griff,.as .ic,.ts .sch,.ang .lap > svg{display:none!important;}
+  header.app,nav.subnav,.kg-seite,.detail,.chips,.lscroll,.as .griff,.as .ic,.ts .sch,.ang .lap > svg{display:none!important;}
   body{background:#fff;} .haupt{display:block;} .prog{height:auto;overflow:visible;border:0;}
   .as{box-shadow:none;break-inside:avoid;} .druckkopf{display:block!important;}
   @page{size:A4 portrait;margin:12mm;}
@@ -150,6 +152,7 @@ html.bp-fenster .prog{height:auto;min-height:0;}
 </div></nav>
 <span class="kwahl" data-kg-seite="links"><input class="t" id="kundeSuche" placeholder="Baustelle / Kunde wählen …" autocomplete="off"><span class="menue hidden" id="kundeMenue"></span></span>
 <label class="lbl" data-kg-seite="mitte">Start <input class="t" type="date" id="start"></label>
+<button type="button" class="btn ghost" data-kg-seite="mitte" id="zumProgBtn" title="Zum Anfang des Programms scrollen">Zum Programm</button>
 <button type="button" class="btn ghost" data-kg-seite="rechts" id="druckBtn">Drucken / PDF</button>
 <button type="button" class="kg-ibtn hidden" data-kg-seite="rechts" id="zuBtn" title="Schliessen (zurück zum Planer)" aria-label="Schliessen"></button>
 <main id="appMain"></main>
@@ -380,11 +383,29 @@ const arbeitstag = d => d.getDay() !== 0 && d.getDay() !== 6 && !FEIERTAGE[iso(d
 
 // ---------------------------------------------------------------- Ansicht
 let gewaehlt = null, ziehen = null;
+// Ansicht endlos: der sichtbare Zeitraum (VON–BIS) wächst beim Scrollen an den Rand um je 8 Wochen und schrumpft nie,
+// damit beim Verschieben nichts springt. Links ein zweiter Scrollbalken, synchron mit dem rechten.
+let VON = null, BIS = null;
 function aufbau(){
+  VON = BIS = null;
   $('appMain').innerHTML = `<div class="chips" id="chips"></div><div class="haupt${DARF ? '' : ' nurlesen'}">
+      <div class="lscroll" id="lscroll" aria-hidden="true"><div id="lsInner"></div></div>
       <div class="prog" id="prog"><div class="druckkopf">Bauprogramm ${esc(kname(KUNDE))}</div><div class="raster" id="raster"></div></div></div>
     <div class="detail hidden" id="detail"></div>`;
+  const P = $('prog'), L = $('lscroll'); let sync = false;
+  P.addEventListener('scroll', () => {
+    if(!sync){ sync = true; L.scrollTop = P.scrollTop; requestAnimationFrame(() => sync = false); }
+    if(P.scrollTop < 80){ const h0 = P.scrollHeight; VON = plus(VON, -56); zeichnen(); P.scrollTop += P.scrollHeight - h0; }
+    else if(P.scrollTop + P.clientHeight > P.scrollHeight - 80){ BIS = plus(BIS, 56); zeichnen(); }
+  });
+  L.addEventListener('scroll', () => { if(!sync){ sync = true; P.scrollTop = L.scrollTop; requestAnimationFrame(() => sync = false); } });
   zeichnen();
+  zumProgramm();
+}
+// «Zum Programm»: zum ersten Block scrollen
+function zumProgramm(){
+  const el = document.querySelector('#raster .ang'), P = $('prog');
+  if(el && P) P.scrollTop = Math.max(0, el.offsetTop - 50);
 }
 let T0 = null; // erster Tag der Ansicht (kann vor dem Start liegen, wenn der Planer früher beginnt)
 const D = v => new Date(v + 'T12:00');
@@ -399,6 +420,10 @@ function zeichnen(){
   const sicht = PL.filter(p => p.va || HILFE), unten = plus(s, -45), oben = plus(ende, 90);
   let a = new Date(s), z = plus(ende, G.length ? 3 : 0);
   sicht.forEach(p => p.ein.forEach(x => { if(D(x.bis) < unten || D(x.von) > oben) return; if(D(x.von) < a) a = D(x.von); if(D(x.bis) > z) z = D(x.bis); }));
+  // Zeitraum nur vergrössern: 4 Wochen vor, 8 Wochen nach dem Programm, beim Scrollen mehr
+  a = plus(a, -28); z = plus(z, 56);
+  if(!VON || a < VON) VON = a; else a = VON;
+  if(!BIS || z > BIS) BIS = z; else z = BIS;
   T0 = a;
   const tage = []; for(let d = new Date(a); d <= z; d = plus(d, 1)) tage.push(new Date(d));
   const zeile = d => tage.findIndex(x => iso(x) === iso(d)) + 2;
@@ -416,7 +441,7 @@ function zeichnen(){
     const fei = FEIERTAGE[iso(d)], frei = !arbeitstag(d), kl = fei ? ' fei' : frei ? ' frei' : '';
     h += `<div class="plz${kl}" style="grid-column:1/${nP + 1};grid-row:${i + 2}"></div>`;
     h += `<div class="tag${kl}" data-i="${i}" style="grid-column:${cT};grid-row:${i + 2}"><b>${WT[d.getDay()]}</b>${fei ? esc(fei) : kurz(d)}</div>`;
-    for(let c = cA; c <= cA + 3; c++) h += `<div class="zelle${kl}" style="grid-column:${c};grid-row:${i + 2}"></div>`;
+    for(let c = cA; c <= cA + 3; c++) h += `<div class="zelle${kl}"${c === cA ? ` data-di="${i}"` : ""} style="grid-column:${c};grid-row:${i + 2}"></div>`;
   });
   // Planer-Balken hochkant, an Wochenenden und Feiertagen unterbrochen
   const laeufe = (von, bis) => { const out = []; let cur = null;
@@ -466,6 +491,7 @@ function zeichnen(){
   const pe = planerEnde();
   if(pe && G.length && zeile(pe.bis) > 1) h += `<div class="plende" style="grid-column:1/-1;grid-row:${zeile(pe.bis)};border-color:${pe.farbe}"><span style="left:${nP * 28 + 110}px;background:${pe.farbe};color:${KG.textAuf(pe.farbe)}">${esc(pe.name)} im Planer bis ${kurz(pe.bis)}</span></div>`;
   R.innerHTML = h;
+  if($("lsInner")) $("lsInner").style.height = $("prog").scrollHeight + "px";
   chips(ende); binden(); detail();
 }
 // Ende des (ersten) Vorarbeiters im Planer, nur Baustellen-Balken
@@ -515,6 +541,18 @@ function binden(){
         const i = G.findIndex(x => x.id === z0.g), [m] = G.splice(i, 1); let j = G.findIndex(x => x.id === zielG); if(unten(e, zEl)) j++; G.splice(j, 0, m);
       }
       geaendert(); });
+  });
+  // Auf einen freien Tag ziehen = dort beginnen: erstes Angebot verschiebt den Start, sonst fixes Datum auf dem ersten Teil
+  // (früher als möglich = rot «zu spät»). Gilt nur fürs Bauprogramm, im Planer ändert sich nichts.
+  R.querySelectorAll('.zelle[data-di]').forEach(c => {
+    c.addEventListener('dragover', e => { if(!ziehen) return; e.preventDefault(); R.querySelectorAll('.ziel-tag').forEach(x => x.classList.remove('ziel-tag')); c.classList.add('ziel-tag'); });
+    c.addEventListener('dragleave', () => c.classList.remove('ziel-tag'));
+    c.addEventListener('drop', e => { if(!ziehen) return; e.preventDefault(); c.classList.remove('ziel-tag'); const z0 = ziehen; ziehen = null;
+      let d = plus(T0, +c.dataset.di); while(!arbeitstag(d)) d = plus(d, 1);
+      if(z0.p){ const { p } = teilVon(z0.p); if(p) p.fix = iso(d); }
+      else { const g = G.find(x => x.id === z0.g); if(!g) return;
+        if(G.indexOf(g) === 0){ $('start').value = iso(d); g.teile[0].fix = null; } else g.teile[0].fix = iso(d); }
+      geaendert(); toast('Beginnt jetzt am ' + kurz(d) + '. Fixes Datum entfernen: Arbeitsschritt anklicken.'); });
   });
   // Herauslösen: eigener Block (gestreifter Lappen «aus …») direkt nach dem Angebot
   R.querySelectorAll('[data-los]').forEach(b => b.onclick = e => { e.stopPropagation(); const g = G.find(x => x.id === b.dataset.lg), i = g.teile.findIndex(x => x.id === b.dataset.los), [p] = g.teile.splice(i, 1);
@@ -583,7 +621,8 @@ async function speichern(){
   const { error: e3 } = ids.length ? await q.not('id', 'in', `(${ids.join(',')})`) : await q;
   if(e3) toast('Speichern fehlgeschlagen: ' + e3.message, true);
 }
-$('start').addEventListener('change', () => { if(KUNDE) geaendert(); });
+$('start').addEventListener('change', () => { if(KUNDE){ geaendert(); zumProgramm(); } });
+$('zumProgBtn').addEventListener('click', zumProgramm);
 $('druckBtn').addEventListener('click', () => { if(!KUNDE) return toast('Zuerst eine Baustelle wählen.', true); gewaehlt = null; zeichnen(); window.print(); });
 window.addEventListener('beforeunload', () => { if(speicherTimer) speichern(); });
 start();
