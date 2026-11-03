@@ -50,7 +50,9 @@
     kran:       { daten: ['adresse', 'termin', 'zusatz', 'pl', 'va'], pflicht: w => !w.datum ? 'Datum fehlt.' : !adresse(w) ? 'Adresse fehlt.' : '',
                   dateiname: w => `${w.datum || ''} Kraneinsatz ${w.strasse || ''}`.trim() }
   };
-  const FMT = ['fb', 'fi', 'fu', 'fl', 'fg']; // Format eines Chips: fett, kursiv, unterstrichen, Leuchtstift, grösser
+  const GROESSEN = [['fxs', 'Sehr klein'], ['fs', 'Klein'], ['', 'Normal'], ['fg', 'Gross'], ['fxl', 'Sehr gross']]; // Schriftgrössen (Klasse, Name)
+  const GK = GROESSEN.map(g => g[0]).filter(Boolean);
+  const FMT = ['fb', 'fi', 'fu', 'fl', ...GK]; // Format eines Chips: fett, kursiv, unterstrichen, Leuchtstift, Grösse
 
   const CSS = `
 body{margin:0;background:#F5F7F9;color:#232B35;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;font-size:14px;line-height:1.4;}
@@ -116,7 +118,7 @@ nav.subnav a.on{color:#323E4E;border-bottom-color:#323E4E;}
 .kgd-adminband{display:flex;align-items:center;gap:8px;padding:7px 16px;background:#F4CDD5;color:#7A2638;font-size:13px;font-weight:600;flex-wrap:wrap;}
 .kgd-adminband span.t{flex:1;min-width:200px;}
 .kgd-rand{width:760px;max-width:100%;container-type:inline-size;}
-.kgd-blatt{background:#fff;min-height:calc(100cqw * 297 / 210);box-shadow:0 2px 14px rgba(20,28,38,.16);font-family:"Jost","Futura","Century Gothic",-apple-system,"Segoe UI",sans-serif;color:#232B35;display:flex;flex-direction:column;font-size:clamp(9.5px,1.75cqw,13.5px);line-height:1.5;}
+.kgd-blatt{background:#fff;min-height:calc(100cqw * 297 / 210);box-shadow:0 2px 14px rgba(20,28,38,.16);font-family:"Jost","Futura","Century Gothic",-apple-system,"Segoe UI",sans-serif;color:#232B35;display:flex;flex-direction:column;--b:clamp(9.5px,1.75cqw,13.5px);font-size:var(--b);line-height:1.5;}
 .kgd-kopf{display:flex;justify-content:flex-end;padding:6cqw 9cqw 0;}
 .kgd-logo{width:22cqw;}
 .kgd-haupt{padding:7cqw 13cqw 2em;display:flex;flex-direction:column;flex:1;}
@@ -129,8 +131,8 @@ nav.subnav a.on{color:#323E4E;border-bottom-color:#323E4E;}
 .kgd-pers + .kgd-pers{margin-top:1.2em;}
 .kgd-mail{color:#2F5C9A;text-decoration:underline;}
 .kgd-fuss{padding:1em 9cqw 5cqw;text-align:center;font-size:.92em;}
-.fb{font-weight:700;} .fi{font-style:italic;} .fu{text-decoration:underline;} .fl{background:#E8EDB0;} .fg{font-size:1.15em;}
-.kgd-wb.gross{font-weight:700;font-size:13px;width:auto;padding:0 6px;}
+.fb{font-weight:700;} .fi{font-style:italic;} .fu{text-decoration:underline;} .fl{background:#E8EDB0;}
+.fxs{font-size:calc(var(--b) * .8);} .fs{font-size:calc(var(--b) * .9);} .fg{font-size:calc(var(--b) * 1.15);} .fxl{font-size:calc(var(--b) * 1.35);}
 .kgd-mark .w{background:#D6E7F4;border-radius:3px;box-shadow:0 0 0 2px #D6E7F4;}
 .kgd-mark .kgd-pers.w{box-shadow:0 0 0 6px #D6E7F4;}
 .kgd-mark .w.fl{background:#E8EDB0;}
@@ -193,7 +195,7 @@ nav.subnav a.on{color:#323E4E;border-bottom-color:#323E4E;}
   body{background:#fff;}
 }
 .kgd-a4{width:210mm;container-type:inline-size;}
-.kgd-a4 .kgd-blatt{box-shadow:none;height:296.5mm;min-height:0;overflow:hidden;font-size:13.5px;}
+.kgd-a4 .kgd-blatt{box-shadow:none;height:296.5mm;min-height:0;overflow:hidden;--b:13.5px;}
 @media (max-width:760px){
   .kgd-start{grid-template-columns:1fr;} .kgd-ordner{border-right:0;border-bottom:1px solid #D5DBE1;}
   .kgd-flaeche{padding:12px 8px 24px;} .kgd-typen{padding:14px 12px;}
@@ -280,8 +282,8 @@ nav.subnav a.on{color:#323E4E;border-bottom-color:#323E4E;}
       const ERLAUBT = new Set(['H2', 'P', 'UL', 'OL', 'LI', 'B', 'STRONG', 'I', 'EM', 'U', 'SPAN', 'BR', 'DIV']);
       const t = document.createElement('div'); t.innerHTML = html || '';
       const lauf = n => [...n.children].forEach(c => {
-        if(c.tagName === 'FONT'){ // aus «A+»: Grösse 4 und mehr = .fg, sonst normal
-          const s = document.createElement('span'); if(+c.getAttribute('size') >= 4) s.className = 'fg';
+        if(c.tagName === 'FONT'){ // Rest aus execCommand('fontSize'): ohne Grössenklasse = normal
+          const s = document.createElement('span');
           s.append(...c.childNodes); c.replaceWith(s); c = s;
         }
         if(!ERLAUBT.has(c.tagName)){ c.replaceWith(...c.childNodes); lauf(n); return; }
@@ -306,7 +308,8 @@ nav.subnav a.on{color:#323E4E;border-bottom-color:#323E4E;}
         <button type="button" class="kgd-wb" data-cmd="italic" title="Kursiv">${ic('kursiv', 18)}</button>
         <button type="button" class="kgd-wb" data-cmd="underline" title="Unterstrichen">${ic('unterstrichen', 18)}</button>
         <button type="button" class="kgd-wb leucht" data-cmd="leucht" title="Leuchtstift">${ic('leuchtstift', 18)}</button>
-        <button type="button" class="kgd-wb gross" data-cmd="gross" title="Grösser">A+</button><span class="kgd-sep"></span>
+<span class="kgd-sep"></span>
+        <select class="kgd-wsel" id="kgdGroesse" aria-label="Schriftgrösse" title="Schriftgrösse">${GROESSEN.map(([k, n]) => `<option value="${k}"${k ? '' : ' selected'}>${n}</option>`).join('')}</select><span class="kgd-sep"></span>
         <button type="button" class="kgd-wb" data-cmd="insertUnorderedList" title="Aufzählung">${ic('aufzaehlung', 18)}</button>
         <button type="button" class="kgd-wb" data-cmd="insertOrderedList" title="Nummerierung">${ic('nummerierung', 18)}</button><span class="kgd-sep"></span>
         <button type="button" class="kgd-wb" data-cmd="undo" title="Rückgängig">${ic('undo', 18)}</button>
@@ -320,6 +323,13 @@ nav.subnav a.on{color:#323E4E;border-bottom-color:#323E4E;}
         if(!ed.isConnected){ document.removeEventListener('selectionchange', markierung); return; }
         const s = getSelection(), r = s.rangeCount && !s.isCollapsed && ed.contains(s.anchorNode) ? s.getRangeAt(0) : null;
         ed.querySelectorAll('.kgd-ph').forEach(c => c.classList.toggle('sel', !!r && r.intersectsNode(c)));
+        // Grössen-Auswahl zeigt die Grösse an der Markierung
+        if(s.rangeCount && ed.contains(s.anchorNode)){
+          auswahl = s.getRangeAt(0).cloneRange();
+          const n = s.anchorNode.nodeType === 3 ? s.anchorNode.parentElement : s.anchorNode;
+          const g = n.closest && n.closest(GK.map(k => '.' + k).join(','));
+          const sel = leiste.querySelector('#kgdGroesse'); if(sel) sel.value = g && ed.contains(g) ? GK.find(k => g.classList.contains(k)) : '';
+        }
       };
       document.addEventListener('selectionchange', markierung);
       // Klick auf einen Chip markiert ihn ganz, damit Fett/Kursiv/Leuchtstift auf ihn wirken
@@ -351,7 +361,7 @@ nav.subnav a.on{color:#323E4E;border-bottom-color:#323E4E;}
         gezogen.classList.remove('zieht'); gezogen = null;
       });
       const chipsFormatieren = cmd => {
-        const k = { bold: 'fb', italic: 'fi', underline: 'fu', leucht: 'fl', gross: 'fg' }[cmd], s = getSelection();
+        const k = { bold: 'fb', italic: 'fi', underline: 'fu', leucht: 'fl' }[cmd], s = getSelection();
         if(!k || !s.rangeCount) return false;
         const r = s.getRangeAt(0), chips = [...ed.querySelectorAll('.kgd-ph')].filter(x => r.intersectsNode(x));
         if(!chips.length) return false;
@@ -368,17 +378,25 @@ nav.subnav a.on{color:#323E4E;border-bottom-color:#323E4E;}
           if(c === 'leucht'){
             const farbe = document.queryCommandValue('hiliteColor') || document.queryCommandValue('backColor') || '';
             document.execCommand('hiliteColor', false, /232, 237, 176|e8edb0/i.test(farbe) ? 'transparent' : '#E8EDB0');
-          } else if(c === 'gross'){
-            // Text grösser/normal: Markierung in <span class="fg"> (über <font size>), bzw. bestehendes .fg auflösen
-            const s = getSelection(), n = s.anchorNode && (s.anchorNode.nodeType === 3 ? s.anchorNode.parentElement : s.anchorNode);
-            const ist = n && n.closest && n.closest('.kgd-ed span.fg:not(.kgd-ph)');
-            if(ist) ist.replaceWith(...ist.childNodes);
-            else {
-              document.execCommand('fontSize', false, '4');
-              ed.querySelectorAll('font').forEach(f => { const sp = document.createElement('span'); sp.className = 'fg'; sp.append(...f.childNodes); f.replaceWith(sp); });
-            }
           } else document.execCommand(c, false, null);
         });
+      });
+      // Schriftgrösse: Chips bekommen die Klasse, Text wird über <font size=7> markiert und zu <span class="…"> (Normal = ohne)
+      leiste.querySelector('#kgdGroesse').addEventListener('change', e => {
+        const k = e.target.value, s = getSelection();
+        ed.focus(); if(auswahl){ s.removeAllRanges(); s.addRange(auswahl); }
+        if(!s.rangeCount || s.isCollapsed){ KGD.toast('Zuerst Text markieren.'); e.target.value = ''; return; }
+        const r = s.getRangeAt(0), setze = el => { GK.forEach(x => el.classList.remove(x)); if(k) el.classList.add(k); };
+        [...ed.querySelectorAll('.kgd-ph')].filter(x => r.intersectsNode(x)).forEach(setze);
+        const rest = r.cloneContents(); rest.querySelectorAll('.kgd-ph').forEach(x => x.remove());
+        if(rest.textContent.trim()){
+          document.execCommand('fontSize', false, '7');
+          ed.querySelectorAll('font').forEach(f => {
+            f.querySelectorAll('span').forEach(x => { if(!x.classList.contains('kgd-ph')){ GK.forEach(g => x.classList.remove(g)); if(!x.className) x.replaceWith(...x.childNodes); } });
+            if(k){ const sp = document.createElement('span'); sp.className = k; sp.append(...f.childNodes); f.replaceWith(sp); }
+            else f.replaceWith(...f.childNodes);
+          });
+        }
       });
       leiste.querySelector('#kgdFormat').addEventListener('change', e => {
         ed.focus(); if(auswahl){ const s = getSelection(); s.removeAllRanges(); s.addRange(auswahl); }
