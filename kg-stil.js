@@ -142,11 +142,11 @@
     { k: 'offerten', n: 'Offertentool', url: 'tool-start-live-v1.html', farbe: PAL.blau[1], akzent: PAL.blau[3], modul: 'offertentool',
       seiten: ['tool-start-live-v1', 'tool-a-live-v1', 'tool-a2-allgemein-live-v1', 'tool-a3-artikel-live-v1', 'tool-b-live-v1', 'einstellungen-live-v1'] },
     { k: 'artikel', n: 'Artikelstamm', url: 'tool-c-live-v1.html', farbe: PAL.blau[1], akzent: PAL.blau[3], modul: 'offertentool', seiten: ['tool-c-live-v1', 'lieferant-abgleich-live-v1'] },
-    { k: 'kunden', n: 'Kontakte', url: 'tool-d-kunden-live-v1.html', farbe: PAL.gold[0], akzent: PAL.gold[3], modul: 'offertentool', seiten: ['tool-d-kunden-live-v1'] },
+    // Kontakte = eigenes Haupttool: Kunden, Lieferanten und Pflegekunden (früher «Pflege & Service»)
+    { k: 'kunden', n: 'Kontakte', url: 'tool-d-kunden-live-v1.html', farbe: PAL.gold[0], akzent: PAL.gold[3],
+      seiten: ['tool-d-kunden-live-v1', 'pflege-kunden-live-v1', 'pflege-kategorien-live-v1'] },
     { k: 'pend', n: 'Pendenzen', url: 'pendenzen-live-v1.html', farbe: PAL.orange[1], akzent: PAL.orange[3], modul: 'pendenzen', seiten: ['pendenzen-live-v1'] },
     { k: 'plan', n: 'Einsatzplaner', url: 'einsatzplaner-live-v1.html', farbe: PAL.petrol[1], akzent: PAL.petrol[3], modul: 'einsatzplaner', seiten: ['einsatzplaner-live-v1', 'bauprogramm-live-v1'] },
-    { k: 'pflege', n: 'Pflege & Service', url: 'pflege-kunden-live-v1.html', farbe: PAL.gruen[1], akzent: PAL.gruen[3], modul: 'pflegetool',
-      seiten: ['pflege-kunden-live-v1', 'pflege-kategorien-live-v1'] },
     { k: 'wissen', n: 'Nachschlagewerk', url: 'wissen-live-v1.html', farbe: PAL.violett[1], akzent: PAL.violett[3], modul: 'wissen', seiten: ['wissen-live-v1'] },
     { k: 'werkzeuge', n: 'Werkzeuge', url: 'werkzeuge-live-v1.html', farbe: PAL.grau[1], akzent: PAL.grau[3],
       seiten: ['werkzeuge-live-v1', 'werkzeug-pool-chlor-live-v1', 'werkzeug-pool-salz-live-v1', 'werkzeug-pool-alk-live-v1', 'werkzeug-pool-afm-live-v1',
@@ -347,7 +347,7 @@ header.app.kg-leiste ~ main.wrap{margin-left:0!important;margin-right:auto!impor
     'tool-a2-allgemein-live-v1': ['offerten', 'offerten'], 'tool-a3-artikel-live-v1': ['offerten', 'offerten'],
     'tool-b-live-v1': ['offerten', 'vorlagen'], 'einstellungen-live-v1': ['offerten', 'vorlagen|einstellungen'],
     'tool-c-live-v1': ['offerten', 'artikel'], 'lieferant-abgleich-live-v1': ['offerten', 'artikel'],
-    'tool-d-kunden-live-v1': ['offerten', 'kunden'],
+    'tool-d-kunden-live-v1': [['offerten', 'kunden'], ['pflege', 'kunden']], // Adressen oder Pflege genügt
     'pendenzen-live-v1': ['pend', '_tool'], 'einsatzplaner-live-v1': ['plan', '_tool'], 'bauprogramm-live-v1': ['plan', '_tool'],
     'pflege-kunden-live-v1': ['pflege', 'kunden'], 'pflege-kategorien-live-v1': ['pflege', 'kategorien'],
     'pflege-handy-live-v1': ['pflege', 'jahresplan'], 'wissen-live-v1': ['wissen', '_tool'],
@@ -358,11 +358,12 @@ header.app.kg-leiste ~ main.wrap{margin-left:0!important;margin-right:auto!impor
     'werkzeug-bau-diagonale-live-v1': ['werkzeuge', 'bau_diagonale'], 'werkzeug-bau-kies-live-v1': ['werkzeuge', 'bau_kies'], 'werkzeug-bau-schalit-live-v1': ['werkzeuge', 'bau_schalit'], 'werkzeug-pflege-spritz-live-v1': ['werkzeuge', 'pflege_spritz'], 'werkzeug-allg-volumen-live-v1': ['werkzeuge', 'allg_volumen'], 'werkzeug-allg-gefaelle-live-v1': ['werkzeuge', 'allg_gefaelle'],
     'doku-live-v1': ['doku', '_tool'], 'doku-dokument-live-v1': ['doku', '_tool'], 'doku-datei-live-v1': ['doku', '_tool'], 'doku-personen-live-v1': ['doku', 'personen']
   };
-  const TOOLRECHT = { offerten: ['offerten', 'offerten'], artikel: ['offerten', 'artikel'], kunden: ['offerten', 'kunden'],
+  const TOOLRECHT = { offerten: ['offerten', 'offerten'], artikel: ['offerten', 'artikel'], kunden: [['offerten', 'kunden'], ['pflege', 'kunden']],
     pend: ['pend', '_tool'], plan: ['plan', '_tool'], pflege: ['pflege', '_tool'], wissen: ['wissen', '_tool'],
     werkzeuge: ['werkzeuge', '_tool'], doku: ['doku', '_tool'] };
-  const erlaubt = ziel => { // ziel = [tool, bereich]; true/false, null = ohne Gruppe
+  const erlaubt = ziel => { // ziel = [tool, bereich] oder Liste davon (eine genügt); true/false, null = ohne Gruppe
     if(!ziel || !sicht || !sicht.rechte) return null;
+    if(Array.isArray(ziel[0])) return ziel.some(z => erlaubt(z) === true);
     if(sicht.rechte.admin) return true;
     const [t, b] = ziel;
     if(KG.darf(t, '_tool', 'sichtbar') !== 'J') return false;
@@ -534,9 +535,9 @@ header.app.kg-leiste ~ main.wrap{margin-left:0!important;margin-right:auto!impor
       if(gear){ gear.textContent = 'Vorlagen & Berechnung'; gear.removeAttribute('title'); if(tabs.length) tabs[tabs.length - 1].after(gear); }
       // Unterseiten ohne eigenen Reiter (z. B. Offerten-Eingabe, Tool B): passenden Reiter aktiv markieren
       const mein = SEITENRECHT[seite];
-      if(mein && !kopfNav.querySelector('a.on')) kopfNav.querySelectorAll('a[href]').forEach(a => {
+      if(mein && !Array.isArray(mein[0]) && !kopfNav.querySelector('a.on')) kopfNav.querySelectorAll('a[href]').forEach(a => {
         const z = SEITENRECHT[(a.getAttribute('href') || '').split(/[?#]/)[0].replace(/\.html?$/, '')];
-        if(z && z[0] === mein[0] && z[1].split('|').includes(mein[1].split('|')[0])) a.classList.add('on');
+        if(z && !Array.isArray(z[0]) && z[0] === mein[0] && z[1].split('|').includes(mein[1].split('|')[0])) a.classList.add('on');
       });
     } else if(sub && !head.contains(sub)){
       reiter = sub;
