@@ -185,6 +185,13 @@ button:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
 .card.ingr{margin-left:12px;}
 .card.gzu{display:none;}
 .card{background:#fff;border-radius:6px;height:30px;display:flex;align-items:center;gap:6px;padding:0 6px 0 0;cursor:pointer;border:1px solid transparent;overflow:hidden;flex:none;}
+.card .vst{font-size:10.5px;font-weight:600;color:#4C5C70;background:#EEF1F4;border-radius:99px;padding:1px 7px;white-space:nowrap;line-height:16px;}
+.card .vst.ein{background:#D6E7F4;color:#323E4E;} .card button.vst.neu{all:unset;cursor:pointer;font-size:10.5px;font-weight:600;line-height:16px;padding:0 7px;border-radius:99px;border:1px dashed #8B9097;color:#4C5C70;white-space:nowrap;} .card button.vst.neu:hover{border-color:#323E4E;color:#323E4E;}
+.card.vhell{opacity:.55;}
+.vset .vhint{font-size:13px;color:#6B7079;margin:0;} .vset .vfl{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#6B7079;} .vset input[type=text],.vset input[type=number]{height:34px;border:1px solid #D5DBE1;border-radius:8px;padding:0 10px;font:inherit;font-size:13.5px;box-sizing:border-box;width:100%;}
+.vset .vrw{display:flex;align-items:flex-end;gap:12px;} .vset .vrw .sp{flex:1;} .vset .vrw .vfl{width:110px;} .vset .vck{display:inline-flex;align-items:center;gap:6px;font-size:13px;padding-bottom:8px;}
+.vks{position:relative;display:block;} .vkm{position:absolute;left:0;right:0;top:36px;background:#fff;border:1px solid #D5DBE1;border-radius:8px;box-shadow:0 8px 24px rgba(35,43,53,.15);z-index:5;display:flex;flex-direction:column;max-height:260px;overflow:auto;}
+.vkm button{all:unset;cursor:pointer;padding:6px 10px;display:flex;flex-direction:column;font-size:13px;color:#232B35;} .vkm button small{color:#8B9097;font-size:11.5px;} .vkm button:hover{background:#F5F7F9;} .vkl{padding:8px 10px;font-size:12.5px;color:#8B9097;}
 .card:hover{border-color:var(--line);}
 .card.sel{border-color:var(--primary);}
 .card .pr{all:unset;cursor:pointer;width:6px;align-self:stretch;flex:none;background:#EEF1F4;}
@@ -427,7 +434,7 @@ const AVF = ['#5F8A6B','#4F7C8A','#B07A4A','#6B5F8A','#9A6B7E','#3F6E8C','#7A8F4
 const R = 20, LW = 320;
 
 let ME = null, ROLLE = null;
-const S = { boards:[], mitglieder:[], archiv:null, pick:null, arten:{}, board:null, listen:[], gruppen:[], pz:[], dateien:[], benutzer:{}, ein:{ oeffnen:'fenster', breiten:{}, farben:{}, notizzettel:'' },
+const S = { vorrat: new Set(), boards:[], mitglieder:[], archiv:null, pick:null, arten:{}, board:null, listen:[], gruppen:[], pz:[], dateien:[], benutzer:{}, ein:{ oeffnen:'fenster', breiten:{}, farben:{}, notizzettel:'' },
   erinn:[], ofMeine:false, sel:null, del:false, delDatei:null, delListe:false, pop:null, zpick:null, neuListe:false, set:false, zettel:false, toast:null, urls:{}, splitOn:null, pwLast:{ zeit:360, team:380 } };
 
 // ---------------------------------------------------------------------------
@@ -580,7 +587,13 @@ async function ladeBoard(){
     // «Zugesagt» zeigt die zugesagten Offerten aus Büro-Board «Planung» (dieselben Karten, Liste selbst hier unsichtbar)
     const { data: pl } = await sb.from('pendenz_liste').select('*').eq('rolle', 'planung').maybeSingle();
     if(pl){ S.listen.push({ ...pl, bereich: '_aus', versteckt: true });
-      const { data: zp } = await sb.from('pendenz').select('*').eq('liste_id', pl.id).eq('erledigt', false).eq('offerte_status', 'zugesagt'); S.pz.push(...(zp || [])); }
+      const { data: zp } = await sb.from('pendenz').select('*').eq('liste_id', pl.id).eq('erledigt', false).eq('offerte_status', 'zugesagt');
+      // im Planer eingeplant: noch 14 Tage hell sichtbar, dann automatisch ins Archiv
+      const weg = (zp || []).filter(p => p.eingeplant_am && Date.now() - new Date(p.eingeplant_am) > 14 * 864e5);
+      if(weg.length){ const { error: ez } = await sb.from('pendenz').update({ erledigt: true, erledigt_am: new Date().toISOString() }).in('id', weg.map(p => p.id)); if(ez) weg.length = 0; }
+      S.pz.push(...(zp || []).filter(p => !weg.includes(p)));
+      const zids = (zp || []).map(p => p.id), { data: vr } = zids.length ? await sb.from('planer_vorrat').select('pendenz_id').in('pendenz_id', zids) : { data: [] };
+      S.vorrat = new Set((vr || []).map(v => v.pendenz_id)); }
     if(S.ofMeine) S.pz = S.pz.filter(p => ofVon(p) === ME); }
   S.erinn = S.board.typ === 'person' ? await ladeErinnerungen() : [];
   S.mitglieder = [];
@@ -618,10 +631,15 @@ function pdHtml(p, opt = {}){
   if(OF(l.art_id)){ if(p.wieder_am) ind.push(`<span class="wdat" title="Wieder anschauen am">${esc(new Date(p.wieder_am).toLocaleDateString('de-CH', { day:'numeric', month:'numeric' }))}</span>`);
     if(faellig(p, l)) ind.push(`<span class="faellig" title="Nachfassen fällig">${A('telefon')}</span>`);
     ind.push(`<button class="chance c${p.chance || 0}" data-chance="${p.id}" aria-label="Chance: ${CHANCE[p.chance || 0]}" title="Chance: ${CHANCE[p.chance || 0]}"><i></i><i></i><i></i></button>`); }
+  // Zugesagt: Stand im Einsatzplaner (eingeplant / im Vorrat / noch nicht – Knopf zum Nachholen)
+  const zuges = istOfferten() && p.offerte_status === 'zugesagt';
+  if(zuges) ind.push(p.eingeplant_am ? '<span class="vst ein" title="Im Einsatzplaner eingeplant – kommt nach 14 Tagen ins Archiv">eingeplant</span>'
+    : S.vorrat.has(p.id) ? '<span class="vst" title="Liegt im Arbeitsvorrat des Einsatzplaners">im Vorrat</span>'
+    : `<button class="vst neu" data-vorrat="${p.id}" title="Noch nicht im Einsatzplaner – jetzt in den Arbeitsvorrat legen">In den Vorrat</button>`);
   if(!gemeinsam && p.erstellt_von && p.erstellt_von !== ME) ind.push(kuerzel(p.erstellt_von));
   // Team-box: vorne die Herkunft – rotes Mail-Icon (per Mail), Pfeil (von einem Kollegen im Tool zugeschoben)
   const herkunft = l.art_id === 'team' && p.herkunft ? `<span class="herk ${p.herkunft}" title="${p.herkunft === 'mail' ? 'Per Mail gekommen' : 'Von einem Kollegen zugeschoben'}">${p.herkunft === 'mail' ? A('brief') : K('senden', 14)}</span>` : '';
-  return `<div class="card${S.sel === p.id ? ' sel' : ''}${gemeinsam ? ' ohnepr' : ''}${opt.gruppe ? ' ingr' + (opt.gruppe.zu ? ' gzu' : '') : ''}" draggable="true" data-card="${p.id}">
+  return `<div class="card${S.sel === p.id ? ' sel' : ''}${zuges && p.eingeplant_am ? ' vhell' : ''}${gemeinsam ? ' ohnepr' : ''}${opt.gruppe ? ' ingr' + (opt.gruppe.zu ? ' gzu' : '') : ''}" draggable="true" data-card="${p.id}">
     ${gemeinsam ? (istOfferten() && S.ofMeine ? '' : kuerzel(wer))
       : opt.zeit ? '' // in Wann? kein Zeit-Streifen – die Liste sagt ja schon wann
       : notiz ? '<span class="pr person"></span>' // Notizen haben keine Zeit
@@ -859,6 +877,41 @@ async function offerteZugestellt(p){
   S.pz = S.pz.filter(x => x !== p); if(S.sel === p.id) S.sel = null; zeichne();
   toast('Offerte zugestellt – liegt jetzt in «Meine Offerten»', async () => { if(await upd('pendenz', p.id, alt)){ Object.assign(p, alt); S.pz.push(p); zeichne(); } });
 }
+// Zugesagt → Balken im Arbeitsvorrat des Einsatzplaners (Kunde, Bau/Pflege, Tage, geschätzt). Abbrechen = bleibt nur zugesagt (später nachholbar).
+function vorratPopup(p){
+  document.getElementById('vorratDlg')?.remove();
+  const w = document.createElement('div'); w.className = 'dbg oben'; w.id = 'vorratDlg';
+  w.innerHTML = `<div class="set vset" role="dialog" aria-label="In den Arbeitsvorrat"><h2>In den Arbeitsvorrat<button class="kg-ibtn" data-vz aria-label="Schliessen">${K('x')}</button></h2>
+    <p class="vhint">Zugesagt: «${esc(p.titel)}». Die Arbeit erscheint im Einsatzplaner oben im Vorrat, in der richtigen Länge.</p>
+    <label class="vfl">Kunde<span class="vks"><input type="text" id="vpK" placeholder="Name, Ort oder Strasse suchen" autocomplete="off" data-lpignore="true" data-1p-ignore="true"><span class="vkm" id="vpKm" hidden></span></span></label>
+    <label class="vfl">Titel<input type="text" id="vpT" value="${esc(p.titel)}" autocomplete="off"></label>
+    <div class="vrw"><label class="vfl">Tage<input type="number" id="vpD" min="0.5" step="0.5" placeholder="z. B. 15"></label>
+      <label class="vck"><input type="checkbox" id="vpG" checked> Länge geschätzt</label></div>
+    <div class="vrw"><span class="seg vseg" id="vpB"><button type="button" data-vb="bau" aria-pressed="true">Bau</button><button type="button" data-vb="pflege" aria-pressed="false">Pflege</button></span></div>
+    <div class="vrw"><span class="sp"></span><button class="btn btn-ghost" data-vz>Abbrechen</button><button class="btn btn-primary" id="vpS">In den Vorrat</button></div></div>`;
+  document.body.appendChild(w);
+  let kunde = null, bereich = 'bau', lauf = 0;
+  const zu = () => w.remove();
+  w.addEventListener('click', e => { if(e.target === w || e.target.closest('[data-vz]')) zu(); const b = e.target.closest('[data-vb]'); if(b){ bereich = b.dataset.vb; w.querySelectorAll('[data-vb]').forEach(x => x.setAttribute('aria-pressed', x === b)); } });
+  w.addEventListener('keydown', e => { if(e.key === 'Escape'){ e.stopPropagation(); zu(); } });
+  const inp = w.querySelector('#vpK'), m = w.querySelector('#vpKm');
+  inp.addEventListener('input', async () => { kunde = null; const q = inp.value.trim(), nr = ++lauf; if(q.length < 2){ m.hidden = true; return; }
+    const { data } = await sb.rpc('kunde_suche', { q, anzahl: 8 }); if(nr !== lauf) return;
+    m.innerHTML = (data || []).map(k => `<button type="button" data-vk="${k.id}" data-vn="${esc(k.name)}"><b>${esc(k.name)}</b><small>${esc([k.strasse, [k.plz, k.ort].filter(Boolean).join(' ')].filter(Boolean).join(', '))}</small></button>`).join('') || '<span class="vkl">Keine Treffer</span>';
+    m.hidden = false; });
+  m.addEventListener('mousedown', e => { const b = e.target.closest('[data-vk]'); if(!b) return; e.preventDefault(); kunde = b.dataset.vk; inp.value = b.dataset.vn; m.hidden = true; w.querySelector('#vpD').focus(); });
+  inp.addEventListener('blur', () => setTimeout(() => { m.hidden = true; }, 150));
+  setTimeout(() => inp.focus(), 0);
+  w.querySelector('#vpS').onclick = async () => {
+    const tage = Number(w.querySelector('#vpD').value);
+    if(!kunde){ toast('Bitte den Kunden aus der Liste wählen.', null, true); inp.focus(); return; }
+    if(!(tage > 0)){ toast('Bitte die Anzahl Tage angeben.', null, true); w.querySelector('#vpD').focus(); return; }
+    const { data: pl } = await sb.from('planer_person').select('id').eq('benutzer_id', ME).eq('ist_projektleiter', true).maybeSingle();
+    const { error } = await sb.from('planer_vorrat').insert({ kunde_id: kunde, titel: w.querySelector('#vpT').value.trim() || null, tage, bereich, geschaetzt: w.querySelector('#vpG').checked, projektleiter_id: pl ? pl.id : null, pendenz_id: p.id, erstellt_von: ME });
+    if(error) return fehler(error, 'Vorrat');
+    zu(); S.vorrat.add(p.id); zeichne(); toast('Im Arbeitsvorrat des Einsatzplaners');
+  };
+}
 // Offerte zugesagt → Büro-Board, Liste «Planung» (bleibt mit Status «zugesagt» für spätere Auswertungen)
 async function zusagen(p){
   const { data: pl, error } = await sb.from('pendenz_liste').select('id').eq('rolle', 'planung').maybeSingle();
@@ -870,6 +923,7 @@ async function zusagen(p){
   if(istOfferten()) Object.assign(p, neu); else { S.pz = S.pz.filter(x => x !== p); if(S.sel === p.id) S.sel = null; }
   zeichne();
   toast('Zugesagt – liegt jetzt auch im Büro-Board unter «Planung»', async () => { if(await upd('pendenz', p.id, alt)){ Object.assign(p, alt); if(!S.pz.includes(p)) S.pz.push(p); zeichne(); } });
+  vorratPopup(p);
 }
 const isoTag = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const naechsterWerktag = () => { const d = new Date(); d.setDate(d.getDate() + 1); while(d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1); return isoTag(d); };
@@ -1013,6 +1067,7 @@ document.addEventListener('click', async e => {
   const d = t.dataset;
   if(d.bg && e.target !== t){ menusZu(); return; }
   if(d.mic){ sprechen(d.mic); return; }
+  if(d.vorrat){ const p = S.pz.find(x => x.id === d.vorrat); if(p) vorratPopup(p); return; }
   // Editor ohne neu zeichnen, damit Cursor und Auswahl bleiben
   if(d.em){ const m = $(d.em); menusZu(d.em); m.hidden = !m.hidden; return; }
   if(d.ex || d.fb){ const ed = $('eb-' + d.ed); ed.focus(); menusZu();
