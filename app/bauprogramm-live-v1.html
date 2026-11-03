@@ -436,7 +436,8 @@ function rechnen(){
   let d = nexter(startDatum());
   B.forEach(p => {
     p.konflikt = false;
-    if(p.fix){ const f = nexter(new Date(p.fix + 'T12:00')); if(f < d) p.konflikt = true; else d = f; }
+    // Eintrag bleibt dort, wo er hingezogen wurde (p.fix = gewünschter Beginn); stösst das vorherige Feld an, rutscht er einfach nach
+    if(p.fix){ const f = nexter(new Date(p.fix + 'T12:00')); if(f > d) d = f; }
     p.von = new Date(d); let rest = teilTage(p), e = new Date(d);
     while(rest > 1){ e = plus(e, 1); if(arbeitstag(e)) rest--; }
     p.bis = e; d = nexter(plus(e, 1));
@@ -597,9 +598,9 @@ function zeichnen(){
   B.forEach(p => {
     const ang = p.teile.length ? angebotVon(p.teile[0]) : null, p5 = pal(ang ? famVon(ang) : 'grau'), r1 = zeile(p.von), r2 = zeile(p.bis) + 1, tg = teilTage(p);
     const { W, namen } = tagTexte(p), nTs = p.teile.filter(id => String(id).startsWith('ts:')).length;
-    W.forEach((d, i) => { h += `<div class="ztxt${i === 0 ? ' erst' : ''}" style="grid-column:${cA};grid-row:${zeile(d)}"><span class="adot" style="background:${p5[1]}${i ? ';opacity:.35' : ''}"></span><span class="zt">${esc(namen[i])}</span>${i === 0 && p.fix ? '<span class="fix">fix</span>' : ''}${i === 0 && p.konflikt ? '<span class="fix">zu spät</span>' : ''}</div>`; });
+    W.forEach((d, i) => { h += `<div class="ztxt${i === 0 ? ' erst' : ''}" style="grid-column:${cA};grid-row:${zeile(d)}"><span class="adot" style="background:${p5[1]}${i ? ';opacity:.35' : ''}"></span><span class="zt">${esc(namen[i])}</span></div>`; });
     h += `<div class="blk${p.konflikt ? ' konflikt' : ''}${gewaehlt === p.id ? ' gewaehlt' : ''}"${DARF ? ' draggable="true"' : ''} data-p="${p.id}" style="grid-column:${cA};grid-row:${r1}/${r2}"
-        title="${esc(teilName(p))} · ${tg} T · ${kurz(p.von)}–${kurz(p.bis)}${p.fix ? ' · fix' : ''}${ang ? ' · ' + esc(angText(ang)) : ''}${nTs > 1 ? '\n' + p.teile.map(id => '– ' + (KNOTEN[id] ? KNOTEN[id].n : '')).join('\n') : ''}">
+        title="${esc(teilName(p))} · ${tg} T · ${kurz(p.von)}–${kurz(p.bis)}${ang ? ' · ' + esc(angText(ang)) : ''}${nTs > 1 ? '\n' + p.teile.map(id => '– ' + (KNOTEN[id] ? KNOTEN[id].n : '')).join('\n') : ''}">
       <span class="bk"><span class="dauer">${tg} T</span>${DARF ? `<button type="button" class="ib" data-zurueck="${p.id}" title="${p.teile.length ? 'Zurück ins Gerüst' : 'Eintrag löschen'}" aria-label="${p.teile.length ? 'Zurück ins Gerüst' : 'Eintrag löschen'}">${p.teile.length ? IC.zurueck : ic('trash', 12)}</button>` : ''}</span>
       ${DARF ? `<span class="griff" data-griff="${p.id}" title="Ziehen = länger/kürzer"></span>` : ''}</div>`;
     // Material/Subunternehmer/Notiz: Text Zeile für Zeile in den Tageszeilen (zinfo), Eingabefeld darüber (beim Tippen sichtbar)
@@ -617,7 +618,7 @@ function planerEnde(){
   return { name: p.kurz, bis: D(l.bis), farbe: l.farbe };
 }
 function chips(ende){
-  const drin = B.reduce((s, p) => s + teilTage(p), 0), konf = B.filter(p => p.konflikt).length;
+  const drin = B.reduce((s, p) => s + teilTage(p), 0), konf = 0;
   const offen = ANG.flatMap(a => blaetter(a).map(b => b.id)).filter(id => !imProgramm(id)).length;
   const pe = planerEnde(), diff = pe && B.length ? (ende > pe.bis ? atZwischen(pe.bis, ende) : -atZwischen(ende, pe.bis)) : 0;
   // Nur noch Warnungen (gefährdeter Fixtermin, Planer-Balken weicht ab); ohne Warnung bleibt die Zeile leer
@@ -717,7 +718,7 @@ function binden(){
     el.addEventListener('dragover', e => { if(!ziehen || ziehen.feld === el.dataset.p) return; e.preventDefault(); weg(); el.classList.add(unten(e, el) ? 'ziel-u' : 'ziel-o'); });
     el.addEventListener('drop', e => { if(!ziehen) return; e.preventDefault(); e.stopPropagation(); weg(); let j = B.findIndex(x => x.id === el.dataset.p); if(unten(e, el)) j++;
       if(ziehen.leaves){ ausGeruest(j); return; }
-      const i = B.findIndex(x => x.id === ziehen.feld); ziehen = null; if(i < 0) return; const [m] = B.splice(i, 1); if(i < j) j--; B.splice(j, 0, m); geaendert(); });
+      const i = B.findIndex(x => x.id === ziehen.feld); ziehen = null; if(i < 0) return; const [m] = B.splice(i, 1); if(i < j) j--; m.fix = null; B.splice(j, 0, m); geaendert(); });
   });
   R.querySelectorAll('.zelle[data-di]').forEach(c => {
     c.addEventListener('dragover', e => { if(!ziehen) return; e.preventDefault(); weg(); c.classList.add('ziel-tag'); });
@@ -729,7 +730,7 @@ function binden(){
       if(ziehen.leaves){ if(erst) $('start').value = iso(d); ausGeruest(j, erst ? null : iso(d)); return; }
       const i = B.findIndex(x => x.id === ziehen.feld); ziehen = null; if(i < 0) return; const [m] = B.splice(i, 1); if(i < j) j--;
       if(j === 0){ $('start').value = iso(d); m.fix = null; } else m.fix = iso(d);
-      B.splice(j, 0, m); geaendert(); toast('Beginnt am ' + kurz(d) + '. Fixes Datum entfernen: Feld anklicken.'); });
+      B.splice(j, 0, m); geaendert(); });
   });
   // In eine leere Zeile tippen = eigener Eintrag an diesem Tag (1 Tag, unten ziehen = länger)
   R.querySelectorAll('.zelle[data-di]').forEach(c => c.addEventListener('click', () => {
@@ -771,14 +772,12 @@ function detail(){
   Dt.innerHTML = `${eigen ? `<div class="feld">Arbeit<input class="t" id="dN" value="${esc(p.name || '')}"${ro}></div>` : `<div class="feld">Arbeit<b style="font-size:14px;color:#232B35;padding:6px 0">${esc(teilName(p))}</b></div>`}
     <div class="feld">Tage<input class="t klein" id="dT" type="number" min="1" value="${teilTage(p)}"${ro}></div>
     ${hatStunden(p) ? `<div class="feld">Team <small>Personen</small><input class="t klein" id="dTeam" type="number" min="1" max="8" value="${p.team}"${ro}></div>` : ''}
-    <div class="feld">Fixes Datum <small>optional</small><input class="t" id="dF" type="date" value="${p.fix || ''}"${ro}></div>
     ${p.teile.length > 1 ? `<div class="feld">Teilschritte<small style="max-width:360px;white-space:normal">${esc(p.teile.map(id => KNOTEN[id] ? KNOTEN[id].n : '').join(' · '))}</small></div>` : ''}
     <span class="sp"></span><button class="btn prim" type="button" id="dOk">Fertig</button>`;
   const an = (id, fn) => { const el = $(id); if(el) el.addEventListener('change', e => { fn(e.target.value); geaendert(); }); };
   an('dN', v => p.name = v.trim() || p.name);
   an('dT', v => { const n = Math.max(1, parseInt(v) || 1); p.extra = (p.extra || 0) + n - teilTage(p); });
   an('dTeam', v => p.team = Math.max(1, parseInt(v) || TEAM));
-  an('dF', v => p.fix = v || null);
   $('dOk').onclick = () => { gewaehlt = null; zeichnen(); };
 }
 
