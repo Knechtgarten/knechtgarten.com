@@ -141,13 +141,28 @@ html.bp-fenster .prog,html.bp-fenster .lscroll,html.bp-fenster .geruest{height:a
 .dlg{width:min(460px,100%);max-height:calc(100vh - 110px);overflow:auto;background:#fff;border-radius:12px;box-shadow:0 18px 50px rgba(20,28,38,.3);padding:18px;display:flex;flex-direction:column;gap:12px;}
 .dlg h3{margin:0;font-size:17px;color:#323E4E;} .dlg p{margin:0;font-size:13.5px;line-height:1.45;color:#6B7079;}
 .dlg .knoepfe{display:flex;gap:8px;justify-content:flex-end;}
+/* Ausdruck: eigene Tabelle wie ein sauberes Google-Sheet-Bauprogramm (eine Zeile pro Tag, A4 hoch) */
+#druck{display:none;}
 @media print{
-  header.app,nav.subnav,.kg-seite,.detail,.chips,.lscroll,.geruest,.griff,.ib{display:none!important;}
-  body{background:#fff;} .haupt{display:block;} .prog{height:auto;overflow:visible;border:0;}
-  .blk{break-inside:avoid;} .druckkopf{display:block!important;}
-  @page{size:A4 portrait;margin:12mm;}
+  body > *:not(#druck){display:none!important;}
+  body{background:#fff;margin:0;}
+  #druck{display:block!important;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#232B35;font-size:9.5pt;}
+  @page{size:A4 portrait;margin:12mm 11mm 14mm;}
 }
-.druckkopf{display:none;padding:0 0 8px;font-size:16px;font-weight:700;color:#323E4E;}
+#druck .dk{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #323E4E;padding-bottom:5px;margin-bottom:8px;}
+#druck .dk h1{margin:0;font-size:15pt;color:#323E4E;} #druck .dk p{margin:2px 0 0;font-size:9pt;color:#6B7079;}
+#druck .dk .fi{text-align:right;font-size:9pt;color:#323E4E;font-weight:700;} #druck .dk .fi span{display:block;font-weight:400;color:#8B9097;}
+#druck table{width:100%;border-collapse:collapse;table-layout:fixed;}
+#druck th{text-align:left;font-size:7.5pt;letter-spacing:.06em;text-transform:uppercase;color:#6B7079;font-weight:700;padding:4px 5px;border-bottom:1.5px solid #323E4E;background:#F5F7F9;}
+#druck td{padding:3px 5px;border-bottom:.5px solid #D5DBE1;vertical-align:top;line-height:1.3;word-wrap:break-word;}
+#druck tr{break-inside:avoid;} #druck thead{display:table-header-group;}
+#druck td.wt{font-weight:700;color:#323E4E;white-space:nowrap;} #druck td.dt{white-space:nowrap;color:#4C5C70;font-variant-numeric:tabular-nums;}
+#druck tr.frei td{background:#F5F7F9;color:#A3B0BE;font-size:7.5pt;padding-top:1px;padding-bottom:1px;}
+#druck tr.fei td{background:#FAEBB0;color:#8A6410;}
+#druck tr.wo td{border-top:1.5px solid #8B9097;}
+#druck td.ar b{font-weight:600;} #druck td.ar small{color:#8B9097;font-size:8pt;}
+#druck .fix{font-weight:700;color:#8A3F12;}
+#druck td.no{color:#4C5C70;}
 @media (max-width:900px){ .prog{height:auto;max-height:none;border-right:0;} }
 
 </style>
@@ -405,7 +420,7 @@ function aufbau(){
   $('appMain').innerHTML = `<div class="chips" id="chips"></div><div class="haupt${DARF ? '' : ' nurlesen'}${GERUEST ? '' : ' ohne-geruest'}" id="haupt">
       <aside class="geruest" id="geruest"></aside>
       <div class="lscroll" id="lscroll" aria-hidden="true"><div id="lsInner"></div></div>
-      <div class="prog" id="prog"><div class="druckkopf">Bauprogramm ${esc(kname(KUNDE))}</div><div class="raster" id="raster"></div></div></div>
+      <div class="prog" id="prog"><div class="raster" id="raster"></div></div></div>
     <div class="detail hidden" id="detail"></div>`;
   const P = $('prog'), L = $('lscroll'); let sync = false;
   P.addEventListener('scroll', () => {
@@ -639,7 +654,48 @@ async function speichern(){
 }
 $('start').addEventListener('change', () => { if(KUNDE){ geaendert(); zumProgramm(); } });
 $('zumProgBtn').addEventListener('click', zumProgramm);
-$('druckBtn').addEventListener('click', () => { if(!KUNDE) return toast('Zuerst eine Baustelle wählen.', true); gewaehlt = null; zeichnen(); window.print(); });
+// Ausdruck: eine Zeile pro Tag (Wochentag · Datum · Arbeiten · Spez. Material · Subunternehmer · Notizen), wie das Google-Sheet-Bauprogramm.
+// Arbeiten = Teilschritt des Tages (bei mehreren Teilschritten nach Tagen verteilt), Material/Subunternehmer/Notiz am ersten Tag des Felds,
+// Abwesenheiten der Leute aus dem Planer in den Notizen.
+const WTL = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
+const MON = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+function druckTabelle(){
+  rechnen();
+  if(!B.length) return '';
+  const proTag = {};   // iso -> [{ arbeit, mat, sub, notiz, fix }]
+  B.forEach(p => {
+    const W = []; for(let d = new Date(p.von); d <= p.bis; d = plus(d, 1)) if(arbeitstag(d)) W.push(iso(d));
+    const ts = p.teile.filter(id => String(id).startsWith('ts:') && KNOTEN[id]);
+    // Teilschritte nach ihren Tagen auf die Arbeitstage verteilen
+    const tagName = new Array(W.length).fill(teilName(p));
+    if(ts.length > 1){ let cum = 0; const tot = ts.reduce((s, id) => s + blattTage(KNOTEN[id], p.team), 0) || 1, f = W.length / tot;
+      ts.forEach(id => { const x = blattTage(KNOTEN[id], p.team) * f, s0 = Math.floor(cum + 1e-9), e0 = Math.max(s0, Math.ceil(cum + x - 1e-9) - 1);
+        for(let i = s0; i <= Math.min(e0, W.length - 1); i++) tagName[i] = i === s0 || tagName[i] === teilName(p) ? KNOTEN[id].n : tagName[i]; cum += x; }); }
+    W.forEach((t, i) => (proTag[t] = proTag[t] || []).push({ arbeit: tagName[i], ueber: ts.length > 1 && i === 0 ? teilName(p) : '', mat: i ? '' : p.mat, sub: i ? '' : p.sub, notiz: i ? '' : p.notiz, fix: i === 0 && p.fix }));
+  });
+  const abw = {}; PL.filter(x => x.va || HILFE).forEach(x => x.abw.forEach(a => { for(let d = D(a.von); d <= D(a.bis); d = plus(d, 1)) (abw[iso(d)] = abw[iso(d)] || []).push(x.kurz + ' abwesend' + (a.t && a.t !== 'abwesend' ? ' (' + a.t + ')' : '')); }));
+  const von = B[0].von, bis = B[B.length - 1].bis;
+  let rows = '';
+  for(let d = new Date(von); d <= bis; d = plus(d, 1)){
+    const t = iso(d), fei = FEIERTAGE[t], frei = !arbeitstag(d), e = proTag[t] || [], ab = abw[t] || [];
+    const kl = [fei ? 'fei' : frei ? 'frei' : '', d.getDay() === 1 && d > von ? 'wo' : ''].filter(Boolean).join(' ');
+    const z = (k) => e.map(x => esc(x[k] || '')).filter(Boolean).join('<br>');
+    rows += `<tr${kl ? ` class="${kl}"` : ''}><td class="wt">${WTL[d.getDay()]}</td><td class="dt">${d.getDate()}. ${MON[d.getMonth()]}</td>
+      <td class="ar">${fei ? esc(fei) : e.map(x => `${x.ueber ? `<small>${esc(x.ueber)}:</small> ` : ''}<b>${esc(x.arbeit)}</b>${x.fix ? ' <span class="fix">(fix)</span>' : ''}`).join('<br>')}</td>
+      <td>${z('mat')}</td><td>${z('sub')}</td><td class="no">${[z('notiz'), ...ab.map(esc)].filter(Boolean).join('<br>')}</td></tr>`;
+  }
+  const ort = [KUNDE.strasse, KUNDE.ort].filter(Boolean).join(', ');
+  return `<div class="dk"><div><h1>Bauprogramm ${esc(kname(KUNDE))}</h1><p>${esc(ort)}${ort ? ' · ' : ''}${WTL[von.getDay()]}, ${von.getDate()}. ${MON[von.getMonth()]} ${von.getFullYear()} – ${WTL[bis.getDay()]}, ${bis.getDate()}. ${MON[bis.getMonth()]} ${bis.getFullYear()}</p></div>
+    <div class="fi">Knechtgarten<span>Stand ${new Date().toLocaleDateString('de-CH')}</span></div></div>
+    <table><colgroup><col style="width:12%"><col style="width:13%"><col style="width:30%"><col style="width:16%"><col style="width:14%"><col style="width:15%"></colgroup>
+    <thead><tr><th>${von.getFullYear()}</th><th></th><th>Arbeiten</th><th>Spez. Material usw.</th><th>Subunternehmer</th><th>Notizen</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+$('druckBtn').addEventListener('click', () => {
+  if(!KUNDE) return toast('Zuerst eine Baustelle wählen.', true);
+  let d = $('druck'); if(!d){ d = document.createElement('div'); d.id = 'druck'; document.body.appendChild(d); }
+  d.innerHTML = druckTabelle(); if(!d.innerHTML) return toast('Das Programm ist noch leer.', true);
+  window.print();
+});
 window.addEventListener('beforeunload', () => { if(speicherTimer) speichern(); });
 start();
 </script>
