@@ -39,11 +39,11 @@
       S('pool_volumen', 'Pool › Pool-Volumen'),
       S('bau_diagonale', 'Bau › Rechter Winkel'),
       S('bau_kies', 'Bau › Kies-Gewicht'),
+      S('bau_stahl', 'Bau › Stahl'),
       S('bau_schalit', 'Bau › Beton für Schalungssteine'),
       S('pflege_spritz', 'Pflege › Spritzmittel'),
       S('spritzmittel_pflegen', 'Spritzmittel-Liste bearbeiten', 'Produkte und Dosierungen ändern'),
-      S('allg_volumen', 'Allgemein › Volumen', 'mehrere Teile zusammenzählen'),
-      S('allg_gefaelle', 'Allgemein › Gefälle') ] },
+      S('allg_gefaelle', 'Bau › Gefälle') ] },
     { k: 'doku', n: 'Doku-Tools', icon: 'doku', bereiche: [
       S('briefe', 'Briefe erstellen', 'alle Ordner; ohne diesen Schalter nur Ordner «für alle» (z. B. Mitarbeiter: GAV, Reglement)'),
       S('vorlagen', 'Vorlagen bearbeiten', 'Brieftexte, Reglement, PDFs hochladen, Ordner verwalten') ] },
