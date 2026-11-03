@@ -48,7 +48,23 @@ nav.subnav a.on{color:#323E4E;border-bottom-color:#323E4E;}
 .haupt{display:grid;grid-template-columns:minmax(0,1fr) 340px;}
 .leer-start{padding:60px 20px;text-align:center;color:#6B7079;font-size:15px;line-height:1.5;}
 .prog{overflow:auto;height:calc(100vh - 150px);border-right:1px solid #D5DBE1;position:relative;background:#fff;}
-.raster{display:grid;grid-template-columns:118px minmax(230px,1.4fr) minmax(130px,.8fr) minmax(130px,.8fr) 130px;position:relative;min-width:780px;}
+.raster{display:grid;position:relative;min-width:960px;}
+/* Planer-Spalte: Balken der Leute bei diesem Kunden hochkant, nur zum Vergleichen (an Wochenenden unterbrochen) */
+.kopf.pl{padding:8px 0;text-align:center;border-right:1px solid #D5DBE1;}
+.plz{border-bottom:1px solid #EEF1F4;border-right:1px solid #D5DBE1;} .plz.frei{background:#F5F7F9;} .plz.fei{background:#FCF5D8;}
+.pls{margin:1px 4px;border-radius:4px;z-index:1;overflow:hidden;display:flex;justify-content:center;}
+.pls span{writing-mode:vertical-rl;transform:rotate(180deg);font-size:11px;font-weight:600;white-space:nowrap;padding:5px 0;}
+.pls.hilfe{opacity:.55;}
+.pls.prov{background-image:repeating-linear-gradient(135deg,rgba(255,255,255,.6) 0 3px,transparent 3px 7px)!important;}
+.pls.abs{background:repeating-linear-gradient(135deg,#C9D1DB 0 4px,#E3E7EC 4px 8px);}
+.plende{height:0;border-top:2px dashed;align-self:end;z-index:2;position:relative;pointer-events:none;}
+.plende span{position:absolute;top:-10px;color:#fff;font-size:11px;font-weight:600;padding:1px 8px;border-radius:99px;white-space:nowrap;}
+button.chip{all:unset;cursor:pointer;font-size:12.5px;padding:4px 10px;border-radius:99px;background:#fff;border:1px solid #D5DBE1;color:#323E4E;font-weight:600;}
+button.chip:hover{border-color:#4C5C70;} button.chip:focus-visible{outline:2px solid #323E4E;outline-offset:2px;}
+/* Fenster-Modus: im Planer als grosses Fenster geöffnet (?fenster=1) */
+html.bp-fenster header.app,html.bp-fenster nav.subnav{display:none!important;}
+html.bp-fenster body{background:#fff;}
+html.bp-fenster .prog,html.bp-fenster .seitel{height:calc(100vh - 100px);}
 .kopf{position:sticky;top:0;z-index:3;background:#F5F7F9;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:#8B9097;font-weight:600;padding:8px 10px;border-bottom:1px solid #D5DBE1;}
 .tag{font-size:12.5px;color:#4C5C70;padding:0 10px;display:flex;align-items:center;gap:6px;border-bottom:1px solid #EEF1F4;font-variant-numeric:tabular-nums;white-space:nowrap;}
 .tag b{width:22px;color:#323E4E;}
@@ -128,6 +144,7 @@ nav.subnav a.on{color:#323E4E;border-bottom-color:#323E4E;}
 <span class="kwahl" data-kg-seite="links"><input class="t" id="kundeSuche" placeholder="Baustelle / Kunde wählen …" autocomplete="off"><span class="menue hidden" id="kundeMenue"></span></span>
 <label class="lbl" data-kg-seite="mitte">Start <input class="t" type="date" id="start"></label>
 <button type="button" class="btn ghost" data-kg-seite="rechts" id="druckBtn">Drucken / PDF</button>
+<button type="button" class="kg-ibtn hidden" data-kg-seite="rechts" id="zuBtn" title="Schliessen (zurück zum Planer)" aria-label="Schliessen"></button>
 <main id="appMain"></main>
 <script>
 // Bauprogramm pro Kunde/Baustelle. Quellen: Auftragsbestätigungen + Angebote aus dem Easybill-Abgleich (easybill_dokument)
@@ -144,6 +161,12 @@ const plus = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); retu
 const kurz = d => `${d.getDate()}.${d.getMonth() + 1}.`;
 const toast = (t, err) => { const e = document.createElement('div'); e.className = 'toast' + (err ? ' err' : ''); e.textContent = t; document.body.appendChild(e); setTimeout(() => e.remove(), err ? 5000 : 2000); };
 let sb, ICH, DARF = true;
+// Fenster-Modus: im Planer über dem Planer geöffnet; Schliessen schickt eine Nachricht an den Planer
+const FENSTER = new URLSearchParams(location.search).has('fenster');
+if(FENSTER){ document.documentElement.classList.add('bp-fenster'); $('zuBtn').classList.remove('hidden'); $('zuBtn').innerHTML = ic('x'); }
+async function schliessen(){ if(speicherTimer) await speichern(); parent.postMessage({ bp: 'zu' }, location.origin); }
+$('zuBtn').addEventListener('click', schliessen);
+addEventListener('keydown', e => { if(FENSTER && e.key === 'Escape' && !document.querySelector('.dlgs')) schliessen(); });
 
 // ---------------------------------------------------------------- Start / Login
 async function start(){
@@ -219,7 +242,7 @@ const tagAusPositionen = pos => (pos || []).filter(p => p.typ === 'POSITION' && 
 const knoten = (k, eltern, tiefe) => { KNOTEN[k.id] = k; k.eltern = eltern; k.tiefe = tiefe; (k.kinder || []).forEach(c => knoten(c, k.id, tiefe + 1)); return k; };
 
 async function kundeOeffnen(kundeId){
-  history.replaceState(null, '', '?kunde=' + kundeId);
+  history.replaceState(null, '', '?kunde=' + kundeId + (FENSTER ? '&fenster=1' : ''));
   $('appMain').innerHTML = '<div class="leer-start">Lädt …</div>';
   const [{ data: k }, { data: prog }, { data: abs }, { data: offBest }] = await Promise.all([
     sb.from('kunde').select('id,name,firma,vorname,nachname,strasse,ort').eq('id', kundeId).maybeSingle(),
@@ -269,20 +292,27 @@ async function kundeOeffnen(kundeId){
     blocks = (bl || []).map(b => ({ ...b, teile: b.teile || [] }));
   }
   $('start').value = PROG ? PROG.start : iso(new Date());
-  await ladeAbwesenheiten(kundeId);
+  await ladePlaner(kundeId);
   aufbau();
 }
-// Abwesenheiten der Leute, die bei dieser Baustelle eingeplant sind (aus dem Planer)
-async function ladeAbwesenheiten(kundeId){
-  ABW = [];
-  const { data: e } = await sb.from('planer_einsatz').select('person_id').eq('kunde_id', kundeId).neq('art', 'absenz');
-  const pids = [...new Set((e || []).map(x => x.person_id).filter(Boolean))];
+// Planer-Balken der Leute bei diesem Kunden (Vorarbeiter immer, Mithilfe ein-/ausblendbar) und ihre Abwesenheiten
+let PL = [], HILFE = (() => { try{ return localStorage.getItem('bp-hilfe') === '1'; }catch(e){ return false; } })();
+async function ladePlaner(kundeId){
+  PL = [];
+  const { data: e } = await sb.from('planer_einsatz').select('person_id,art,beginn,ende,projektleiter_id,abgemacht').eq('kunde_id', kundeId).in('art', ['baustelle', 'hilfe', 'termin']);
+  const ein = (e || []).filter(x => x.person_id), pids = [...new Set(ein.map(x => x.person_id))];
   if(!pids.length) return;
+  const plIds = ein.map(x => x.projektleiter_id).filter(Boolean);
   const [{ data: a }, { data: p }] = await Promise.all([
     sb.from('planer_einsatz').select('person_id,beginn,ende,titel').eq('art', 'absenz').in('person_id', pids).gte('ende', iso(plus(new Date(), -400))),
-    sb.from('planer_person').select('id,name').in('id', pids)
+    sb.from('planer_person').select('id,name,farbe,sortierung').in('id', [...new Set([...pids, ...plIds])])
   ]);
-  ABW = (a || []).map(x => ({ von: String(x.beginn).slice(0, 10), bis: String(x.ende || x.beginn).slice(0, 10), t: ((p || []).find(y => y.id === x.person_id)?.name || '') + (x.titel ? ': ' + x.titel : ': abwesend') }));
+  const pp = id => (p || []).find(x => x.id === id), t10 = v => String(v).slice(0, 10);
+  PL = pids.map(id => { const x = pp(id) || {}, eig = ein.filter(z => z.person_id === id);
+    return { id, name: x.name || '', kurz: (x.name || '').split(' ')[0], sort: x.sortierung ?? 999, va: eig.some(z => z.art !== 'hilfe'),
+      ein: eig.map(z => ({ von: t10(z.beginn), bis: t10(z.ende || z.beginn), farbe: pp(z.projektleiter_id)?.farbe || '#8B9097', hilfe: z.art === 'hilfe', prov: z.abgemacht === false })),
+      abw: (a || []).filter(z => z.person_id === id).map(z => ({ von: t10(z.beginn), bis: t10(z.ende || z.beginn), t: z.titel || 'abwesend' })) }; })
+    .sort((a, b) => (b.va - a.va) || a.sort - b.sort);
 }
 
 // ---------------------------------------------------------------- Blöcke
@@ -292,7 +322,7 @@ const blockFix = b => b.fix || '';
 const blockMat = b => b.mat || '';
 const blockSub = b => b.sub || '';
 const hatStunden = b => b.teile.some(id => KNOTEN[id] && KNOTEN[id].std != null);
-const neuerBlock = (name, f, teile, mehr) => ({ id: crypto.randomUUID(), name, farbe: f || 'grau', teile, extra: 0, team: TEAM, fix: null, mat: null, sub: null, ursprung_id: null, ...mehr });
+const neuerBlock = (name, f, teile, mehr) => ({ id: crypto.randomUUID(), name, farbe: f || 'grau', teile, extra: 0, team: TEAM, fix: null, mat: null, sub: null, notiz: null, ursprung_id: null, ...mehr });
 function einfuegen(kid, vorId){
   const k = KNOTEN[kid], teile = blaetter(k).map(b => b.id).filter(id => !imProgramm(id));
   if(!teile.length) return;
@@ -330,44 +360,79 @@ function aufbau(){
   if($('eigenBtn')) $('eigenBtn').addEventListener('click', () => { const nb = neuerBlock('Reserve', 'grau', [], { extra: 1 }); blocks.push(nb); gewaehlt = nb.id; geaendert(); });
   zeichnen();
 }
+let T0 = null; // erster Tag der Ansicht (kann vor dem Start liegen, wenn der Planer früher beginnt)
+const D = v => new Date(v + 'T12:00');
+const atZwischen = (a, b) => { let n = 0; for(let d = plus(a, 1); d <= b; d = plus(d, 1)) if(arbeitstag(d)) n++; return n; };
 function zeichnen(){
   rechnen();
   const s = startDatum(), ende = blocks.length ? blocks[blocks.length - 1].bis : plus(s, 13);
-  const tage = []; for(let d = new Date(s); d <= plus(ende, blocks.length ? 3 : 0); d = plus(d, 1)) tage.push(new Date(d));
+  // Planer-Spalten: Vorarbeiter immer, Mithilfe nur eingeblendet; Balken 45 Tage vor bis 90 Tage nach dem Programm
+  const sicht = PL.filter(p => p.va || HILFE), unten = plus(s, -45), oben = plus(ende, 90);
+  let a = new Date(s), z = plus(ende, blocks.length ? 3 : 0);
+  sicht.forEach(p => p.ein.forEach(x => { if(D(x.bis) < unten || D(x.von) > oben) return; if(D(x.von) < a) a = D(x.von); if(D(x.bis) > z) z = D(x.bis); }));
+  T0 = a;
+  const tage = []; for(let d = new Date(a); d <= z; d = plus(d, 1)) tage.push(new Date(d));
   const zeile = d => tage.findIndex(x => iso(x) === iso(d)) + 2;
+  const nP = Math.max(2, sicht.length), cT = nP + 1, cA = cT + 1;
   const R = $('raster');
+  R.style.gridTemplateColumns = `repeat(${nP}, 28px) 104px minmax(230px,1.4fr) minmax(120px,.8fr) minmax(120px,.8fr) minmax(150px,1fr)`;
   R.style.gridTemplateRows = '34px ' + tage.map(d => arbeitstag(d) ? '34px' : '18px').join(' ');
-  let h = ['Tag', 'Arbeit', 'Spez. Material', 'Subunternehmer', 'Aus dem Planer'].map((t, i) => `<div class="kopf" style="grid-column:${i + 1};grid-row:1">${t}</div>`).join('');
+  let h = `<div class="kopf pl" style="grid-column:1/${nP + 1};grid-row:1" title="Balken aus dem Planer, nur zum Vergleichen">Planer</div>`
+    + ['Tag', 'Arbeit', 'Spez. Material', 'Subunternehmer', 'Notizen'].map((t, i) => `<div class="kopf" style="grid-column:${cT + i};grid-row:1">${t}</div>`).join('');
   tage.forEach((d, i) => {
     const fei = FEIERTAGE[iso(d)], frei = !arbeitstag(d), kl = fei ? ' fei' : frei ? ' frei' : '';
-    h += `<div class="tag${kl}" data-i="${i}" style="grid-column:1;grid-row:${i + 2}"><b>${WT[d.getDay()]}</b>${fei ? esc(fei) : kurz(d)}</div>`;
-    for(let c = 2; c <= 5; c++) h += `<div class="zelle${kl}" style="grid-column:${c};grid-row:${i + 2}"></div>`;
+    h += `<div class="plz${kl}" style="grid-column:1/${nP + 1};grid-row:${i + 2}"></div>`;
+    h += `<div class="tag${kl}" data-i="${i}" style="grid-column:${cT};grid-row:${i + 2}"><b>${WT[d.getDay()]}</b>${fei ? esc(fei) : kurz(d)}</div>`;
+    for(let c = cA; c <= cA + 3; c++) h += `<div class="zelle${kl}" style="grid-column:${c};grid-row:${i + 2}"></div>`;
   });
-  if(!blocks.length) h += `<div class="ziel-leer" data-ende style="grid-row:2/${tage.length + 2}">Noch leer.<br>${DARF ? 'Zieh von rechts eine Auftragsbestätigung, ein Angebot,<br>einen Arbeitsschritt oder einen Teilschritt hierher – oder klick «+».' : ''}</div>`;
+  // Planer-Balken hochkant, an Wochenenden und Feiertagen unterbrochen
+  const laeufe = (von, bis) => { const out = []; let cur = null;
+    for(let d = D(von); d <= D(bis); d = plus(d, 1)){ if(d < a || d > z) continue; if(arbeitstag(d)){ if(cur) cur[1] = d; else out.push(cur = [d, d]); } else cur = null; }
+    return out; };
+  sicht.forEach((p, i) => {
+    p.abw.forEach(x => laeufe(x.von, x.bis).forEach(([v, b]) => { h += `<div class="pls abs" style="grid-column:${i + 1};grid-row:${zeile(v)}/${zeile(b) + 1}" title="${esc(p.name + ': ' + x.t)}"></div>`; }));
+    p.ein.forEach(x => laeufe(x.von, x.bis).forEach(([v, b], j) => {
+      const tip = `${p.name}${x.hilfe ? ' (Mithilfe)' : ''}: ${kurz(D(x.von))}–${kurz(D(x.bis))}${x.prov ? ' · noch nicht abgemacht' : ''}`;
+      h += `<div class="pls${x.hilfe ? ' hilfe' : ''}${x.prov ? ' prov' : ''}" style="grid-column:${i + 1};grid-row:${zeile(v)}/${zeile(b) + 1};background:${x.farbe};color:${KG.textAuf(x.farbe)}" title="${esc(tip)}">${j === 0 && zeile(b) > zeile(v) ? `<span>${esc(p.kurz)}</span>` : ''}</div>`; }));
+  });
+  if(!blocks.length) h += `<div class="ziel-leer" data-ende style="grid-column:${cA}/${cA + 3};grid-row:${zeile(s)}/${tage.length + 2}">Noch leer.<br>${DARF ? 'Zieh von rechts eine Auftragsbestätigung, ein Angebot,<br>einen Arbeitsschritt oder einen Teilschritt hierher – oder klick «+».' : ''}</div>`;
   blocks.forEach(b => {
-    const a = farbe(b.farbe), r1 = zeile(b.von), r2 = zeile(b.bis) + 1, tg = blockTage(b), fix = blockFix(b);
+    const f = farbe(b.farbe), r1 = zeile(b.von), r2 = zeile(b.bis) + 1, tg = blockTage(b), fix = blockFix(b);
     const urs = b.ursprung_id && blocks.find(x => x.id === b.ursprung_id);
     const herk = urs ? 'aus «' + urs.name + '»' : b.teile.length > 1 ? b.teile.length + ' Teile' : '';
-    h += `<div class="block${b.konflikt ? ' konflikt' : ''}${gewaehlt === b.id ? ' gewaehlt' : ''}" ${DARF ? 'draggable="true"' : ''} data-b="${b.id}" style="grid-column:2;grid-row:${r1}/${r2};background:${a.h};color:${a.t}">
+    h += `<div class="block${b.konflikt ? ' konflikt' : ''}${gewaehlt === b.id ? ' gewaehlt' : ''}" ${DARF ? 'draggable="true"' : ''} data-b="${b.id}" style="grid-column:${cA};grid-row:${r1}/${r2};background:${f.h};color:${f.t}">
       <b>${esc(b.name)}</b><small>${kurz(b.von)}${tg > 1 ? '–' + kurz(b.bis) : ''}${herk ? ' · ' + esc(herk) : ''}${fix ? ' · <span class="fix">fix</span>' : ''}${b.konflikt ? ' · <span class="fix">davor zu spät fertig</span>' : ''}</small>
       <span class="dauer">${tg} T</span>${DARF ? `<span class="griff" data-griff="${b.id}" title="Ziehen = länger/kürzer"></span>` : ''}</div>
-      <div class="info" style="grid-column:3;grid-row:${r1}/${r2};--fb:${a.h}">${esc(blockMat(b))}</div>
-      <div class="info" style="grid-column:4;grid-row:${r1}/${r2};--fb:${a.h}">${esc(blockSub(b))}</div>`;
+      <div class="info" style="grid-column:${cA + 1};grid-row:${r1}/${r2};--fb:${f.h}">${esc(blockMat(b))}</div>
+      <div class="info" style="grid-column:${cA + 2};grid-row:${r1}/${r2};--fb:${f.h}">${esc(blockSub(b))}</div>
+      <div class="info" style="grid-column:${cA + 3};grid-row:${r1}/${r2};--fb:${f.h}">${esc(b.notiz || '')}</div>`;
   });
-  if(blocks.length && DARF) h += `<div class="ende" data-ende style="grid-row:${zeile(ende) + 1}/span 2">hierher ziehen = ans Ende</div>`;
-  const last = tage[tage.length - 1];
-  ABW.forEach(x => { const v = new Date(x.von + 'T12:00'), b = new Date(x.bis + 'T12:00'); if(b < s || v > last) return;
-    h += `<div class="abw" style="grid-column:5;grid-row:${zeile(v < s ? s : v)}/${zeile(b > last ? last : b) + 1}">${esc(x.t)}</div>`; });
+  if(blocks.length && DARF) h += `<div class="ende" data-ende style="grid-column:${cA}/${cA + 3};grid-row:${zeile(ende) + 1}/span 2">hierher ziehen = ans Ende</div>`;
+  // Linie, wo der Vorarbeiter-Balken im Planer endet
+  const pe = planerEnde();
+  if(pe && blocks.length && zeile(pe.bis) > 1) h += `<div class="plende" style="grid-column:1/-1;grid-row:${zeile(pe.bis)};border-color:${pe.farbe}"><span style="left:${nP * 28 + 110}px;background:${pe.farbe};color:${KG.textAuf(pe.farbe)}">${esc(pe.name)} im Planer bis ${kurz(pe.bis)}</span></div>`;
   R.innerHTML = h;
   baum(); chips(ende); binden(); detail();
+}
+// Ende des (ersten) Vorarbeiters im Planer, nur Baustellen-Balken
+function planerEnde(){
+  const p = PL.find(x => x.va); if(!p) return null;
+  const ein = p.ein.filter(x => !x.hilfe); if(!ein.length) return null;
+  const l = ein.reduce((m, x) => x.bis > m.bis ? x : m);
+  return { name: p.kurz, bis: D(l.bis), farbe: l.farbe };
 }
 function chips(ende){
   const alle = WURZELN.flatMap(blaetter), gesamt = Math.ceil(alle.reduce((s, b) => s + blattTage(b), 0)), drin = blocks.reduce((s, b) => s + blockTage(b), 0);
   const offenT = Math.ceil(alle.filter(b => !imProgramm(b.id)).reduce((s, b) => s + blattTage(b), 0)), konf = blocks.filter(b => b.konflikt).length;
+  const pe = planerEnde(), nH = PL.filter(p => !p.va).length;
+  const diff = pe && blocks.length ? (ende > pe.bis ? atZwischen(pe.bis, ende) : -atZwischen(ende, pe.bis)) : 0;
   $('chips').innerHTML = `<span class="chip">Aufträge <b>${gesamt} Tage</b></span><span class="chip">Im Programm <b>${drin} Tage</b> in <b>${blocks.length}</b> Blöcken</span>
     ${blocks.length ? `<span class="chip">Start <b>${kurz(startDatum())}</b> · Ende <b>${WT[ende.getDay()]} ${kurz(ende)}</b></span>` : ''}
     ${offenT ? `<span class="chip">noch nicht eingeplant <b>${offenT} Tage</b></span>` : ''}
-    ${konf ? `<span class="chip warn">${konf === 1 ? '1 fixer Termin ist' : konf + ' fixe Termine sind'} gefährdet</span>` : ''}`;
+    ${konf ? `<span class="chip warn">${konf === 1 ? '1 fixer Termin ist' : konf + ' fixe Termine sind'} gefährdet</span>` : ''}
+    ${diff ? `<span class="chip warn">Planer-Balken ${esc(pe.name)} ${Math.abs(diff)} Arbeitstage ${diff > 0 ? 'kürzer' : 'länger'} als das Programm</span>` : ''}
+    ${nH ? `<button type="button" class="chip" id="hilfeBtn">${HILFE ? 'Mithilfe ausblenden' : `Mithilfe einblenden (${nH})`}</button>` : ''}`;
+  if($('hilfeBtn')) $('hilfeBtn').onclick = () => { HILFE = !HILFE; try{ localStorage.setItem('bp-hilfe', HILFE ? '1' : '0'); }catch(e){} zeichnen(); };
 }
 function baum(){
   let h = '';
@@ -411,7 +476,7 @@ function binden(){
     e.preventDefault(); e.stopPropagation(); const b = blocks.find(x => x.id === g.dataset.griff);
     const bewegen = ev => {
       const t = [...R.querySelectorAll('.tag')].find(x => { const r = x.getBoundingClientRect(); return ev.clientY >= r.top && ev.clientY < r.bottom; });
-      if(!t) return; const tagIso = iso(plus(startDatum(), +t.dataset.i));
+      if(!t) return; const tagIso = iso(plus(T0, +t.dataset.i));
       let n = 0; for(let d = new Date(b.von); iso(d) <= tagIso; d = plus(d, 1)) if(arbeitstag(d)) n++;
       n = Math.max(1, n); const alt = blockTage(b); if(n !== alt){ b.extra = (b.extra || 0) + n - alt; zeichnen(); }
     };
@@ -437,6 +502,7 @@ function detail(){
     <div class="feld">Fixes Datum <small>optional</small><input class="t" id="dF" type="date" value="${blockFix(b)}"${ro}></div>
     <div class="feld">Spez. Material<input class="t" id="dM" value="${esc(blockMat(b))}"${ro}></div>
     <div class="feld">Subunternehmer<input class="t" id="dS" value="${esc(blockSub(b))}"${ro}></div>
+    <div class="feld">Notiz<input class="t" id="dNo" style="width:220px" value="${esc(b.notiz || '')}"${ro}></div>
     <span class="sp"></span>
     ${DARF && b.teile.length > 1 ? '<button class="btn ghost" type="button" id="dLoes">Herauslösen …</button>' : ''}
     ${DARF ? '<button class="btn ghost" type="button" id="dTeil">Teilen …</button>' : ''}
@@ -447,7 +513,7 @@ function detail(){
   an('dN', v => b.name = v.trim() || b.name);
   an('dT', v => { const n = Math.max(1, parseInt(v) || 1); b.extra = (b.extra || 0) + n - blockTage(b); });
   an('dTeam', v => b.team = Math.max(1, parseInt(v) || TEAM));
-  an('dF', v => b.fix = v || null); an('dM', v => b.mat = v.trim() || null); an('dS', v => b.sub = v.trim() || null);
+  an('dF', v => b.fix = v || null); an('dM', v => b.mat = v.trim() || null); an('dS', v => b.sub = v.trim() || null); an('dNo', v => b.notiz = v.trim() || null);
   const klick = (id, fn) => { const el = $(id); if(el) el.onclick = fn; };
   klick('dLoes', () => herausloesen(b)); klick('dTeil', () => teilen(b));
   klick('dZur', () => { urs.teile.push(...b.teile); urs.extra = (urs.extra || 0) + (b.extra || 0); blocks = blocks.filter(x => x.id !== b.id);
@@ -507,7 +573,7 @@ async function speichern(){
     if(error){ toast('Speichern fehlgeschlagen: ' + error.message, true); return; }
     PROG = data;
   } else await sb.from('bauprogramm').update({ start: $('start').value, geaendert_am: new Date().toISOString() }).eq('id', PROG.id);
-  const zeilen = blocks.map((b, i) => ({ id: b.id, programm_id: PROG.id, sortierung: i, name: b.name, farbe: b.farbe, teile: b.teile, extra: b.extra || 0, team: b.team || TEAM, fix: b.fix || null, mat: b.mat || null, sub: b.sub || null, ursprung_id: b.ursprung_id || null }));
+  const zeilen = blocks.map((b, i) => ({ id: b.id, programm_id: PROG.id, sortierung: i, name: b.name, farbe: b.farbe, teile: b.teile, extra: b.extra || 0, team: b.team || TEAM, fix: b.fix || null, mat: b.mat || null, sub: b.sub || null, notiz: b.notiz || null, ursprung_id: b.ursprung_id || null }));
   // zuerst ohne Ursprung speichern (Verweis auf Blöcke, die evtl. erst jetzt entstehen), dann Ursprung setzen
   if(zeilen.length){
     const { error } = await sb.from('bauprogramm_block').upsert(zeilen.map(z => ({ ...z, ursprung_id: null })));
