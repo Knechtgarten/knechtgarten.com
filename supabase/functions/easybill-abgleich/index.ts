@@ -144,7 +144,11 @@ Deno.serve(async (req) => {
       if (error) throw new Error('Dokumente speichern: ' + error.message);
     }
 
-    const ergebnis = { kunden: zeilen.length, auftragsbestaetigungen: abs.length, angebote: angebote.length };
+    // 3) Angebote ↔ unsere Offerten verbinden, Offerten in einer AB = bestätigt (zugesagt)
+    const { data: vk, error: vkFehler } = await db.rpc('easybill_verknuepfen');
+    if (vkFehler) throw new Error('Offerten verknüpfen: ' + vkFehler.message);
+
+    const ergebnis = { kunden: zeilen.length, auftragsbestaetigungen: abs.length, angebote: angebote.length, ...(vk || {}) };
     if (logId) await db.from('easybill_abgleich').update({ beendet: new Date().toISOString(), kunden: zeilen.length, dokumente: doks.length }).eq('id', logId);
     return json(ergebnis);
   } catch (e) {
