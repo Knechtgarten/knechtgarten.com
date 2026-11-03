@@ -67,18 +67,20 @@ nav.subnav a.on{color:#323E4E;border-bottom-color:#323E4E;}
 .gah .gan{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .gah svg{width:12px;height:12px;flex:none;color:#8B9097;}
 .gtg{font-size:11px;font-weight:700;color:#4C5C70;white-space:nowrap;font-variant-numeric:tabular-nums;}
-.gas{display:grid;grid-template-columns:22px minmax(0,1fr);gap:3px;}
-.gasb{background:#CDD4DC;border-radius:5px;display:flex;justify-content:center;padding:4px 0;color:#323E4E;overflow:hidden;}
-.gasb span{writing-mode:vertical-rl;transform:rotate(180deg);font-size:10.5px;font-weight:700;white-space:nowrap;overflow:hidden;max-height:100%;}
-.gasb[draggable]{cursor:grab;} .gasb[draggable]:hover{background:#BFC7D1;}
-.gasb.drin{background:#E3E7EC;color:#A3B0BE;}
 .gtsl{display:flex;flex-direction:column;gap:2px;min-width:0;}
 .gts{background:#fff;border:1px solid #D5DBE1;border-radius:5px;display:flex;align-items:center;gap:5px;padding:2px 6px;font-size:12px;line-height:18px;color:#232B35;min-width:0;}
 .gts[draggable]{cursor:grab;} .gts[draggable]:hover{border-color:#8B9097;}
 .gts .gtn{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.gts.drin{background:#F5F7F9;color:#A3B0BE;border-style:dashed;cursor:pointer;} .gts.drin .gtg{color:#A3B0BE;}
 .gts.eb{font-size:11.5px;color:#6B7079;}
-.gah.drin{color:#A3B0BE;}
+.gang{gap:3px;} .gang:not(.auf){padding:3px 5px;}
+.gah[data-aang]{cursor:pointer;}
+.gpf{display:inline-flex;width:20px;height:20px;border-radius:50%;align-items:center;justify-content:center;color:#4C5C70;flex:none;}
+.gpf svg{width:14px!important;height:14px!important;color:inherit!important;}
+.gah:hover .gpf,.gasr:hover .gpf{background:#D5DBE1;}
+.gasr{background:#CDD4DC;border-radius:5px;display:flex;align-items:center;gap:6px;padding:2px 4px 2px 8px;min-height:24px;box-sizing:border-box;font-size:12px;font-weight:600;color:#323E4E;cursor:grab;}
+.gasr:hover{background:#BFC7D1;} .gasr .gan{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.gasr.auf{border-radius:5px 5px 0 0;} .gasr.auf + .gtsl{padding:3px 0 4px 10px;}
+.gfertig{display:flex;align-items:center;gap:6px;color:#2A7570;font-weight:600;padding:6px 2px;}
 .hk{color:#2A7570;display:inline-flex;} .hk svg{width:12px;height:12px;}
 .adot{width:8px;height:8px;border-radius:50%;flex:none;}
 .ziehe{opacity:.45;}
@@ -399,13 +401,12 @@ async function ladePlaner(kundeId){
       abw: (a || []).filter(z => z.person_id === id).map(z => ({ von: t10(z.beginn), bis: t10(z.ende || z.beginn), t: z.titel || 'abwesend' })) }; })
     .sort((a, b) => (b.va - a.va) || a.sort - b.sort);
 }
-// Programm = Liste einzelner Felder (B). Beim ersten Öffnen: je ein Feld pro Arbeitsschritt (bzw. pro Easybill-Angebot).
+// Programm = Liste einzelner Felder (B). Neues Programm startet leer, alles liegt im Gerüst (Vorrat).
 // Fehlende Angebote/Arbeitsschritte (neu dazugekommen) werden hinten angehängt, wenn schon ein Programm besteht.
 function aufbauGruppen(zeilen){
   B = zeilen.map(r => ({ id: r.id, teile: r.teile || [], name: r.name, extra: r.extra || 0, team: r.team || TEAM, fix: r.fix, mat: r.mat, sub: r.sub, notiz: r.notiz }));
   NEU = 0;
   if(zeilen.length) return;   // bestehendes Programm: nichts automatisch dazu, Neues steht im Gerüst
-  ANG.forEach(A => { if(A.kinder) A.kinder.forEach(s => B.push(neuerTeil(s.kinder.map(b => b.id)))); else B.push(neuerTeil([A.id])); });
 }
 // Blätter und Angebote
 const angebotVon = leaf => { let k = KNOTEN[leaf]; while(k && k.tiefe > 1) k = KNOTEN[k.eltern]; return k ? k.id : null; };
@@ -511,35 +512,38 @@ const atZwischen = (a, b) => { let n = 0; for(let d = plus(a, 1); d <= b; d = pl
 const SVGI = p => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
 const IC = { rein: SVGI('<path d="M5 12h14M13 6l6 6-6 6"/>'), zurueck: ic('zurueck', 12), griff: ic('griff', 12) };
 const zLeaves = (el) => JSON.parse(el.dataset.leaves || '[]');
-// Gerüst: pro Angebot der Arbeitsschritt-Balken (bleibt immer) mit seinen Teilschritten; was im Programm ist, ist hellgrau
+// Gerüst = Vorrat: nur, was noch nicht im Programm ist. Angebote zugeklappt (immer nur eins offen),
+// darin die Arbeitsschritte als Balken; Pfeil nur, wenn mehr als ein Teilschritt übrig ist.
+// Zurückgezogenes findet von selbst seinen Platz (wird aus «nicht im Programm» neu zusammengesetzt).
+let AUF_ANG = null, AUF_AS = null;
+const tageVon = ids => Math.ceil(ids.reduce((s, id) => s + blattTage(KNOTEN[id]), 0) - 1e-9);
+const PFEIL = auf => SVGI(auf ? '<path d="M6 15l6-6 6 6"/>' : '<path d="M6 9l6 6 6-6"/>');
 function geruest(){
   const Gr = $('geruest'); if(!Gr) return;
   if(!GERUEST){ Gr.innerHTML = ''; return; }
   let h = '';
-  if(!ANG.length) h += '<div class="gleer">Keine Auftragsbestätigung und keine bestätigte Offerte. Mit «+ Eigener Block» kannst du trotzdem planen.</div>';
-  ANG.forEach(A => {
-    const p5 = pal(famVon(A.id)), alle = blaetter(A).map(b => b.id), offen = alle.filter(id => !imProgramm(id));
-    const tg = Math.ceil(alle.reduce((s, id) => s + blattTage(KNOTEN[id]), 0) - 1e-9);
-    h += `<section class="gang"><div class="gah${offen.length ? '' : ' drin'}"${DARF && offen.length ? ` draggable="true" data-leaves='${JSON.stringify(A.kinder ? offen : offen)}' data-proas="1"` : ''} title="${offen.length ? 'Ganze Offerte ins Programm ziehen (je ein Feld pro Arbeitsschritt)' : 'Alles im Programm'}">
-        <span class="adot" style="background:${p5[1]}"></span>${DARF && offen.length ? IC.griff : ''}<span class="gan">${esc(angText(A.id))}</span><span class="gtg">${tg} T</span>${offen.length ? '' : `<span class="hk">${ic('check', 12)}</span>`}</div>`;
-    if(A.kinder) A.kinder.forEach(s => {
-      const ts = s.kinder.map(k => k.id), off = ts.filter(id => !imProgramm(id));
-      h += `<div class="gas"><div class="gasb${off.length ? '' : ' drin'}"${DARF && off.length ? ` draggable="true" data-leaves='${JSON.stringify(off)}'` : ''} title="${esc(s.n)}${off.length ? ' – ziehen: alle übrigen Teilschritte als ein Feld' : ' – im Programm'}"><span>${esc(s.n)}</span></div><div class="gtsl">`
-        + s.kinder.map(k => { const drin = imProgramm(k.id);
-          return `<div class="gts${drin ? ' drin' : ''}"${DARF && !drin ? ` draggable="true" data-leaves='${JSON.stringify([k.id])}'` : ''} data-leaf="${k.id}" title="${esc(k.n)}${drin ? ' – im Programm' : ' – ziehen: als eigenes Feld'}"><span class="gtn">${esc(k.n)}</span><span class="gtg">${Math.round(blattTage(KNOTEN[k.id]) * 10) / 10} T</span>${drin ? `<span class="hk">${ic('check', 11)}</span>` : ''}</div>`; }).join('')
-        + '</div></div>';
+  if(!ANG.length) h += '<div class="gleer">Keine Auftragsbestätigung und keine bestätigte Offerte. In eine leere Zeile rechts tippen = eigener Eintrag.</div>';
+  const rest = ANG.filter(A => blaetter(A).some(b => !imProgramm(b.id)));
+  if(ANG.length && !rest.length) h += `<div class="gleer gfertig">${ic('check', 14)} Alles eingeplant</div>`;
+  rest.forEach(A => {
+    const p5 = pal(famVon(A.id)), offen = blaetter(A).map(b => b.id).filter(id => !imProgramm(id)), auf = AUF_ANG === A.id && !!A.kinder;
+    h += `<section class="gang${auf ? ' auf' : ''}"><div class="gah"${DARF ? ` draggable="true" data-leaves='${JSON.stringify(offen)}' data-proas="1"` : ''}${A.kinder ? ` data-aang="${A.id}"` : ''} title="${A.kinder ? 'Klick = auf-/zuklappen · ziehen = ganzes Angebot (je ein Feld pro Arbeitsschritt)' : esc(A.klein || 'nur Easybill') + ' · ziehen = ins Programm'}">
+        <span class="adot" style="background:${p5[1]}"></span><span class="gan">${esc(angText(A.id))}</span><span class="gtg">${tageVon(offen)} T</span>${A.kinder ? `<span class="gpf">${PFEIL(auf)}</span>` : ''}</div>`;
+    if(auf) A.kinder.forEach(s => {
+      const off = s.kinder.map(k => k.id).filter(id => !imProgramm(id)); if(!off.length) return;
+      const mehr = off.length > 1, asAuf = mehr && AUF_AS === s.id;
+      h += `<div class="gasr${asAuf ? ' auf' : ''}"${DARF ? ` draggable="true" data-leaves='${JSON.stringify(off)}'` : ''}${mehr ? ` data-aas="${s.id}"` : ''} title="${esc(s.n)} – ziehen${mehr ? ': alle übrigen Teilschritte als ein Feld · Klick = Teilschritte zeigen' : ''}">
+          <span class="gan">${esc(s.n)}</span><span class="gtg">${tageVon(off)} T</span>${mehr ? `<span class="gpf">${PFEIL(asAuf)}</span>` : ''}</div>`;
+      if(asAuf) h += '<div class="gtsl">' + off.map(id => `<div class="gts"${DARF ? ` draggable="true" data-leaves='${JSON.stringify([id])}'` : ''} title="${esc(KNOTEN[id].n)} – ziehen: als eigenes Feld"><span class="gtn">${esc(KNOTEN[id].n)}</span><span class="gtg">${Math.round(blattTage(KNOTEN[id]) * 10) / 10} T</span></div>`).join('') + '</div>';
     });
-    else { const drin = imProgramm(A.id);
-      h += `<div class="gts eb${drin ? ' drin' : ''}"${DARF && !drin ? ` draggable="true" data-leaves='${JSON.stringify([A.id])}'` : ''} title="${esc(A.klein || '')}"><span class="gtn">${esc(A.klein || 'nur Easybill')}</span>${drin ? `<span class="hk">${ic('check', 11)}</span>` : ''}</div>`; }
     h += '</section>';
   });
   Gr.innerHTML = h;
   Gr.querySelectorAll('[data-leaves]').forEach(el => el.addEventListener('dragstart', e => {
-    const lv = zLeaves(el); ziehen = { leaves: lv, proAs: !!el.dataset.proas }; e.dataTransfer.setData('text/plain', ''); el.classList.add('ziehe'); }));
+    e.stopPropagation(); ziehen = { leaves: zLeaves(el), proAs: !!el.dataset.proas }; e.dataTransfer.setData('text/plain', ''); el.classList.add('ziehe'); }));
   Gr.querySelectorAll('[data-leaves]').forEach(el => el.addEventListener('dragend', () => { el.classList.remove('ziehe'); }));
-  // Klick auf einen Teilschritt im Programm = zum Feld springen
-  Gr.querySelectorAll('.gts.drin[data-leaf]').forEach(el => el.addEventListener('click', () => { const p = feldVon(el.dataset.leaf); if(!p) return; gewaehlt = p.id; zeichnen();
-    const f = document.querySelector(`#raster .blk[data-p="${p.id}"]`); if(f) $('prog').scrollTop = Math.max(0, f.offsetTop - 80); }));
+  Gr.querySelectorAll('[data-aang]').forEach(el => el.addEventListener('click', () => { AUF_ANG = AUF_ANG === el.dataset.aang ? null : el.dataset.aang; AUF_AS = null; geruest(); }));
+  Gr.querySelectorAll('[data-aas]').forEach(el => el.addEventListener('click', () => { AUF_AS = AUF_AS === el.dataset.aas ? null : el.dataset.aas; geruest(); }));
 }
 function zeichnen(){
   rechnen();
