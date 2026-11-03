@@ -242,6 +242,9 @@ header.app.kg-leiste .kg-reiter a.kg-ohne{display:none!important;}
 /* aktiver Reiter in der Tool-Farbe */
 header.app.kg-leiste .kg-reiter a.on:not(.navic),header.app.kg-leiste .kg-reiter > .wrap > button.on:not(.navic){border-bottom-color:var(--kg-akzent,#D1DB5F)!important;}
 header.app.kg-leiste .kg-reiter .navic.on{box-shadow:inset 0 -2px 0 var(--kg-akzent,#D1DB5F)!important;}
+/* Inhalt beginnt an derselben linken Kante wie die weisse Leiste: links bündig, nie zentriert.
+   Listen-Seiten heben die Maximalbreite selbst auf (main.wrap{max-width:none}). */
+header.app.kg-leiste ~ main.wrap{margin-left:0!important;margin-right:auto!important;}
 /* Weisse Leiste = Seite: [Ansicht-Segmente][Suche/Filter] … [Nebenaktionen][Hauptaktion] */
 .kg-seite{display:flex;align-items:center;gap:10px;min-height:50px;padding:8px 16px;box-sizing:border-box;background:#fff;border-bottom:1px solid #E1E5E9;flex-wrap:wrap;
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;font-size:13px;}
@@ -257,6 +260,7 @@ header.app.kg-leiste .kg-reiter .navic.on{box-shadow:inset 0 -2px 0 var(--kg-akz
 .kg-seite .kg-m > .filterbar{display:flex;align-items:center;gap:8px;flex:1;min-width:0;margin:0!important;flex-wrap:wrap;}
 .kg-seite .kundensearch-wrap{position:relative;flex:1 1 220px;max-width:380px;margin:0!important;}
 .kg-seite .kg-m > input[type="text"]{flex:1 1 220px;}
+.kg-seite select{height:32px;box-sizing:border-box;border:1px solid #D5DBE1;border-radius:8px;padding:0 8px;font:inherit;font-size:12.5px;background:#fff;color:#323E4E;margin:0;max-width:240px;}
 .kg-seite .kg-m input[type="date"]{height:32px;box-sizing:border-box;border:1px solid #D5DBE1;border-radius:8px;padding:0 8px;font:inherit;font-size:12.5px;}
 .kg-seite .kg-seg,.kg-seg{display:inline-flex!important;border:1px solid #D5DBE1!important;border-radius:8px!important;overflow:hidden;height:32px;box-sizing:border-box;background:#fff;padding:0!important;gap:0!important;width:auto!important;margin:0!important;}
 .kg-seg > button,.kg-seg > a{all:unset;box-sizing:border-box;display:flex;align-items:center;gap:6px;padding:0 13px;font-size:12.5px;font-weight:600;color:#4C5C70;cursor:pointer;
