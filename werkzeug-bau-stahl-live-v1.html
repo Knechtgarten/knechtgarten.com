@@ -35,14 +35,16 @@
 // Profile: Querschnitt (mm²) × Dichte ÷ 1000 = kg pro m.
 const DICHTE = { stahl: 7.85, edel: 7.93, alu: 2.70 };
 const S = 'fill="none" stroke="#4C5C70" stroke-width="1.5" stroke-linejoin="round"';
-const KASTEN = '<path d="M80 52 H220 L280 22 H140 Z"/><path d="M80 52 V122 H220 V52"/><path d="M220 122 L280 92 V22"/>';
+// Kasten mit fein gezeichneten Abkantungen: oben 2×25 mm (doppelte Linie), unten 50 mm (Fuss nach aussen)
+const KASTEN = '<path d="M80 52 H220 L280 22 H140 Z"/><path d="M80 52 V122 H220 V52"/><path d="M220 122 L280 92 V22"/>'
+  + '<path d="M80 56 H220 L280 26" stroke-width=".8"/>'
+  + '<path d="M80 122 L72 127 H226 L290 95 L280 92 M220 122 L226 127" stroke-width=".8"/>';
 const FORMEN = [
-  { k: 'g1', n: 'Gefäss mit Boden', h: 160, svg: KASTEN + '<path d="M80 122 L140 92 V22 M140 92 H280" stroke-dasharray="4 4"/>',
-    f: [['l', 'L', 114, 128, '1200'], ['b', 'B', 256, 108, '400'], ['h', 'H', 0, 74, '500'], ['t', 'Dicke', 0, 0, '3']],
-    rechne: (v, r) => { const m2 = 2 * (v.l + v.b) * (v.h + 100) / 1e6 + v.l * v.b / 1e6; return [m2 * v.t * r, `${KGW.fmt(m2, 2)} m² Blech`]; } },
-  { k: 'g2', n: 'Hochbeet ohne Boden', h: 165, svg: KASTEN + '<path d="M70 128 H226 L290 96" stroke-width="3"/>',
-    f: [['l', 'L', 114, 134, '2000'], ['b', 'B', 262, 110, '800'], ['h', 'H', 0, 74, '600'], ['t', 'Dicke', 0, 0, '3']],
-    rechne: (v, r) => { const m2 = 2 * (v.l + v.b) * (v.h + 100) / 1e6; return [m2 * v.t * r, `${KGW.fmt(m2, 2)} m² Blech`]; } },
+  { k: 'ge', n: 'Gefäss / Hochbeet', h: 165, seg: [['mit', 'Mit Boden'], ['ohne', 'Ohne Boden']],
+    svg: KASTEN + '<path d="M80 122 L140 92 V22 M140 92 H280" stroke-dasharray="4 4"/>',
+    f: [['l', 'L', 114, 134, '1200'], ['b', 'B', 262, 110, '400'], ['h', 'H', 0, 74, '500'], ['t', 'Dicke', 0, 0, '3']],
+    // Wände: Umfang × (Höhe + 2×25 oben + 50 unten), mit Boden zusätzlich L × B
+    rechne: (v, r, seg) => { const m2 = 2 * (v.l + v.b) * (v.h + 100) / 1e6 + (seg === 'mit' ? v.l * v.b / 1e6 : 0); return [m2 * v.t * r, `${KGW.fmt(m2, 2)} m² Blech`]; } },
   { k: 'bl', n: 'Blech', h: 120, svg: '<path d="M70 70 H230 L300 30 H140 Z"/><path d="M70 70 V77 H230 L300 37 V30 M230 70 V77"/>',
     f: [['l', 'L', 120, 86, '2000'], ['b', 'B', 268, 66, '1000'], ['t', 'Dicke', 0, 58, '3']],
     rechne: (v, r) => { const m2 = v.l * v.b / 1e6; return [m2 * v.t * r, `${KGW.fmt(m2, 2)} m²`]; } },
@@ -66,7 +68,7 @@ KGW.werkzeug('bau_stahl', inhalt => {
     <span class="einh" style="text-align:right">Masse in mm</span></div>`);
   const matBox = inhalt.lastElementChild;
   FORMEN.forEach(fo => {
-    inhalt.insertAdjacentHTML('beforeend', KGW.karte(fo.n, `<div class="zei" style="height:${fo.h}px">
+    inhalt.insertAdjacentHTML('beforeend', KGW.karte(fo.n, `${fo.seg ? KGW.seg(fo.k + '-seg', fo.seg, g('seg-' + fo.k + '-seg', fo.seg[0][0])) : ''}<div class="zei" style="height:${fo.h}px">
       <svg aria-hidden="true" width="342" height="${fo.h}" viewBox="0 0 342 ${fo.h}" ${S}>${fo.svg}</svg>
       ${fo.f.map(([k, lab, x, y, std, cls]) => `<label class="zf${cls ? ' ' + cls : ''}" style="left:${x}px;top:${y}px">${lab}<input id="${fo.k}-${k}" inputmode="decimal" autocomplete="off" aria-label="${fo.n} ${lab} in mm" value="${KGW.esc(g(fo.k + '-' + k, std))}"></label>`).join('')}
     </div><div class="erg"><small id="${fo.k}-info"></small><b id="${fo.k}-kg"></b><span>kg</span></div>`, 'karte-' + fo.k));
@@ -77,11 +79,12 @@ KGW.werkzeug('bau_stahl', inhalt => {
       const v = {}; fo.f.forEach(([k]) => { v[k] = KGW.zahl(fo.k + '-' + k); });
       let kg, info;
       if(fo.profil){ const kgm = fo.profil(v) * r / 1000; kg = kgm * v.l / 1000; info = `${KGW.fmt(kgm, 2)} kg/m`; }
-      else [kg, info] = fo.rechne(v, r);
+      else [kg, info] = fo.rechne(v, r, fo.seg && KGW.segWert($('karte-' + fo.k), fo.k + '-seg'));
       $(fo.k + '-kg').textContent = KGW.fmt(isFinite(kg) ? kg : 0, 1); $(fo.k + '-info').textContent = info;
     });
   };
   KGW.binden(matBox, rechne, 'kgw-stahl-');
+  FORMEN.filter(fo => fo.seg).forEach(fo => KGW.binden($('karte-' + fo.k), rechne, 'kgw-stahl-'));
   inhalt.querySelectorAll('.zf input').forEach(i => i.addEventListener('input', () => { KGW.lsSet('kgw-stahl-' + i.id, i.value); rechne(); }));
   rechne();
 });
