@@ -1130,6 +1130,20 @@ function ladeTypen(wx, we){
   (wx || []).forEach(x => { const r = RES.find(m => m.id === x.planer_ressource_id); if(r){ r.wx = x.id; r.w_eid = x.eintrag_id; } if(!r || r.typ !== 'maschine' || !tit[x.eintrag_id]) return; r.typ_eid = x.eintrag_id; r.typ_planung = tit[x.eintrag_id]; (by[x.eintrag_id] ||= []).push(r.id); });
   TYPEN = Object.entries(by).map(([eid, ids]) => ({ id: 'T:' + eid, eid, typ: 'maschine', istTyp: true, name: tit[eid], nummer: null, aktiv: true, ids }));
 }
+// Kunden (rund 4000): Seiten parallel laden statt nacheinander; zwischengespeichert im Browser,
+// damit der Planer sofort startet – die frische Liste kommt im Hintergrund nach.
+const KSEL = 'id,name,firma,vorname,nachname,strasse,plz,ort';
+async function ladeKunden(){
+  const { data, count, error } = await sb.from('kunde').select(KSEL, { count: 'exact' }).order('name').order('id').range(0, 999); if(error) throw error;
+  const n = Math.ceil((count || 0) / 1000), rest = await Promise.all(Array.from({ length: Math.max(0, n - 1) }, (_, i) =>
+    sb.from('kunde').select(KSEL).order('name').order('id').range((i + 1) * 1000, (i + 2) * 1000 - 1).then(r => { if(r.error) throw r.error; return r.data; })));
+  return data.concat(...rest); }
+function setzeKunden(k){ KUNDEN = {}; k.forEach(x => KUNDEN[x.id] = x); KLIST = k.map(x => ({ id: x.id, lab: kLabel(x) })); }
+function kundenVorab(){
+  if(Object.keys(KUNDEN).length) return Promise.resolve(null);
+  const c = lsGet('kunden', null), frisch = ladeKunden().then(k => { lsSet('kunden', k); return k; });
+  if(c && c.length){ frisch.then(k => { setzeKunden(k); if(VIEW === 'plan' && !drag) renderRows(); }).catch(e => console.warn('Kunden nicht aktualisiert', e)); return Promise.resolve(c); }
+  return frisch; }
 async function ladeAlles(){
   try{
     const von = fromU(0), bis = fromU(NDAYS);
@@ -1139,7 +1153,7 @@ async function ladeAlles(){
       fetchAll(() => sb.from('planer_einsatz').select('*, planer_datei(id,art,name,storage_pfad)').lt('beginn', bis).gt('ende', von)),
       fetchAll(() => sb.from('planer_einsatz').select('*, planer_datei(id,art,name,storage_pfad)').not('wdh', 'is', null).lt('beginn', bis)),
       fetchAll(() => sb.from('planer_feiertag').select('*')),
-      Object.keys(KUNDEN).length ? Promise.resolve(null) : fetchAll(() => sb.from('kunde').select('id,name,firma,vorname,nachname,strasse,plz,ort').order('name')),
+      kundenVorab(),
       fetchAll(() => sb.from('planer_ressource').select('*').order('sortierung')),
       fetchAll(() => sb.from('planer_ressource_einsatz').select('*')),
       fetchAll(() => sb.from('planer_magazin').select('*, planer_datei(id,art,name,storage_pfad)').is('erledigt_am', null).order('sort')),
@@ -1156,7 +1170,7 @@ async function ladeAlles(){
     GRUPPEN = g; PERSONEN = p.filter(x => !x.ist_ablage); ABL = p.filter(x => x.ist_ablage && x.aktiv); P = {}; p.forEach(x => P[x.id] = x); // Ablage-Personen nur für die Ablage-Zeilen
     EINS = e.concat(s.filter(x => !e.some(y => y.id === x.id))).map(rowToItem); // s = wiederkehrende, auch wenn der erste Termin vor dem Bereich liegt
     FEIER = new Map(); f.forEach(x => FEIER.set(fromIso(x.datum), x.name));
-    if(k){ KUNDEN = {}; k.forEach(x => KUNDEN[x.id] = x); KLIST = k.map(x => ({ id: x.id, lab: kLabel(x) })); }
+    if(k) setzeKunden(k);
     if(isBuero() && !BENUTZER.length){ const { data } = await sb.rpc('pflege_zustaendige'); BENUTZER = data || []; }
     if(!PF || Date.now() - (PF.t || 0) > 300000){ await ladePflege(); if(PF) PF.t = Date.now(); }
     if(!WS || Date.now() - (WS.t || 0) > 60000){ await ladeService(); if(WS) WS.t = Date.now(); }
