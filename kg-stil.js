@@ -132,6 +132,7 @@
     pflege: '<path d="M5 19c0-8 5-13 14-14 0 9-5 14-13 14z"/><path d="M5 19l8-8"/>',
     wissen: '<path d="M3 5.5C5.5 4.5 9 4.5 12 6.5c3-2 6.5-2 9-1v13c-2.5-1-6-1-9 1-3-2-6.5-2-9-1z"/><path d="M12 6.5v13"/>',
     rechner: '<rect x="5" y="3" width="14" height="18" rx="2"/><rect x="8" y="6" width="8" height="3" rx=".5"/><path d="M8 13h1M11.5 13h1M15 13h1M8 17h1M11.5 17h1M15 17h1"/>',
+    projekte: '<path d="M12 3.5A8.5 8.5 0 0 1 16.88 18.96" stroke-width="2" stroke-dasharray="0.1 3.6"/><path d="M16.88 18.96A8.5 8.5 0 1 1 12 3.5"/>',   // Projekte: Rand, Anfang gepunktet (läuft noch)
     verw: P.gear,
     // Werkzeuge = grosser Schraubenschlüssel (grau); Doku-Tools = Dokument mit Zahnrad (Beere, noch ohne Seite / TOOLS-Eintrag)
     werkzeuge: '<path d="M16.8 3.4a5.2 5.2 0 0 0-6.9 6.6L2.8 17.1a2.2 2.2 0 0 0 3.1 3.1l7.1-7.1a5.2 5.2 0 0 0 6.6-6.9l-3.1 3.1-2.8-.6-.6-2.8z"/>',
@@ -146,6 +147,8 @@
     // Kontakte = eigenes Haupttool: Kunden, Lieferanten und Pflegekunden (früher «Pflege & Service»)
     { k: 'kunden', n: 'Kontakte', url: 'tool-d-kunden-live-v1.html', farbe: PAL.gold[0], akzent: PAL.gold[3],
       seiten: ['tool-d-kunden-live-v1', 'pflege-kunden-live-v1'] },
+    // Projekte: Direktweg zu Kontakte › Projekte (eigene Seite gibt es nicht)
+    { k: 'projekte', n: 'Projekte', url: 'tool-d-kunden-live-v1.html?modus=projekte', farbe: PAL.erde[1], akzent: PAL.erde[3], seiten: [] },
     { k: 'pend', n: 'Pendenzen', url: 'pendenzen-live-v1.html', farbe: PAL.orange[1], akzent: PAL.orange[3], modul: 'pendenzen', seiten: ['pendenzen-live-v1'] },
     { k: 'plan', n: 'Einsatzplaner', url: 'einsatzplaner-live-v1.html', farbe: PAL.petrol[1], akzent: PAL.petrol[3], modul: 'einsatzplaner', seiten: ['einsatzplaner-live-v1', 'bauprogramm-live-v1'] },
     { k: 'wissen', n: 'Nachschlagewerk', url: 'wissen-live-v1.html', farbe: PAL.violett[1], akzent: PAL.violett[3], modul: 'wissen', seiten: ['wissen-live-v1'] },
@@ -359,7 +362,7 @@ header.app.kg-leiste ~ main.wrap{margin-left:0!important;margin-right:auto!impor
     'werkzeug-bau-diagonale-live-v1': ['werkzeuge', 'bau_diagonale'], 'werkzeug-bau-kies-live-v1': ['werkzeuge', 'bau_kies'], 'werkzeug-bau-stahl-live-v1': ['werkzeuge', 'bau_stahl'], 'werkzeug-bau-schalit-live-v1': ['werkzeuge', 'bau_schalit'], 'werkzeug-pflege-spritz-live-v1': ['werkzeuge', 'pflege_spritz'], 'werkzeug-allg-gefaelle-live-v1': ['werkzeuge', 'allg_gefaelle'],
     'doku-live-v1': ['doku', '_tool'], 'doku-dokument-live-v1': ['doku', '_tool'], 'doku-datei-live-v1': ['doku', '_tool'], 'doku-personen-live-v1': ['doku', 'personen']
   };
-  const TOOLRECHT = { offerten: ['offerten', 'offerten'], artikel: ['offerten', 'artikel'], kunden: [['offerten', 'kunden'], ['pflege', 'kunden']],
+  const TOOLRECHT = { offerten: ['offerten', 'offerten'], artikel: ['offerten', 'artikel'], kunden: [['offerten', 'kunden'], ['pflege', 'kunden']], projekte: ['offerten', 'kunden'],
     pend: ['pend', '_tool'], plan: ['plan', '_tool'], pflege: ['pflege', '_tool'], wissen: ['wissen', '_tool'],
     werkzeuge: ['werkzeuge', '_tool'], doku: ['doku', '_tool'] };
   const erlaubt = ziel => { // ziel = [tool, bereich] oder Liste davon (eine genügt); true/false, null = ohne Gruppe
