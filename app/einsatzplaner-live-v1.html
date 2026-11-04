@@ -223,6 +223,7 @@ html:not(.ep-eingebettet) .tl .grid{margin-bottom:50vh;} /* unten Platz, damit a
 .vbar{position:absolute;height:16px;border-radius:4px;font-size:11px;font-weight:600;line-height:16px;padding:0 6px;box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:grab;z-index:1;}
 .vbar.gesch{border:1.5px dashed rgba(255,255,255,.9);line-height:13px;}
 .vbar.ziehe{opacity:.35;}
+.vbrg{position:absolute;height:3px;opacity:.55;pointer-events:none;}
 .vgeist{position:fixed;z-index:500;pointer-events:none;box-shadow:0 6px 18px rgba(35,43,53,.3);}
 .vneuz{background:#D6E7F4;color:#323E4E;border:1.5px dashed #323E4E;line-height:13px;pointer-events:none;}
 .lane.vziel{box-shadow:inset 0 0 0 2px #323E4E;background:rgba(214,231,244,.45);}
@@ -1024,9 +1025,15 @@ function vorratZeichnen(){
     if(dayW >= 11) ['M', 'D', 'M', 'D', 'F'].forEach((t, r) => { kopf += `<span class="vt" style="left:${(w * (5 + 2 * WEK) + r) * dayW}px;width:${dayW}px">${t}</span>`; });
     if(WEK) kopf += `<span class="vwe" style="left:${w * W7 + 5 * dayW}px;width:${2 * WEK * dayW}px"></span>`;
   }
+  // wie die Personen-Balken: an Wochenenden unterbrochen, Stücke mit dünnem Steg verbunden (Jahr: ohne Wochenenden = ein Balken)
   const bars = L.map(({ v, z, a, n }) => {
-    const x = vX(a), w = vX(a + n - 1) + dayW - x, f = VFARBE[v.bereich] || VFARBE.bau, lab = vLab(v), t = `${v.geschaetzt ? '≈ ' : ''}${fmtN(Number(v.tage))} T`;
-    return `<div class="vbar${v.geschaetzt ? ' gesch' : ''}" data-v="${v.id}" style="left:${x + 1}px;top:${VKOPF + z * VH + 2}px;width:${Math.max(8, w - 2)}px;background:${f};color:${KG.textAuf(f)}" title="${esc(lab)} · ${t}${v.geschaetzt ? ' (geschätzt)' : ''} · ${v.bereich === 'pflege' ? 'Pflege' : 'Bau'}&#10;Runterziehen = einplanen · Klick = ändern">${esc(lab)} · ${t}</div>`;
+    const f = VFARBE[v.bereich] || VFARBE.bau, lab = vLab(v), t = `${v.geschaetzt ? '≈ ' : ''}${fmtN(Number(v.tage))} T`, top = VKOPF + z * VH + 2;
+    const tip = `${esc(lab)} · ${t}${v.geschaetzt ? ' (geschätzt)' : ''} · ${v.bereich === 'pflege' ? 'Pflege' : 'Bau'}&#10;Runterziehen = einplanen · Klick = ändern`;
+    const st = []; for(let q = Math.floor(a / 5); q * 5 < a + n; q++) st.push([Math.max(a, 5 * q), Math.min(a + n, 5 * q + 5)]);
+    if(!WEK) st.splice(0, st.length, [a, a + n]);
+    return st.map(([s, e], i) => { const x = vX(s), w = vX(e - 1) + dayW - x;
+      const brg = i ? `<div class="vbrg" style="left:${vX(st[i - 1][1] - 1) + dayW - 1}px;top:${top + 6.5}px;width:${x - vX(st[i - 1][1] - 1) - dayW + 2}px;background:${f}"></div>` : '';
+      return brg + `<div class="vbar${v.geschaetzt ? ' gesch' : ''}" data-v="${v.id}" style="left:${x + 1}px;top:${top}px;width:${Math.max(8, w - 2)}px;background:${f};color:${KG.textAuf(f)}" title="${tip}">${esc(lab)} · ${t}</div>`; }).join('');
   }).join('');
   el.classList.toggle('zu', !VOR_OFFEN);
   el.innerHTML = `<div class="vnm"><button type="button" class="vtog" id="vTog" aria-expanded="${VOR_OFFEN}" title="Vorrat ${VOR_OFFEN ? 'zuklappen' : 'aufklappen'}">${I(VOR_OFFEN ? 'down' : 'next')}<b>Vorrat</b></button>
@@ -1098,7 +1105,7 @@ addEventListener('pointermove', e => {
   if(!d.moved && Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < 5) return;
   d.moved = true;
   if(d.art === 'bar'){
-    if(!d.g){ d.g = d.b.cloneNode(true); d.g.className = 'vbar vgeist'; d.g.style.width = d.b.offsetWidth + 'px'; document.body.appendChild(d.g); d.b.classList.add('ziehe'); }
+    if(!d.g){ d.g = d.b.cloneNode(true); d.g.className = 'vbar vgeist'; d.g.style.width = d.b.offsetWidth + 'px'; document.body.appendChild(d.g); document.querySelectorAll(`#vorrat .vbar[data-v="${d.v.id}"]`).forEach(x => x.classList.add('ziehe')); }
     d.g.style.left = (e.clientX - 12) + 'px'; d.g.style.top = (e.clientY - 9) + 'px';
     const lane = document.elementFromPoint(e.clientX, e.clientY)?.closest('#tl .lane[data-mid]');
     document.querySelectorAll('.lane.vziel').forEach(x => { if(x !== lane) x.classList.remove('vziel'); }); if(lane) lane.classList.add('vziel');
@@ -1111,7 +1118,7 @@ addEventListener('pointermove', e => {
 addEventListener('pointerup', e => {
   if(!vDrag) return; const d = vDrag; vDrag = null;
   document.querySelectorAll('.lane.vziel').forEach(x => x.classList.remove('vziel'));
-  if(d.g) d.g.remove(); if(d.b) d.b.classList.remove('ziehe');
+  if(d.g) d.g.remove(); document.querySelectorAll('#vorrat .ziehe').forEach(x => x.classList.remove('ziehe'));
   if(d.art === 'bar'){
     if(!d.moved){ vorratDialog(d.v, null, d.b.getBoundingClientRect()); return; }
     const lane = document.elementFromPoint(e.clientX, e.clientY)?.closest('#tl .lane[data-mid]');
