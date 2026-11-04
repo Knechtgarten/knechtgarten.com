@@ -104,7 +104,9 @@ tr.offertenrow td{padding:0;border-bottom:1px solid var(--soft);}
 .pjdi{display:flex;flex-direction:column;gap:2px;flex:1;} .pjdf{display:flex;justify-content:flex-end;gap:8px;}
 .pjchk{all:unset;box-sizing:border-box;cursor:pointer;display:flex;align-items:center;gap:10px;padding:4px 8px;border-radius:8px;font-size:13.5px;color:#232B35;} .pjchk:hover{background:#F5F7F9;}
 .pjzl{display:flex;align-items:center;border-radius:8px;} .pjzl .pjchk{flex:1;} .pjgr{cursor:grab;color:#A3B0BE;display:flex;padding:0 0 0 2px;} .pjzl:hover .pjgr{color:#4C5C70;} .pjzl.zieht{opacity:.4;} .pjzl.ziel{box-shadow:inset 0 2px 0 #323E4E;}
-.pjex{margin-left:4px;} .pjneu{padding:2px 8px 6px 22px;} .pjneu input{width:100%;height:30px;border:1px dashed #B9C2CC;border-radius:6px;padding:0 10px;font:inherit;font-size:13px;box-sizing:border-box;} .pjneu input:focus{border-style:solid;border-color:#323E4E;outline:0;}
+.pjex{margin-left:4px;} .pjblk{flex:1;display:flex;flex-direction:column;} .pjzl:has(.pjblk){align-items:flex-start;} .pjzl:has(.pjblk) .pjgr{padding-top:7px;}
+.pjneu{display:flex;align-items:center;margin-bottom:6px;} .pjneu .pjgr{visibility:hidden;} .pjneu .pjin{flex:1;display:flex;align-items:center;gap:10px;padding:4px 8px;} .pjneu .pjbox{border-style:dashed;border-color:#B9C2CC;}
+.pjneu input{flex:1;min-width:0;height:22px;border:0;border-bottom:1px dashed #B9C2CC;padding:0;background:none;font:inherit;font-size:13.5px;color:#232B35;} .pjneu input:focus{border-bottom:1px solid #323E4E;outline:0;}
 .pjchk .pjam{margin-left:auto;font-size:11.5px;color:#8B9097;font-variant-numeric:tabular-nums;}
 .pjbox{width:18px;height:18px;border-radius:5px;border:1.5px solid #8B9097;display:flex;align-items:center;justify-content:center;flex:none;background:#fff;color:#fff;} .pjbox.an{background:#3F7D3F;border-color:#3F7D3F;}
 .pjnach{display:flex;align-items:center;gap:5px;padding:8px;font-size:13.5px;} .pjnach > span:first-child{margin-right:6px;}
@@ -1155,11 +1157,18 @@ async function ladeProjekte(){
 }
 const pjF = () => Object.assign({}, PJ_FRISTEN, PJ.einst?.fristen || {});
 const pjC = k => (PJ.einst?.checklisten || {})[k] || [];
-// Checkliste eines Projekts: Standardpunkte (Einstellungen) + eigene Punkte, Reihenfolge pro Projekt (ziehen)
-function pjListe(S, art){
-  const a = (S || {})[art] || {}, alle = [...pjC(art), ...(a.eigene || []).map(e => ({ ...e, eigen: true }))], r = a.reihe || [];
-  return alle.map((c, i) => ({ c, i, p: r.indexOf(c.k) })).sort((x, y) => (x.p < 0 ? 1e3 + x.i : x.p) - (y.p < 0 ? 1e3 + y.i : y.p)).map(x => x.c);
+// feste Punkte mit eigener Logik (Schlüssel mit «_»), ziehbar wie die anderen
+const PJ_FEST = { bb: [{ k: '_keine', vorn: true }, { k: '_nach' }, { k: '_voll' }, { k: '_erh' }, { k: '_kost' }] };
+// ganze Checkliste: feste Punkte + Standardpunkte (Einstellungen) + eigene Punkte, Reihenfolge pro Projekt (ziehen);
+// was nicht in der Reihenfolge steht, kommt hinter alle seine Vorgänger aus der Grundreihenfolge (neue eigene Punkte = ganz unten)
+function pjReihe(S, art){
+  const a = (S || {})[art] || {}, f = PJ_FEST[art] || [];
+  const std = [...f.filter(x => x.vorn), ...pjC(art), ...f.filter(x => !x.vorn), ...(a.eigene || []).map(e => ({ ...e, eigen: true }))];
+  const m = new Map(std.map(c => [c.k, c])), out = (a.reihe || []).filter((k, i, r) => m.has(k) && r.indexOf(k) === i);
+  std.forEach((c, i) => { if(!out.includes(c.k)) out.splice(Math.max(-1, ...std.slice(0, i).map(x => out.indexOf(x.k))) + 1, 0, c.k); });
+  return out.map(k => m.get(k));
 }
+const pjListe = (S, art) => pjReihe(S, art).filter(c => c.k[0] !== '_');
 const pjHeute = () => { const d = new Date(); d.setHours(12, 0, 0, 0); return d; };
 const pjD = v => v ? new Date(String(v).slice(0, 10) + 'T12:00') : null;
 const pjPlus = (v, n) => { const d = pjD(v); if(!d) return null; d.setDate(d.getDate() + n); return d; };
@@ -1258,7 +1267,12 @@ function pjDialog(p, s){
   const kn = (KUNDEN.find(x => x.id === p.kunde_id) || {}), titel = { ab: 'Auftragsbestätigung', bb: 'Baubewilligung', avor: 'Arbeitsvorbereitung', va: 'Vorarbeitertermin', sr: 'Schlussrechnung', za: 'Zahlung' }[s];
   const box = (an, attr, t, am) => `<button type="button" class="pjchk" ${attr}><span class="pjbox${an ? ' an' : ''}">${an ? KG.icon('check', 12) : ''}</span>${escHtml(t)}${am && typeof am === 'string' ? `<small class="pjam">${pjKurz(pjD(am))}</small>` : ''}</button>`;
   // Zeilen einer Checkliste: Griff zum Ziehen, Haken, bei eigenen Punkten Löschen
-  const pjZeilen = (art, a, attr) => pjListe(p.schritte, art).map(c => `<div class="pjzl" draggable="true" data-zk="${c.k}" data-zart="${art}"><span class="pjgr" title="Ziehen = Reihenfolge ändern">${KG.icon('griff', 12)}</span>${box((a.punkte || {})[c.k], `data-${attr}="${c.k}"`, c.t, (a.punkte || {})[c.k])}${c.eigen ? `<button type="button" class="kg-ibtn danger pjex" data-eweg="${art}|${c.k}" title="Eigenen Punkt löschen" aria-label="Eigenen Punkt löschen">${KG.icon('trash', 12)}</button>` : ''}</div>`).join('');
+  // fest = Inhalt der festen Punkte (Schlüssel «_…»), nur = Filter
+  const pjZeilen = (art, a, attr, fest = {}, nur = () => true) => pjReihe(p.schritte, art).filter(nur).map(c => {
+    const inn = c.k[0] === '_' ? fest[c.k] || '' : box((a.punkte || {})[c.k], `data-${attr}="${c.k}"`, c.t, (a.punkte || {})[c.k]);
+    return inn ? `<div class="pjzl" draggable="true" data-zk="${c.k}" data-zart="${art}"><span class="pjgr" title="Ziehen = Reihenfolge ändern">${KG.icon('griff', 12)}</span>${inn}${c.eigen ? `<button type="button" class="kg-ibtn danger pjex" data-eweg="${art}|${c.k}" title="Eigenen Punkt löschen" aria-label="Eigenen Punkt löschen">${KG.icon('trash', 12)}</button>` : ''}</div>` : ''; }).join('');
+  // Feld für einen neuen eigenen Punkt: sieht aus wie ein kommender Punkt, immer zuunterst
+  const neuFeld = `<div class="pjneu"><span class="pjgr" aria-hidden="true">${KG.icon('griff', 12)}</span><label class="pjin"><span class="pjbox"></span><input type="text" id="pjNeuP" placeholder="Eigener Punkt (Enter)" autocomplete="off" data-lpignore="true"></label></div>`;
   const inhalt = () => { const S = p.schritte || {};
     // AB und Schlussrechnung: zwei Haken (halb / voll)
     if(s === 'ab' || s === 'sr'){ const a = S[s] || {}, st = a.stufe || 0, t = s === 'ab' ? ['Auftragsbestätigung versendet', 'Unterschrieben zurück erhalten'] : ['Schlussrechnung erstellt', 'Schlussrechnung versendet'];
@@ -1270,15 +1284,16 @@ function pjDialog(p, s){
     if(s === 'avor'){ const a = S.avor || {};
       return `<label class="pjfl">Baustart (ungefähr)<input type="date" id="pjBs" value="${p.baustart || ''}"></label>
         <div class="pjhint">${p.baustart ? 'Später verschieben ist kein Problem – die Fristen von AVOR und Vorarbeiter rechnen ab diesem Datum.' : 'Noch kein Baustart: die AVOR erinnert ' + pjF().avor_ohne_baustart + ' Tage nach der Zusage.'}</div>`
-        + pjZeilen('avor', a, 'av') + '<div class="pjneu"><input type="text" id="pjNeuP" placeholder="+ eigener Punkt (Enter)" autocomplete="off" data-lpignore="true"></div>'
+        + pjZeilen('avor', a, 'av') + neuFeld
         + '<div class="pjhint">Materialliste aus dem Angebot – später.</div>'; }
     if(s === 'bb'){ const b = S.bb || {};
-      return box(b.keine, 'data-bbk', 'Braucht keine Baubewilligung') + (b.keine ? '' : pjZeilen('bb', b, 'bb') + '<div class="pjneu"><input type="text" id="pjNeuP" placeholder="+ eigener Punkt (Enter)" autocomplete="off" data-lpignore="true"></div>'
-        // Nachforderungen der Gemeinde: jede abgearbeitete gibt eine neue leere, bis «vollständig»
-        + (b.nachtraege || []).map((d, i) => box(true, `data-bbx="${i}"`, `${i + 1}. Nachforderung abgearbeitet`, d)).join('')
-        + (b.vollstaendig || b.erhalten ? '' : box(false, 'data-bbn', `${(b.nachtraege || []).length + 1}. Nachforderung abgearbeitet`))
-        + box(b.vollstaendig, 'data-bbv', 'Baubewilligung vollständig (von unserer Seite)', b.vollstaendig)
-        + box(b.erhalten, 'data-bbe', 'Baubewilligung erhalten', b.erhalten) + box(b.kosten, 'data-bbc', 'Kosten Baubewilligung verrechnet (vor der 1. Akonto)', b.kosten)); }
+      // Nachforderungen der Gemeinde: jede abgearbeitete gibt eine neue leere, bis «vollständig» (zusammen ein Block)
+      const nach = (b.nachtraege || []).map((d, i) => box(true, `data-bbx="${i}"`, `${i + 1}. Nachforderung abgearbeitet`, d)).join('')
+        + (b.vollstaendig || b.erhalten ? '' : box(false, 'data-bbn', `${(b.nachtraege || []).length + 1}. Nachforderung abgearbeitet`));
+      const fest = { _keine: box(b.keine, 'data-bbk', 'Braucht keine Baubewilligung'), _nach: nach && `<div class="pjblk">${nach}</div>`,
+        _voll: box(b.vollstaendig, 'data-bbv', 'Baubewilligung vollständig (von unserer Seite)', b.vollstaendig),
+        _erh: box(b.erhalten, 'data-bbe', 'Baubewilligung erhalten', b.erhalten), _kost: box(b.kosten, 'data-bbc', 'Kosten Baubewilligung verrechnet (vor der 1. Akonto)', b.kosten) };
+      return b.keine ? pjZeilen('bb', b, 'bb', fest, c => c.k === '_keine') : pjZeilen('bb', b, 'bb', fest) + neuFeld; }
     const z = (S.zahlung || {}).stand || 'offen';
     return [['offen', 'noch offen'], ['bezahlt', 'vollständig bezahlt'], ['m1', '1. Mahnung verschickt'], ['m2', '2. Mahnung verschickt']].map(([k, t]) => `<button type="button" class="pjopt${z === k ? ' an' : ''}" data-za="${k}"><i class="pjo ${k}"></i>${t}</button>`).join('')
       + `<div class="pjhint">${(S.sr || {}).stufe === 2 ? 'Fällig ' + pjF().zahlung + ' Tage nach der Schlussrechnung.' : 'Die Frist läuft ab der versendeten Schlussrechnung.'}</div>`; };
@@ -1317,7 +1332,7 @@ function pjDialog(p, s){
   w.addEventListener('dragover', e => { const z = e.target.closest?.('.pjzl'); if(!zieh || !z) return; e.preventDefault(); w.querySelectorAll('.pjzl.ziel').forEach(x => x.classList.remove('ziel')); z.classList.add('ziel'); });
   w.addEventListener('dragend', () => { zieh = null; w.querySelectorAll('.pjzl').forEach(x => x.classList.remove('zieht', 'ziel')); });
   w.addEventListener('drop', e => { const z = e.target.closest?.('.pjzl'); if(!zieh || !z) return; e.preventDefault(); const von = zieh, nach = z.dataset.zk, art = z.dataset.zart; zieh = null; if(von === nach) return;
-    setz(S => { const alt = pjListe(S, art).map(c => c.k), runter = alt.indexOf(von) < alt.indexOf(nach), keys = alt.filter(k => k !== von), i = keys.indexOf(nach) + (runter ? 1 : 0); keys.splice(i, 0, von); (S[art] = S[art] || {}).reihe = keys; }); });
+    setz(S => { const alt = pjReihe(S, art).map(c => c.k), runter = alt.indexOf(von) < alt.indexOf(nach), keys = alt.filter(k => k !== von), i = keys.indexOf(nach) + (runter ? 1 : 0); keys.splice(i, 0, von); (S[art] = S[art] || {}).reihe = keys; }); });
   w.addEventListener('change', async e => { if(e.target.id === 'pjBs'){ if(await pjSpeichern(p, { baustart: e.target.value || null })) zeichnen(); } });
   w.addEventListener('keydown', e => { if(e.key === 'Escape') w.remove(); });
 }
