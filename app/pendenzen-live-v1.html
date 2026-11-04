@@ -46,6 +46,13 @@ header.app .userbar button.lo{font-size:11.5px;color:#c7ccd1;background:none;bor
 .ablage{flex:none;padding:0 20px 6px;}
 .ablage .dzs{flex-direction:column;gap:6px;}
 .ablspalte{width:220px;} .ablspalte.breit{width:280px;}
+body.offest .lresize{display:none;} body.offest .lh{cursor:default;}
+/* Offerten-Board rechts: «Zugesagt» als Ablagefeld wie Archivieren (beim Darüberziehen hellblau), darunter ruhige Liste */
+.dz[data-dzone="zusage"].hot{background:#D6E7F4;}
+.ablzu{padding:18px 20px 0;} .zuliste{background:#fff;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-top:2px;}
+.zuliste .card{border-radius:0;border:0;border-top:1px solid rgba(50,62,78,.07);height:28px;padding:0 8px 0 10px;background:transparent;gap:8px;}
+.zuliste .card:first-child{border-top:0;} .zuliste .card:hover{background:rgba(50,62,78,.04);} .zuliste .card .tx{font-size:13px;}
+.zuliste .zhint{padding:8px 10px;}
 .ablspalte .dz{height:44px;font-size:13px;}
 .ablliste{padding:10px 20px 0;} .ablliste .list{position:relative !important;left:0 !important;top:0 !important;width:100% !important;} .ablliste .lh{cursor:default;} .ablliste [data-set]{display:none;}
 .pane.schmal .ablage{padding:6px 7px;}
@@ -499,7 +506,11 @@ function anzeigeBreiten(){ const seiten = reihe().filter(z => z !== 'mitte'), w 
 // Darstellung je nach Breite: frei (eigene Anordnung), Spalten (automatisch gestapelt), schmal (Titel hochkant)
 // Wann? und Allgemein: immer frei anordnen – zu breite Listen werden auf die Bereichsbreite gekürzt, Überlappungen rutschen nach unten
 let KAPPE = Infinity;
-const lBreite = l => Math.min(l.breite || LW, KAPPE), lX = l => Math.max(0, Math.min(l.x, Math.floor((KAPPE + R - lBreite(l)) / R) * R));
+const lBreite = l => l._fw ?? Math.min(l.breite || LW, KAPPE), lX = l => l._fx ?? Math.max(0, Math.min(l.x, Math.floor((KAPPE + R - lBreite(l)) / R) * R));
+// Offerten-Board: Listen in fester Reihenfolge nebeneinander, alle gleich breit über die ganze Fläche (nicht verschiebbar)
+const OF_REIHE = ['of_zugestellt', 'of_nachgefasst', 'of_meldet', 'of_aufgeschoben', 'of_keine', 'of_abgesagt'];
+function ofLage(ls, w){ const n = OF_REIHE.length, b = Math.max(180, Math.floor((w - 2 * R - (n - 1) * R) / n));
+  ls.forEach(l => { const i = OF_REIHE.indexOf(l.art_id); if(i < 0) return; l._fx = R + i * (b + R); l._fw = b; l._fy = R; }); }
 // alle Bereiche frei anordnen (Raster 20 px), auch die Mitte: zu breite Listen werden auf die Bereichsbreite gekürzt, was rechts nicht Platz hat, rückt nach links, Überlappungen rutschen nach unten
 function modusFuer(ls, w, zn){ return w <= 60 ? 'schmal' : 'frei'; }
 const sortiert = l => S.pz.filter(p => p.liste_id === l.id).sort((a, b) => a.sortierung - b.sortierung || a.erstellt_am.localeCompare(b.erstellt_am));
@@ -698,7 +709,7 @@ function listHtml(l){
   // Hintergrund: selbst gewählt überall; sonst in der Mitte Stufe 5 (Palette) bzw. ganz fein in der Titelfarbe (alte Farben)
   // alle Listen im ruhigen Stil (weiss, Zeilen mit feiner Linie); Hintergrund nur, wenn selbst gewählt
   const tint = !l.zeit && l.farbe_hg ? `;background:${l.farbe_hg}` : '';
-  return `<div class="list zl${l.zu ? ' zu' : ''}" data-list="${l.id}" style="left:${lX(l)}px;top:${l.y}px;width:${lBreite(l)}px${tint}">${kopf}<div class="body">${body}</div><div class="lresize" data-rz="${l.id}" title="Breite ziehen, Doppelklick = Standard"></div></div>`;
+  return `<div class="list zl${l.zu ? ' zu' : ''}" data-list="${l.id}" style="left:${lX(l)}px;top:${l._fy ?? l.y}px;width:${lBreite(l)}px${tint}">${kopf}<div class="body">${body}</div><div class="lresize" data-rz="${l.id}" title="Breite ziehen, Doppelklick = Standard"></div></div>`;
 }
 function zeichne(){
   const sc = {}; document.querySelectorAll('[data-cv]').forEach(c => sc[c.dataset.cv] = [c.scrollLeft, c.scrollTop]);
@@ -721,12 +732,15 @@ function zeichne(){
     + (istOfferten() ? '' : `<button class="kg-haupt" data-neuliste>${K('plus')}Liste</button>`);
   $('pzSeite').innerHTML = `<div class="kg-l">${seg}${seg2}</div>${rechts ? `<div class="kg-r">${rechts}</div>` : ''}`;
   // Ablagefelder: Offerten-Board nur Archivieren (Zugesagt ist dort eine Liste); «In anderes Board» braucht es dort nicht
-  const dzs = (istOfferten() ? [['archiv', 'archiv', 'Archivieren']] : [['archiv', 'archiv', 'Archivieren'], ['board', 'senden', 'In anderes Board'], ['planer', 'kalender', 'In den Planer'], ...(S.board.typ === 'person' && ofBoard() ? [['offerte', 'check', 'Offerte zugestellt']] : [])]).map(([z, ic, t]) => `<div class="dz${S.treffer === z ? ' treffer' : ''}" data-dzone="${z}" title="${t}">${K(ic, 15)}<span>${t}</span></div>`).join('');
+  document.body.classList.toggle('offest', istOfferten());
+  const dzs = (istOfferten() ? [['archiv', 'archiv', 'Archivieren'], ['zusage', 'check', 'Zugesagt']] : [['archiv', 'archiv', 'Archivieren'], ['board', 'senden', 'In anderes Board'], ['planer', 'kalender', 'In den Planer'], ...(S.board.typ === 'person' && ofBoard() ? [['offerte', 'check', 'Offerte zugestellt']] : [])]).map(([z, ic, t]) => `<div class="dz${S.treffer === z ? ' treffer' : ''}" data-dzone="${z}" title="${t}">${K(ic, 15)}<span>${t}</span></div>`).join('');
   // Offerten-Board: «Zugesagt» steht rechts unter «Archivieren» – hineinziehen = zugesagt, darunter die zugesagten Offerten
   const zlist = istOfferten() ? S.listen.find(l => l.art_id === 'of_zugesagt') : null;
   const ablage = `<div class="ablage"><div class="ptitle" style="padding:0"><span>Hierher ziehen</span></div><div class="dzs">${dzs}</div></div>`
-    + (zlist ? `<div class="ablliste">${listHtml(zlist).replace(/ data-drag="[^"]*"/, '')}</div>` : '');
-  $('main').innerHTML = `<div class="zones">${reihe().map((zn, i) => { const ls = S.listen.filter(l => bereichOf(l) === zn && l !== zlist), w = bw[zn], modus = modusFuer(ls, w, zn); KAPPE = w - 2 * R;
+    // darunter nur eine ruhige Liste der zugesagten Offerten (abgelegt wird oben auf «Zugesagt»)
+    + (zlist ? (() => { const zp = S.pz.filter(p => p.offerte_status === 'zugesagt' && listeById(p.liste_id)?.versteckt);
+      return `<div class="ablzu"><div class="ptitle" style="padding:0"><span>Zugesagte Offerten</span></div><div class="zuliste">${zp.map(p => pdHtml(p)).join('') || '<div class="zhint">Noch keine.</div>'}</div><div class="zhint">Liegt auch im Büro-Board unter «Planung».</div></div>`; })() : '');
+  $('main').innerHTML = `<div class="zones">${reihe().map((zn, i) => { const ls = S.listen.filter(l => bereichOf(l) === zn && l !== zlist), w = bw[zn], modus = modusFuer(ls, w, zn); KAPPE = w - 2 * R; if(istOfferten()) ofLage(ls, w);
     const geordnet = [...ls].sort((a, c) => a.y - c.y || a.x - c.x);
     const strip = l => { const z = l.zeit && ZEIT[l.zeit], a = !l.zeit && art(l.art_id); return `<button class="vstrip${(z ? z.hell : hellAuf(listFarbe(l))) ? ' hell' : ''}" data-open="${zn}" style="background:${z ? z.c : listFarbe(l)}" title="${esc(l.titel)}">${A(z ? z.icon : a.icon)}${esc(l.titel)}</button>`; };
     let inhalt;
@@ -1286,13 +1300,13 @@ document.addEventListener('dblclick', e => { const h = e.target.closest('[data-r
 document.addEventListener('pointerdown', e => {
   const pg = e.target.closest('[data-pgriff]'); // Bereich am Griff packen und auf einen anderen Bereich ziehen = Plätze tauschen
   if(pg){ pd = { zn: pg.dataset.pgriff }; e.preventDefault(); return; }
-  const rzh = e.target.closest('[data-rz]'); // Listenbreite am rechten Rand ziehen (nur in der freien Anordnung sichtbar)
+  const rzh = !istOfferten() && e.target.closest('[data-rz]'); // Listenbreite am rechten Rand ziehen (nicht im Offerten-Board: feste Breite)
   if(rzh){ const l = listeById(rzh.dataset.rz); rz = { l, el:rzh.parentElement, x0:e.clientX, w0:l.breite || LW }; e.preventDefault(); return; }
   const sp = e.target.closest('[data-split]');
   if(sp){ const k = sp.dataset.split; sd = { k, links: sp.dataset.links === '1', x0:e.clientX, w0:anzeigeBreiten()[k] }; S.splitOn = k; sp.classList.add('on'); e.preventDefault(); return; }
   const pr = e.target.closest('[data-paar]');
   if(pr){ const [a, b] = pr.dataset.paar.split('|'), bw = anzeigeBreiten(); sd = { paar:[a, b], x0:e.clientX, wa:bw[a], wb:bw[b] }; S.splitOn = pr.dataset.paar; pr.classList.add('on'); e.preventDefault(); return; }
-  const h = e.target.closest('[data-drag]'); if(!h || e.target.closest('button')) return;
+  const h = e.target.closest('[data-drag]'); if(!h || e.target.closest('button') || istOfferten()) return; // Offerten-Board: Listen fest
   const l = listeById(h.dataset.drag), r = h.parentElement.getBoundingClientRect();
   ld = { l, el:h.parentElement, gx:e.clientX - r.left, gy:e.clientY - r.top, w:r.width, moved:false }; e.preventDefault();
 });
