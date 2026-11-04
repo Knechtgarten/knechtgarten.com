@@ -166,6 +166,9 @@ html.bp-fenster #zuBtn:hover{background:rgba(255,255,255,.12)!important;color:#f
 .kopf{position:sticky;top:0;z-index:3;background:#F5F7F9;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:#323E4E;font-weight:700;padding:8px 10px;border-bottom:1px solid #D5DBE1;}
 .tag{font-size:12.5px;color:#4C5C70;padding:0 10px;display:flex;align-items:center;gap:6px;border-bottom:1px solid #DCE1E6;font-variant-numeric:tabular-nums;white-space:nowrap;}
 .tag b{width:22px;color:#323E4E;}
+/* Griffe am angewählten Feld: innen ganzer Arbeitsschritt, aussen ganze Offerte */
+.ggr{justify-self:end;width:5px;border-radius:3px;margin:3px 0;z-index:3;cursor:grab;position:relative;opacity:.85;}
+.ggr:hover{opacity:1;box-shadow:0 0 0 2px rgba(50,62,78,.18);} .ggr.as{margin-right:2px;} .ggr.ang{margin-right:10px;}
 .tag.frei{background:#F5F7F9;color:#A3B0BE;font-size:9px;line-height:10px;overflow:hidden;} .tag.frei b{color:#A3B0BE;}
 .tag.fei{background:#FAEBB0;color:#8A6410;font-size:11.5px;overflow:hidden;}
 .zelle{border-bottom:1px solid #DCE1E6;border-left:1px solid #E3E7EC;}
@@ -521,9 +524,12 @@ function aufbau(){
   L.addEventListener('scroll', () => { if(!sync){ sync = true; P.scrollTop = L.scrollTop; requestAnimationFrame(() => sync = false); } });
   // Feld ins Gerüst ziehen = zurück
   const Gr = $('geruest');
-  Gr.addEventListener('dragover', e => { if(ziehen && ziehen.feld){ e.preventDefault(); Gr.classList.add('ziel'); } });
+  Gr.addEventListener('dragover', e => { if(ziehen && (ziehen.feld || ziehen.felder)){ e.preventDefault(); Gr.classList.add('ziel'); } });
   Gr.addEventListener('dragleave', e => { if(!Gr.contains(e.relatedTarget)) Gr.classList.remove('ziel'); });
-  Gr.addEventListener('drop', e => { Gr.classList.remove('ziel'); if(!ziehen || !ziehen.feld) return; e.preventDefault(); const id = ziehen.feld; ziehen = null; zurueck(id); });
+  Gr.addEventListener('drop', e => { Gr.classList.remove('ziel'); if(!ziehen || !(ziehen.feld || ziehen.felder)) return; e.preventDefault();
+    // ganzer Arbeitsschritt / ganze Offerte zurück: alle Felder auf einmal (Teilschritte gehen an ihren Ursprung zurück)
+    if(ziehen.felder){ const ids = ziehen.felder; ziehen = null; B = B.filter(x => !ids.includes(x.id)); if(ids.includes(gewaehlt)) gewaehlt = null; geaendert(); return; }
+    const id = ziehen.feld; ziehen = null; zurueck(id); });
   zeichnen();
   zumProgramm();
 }
@@ -669,6 +675,15 @@ function zeichnen(){
     // Material/Subunternehmer/Notiz: Text Zeile für Zeile in den Tageszeilen (zinfo), Eingabefeld darüber (beim Tippen sichtbar)
     W.forEach((d, j) => { ['mat', 'sub', 'notiz'].forEach((f, i) => { h += `<input class="zinfo" type="text" data-zi="${p.id}|${f}|${j}" data-tp="${p.id}" data-feld="${f}" data-j="${j}" style="grid-column:${cA + 1 + i};grid-row:${zeile(d)}" aria-label="${['Spez. Material', 'Lieferant', 'Notiz'][i]} ${kurz(d)}" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-form-type="other"${DARF ? '' : ' readonly'}>`; }); });
   });
+  // Angewähltes Feld: links neben dem Programm zwei Griffe – innen ganzer Arbeitsschritt, aussen ganze Offerte (ziehen = alles zusammen)
+  const gw = DARF && gewaehlt && B.find(p => p.id === gewaehlt);
+  if(gw && gw.teile.length){
+    const as = gruppeAs(gw), an = gruppeAng(gw), ang = angebotVon(gw.teile[0]), p5 = pal(ang ? famVon(ang) : 'grau');
+    const griff = (g, art, farbe, tip) => { const r1 = Math.min(...g.map(p => zeile(p.von))), r2 = Math.max(...g.map(p => zeile(p.bis))) + 1;
+      h += `<div class="ggr ${art}" draggable="true" data-ggr="${g.map(p => p.id).join(',')}" style="grid-column:${cT};grid-row:${r1}/${r2};background:${farbe}" title="${esc(tip)}"></div>`; };
+    if(as.length > 1) griff(as, 'as', p5[1], `Ganzen Arbeitsschritt «${asVon(gw.teile[0])?.n || teilName(gw)}» verschieben (${as.length} Felder) · ins Gerüst ziehen = zurück`);
+    if(an.length > as.length) griff(an, 'ang', p5[3], `Ganze Offerte «${angText(ang)}» verschieben (${an.length} Felder) · ins Gerüst ziehen = zurück`);
+  }
   R.innerHTML = h;
   if($('lsInner')) $('lsInner').style.height = $('prog').scrollHeight + 'px';
   geruest(); chips(ende); binden(); detail(); infoVerteilen();
@@ -747,6 +762,17 @@ function zSpeichern(z){
   clearTimeout(speicherTimer); speicherTimer = setTimeout(speichern, 800);
 }
 const teilVon = id => { const p = B.find(x => x.id === id); return p ? { p } : {}; };
+// Gruppen eines Felds: alle Felder desselben Arbeitsschritts bzw. derselben Offerte (in Programm-Reihenfolge)
+const gruppeAs = p => { const as = p.teile.length ? asVon(p.teile[0]) : null; return as ? B.filter(q => q.teile.length && asVon(q.teile[0]) === as) : [p]; };
+const gruppeAng = p => { const a = p.teile.length ? angebotVon(p.teile[0]) : null; return a ? B.filter(q => q.teile.length && angebotVon(q.teile[0]) === a) : [p]; };
+// mehrere Felder zusammen an Stelle j (Index im Programm vor dem Herausnehmen) setzen; fix gilt fürs erste Feld
+function gruppeSetzen(ids, j, fix){
+  const mit = B.filter(x => ids.includes(x.id)); if(!mit.length) return;
+  j -= B.slice(0, j).filter(x => ids.includes(x.id)).length;
+  B = B.filter(x => !ids.includes(x.id));
+  mit.forEach((m, i) => m.fix = i === 0 ? (fix || null) : null);
+  B.splice(Math.max(0, Math.min(j, B.length)), 0, ...mit);
+}
 function binden(){
   const R = $('raster');
   R.querySelectorAll('.blk').forEach(el => el.addEventListener('click', e => { if(e.target.closest('.griff,.ib')) return; gewaehlt = gewaehlt === el.dataset.p ? null : el.dataset.p; zeichnen(); }));
@@ -778,9 +804,15 @@ function binden(){
     if(z0.proAs){ const gruppen = []; z0.leaves.forEach(id => { const as = asVon(id); const g = gruppen.find(x => x.as === as); if(g && as) g.l.push(id); else gruppen.push({ as, l: [id] }); });
       gruppen.forEach((g, i) => { B.forEach(p => p.teile = p.teile.filter(id => !g.l.includes(id))); B.splice(Math.min(idx + i, B.length), 0, neuerTeil(g.l, { fix: i === 0 ? fix || null : null })); }); geaendert(); }
     else einfuegen(z0.leaves, idx, fix); };
+  // Griffe (ganzer Arbeitsschritt / ganze Offerte) ziehen
+  R.querySelectorAll('[data-ggr]').forEach(g => {
+    g.addEventListener('dragstart', e => { e.stopPropagation(); ziehen = { felder: g.dataset.ggr.split(',') }; e.dataTransfer.setData('text/plain', ''); g.classList.add('ziehe');
+      ziehen.felder.forEach(id => R.querySelector(`.blk[data-p="${id}"]`)?.classList.add('ziehe')); });
+    g.addEventListener('click', e => e.stopPropagation()); });
   R.querySelectorAll('.blk').forEach(el => {
-    el.addEventListener('dragover', e => { if(!ziehen || ziehen.feld === el.dataset.p) return; e.preventDefault(); weg(); el.classList.add(unten(e, el) ? 'ziel-u' : 'ziel-o'); });
+    el.addEventListener('dragover', e => { if(!ziehen || ziehen.feld === el.dataset.p || ziehen.felder?.includes(el.dataset.p)) return; e.preventDefault(); weg(); el.classList.add(unten(e, el) ? 'ziel-u' : 'ziel-o'); });
     el.addEventListener('drop', e => { if(!ziehen) return; e.preventDefault(); e.stopPropagation(); weg(); let j = B.findIndex(x => x.id === el.dataset.p); if(unten(e, el)) j++;
+      if(ziehen.felder){ const ids = ziehen.felder; ziehen = null; if(ids.includes(el.dataset.p)) return; gruppeSetzen(ids, j, null); geaendert(); return; }
       if(ziehen.leaves){ ausGeruest(j); return; }
       vorHolen(ziehen.feld); const i = B.findIndex(x => x.id === ziehen.feld); ziehen = null; if(i < 0) return; const [m] = B.splice(i, 1); if(i < j) j--; m.fix = null; B.splice(j, 0, m); geaendert(); });
   });
@@ -791,6 +823,12 @@ function binden(){
       // Position nach Datum: vor dem ersten Feld, das später beginnt
       let j = B.findIndex(p => p.von > d); if(j < 0) j = B.length;
       const erst = j === 0;
+      if(ziehen.felder){ const ids = ziehen.felder; ziehen = null;
+        // Zielindex ohne die gezogenen Felder bestimmen
+        const rest = B.filter(x => !ids.includes(x.id)); let k = rest.findIndex(p => p.von > d); if(k < 0) k = rest.length;
+        const jAlt = k < rest.length ? B.indexOf(rest[k]) : B.length;
+        if(k === 0) $('start').value = iso(d);
+        gruppeSetzen(ids, jAlt, k === 0 ? null : iso(d)); geaendert(); return; }
       if(ziehen.leaves){ if(erst) $('start').value = iso(d); ausGeruest(j, erst ? null : iso(d)); return; }
       vorHolen(ziehen.feld); const i = B.findIndex(x => x.id === ziehen.feld); ziehen = null; if(i < 0) return; const [m] = B.splice(i, 1); if(i < j) j--;
       if(j === 0){ $('start').value = iso(d); m.fix = null; } else m.fix = iso(d);
