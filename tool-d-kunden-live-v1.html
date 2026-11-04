@@ -311,9 +311,11 @@ td.kats{white-space:normal;}
     <span class="kg-seg kseg" id="bereiche" data-kg-seite="links">
       <button type="button" data-b="alle">Alle<small id="nAlle"></small></button>
       <button type="button" data-b="kunden" class="on">Kunden<small id="nKunden"></small></button>
+      <button type="button" data-b="pf">Pflege<small id="nPf"></small></button>
+      <button type="button" data-b="pj">Projekte<small id="nPj"></small></button>
       <button type="button" data-b="lief">Lieferanten<small id="nLief"></small></button>
     </span>
-    <span class="kg-seg" id="modusSeg" data-kg-seite="links">
+    <span id="modusSeg" style="display:none" hidden>
       <button type="button" data-m="adr" class="on">Adressen</button>
       <button type="button" data-m="pf">Pflege</button>
       <button type="button" data-m="pj">Projekte</button>
@@ -632,7 +634,7 @@ async function loadKunden(){
   MIT_ADR = darf('offerten', 'kunden'); MIT_PF = darf('pflege', 'kunden');
   if(!MIT_ADR){ modus = 'pf'; bereich = 'kunden'; } else if(new URLSearchParams(location.search).get('modus') === 'pflege' && MIT_PF) modus = 'pf'; else if(new URLSearchParams(location.search).get('modus') === 'projekte') modus = 'pj';
   ICH_ID = (await sb.auth.getSession()).data.session?.user.id || null;
-  await Promise.all([ladeKundenListe(), MIT_ADR ? ladeOffertenAnzahlProKunde() : null, MIT_ADR ? ladeKontaktDaten() : null, MIT_PF ? ladePflege().catch(() => { MIT_PF = false; }) : null]);
+  await Promise.all([ladeKundenListe(), MIT_ADR ? ladeOffertenAnzahlProKunde() : null, MIT_ADR ? ladeKontaktDaten() : null, MIT_PF ? ladePflege().catch(() => { MIT_PF = false; }) : null, MIT_ADR ? ladeProjekte().catch(() => null) : null]);
   KUNDEN.forEach(k => { k.offerten_count = OFFERTEN_COUNT_PRO_KUNDE[k.id] || 0; });
   renderKundenTable();
 }
@@ -826,19 +828,29 @@ function renderOffertenTabelle(kundeId){
   </table>`;
 }
 
+// Eine Leiste: Alle · Kunden · Pflege · Projekte · Lieferanten (Pflege/Projekte = Ansicht der Kunden)
+function bereicheZeigen(){
+  const akt = modus === 'pf' ? 'pf' : modus === 'pj' ? 'pj' : bereich;
+  const sicht = { alle: MIT_ADR, kunden: MIT_ADR, pf: MIT_PF && PF.reg.length > 0, pj: MIT_ADR, lief: MIT_ADR };
+  document.querySelectorAll('#bereiche [data-b]').forEach(b => { b.classList.toggle('on', b.dataset.b === akt); b.style.display = sicht[b.dataset.b] ? '' : 'none'; });
+  $('nAlle').textContent = KUNDEN.length + LIEF.length; $('nKunden').textContent = KUNDEN.length; $('nLief').textContent = LIEF.length;
+  $('nPf').textContent = PF.kunden.size || ''; $('nPj').textContent = PJ.geladen && !PJ.archiv ? PJ.liste.length : '';
+  $('modusSeg').style.display = 'none';
+}
 function renderKundenTable(){
   // Projekte: eigene Ansicht statt Kundentabelle
   const pjAn = modus === 'pj';
-  ['kfilter', 'abc', 'kunten', 'kundenStatus', 'bereiche', 'sStr', 'sOrt', 'sLeer'].forEach(id => { if($(id)) $(id).style.display = pjAn ? 'none' : ''; });
+  ['kfilter', 'abc', 'kunten', 'kundenStatus', 'sStr', 'sOrt', 'sLeer'].forEach(id => { if($(id)) $(id).style.display = pjAn ? 'none' : ''; });
   document.querySelector('.kundentable').style.display = pjAn ? 'none' : ''; $('pjWrap').hidden = !pjAn;
-  if(pjAn){ document.querySelectorAll('#modusSeg [data-m]').forEach(b => b.classList.toggle('on', b.dataset.m === modus)); document.querySelectorAll('[data-kg-recht="offerten.kunden.erstellen"], #ebAbgleichBtn, #ebStand').forEach(b => b.style.display = 'none'); projekteZeichnen(); return; }
+  bereicheZeigen();
+  if(pjAn){ document.querySelectorAll('[data-kg-recht="offerten.kunden.erstellen"], #ebAbgleichBtn, #ebStand').forEach(b => b.style.display = 'none'); projekteZeichnen(); return; }
   if(modus === 'pf') bereich = 'kunden';
   const lief = bereich === 'lief', pf = modus === 'pf';
   // Bereiche mit Anzahl, Umschalter Adressen | Pflege, Filter, Kopfzeile
-  $('nAlle').textContent = KUNDEN.length + LIEF.length; $('nKunden').textContent = pf ? PF.kunden.size : KUNDEN.length; $('nLief').textContent = LIEF.length;
-  document.querySelectorAll('#bereiche [data-b]').forEach(b => { b.classList.toggle('on', b.dataset.b === bereich); b.style.display = (pf || !MIT_ADR) && b.dataset.b !== 'kunden' ? 'none' : ''; });
+  bereicheZeigen();
+
   document.querySelectorAll('#modusSeg [data-m]').forEach(b => b.classList.toggle('on', b.dataset.m === modus));
-  $('modusSeg').style.display = MIT_ADR && !lief ? '' : 'none'; document.querySelector('#modusSeg [data-m="pf"]').style.display = MIT_PF && PF.reg.length ? '' : 'none';
+
   document.querySelectorAll('[data-kg-recht="offerten.kunden.erstellen"], #ebAbgleichBtn, #ebStand').forEach(b => b.style.display = lief || pf || !MIT_ADR ? 'none' : '');
   const FILTER = [['ab', 'mit Auftragsbestätigung', AB_SET], ['offerte', 'offene Offerte', OFFEN_SET], ['temp', 'nicht in Easybill', null]];
   $('kfilter').innerHTML = pf ? pfFilterHtml()
@@ -1053,7 +1065,11 @@ document.querySelectorAll('#modusSeg [data-m]').forEach(b => b.addEventListener(
   modus = b.dataset.m; buchstabe = null; seite = 0; geoeffneterKunde = null; schnell.clear(); filterAuf = false;
   pff.reg.clear(); pff.kat = pff.abo = pff.wer = pff.tag = ''; pff.meine = false; renderKundenTable();
 }));
-document.querySelectorAll('#bereiche [data-b]').forEach(b => b.addEventListener('click', () => { bereich = b.dataset.b; buchstabe = null; seite = 0; geoeffneterKunde = null; if(bereich === 'lief') schnell.clear(); renderKundenTable(); }));
+document.querySelectorAll('#bereiche [data-b]').forEach(b => b.addEventListener('click', () => {
+  const v = b.dataset.b, neu = v === 'pf' ? 'pf' : v === 'pj' ? 'pj' : 'adr';
+  if(neu !== modus){ schnell.clear(); filterAuf = false; pff.reg.clear(); pff.kat = pff.abo = pff.wer = pff.tag = ''; pff.meine = false; }
+  modus = neu; bereich = neu === 'adr' ? v : 'kunden'; buchstabe = null; seite = 0; geoeffneterKunde = null; if(bereich === 'lief') schnell.clear(); renderKundenTable();
+}));
 
 // ---------------------------------------------------------------------------
 // Projekte (Umschalter Adressen | Pflege | Projekte): Ablauf von der Zusage bis zur Zahlung.
@@ -1072,6 +1088,7 @@ async function ladeProjekte(){
   ]);
   if(p.error){ showToast(friendlyError(p.error), true); return; }
   PJ.liste = p.data || []; PJ.einst = e.data || { checklisten: { bb: [], avor: [] }, fristen: {} }; PJ.ben = b.data || []; PJ.geladen = true;
+  if($('nPj')) $('nPj').textContent = PJ.archiv ? '' : PJ.liste.length;
 }
 const pjF = () => Object.assign({}, PJ_FRISTEN, PJ.einst?.fristen || {});
 const pjC = k => (PJ.einst?.checklisten || {})[k] || [];
