@@ -686,7 +686,7 @@ function listHtml(l){
     kopf = `<div class="lh${z.hell ? ' hell' : ''}" data-drag="${l.id}" style="background:${z.c}"><button class="tog" data-tog="${l.id}" aria-label="Auf-/zuklappen">${K('chev')}</button>${A(z.icon)}<b>${esc(z.t)}</b><button class="kg-ibtn lplus" data-plus="${l.id}" aria-label="Neue Pendenz für ${esc(z.t)}" title="Neue Pendenz">${K('plus')}</button></div>`;
     const erinn = l.zeit === 1 ? S.erinn.map(({ p, l: ol }) => `<button class="erinn" data-erinn="${p.id}" title="Im Offerten-Board öffnen"><span class="ty" style="background:${ol.farbe || artFarbe(ol.art_id)}">${A(art(ol.art_id).icon)}</span><span class="tx">${esc(p.titel)}</span><span class="etag">${ol.art_id === 'of_aufgeschoben' || (ol.art_id === 'of_meldet' && p.wieder_am) ? 'wieder anschauen' : 'nachfassen'}</span></button>`).join('') : '';
     // Eingabefeld erst nach Klick aufs Plus im Kopf, Mikrofon darin (Enter speichert, Esc schliesst)
-    body = (S.addOffen === l.id ? `<div class="zadd"><input type="text" id="add-${l.id}" placeholder="Neue Pendenz …" aria-label="Neue Pendenz für ${esc(z.t)}"><button class="kg-ibtn${recZiel === 'add-' + l.id ? ' on' : ''}" data-mic="add-${l.id}" aria-label="Sprechen" title="Sprechen">${K('mikrofon')}</button></div>` : '')
+    body = (S.addOffen === l.id ? `<div class="zadd"><input type="text" id="add-${l.id}" placeholder="Neue Pendenz …" aria-label="Neue Pendenz für ${esc(z.t)}"><button class="kg-ibtn${recZiel === 'add-' + l.id ? ' on' : ''}" data-mic="add-${l.id}" aria-label="Sprechen" title="Sprechen">${K('mikrofon')}</button><button class="kg-ibtn zok" data-zok="${l.id}" aria-label="Speichern" title="Speichern">${K('check')}</button></div>` : '')
       + `<div class="cards" data-drop="${l.id}">${erinn}${ps.map(p => pdHtml(p, { zeit:true })).join('')}</div>`;
   } else { const a = art(l.art_id), gs = S.gruppen.filter(g => g.liste_id === l.id), zu = l.art_id === 'of_zugesagt';
     const ps = zu ? S.pz.filter(p => p.offerte_status === 'zugesagt' && listeById(p.liste_id)?.versteckt) : sortiert(l);
@@ -696,7 +696,7 @@ function listHtml(l){
     // Gruppentitel = Trenner: Titel und Pendenzen in einer Reihenfolge, alles unter einem Titel gehört zu dieser Gruppe
     let akt = null;
     const folge = [...ps.map(p => ({ p, s: p.sortierung })), ...gs.map(g => ({ g, s: g.sortierung }))].sort((a, b) => a.s - b.s || (a.g ? -1 : 1));
-    body = (S.addOffen === l.id && erfassbar ? `<div class="zadd"><input type="text" id="add-${l.id}" placeholder="Neue ${wort} …" aria-label="Neue ${wort} in ${esc(l.titel)}"><button class="kg-ibtn${recZiel === 'add-' + l.id ? ' on' : ''}" data-mic="add-${l.id}" aria-label="Sprechen" title="Sprechen">${K('mikrofon')}</button></div>` : '')
+    body = (S.addOffen === l.id && erfassbar ? `<div class="zadd"><input type="text" id="add-${l.id}" placeholder="Neue ${wort} …" aria-label="Neue ${wort} in ${esc(l.titel)}"><button class="kg-ibtn${recZiel === 'add-' + l.id ? ' on' : ''}" data-mic="add-${l.id}" aria-label="Sprechen" title="Sprechen">${K('mikrofon')}</button><button class="kg-ibtn zok" data-zok="${l.id}" aria-label="Speichern" title="Speichern">${K('check')}</button></div>` : '')
       + `<div class="cards" data-drop="${l.id}">${folge.map(x => { if(x.g){ akt = x.g;
         return `<div class="gh${x.g.zu ? ' zu' : ''}" draggable="true" data-ghead="${x.g.id}" data-gtog="${x.g.id}" title="Ziehen = Gruppe verschieben, Klick = auf-/zuklappen"><span class="tog">${K('chev')}</span>${esc(x.g.titel)}</div>`; }
       return pdHtml(x.p, { gruppe: akt }); }).join('')}</div>`
@@ -1161,6 +1161,7 @@ document.addEventListener('click', async e => {
   if(d.drucke){ S.druck = false; zeichneOver(); return drucken(d.drucke); }
   if(S.bmenu || S.druck){ S.bmenu = false; S.druck = false; zeichneOver(); }
   // Plus im Kopf einer Wann?-Liste: Eingabefeld auf/zu
+  if(d.zok){ e.stopPropagation(); return zaddSpeichern(d.zok, true); } // Häkchen im Eingabefeld: speichern und schliessen
   if(d.plus){ e.stopPropagation(); const l = listeById(d.plus); S.addOffen = S.addOffen === l.id ? null : l.id; if(l.zu){ l.zu = false; upd('pendenz_liste', l.id, { zu: false }); } zeichne(); return $('add-' + l.id)?.focus(); }
   if(d.bwahl) return wechsleBoard(d.bwahl);
   if(d.archiv){ const p = S.pz.find(x => x.id === d.archiv); if(p) return archivieren(p); return; }
@@ -1241,6 +1242,17 @@ document.addEventListener('change', async e => { const t = e.target;
     S.mitglieder = t.checked ? [...S.mitglieder, uid] : S.mitglieder.filter(x => x !== uid); return zeichne(); }
 });
 document.addEventListener('input', e => { if(e.target.id === 'pq' && S.pick){ S.pick.q = e.target.value; zeichneOver(); } });
+// Eingabefeld oben in der Liste: speichern (schliessen = Feld zu, sonst offen für die nächste Pendenz)
+let zSpeichert = false;
+async function zaddSpeichern(id, schliessen){
+  if(zSpeichert) return; const i = $('add-' + id), v = i?.value.trim();
+  zSpeichert = true; try { if(v){ i.value = ''; await neuePendenz(listeById(id), v); } } finally { zSpeichert = false; }
+  if(schliessen){ if(S.addOffen === id){ S.addOffen = null; zeichne(); } } else $('add-' + id)?.focus();
+}
+// Daneben klicken: was im Feld steht, wird gespeichert, das Feld geht zu (Mikrofon und Häkchen im Feld zählen nicht als «daneben»)
+document.addEventListener('focusout', e => { const t = e.target; if(!t.id?.startsWith('add-') || !t.closest('.zadd') || zSpeichert) return;
+  if(e.relatedTarget && t.closest('.zadd').contains(e.relatedTarget)) return;
+  const id = t.id.slice(4); setTimeout(() => { if(rec || !document.body.contains(t)) return; zaddSpeichern(id, true); }, 120); });
 document.addEventListener('keydown', e => {
   if(e.key === 'Enter' && e.target.id?.startsWith('add-')){ const id = e.target.id.slice(4), b = document.querySelector(`[data-add="${id}"]`), v = e.target.value.trim();
     if(b) b.click(); else if(v) neuePendenz(listeById(id), v).then(() => $('add-' + id)?.focus()); }
