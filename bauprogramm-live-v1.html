@@ -75,8 +75,8 @@ nav.subnav a.on{color:#323E4E;border-bottom-color:#323E4E;}
 .gpf{display:inline-flex;width:20px;height:20px;border-radius:50%;align-items:center;justify-content:center;color:#4C5C70;flex:none;}
 .gpf svg{width:14px!important;height:14px!important;color:inherit!important;}
 .gah:hover .gpf,.gasr:hover .gpf{background:#D5DBE1;}
-.gasr{background:#CDD4DC;border-radius:5px;display:flex;align-items:center;gap:6px;padding:2px 4px 2px 8px;min-height:24px;box-sizing:border-box;font-size:12px;font-weight:600;color:#323E4E;cursor:grab;}
-.gasr:hover{background:#BFC7D1;} .gasr .gan{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.gasr{background:color-mix(in srgb, var(--gfarbe, #8B9097) 22%, #F5F7F9);border-radius:5px;display:flex;align-items:center;gap:6px;padding:2px 4px 2px 8px;min-height:24px;box-sizing:border-box;font-size:12px;font-weight:600;color:#323E4E;cursor:grab;}
+.gasr:hover{background:color-mix(in srgb, var(--gfarbe, #8B9097) 32%, #F5F7F9);} .gasr .gan{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .gasr.auf{border-radius:5px 5px 0 0;} .gasr.auf + .gtsl{padding:3px 0 4px 10px;}
 .gfertig{display:flex;align-items:center;gap:6px;color:#2A7570;font-weight:600;padding:6px 2px;}
 .gabs{display:flex;flex-direction:column;gap:2px;padding:2px 2px 6px;border-bottom:1px solid #DCE1E6;}
@@ -419,6 +419,7 @@ async function ladePlaner(kundeId){
       ein: eig.map(z => ({ von: t10(z.beginn), bis: t10(z.ende || z.beginn), farbe: z.art === 'hilfe' ? KG.palette.grau[3] : KG.palette.grau[2], hilfe: z.art === 'hilfe', prov: z.abgemacht === false })),
       abw: (a || []).filter(z => z.person_id === id).map(z => ({ von: t10(z.beginn), bis: t10(z.ende || z.beginn), t: z.titel || 'abwesend' })) }; })
     .sort((a, b) => (b.va - a.va) || a.sort - b.sort);
+  vaAbwesenheiten();
 }
 // Programm = Liste einzelner Felder (B). Neues Programm startet leer, alles liegt im Gerüst (Vorrat).
 // Fehlende Angebote/Arbeitsschritte (neu dazugekommen) werden hinten angehängt, wenn schon ein Programm besteht.
@@ -468,7 +469,11 @@ function rechnen(){
   });
 }
 const startDatum = () => new Date(($('start').value || iso(new Date())) + 'T12:00');
-const arbeitstag = d => d.getDay() !== 0 && d.getDay() !== 6 && !FEIERTAGE[iso(d)];
+// Arbeitstag: kein Wochenende, kein Feiertag und der Vorarbeiter ist nicht abwesend (Ferien, freier Tag …) – wie im Planer, das Programm springt darüber
+const arbeitstag = d => d.getDay() !== 0 && d.getDay() !== 6 && !FEIERTAGE[iso(d)] && !VA_ABW[iso(d)];
+let VA_ABW = {};
+function vaAbwesenheiten(){ VA_ABW = {}; const va = PL.find(x => x.va); if(!va) return;
+  va.abw.forEach(x => { for(let d = D(x.von); d <= D(x.bis); d = plus(d, 1)) VA_ABW[iso(d)] = x.t || 'abwesend'; }); }
 // Felder einfügen (aus dem Gerüst): an Index; Teilschritte, die schon in einem Feld sind, werden dort herausgenommen
 function einfuegen(leaves, idx, fix){
   leaves = leaves.filter(Boolean); if(!leaves.length) return;
@@ -564,7 +569,8 @@ function geruest(){
   if(ANG.length && !rest.length && !VOR.length) h += `<div class="gleer gfertig">${ic('check', 14)} Alles eingeplant</div>`;
   rest.forEach(A => {
     const p5 = pal(famVon(A.id)), offen = blaetter(A).map(b => b.id).filter(id => !imProgramm(id)), auf = AUF_ANG === A.id && !!A.kinder;
-    h += `<section class="gang${auf ? ' auf' : ''}"><div class="gah"${DARF ? ` draggable="true" data-leaves='${JSON.stringify(offen)}' data-proas="1"` : ''}${A.kinder ? ` data-aang="${A.id}"` : ''} title="${A.kinder ? 'Klick = auf-/zuklappen · ziehen = ganzes Angebot (je ein Feld pro Arbeitsschritt)' : esc(A.klein || 'nur Easybill') + ' · ziehen = ins Programm'}">
+    // Angebot ganz fein in seiner Farbe (statt grau), Arbeitsschritte darin etwas kräftiger
+    h += `<section class="gang${auf ? ' auf' : ''}" style="background:color-mix(in srgb, ${p5[1]} 9%, #F5F7F9);border-color:color-mix(in srgb, ${p5[1]} 22%, #DCE1E6);--gfarbe:${p5[1]}"><div class="gah"${DARF ? ` draggable="true" data-leaves='${JSON.stringify(offen)}' data-proas="1"` : ''}${A.kinder ? ` data-aang="${A.id}"` : ''} title="${A.kinder ? 'Klick = auf-/zuklappen · ziehen = ganzes Angebot (je ein Feld pro Arbeitsschritt)' : esc(A.klein || 'nur Easybill') + ' · ziehen = ins Programm'}">
         <span class="adot" style="background:${p5[1]}"></span><span class="gan">${esc(angText(A.id))}</span><span class="gtg">${tageVon(offen)} T</span>${A.kinder ? `<span class="gpf">${PFEIL(auf)}</span>` : ''}</div>`;
     if(auf) A.kinder.forEach(s => {
       const off = s.kinder.map(k => k.id).filter(id => !imProgramm(id)); if(!off.length) return;
@@ -622,7 +628,7 @@ function zeichnen(){
   let h = `<div class="kopf pl" style="grid-column:1/${nP + 1};grid-row:1" title="Balken aus dem Planer, nur zum Vergleichen">${hilfeKnopf}</div>`
     + ['Tag', 'Programm', 'Spez. Material', 'Lieferant', 'Notizen'].map((t, i) => `<div class="kopf" style="grid-column:${cT + i};grid-row:1">${t}</div>`).join('');
   tage.forEach((d, i) => {
-    const fei = FEIERTAGE[iso(d)], frei = !arbeitstag(d), kl = fei ? ' fei' : frei ? ' frei' : '';
+    const fei = FEIERTAGE[iso(d)] || (d.getDay() % 6 && VA_ABW[iso(d)] ? (PL.find(x => x.va)?.kurz || '') + ': ' + VA_ABW[iso(d)] : null), frei = !arbeitstag(d), kl = FEIERTAGE[iso(d)] ? ' fei' : frei ? ' frei' : '';
     h += `<div class="plz${kl}" style="grid-column:1/${nP + 1};grid-row:${i + 2}"></div>`;
     h += `<div class="tag${kl}" data-i="${i}" style="grid-column:${cT};grid-row:${i + 2}"><b>${WT[d.getDay()]}</b>${fei ? esc(fei) : kurz(d)}</div>`;
     for(let c = cA; c <= cA + 3; c++) h += `<div class="zelle${kl}"${c === cA ? ` data-di="${i}"` : ''} style="grid-column:${c};grid-row:${i + 2}"></div>`;
@@ -655,7 +661,7 @@ function zeichnen(){
   B.forEach(p => {
     const ang = p.teile.length ? angebotVon(p.teile[0]) : null, p5 = pal(ang ? famVon(ang) : 'grau'), r1 = zeile(p.von), r2 = zeile(p.bis) + 1, tg = teilTage(p);
     const { W, namen } = tagTexte(p), nTs = p.teile.filter(id => String(id).startsWith('ts:')).length;
-    W.forEach((d, i) => { h += `<div class="ztxt${i === 0 ? ' erst' : ''}" style="grid-column:${cA};grid-row:${zeile(d)}"><span class="adot" style="background:${p5[1]}${i ? ';opacity:.35' : ''}"></span><span class="zt">${esc(namen[i])}</span></div>`; });
+    W.forEach((d, i) => { h += `<div class="ztxt${i === 0 ? ' erst' : ''}" style="grid-column:${cA};grid-row:${zeile(d)};background:color-mix(in srgb, ${p5[1]} 9%, #fff)"><span class="adot" style="background:${p5[1]}${i ? ';opacity:.35' : ''}"></span><span class="zt">${esc(namen[i])}</span></div>`; });
     h += `<div class="blk${p.konflikt ? ' konflikt' : ''}${gewaehlt === p.id ? ' gewaehlt' : ''}"${DARF ? ' draggable="true"' : ''} data-p="${p.id}" style="grid-column:${cA};grid-row:${r1}/${r2}"
         title="${esc(teilName(p))} · ${tg} T · ${kurz(p.von)}–${kurz(p.bis)}${ang ? ' · ' + esc(angText(ang)) : ''}${nTs > 1 ? '\n' + p.teile.map(id => '– ' + (KNOTEN[id] ? KNOTEN[id].n : '')).join('\n') : ''}">
       <span class="bk"><span class="dauer">${tg} T</span>${DARF ? `<button type="button" class="ib" data-zurueck="${p.id}" title="${p.teile.length ? 'Zurück ins Gerüst' : 'Eintrag löschen'}" aria-label="${p.teile.length ? 'Zurück ins Gerüst' : 'Eintrag löschen'}">${p.teile.length ? IC.zurueck : ic('trash', 12)}</button>` : ''}</span>
