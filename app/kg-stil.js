@@ -142,7 +142,7 @@
   const TOOLS = [
     { k: 'home', n: 'Startseite', url: 'index.html', farbe: PAL.oliv[1], akzent: PAL.oliv[3], seiten: ['index'] },
     { k: 'offerten', n: 'Offertentool', url: 'tool-start-live-v1.html', farbe: PAL.blau[1], akzent: PAL.blau[3], modul: 'offertentool',
-      seiten: ['tool-start-live-v1', 'tool-a-live-v1', 'tool-a2-allgemein-live-v1', 'tool-a3-artikel-live-v1'] },
+      seiten: ['tool-start-live-v1', 'tool-a-live-v1', 'tool-a2-allgemein-live-v1', 'tool-a3-artikel-live-v1', 'tool-b-live-v1', 'einstellungen-live-v1'] },
     { k: 'artikel', n: 'Artikelstamm', url: 'tool-c-live-v1.html', farbe: PAL.blau[1], akzent: PAL.blau[3], modul: 'offertentool', seiten: ['tool-c-live-v1', 'lieferant-abgleich-live-v1'] },
     // Kontakte = eigenes Haupttool: Kunden, Lieferanten und Pflegekunden (früher «Pflege & Service»)
     { k: 'kunden', n: 'Kontakte', url: 'tool-d-kunden-live-v1.html', farbe: PAL.gold[0], akzent: PAL.gold[3],
@@ -158,7 +158,7 @@
     { k: 'doku', n: 'Doku-Tools', url: 'doku-live-v1.html', farbe: PAL.beere[1], akzent: PAL.beere[3],
       seiten: ['doku-live-v1', 'doku-dokument-live-v1', 'doku-datei-live-v1', 'doku-personen-live-v1'] },
     { k: 'verw', n: 'Einstellungen', url: 'einstellungen-uebersicht-live-v1.html', farbe: '#FFFFFF', akzent: PAL.grau[3], admin: true,
-      seiten: ['einstellungen-uebersicht-live-v1', 'einstellungen-live-v1', 'tool-b-live-v1', 'verwaltung-live-v1', 'tools-live-v1', 'mailassistent-verwaltung-live-v1', 'dokumentensuche-verwaltung-live-v1', 'pflege-kategorien-live-v1', 'projekt-einstellungen-live-v1'] }
+      seiten: ['einstellungen-uebersicht-live-v1', 'verwaltung-live-v1', 'tools-live-v1', 'mailassistent-verwaltung-live-v1', 'dokumentensuche-verwaltung-live-v1', 'pflege-kategorien-live-v1', 'projekt-einstellungen-live-v1'] }
   ];
   KG.tools = TOOLS;
   KG.toolIcons = TI;
@@ -536,9 +536,8 @@ header.app.kg-leiste ~ main.wrap{margin-left:0!important;margin-right:auto!impor
       reiter = kopfNav;
       const gear = kopfNav.querySelector('a.gear');
       const tabs = [...kopfNav.querySelectorAll(':scope > a:not(.icobtn):not(.gear)')];
-      // «Vorlagen & Berechnung» gehört zu Einstellungen: in den Tools weg, auf den Einstellungsseiten Reiter «Übersicht» + «Vorlagen & Berechnung»
-      if(gear && aktuell.k !== 'verw') gear.remove();
-      else if(gear){ gear.textContent = 'Vorlagen & Berechnung'; gear.removeAttribute('title'); tabs.forEach(t => t.remove()); const u = document.createElement('a'); u.href = 'einstellungen-uebersicht-live-v1.html'; u.textContent = 'Übersicht'; gear.before(u); if(seite === 'einstellungen-live-v1') gear.classList.add('on'); }
+      // «Vorlagen & Berechnung» bleibt vorerst als Reiter im Offertentool (wird noch oft angepasst); auch über Einstellungen erreichbar
+      if(gear){ gear.textContent = 'Vorlagen & Berechnung'; gear.removeAttribute('title'); if(tabs.length) tabs[tabs.length - 1].after(gear); }
       // Unterseiten ohne eigenen Reiter (z. B. Offerten-Eingabe, Tool B): passenden Reiter aktiv markieren
       const mein = SEITENRECHT[seite];
       if(mein && !Array.isArray(mein[0]) && !kopfNav.querySelector('a.on')) kopfNav.querySelectorAll('a[href]').forEach(a => {
