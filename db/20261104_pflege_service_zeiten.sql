@@ -192,3 +192,8 @@ update pflege_kunde_arbeit ka set dauer_min = greatest(15, round(v.std * 4) * 15
 ) as v(kat, arbeit, eb, std), pflege_kunde_kategorie kk, pflege_kategorie c, pflege_arbeit a, kunde k
 where kk.id = ka.kunde_kategorie_id and c.id = kk.kategorie_id and a.id = ka.arbeit_id and k.id = kk.kunde_id
   and c.kuerzel = v.kat and a.name = v.arbeit and k.easybill_id::bigint = v.eb::bigint and ka.dauer_min is null;
+-- 3) Ausreisser zurück auf Standard (Rapport enthielt mehrere Arbeiten): Kundenwert > 3× Standard und > 2 Std., ausser Thomas Balmer (Wert aus Sheet)
+update pflege_kunde_arbeit ka set dauer_min = null
+from pflege_kunde_kategorie kk, pflege_arbeit a, kunde k
+where kk.id = ka.kunde_kategorie_id and a.id = ka.arbeit_id and k.id = kk.kunde_id
+  and a.dauer_min is not null and ka.dauer_min > 3 * a.dauer_min and ka.dauer_min > 120 and k.name <> 'Thomas Balmer';
