@@ -24,6 +24,7 @@
     undo: '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>',
     zurueck: '<path d="M19 12H5"/><path d="M11 6l-6 6 6 6"/>',
     eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
+    suche: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
     notiz: '<path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h6"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
     stern: '<path d="M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/>',
