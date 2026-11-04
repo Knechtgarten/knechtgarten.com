@@ -178,6 +178,14 @@
      --------------------------------------------------------------------------- */
   const seite = (location.pathname.split('/').pop() || 'index.html').replace(/\.html?$/, '') || 'index';
   const aktuell = TOOLS.find(t => t.seiten.includes(seite));
+  // Browser-Tab: Knecht-Tool-Blatt als Icon (wenn die Seite kein eigenes hat, z. B. Pendenzen-App) und Name «Knecht-Tool · Tool»
+  const tabKnecht = () => {
+    if(!document.querySelector('link[rel~="icon"]')){
+      [['icon', '/knecht-tool.svg', 'image/svg+xml'], ['icon', '/knecht-tool-32.png', 'image/png'], ['apple-touch-icon', '/knecht-tool-180.png', '']].forEach(([rel, href, type]) => {
+        const l = document.createElement('link'); l.rel = rel; l.href = href; if(type) l.type = type; document.head.appendChild(l); }); }
+    if(aktuell) document.title = aktuell.k === 'home' ? 'Knecht-Tool' : `Knecht-Tool · ${aktuell.n}`;
+  };
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', tabKnecht); else tabKnecht();
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
   const cssLeiste = `.kg-ti{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;box-sizing:border-box;}
