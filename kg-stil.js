@@ -145,7 +145,7 @@
     { k: 'artikel', n: 'Artikelstamm', url: 'tool-c-live-v1.html', farbe: PAL.blau[1], akzent: PAL.blau[3], modul: 'offertentool', seiten: ['tool-c-live-v1', 'lieferant-abgleich-live-v1'] },
     // Kontakte = eigenes Haupttool: Kunden, Lieferanten und Pflegekunden (früher «Pflege & Service»)
     { k: 'kunden', n: 'Kontakte', url: 'tool-d-kunden-live-v1.html', farbe: PAL.gold[0], akzent: PAL.gold[3],
-      seiten: ['tool-d-kunden-live-v1', 'pflege-kunden-live-v1', 'pflege-kategorien-live-v1', 'projekt-einstellungen-live-v1'] },
+      seiten: ['tool-d-kunden-live-v1', 'pflege-kunden-live-v1'] },
     { k: 'pend', n: 'Pendenzen', url: 'pendenzen-live-v1.html', farbe: PAL.orange[1], akzent: PAL.orange[3], modul: 'pendenzen', seiten: ['pendenzen-live-v1'] },
     { k: 'plan', n: 'Einsatzplaner', url: 'einsatzplaner-live-v1.html', farbe: PAL.petrol[1], akzent: PAL.petrol[3], modul: 'einsatzplaner', seiten: ['einsatzplaner-live-v1', 'bauprogramm-live-v1'] },
     { k: 'wissen', n: 'Nachschlagewerk', url: 'wissen-live-v1.html', farbe: PAL.violett[1], akzent: PAL.violett[3], modul: 'wissen', seiten: ['wissen-live-v1'] },
@@ -154,8 +154,8 @@
         'werkzeug-pool-volumen-live-v1', 'werkzeug-bau-diagonale-live-v1', 'werkzeug-bau-kies-live-v1', 'werkzeug-bau-stahl-live-v1', 'werkzeug-bau-schalit-live-v1', 'werkzeug-pflege-spritz-live-v1', 'werkzeug-allg-gefaelle-live-v1'] },
     { k: 'doku', n: 'Doku-Tools', url: 'doku-live-v1.html', farbe: PAL.beere[1], akzent: PAL.beere[3],
       seiten: ['doku-live-v1', 'doku-dokument-live-v1', 'doku-datei-live-v1', 'doku-personen-live-v1'] },
-    { k: 'verw', n: 'Verwaltung', url: 'verwaltung-live-v1.html', farbe: '#FFFFFF', akzent: PAL.grau[3], admin: true,
-      seiten: ['verwaltung-live-v1', 'tools-live-v1', 'mailassistent-verwaltung-live-v1', 'dokumentensuche-verwaltung-live-v1'] }
+    { k: 'verw', n: 'Einstellungen', url: 'einstellungen-uebersicht-live-v1.html', farbe: '#FFFFFF', akzent: PAL.grau[3], admin: true,
+      seiten: ['einstellungen-uebersicht-live-v1', 'verwaltung-live-v1', 'tools-live-v1', 'mailassistent-verwaltung-live-v1', 'dokumentensuche-verwaltung-live-v1', 'pflege-kategorien-live-v1', 'projekt-einstellungen-live-v1'] }
   ];
   KG.tools = TOOLS;
   KG.toolIcons = TI;
@@ -406,7 +406,7 @@ header.app.kg-leiste ~ main.wrap{margin-left:0!important;margin-right:auto!impor
 
   function sichtbar(t, s){
     if(t.k === 'home' || t.k === aktuell.k) return true;
-    if(t.admin) return s.rolle === 'admin' || !!(s.rechte && s.rechte.admin) || !!(s.module && s.module.get('tools'));
+    if(t.admin) return s.rolle === 'admin' || s.rolle === 'buero_team' || !!(s.rechte && s.rechte.admin) || !!(s.module && s.module.get('tools'));   // Einstellungen: Admin + Büro
     const neu = erlaubt(TOOLRECHT[t.k]);
     if(neu !== null) return neu;
     if(!s.module || !t.modul) return true;
@@ -569,10 +569,10 @@ header.app.kg-leiste ~ main.wrap{margin-left:0!important;margin-right:auto!impor
       const name = t.replace(/\s*\(.*$/, '') || 'Angemeldet', rolle = (t.match(/\(([^)]*)\)/) || [])[1] || '';
       const eigene = document.querySelector('#hknoepfe [data-seto]');
       const bau = s => {
-        const verw = s.rolle === 'admin' ? 'verwaltung-live-v1.html' : (s.module && s.module.get('tools') ? 'tools-live-v1.html' : null);
+        const verw = s.rolle === 'admin' || s.rolle === 'buero_team' ? 'einstellungen-uebersicht-live-v1.html' : (s.module && s.module.get('tools') ? 'tools-live-v1.html' : null);
         return `<div class="kg-pkopf"><b>${esc(name)}</b>${rolle ? `<span>${esc(rolle)}</span>` : ''}</div>`
           + (eigene ? `<button type="button" data-k="eigene">${SVG(P.gear)}Meine Einstellungen · ${esc(aktuell.n)}</button>` : '')
-          + (verw && aktuell.k !== 'verw' ? `<a href="${verw}">${SVG(P.gear)}Verwaltung</a>` : '')
+          + (verw && aktuell.k !== 'verw' ? `<a href="${verw}">${SVG(P.gear)}Einstellungen</a>` : '')
           + `<div class="kg-sep"></div><button type="button" data-k="aus">${SVG(I_AUS)}Abmelden</button>`;
       };
       const binden = () => {
