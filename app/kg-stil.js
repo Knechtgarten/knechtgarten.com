@@ -448,7 +448,7 @@ header.app.kg-leiste ~ main.wrap{margin-left:0!important;margin-right:auto!impor
   if(SEITENRECHT[seite]){ if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', rechteBeobachten); else rechteBeobachten(); }
 
   function menuHtml(s){
-    const verwUrl = s.rolle && s.rolle !== 'admin' ? 'tools-live-v1.html' : 'verwaltung-live-v1.html';
+    const verwUrl = !s.rolle || s.rolle === 'admin' || s.rolle === 'buero_team' ? 'einstellungen-uebersicht-live-v1.html' : 'tools-live-v1.html';
     const items = TOOLS.filter(t => sichtbar(t, s)).map(t =>
       `<a class="kg-it${t.k === aktuell.k ? ' on' : ''}" href="${t.k === 'verw' ? verwUrl : t.url}">${KG.toolIcon(t.k, 32)}<span>${esc(t.n)}</span></a>`).join('');
     const ext = s.extern.length ? `<div class="kg-sep"></div><div class="kg-h">Externe Links</div><div class="kg-ext">${s.extern.map(m =>
