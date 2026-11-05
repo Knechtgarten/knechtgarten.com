@@ -507,6 +507,14 @@ body.kopiert, body.kopiert *{cursor:copy !important;}
 .mwarn{position:absolute;top:-2px;width:13px;height:13px;border-radius:50%;display:flex;align-items:center;justify-content:center;z-index:3;pointer-events:auto;border:1px solid #fff;}
 .mwarn .i{width:9px;height:9px;stroke-width:2;}
 .mwarn.o{background:#E08A1E;color:#fff;} .mwarn.r{background:var(--red);color:#fff;}
+/* Arbeitszeit nach Saison */
+.row.azrow .lane{height:20px;}
+.row.azrow > .nm{font-size:11px;color:#4C5C70;}
+.azb{position:absolute;top:3px;height:14px;line-height:12px;border:1px solid #C9CED4;border-radius:3px;background:#F5F7F9;color:#4C5C70;font-size:10.5px;font-weight:600;padding:0 5px;box-sizing:border-box;white-space:nowrap;overflow:hidden;cursor:pointer;z-index:1;}
+.azb:hover{border-color:var(--primary);}
+.azb.zu{background:repeating-linear-gradient(135deg,#EEF1F3 0 4px,#fff 4px 8px);color:#8B9097;}
+.azf{display:flex;gap:8px;} .azf label{display:flex;flex-direction:column;gap:3px;font-size:11.5px;color:var(--muted);flex:1;min-width:0;}
+.azf input{height:30px;border:1px solid var(--line);border-radius:6px;padding:0 6px;font:inherit;font-size:13px;width:100%;box-sizing:border-box;}
 .fokusfertig{position:fixed;left:50%;bottom:calc(22px + env(safe-area-inset-bottom, 0px));transform:translateX(-50%);z-index:60;display:inline-flex;align-items:center;gap:6px;padding:8px 18px!important;border-radius:99px!important;box-shadow:0 8px 22px rgba(35,43,53,.3);font-size:13px!important;} /* Maschinen-/Lieferwagen-Ansicht verlassen */
 .fkgrau{position:absolute;z-index:3;pointer-events:none;background:rgba(35,43,53,.09);backdrop-filter:grayscale(1);-webkit-backdrop-filter:grayscale(1);}
 .fkrand{position:absolute;z-index:3;pointer-events:none;border:1.5px solid;border-radius:4px;box-sizing:border-box;}
@@ -1023,6 +1031,37 @@ addEventListener('keydown', e => { if(e.key === 'Escape' && $('bpWrap')) bpZu();
 // Zugesagte, noch nicht terminierte Arbeiten in richtiger Länge, ohne Datum: Wochen 1, 2, 3 … und Wochentage.
 // Stapeln sich selber: älteste oben links, jeweils in die Zeile, die am wenigsten weit reicht (max. VZ Zeilen, dann in die Breite).
 // Runterziehen auf eine Person = Planer-Balken, der Vorrat-Eintrag verschwindet. Leere Fläche ziehen/klicken = neu.
+// ---------------------------------------------------------------- Arbeitszeit nach Saison (Zeile unter «Allgemein»)
+// Jedes Jahr gleich: ein Eintrag gilt ab Tag/Monat bis zum nächsten (planer_arbeitszeit). Stunden 0 = Betrieb geschlossen. Büro kann alles ändern.
+let AZ = [];
+async function ladeArbeitszeit(){ const { data } = await sb.from('planer_arbeitszeit').select('*').order('ab_monat').order('ab_tag'); AZ = data || []; }
+const azKey = a => a.ab_monat * 100 + a.ab_tag;
+function azFuer(d){ if(!AZ.length) return null; const x = dDate(d), k = (x.getMonth() + 1) * 100 + x.getDate(); let a = null;
+  AZ.forEach(z => { if(azKey(z) <= k) a = z; }); return a || AZ[AZ.length - 1]; } // vor dem ersten Eintrag gilt der letzte vom Vorjahr
+const azText = a => a && Number(a.stunden) > 0 ? `${a.start || ''} · ${fmtN(Number(a.stunden))} Std` : 'Betrieb geschlossen';
+function azRow(W, bgx){
+  let h = '', s = 0, cur = azFuer(0); const schritt = dayW < 8 ? 28 : 7;
+  const seg = (a, b, z) => { const cls = z && Number(z.stunden) > 0 ? 'azb' : 'azb zu';
+    for(let q = a; q < b;){ const n = Math.min(b, q === a ? a + schritt - ((dDate(a).getDay() + 6) % 7) % schritt : q + schritt); // Text jede Woche (Quartal/Jahr: alle 4 Wochen) wiederholen
+      h += `<div class="${cls}" data-az="${z?.id || ''}" data-azd="${q}" style="left:${X(q) + 1}px;width:${Math.max(4, XW(q, n) - 2)}px" title="Arbeitszeit ab ${z ? z.ab_tag + '.' + z.ab_monat + '.' : ''}: ${esc(azText(z))}">${XW(q, n) > 40 ? esc(azText(z)) : ''}</div>`; q = n; } };
+  for(let d = 1; d <= NDAYS; d++){ const z = d < NDAYS ? azFuer(d) : null; if(d === NDAYS || z !== cur){ seg(s, d, cur); s = d; cur = z; } }
+  return `<div class="row azrow"><div class="nm" title="Arbeitsbeginn am Morgen und Stunden pro Tag (jedes Jahr gleich)"><span class="n">Arbeitszeit</span></div><div class="lane" style="width:${W}px;${bgx}">${feierHTML()}${h}</div></div>`;
+}
+// Klick auf die Arbeitszeit: ändern, neuer Zeitraum ab diesem Tag, löschen (nur Büro)
+function azPop(id, d, rect){
+  const z = AZ.find(x => x.id === id), x = dDate(d), ed = isBuero();
+  const pop = popAt(rect, `<b>Arbeitszeit${z ? ` ab ${z.ab_tag}.${z.ab_monat}.` : ''}</b><span class="muted small">${esc(azText(z))} – gilt jedes Jahr bis zum nächsten Zeitraum</span>
+    ${ed ? `<div class="azf"><label>Ab<input type="text" id="azAb" value="${z ? z.ab_tag + '.' + z.ab_monat + '.' : ''}" placeholder="TT.MM."></label><label>Start<input type="time" id="azSt" value="${esc(z?.start || '')}"></label><label>Stunden<input type="number" id="azH" min="0" max="12" step="0.25" value="${z ? Number(z.stunden) : ''}"></label></div>
+      <div class="cmrow">${z ? `<button type="button" class="kg-ibtn danger" id="azDel" title="Zeitraum löschen" aria-label="Zeitraum löschen">${I('trash')}</button>` : ''}<button type="button" class="btn btn-ghost" id="azNeu">Neu ab ${x.getDate()}.${x.getMonth() + 1}.</button><span style="flex:1"></span><button type="button" class="btn btn-primary" id="azOk">Speichern</button></div>` : ''}`);
+  mausWegZu(pop); if(!ed) return;
+  const lies = () => { const m = ($('azAb').value || '').match(/^\s*(\d{1,2})\.(\d{1,2})\.?\s*$/); const st = $('azSt').value || null, hh = Number($('azH').value) || 0;
+    if(!m){ toast('Bitte «Ab» als TT.MM. eingeben, z. B. 2.3.', null, true); return null; } return { ab_tag: +m[1], ab_monat: +m[2], start: hh > 0 ? st : null, stunden: hh }; };
+  const fertig = async error => { if(error) return fehler(error, 'Arbeitszeit'); closePop(); await ladeArbeitszeit(); renderRows(); };
+  $('azOk').onclick = async () => { const row = lies(); if(!row) return; const { error } = z ? await sb.from('planer_arbeitszeit').update(row).eq('id', z.id) : await sb.from('planer_arbeitszeit').insert(row); fertig(error); };
+  $('azNeu').onclick = async () => { const row = { ab_tag: x.getDate(), ab_monat: x.getMonth() + 1, start: z?.start || '07:00', stunden: Number(z?.stunden) || 8.5 };
+    const { error } = await sb.from('planer_arbeitszeit').insert(row); if(error) return fehler(error, 'Arbeitszeit'); await ladeArbeitszeit(); renderRows(); toast(`Neuer Zeitraum ab ${row.ab_tag}.${row.ab_monat}. – zum Ändern anklicken`); };
+  if(z) $('azDel').onclick = () => { closePop(); bestaetige('Zeitraum löschen?', `<div>Ab ${z.ab_tag}.${z.ab_monat}.: ${esc(azText(z))}</div>`, 'Löschen', async () => { const { error } = await sb.from('planer_arbeitszeit').delete().eq('id', z.id); fertig(error); }); };
+}
 let VOR = [], VOR_OFFEN = lsGet('vorratOffen', true), vDrag = null;
 // Seit 2026-11-05: ein Vorrat pro Gruppe direkt unter dem Gruppentitel (planer_gruppe.vorrat_bereich), Lehrlinge und Allgemeines unter «Allgemein».
 // Zwei Quellen in denselben Zeilen: Vorrat-Einträge (z. B. zugesagte Offerten) und Pflege-Vorschläge ohne zuständige Person. Alle weiss gestrichelt wie offene Aufträge.
@@ -1227,7 +1266,7 @@ async function ladeAlles(){
     if(!PF || Date.now() - (PF.t || 0) > 300000){ await ladePflege(); if(PF) PF.t = Date.now(); }
     if(!WS || Date.now() - (WS.t || 0) > 60000){ await ladeService(); if(WS) WS.t = Date.now(); }
     syncPflegeErledigt();
-    await ladeBP(); await ladeVorrat();
+    await ladeBP(); await ladeVorrat(); await ladeArbeitszeit();
   }catch(err){ fehler(err, 'Laden'); }
 }
 function rowToItem(r){ return { id: r.id, mid: r.person_id, kind: r.art, s: toU(r.beginn), e: toU(r.ende), kid: r.kunde_id, title: r.titel || '', text: r.notiz || '', pl: r.projektleiter_id, link: r.mit_einsatz_id, allein: r.allein, ok: r.abgemacht, soll: r.soll_tage, files: r.planer_datei || [], pkk: r.pflege_kunde_kategorie_id, pj: r.pflege_jahr, pkw: r.pflege_kw, fix: !!r.start_fix, fixg: r.start_fix_grund || '', kv: r.kopie_von, wdh: r.wdh || null, pz: r.pausen || [], at: r.allein_tage || [], mp: r.mit_person_id || null, serie: r.serie_id || null, ueber: !!r.uebereinander, frei: !!r.tage_frei, weicht: !!r.weicht }; }
@@ -1934,6 +1973,7 @@ function renderRows(){
     const ps = act.filter(p => (p.gruppe_id || '_ohne') === g.id).sort((a, b) => a.sortierung - b.sortierung || a.name.localeCompare(b.name));
     if(!ps.length && (!(isBuero() && g.id !== '_ohne') || /^neu$/i.test(g.name))) return; /* «Neu» nur, wenn jemand drin ist */ const ablK = !EINGEBETTET && /allgemein/i.test(g.name), zu = !ablK && collapsed.has(g.id); // Büro sieht auch leere Gruppen (zum Hinzufügen und Hineinziehen)
     h += `<div class="row grp${zu ? ' zu' : ''}${g === ph ? ' phk' : ''}${ablK ? ' ablk' : ''}" data-g="${g.id}"><div class="nm">${ablK ? `<button type="button" class="ablbar${ABLAGE ? ' on' : ''}" id="ablBtn" title="Drei leere Ablage-Zeilen unter jeder Gruppe ein-/ausblenden">Ablage ${ABLAGE ? 'eingeblendet' : 'ausgeblendet'}</button>` : ''}${I('chev')}<span class="gn" title="${esc(g.name)}">${esc(g.name)}</span>${ablHinweis(g.id)}${g.offene_linie ? `<button type="button" class="goff${OFFEN_ZU.has(g.id) ? '' : ' on'}" data-goff="${g.id}" title="Offene Linien dieser Gruppe ${OFFEN_ZU.has(g.id) ? 'einblenden' : 'ausblenden'}">offen</button>` : ''}${isBuero() && g.id !== '_ohne' ? `<button class="gadd" data-gadd="${g.id}" title="Zeile hinzufügen" aria-label="Zeile hinzufügen">${I('plus')}</button>` : ''}</div><div class="lane" style="width:${W}px;height:20px">${g.offene_linie ? '' : provBars('g:' + g.id)}</div></div>`;
+    if(ablK && !zu) h += azRow(W, bgx); // Arbeitszeit nach Saison
     const offAn = !!g.offene_linie && !zu && !OFFEN_ZU.has(g.id), abl0 = ABL.filter(a => a.gruppe_id === g.id).sort((a, b) => a.sortierung - b.sortierung)[0];
     if(offAn && g.vorrat_bereich && vorratAn()) h += vorratBlock(g.vorrat_bereich, g.id, 'Vorrat'); // Arbeitsvorrat der Gruppe (auf/zu mit «offen»)
     if(!zu) ps.forEach(p => { h += personRow(p, W, bgx); if(openMid === p.id) h += openTyp === 'maschine' ? ovRows(W, bgx, 'maschine', p.id) : vehFocusRows(W, bgx, p.id); if(offAn) h += personRow({ ...p, offLab: 'offen' }, W, bgx, true); });
@@ -3233,6 +3273,7 @@ function bindTimeline(t){
     if(openMid && openTyp === 'fahrzeug'){ clearTimeout(t._pT); t._pT = setTimeout(() => { const c = Math.floor(UX(t.scrollLeft)), e2 = c + Math.ceil(visW() / dayW); if(c < POOLR[0] + 3 || e2 > POOLR[1] - 3) renderRows(); }, 150); } }, { passive: true });
   t.addEventListener('pointerdown', e => {
     if(e.button !== 0 || e.target.closest('.vorrat')) return; closePop();
+    const azb = e.target.closest('[data-azd]'); if(azb){ e.preventDefault(); azPop(azb.dataset.az, +azb.dataset.azd, { left: e.clientX, bottom: azb.getBoundingClientRect().bottom }); return; }
     if(openMid && layer === 'p'){ const r = e.target.closest('.row'); if(r && !r.classList.contains('fov') && !r.classList.contains('fokusp') && !r.classList.contains('grp') && !r.classList.contains('hdr') && e.target.closest('.lane, .nm') && !e.target.closest('.mab, [data-mab]')){ e.preventDefault(); fokusZu(); return; } } // anderes Bagger-/Lieferwagen-Icon = dorthin wechseln
     const pgo = e.target.closest("[data-phgo]"); if(pgo){ phSpringe(pgo.dataset.phgo); return; }
     const phs = e.target.closest(".row.phk > .nm, .row.tools > .nm, .row[data-mid] > .nm"); if(phs && layer === "p" && !e.target.closest(".gadd")){ const ph = phGruppe(), r = phs.parentElement;
