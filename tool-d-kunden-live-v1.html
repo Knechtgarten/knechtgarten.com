@@ -367,7 +367,7 @@ tr.offertenrow > td{border:1px solid #323E4E;border-top:0;padding:0!important;} 
       <span class="ebstand" id="ebStand" data-kg-seite="rechts"></span>
       <button type="button" class="btn kg-neben" id="ebAbgleichBtn" data-kg-seite="rechts" title="Kunden und Auftragsbestätigungen der letzten zwei Jahre aus Easybill holen (läuft auch jede Nacht)">Alles aus Easybill holen</button>
       <button type="button" class="btn kg-neben" id="kundeImportBtn" data-kg-seite="rechts" data-kg-recht="offerten.kunden.erstellen">Von Easybill importieren</button>
-      <button type="button" class="btn kg-haupt" id="kundeNeuBtn" data-kg-seite="rechts" data-kg-recht="offerten.kunden.erstellen">+ Neuer Temp. Kunde</button>
+      <button type="button" class="btn kg-haupt" id="kundeNeuBtn" data-kg-seite="rechts" data-kg-recht="offerten.kunden.erstellen">+ Neuer Kunde</button>
     </div>
     <div class="kundensearch-wrap" data-kg-seite="mitte">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.2" y2="16.2"/></svg>
@@ -444,6 +444,7 @@ tr.offertenrow > td{border:1px solid #323E4E;border-top:0;padding:0!important;} 
 
     <div class="ovlbtns">
       <button class="btnlink" id="kmCancel">Abbrechen</button>
+      <button class="btn" id="kmEb" title="Kunde in Easybill anlegen (Easybill vergibt die Kundennummer) und hier verknüpfen">In Easybill anlegen</button>
       <button class="btn" id="kmSave">Speichern</button>
     </div>
     <div class="status" id="kmStatus"></div>
@@ -1531,7 +1532,7 @@ $('kmEmailHinzufuegen').addEventListener('click', () => { kmEmails.push(''); ren
 
 function openKundeModalNeu(){
   kmEditId = null;
-  $('kundeModalTitel').textContent = 'Neuer Kunde';
+  $('kundeModalTitel').textContent = 'Neuer Kunde'; kmEbId = null; $('kmEb').hidden = false;
   ['kmKundennummer','kmFirma','kmVorname','kmNachname','kmZusatz1','kmZusatz2','kmStrasse','kmPlz','kmOrt',
    'kmLaStrasse','kmLaPlz','kmLaOrt','kmLaBundesland','kmLaLand','kmTelefon1','kmTelefon2','kmFax','kmMobil'].forEach(id => { $(id).value = ''; });
   $('kmAnrede').value = '';
@@ -1544,7 +1545,7 @@ function openKundeModalNeu(){
 
 function openKundeModalBearbeiten(k){
   kmEditId = k.id;
-  $('kundeModalTitel').textContent = 'Kunde bearbeiten';
+  $('kundeModalTitel').textContent = 'Kunde bearbeiten'; kmEbId = k.easybill_id || null; $('kmEb').hidden = !!kmEbId;
   $('kmKundennummer').value = k.kundennummer || '';
   $('kmFirma').value = k.firma || '';
   $('kmAnrede').value = k.anrede || '';
@@ -1576,7 +1577,9 @@ function openKundeModalBearbeiten(k){
 $('kundeNeuBtn').addEventListener('click', openKundeModalNeu);
 $('kmCancel').addEventListener('click', () => $('kundeModalOvl').classList.remove('show'));
 
-$('kmSave').addEventListener('click', async () => {
+// Speichern: nur hier (temporärer Kunde) oder zusätzlich in Easybill anlegen und verknüpfen (Knopf «In Easybill anlegen»)
+let kmEbId = null;
+async function kmSpeichern(inEb){
   const firma = $('kmFirma').value.trim();
   const vorname = $('kmVorname').value.trim();
   const nachname = $('kmNachname').value.trim();
@@ -1614,6 +1617,15 @@ $('kmSave').addEventListener('click', async () => {
       emails: kmEmails.map(e => e.trim()).filter(Boolean),
     }
   };
+  if(inEb){
+    $('kmStatus').textContent = 'Wird in Easybill angelegt …'; $('kmStatus').className = 'status'; $('kmEb').disabled = true;
+    const { data, error: fe } = await sb.functions.invoke('easybill-kunde-anlegen', { body: { vorname, nachname, firma, anrede: payload.anrede || '', strasse: payload.strasse || '', plz: payload.plz || '', ort: payload.ort || '',
+      telefon: payload.kontaktdaten.telefon1 || '', mobil: payload.kontaktdaten.mobil || '', email: payload.kontaktdaten.emails[0] || '' } });
+    $('kmEb').disabled = false;
+    let msg = data?.error; if(fe && !msg){ try { msg = (await fe.context?.json())?.error; } catch(e){} msg = msg || fe.message; }
+    if(msg || !data?.kunde){ $('kmStatus').textContent = 'Easybill: ' + (msg || 'unbekannter Fehler'); $('kmStatus').className = 'status err'; return; }
+    payload.easybill_id = data.kunde.easybill_id; payload.kundennummer = data.kunde.kundennummer || payload.kundennummer;
+  }
   let error;
   if(kmEditId){
     ({ error } = await sb.from('kunde').update(payload).eq('id', kmEditId));
@@ -1622,9 +1634,11 @@ $('kmSave').addEventListener('click', async () => {
   }
   if(error){ $('kmStatus').textContent = 'Fehler: ' + error.message; $('kmStatus').className = 'status err'; return; }
   $('kundeModalOvl').classList.remove('show');
-  showToast(kmEditId ? 'Kunde gespeichert.' : 'Kunde angelegt.');
+  showToast(inEb ? `In Easybill angelegt${payload.kundennummer ? ' (Nr. ' + payload.kundennummer + ')' : ''} und verknüpft.` : kmEditId ? 'Kunde gespeichert.' : 'Kunde angelegt.');
   await ladeKundenListe();
-});
+}
+$('kmSave').addEventListener('click', () => kmSpeichern(false));
+$('kmEb').addEventListener('click', () => kmSpeichern(true));
 
 // ---------------------------------------------------------------------------
 // Von Easybill importieren: ein Fenster fuer zwei Faelle - eigenstaendig
