@@ -457,6 +457,7 @@ body.kopiert, body.kopiert *{cursor:copy !important;}
 /* Maschinen-Reservierung: vorläufig gestrichelt, fest durchgezogen; Überschneidung orange (vorläufig) / rot (fest) */
 .band.mres{background:#fff;border:1.5px solid var(--c);color:var(--ink);}
 .band.mres.vorl{border-style:dashed;}
+.wunschz{font-size:12px;color:var(--muted);margin-top:2px;} .wunschz b{color:var(--primary);} .wunschz.aus{color:#B4531C;} .wunschz.aus b{color:#B4531C;} /* Termin-Fenster: Wunsch-Tage des Kunden */
 .row.neuzeile > .nm{padding:2px 6px;} .neuin{width:100%;box-sizing:border-box;border:1px dashed #C3C8CE;border-radius:5px;padding:2px 6px;font:inherit;font-size:12px;background:transparent;color:var(--ink);} .neuin:focus{outline:none;border-style:solid;border-color:var(--primary);background:#fff;} /* Schnupper / Temporär: neue Zeile eintippen */
 .row.mgrpk > .nm,.row.ov.fov.mgrpk > .nm{cursor:pointer;background:var(--kg-tool,var(--primary));padding-left:14px;color:#fff;font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;gap:4px;} .row.mgrpk > .lane{background:#F3F5F7!important;} /* Bagger / Dumper / Diverse: grüne Kopfzeile, auf und zu */
 .row.mleer > .nm{color:var(--muted);font-size:11px;font-style:italic;}
@@ -1693,7 +1694,7 @@ function personRow(p, W, bgx){
     const lab = (it._alt ? `seit ${dLab(Math.floor(it._alt.s))} · ` : '') + (ohneKunde ? 'Ohne Kunde' : it.kind === 'hilfe' ? hilfeKurz(it) : labOf(it)) + (mehr && !abw && zoom !== 'quartal' && zoom !== 'jahr' && zoom !== 'woche' && !monKopf ? ` · ${fmtN(L.n)} T` : ''); // Woche: Anzahl Tage nur im Mouse-over // Quartal/Jahr: Anzahl Tage nur im Mouse-Over
     const cntH = abw ? ` · <span class="bwt">${fmtN(L.n)} von ${fmtN(it.soll)} T</span>` : '';
     const plTxt = it.kind === 'baustelle' || it.kind === 'termin' ? `\n${P[it.pl] ? 'Projektleiter: ' + P[it.pl].name : 'Selber abgemacht'}` : ''; // Mouse-over: wer zuständig ist
-    const tip = `${titleOf(it)}\n${p.name}${plTxt}${it.e - it.s > 1 + 1e-6 ? `\n${fmtN(L.n)} Arbeitstage` : ''}${it.allein ? '\nArbeitet allein' : ''}${it.ok === false ? '\nNoch nicht abgemacht' : ''}${isRep ? '\nWiederkehrend' : ''}${it.fix ? `\nStart fix${it.fixg ? ': ' + it.fixg : ''}` : ''}${abw ? `\nGeplant ${tageTxt(it.soll)}, aktuell ${tageTxt(L.n)}` : ''}`;
+    const tip = `${titleOf(it)}\n${p.name}${plTxt}${it.e - it.s > 1 + 1e-6 ? `\n${fmtN(L.n)} Arbeitstage` : ''}${it.allein ? '\nArbeitet allein' : ''}${wunschTxt(it) ? '\nWunsch-Tage: ' + wunschTxt(it) : ''}${it.ok === false ? '\nNoch nicht abgemacht' : ''}${isRep ? '\nWiederkehrend' : ''}${it.fix ? `\nStart fix${it.fixg ? ': ' + it.fixg : ''}` : ''}${abw ? `\nGeplant ${tageTxt(it.soll)}, aktuell ${tageTxt(L.n)}` : ''}`;
     // Beschriftung läuft über Wochenenden weiter
     // Woche bis Jahr: Balken füllen ganze Halbtage (Vormittag/Nachmittag nur 1 px auseinander), damit mehr Text Platz hat
     const voll = zoom !== 'tag' && !L.mini, sV = voll ? L.segs.map(([a, b]) => [Math.floor(a * 2 + 1e-9) / 2, Math.ceil(b * 2 - 1e-9) / 2]) : L.segs, rd = voll ? .5 : 1;
@@ -3410,6 +3411,9 @@ function bindWindow(){
       // In eine Ablage-Zeile hineingelegt (aus einer anderen Zeile): keine Prüfung, kein Kürzen, kein Nachziehen – der Termin bleibt
       // unverändert. Innerhalb der Ablage (ziehen, verschieben, verlängern) gelten die normalen Regeln.
       const inAblage = !!P[it.mid]?.ist_ablage && !P[d.mid0]?.ist_ablage;
+      // Kunde mit Wunsch-Tagen: auf andere Tage verschoben -> nachfragen
+      const tagWechsel = Math.floor(it.s + 1e-9) !== Math.floor(d.s0 + 1e-9) || Math.ceil(it.e - 1e-9) !== Math.ceil(d.e0 - 1e-9), aw = !inAblage && tagWechsel ? ausserWunsch(it) : [];
+      if(aw.length && (await wunschFrage(it, aw, { x: e.clientX, y: e.clientY })) !== 'ok'){ Object.assign(it, vorher); renderRows(); return; }
       if(!inAblage && (await ablegenPruefen(it, { x: e.clientX, y: e.clientY })) === 'ab'){ Object.assign(it, vorher); renderRows(); return; }
       // Rand gezogen: fixe Arbeitstage bleiben (Abweichung = rot, «übernehmen» im Hinweis); nur wer nicht mehr lang ist, verliert sie
       const keinLang = !inAblage && it.soll && !istLang(it); if(keinLang) it.soll = null;
@@ -3535,6 +3539,20 @@ function sprungEnde(b, faktor, ab, maxSpr = 1){
   }
   return null;
 }
+// Wunsch-Tage des Kunden (Pflege-Tool, 1 = Mo … 7 = So)
+const wunschTage = it => (it && it.kid && PF?.ku?.[it.kid]?.wunsch_wochentage) || [];
+const wunschTxt = it => wunschTage(it).map(x => WD[x % 7]).join(', ');
+// Liegt der Termin (Werktage) auf Tagen ausserhalb der Wunsch-Tage? -> diese Tage zurückgeben
+function ausserWunsch(it){ const w = wunschTage(it); if(!w.length) return []; const o = [];
+  for(let d = Math.floor(it.s + 1e-9); d < Math.ceil(it.e - 1e-9); d++){ if(isOff(d)) continue; const t = dDate(d).getDay() || 7; if(!w.includes(t)) o.push(d); } return o; }
+function wunschFrage(it, tage, pt){
+  return new Promise(res => {
+    const k = KUNDEN[it.kid], pop = popAt({ left: pt.x - 20, bottom: pt.y }, `<b>Wunsch-Tage beachten</b><span class="small">${esc(k ? kName(k) : 'Der Kunde')} wünscht: <b>${esc(wunschTxt(it))}</b>.<br>${tage.length === 1 ? esc(dLab(tage[0])) + ' ist kein Wunsch-Tag.' : 'Einige Tage sind keine Wunsch-Tage.'}</span><div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost" data-wf="ab">Abbrechen</button><button class="btn btn-primary" data-wf="ok">Trotzdem verschieben</button></div>`);
+    pop.classList.add('upop');
+    const fertig = w => { removeEventListener('pointerdown', aussen, true); removeEventListener('keydown', esc_, true); $('popwrap').innerHTML = ''; res(w); };
+    const aussen = e => { const b = e.target.closest('[data-wf]'); if(b){ e.preventDefault(); e.stopPropagation(); fertig(b.dataset.wf); } else if(!e.target.closest('.upop')) fertig('ab'); };
+    const esc_ = e => { if(e.key === 'Escape'){ e.preventDefault(); fertig('ab'); } else if(e.key === 'Enter'){ e.preventDefault(); fertig('ok'); } };
+    addEventListener('pointerdown', aussen, true); addEventListener('keydown', esc_, true); }); }
 function reinFrage(pt){
   return new Promise(res => {
     const pop = popAt({ left: pt.x - 20, bottom: pt.y }, ['rein|Reinschieben', 'ueber|Übereinander', 'ab|Abbrechen'].map(s => s.split('|')).map(([k, l]) => `<button class="btn btn-ghost" data-rf="${k}">${l}</button>`).join(''));
@@ -3713,7 +3731,7 @@ function openPanel(id, isNew){
   const lang = it.e - it.s >= .5 - 1e-6;
   const dauer = lang ? `${fmtN(L.n)} ${L.n === 1 ? 'Arbeitstag' : 'Arbeitstage'}` : `${fmtN((it.e - it.s) * 12)} Std.`;
   const hilfeB = it.kind === 'hilfe' ? byId(it.link) : null;
-  const zeile = `<div class="kopf2"><b>${esc(P[it.mid]?.name || '')}</b> · <b>${it.kind === 'hilfe' ? (hilfeB ? 'Mit ' + esc(first(P[hilfeB.mid]?.name)) : 'Mithilfe') : esc(dauer)}</b></div>`;
+  const zeile = `<div class="kopf2"><b>${esc(P[it.mid]?.name || '')}</b> · <b>${it.kind === 'hilfe' ? (hilfeB ? 'Mit ' + esc(first(P[hilfeB.mid]?.name)) : 'Mithilfe') : esc(dauer)}</b></div>${wunschTxt(it) ? `<div class="wunschz${ausserWunsch(it).length ? ' aus' : ''}">Wunsch-Tage: <b>${esc(wunschTxt(it))}</b>${ausserWunsch(it).length ? ' – liegt nicht auf einem Wunsch-Tag' : ''}</div>` : ''}`;
   const zust = auftrag ? `<label class="zst">Zuständig<select id="pPl" ${dis}><option value="">– selber abgemacht –</option>${pls.map(p => `<option value="${p.id}"${p.id === it.pl ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>${(() => { const fr = (LAY[it.id] || {}).free || [], S = soloSet(it), an = fr.length && fr.every(k => S.has(k)); return fr.length && !it.rep ? `<button type="button" id="pAllein" class="btn btn-ghost" ${dis} title="Arbeitet allein (blauer Punkt) – gilt für den ganzen Termin" style="padding:3px 10px;font-size:12px;margin-left:6px${an ? ';background:#2F6F9F;color:#fff;border-color:#2F6F9F' : ''}">Allein</button>` : ''; })()}` : '';
   const kundeNeu = auftrag && ed && (panelKunde || (!it.kid && !it.title));
   // Abschnitte je nach vorhandenen Daten
