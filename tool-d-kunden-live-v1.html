@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script src="/kg-pw-schutz.js?v=5"></script>
-<script src="/kg-stil.js?v=43"></script>
+<script src="/kg-stil.js?v=44"></script>
 <title>Kontakte – Kunden und Lieferanten</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
@@ -206,7 +206,29 @@ td.kats{white-space:normal;}
 .kfilter select{height:28px;border:1px solid #D5DBE1;border-radius:8px;padding:0 6px;font:inherit;font-size:12px;background:#fff;color:var(--primary);}
 .kfilter .fgrp{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:700;margin:0 2px 0 6px;}
 .kfilter .fgrp:first-child{margin-left:0;}
-.kfilter a.flink{font-size:12px;color:var(--primary);font-weight:600;margin-left:auto;}
+.kfilter .fr{margin-left:auto;display:flex;align-items:center;gap:10px;}
+.kfilter a.flink{font-size:12px;color:var(--primary);font-weight:600;}
+.fkarte{display:inline-flex;align-items:center;gap:6px;}
+/* Region: Dropdown mit Mehrfachauswahl */
+.regdd{position:relative;}
+.regdd summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;gap:6px;height:28px;box-sizing:border-box;border:1px solid #D5DBE1;border-radius:8px;padding:0 8px;font-size:12px;background:#fff;color:var(--primary);white-space:nowrap;}
+.regdd summary::-webkit-details-marker{display:none;}
+.regdd summary.an{border-color:var(--primary);font-weight:600;}
+.regdd summary svg{color:var(--muted);}
+.regdd-p{position:absolute;top:32px;left:0;z-index:30;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 28px rgba(35,43,53,.16);padding:6px;min-width:240px;max-height:60vh;overflow:auto;display:flex;flex-direction:column;}
+.regdd-p label{display:flex;align-items:center;gap:7px;font-size:12.5px;padding:5px 8px;border-radius:6px;cursor:pointer;white-space:nowrap;}
+.regdd-p label:hover{background:var(--bg,#F5F7F9);}
+.regdd-p .rdot{margin-right:0;}
+.regdd-alle{all:unset;cursor:pointer;font-size:12px;color:var(--muted);padding:6px 8px;border-top:1px solid var(--line);margin-top:4px;}
+.regdd-alle:hover{color:var(--primary);}
+/* Karte der Pflegekunden */
+#pfKarte{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff;}
+#pfKarteInfo{padding:6px 12px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--line);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+#pfMap{height:calc(100vh - 250px);min-height:420px;}
+#pfMap .iw{font-size:12.5px;line-height:1.45;color:#323E4E;} #pfMap .iw .m{color:#8B9097;}
+#pfMap .reg-l{text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff;}
+#pfMap .iw-b{display:flex;gap:6px;margin-top:7px;} #pfMap .iw-b button{font:inherit;font-size:12px;padding:4px 10px;border:1px solid #8B9097;border-radius:6px;background:#fff;color:#323E4E;cursor:pointer;}
+#pfMap .iw-b button:hover{border-color:#323E4E;background:#F5F7F9;}
 .det{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:12px;margin:4px 0 8px;}
 .det section{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:12.5px;line-height:1.5;min-width:0;}
 .det h4{margin:0 0 6px;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);}
@@ -361,6 +383,7 @@ tr.offertenrow > td{border:1px solid #323E4E;border-top:0;padding:0!important;} 
       <thead id="kundenKopf"></thead>
       <tbody id="kundenBody"></tbody>
     </table>
+    <div id="pfKarte" hidden><div id="pfKarteInfo">Karte wird geladen …</div><div id="pfMap"></div></div>
     <div class="kunten" id="kunten"></div>
     <div class="status" id="kundenStatus"></div>
   </div>
@@ -499,7 +522,7 @@ let KUNDEN = [];
 let OFFERTEN_PRO_KUNDE = {}; // { kunde_id: [{...}] }
 let sortCol = '_name_sort';
 let sortDir = 1;
-let geoeffneterKunde = null;
+let geoeffneterKunde = null, springeZu = null;
 let suchtext = '';
 
 function anzeigename(k){
@@ -694,7 +717,7 @@ async function ladeKontaktDaten(){
 // Ansicht «Pflege»: Pflegekunden mit Region, Abo, Kategorien, Zuständig (Daten wie im Pflege-Tool).
 // Einsätze und Daten stehen nur im Einsatzplaner. Rechte: Adressen = offerten/kunden, Pflege = pflege/kunden.
 // ---------------------------------------------------------------------------
-let modus = 'adr', filterAuf = false, MIT_ADR = true, MIT_PF = true, ICH_ID = null;
+let modus = 'adr', pfKarteAn = false, filterAuf = false, MIT_ADR = true, MIT_PF = true, ICH_ID = null;
 const PF = { kunden: new Map(), kat: [], kk: [], kz: [], reg: [], regPlz: {}, obj: [], tags: [], felder: [], arbeiten: [], ka: [], zust: [] };
 const pff = { reg: new Set(), kat: '', abo: '', wer: '', tag: '', meine: false };
 const PSVG = p => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
@@ -761,12 +784,21 @@ function pfFilterHtml(){
   const chip = (attr, an, t) => `<button type="button" class="fchip" ${attr} aria-pressed="${an}">${t}</button>`;
   const zIds = [...new Set(PF.kz.map(z => z.benutzer_id))].sort((a, b) => zustName(a).localeCompare(zustName(b), 'de'));
   return chip('data-pm="1"', pff.meine, 'Meine Kunden')
-    + '<span class="fgrp">Region</span>' + PF.reg.map(r => chip(`data-preg="${r.id}" title="${escHtml(r.name)}"`, pff.reg.has(r.id), `<span class="rdot" style="background:${escHtml(r.farbe || '#8B9097')}"></span>${escHtml(regKurz(r))}`)).join('')
+    + pfRegHtml()
     + `<span class="fgrp">Pflege</span><select data-pf="kat" aria-label="Kategorie"><option value="">Alle Kategorien</option>${PF.kat.map(c => `<option value="${c.id}"${pff.kat === c.id ? ' selected' : ''}>${escHtml(c.name)}</option>`).join('')}</select>
       <select data-pf="abo" aria-label="Abo"><option value="">Alle Abos</option>${ABO.map(a => `<option value="${a.id}"${pff.abo === a.id ? ' selected' : ''}>${a.n}</option>`).join('')}</select>
       <select data-pf="wer" aria-label="Zuständig"><option value="">Alle Zuständigen</option><option value="-"${pff.wer === '-' ? ' selected' : ''}>Niemand zuständig</option>${zIds.map(id => `<option value="${id}"${pff.wer === id ? ' selected' : ''}>${escHtml(zustName(id))}</option>`).join('')}</select>
       ${PF.tags.length ? `<select data-pf="tag" aria-label="Tag"><option value="">Alle Tags</option>${PF.tags.map(t => `<option value="${t.id}"${pff.tag === t.id ? ' selected' : ''}>${escHtml(t.name)}</option>`).join('')}</select>` : ''}
-      <a class="flink" href="pflege-kunden-live-v1.html?liste=1" title="Bisherige Pflege-Liste: Karte, Druck, Pflegekunde aus Easybill hinzufügen">Pflegeliste (Karte, Druck, neu)</a>`;
+      <span class="fr"><a class="flink" href="pflege-kunden-live-v1.html?liste=1" title="Pflege-Liste zum Drucken, Pflegekunde aus Easybill hinzufügen">Drucken / neu</a>
+      <button type="button" class="fchip fkarte" id="pfKarteBtn" aria-pressed="${pfKarteAn}" title="${pfKarteAn ? 'Zurück zur Liste' : 'Gefilterte Kunden auf der Karte zeigen'}">${KG.icon(pfKarteAn ? 'aufzaehlung' : 'karte', 14)}${pfKarteAn ? 'Liste' : 'Karte'}</button></span>`;
+}
+// Region: Mehrfachauswahl im Dropdown (spart Platz), Mehrfachwahl = oder
+function pfRegHtml(){
+  const sel = PF.reg.filter(r => pff.reg.has(r.id));
+  const label = !sel.length ? 'Alle Regionen' : sel.length <= 2 ? sel.map(r => regKurz(r)).join(', ') : `${sel.length} Regionen`;
+  return `<details class="regdd" id="pfReg"><summary${sel.length ? ' class="an"' : ''}>${sel.length === 1 ? `<span class="rdot" style="background:${escHtml(sel[0].farbe || '#8B9097')}"></span>` : ''}${escHtml(label)}${KG.icon('chev', 12)}</summary>
+    <div class="regdd-p">${PF.reg.map(r => `<label title="${escHtml(r.name)}"><input type="checkbox" data-preg="${r.id}"${pff.reg.has(r.id) ? ' checked' : ''}><span class="rdot" style="background:${escHtml(r.farbe || '#8B9097')}"></span>${escHtml(r.name)}</label>`).join('')}
+      <button type="button" class="regdd-alle" data-preg-alle>Alle Regionen</button></div></details>`;
 }
 function pfZeile(k){
   const pk = PF.kunden.get(k.id), r = pfRegion(k), kats = pfKats(k.id), z = pfZustIds(k.id).map(zustName);
@@ -881,7 +913,14 @@ function renderKundenTable(){
       + (filterAuf ? FILTER.map(([k, n, set]) => `<button type="button" class="fchip" data-f="${k}" aria-pressed="${schnell.has(k)}">${n}<small>${KUNDEN.filter(x => set ? set.has(x.id) : !x.easybill_id).length}</small></button>`).join('') : '');
   if($('filterAuf')) $('filterAuf').onclick = () => { filterAuf = !filterAuf; renderKundenTable(); };
   $('kfilter').querySelectorAll('[data-pm]').forEach(b => b.onclick = () => { pff.meine = !pff.meine; seite = 0; renderKundenTable(); });
-  $('kfilter').querySelectorAll('[data-preg]').forEach(b => b.onclick = () => { const r = b.dataset.preg; pff.reg.has(r) ? pff.reg.delete(r) : pff.reg.add(r); seite = 0; renderKundenTable(); });
+  $('kfilter').querySelectorAll('input[data-preg]').forEach(b => b.onchange = () => { const r = b.dataset.preg; b.checked ? pff.reg.add(r) : pff.reg.delete(r); seite = 0; renderKundenTable(); if($('pfReg')) $('pfReg').open = true; });
+  $('kfilter').querySelectorAll('[data-preg-alle]').forEach(b => b.onclick = () => { pff.reg.clear(); seite = 0; renderKundenTable(); });
+  if($('pfKarteBtn')) $('pfKarteBtn').onclick = () => { pfKarteAn = !pfKarteAn; renderKundenTable(); };
+  // Karte statt Tabelle (nur Ansicht Pflege); Filter oben gelten auch für die Karte
+  const karteJetzt = pf && pfKarteAn;
+  ['abc', 'kunten'].forEach(id => { $(id).style.display = karteJetzt ? 'none' : ''; });
+  document.querySelector('.kundentable').style.display = karteJetzt ? 'none' : ''; $('pfKarte').hidden = !karteJetzt;
+  if(karteJetzt){ zeichnePfKarte(); return; }
   $('kfilter').querySelectorAll('select[data-pf]').forEach(s => s.onchange = () => { pff[s.dataset.pf] = s.value; seite = 0; renderKundenTable(); });
   if(pf){
     const th = (k, t, st) => `<th data-sort="${k}"${st ? ` style="${st}"` : ''}>${t}</th>`;
@@ -917,6 +956,7 @@ function renderKundenTable(){
   const da = new Set(basis.map(ersterBuchstabe));
   if(buchstabe && !da.has(buchstabe)) buchstabe = null;
   const liste = buchstabe ? basis.filter(k => ersterBuchstabe(k) === buchstabe) : basis;
+  if(springeZu){ const i = liste.findIndex(k => k.id === springeZu); if(i >= 0) seite = Math.floor(i / PRO_SEITE); }
   const seiten = Math.max(1, Math.ceil(liste.length / PRO_SEITE)); seite = Math.min(seite, seiten - 1);
   const sichtbar = liste.slice(seite * PRO_SEITE, seite * PRO_SEITE + PRO_SEITE);
   const zaehler = `${liste.length ? `${seite * PRO_SEITE + 1}–${Math.min(liste.length, seite * PRO_SEITE + PRO_SEITE)} von ${liste.length}` : '0 Treffer'}
@@ -951,6 +991,8 @@ function renderKundenTable(){
   document.querySelectorAll('[data-zuord]').forEach(b => b.onclick = e => { e.stopPropagation(); zuordnungSetzen(b.dataset.zuord, b.dataset.wert); });
   document.querySelectorAll('tr.liefrow').forEach(tr => tr.onclick = () => { geoeffneterKunde = geoeffneterKunde === tr.dataset.lid ? null : tr.dataset.lid; renderKundenTable(); });
 
+  if(springeZu){ const id = springeZu; springeZu = null; document.querySelector(`tr.kundenrow[data-id="${id}"]`)?.scrollIntoView({ block: 'center' });
+    if(!OFFERTEN_PRO_KUNDE[id]) ladeOffertenFuerKunde(id).then(() => { if(geoeffneterKunde === id) renderKundenTable(); }); }
   document.querySelectorAll('tr.kundenrow').forEach(tr => {
     tr.addEventListener('click', async () => {
       const id = tr.dataset.id;
@@ -1089,6 +1131,103 @@ function easybillKachel(k){
   if(!liste) return leerT('Lädt …');
   if(!liste.length) return leerT('Noch nichts geholt. Ältere holst du mit «Jetzt holen».');
   return liste.map(d => `<div class="kkz"><span class="ebtyp${d.typ === 'ORDER' ? ' ab' : ''}">${d.typ === 'ORDER' ? 'AB' : 'Ang.'}</span><span class="t">${escHtml(d.nummer || '')}${d.typ === 'ORDER' && d.dauer ? ` <span class="abdauer" title="Baustellendauer laut AB">≈ ${String(d.dauer).replace('.', ',')} T</span>` : ''}</span><span class="d">${kDat(d.datum)}</span><span class="b">${kBetrag(d.betrag_netto)}</span></div>`).join('');
+}
+
+document.addEventListener('click', e => { const d = $('pfReg'); if(d?.open && !e.target.closest('#pfReg')) d.open = false; });
+
+// ---------------------------------------------------------------------------
+// Karte der Pflegekunden (Google Maps) direkt in Kontakte, Ansicht «Pflege» – gleiche Filter wie die Liste.
+// Eine Nadel pro Hauptadresse / Objekt in der Farbe der Region; weit weg pro Region ein Kreis mit Anzahl.
+// Koordinaten rechnet die Edge Function pflege-geocode aus (wie im Pflege-Tool).
+// ---------------------------------------------------------------------------
+const PK = { geladen: null, map: null, iw: null, teile: [], geo: new Map(), obj: [], fehler: null };
+const NADEL = 'M12 2C8.1 2 5 5.1 5 9c0 5.2 7 13 7 13s7-7.8 7-13c0-3.9-3.1-7-7-7z';
+const KARTE_NADEL_ZOOM = 11;                                                  // ab diesem Zoom einzelne Nadeln
+const KARTE_START = { south: 46.66, west: 7.22, north: 47.16, east: 7.90 };   // Biel – Bern – Thun – Interlaken
+const pkInfo = t => { if($('pfKarteInfo')) $('pfKarteInfo').textContent = t; };
+async function pkLaden(){
+  const { data, error } = await sb.from('app_einstellung').select('wert').eq('schluessel', 'google_maps_browser_key').maybeSingle();
+  if(error || !data?.wert) throw new Error('Kein Google-Maps-Schlüssel hinterlegt.');
+  if(!window.google?.maps) await new Promise((ok, nein) => { const s = document.createElement('script');
+    s.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(data.wert)}&v=weekly&language=de&region=CH`;
+    s.onload = ok; s.onerror = () => nein(new Error('Google Maps konnte nicht geladen werden.')); document.head.appendChild(s); });
+  // fehlende / geänderte Adressen umrechnen lassen
+  for(let runde = 0; runde < 15; runde++){
+    const { data: d, error: e } = await sb.functions.invoke('pflege-geocode', { body: {} });
+    let f = d?.error; if(e && !f){ try { f = (await e.context?.json())?.error; } catch {} f = f || e.message; }
+    if(f){ PK.fehler = f; break; } if(!d?.offen) break; pkInfo(`Adressen werden umgerechnet … noch ${d.offen}`);
+  }
+  const [k, o] = await Promise.all([ladeAlleZeilen(() => sb.from('pflege_kunde').select('kunde_id,lat,lon')), ladeAlleZeilen(() => sb.from('pflege_objekt').select('id,kunde_id,name,strasse,plz,ort,region_id,lat,lon'))]);
+  PK.geo = new Map(k.map(x => [x.kunde_id, x])); PK.obj = o;
+}
+// Orte: Hauptadresse (wenn dort gepflegt wird) und Objekte der gefilterten Kunden
+function pkOrte(){
+  const orte = [], adr = a => [a.strasse, [a.plz, a.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  const passt = (kid, oid, rid) => (!pff.reg.size || pff.reg.has(rid)) && (!pff.kat || PF.kk.some(x => x.kunde_id === kid && (x.objekt_id || null) === oid && x.kategorie_id === pff.kat));
+  gefilterteKunden().forEach(k => {
+    const objs = PK.obj.filter(o => o.kunde_id === k.id), haupt = !objs.length || PF.kk.some(x => x.kunde_id === k.id && !x.objekt_id);
+    const r = pfRegion(k), g = PK.geo.get(k.id) || {};
+    if(haupt && passt(k.id, null, r?.id)) orte.push({ k, o: null, lat: g.lat, lon: g.lon, reg: r, adr: adr(k) });
+    objs.forEach(o => { const rid = o.region_id || regionAusPlz(plzZahl(o.plz, o.ort)); if(passt(k.id, o.id, rid))
+      orte.push({ k, o, lat: o.lat, lon: o.lon, reg: PF.reg.find(x => x.id === rid), adr: adr(o) }); });
+  });
+  return orte;
+}
+async function zeichnePfKarte(){
+  if(!PK.geladen) PK.geladen = pkLaden().catch(e => { PK.geladen = null; throw e; });
+  try { await PK.geladen; } catch(e){ pkInfo(e.message); return; }
+  if(!pfKarteAn || modus !== 'pf') return;
+  const gm = google.maps;
+  if(!PK.map){
+    PK.map = new gm.Map($('pfMap'), { mapTypeControl: true, streetViewControl: false, fullscreenControl: true, gestureHandling: 'greedy', clickableIcons: false });
+    PK.map.fitBounds(KARTE_START, 0); PK.iw = new gm.InfoWindow();
+    PK.map.addListener('zoom_changed', () => PK.umschalten?.());
+  }
+  const map = PK.map, iw = PK.iw;
+  PK.teile.forEach(x => x.setMap(null)); PK.teile = []; iw.close();
+  const orte = pkOrte(), mit = orte.filter(x => x.lat != null), ohne = orte.filter(x => x.lat == null);
+  const nadeln = mit.map(x => {
+    const m = new gm.Marker({ position: { lat: x.lat, lng: x.lon }, title: anzeigename(x.k),
+      icon: { path: NADEL, fillColor: x.reg?.farbe || '#8B9097', fillOpacity: 1, strokeColor: '#323E4E', strokeWeight: 1.2, scale: 1.25, anchor: new gm.Point(12, 22) } });
+    const pk = PF.kunden.get(x.k.id) || {}, kw = pk.abo_typ === 'ohne_voranmeldung' ? 'ohne Anmeldung' : KANAELE.filter(c => (pk.voranmeldung_kanaele || []).includes(c.id)).map(c => c.n).join(', ') || (pk.abo_typ === 'mit_voranmeldung' ? 'Voranmeldung, Kontaktweg offen' : '');
+    const html = `<div class="iw"><b>${escHtml([anzeigename(x.k), x.k.vorname].filter(Boolean).join(' '))}</b>${x.o ? ` <span class="m">· Objekt${x.o.name ? ' ' + escHtml(x.o.name) : ''}</span>` : ''}<br>${escHtml(x.adr)}${x.reg ? `<br><span class="m">${escHtml(x.reg.name)}</span>` : ''}${kw ? `<br>${escHtml(kw)}` : ''}<br><span class="m">Klicken zeigt den Kunden in der Liste</span></div>`;
+    m.addListener('mouseover', () => { iw.setContent(html); iw.open({ map, anchor: m }); });
+    m.addListener('click', () => { pfKarteAn = false; buchstabe = null; geoeffneterKunde = x.k.id; springeZu = x.k.id; renderKundenTable(); });
+    return m;
+  });
+  // Regionen: Gebiet (pflege_region.gebiet) und Kreis mit Anzahl; Klick = hineinzoomen oder nur diese Region
+  const proReg = {}, kreise = [], namen = [], polys = [];
+  mit.forEach(x => { if(x.reg) (proReg[x.reg.id] = proReg[x.reg.id] || []).push({ lat: x.lat, lng: x.lon }); });
+  const zoomeAuf = p => { const b = new gm.LatLngBounds(); p.forEach(x => b.extend(x)); map.fitBounds(b, 60); gm.event.addListenerOnce(map, 'idle', () => { if(map.getZoom() < KARTE_NADEL_ZOOM) map.setZoom(KARTE_NADEL_ZOOM); }); };
+  const regionFenster = (r, pfad, pos) => {
+    const p = proReg[r.id] || [], d = document.createElement('div'); d.className = 'iw';
+    d.innerHTML = `<b>${escHtml(r.name)}</b><br><span class="m">${p.length} ${p.length === 1 ? 'Ort' : 'Orte'} mit den aktuellen Filtern</span>
+      <div class="iw-b"><button type="button" data-a="zoom">Hineinzoomen</button><button type="button" data-a="nur">Nur diese Region</button></div>`;
+    d.querySelector('[data-a="zoom"]').onclick = () => { iw.close(); zoomeAuf(p.length ? p : pfad); };
+    d.querySelector('[data-a="nur"]').onclick = () => { pff.reg = new Set([r.id]); seite = 0; renderKundenTable(); };
+    iw.setContent(d); iw.setPosition(pos); iw.open({ map });
+  };
+  PF.reg.filter(r => !r.ist_rest).forEach(r => {
+    const pfade = (r.gebiet || []).map(pf => pf.map(([la, ln]) => ({ lat: la, lng: ln }))), p = proReg[r.id] || [], alle = pfade.flat();
+    if(pfade.length){ const poly = new gm.Polygon({ map, paths: pfade, strokeColor: r.farbe, strokeOpacity: .8, strokeWeight: 1.5, fillColor: r.farbe, fillOpacity: p.length ? .16 : .06 });
+      poly.addListener('click', e => regionFenster(r, alle, e.latLng)); polys.push(poly); }
+    if(!p.length && !pfade.length) return;
+    const q = p.length ? p : alle, mitte = { lat: q.reduce((s, x) => s + x.lat, 0) / q.length, lng: q.reduce((s, x) => s + x.lng, 0) / q.length };
+    if(p.length){ const k = new gm.Marker({ position: mitte, title: `${r.name}: ${p.length}`, zIndex: 900,
+        icon: { path: gm.SymbolPath.CIRCLE, scale: 9 + Math.sqrt(p.length) * 2.2, fillColor: r.farbe, fillOpacity: .9, strokeColor: '#323E4E', strokeWeight: 1.5 },
+        label: { text: String(p.length), color: '#fff', fontSize: '12px', fontWeight: '700' } });
+      k.addListener('click', () => regionFenster(r, alle, mitte)); kreise.push(k); }
+    namen.push(new gm.Marker({ position: mitte, clickable: false, zIndex: 901, icon: { path: gm.SymbolPath.CIRCLE, scale: 0, labelOrigin: new gm.Point(0, 3.2) },
+      label: { text: r.name.replace(/\s*\(.*\)$/, ''), color: '#323E4E', fontSize: '12.5px', fontWeight: '700', className: 'reg-l' } }));
+  });
+  PK.teile = [...nadeln, ...kreise, ...namen, ...polys];
+  // je nach Zoom Regionskreise oder einzelne Nadeln (Regionsname bleibt sichtbar)
+  PK.umschalten = () => { const nah = map.getZoom() >= KARTE_NADEL_ZOOM;
+    nadeln.forEach(m => m.setMap(nah ? map : null)); kreise.forEach(m => m.setMap(nah ? null : map));
+    namen.forEach(m => { m.setMap(map); const i = m.getIcon(); i.labelOrigin = new gm.Point(0, nah ? 3.2 : -3.4); m.setIcon(i); }); };
+  PK.umschalten();
+  pkInfo((PK.fehler ? `Fehler beim Umrechnen der Adressen: ${PK.fehler} · ` : '') + `${mit.length} Orte · Kreis anklicken oder hineinzoomen für die einzelnen Kunden · Nadel anklicken zeigt den Kunden in der Liste`
+    + (ohne.length ? ` · ${ohne.length} ohne Koordinaten: ${ohne.map(x => anzeigename(x.k) + (x.adr ? ' (' + x.adr + ')' : ' (keine Adresse)')).join(', ')}` : ''));
 }
 
 // Links in den Kacheln eines aufgeklappten Kunden
