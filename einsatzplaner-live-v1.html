@@ -1055,13 +1055,13 @@ addEventListener('keydown', e => { if(e.key === 'Escape' && $('bpWrap')) bpZu();
 // Die Zeile zeigt oben die wiederkehrenden Ferien, in der Mitte normale Balken (z. B. Abschlussprüfungen), unten das Arbeitszeit-Band.
 let AZ = [], FER = [], FERA = [];
 async function ladeArbeitszeit(){
-  const [a, f, x] = await Promise.all([sb.from('planer_arbeitszeit').select('*').order('ab_monat').order('ab_tag'), sb.from('planer_ferien').select('*').order('sortierung').order('von_kw'), sb.from('planer_ferien_ausnahme').select('*')]);
+  const [a, f, x] = await Promise.all([sb.from('planer_arbeitszeit').select('*').order('ab_kw'), sb.from('planer_ferien').select('*').order('sortierung').order('von_kw'), sb.from('planer_ferien_ausnahme').select('*')]);
   AZ = a.data || []; FER = f.data || []; FERA = x.data || []; }
 const istAzZeile = mid => istAllg(mid) && /arbeitszeit/i.test(P[mid]?.name || '');
-const azKey = a => a.ab_monat * 100 + a.ab_tag;
+const azKey = a => a.ab_kw;
 const hMin = t => { const m = String(t || '').match(/^(\d{1,2}):(\d{2})/); return m ? +m[1] * 60 + +m[2] : null; };
 const azStd = a => { if(!a?.start) return 0; const s = hMin(a.start), e = hMin(a.ende || '17:00'); return s == null || e == null ? 0 : Math.max(0, (e - s) / 60 - Number(a.mittag ?? 1)); };
-function azFuer(d){ if(!AZ.length) return null; const x = dDate(d), k = (x.getMonth() + 1) * 100 + x.getDate(); let a = null;
+function azFuer(d){ if(!AZ.length) return null; const x = dDate(d); let k = kw(d); if(x.getMonth() === 11 && k < 10) k = 53; let a = null; // Ende Dezember in KW 1 des Folgejahres = noch altes Jahr
   AZ.forEach(z => { if(azKey(z) <= k) a = z; }); return a || AZ[AZ.length - 1]; } // vor dem ersten Eintrag gilt der letzte vom Vorjahr
 const azText = a => a && azStd(a) > 0 ? `${a.start}–${a.ende || '17:00'} · ${fmtN(azStd(a))} Std` : 'Betrieb geschlossen';
 // Band unten in der Zeile: ein Stück pro Zeitraum, Text jede Woche (Quartal/Jahr: alle 4 Wochen) wiederholt
@@ -1069,7 +1069,7 @@ function azBand(){
   let h = '', s = 0, cur = azFuer(0); const schritt = dayW < 8 ? 28 : 7;
   const seg = (a, b, z) => { const cls = z && azStd(z) > 0 ? 'azb' : 'azb zu';
     for(let q = a; q < b;){ const n = Math.min(b, q === a ? a + schritt - ((dDate(a).getDay() + 6) % 7) % schritt : q + schritt);
-      h += `<div class="${cls}" data-az="${z?.id || ''}" data-azd="${q}" style="left:${X(q) + 1}px;width:${Math.max(4, XW(q, n) - 2)}px" title="Arbeitszeit ab ${z ? z.ab_tag + '.' + z.ab_monat + '.' : ''}: ${esc(azText(z))}">${XW(q, n) > 40 ? esc(azText(z)) : ''}</div>`; q = n; } };
+      h += `<div class="${cls}" data-az="${z?.id || ''}" data-azd="${q}" style="left:${X(q) + 1}px;width:${Math.max(4, XW(q, n) - 2)}px" title="Arbeitszeit ab KW ${z ? z.ab_kw : ''}: ${esc(azText(z))}">${XW(q, n) > 40 ? esc(azText(z)) : ''}</div>`; q = n; } };
   for(let d = 1; d <= NDAYS; d++){ const z = d < NDAYS ? azFuer(d) : null; if(d === NDAYS || z !== cur){ seg(s, d, cur); s = d; cur = z; } }
   return h;
 }
@@ -1092,7 +1092,7 @@ function ferBars(){
 // Klick auf das Arbeitszeit-Band: Info, Büro kommt zu den Einstellungen
 function azPop(id, d, rect){
   const z = AZ.find(x => x.id === id);
-  const pop = popAt(rect, `<b>Arbeitszeit${z ? ` ab ${z.ab_tag}.${z.ab_monat}.` : ''}</b><span class="muted small">${esc(azText(z))}${z?.start ? ` (${fmtN(Number(z.mittag ?? 1))} Std Mittag)` : ''} – gilt jedes Jahr bis zum nächsten Zeitraum</span>
+  const pop = popAt(rect, `<b>Arbeitszeit${z ? ` ab KW ${z.ab_kw}` : ''}</b><span class="muted small">${esc(azText(z))}${z?.start ? ` (${fmtN(Number(z.mittag ?? 1))} Std Mittag)` : ''} – gilt jedes Jahr bis zum nächsten Zeitraum</span>
     ${isBuero() ? `<div class="cmrow"><span style="flex:1"></span><a class="btn btn-ghost" href="#arbeitszeit">Arbeitszeit & Ferien bearbeiten</a></div>` : ''}`);
   mausWegZu(pop);
 }
@@ -1114,9 +1114,9 @@ function ferPop(fid, y, rect){
 function renderArbeitszeit(){
   const az = [...AZ].sort((a, b) => azKey(a) - azKey(b));
   $('appMain').innerHTML = `<div class="page azpage"><h2>Arbeitszeit &amp; Ferien</h2><p class="hint">Gilt jedes Jahr gleich und erscheint im Planer in der Zeile «Arbeitszeit &amp; Ferien». Ausnahmen für ein einzelnes Jahr direkt im Planer anklicken.</p>
-    <h3>Arbeitszeit</h3><p class="hint">Ein Zeitraum gilt ab dem Datum bis zum nächsten. Ohne Start = Betrieb geschlossen. Stunden = Ende − Start − Mittag.</p>
-    <div class="card azt"><div class="azh"><span>Ab (TT.MM.)</span><span>Start</span><span>Ende</span><span>Mittag (Std)</span><span>Stunden</span><span></span></div>
-      ${az.map(z => `<div class="azz2" data-azid="${z.id}"><input type="text" data-k="ab" value="${z.ab_tag}.${z.ab_monat}." aria-label="Ab"><input type="time" data-k="start" value="${esc(z.start || '')}" aria-label="Start"><input type="time" data-k="ende" value="${esc(z.ende || '17:00')}" aria-label="Ende"><input type="number" data-k="mittag" min="0" max="3" step="0.25" value="${Number(z.mittag ?? 1)}" aria-label="Mittag"><b>${azStd(z) > 0 ? fmtN(azStd(z)) + ' Std' : 'geschlossen'}</b><button type="button" class="kg-ibtn danger" data-azx="${z.id}" title="Zeitraum löschen" aria-label="Zeitraum löschen">${I('trash')}</button></div>`).join('')}
+    <h3>Arbeitszeit</h3><p class="hint">Ein Zeitraum gilt jedes Jahr ab Montag der Kalenderwoche bis zum nächsten. Ohne Start = Betrieb geschlossen. Stunden = Ende − Start − Mittag.</p>
+    <div class="card azt"><div class="azh"><span>Ab KW</span><span>Start</span><span>Ende</span><span>Mittag (Std)</span><span>Stunden</span><span></span></div>
+      ${az.map(z => `<div class="azz2" data-azid="${z.id}"><input type="number" data-k="ab_kw" min="1" max="53" value="${z.ab_kw}" aria-label="Ab KW"><input type="time" data-k="start" value="${esc(z.start || '')}" aria-label="Start"><input type="time" data-k="ende" value="${esc(z.ende || '17:00')}" aria-label="Ende"><input type="number" data-k="mittag" min="0" max="3" step="0.25" value="${Number(z.mittag ?? 1)}" aria-label="Mittag"><b>${azStd(z) > 0 ? fmtN(azStd(z)) + ' Std' : 'geschlossen'}</b><button type="button" class="kg-ibtn danger" data-azx="${z.id}" title="Zeitraum löschen" aria-label="Zeitraum löschen">${I('trash')}</button></div>`).join('')}
       <button type="button" class="btn btn-ghost" id="azNeu">${I('plus')}Zeitraum</button></div>
     <h3>Wiederkehrende Ferien</h3><p class="hint">Pro Kalenderwoche, jedes Jahr gleich (Montag bis Freitag). Zum Beispiel Betriebsferien, Schulferien der Lernenden.</p>
     <div class="card azt"><div class="azh fer"><span>Name</span><span>Art</span><span>von KW</span><span>bis KW</span><span></span></div>
@@ -1126,11 +1126,11 @@ function renderArbeitszeit(){
   const neu = async () => { await ladeArbeitszeit(); renderArbeitszeit(); };
   const azUpd = async (id, row) => { const z = { ...AZ.find(a => a.id === id), ...row }; row.stunden = azStd(z); const { error } = await sb.from('planer_arbeitszeit').update(row).eq('id', id); if(error) return fehler(error, 'Arbeitszeit'); neu(); };
   document.querySelectorAll('.azz2 [data-k]').forEach(i => i.onchange = () => { const id = i.closest('[data-azid]').dataset.azid, k = i.dataset.k;
-    if(k === 'ab'){ const m = i.value.match(/^\s*(\d{1,2})\.(\d{1,2})\.?\s*$/); if(!m){ toast('Bitte als TT.MM. eingeben, z. B. 2.3.', null, true); return; } return azUpd(id, { ab_tag: +m[1], ab_monat: +m[2] }); }
+    if(k === 'ab_kw'){ const w = Math.round(+i.value); if(!(w >= 1 && w <= 53)){ toast('Bitte eine Kalenderwoche 1–53 eingeben.', null, true); return; } if(AZ.some(a => a.ab_kw === w && a.id !== id)){ toast(`Ab KW ${w} gibt es schon.`, null, true); return; } return azUpd(id, { ab_kw: w }); }
     azUpd(id, { [k]: k === 'mittag' ? Number(i.value) || 0 : (i.value || null) }); });
   document.querySelectorAll('[data-azx]').forEach(b => b.onclick = () => bestaetige('Zeitraum löschen?', '', 'Löschen', async () => { const { error } = await sb.from('planer_arbeitszeit').delete().eq('id', b.dataset.azx); if(error) return fehler(error); neu(); }));
-  $('azNeu').onclick = async () => { const t = new Date(); let tag = t.getDate(), mo = t.getMonth() + 1; while(AZ.some(a => a.ab_tag === tag && a.ab_monat === mo)) tag = tag % 28 + 1;
-    const { error } = await sb.from('planer_arbeitszeit').insert({ ab_tag: tag, ab_monat: mo, start: '07:00', ende: '17:00', mittag: 1, stunden: 9 }); if(error) return fehler(error); neu(); };
+  $('azNeu').onclick = async () => { let w = kw(TODAY); while(AZ.some(a => a.ab_kw === w)) w = w % 53 + 1;
+    const { error } = await sb.from('planer_arbeitszeit').insert({ ab_kw: w, start: '07:00', ende: '17:00', mittag: 1, stunden: 9 }); if(error) return fehler(error); neu(); };
   document.querySelectorAll('.ferz [data-k]').forEach(i => i.onchange = async () => { const id = i.closest('[data-ferid]').dataset.ferid, k = i.dataset.k, v = k.endsWith('_kw') ? Math.min(53, Math.max(1, +i.value || 1)) : i.value.trim();
     if(k === 'name' && !v) return; const { error } = await sb.from('planer_ferien').update({ [k]: v }).eq('id', id); if(error) return fehler(error); neu(); });
   document.querySelectorAll('[data-ferx]').forEach(b => b.onclick = () => bestaetige('Ferien löschen?', '<div>Auch die Ausnahmen einzelner Jahre werden gelöscht.</div>', 'Löschen', async () => { const { error } = await sb.from('planer_ferien').delete().eq('id', b.dataset.ferx); if(error) return fehler(error); neu(); }));
@@ -1141,7 +1141,7 @@ let VOR = [], VOR_OFFEN = lsGet('vorratOffen', true), vDrag = null;
 // Seit 2026-11-05: ein Vorrat pro Gruppe direkt unter dem Gruppentitel (planer_gruppe.vorrat_bereich), Lehrlinge und Allgemeines unter «Allgemein».
 // Zwei Quellen in denselben Zeilen: Vorrat-Einträge (z. B. zugesagte Offerten) und Pflege-Vorschläge ohne zuständige Person. Alle weiss gestrichelt wie offene Aufträge.
 const VZ = 6, VH = 20, VKOPF = 16; // höchstens 6 Zeilen pro Gruppe, dann in die Breite
-const VBER = { bau: 'Gartenbau', pflege: 'Pflege', pool: 'Pool', lehrling: 'Lehrlinge' }; // «Allgemein» (andere) gibt es nicht mehr
+const VBER = { bau: 'Gartenbau', pflege: 'Pflege', pool: 'Pool' }; // Lehrlinge: Schulferien in Arbeitszeit & Ferien, Prüfungen in Termine & Infos // «Allgemein» (andere) gibt es nicht mehr
 const vorratAn = () => !EINGEBETTET && isBuero();
 async function ladeVorrat(){ if(!vorratAn()) return; const { data, error } = await sb.from('planer_vorrat').select('*').order('erstellt_am'); if(!error) VOR = data || []; }
 const vX = i => { const q = Math.floor(i / 5), r = i - 5 * q; return (q * (5 + 2 * WEK) + r) * dayW; };
@@ -2051,8 +2051,7 @@ function renderRows(){
     h += `<div class="row grp${zu ? ' zu' : ''}${g === ph ? ' phk' : ''}${ablK ? ' ablk' : ''}" data-g="${g.id}"><div class="nm">${ablK ? `<button type="button" class="ablbar${ABLAGE ? ' on' : ''}" id="ablBtn" title="Drei leere Ablage-Zeilen unter jeder Gruppe ein-/ausblenden">Ablage ${ABLAGE ? 'eingeblendet' : 'ausgeblendet'}</button>` : ''}${I('chev')}<span class="gn" title="${esc(g.name)}">${esc(g.name)}</span>${ablHinweis(g.id)}${g.offene_linie ? `<button type="button" class="goff${OFFEN_ZU.has(g.id) ? '' : ' on'}" data-goff="${g.id}" title="Offene Linien dieser Gruppe ${OFFEN_ZU.has(g.id) ? 'einblenden' : 'ausblenden'}">offen</button>` : ''}${isBuero() && g.id !== '_ohne' ? `<button class="gadd" data-gadd="${g.id}" title="Zeile hinzufügen" aria-label="Zeile hinzufügen">${I('plus')}</button>` : ''}</div><div class="lane" style="width:${W}px;height:20px">${g.offene_linie ? '' : provBars('g:' + g.id)}</div></div>`;
     const offAn = !!g.offene_linie && !zu && !OFFEN_ZU.has(g.id), abl0 = ABL.filter(a => a.gruppe_id === g.id).sort((a, b) => a.sortierung - b.sortierung)[0];
     if(offAn && g.vorrat_bereich && vorratAn()) h += vorratBlock(g.vorrat_bereich, g.id, 'Vorrat'); // Arbeitsvorrat der Gruppe (auf/zu mit «offen»)
-    if(!zu) ps.forEach(p => { h += personRow(p, W, bgx); if(openMid === p.id) h += openTyp === 'maschine' ? ovRows(W, bgx, 'maschine', p.id) : vehFocusRows(W, bgx, p.id); if(offAn) h += personRow({ ...p, offLab: 'offen' }, W, bgx, true); });
-    if(ablK && !zu && vorratAn() && VOR.some(v => v.bereich === 'lehrling')) h += vorratBlock('lehrling', null, 'Lehrlinge'); // Vorrat Lehrlinge unter den Hinweisen (Details folgen) // Anhänger nur in der Übersicht «Anhänger»
+    if(!zu) ps.forEach(p => { h += personRow(p, W, bgx); if(openMid === p.id) h += openTyp === 'maschine' ? ovRows(W, bgx, 'maschine', p.id) : vehFocusRows(W, bgx, p.id); if(offAn) h += personRow({ ...p, offLab: 'offen' }, W, bgx, true); }); // Anhänger nur in der Übersicht «Anhänger»
     // Schnupper / Temporär: unten immer eine leere Zeile zum Eintippen (Name + Enter = neue Zeile, auch ohne Account)
     if(!zu && !EINGEBETTET && isBuero() && /schnupper|tempor/i.test(g.name)) h += `<div class="row neuzeile"><div class="nm"><input type="text" class="neuin" data-neup="${g.id}" placeholder="+ Name eintippen …" aria-label="Neue Zeile in ${esc(g.name)}"></div><div class="lane" style="width:${W}px;${bgx}"></div></div>`;
     // Ablage-Zeilen (eingeschaltet über den Knopf oben links)
@@ -3367,7 +3366,9 @@ function bindTimeline(t){
     // Büro: Gruppe am Kopf ziehen = ganze Gruppe verschieben (kurzer Klick = auf-/zuklappen)
     if(g){ const id = g.dataset.g; if(isBuero() && id !== '_ohne' && layer === 'p' && e.target.closest('.nm')){ drag = { kind: 'grow', gid: id, x0: e.clientX, y0: e.clientY, moved: false, toggle }; e.preventDefault(); return; } toggle(id); return; }
     // Büro: Person am Namen ziehen = umsortieren / andere Gruppe (kurzer Klick = bearbeiten)
-    const pn = e.target.closest('.row[data-mid] > .nm'); if(pn && layer === 'p' && !e.target.closest('.mab')){ const mid = pn.parentElement.dataset.mid; // Klick auf Name = Pendenzen, Büro kann zusätzlich ziehen
+    const pn = e.target.closest('.row[data-mid] > .nm');
+    if(pn && isBuero() && istAzZeile(pn.parentElement.dataset.mid) && e.target.closest('.nm .n')){ location.hash = 'arbeitszeit'; return; } // Verwaltung der Arbeitszeit & Ferien
+    if(pn && layer === 'p' && !e.target.closest('.mab')){ const mid = pn.parentElement.dataset.mid; // Klick auf Name = Pendenzen, Büro kann zusätzlich ziehen
       // Klick daneben (leeres Feld) = Zeile hervorheben / wieder aufheben
       const klick = e.target.closest(".nm .n, .nm .dot, .nm .z, .nm .me") ? () => openBoard(mid) : () => { MARKS = MARKS.includes(mid) ? MARKS.filter(x => x !== mid) : [...MARKS, mid]; renderRows(); };
       if(isBuero()){ drag = { kind: "prow", mid, x0: e.clientX, y0: e.clientY, moved: false, klick }; e.preventDefault(); } else drag = { kind: "click", fn: klick }; return; }
