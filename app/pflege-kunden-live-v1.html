@@ -206,6 +206,15 @@ tbody tr:last-child td{border-bottom:none;}
 .objs .i{width:14px;height:14px;}
 .o-head{border-left:4px solid var(--accent-lime);margin-top:8px;}
 .o-head h2{font-size:17px;color:var(--primary);}
+.o-zu{all:unset;box-sizing:border-box;display:flex;align-items:center;gap:10px;width:100%;margin-top:8px;padding:9px 14px;cursor:pointer;font-size:13px;color:var(--ink);background:#fff;border:1px solid var(--line);border-left:4px solid var(--accent-lime);border-radius:var(--radius,10px);}
+.o-zu:hover{border-color:var(--primary);border-left-color:var(--accent-lime);}
+.o-zu .i{width:14px;height:14px;flex:none;color:var(--muted);}
+.o-zu b{color:var(--primary);flex:none;}
+.o-zu-adr{flex:none;color:var(--primary);}
+.o-zu-adr::before,.o-zu-notiz::before{content:"·";margin-right:8px;color:var(--muted);}
+.o-zu-notiz{flex:1;min-width:0;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.o-zuklapp{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px;}
+.o-zuklapp:hover{color:var(--primary);} .o-zuklapp .i{width:14px;height:14px;}
 .o-adr{display:grid;grid-template-columns:minmax(0,2fr) 80px minmax(0,1.3fr);gap:8px;margin-top:10px;}
 .o-head .addrow{margin-top:10px;}
 
@@ -751,6 +760,7 @@ async function speichere(tabelle, filter, werte){
 // #k=<kunde_id>&o=<objekt_id>: gewaehltes Objekt, ohne o= die Hauptadresse
 const aktKundeId = () => (location.hash.match(/k=([0-9a-f-]+)/) || [])[1] || null;
 const aktObjektId = () => { const id = (location.hash.match(/[&#]o=([0-9a-f-]+)/) || [])[1]; return id && S.obj.some(o => o.id === id) ? id : null; };
+const OBJ_AUF = new Set(); // Objekt-Block «Adresse und Notizen zum Objekt»: standardmässig zu, aufgeklappte Objekte merken
 const zeigeObjekt = (kundeId, objektId) => { location.hash = 'k=' + kundeId + (objektId ? '&o=' + objektId : ''); };
 let letzterKunde = null;
 window.addEventListener('hashchange', () => {
@@ -1431,8 +1441,10 @@ function renderDetail(kundeId){
         <div class="wtage" title="An diesen Tagen plant der Einsatzplaner die Pflege-Vorschläge ein. Keiner gewählt = egal."><span class="muted small">Wunsch-Tage</span>${['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'].map((t, i) => `<button type="button" data-act="wunsch-tag" data-tag="${i + 1}" aria-pressed="${(k.wunsch_wochentage || []).includes(i + 1)}" aria-label="Wunsch-Tag ${t}">${t}</button>`).join('')}</div>
       </div>
     </section>
-    ${obj ? `<section class="card k-head o-head">
+    ${obj && !OBJ_AUF.has(obj.id) ? `<button type="button" class="card o-head o-zu" data-act="obj-auf" aria-expanded="false">${I('next')}<b>Adresse und Notizen zum Objekt</b><span class="o-zu-adr">${esc(objektName(obj))}</span>${obj.notiz ? `<span class="o-zu-notiz">${esc(obj.notiz.split('\n')[0])}</span>` : ''}</button>` : ''}
+    ${obj && OBJ_AUF.has(obj.id) ? `<section class="card k-head o-head">
       <div>
+        <button type="button" class="o-zuklapp" data-act="obj-auf" aria-expanded="true">${I('chev')}Adresse und Notizen zum Objekt</button>
         <h2>${esc(objektName(obj))}</h2>
         <div class="muted small">Objekt von ${esc(ku.name)} · alles unten gilt nur für dieses Objekt</div>
         <div class="o-adr">
@@ -2137,11 +2149,12 @@ appUndLeiste('click', async e => {
   }
   else if(act === 'tab'){ S.ktab = b.dataset.kat; S.kwAsk = null; render(); }
   else if(act === 'objekt') zeigeObjekt(kundeId, b.dataset.o || null);
+  else if(act === 'obj-auf'){ const oid = aktObjektId(); if(!oid) return; OBJ_AUF.has(oid) ? OBJ_AUF.delete(oid) : OBJ_AUF.add(oid); render(); }
   else if(act === 'objekt-neu'){
     const reihe = Math.max(0, ...objekteVon(kundeId).map(o => o.reihenfolge ?? 0)) + 1;
     const { data, error } = await sb.from('pflege_objekt').insert({ kunde_id: kundeId, reihenfolge: reihe }).select().single();
     if(error){ showToast(friendlyError(error), true); return; }
-    S.obj.push(data);
+    S.obj.push(data); OBJ_AUF.add(data.id); // neues Objekt gleich aufgeklappt (Adresse eintippen)
     zeigeObjekt(kundeId, data.id);
     setTimeout(() => $('oStr')?.focus(), 0);
   }
@@ -2174,10 +2187,14 @@ appUndLeiste('click', async e => {
   else if(act === 'arb-rm'){
     const id = b.closest('[data-id]').dataset.id, ka = S.ka.find(x => x.id === id);
     const name = ka.arbeit_id ? S.arbeiten.find(a => a.id === ka.arbeit_id)?.name : (ka.titel || 'Zusatzarbeit');
-    if(!await kgBestaetigen(`«${name}» bei diesem Kunden entfernen?`, 'Arbeit entfernen?', 'Entfernen')) return;
-    const { error } = await sb.from('pflege_kunde_arbeit').delete().eq('id', id);
+    // letzte Arbeit der Kategorie: ganze Kategorie mit entfernen (Reiter verschwindet)
+    const kkA = S.kk.find(x => x.id === ka.kunde_kategorie_id), letzte = kkA && !S.ka.some(x => x.kunde_kategorie_id === kkA.id && x.id !== id), katA = kkA && katById(kkA.kategorie_id);
+    if(!await kgBestaetigen(letzte ? `«${name}» ist die letzte Arbeit von «${katA?.name || ''}». Die Kategorie wird ${kkA.objekt_id ? 'bei diesem Objekt' : 'bei diesem Kunden'} ganz entfernt (mit Angaben und Zuständigen).` : `«${name}» bei diesem Kunden entfernen?`, letzte ? 'Kategorie entfernen?' : 'Arbeit entfernen?', 'Entfernen')) return;
+    const { error } = letzte ? await sb.from('pflege_kunde_kategorie').delete().eq('id', kkA.id) : await sb.from('pflege_kunde_arbeit').delete().eq('id', id);
     if(error){ showToast(friendlyError(error), true); return; }
-    S.ka = S.ka.filter(x => x.id !== id); render();
+    S.ka = S.ka.filter(x => x.id !== id);
+    if(letzte){ S.kk = S.kk.filter(x => x.id !== kkA.id); S.ka = S.ka.filter(x => x.kunde_kategorie_id !== kkA.id); S.kz = S.kz.filter(x => x.kunde_kategorie_id !== kkA.id); S.ktab = null; }
+    render();
   }
   else if(act === 'std-add'){
     const { data, error } = await sb.from('pflege_kunde_arbeit').insert({ kunde_kategorie_id: kk.id, arbeit_id: b.dataset.arbeit }).select().single();
