@@ -2554,6 +2554,22 @@ async function vehWeg(z){
   const { error } = ids.length ? await sb.from('planer_ressource_einsatz').delete().in('id', ids) : {}; if(error){ fehler(error, 'Entfernen'); await neuLaden(); return; }
   toast(`${resName(r)} zurück in die Ablage`, () => assignVeh(r, z.s, z.e, z.mid));
 }
+// Rechtsklick auf eine eingeplante Maschine / ein Fahrzeug: kleines Menü mit runden Knöpfen (Details, 1 Tag unterbrechen, Schloss öffnen, löschen)
+function resMenu(zid, rid, rect, u){
+  if(zid.startsWith('stamm_')){ openResPop(zid, rid, rect, u); return; }
+  const r = resById(rid), z = RESE.find(o => o.id === zid); if(!r || !z) return;
+  const x = (RU[rid]?.list || []).find(o => o.id === zid), b = x?.bau ? byId(x.bau) : null, masch = !!(x?.masch && b);
+  const ed = canEditRes(r.typ) && (!b || !openMid || b.mid === openMid);
+  const btn = (id, ic, t, cls = '') => `<button type="button" class="kg-ibtn${cls}" id="${id}" title="${t}" aria-label="${t}">${I(ic)}</button>`;
+  const pop = popAt(rect, `<b>${esc(resName(r))}</b>${b ? `<span class="muted small">${esc(titleOf(b))}</span>` : ''}<div class="cmrow rmrow">${btn('rmD', 'file', 'Details')}${ed && masch && x.all ? btn('rmU', 'pause', 'Hier 1 Tag unterbrechen') : ''}${ed && masch && z.fest && !r.istTyp ? btn('rmF', 'unlock', 'Schloss öffnen (wieder vorläufig)') : ''}${ed ? btn('rmX', 'trash', masch ? 'Aus der Baustelle löschen' : 'Löschen', ' danger') : ''}</div>`);
+  mausWegZu(pop);
+  const on = (s, fn) => { const el = pop.querySelector(s); if(el) el.onclick = () => { closePop(); fn(); }; };
+  const sav = async row => { const { error } = await sb.from('planer_ressource_einsatz').update(row).eq('id', zid); if(error) return fehler(error); await neuLaden(); };
+  on('#rmD', () => openResPop(zid, rid, rect, u));
+  on('#rmU', () => { const i = slotIdx(x.all, u); sav({ pausen: [...(z.pz || []), [i, Math.min(x.all.length, i + 2)]] }).then(() => toast(`${resName(r)} am ${dLab(x.all[i] >> 1)} nicht gebraucht`)); });
+  on('#rmF', () => sav(r.typ_eid ? { ressource_id: null, typ_eintrag_id: r.typ_eid, wunsch_ressource_id: r.id, fest: false } : { fest: false }));
+  on('#rmX', () => bestaetige(`${masch ? 'Maschine aus der Baustelle' : resName(r)} löschen?`, `<div>${esc(resName(r))}${b ? ' · ' + esc(labOf(b)) : ''}</div>`, 'Löschen', () => resDelete(zid)));
+}
 function openResPop(zid, rid, rect, u){
   const r = resById(rid); const ed = canEditRes(r.typ);
   if(zid.startsWith('stamm_')){
@@ -3169,6 +3185,7 @@ function bindTimeline(t){
   if(!EINGEBETTET){ t.addEventListener('mousemove', e => { const h = e.target.closest('.hdr'); if(!h){ if(tfTag != null) tagFarbe(null); return; } const r = t.getBoundingClientRect(), d = Math.floor(UX(e.clientX - r.left - NAMEW + t.scrollLeft)); if(d !== tfTag) tagFarbe(d); }); t.addEventListener('mouseleave', () => { if(tfTag != null) tagFarbe(null); }); }
   // Rechtsklick auf einen Balken = kleines Menü
   t.addEventListener('contextmenu', e => {
+    const bnd = e.target.closest('.band[data-rz]'); if(bnd){ e.preventDefault(); resMenu(bnd.dataset.rz, bnd.dataset.rid, bnd.getBoundingClientRect(), uAt(e.clientX)); return; } // Maschine / Fahrzeug: kleines Menü
     const mke = e.target.closest('[data-mk]'); if(mke){ e.preventDefault(); const m = MARK.find(x => x.id === mke.dataset.mk); if(m) mkMenu(m, mke.getBoundingClientRect()); return; }
     // Provisorisch (Pflege-Vorschlag oder «noch nicht abgemacht») = direkt das Abmachen-Fenster, alles vorbelegt
     const pv = e.target.closest('.bar.prov[data-prov]'); if(pv){ e.preventDefault(); const p = PROV.find(x => x.id === pv.dataset.prov); if(!p) return;
