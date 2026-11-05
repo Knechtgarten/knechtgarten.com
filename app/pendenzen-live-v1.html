@@ -1013,7 +1013,7 @@ function vorratPopup(p){
     <button type="button" class="vtog vspalte" id="vpP" aria-pressed="false" title="AB, Baubewilligung, AVOR … bis zur Zahlung in Kontakte › Projekte">${K('check', 13)}Projekt erstellen</button>
     <div class="vrw"><span class="sp"></span><button class="btn btn-ghost" data-vz>Abbrechen</button><button class="btn btn-primary" id="vpS">Abschliessen</button></div></div>`;
   document.body.appendChild(w);
-  let kunde = null, bereich = null, projekt = false, OFF = []; // Projekt nur, wenn aktiv gewählt
+  let kunde = null, bereich = null, projekt = false, OFF = [], offLauf = 0; // Projekt nur, wenn aktiv gewählt
   const zu = () => w.remove(), pB = w.querySelector('#vpP'), tg = w.querySelector('#vpD'), dauer = w.querySelector('#vpG'), ol = w.querySelector('#vpO');
   w.addEventListener('click', e => { if(e.target === w || e.target.closest('[data-vz]')) zu(); const b = e.target.closest('[data-vb]');
     if(b){ bereich = b.dataset.vb; w.querySelectorAll('[data-vb]').forEach(x => x.setAttribute('aria-pressed', x === b)); }
@@ -1023,11 +1023,20 @@ function vorratPopup(p){
   const rechne = () => { const std = OFF.filter(o => o.an).reduce((s, o) => s + o.std, 0); if(std > 0) tg.value = Math.max(.5, Math.round(std / 9 * 2) / 2);
     const s = ol.querySelector('.vosum'); if(s) s.textContent = std > 0 ? `${std.toLocaleString('de-CH')} Std Vorarbeiter ÷ 9 = ${tg.value} Tage` : 'Offerten anhaken – die Tage werden aus den Vorarbeiter-Stunden gerechnet.'; };
   const offertenZeigen = () => { const an = dauer.value === 'offerte' && kunde; ol.hidden = !an; if(!an) return;
-    ol.innerHTML = OFF.length ? OFF.map((o, i) => `<label class="voz"><input type="checkbox" data-voi="${i}"${o.an ? ' checked' : ''}><span><b>${esc(o.titel || 'Offerte')}</b><small>${[o.offertnummer, o.datum ? new Date(o.datum).toLocaleDateString('de-CH') : '', o.betrag_total ? Number(o.betrag_total).toLocaleString('de-CH', { minimumFractionDigits: 2 }) + ' CHF' : ''].filter(Boolean).map(esc).join(' · ')}</small></span><em>${o.std ? o.std.toLocaleString('de-CH') + ' Std' : 'keine Vorarbeiter-Std'}</em></label>`).join('') + '<div class="vosum"></div>'
-      : '<div class="vosum">Für diesen Kunden gibt es im Offertentool noch keine Offerte. Tage bitte selbst eintragen.</div>';
+    ol.innerHTML = OFF.length ? OFF.map((o, i) => `<label class="voz"><input type="checkbox" data-voi="${i}"${o.an ? ' checked' : ''}><span><b>${esc(o.titel || 'Offerte')}</b><small>${[o.eb ? 'Easybill' : 'Offertentool', o.offertnummer, o.datum ? new Date(o.datum).toLocaleDateString('de-CH') : '', o.betrag_total ? Number(o.betrag_total).toLocaleString('de-CH', { minimumFractionDigits: 2 }) + ' CHF' : ''].filter(Boolean).map(esc).join(' · ')}</small></span><em>${o.std ? o.std.toLocaleString('de-CH') + ' Std' : 'keine Vorarbeiter-Std'}</em></label>`).join('') + '<div class="vosum"></div>'
+      : '<div class="vosum">Für diesen Kunden gibt es weder im Offertentool noch in Easybill (letzte 3 Jahre) eine Offerte. Tage bitte selbst eintragen.</div>';
     ol.querySelectorAll('[data-voi]').forEach(c => c.onchange = () => { OFF[+c.dataset.voi].an = c.checked; rechne(); }); rechne(); };
-  const offertenLaden = async id => { OFF = []; if(id){ const { data } = await sb.from('offerte').select('id,titel,offertnummer,datum,betrag_total,kosten_snapshot').eq('kunde_id', id).order('datum', { ascending: false });
-      OFF = (data || []).map(o => ({ ...o, std: vorarbStd(o), an: false })); if(OFF.length === 1) OFF[0].an = true; } offertenZeigen(); };
+  // Offerten aus dem Offertentool + direkt in Easybill geschriebene (exportierte Kopien nicht doppelt)
+  const offertenLaden = async id => { OFF = []; const nr = ++offLauf;
+    if(id){ if(dauer.value === 'offerte'){ ol.hidden = false; ol.innerHTML = '<div class="vosum">Offerten werden geladen (Offertentool und Easybill) …</div>'; }
+      const [{ data }, { data: k }] = await Promise.all([sb.from('offerte').select('id,titel,offertnummer,datum,betrag_total,kosten_snapshot,easybill_document_id').eq('kunde_id', id).order('datum', { ascending: false }), sb.from('kunde').select('easybill_id').eq('id', id).maybeSingle()]);
+      const eigene = (data || []).map(o => ({ ...o, std: vorarbStd(o), an: false })), schon = new Set(eigene.filter(o => o.easybill_document_id).map(o => String(o.easybill_document_id)));
+      let eb = [];
+      if(k?.easybill_id){ const { data: e, error } = await sb.functions.invoke('easybill-offerten-kunde', { body: { easybill_id: k.easybill_id } }); if(error || e?.error) toast('Easybill-Offerten konnten nicht geladen werden.', null, true);
+        eb = (e?.offerten || []).filter(o => !schon.has(String(o.id))).map(o => ({ titel: o.titel || 'Offerte aus Easybill', offertnummer: o.nummer, datum: o.datum, betrag_total: o.betrag_netto, std: o.vorarbeiter_std, eb: true, an: false })); }
+      if(nr !== offLauf) return;
+      OFF = [...eigene, ...eb].sort((a, b) => String(b.datum || '').localeCompare(String(a.datum || ''))); if(OFF.length === 1) OFF[0].an = true; }
+    offertenZeigen(); };
   dauer.onchange = offertenZeigen;
   kundenFeld(w.querySelector('#vpKf'), p.kunde_id, k => { kunde = k; offertenLaden(k?.id); if(k) tg.focus(); }, 'vpK');
   setTimeout(() => w.querySelector('#vpK')?.focus(), 0);
