@@ -428,6 +428,16 @@ body.kopiert, body.kopiert *{cursor:copy !important;}
 .lane.drop{background:#F2F5D6 !important;}
 .pgrip{display:inline-flex;width:12px;margin-left:-8px;margin-right:-4px;color:#9AA1A8;cursor:grab;opacity:0;flex:none;} .pgrip .i{width:12px;height:12px;}
 .row:hover > .nm .pgrip{opacity:1;}
+/* Offene Linie unter der Person: nicht abgemachte Aufträge, überlappende in Unterzeilen */
+.row.offen > .nm{font-size:10px;color:var(--muted);padding-left:26px;font-style:italic;background:#FAFBFC;}
+.row.offen.offg > .nm{font-style:normal;font-weight:600;padding-left:12px;}
+.row.offen{border-bottom:1px dashed #E1E5E9;}
+.row.offen .lane > .bar,.row.offen .lane > .bgrip,.row.offen .lane > .bpz{top:calc(var(--lv, 0) * 17px + 2px)!important;height:15px!important;}
+.row.offen .lane > .brg{top:calc(var(--lv, 0) * 17px + 8px)!important;}
+.row.offen .bar .t{line-height:13px!important;}
+.row.offen .itri,.row.offen .rdot{display:none;}
+.goff{all:unset;cursor:pointer;font-size:9.5px;font-weight:700;letter-spacing:.04em;padding:1px 7px;border-radius:99px;border:1px solid #A9B0B7;color:#6B7280;margin-left:8px;text-transform:uppercase;}
+.goff.on{background:var(--primary);border-color:var(--primary);color:#fff;}
 .gadd{all:unset;cursor:pointer;width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;border-radius:4px;color:#8B9097;flex:none;margin-left:auto;}
 .gadd .i{width:13px;height:13px;}
 .gadd:hover{color:#323E4E;background:#E1E5E9;}
@@ -1112,12 +1122,12 @@ async function zurueckInVorrat(it){
     EINS.push(kopie); render(); });
 }
 // Einplanen: Vorrat-Balken auf eine Personenzeile ziehen (Beginn = Tag unter der Maus, Länge = Arbeitstage)
-async function vorratEinplanen(v, mid, u){
+async function vorratEinplanen(v, mid, u, offen = false){
   if(!canEdit(mid)){ toast('Diese Zeile darfst du nicht bearbeiten.'); return; }
   let d = Math.floor(u + 1e-9); while(isOff(d)) d++;
   let last = d, n = vTage(v) - 1; while(n > 0){ last++; if(!isOff(last)) n--; }
   const p = P[mid], ich = myPerson(), pl = v.projektleiter_id || (p?.ist_projektleiter ? mid : (ich?.ist_projektleiter ? ich.id : null));
-  const neu = await neuerEinsatz({ mid, kind: v.bereich === 'bau' ? 'baustelle' : 'termin', s: d, e: last + 1, kid: v.kunde_id || null, title: v.titel || '', text: v.notiz || '', pl, ok: true, soll: Number(v.tage) }, false);
+  const neu = await neuerEinsatz({ mid, kind: v.bereich === 'bau' ? 'baustelle' : 'termin', s: d, e: last + 1, kid: v.kunde_id || null, title: v.titel || '', text: v.notiz || '', pl, ok: !offen, soll: Number(v.tage) }, false);
   if(!neu) return;
   const { error } = await sb.from('planer_vorrat').delete().eq('id', v.id); if(error){ fehler(error, 'Vorrat'); return; }
   VOR = VOR.filter(x => x !== v); vorratZeichnen();
@@ -1155,7 +1165,7 @@ addEventListener('pointerup', e => {
   if(d.art === 'bar'){
     if(!d.moved){ vorratDialog(d.v, null, d.b.getBoundingClientRect()); return; }
     const lane = document.elementFromPoint(e.clientX, e.clientY)?.closest('#tl .lane[data-mid]');
-    if(lane) vorratEinplanen(d.v, lane.dataset.mid, uAt(e.clientX));
+    if(lane && P[lane.dataset.mid]) vorratEinplanen(d.v, lane.dataset.mid, uAt(e.clientX), lane.dataset.off === '1');
   } else vorratDialog(null, d.moved ? d.n : 5, { left: e.clientX, bottom: e.clientY });
 });
 function ladeTypen(wx, we){
@@ -1385,12 +1395,31 @@ const inPause = (it, k) => !!it.pz?.length && it.pz.some(([a, c]) => k / 2 >= it
 const passtRein = (it, o) => !(it.kind === 'absenz' && o.kind !== 'absenz') && o.s >= it.s - 1e-6 && o.e <= it.e + 1e-6 && o.e - o.s < it.e - it.s - 1e-6;
 // Wer sich zuletzt bewegt hat (weicht), gibt bei teilweiser Überlappung nach: dort wird er ausgespart, der bestehende bleibt.
 const schneidet = (it, o) => isShort(o) ? !isShort(it) : (!o.ueber && (passtRein(it, o) || (it.weicht && !o.weicht && it.kind !== 'absenz' && !passtRein(o, it) && !(o.s <= it.s + 1e-6 && o.e >= it.e - 1e-6)))); // kurz auf kurz verdrängt nie; ganz verdeckt = übereinander, nicht verschwinden
+// Offene Linie: nicht abgemachte Aufträge stehen bei Gruppen mit «offener Linie» (Pool, Gartenbau, Pflege) in einer eigenen Zeile unter der Person.
+// Hochziehen in die Personenzeile = abgemacht, runterziehen = wieder offen. Im Gruppentitel «offen» blendet alle Linien der Gruppe ein/aus.
+let OFFEN_ZU = new Set(lsGet('offenZu', [])), OFFLV = {};
+const hatOffen = mid => !!GRUPPEN.find(g => g.id === P[mid]?.gruppe_id)?.offene_linie;
+const istOffen = it => !!it && it.ok === false && it.kind !== 'absenz' && it.kind !== 'hilfe' && hatOffen(it.mid);
+// ganze Halbtage, keine Unterbrüche; was sich überschneidet, kommt in die nächste Unterzeile (Stufe 0, 1, 2 …)
+function offenLayout(list){
+  const ende = [];
+  list.slice().sort((a, b) => a.s - b.s || b.e - a.e).forEach(it => {
+    const multi = it.e - it.s > 1 + 1e-6, free = [];
+    for(let k = Math.floor(it.s * 2 + 1e-9); k <= Math.ceil(it.e * 2 - 1e-9) - 1; k++){ if(multi && isOff(k >> 1)) continue; if(inPause(it, k)) continue; free.push(k); }
+    const segs = []; free.forEach(k => { const a = Math.max(it.s, k / 2), b = Math.min(it.e, (k + 1) / 2); const L = segs[segs.length - 1]; if(L && Math.abs(L[1] - a) < 1e-6) L[1] = b; else segs.push([a, b]); });
+    const a = Math.floor(it.s * 2 + 1e-9) / 2, b = Math.ceil(it.e * 2 - 1e-9) / 2; // Balken füllen ganze Halbtage
+    let lv = ende.findIndex(x => x <= a + 1e-6); if(lv < 0){ lv = ende.length; ende.push(0); } ende[lv] = b;
+    LAY[it.id] = { segs, free, n: free.length / 2, miss: [], lv, offen: true };
+  });
+  OFFLV[list[0].mid] = ende.length;
+}
 let DUPS = [];
 function compute(){
   floatOffene();
-  ALL = EINS.filter(it => !wdhAusSelbst(it)).concat(occs()); LAY = {}; DUPS = [];
-  const rows = {}; ALL.forEach(it => (rows[it.mid] ??= []).push(it));
+  ALL = EINS.filter(it => !wdhAusSelbst(it)).concat(occs()); LAY = {}; DUPS = []; OFFLV = {};
+  const rows = {}; ALL.forEach(it => (rows[istOffen(it) ? 'o:' + it.mid : it.mid] ??= []).push(it));
   Object.values(rows).forEach(list => {
+    if(istOffen(list[0])){ offenLayout(list); return; } // offene Linie: eigene Zeile, keine Konflikte
     list.forEach((it, i) => it._o = i);
     list.sort((a, b) => (b.e - b.s) - (a.e - a.s) || a._o - b._o);
     list.forEach((it, i) => {
@@ -1431,7 +1460,7 @@ function compute(){
   // Mithilfe zählt pro Person und Halbtag: «Mit Cornelia» deckt alle Termine von Cornelia in diesem Halbtag
   const cover = {}; ALL.forEach(h => { if(h.kind !== 'hilfe' || !LAY[h.id]) return; const m = (h.link && byId(h.link)?.mid) || h.mp; if(m) LAY[h.id].free.forEach(k => (cover[m] ??= new Set()).add(k)); });
   // Blau = an diesem Halbtag allein (kein Personal nötig); blau + Mithilfe eingeteilt = Konflikt (roter Rand)
-  ALL.forEach(b => { if(!(b.kind === 'baustelle' || (b.kind === 'termin' && b.e - b.s >= 2 / 12 - 1e-6)) || !P[b.mid]?.ist_vorarbeiter || !LAY[b.id] || LAY[b.id].mini) return; const c = cover[b.mid] || new Set(), A = soloSet(b), L = LAY[b.id];
+  ALL.forEach(b => { if(istOffen(b) || !(b.kind === 'baustelle' || (b.kind === 'termin' && b.e - b.s >= 2 / 12 - 1e-6)) || !P[b.mid]?.ist_vorarbeiter || !LAY[b.id] || LAY[b.id].mini) return; const c = cover[b.mid] || new Set(), A = soloSet(b), L = LAY[b.id];
     L.solo = L.free.filter(k => A.has(k)); L.soloCf = new Set(L.solo.filter(k => c.has(k)));
     L.miss = L.free.filter(k => !c.has(k) && !A.has(k) && k >= TODAY * 2); L.vorarb = true; });
   computeRU(); computeProv(); computeSvc();
@@ -1707,12 +1736,12 @@ function dupSpringen(){ const L = dupTage(); if(!L.length) return; const x = L[d
   const g = P[x.mid]?.gruppe_id; if(g && collapsed.has(g)){ collapsed.delete(g); lsSet(ZU_KEY, [...collapsed]); renderRows(); }
   const row = t.querySelector(`.row[data-mid="${x.mid}"]`); t.scrollLeft = Math.max(0, X(x.d) - 2 * dayW); if(row) t.scrollTop = Math.max(0, row.offsetTop - 120);
   row?.classList.add('mark'); setTimeout(() => row?.classList.remove('mark'), 1500); }
-function personRow(p, W, bgx){
-  const ed = canEdit(p.id), its = ALL.filter(i => i.mid === p.id); let bars = '';
+function personRow(p, W, bgx, offen = false){
+  const ed = canEdit(p.id) && !!P[p.id], its = ALL.filter(i => i.mid === p.id && (!hatOffen(p.id) || offen === istOffen(i))); let bars = '';
   const hitOf = it => (!query || (titleOf(it) + ' ' + kOrt(KUNDEN[it.kid]) + ' ' + (it.text || '') + ' ' + (it.title || '')).toLowerCase().includes(query)) && (!plFilter || it.pl === plFilter || (it.kind === 'hilfe' && byId(it.link)?.pl === plFilter));
   // Ab Wochenansicht: mehrere kurze Termine im selben Halbtag = ein Block «3 Termine»
   const grpd = new Set();
-  if(zoom !== 'tag'){
+  if(zoom !== 'tag' && !offen){
     const bk = {}; its.forEach(it => { const L = LAY[it.id]; if(!L || !L.segs.length || L.mini || !isShort(it) || it.ok === false || L.dup) return; /* offene und übereinander liegende Termine nie in «2 Aufträge» verstecken */ (bk[Math.floor(it.s * 2)] ??= []).push(it); });
     Object.values(bk).forEach(g => { if(g.length < 2) return; g.sort((a, b) => a.s - b.s).forEach(i => grpd.add(i.id)); const d = Math.floor(g[0].s);
       const s = Math.floor(g[0].s * 2) / 2, e = Math.max(s + .5, ...g.map(i => i.e)); const l = X(s) + 1, w = Math.max(14, XW(s, e) - 2);
@@ -1767,7 +1796,7 @@ function personRow(p, W, bgx){
       // Woche/Tag: an jedem Tagesbeginn wieder ein Farbstreifen (offene Aufträge: schraffiertes Feld)
       const bgK = !kd.length || prov ? bgS : st.strich ? bgS.replace('background:', 'background:' + kd.map(o => `linear-gradient(${st.strich},${st.strich}) ${o - 5}px 0/5px 100% no-repeat`).join(',') + ',') : bgS;
       const txtK = kd.length ? [0, ...kd].map((o, j, a) => { const fo = feldOff(it, Math.floor(UX(l + o) + 1e-6)); return `<span class="t" style="left:${o + 3 + fo}px;width:${Math.max(0, (prov ? KW() : (a[j + 1] ?? w) - o) - 6 - fo)}px;overflow:hidden">${lab1}</span>`; }).join('') : txt(l + 1);
-      if(i > 0 && sP[i - 1][3] !== sg[3]){ const pe = X(sP[i - 1][1]) - rd, gw = l - pe; if(gw > 0) bars += `<div class="brg${hit ? '' : ' dim'}" style="left:${pe}px;width:${gw}px;background:${st.strich || (String(st.bg).startsWith('linear-gradient') ? st.bd : st.bg)};color:${st.fg === '#FFFFFF' ? '#232B35' : st.fg}"></div>`; }
+      if(i > 0 && sP[i - 1][3] !== sg[3]){ const pe = X(sP[i - 1][1]) - rd, gw = l - pe; if(gw > 0) bars += `<div class="brg${hit ? '' : ' dim'}" data-bid="${it.id}" style="left:${pe}px;width:${gw}px;background:${st.strich || (String(st.bg).startsWith('linear-gradient') ? st.bd : st.bg)};color:${st.fg === '#FFFFFF' ? '#232B35' : st.fg}"></div>`; }
       const cls = ['bar', it.kind === 'absenz' ? 'abs' : '', it.kind === 'hilfe' ? 'hilfe' : '', (it.kind === 'baustelle' || it.kind === 'termin') && !prov ? 'kopf' : '', st.strich && !prov ? 'strich' : '', ed ? 'ed' : '', prov ? 'provi' : '', it._alt || ohneKunde ? 'altb' : '', L.mini ? 'mini' : '', selId === it.id ? 'sel' : '', hit ? '' : 'dim'].join(' ') + dupC;
       bars += `<div class="${cls}" data-id="${it.id}" style="left:${l}px;width:${w}px;${bgK};border-color:${prov ? '#323E4E' : st.bd}${st.strich && !prov ? ';border-left:5px solid ' + st.strich : ''}" title="${esc(sg[2] ? tipD : tip)}">${i === 0 && !it.fix && w >= 30 ? '<span class="hl"></span>' : ''}${txtK}${i === sP.length - 1 && w >= 30 ? '<span class="hr"></span>' : ''}${i === sP.length - 1 && abw ? `<span class="bwarn" title="Geplant ${tageTxt(it.soll)}, aktuell ${tageTxt(L.n)}">!</span>` : ''}${i === sP.length - 1 && it.kind === 'baustelle' && it.kid && BPE.has(bpVon(it)) && w >= 40 && !EINGEBETTET ? `<span class="bpic" data-bpk="${bpVon(it)}" style="right:${abw ? 18 : 8}px" title="Bauprogramm öffnen">${KG.icon('dokument', 11)}</span>` : ''}</div>`;
     });
@@ -1811,11 +1840,16 @@ function personRow(p, W, bgx){
     }
   });
   // Vorab «Allein» (noch ohne Termin): leerer Termin mit blauem Strich; ein Termin, der hineinkommt, übernimmt es
-  if(zoom !== 'jahr') MARK.filter(m => m.person_id === p.id && m.art === 'allein').forEach(m => { const d = fromIso(m.tag); if(d < 0 || d >= NDAYS) return;
+  if(zoom !== 'jahr' && !offen) MARK.filter(m => m.person_id === p.id && m.art === 'allein').forEach(m => { const d = fromIso(m.tag); if(d < 0 || d >= NDAYS) return;
     const a = d + (m.teil === 'nm' ? .5 : 0), b = d + (m.teil === 'vm' ? .5 : 1), w = Math.max(4, XW(a, b) - 1);
     bars += `<div class="avor${ed ? ' ed' : ''}" data-avor="${m.id}" style="left:${X(a) + .5}px;width:${w}px" title="Allein · ${esc(dLab(d))} ${TEIL[m.teil] || ''}${ed ? '\nKlick: entfernen' : ''}">${w > 46 ? '<span>Allein</span>' : ''}</div>`; });
+  if(offen){ // Zeile unter der Person (bzw. «Nicht zugeteilt» unter dem Gruppentitel): jede Unterzeile 17 px
+    bars = bars.replace(/(data-(?:id|gid|pzid|bid)="([^"]+)"[^>]*?style=")/g, (m, a, id) => a + `--lv:${LAY[id]?.lv || 0};`);
+    const n = Math.max(1, OFFLV[p.id] || 0);
+    return `<div class="row offen${p.gprov ? ' offg' : ''}" data-offp="${p.id}"><div class="nm" title="Noch nicht abgemacht – hochziehen = abmachen"><span>${esc(p.offLab || 'offen')}</span></div><div class="lane${ed ? ' ed' : ''}" data-mid="${p.id}" data-off="1" style="width:${W}px;height:${n * 17 + 4}px;${bgx}">${feierHTML()}${bars}${provBars('p:' + p.id)}${p.gprov ? provBars('g:' + p.gprov) : ''}</div></div>`;
+  }
   const mine = p.benutzer_id === ME;
-  return `<div class="row${openMid === p.id ? " fokusp" : ""}${MARKS.includes(p.id) ? " mark" : ""}${P[p.id] && phGruppe()?.id === p.gruppe_id ? " ph" : ""}${GRUPPEN.some(g => g.id === p.gruppe_id && /^neu$/i.test(g.name)) ? " neup" : ""}" data-mid="${p.id}"><div class="nm"${p.farbe ? ` style="--pf:${p.farbe};--pft:${txtOn(p.farbe)}"` : ''} title="${esc(p.name + (p.zusatz ? ' · ' + p.zusatz : ''))}">${isBuero() ? `<span class="pgrip" title="Ziehen: Reihenfolge oder Gruppe ändern">${I('grip')}</span>` : ''}<span class="n">${esc(p.name)}</span>${pzPunkt(p.id)}${p.zusatz ? `<span class="z">${esc(p.zusatz)}</span>` : ''}${mine ? '<span class="me">Ich</span>' : ''}${p.farbe && !p.ist_projektleiter ? `${mabKnopf(p)}<button class="mab mab2${openMid === p.id && openTyp === 'fahrzeug' ? ' on' : ''}" data-mab="${p.id}" data-typ="fahrzeug" title="Lieferwagen und Anhänger einteilen (aufklappen)" aria-label="Lieferwagen einteilen">${I('truck')}</button>` : ''}</div><div class="lane${ed ? ' ed' : ''}" data-mid="${p.id}" style="width:${W}px;${bgx}">${feierHTML()}${bars}${provBars('p:' + p.id)}${p.id === svcRowId() ? svcRowBars() : ''}${vehIcons(p)}${markHTML(p)}</div></div>`;
+  return `<div class="row${openMid === p.id ? " fokusp" : ""}${MARKS.includes(p.id) ? " mark" : ""}${P[p.id] && phGruppe()?.id === p.gruppe_id ? " ph" : ""}${GRUPPEN.some(g => g.id === p.gruppe_id && /^neu$/i.test(g.name)) ? " neup" : ""}" data-mid="${p.id}"><div class="nm"${p.farbe ? ` style="--pf:${p.farbe};--pft:${txtOn(p.farbe)}"` : ''} title="${esc(p.name + (p.zusatz ? ' · ' + p.zusatz : ''))}">${isBuero() ? `<span class="pgrip" title="Ziehen: Reihenfolge oder Gruppe ändern">${I('grip')}</span>` : ''}<span class="n">${esc(p.name)}</span>${pzPunkt(p.id)}${p.zusatz ? `<span class="z">${esc(p.zusatz)}</span>` : ''}${mine ? '<span class="me">Ich</span>' : ''}${p.farbe && !p.ist_projektleiter ? `${mabKnopf(p)}<button class="mab mab2${openMid === p.id && openTyp === 'fahrzeug' ? ' on' : ''}" data-mab="${p.id}" data-typ="fahrzeug" title="Lieferwagen und Anhänger einteilen (aufklappen)" aria-label="Lieferwagen einteilen">${I('truck')}</button>` : ''}</div><div class="lane${ed ? ' ed' : ''}" data-mid="${p.id}" style="width:${W}px;${bgx}">${feierHTML()}${bars}${hatOffen(p.id) ? '' : provBars('p:' + p.id)}${p.id === svcRowId() ? svcRowBars() : ''}${vehIcons(p)}${markHTML(p)}</div></div>`;
 }
 // Aufgeklappt (Maschinen / Lieferwagen): Baustellen-Zeitraum der Person mit Rahmen in ihrer Farbe,
 // links und rechts davon grau wie der Rest
@@ -1874,8 +1908,10 @@ function renderRows(){
   grps.forEach(g => {
     const ps = act.filter(p => (p.gruppe_id || '_ohne') === g.id).sort((a, b) => a.sortierung - b.sortierung || a.name.localeCompare(b.name));
     if(!ps.length && (!(isBuero() && g.id !== '_ohne') || /^neu$/i.test(g.name))) return; /* «Neu» nur, wenn jemand drin ist */ const ablK = !EINGEBETTET && /allgemein/i.test(g.name), zu = !ablK && collapsed.has(g.id); // Büro sieht auch leere Gruppen (zum Hinzufügen und Hineinziehen)
-    h += `<div class="row grp${zu ? ' zu' : ''}${g === ph ? ' phk' : ''}${ablK ? ' ablk' : ''}" data-g="${g.id}"><div class="nm">${ablK ? `<button type="button" class="ablbar${ABLAGE ? ' on' : ''}" id="ablBtn" title="Drei leere Ablage-Zeilen unter jeder Gruppe ein-/ausblenden">Ablage ${ABLAGE ? 'eingeblendet' : 'ausgeblendet'}</button>` : ''}${I('chev')}${esc(g.name)} <span style="opacity:.6;font-weight:400">(${ps.length})</span>${ablHinweis(g.id)}${isBuero() && g.id !== '_ohne' ? `<button class="gadd" data-gadd="${g.id}" title="Zeile hinzufügen" aria-label="Zeile hinzufügen">${I('plus')}</button>` : ''}</div><div class="lane" style="width:${W}px;height:20px">${provBars('g:' + g.id)}</div></div>`;
-    if(!zu) ps.forEach(p => { h += personRow(p, W, bgx); if(openMid === p.id) h += openTyp === 'maschine' ? ovRows(W, bgx, 'maschine', p.id) : vehFocusRows(W, bgx, p.id); }); // Anhänger nur in der Übersicht «Anhänger»
+    h += `<div class="row grp${zu ? ' zu' : ''}${g === ph ? ' phk' : ''}${ablK ? ' ablk' : ''}" data-g="${g.id}"><div class="nm">${ablK ? `<button type="button" class="ablbar${ABLAGE ? ' on' : ''}" id="ablBtn" title="Drei leere Ablage-Zeilen unter jeder Gruppe ein-/ausblenden">Ablage ${ABLAGE ? 'eingeblendet' : 'ausgeblendet'}</button>` : ''}${I('chev')}${esc(g.name)} <span style="opacity:.6;font-weight:400">(${ps.length})</span>${ablHinweis(g.id)}${g.offene_linie ? `<button type="button" class="goff${OFFEN_ZU.has(g.id) ? '' : ' on'}" data-goff="${g.id}" title="Offene Linien dieser Gruppe ${OFFEN_ZU.has(g.id) ? 'einblenden' : 'ausblenden'}">offen</button>` : ''}${isBuero() && g.id !== '_ohne' ? `<button class="gadd" data-gadd="${g.id}" title="Zeile hinzufügen" aria-label="Zeile hinzufügen">${I('plus')}</button>` : ''}</div><div class="lane" style="width:${W}px;height:20px">${g.offene_linie ? '' : provBars('g:' + g.id)}</div></div>`;
+    const offAn = !!g.offene_linie && !zu && !OFFEN_ZU.has(g.id), abl0 = ABL.filter(a => a.gruppe_id === g.id).sort((a, b) => a.sortierung - b.sortierung)[0];
+    if(offAn) h += personRow({ ...(abl0 || { id: '_g' + g.id }), name: '', offLab: 'Nicht zugeteilt', gprov: g.id }, W, bgx, true); // offene Aufträge ohne Person
+    if(!zu) ps.forEach(p => { h += personRow(p, W, bgx); if(openMid === p.id) h += openTyp === 'maschine' ? ovRows(W, bgx, 'maschine', p.id) : vehFocusRows(W, bgx, p.id); if(offAn) h += personRow({ ...p, offLab: 'offen' }, W, bgx, true); }); // Anhänger nur in der Übersicht «Anhänger»
     // Schnupper / Temporär: unten immer eine leere Zeile zum Eintippen (Name + Enter = neue Zeile, auch ohne Account)
     if(!zu && !EINGEBETTET && isBuero() && /schnupper|tempor/i.test(g.name)) h += `<div class="row neuzeile"><div class="nm"><input type="text" class="neuin" data-neup="${g.id}" placeholder="+ Name eintippen …" aria-label="Neue Zeile in ${esc(g.name)}"></div><div class="lane" style="width:${W}px;${bgx}"></div></div>`;
     // Ablage-Zeilen (eingeschaltet über den Knopf oben links)
@@ -2228,7 +2264,7 @@ async function toolDrop(d, mid, u){
   if(d.typ === 'abs'){ const neu = await neuerEinsatz({ mid, kind: 'absenz', s: a, e: b, title: d.val, ok: true }, false); if(neu) toast(`${d.val} eingetragen · ${P[mid].name}`, () => loescheEinsatz(neu)); return; }
   if(d.typ === 'mh'){ if(d.val === mid){ toast('Mithilfe bei sich selbst geht nicht.', null, true); return; }
     const o = mithilfeWahl(mid, a, b).find(x => x.pid === d.val);
-    const neu = await neuerEinsatz({ mid, kind: 'hilfe', s: a, e: b, link: o?.x?.id || null, mp: o?.x ? null : d.val, ok: true }, false);
+    const neu = await neuerEinsatz({ mid, kind: 'hilfe', s: a, e: b, link: null, mp: d.val, ok: true }, false);
     if(neu) toast(`${P[mid].name}: mit ${first(P[d.val].name)}`, () => loescheEinsatz(neu)); }
 }
 async function mkEinfuegen(mid, u){ if(!MKCOPY) return; const row = { person_id: mid, tag: isoDate(Math.floor(u + 1e-9)), teil: MKCOPY.teil, art: MKCOPY.art, text: MKCOPY.text || null, lieferant: MKCOPY.lieferant || null, erstellt_von: ME };
@@ -2806,7 +2842,7 @@ async function provToEinsatz(pid, mid, s, e, ok, pl, ueber, weicht){
   const p = PROV.find(x => x.id === pid); if(!p) return;
   const neu = await neuerEinsatz({ mid, kind: 'termin', s: r48(s), e: r48(e), kid: p.kid, title: `${p.kat.name}: ${p.arb.join(', ')}`, text: VNOT[p.id]?.n || '', ok, pl: pl !== undefined ? pl : VNOT[p.id]?.pl || null, pkk: p.kk, pj: p.y, pkw: p.w, ueber: !!ueber, weicht: !!weicht, allein: !!p.allein }, false); // «Allein» aus dem Pflege-Tool
   if(neu && VNOT[p.id]){ await sb.from('planer_vorschlag_notiz').delete().eq('kunde_kategorie_id', p.kk).eq('jahr', p.y).eq('kw', p.w); delete VNOT[p.id]; }
-  if(neu){ renderRows(); toast(`${kShort(KUNDEN[p.kid])}: ${ok ? 'abgemacht' : 'angeheftet'} bei ${P[mid].name}`, () => loescheEinsatz(neu)); }
+  if(neu){ renderRows(); toast(`${kShort(KUNDEN[p.kid])}: ${ok ? 'abgemacht' : 'offen'} bei ${P[mid].name}`, () => loescheEinsatz(neu)); }
 }
 
 // ---------------------------------------------------------------------------
@@ -2908,7 +2944,7 @@ function openNeuLeiste(lane, mid, a, b, extra){ // extra = { lab, ic, fn }: zus�
     openMark({ person_id: mid, tag: isoDate(Math.floor(a + 1e-9)), teil: zoom === 'woche' || zoom === 'tag' ? (a - Math.floor(a) < .5 ? 'vm' : 'nm') : 'ganz', art: 'liefer' }, rect); return; }
   const p = P[mid]; const kurz = b - a < .5 - 1e-6;
   // Vorwahl je Zeile: Lehrlinge / Hilfskräfte (ohne Farbe) meistens «Mithilfe»
-  const def = !p?.farbe && !p?.ist_projektleiter && p?.gruppe_id !== GRUPPEN.find(g => g.name === 'Allgemein')?.id ? 'hilfe' : 'termin';
+  const def = lane.dataset.off === '1' ? 'offen' : !p?.farbe && !p?.ist_projektleiter && p?.gruppe_id !== GRUPPEN.find(g => g.name === 'Allgemein')?.id ? 'hilfe' : 'termin';
   const gh = lane.querySelector('.ghost') || (() => { const g = document.createElement('div'); g.className = 'ghost'; lane.appendChild(g); return g; })();
   gh.style.left = X(a) + 'px'; gh.style.width = XW(a, b) + 'px';
   const el = document.createElement('div'); el.className = 'leiste'; document.body.appendChild(el);
@@ -2919,7 +2955,8 @@ function openNeuLeiste(lane, mid, a, b, extra){ // extra = { lab, ic, fn }: zus�
 // Kompakte Auswahl direkt beim Eintrag: eine Zeile pro Möglichkeit, rechts die Taste, passende Wahl dunkel
 function drawNeuLeiste(){
   const L = neuL;
-  const arten = [['termin', 'Auftrag'], ['offen', 'Offener Auftrag'], ['hilfe', 'Mithilfe'], ['absenz', 'Absenz'], ['allein', 'Allein']];
+  // offene Linie: nur offener Auftrag; Personen mit offener Linie: «offen» gibt es nur noch über die Linie
+  const arten = L.lane?.dataset?.off === '1' ? [['offen', 'Offener Auftrag']] : [['termin', 'Auftrag'], ...(hatOffen(L.mid) ? [] : [['offen', 'Offener Auftrag']]), ['hilfe', 'Mithilfe'], ['absenz', 'Absenz'], ['allein', 'Allein']];
   const btn = (attr, lab, on) => `<button ${attr} class="${on ? 'on' : ''}">${lab}</button>`; // Tasten 1–4 / V funktionieren weiter, werden aber nicht angezeigt
   let kopf = '', list;
   if(L.step === 'absenz'){ kopf = 'Art der Absenz'; list = ABS_TYPEN().map((t, i) => btn(`data-abs="${esc(t)}"`, `<span>${esc(t)}</span>`, false)).join(''); }
@@ -2938,7 +2975,7 @@ function drawNeuLeiste(){
   L.el.querySelectorAll('[data-art]').forEach(x => x.onclick = () => waehleArt(x.dataset.art));
   L.el.querySelectorAll('[data-abs]').forEach(x => x.onclick = () => legeAn('absenz', { title: x.dataset.abs }));
   L.el.classList.toggle('mh', L.step === 'hilfe');
-  L.el.querySelectorAll('[data-mh]').forEach(x => x.onclick = () => { const o = L.baus[+x.dataset.mh]; legeAn('hilfe', o.x ? { link: o.x.id } : { mp: o.pid }); });
+  L.el.querySelectorAll('[data-mh]').forEach(x => x.onclick = () => { const o = L.baus[+x.dataset.mh]; legeAn('hilfe', { mp: o.pid }); });
   const pb = L.el.querySelector('[data-paste]'); if(pb) pb.onclick = fuegeKopieEin;
   L.el.querySelectorAll('[data-mkp]').forEach(x => x.onclick = () => { const a = L.a, mid = L.mid; closeNeuLeiste(); mkEinfuegen(mid, a); });
   L.el.querySelectorAll('[data-mkm]').forEach(x => x.onclick = () => { const r = L.el.getBoundingClientRect(), m = { person_id: L.mid, tag: isoDate(Math.floor(L.a + 1e-9)), teil: 'ganz', art: x.dataset.mkm }; closeNeuLeiste(); openMark(m, { left: r.left, bottom: r.top }); });
@@ -2980,14 +3017,14 @@ async function fuegeKopieEin(){
   const L = neuL; if(!L || !COPY) return; const o = byId(COPY.id);
   if(!o){ closeNeuLeiste(); kopieWeg(); toast('Das Original ist nicht mehr im Plan. Bitte neu kopieren.', null, true); return; }
   closeNeuLeiste();
-  await neuerEinsatz({ mid: L.mid, kind: o.kind, s: L.a, e: r48(L.a + (o.e - o.s)), kid: o.kid, title: o.title, pl: o.pl, ok: o.ok, kv: o.id }, true);
+  await neuerEinsatz({ mid: L.mid, kind: o.kind, s: L.a, e: r48(L.a + (o.e - o.s)), kid: o.kid, title: o.title, pl: o.pl, ok: L.lane?.dataset?.off === '1' ? false : hatOffen(L.mid) ? true : o.ok, kv: o.id }, true);
 }
 async function legeAn(art, extra = {}){
   const L = neuL; if(!L) return; closeNeuLeiste();
   const kurz = L.b - L.a < .5 - 1e-6;
   const kind = art === 'absenz' ? 'absenz' : art === 'hilfe' ? 'hilfe' : (kurz ? 'termin' : 'baustelle');
   const mePl = myPerson(); const pl = kind === 'baustelle' ? (P[L.mid]?.ist_projektleiter ? L.mid : (mePl?.ist_projektleiter ? mePl.id : null)) : null;
-  const neu = await neuerEinsatz({ mid: L.mid, kind, s: L.a, e: L.b, title: extra.title || '', link: extra.link || null, mp: extra.mp || null, ok: art !== 'offen', pl }, kind === 'termin' || kind === 'baustelle');
+  const neu = await neuerEinsatz({ mid: L.mid, kind, s: L.a, e: L.b, title: extra.title || '', link: extra.link || null, mp: extra.mp || null, ok: art !== 'offen' && L.lane?.dataset?.off !== '1', pl }, kind === 'termin' || kind === 'baustelle');
   if(neu && (kind === 'absenz' || kind === 'hilfe')) toast(`${kind === 'absenz' ? extra.title : labOf(neu)} eingetragen`, () => loescheEinsatz(neu));
 }
 addEventListener('keydown', e => {
@@ -2998,7 +3035,7 @@ addEventListener('keydown', e => {
   if(/^[1-9]$/.test(e.key)){ e.preventDefault(); const n = +e.key - 1;
     if(neuL.step === 'art'){ const k = ['termin', 'offen', 'hilfe', 'absenz'][n]; if(k) waehleArt(k); }
     else if(neuL.step === 'absenz'){ const t = ABS_TYPEN()[n]; if(t) legeAn('absenz', { title: t }); }
-    else if(neuL.step === 'hilfe'){ const o = neuL.baus[n]; if(o) legeAn('hilfe', o.x ? { link: o.x.id } : { mp: o.pid }); } }
+    else if(neuL.step === 'hilfe'){ const o = neuL.baus[n]; if(o) legeAn('hilfe', { mp: o.pid }); } }
 });
 addEventListener('pointerdown', e => { if(neuL && !e.target.closest('.leiste')) closeNeuLeiste(); }, true);
 // Verklickt? Maus mehr als 60 px weg von Auswahl und neuem Eintrag = wie Esc
@@ -3159,6 +3196,7 @@ function bindTimeline(t){
     const mb = e.target.closest('[data-mab]'); if(mb){ e.stopPropagation(); const same = openMid === mb.dataset.mab && openTyp === mb.dataset.typ; openMid = same ? null : mb.dataset.mab; openTyp = mb.dataset.typ; renderRows(); return; }
     const ga = e.target.closest('[data-gadd]'); if(ga){ e.stopPropagation(); const g = GRUPPEN.find(x => x.id === ga.dataset.gadd);
       if(/schnupper|tempor/i.test(g?.name || '')) schnellPerson(g, ga.getBoundingClientRect()); else personDlg(null, ga.dataset.gadd); return; }
+    const gof = e.target.closest('[data-goff]'); if(gof){ e.stopPropagation(); const id = gof.dataset.goff; OFFEN_ZU.has(id) ? OFFEN_ZU.delete(id) : OFFEN_ZU.add(id); lsSet('offenZu', [...OFFEN_ZU]); renderRows(); return; }
     const pv = e.target.closest('.bar.prov[data-prov]'); if(pv){ drag = { kind: 'prov', pid: pv.dataset.prov, x0: e.clientX, y0: e.clientY, moved: false, rect: pv.getBoundingClientRect() }; e.preventDefault(); return; }
     // Archiv und seine Jahre auf-/zuklappen
     const ag = e.target.closest('.row.grp[data-ay], .row.grp[data-g="_archiv"]'); if(ag && !(drag && drag.kind === 'prow')){ if(ag.dataset.ay){ const y = ag.dataset.ay; archJahre.has(y) ? archJahre.delete(y) : archJahre.add(y); lsSet('archJahre', [...archJahre]); } else { archOffen = !archOffen; lsSet('archOffen', archOffen); } renderRows(); return; }
@@ -3208,7 +3246,7 @@ function bindTimeline(t){
       add(+sd.dataset.k); sd.classList.add('wahl');
       drag = { kind: 'solo', id: b.id, an: !sd.classList.contains('blau'), ks, add, tag }; e.preventDefault(); e.stopPropagation(); return; }
     const grp = e.target.closest('.bgrip'); if(grp){ const it = byId(grp.dataset.gid); if(!it) return;
-      drag = { kind: 'bar', id: it.id, mode: grp.dataset.side, x0: e.clientX, y0: e.clientY, s0: it.s, e0: it.e, mid0: it.mid, moved: false, ed: canEdit(it.mid), u0: uAt(e.clientX), pz0: it.pz?.length ? JSON.parse(JSON.stringify(it.pz)) : null, at0: it.at?.length ? [...it.at] : null, n0: null };
+      drag = { kind: 'bar', id: it.id, mode: grp.dataset.side, x0: e.clientX, y0: e.clientY, s0: it.s, e0: it.e, mid0: it.mid, ok0: it.ok, moved: false, ed: canEdit(it.mid), u0: uAt(e.clientX), pz0: it.pz?.length ? JSON.parse(JSON.stringify(it.pz)) : null, at0: it.at?.length ? [...it.at] : null, n0: null };
       e.preventDefault(); return; }
     const bar = e.target.closest('.bar[data-id]'), lane = e.target.closest('.lane[data-mid]');
     if(bar){
@@ -3218,7 +3256,7 @@ function bindTimeline(t){
       // Alt gedrückt = Kopie ziehen (Original bleibt stehen), wie im alten Planer
       const copy = e.altKey && !it.pkk;
       const mode = copy ? 'move' : e.target.classList.contains('hl') ? 'l' : e.target.classList.contains('hr') ? 'r' : 'move';
-      drag = { kind: 'bar', id, mode, copy, x0: e.clientX, y0: e.clientY, s0: it.s, e0: it.e, mid0: it.mid, moved: false, ed, u0: uAt(e.clientX), pz0: it.pz?.length ? JSON.parse(JSON.stringify(it.pz)) : null, at0: it.at?.length ? [...it.at] : null, n0: it.kind === 'baustelle' && it.e - it.s > 1 + 1e-6 && !it.wdh ? halbtageJetzt(it) : null };
+      drag = { kind: 'bar', id, mode, copy, x0: e.clientX, y0: e.clientY, s0: it.s, e0: it.e, mid0: it.mid, ok0: it.ok, moved: false, ed, u0: uAt(e.clientX), pz0: it.pz?.length ? JSON.parse(JSON.stringify(it.pz)) : null, at0: it.at?.length ? [...it.at] : null, n0: it.kind === 'baustelle' && it.e - it.s > 1 + 1e-6 && !it.wdh ? halbtageJetzt(it) : null };
       e.preventDefault(); return;
     }
     if(lane && lane.classList.contains('ed')){
@@ -3245,7 +3283,8 @@ function bindWindow(){
         (m.wdh.aus ||= []).push(isoDate(o.d)); const tmp = { ...o, id: 'T' + o.id }; EINS.push(tmp); drag.occ = { o: { ...o }, m }; drag.id = tmp.id; }
       drag.moved = true; const it = byId(drag.id); const du = snapU(uAt(e.clientX) - drag.u0); const sn = SNAP[zoom];
       if(drag.mode === 'move'){ if(it.fix){ if(du) drag.fixHit = true; } else { it.s = r48(drag.s0 + du); it.e = r48(drag.e0 + du); } // Start fix: nur auf andere Person
-        const ue = document.elementFromPoint(e.clientX, e.clientY), el = ue?.closest('.lane[data-mid]'); if(el && canEdit(el.dataset.mid)) it.mid = el.dataset.mid;
+        const ue = document.elementFromPoint(e.clientX, e.clientY), el = ue?.closest('.lane[data-mid]'); if(el && canEdit(el.dataset.mid) && P[el.dataset.mid]){ it.mid = el.dataset.mid;
+          if(hatOffen(it.mid) && it.kind !== 'absenz' && it.kind !== 'hilfe' && !it.wdh && !drag.occ) it.ok = el.dataset.off !== '1'; } // offene Linie = offen, Personenzeile = abgemacht
         if(vorratAn() && !drag.copy && !drag.occ && !it.wdh) $('vorrat')?.classList.toggle('drop', !!ue?.closest('#vorrat') && insVorratOk(it)); }
       else if(drag.mode === 'l'){ it.s = r48(Math.min(drag.e0 - sn, drag.s0 + du)); // Unterbrüche bleiben am gleichen Datum
         if(drag.pz0) it.pz = drag.pz0.map(([a, c]) => [r48(a + drag.s0 - it.s), r48(c + drag.s0 - it.s)]).filter(([a, c]) => c > 0).map(([a, c]) => [Math.max(0, a), c]);
@@ -3355,10 +3394,11 @@ function bindWindow(){
       d.gh?.remove(); document.querySelectorAll('.lane.drop').forEach(l => l.classList.remove('drop'));
       if(!d.moved){ openProvPanel(d.pid); return; }
       const p = PROV.find(x => x.id === d.pid); const ln = document.elementFromPoint(e.clientX, e.clientY)?.closest('.lane[data-mid]');
-      if(p && ln && canEdit(ln.dataset.mid)){ const len = p.min / 60 / 12; const s = zoom === 'tag' || zoom === 'woche' ? Math.round(uAt(e.clientX) * 48) / 48 : Math.floor(uAt(e.clientX)) + 1 / 12;
-        const tmp = { id: '_tmp', mid: ln.dataset.mid, kind: 'termin', s: r48(s), e: r48(s + len), title: '' }; EINS.push(tmp); // erst prüfen: übereinander / reinschieben / dritter Termin
+      if(p && ln && canEdit(ln.dataset.mid) && P[ln.dataset.mid]){ const len = p.min / 60 / 12; const s = zoom === 'tag' || zoom === 'woche' ? Math.round(uAt(e.clientX) * 48) / 48 : Math.floor(uAt(e.clientX)) + 1 / 12;
+        const okZ = !hatOffen(ln.dataset.mid) ? false : ln.dataset.off !== '1'; // Personenzeile = abgemacht, offene Linie = offen
+        const tmp = { id: '_tmp', mid: ln.dataset.mid, kind: 'termin', s: r48(s), e: r48(s + len), title: '', ok: okZ }; EINS.push(tmp); // erst prüfen: übereinander / reinschieben / dritter Termin
         const pr = await ablegenPruefen(tmp, { x: e.clientX, y: e.clientY }); EINS = EINS.filter(x => x !== tmp); renderRows();
-        if(pr !== 'ab') await provToEinsatz(p.id, ln.dataset.mid, s, s + len, false, undefined, tmp.ueber, tmp.weicht); }
+        if(pr !== 'ab') await provToEinsatz(p.id, ln.dataset.mid, s, s + len, okZ, undefined, tmp.ueber, tmp.weicht); }
       return;
     }
     if(d.kind === 'mag'){
@@ -3450,8 +3490,8 @@ function bindWindow(){
         if(neu.s !== d.s0 || neu.e !== d.e0 || neu.mid !== d.mid0) wdhVerschieben(d.occ.o, neu); return; }
       if(it.wdh && (it.s !== d.s0 || it.e !== d.e0 || it.mid !== d.mid0)){ const neu = { s: it.s, e: it.e, mid: it.mid }; Object.assign(it, { s: d.s0, e: d.e0, mid: d.mid0 }); renderRows(); wdhVerschieben(it, neu); return; }
       if(d.fixHit) toast('Start ist fix. Zum Verschieben im Detailfeld das Schloss öffnen.');
-      if(it.s === d.s0 && it.e === d.e0 && it.mid === d.mid0) return;
-      const vorher = { s: d.s0, e: d.e0, mid: d.mid0, ...(d.pz0 ? { pz: d.pz0 } : {}), ...(d.at0 ? { at: d.at0 } : {}) };
+      if(it.s === d.s0 && it.e === d.e0 && it.mid === d.mid0 && it.ok === d.ok0) return;
+      const vorher = { s: d.s0, e: d.e0, mid: d.mid0, ok: d.ok0, ...(d.pz0 ? { pz: d.pz0 } : {}), ...(d.at0 ? { at: d.at0 } : {}) };
       // In eine Ablage-Zeile hineingelegt (aus einer anderen Zeile): keine Prüfung, kein Kürzen, kein Nachziehen – der Termin bleibt
       // unverändert. Innerhalb der Ablage (ziehen, verschieben, verlängern) gelten die normalen Regeln.
       const inAblage = !!P[it.mid]?.ist_ablage && !P[d.mid0]?.ist_ablage;
@@ -3460,7 +3500,7 @@ function bindWindow(){
       if(aw.length && (await wunschFrage(it, aw, { x: e.clientX, y: e.clientY })) !== 'ok'){ Object.assign(it, vorher); renderRows(); return; }
       if(!inAblage && (await ablegenPruefen(it, { x: e.clientX, y: e.clientY })) === 'ab'){ Object.assign(it, vorher); renderRows(); return; }
       // Rand gezogen: fixe Arbeitstage bleiben, auch wenn der Balken ganz klein wird (Abweichung = rot, «übernehmen» im Hinweis); ausschalten nur von Hand
-      const ok = await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true), person_id: it.mid, uebereinander: !!it.ueber, weicht: !!it.weicht, ...(d.pz0 && d.mode === 'l' ? { pausen: it.pz } : {}), ...(d.at0 && d.mode === 'l' ? { allein_tage: it.at } : {}) });
+      const ok = await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true), person_id: it.mid, abgemacht: it.ok !== false, uebereinander: !!it.ueber, weicht: !!it.weicht, ...(d.pz0 && d.mode === 'l' ? { pausen: it.pz } : {}), ...(d.at0 && d.mode === 'l' ? { allein_tage: it.at } : {}) });
       if(!ok){ Object.assign(it, vorher); renderRows(); return; }
       tageFixNachholen(); // neu lang geworden = fixe Arbeitstage
       if(!inAblage) await vorabUebernehmen(it); // auf vorgemerktes «Allein» gezogen
@@ -3469,8 +3509,8 @@ function bindWindow(){
       if(!inAblage && d.mode === 'move' && istLang(it) && it.soll && !it.frei){ compute(); const ne = sprungEnde(it, 2, it.s);
         if(ne != null && Math.abs(ne - it.e) > 1e-6){ const e0 = it.e; it.e = ne; if(!(await speichere(it, { ende: fromU(it.e, true) }))) it.e = e0; } }
       renderRows();
-      const msg = it.mid !== d.mid0 ? (inAblage ? `${labOf(it)} in die Ablage gelegt` : `${labOf(it)} → ${P[it.mid].name}`) : `Verschoben auf ${spanLabel(it)}`;
-      const undo = async () => { Object.assign(it, vorher); renderRows(); await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true), person_id: it.mid, ...(vorher.pz ? { pausen: it.pz } : {}) }); };
+      const msg = it.ok !== d.ok0 ? `${labOf(it)}: ${it.ok === false ? 'wieder offen' : 'abgemacht'}${it.mid !== d.mid0 ? ' · ' + P[it.mid].name : ''}` : it.mid !== d.mid0 ? (inAblage ? `${labOf(it)} in die Ablage gelegt` : `${labOf(it)} → ${P[it.mid].name}`) : `Verschoben auf ${spanLabel(it)}`;
+      const undo = async () => { Object.assign(it, vorher); renderRows(); await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true), person_id: it.mid, abgemacht: it.ok !== false, ...(vorher.pz ? { pausen: it.pz } : {}) }); };
       const nJetzt = LAY[it.id]?.n, abwR = d.mode !== 'move' && it.soll && nJetzt != null && Math.abs(nJetzt - it.soll) > .01;
       toast(abwR ? `${labOf(it)}: ${fmtN(nJetzt)} statt ${fmtN(it.soll)} T` : msg, abwR ? [{ l: 'Als neue Länge übernehmen', fn: async () => { it.soll = nJetzt; renderRows(); await speichere(it, { soll_tage: it.soll }); if(selId === it.id) openPanel(it.id); } }, { l: 'Rückgängig', fn: undo }] : undo);
       if(selId === it.id) openPanel(it.id);
@@ -3543,12 +3583,13 @@ async function pausenGeaendert(it, pz0, nV){
 // Liegt it ganz in einem längeren Termin: Menü Reinschieben / Übereinander / Abbrechen (kurze: immer reinschieben).
 // Beim Reinschieben rutscht das Ende des langen Termins nur nach Sprung-Regel (Faktor 3) nach hinten, sonst rot «x von y T».
 async function ablegenPruefen(it, pt){
+  if(istOffen(it)) return 'ok';
   compute();
   const zuViele = () => { compute(); const L = LAY[it.id]; return !!L && L.free.some(k => ALL.filter(o => o.mid === it.mid && LAY[o.id]?.dup?.[k]).length > 2); };
   // Tage der unterbrochenen langen Termine festhalten (ohne it gezählt), damit rot «x von y T» erscheint
   const tageFesthalten = async H => { const mid0 = it.mid; it.mid = '_'; compute(); const n0 = {}; H.forEach(h => { if(!h.rep && !h.soll && h.kind !== 'absenz' && h.e - h.s > 1 + 1e-6) n0[h.id] = LAY[h.id]?.n; }); it.mid = mid0; compute();
     for(const h of H) if(n0[h.id] && Math.abs((LAY[h.id]?.n || 0) - n0[h.id]) > .01){ h.soll = n0[h.id]; await speichere(h, { soll_tage: h.soll }); } };
-  const reihe = ALL.filter(o => o.mid === it.mid && o !== it && !o.rep && o.e > it.s + 1e-6 && o.s < it.e - 1e-6);
+  const reihe = ALL.filter(o => o.mid === it.mid && o !== it && !o.rep && !istOffen(o) && o.e > it.s + 1e-6 && o.s < it.e - 1e-6);
   // Ganz in einem längeren Termin = hineinschieben (Menü); teilweise überlappend = wer sich bewegt, gibt nach (weicht)
   const H = it.kind === 'absenz' ? [] : reihe.filter(o => !isShort(o) && passtRein(o, it)), teil = reihe.filter(o => !passtRein(o, it) && !passtRein(it, o)); // Absenz: kein Menü, das Nachziehen macht ausgleich()
   let wahl = H.length ? 'rein' : 'ok'; if(H.length && !isShort(it)){ wahl = await reinFrage(pt); if(wahl === 'ab') return 'ab'; } // kurz: immer reinschieben
@@ -3781,8 +3822,6 @@ function openPanel(id, isNew){
   let secs = '';
   if(it.kind === 'hilfe'){
     if(hilfeB) secs += accHTML('h-bau', 'Baustelle von ' + first(P[hilfeB.mid]?.name), 'users', null, `<span>${esc(titleOf(hilfeB))} · ${esc(spanLabel(hilfeB))}</span>${hilfeB.text ? `<span class="small" style="white-space:pre-wrap">${esc(hilfeB.text)}</span>` : ''}<button class="btn btn-ghost" data-open="${hilfeB.id}" style="align-self:flex-start">Baustelle öffnen</button>`, true);
-    else if(ed){ const baus = EINS.filter(b => b.kind === 'baustelle' && b.mid !== it.mid && b.s < it.e && b.e > it.s);
-      secs += `<div class="fld"><label>Mithilfe bei</label><select id="pLink"><option value="">– Baustelle wählen –</option>${baus.map(b => `<option value="${b.id}">${esc(first(P[b.mid]?.name))} · ${esc(labOf(b))}</option>`).join('')}</select></div>`; }
   }
   // Oben rechts: roter Punkt = Personal fehlt («allein» wird direkt an den Punkten im Plan gesetzt)
   const missT = new Set(L.miss.map(x => x >> 1)).size;
