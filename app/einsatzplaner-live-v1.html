@@ -1003,7 +1003,9 @@ addEventListener('keydown', e => { if(e.key === 'Escape' && $('bpWrap')) bpZu();
 // Runterziehen auf eine Person = Planer-Balken, der Vorrat-Eintrag verschwindet. Leere Fläche ziehen/klicken = neu.
 let VOR = [], VOR_OFFEN = lsGet('vorratOffen', true), vDrag = null;
 const VZ = 10, VH = 20, VKOPF = 30;
-const VFARBE = { bau: KG.palette.blau[1], pflege: KG.palette.gruen[3] };
+const VFARBE = { bau: KG.palette.blau[1], pflege: KG.palette.gruen[3], lehrling: KG.palette.gold[3], andere: KG.palette.grau[3] };
+const VBER = { bau: 'Bau', pflege: 'Pflege', lehrling: 'Lehrlinge', andere: 'Andere' };
+const VFEST = { lehrling: VZ - 2, andere: VZ - 1 }; // eigene Zeilen ganz unten; Bau und Pflege stapeln sich in den Zeilen darüber
 const vorratAn = () => !EINGEBETTET && isBuero();
 async function ladeVorrat(){ if(!vorratAn()) return; const { data, error } = await sb.from('planer_vorrat').select('*').order('erstellt_am'); if(!error) VOR = data || []; }
 const vX = i => { const q = Math.floor(i / 5), r = i - 5 * q; return (q * (5 + 2 * WEK) + r) * dayW; };
@@ -1012,8 +1014,8 @@ const vTage = v => Math.max(1, Math.ceil(Number(v.tage) - 1e-9));
 const vLab = v => { const k = KUNDEN[v.kunde_id]; return [k ? kShort(k) : '', v.titel || ''].filter(Boolean).join(' · ') || 'Ohne Kunde'; };
 const vSort = () => VOR.sort((a, b) => String(a.erstellt_am).localeCompare(String(b.erstellt_am)));
 function vorratLage(){
-  const ende = new Array(VZ).fill(0);
-  return VOR.map(v => { let z = 0; ende.forEach((x, i) => { if(x < ende[z]) z = i; }); const a = ende[z], n = vTage(v); ende[z] = a + n; return { v, z, a, n }; });
+  const ende = new Array(VZ).fill(0), frei = VZ - 2;
+  return VOR.map(v => { let z = VFEST[v.bereich]; if(z == null){ z = 0; for(let i = 0; i < frei; i++) if(ende[i] < ende[z]) z = i; } const a = ende[z], n = vTage(v); ende[z] = a + n; return { v, z, a, n }; });
 }
 function vorratZeichnen(){
   const el = $('vorrat'); if(!el) return;
@@ -1029,7 +1031,7 @@ function vorratZeichnen(){
   // wie die Personen-Balken: an Wochenenden unterbrochen, Stücke mit dünnem Steg verbunden (Jahr: ohne Wochenenden = ein Balken)
   const bars = L.map(({ v, z, a, n }) => {
     const f = VFARBE[v.bereich] || VFARBE.bau, lab = vLab(v), t = `${v.geschaetzt ? '≈ ' : ''}${fmtN(Number(v.tage))} T`, top = VKOPF + z * VH + 2;
-    const tip = `${esc(lab)} · ${t}${v.geschaetzt ? ' (geschätzt)' : ''} · ${v.bereich === 'pflege' ? 'Pflege' : 'Bau'}&#10;Runterziehen = einplanen · Klick = ändern`;
+    const tip = `${esc(lab)} · ${t}${v.geschaetzt ? ' (geschätzt)' : ''} · ${VBER[v.bereich] || 'Bau'}&#10;Runterziehen = einplanen · Klick = ändern`;
     const st = []; for(let q = Math.floor(a / 5); q * 5 < a + n; q++) st.push([Math.max(a, 5 * q), Math.min(a + n, 5 * q + 5)]);
     if(!WEK) st.splice(0, st.length, [a, a + n]);
     return st.map(([s, e], i) => { const x = vX(s), w = vX(e - 1) + dayW - x;
@@ -1039,7 +1041,7 @@ function vorratZeichnen(){
   el.classList.toggle('zu', !VOR_OFFEN);
   el.innerHTML = `<div class="vnm"><button type="button" class="vtog" id="vTog" aria-expanded="${VOR_OFFEN}" title="Vorrat ${VOR_OFFEN ? 'zuklappen' : 'aufklappen'}">${I(VOR_OFFEN ? 'down' : 'next')}<b>Vorrat</b></button>
       <span class="vsum">${VOR.length ? `${VOR.length} Arbeit${VOR.length > 1 ? 'en' : ''} · ${fmtN(sum)} T` : 'leer'}</span>
-      ${VOR_OFFEN ? `<span class="vleg"><i style="background:${VFARBE.bau}"></i>Bau <i style="background:${VFARBE.pflege}"></i>Pflege</span><button type="button" class="btn btn-ghost vneu" id="vNeu">${I('plus')}Arbeit</button>` : ''}</div>
+      ${VOR_OFFEN ? `<span class="vleg">${Object.keys(VBER).map(b => `<i style="background:${VFARBE[b]}"></i>${VBER[b]}`).join(' ')}</span><button type="button" class="btn btn-ghost vneu" id="vNeu">${I('plus')}Arbeit</button>` : ''}</div>
     ${VOR_OFFEN ? `<div class="vsc"><div class="vin" style="width:${wochen * W7}px;height:${VKOPF + VZ * VH + 4}px">${kopf}<div class="vfeld" style="top:${VKOPF}px"></div>${bars}</div></div>` : ''}`;
   const sc2 = el.querySelector('.vsc'); if(sc2) sc2.scrollLeft = alt;
   $('vTog').onclick = () => { VOR_OFFEN = !VOR_OFFEN; lsSet('vorratOffen', VOR_OFFEN); vorratZeichnen(); requestAnimationFrame(tlFuellen); };
@@ -1054,7 +1056,7 @@ function vorratDialog(v, tage, rect){
     <input type="text" id="vT" placeholder="Titel (optional)" value="${esc(v?.titel || '')}">
     <div class="vrow"><label>Tage <input type="number" id="vD" min="0.5" step="0.5" value="${v ? Number(v.tage) : tage}"></label>
       <label class="vchk"><input type="checkbox" id="vG"${v?.geschaetzt ? ' checked' : ''}> geschätzt</label></div>
-    <div class="seg" id="vB"><button type="button" data-b="bau" aria-pressed="${ber === 'bau'}">Bau</button><button type="button" data-b="pflege" aria-pressed="${ber === 'pflege'}">Pflege</button></div>
+    <div class="seg" id="vB">${Object.keys(VBER).map(b => `<button type="button" data-b="${b}" aria-pressed="${ber === b}">${VBER[b]}</button>`).join('')}</div>
     <div class="vrow">${v ? `<button type="button" class="kg-ibtn danger" id="vX" title="Aus dem Vorrat löschen" aria-label="Löschen">${I('trash')}</button>` : ''}<span class="sp"></span><button type="button" class="btn btn-ghost" id="vA">Abbrechen</button><button type="button" class="btn btn-primary" id="vS">${v ? 'Speichern' : 'In den Vorrat'}</button></div>`);
   pop.classList.add('vpop');
   let bereich = ber;
@@ -1085,7 +1087,7 @@ async function vorratEinplanen(v, mid, u){
   let d = Math.floor(u + 1e-9); while(isOff(d)) d++;
   let last = d, n = vTage(v) - 1; while(n > 0){ last++; if(!isOff(last)) n--; }
   const p = P[mid], ich = myPerson(), pl = v.projektleiter_id || (p?.ist_projektleiter ? mid : (ich?.ist_projektleiter ? ich.id : null));
-  const neu = await neuerEinsatz({ mid, kind: 'baustelle', s: d, e: last + 1, kid: v.kunde_id || null, title: v.titel || '', text: v.notiz || '', pl, ok: true, soll: Number(v.tage) }, false);
+  const neu = await neuerEinsatz({ mid, kind: v.bereich === 'bau' ? 'baustelle' : 'termin', s: d, e: last + 1, kid: v.kunde_id || null, title: v.titel || '', text: v.notiz || '', pl, ok: true, soll: Number(v.tage) }, false);
   if(!neu) return;
   const { error } = await sb.from('planer_vorrat').delete().eq('id', v.id); if(error){ fehler(error, 'Vorrat'); return; }
   VOR = VOR.filter(x => x !== v); vorratZeichnen();
