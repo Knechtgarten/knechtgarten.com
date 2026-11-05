@@ -5,7 +5,7 @@
 <script src="/kg-pw-schutz.js?v=5"></script>
 <script src="/kg-stil.js?v=44"></script>
 <script src="/kg-doku.js?v=8"></script>
-<script src="/kg-kundenordner.js?v=1"></script>
+<script src="/kg-kundenordner.js?v=2"></script>
 <title>Kontakte – Kunden und Lieferanten</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
@@ -163,6 +163,11 @@ tr.offertenrow td{padding:0;border-bottom:1px solid var(--soft);}
 .ovl.show{display:flex;}
 .ovlbox{background:#fff;border-radius:12px;max-width:360px;width:100%;padding:18px 20px;box-shadow:0 12px 40px rgba(0,0,0,.25);}
 .ovlbox.wide{max-width:640px;max-height:88vh;overflow-y:auto;}
+.ozbox{max-width:980px!important;} .ozfil{display:flex;gap:6px;margin:6px 0 8px;flex-wrap:wrap;}
+.ozlist{max-height:60vh;overflow:auto;border:1px solid var(--line);border-radius:8px;}
+.ozz{display:grid;grid-template-columns:22px minmax(0,1.2fr) 110px minmax(0,1.6fr);gap:8px;align-items:center;padding:5px 8px;border-bottom:1px solid #EEF1F3;font-size:12.5px;}
+.ozz.an{background:#F5F9FC;} .ozz a{color:var(--primary);font-weight:600;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;} .ozz .ozj{color:var(--muted);font-size:11.5px;}
+.ozz select{height:28px;border:1px solid var(--line);border-radius:6px;font:inherit;font-size:12px;min-width:0;}
 .ordz{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid #EEF1F3;font-size:13px;}
 .ordz a{color:var(--primary);font-weight:600;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;} .ordz span{color:var(--muted);font-size:12px;} .ordz small{color:var(--muted);}
 .ovlmsg{font-size:15px;font-weight:700;color:var(--primary);margin-bottom:16px;}
@@ -370,6 +375,7 @@ tr.offertenrow > td{border:1px solid #323E4E;border-top:0;padding:0!important;} 
     <div class="addbtn-row">
       <span class="ebstand" id="ebStand" data-kg-seite="rechts"></span>
       <button type="button" class="btn kg-neben" id="ebAbgleichBtn" data-kg-seite="rechts" title="Kunden und Auftragsbestätigungen der letzten zwei Jahre aus Easybill holen (läuft auch jede Nacht)">Alles aus Easybill holen</button>
+      <button type="button" class="btn kg-neben" id="ordZuordBtn" data-kg-seite="rechts" data-kg-recht="offerten.kunden.erstellen" title="Bestehende Kundenordner im Google Drive einmalig den Kunden zuordnen">Drive-Ordner zuordnen</button>
       <button type="button" class="btn kg-neben" id="kundeImportBtn" data-kg-seite="rechts" data-kg-recht="offerten.kunden.erstellen">Von Easybill importieren</button>
       <button type="button" class="btn kg-haupt" id="kundeNeuBtn" data-kg-seite="rechts" data-kg-recht="offerten.kunden.erstellen">+ Neuer Kunde</button>
     </div>
@@ -1136,6 +1142,63 @@ document.addEventListener('click', async e => { const b = e.target.closest('[dat
   if(b.dataset.gverb){ try { await KGD.googleVerbinden(); GOOGLE_OK = true; Object.keys(ORDNER_K).forEach(id => delete ORDNER_K[id]); renderKundenTable(); } catch(err){ showToast(err.message, true); } return; }
   const k = KUNDEN.find(x => x.id === (b.dataset.ordneu || b.dataset.ordverk)); if(!k) return;
   if(b.dataset.ordneu) ordnerAnlegen(k); else ordnerVerknuepfenDlg(k); }, true);
+// Einmalige Massen-Zuordnung: alle Kundenordner im Drive lesen (Jahresordner 2013–heute, Dauerpflege = Stammordner),
+// pro Ordner Kunden vorschlagen (Name, Ort, Strasse). Nur eindeutige Treffer sind vorgewählt, gespeichert wird erst beim Bestätigen.
+async function ordnerZuordnenDlg(){
+  const w = document.createElement('div'); w.className = 'ovl show'; document.body.appendChild(w);
+  const box = h => { w.innerHTML = `<div class="ovlbox wide ozbox"><div class="ovlmsg">Drive-Ordner den Kunden zuordnen</div>${h}</div>`; };
+  const zu = () => w.remove();
+  w.addEventListener('click', e => { if(e.target === w || e.target.closest('[data-ozzu]')) zu(); });
+  if(!(await KKO.verbunden())){ box(`<p class="hint">Dafür braucht es einmal die Verbindung mit deinem Google-Konto.</p><div class="ovlbtns"><button class="btnlink" data-ozzu>Abbrechen</button><button class="btn" id="ozG">Google verbinden</button></div>`);
+    w.querySelector('#ozG').onclick = async () => { try { await KGD.googleVerbinden(); GOOGLE_OK = true; zu(); ordnerZuordnenDlg(); } catch(err){ showToast(err.message, true); } }; return; }
+  box('<p class="hint" id="ozInfo">Liest die Ordner im Drive …</p>');
+  const info = t => { const e = w.querySelector('#ozInfo'); if(e) e.textContent = t; };
+  let ordner = [];
+  try {
+    const quellen = [];
+    for(const f of await KKO.unterordner(KKO.ROOT)){
+      if(/^\d{4}$/.test(f.name)) quellen.push({ id: f.id, jahr: +f.name, bereich: f.name });
+      else if(/^\d{4}-\d{4}$/.test(f.name)) (await KKO.unterordner(f.id)).filter(c => /^\d{4}$/.test(c.name)).forEach(c => quellen.push({ id: c.id, jahr: +c.name, bereich: c.name }));
+      else if(/dauerpflege/i.test(f.name)) quellen.push({ id: f.id, jahr: null, bereich: f.name.replace(/^[\d._]+/, '') });
+    }
+    for(const [i, q] of quellen.entries()){ info(`Liest ${q.bereich} … (${i + 1} von ${quellen.length})`);
+      (await KKO.unterordner(q.id)).filter(c => !/^(zzzz|vorlage|\d\d[_-])/i.test(c.name)).forEach(c => ordner.push({ id: c.id, name: c.name, jahr: q.jahr, bereich: q.bereich })); }
+  } catch(err){ box(`<p class="status err">${escHtml(err.message)}</p><div class="ovlbtns"><button class="btn" data-ozzu>Schliessen</button></div>`); return; }
+  // schon verknüpfte Ordner weglassen
+  const schon = new Set(); for(let von = 0; ; von += 1000){ const { data } = await sb.from('kunde_ordner').select('drive_id').range(von, von + 999); (data || []).forEach(x => schon.add(x.drive_id)); if(!data || data.length < 1000) break; }
+  ordner = ordner.filter(o => !schon.has(o.id));
+  // Vorschläge: Wörter aus Name/Firma müssen im Ordnernamen vorkommen, Ort und Strasse geben Zusatzpunkte
+  const norm = s => String(s || '').toLowerCase().replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/é|è|ê/g, 'e').replace(/à/g, 'a');
+  const STOP = new Set(['und', 'pflege', 'gmbh', 'familie', 'herr', 'frau', 'neubau', 'umbau', 'garten', 'von', 'der', 'die', 'das', 'bei', 'gartenpflege', 'unterhalt', 'pool', 'teich']);
+  const tok = s => norm(s).split(/[^a-z0-9]+/).filter(x => x.length >= 3 && !/^\d+$/.test(x) && !STOP.has(x));
+  const idx = new Map(), kinfo = KUNDEN.map((k, i) => { const n = [...new Set([...tok(k.nachname), ...tok(k.firma), ...tok(k.name)])]; n.forEach(t => { if(!idx.has(t)) idx.set(t, new Set()); idx.get(t).add(i); });
+    return { k, n, o: tok(String(k.ort || '').replace(/^\d{4}\s*/, '')), s: tok(String(k.strasse || '').replace(/\d.*$/, '')) }; });
+  const zeilen = ordner.map(o => { const ft = new Set(tok(o.name)), kand = new Set(); ft.forEach(t => (idx.get(t) || []).forEach(i => kand.add(i)));
+    const v = [...kand].map(i => { const x = kinfo[i], nh = x.n.filter(t => ft.has(t)).length, oh = x.o.some(t => ft.has(t)), sh = x.s.some(t => ft.has(t));
+      return { k: x.k, p: nh * 4 + (oh ? 3 : 0) + (sh ? 1 : 0) + (x.k.easybill_id ? .5 : 0), g: [nh ? 'Name' : '', oh ? 'Ort' : '', sh ? 'Strasse' : ''].filter(Boolean).join(' + ') }; })
+      .filter(x => x.p >= 4).sort((a, b) => b.p - a.p).slice(0, 5);
+    const sicher = v.length && v[0].p >= 7 && !(v[1] && Math.floor(v[1].p) >= Math.floor(v[0].p));
+    return { o, v, wahl: sicher ? v[0].k.id : '', an: !!sicher, sicher }; });
+  let filter = 'alle';
+  const zeichne = () => {
+    const sicht = zeilen.filter(z => filter === 'alle' || (filter === 'sicher' ? z.sicher : filter === 'unklar' ? z.v.length && !z.sicher : !z.v.length));
+    const n = zeilen.filter(z => z.an && z.wahl).length;
+    box(`<p class="hint">${ordner.length} Ordner noch ohne Kunde (${schon.size} schon verknüpft). Eindeutige Treffer sind vorgewählt – bitte kurz durchsehen, unklare selbst wählen.</p>
+      <div class="ozfil">${[['alle', 'Alle', zeilen.length], ['sicher', 'Eindeutig', zeilen.filter(z => z.sicher).length], ['unklar', 'Unklar', zeilen.filter(z => z.v.length && !z.sicher).length], ['ohne', 'Kein Vorschlag', zeilen.filter(z => !z.v.length).length]].map(([k, t, c]) => `<button type="button" class="fchip" data-ozf="${k}" aria-pressed="${filter === k}">${t} <small>${c}</small></button>`).join('')}</div>
+      <div class="ozlist">${sicht.slice(0, 1500).map(z => { const i = zeilen.indexOf(z); return `<div class="ozz${z.an ? ' an' : ''}"><input type="checkbox" data-ozc="${i}"${z.an ? ' checked' : ''}${z.v.length ? '' : ' disabled'}><a href="${KKO.link(z.o.id)}" target="_blank" rel="noopener" title="Im Drive öffnen">${escHtml(z.o.name)}</a><span class="ozj">${z.o.jahr || 'Stamm · ' + escHtml(z.o.bereich)}</span>
+        <select data-ozs="${i}"${z.v.length ? '' : ' disabled'}><option value="">– nicht zuordnen –</option>${z.v.map(x => `<option value="${x.k.id}"${x.k.id === z.wahl ? ' selected' : ''}>${escHtml(anzeigename(x.k))}${x.k.vorname ? ' ' + escHtml(x.k.vorname) : ''} · ${escHtml(x.k.ort || '')} (${x.g})</option>`).join('')}</select></div>`; }).join('') || '<p class="kkleer">Keine Ordner in dieser Auswahl.</p>'}</div>
+      <div class="ovlbtns"><button class="btnlink" data-ozzu>Abbrechen</button><button class="btn" id="ozOk"${n ? '' : ' disabled'}>${n} Zuordnungen speichern</button></div>`);
+    w.querySelectorAll('[data-ozf]').forEach(b => b.onclick = () => { filter = b.dataset.ozf; zeichne(); });
+    w.querySelectorAll('[data-ozc]').forEach(c => c.onchange = () => { const z = zeilen[+c.dataset.ozc]; z.an = c.checked; if(z.an && !z.wahl) z.wahl = z.v[0]?.k.id || ''; zeichne(); });
+    w.querySelectorAll('[data-ozs]').forEach(s => s.onchange = () => { const z = zeilen[+s.dataset.ozs]; z.wahl = s.value; z.an = !!s.value; zeichne(); });
+    w.querySelector('#ozOk').onclick = async () => { const rows = zeilen.filter(z => z.an && z.wahl).map(z => ({ kunde_id: z.wahl, jahr: z.o.jahr, drive_id: z.o.id, name: z.o.name }));
+      w.querySelector('#ozOk').disabled = true; w.querySelector('#ozOk').textContent = 'Speichert …';
+      for(let i = 0; i < rows.length; i += 200){ const { error } = await sb.from('kunde_ordner').upsert(rows.slice(i, i + 200), { onConflict: 'kunde_id,drive_id' }); if(error){ showToast('Speichern: ' + error.message, true); return; } }
+      zu(); Object.keys(ORDNER_K).forEach(id => delete ORDNER_K[id]); renderKundenTable(); showToast(`${rows.length} Ordner zugeordnet.`); };
+  };
+  zeichne();
+}
+document.addEventListener('click', e => { if(e.target.closest('#ordZuordBtn')){ e.preventDefault(); ordnerZuordnenDlg(); } });
 function kundeDetail(k){
   const T = [];
   T.push(kachel('Adresse &amp; Kontakt', MIT_ADR ? `<button type="button" class="kklink km-edit" data-id="${k.id}">Bearbeiten</button>` : '', adresseHtml([anzeigename(k), k.vorname].filter(Boolean).join(' '), k)));
