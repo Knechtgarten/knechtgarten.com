@@ -984,7 +984,8 @@ const r48 = u => Math.round(u * 48) / 48;
 let ABL = [], ABLAGE = !!lsGet('ablage', false); // Ablage-Zeilen unter jeder Gruppe (Knopf oben links, gemerkt im Browser)
 let INFO = new Map(); // wichtige Info pro Termin und Tag: «einsatz_id|JJJJ-MM-TT» -> Zeile
 let MARK = [], RES = [], RESE = [], GRUPPEN = [], PERSONEN = [], P = {}, EINS = [], FEIER = new Map(), KUNDEN = {}, KLIST = [], BENUTZER = [];
-async function fetchAll(mk){ let out = [], i = 0; for(;;){ const { data, error } = await mk().range(i, i + 999); if(error) throw error; out = out.concat(data); if(data.length < 1000) break; i += 1000; } return out; }
+// Seitenweise laden: immer mit fester Reihenfolge (Standard id), sonst fallen bei mehr als 1000 Zeilen einzelne heraus (z. B. gerade geänderte Termine)
+async function fetchAll(mk, sortier = ['id']){ let out = [], i = 0; for(;;){ let q = mk(); for(const s of sortier) q = q.order(s); const { data, error } = await q.range(i, i + 999); if(error) throw error; out = out.concat(data); if(data.length < 1000) break; i += 1000; } return out; }
 // Maschinen-Typen kommen aus dem Nachschlagewerk: Eintrag = Typ (z. B. «Raupenbagger 3.5 t»), seine Stück = Maschinen.
 // Ein Typ ist eine eigene «Ressource» mit id 'T:<eintrag>' (vorläufige Reservierung ohne Nummer).
 let TYPEN = [], BPE = new Set(); // BPE = Balken (Einsatz-IDs) mit Bauprogramm (Icon auf dem Baustellen-Balken)
@@ -1184,14 +1185,14 @@ async function ladeAlles(){
       fetchAll(() => sb.from('planer_person').select('*').order('sortierung')),
       fetchAll(() => sb.from('planer_einsatz').select('*, planer_datei(id,art,name,storage_pfad)').lt('beginn', bis).gt('ende', von)),
       fetchAll(() => sb.from('planer_einsatz').select('*, planer_datei(id,art,name,storage_pfad)').not('wdh', 'is', null).lt('beginn', bis)),
-      fetchAll(() => sb.from('planer_feiertag').select('*')),
+      fetchAll(() => sb.from('planer_feiertag').select('*'), ['datum']),
       kundenVorab(),
       fetchAll(() => sb.from('planer_ressource').select('*').order('sortierung')),
       fetchAll(() => sb.from('planer_ressource_einsatz').select('*')),
       fetchAll(() => sb.from('planer_magazin').select('*, planer_datei(id,art,name,storage_pfad)').is('erledigt_am', null).order('sort')),
       fetchAll(() => sb.from('planer_pendenz').select('*, planer_datei(id,art,name,storage_pfad)').eq('erledigt', false)),
       fetchAll(() => sb.from('planer_absenz_typ').select('*').order('sortierung')),
-      fetchAll(() => sb.from('planer_vorschlag_notiz').select('*')),
+      fetchAll(() => sb.from('planer_vorschlag_notiz').select('*'), []),
       fetchAll(() => sb.from('wissen_exemplar').select('id,eintrag_id,planer_ressource_id').not('planer_ressource_id', 'is', null).is('archiviert_am', null)),
       fetchAll(() => sb.from('wissen_eintrag').select('id,titel').is('archiviert_am', null)),
       fetchAll(() => sb.from('planer_markierung').select('*').gte('tag', isoDate(0)).lte('tag', isoDate(NDAYS))),
@@ -2729,11 +2730,11 @@ async function ladePflege(){
     const [kat, arb, ku, kk, ka, zu, st, feld] = await Promise.all([
       fetchAll(() => sb.from('pflege_kategorie').select('id,name,kuerzel,farbe')),
       fetchAll(() => sb.from('pflege_arbeit').select('id,kategorie_id,name,standard_kws,dauer_min,ablauf')),
-      fetchAll(() => sb.from('pflege_kunde').select('kunde_id,abo_typ,wunsch_wochentage,notiz')),
+      fetchAll(() => sb.from('pflege_kunde').select('kunde_id,abo_typ,wunsch_wochentage,notiz'), ['kunde_id']),
       fetchAll(() => sb.from('pflege_kunde_kategorie').select('id,kunde_id,kategorie_id,werte,bewaesserung')),
       fetchAll(() => sb.from('pflege_kunde_arbeit').select('id,kunde_kategorie_id,arbeit_id,titel,beschrieb,kws,kws_plus,kws_minus,abgewaehlte_jahre,dauer_min,allein')),
-      fetchAll(() => sb.from('pflege_kunde_kategorie_zustaendig').select('*')),
-      fetchAll(() => sb.from('pflege_einsatz_status').select('kunde_kategorie_id,jahr,kw').in('jahr', [y, y + 1])),
+      fetchAll(() => sb.from('pflege_kunde_kategorie_zustaendig').select('*'), ['kunde_kategorie_id', 'benutzer_id']),
+      fetchAll(() => sb.from('pflege_einsatz_status').select('kunde_kategorie_id,jahr,kw').in('jahr', [y, y + 1]), ['kunde_kategorie_id', 'jahr', 'kw']),
       fetchAll(() => sb.from('pflege_feld').select('id,kategorie_id,name,typ,einheit,reihenfolge'))
     ]);
     const m = l => { const o = {}; l.forEach(x => o[x.id] = x); return o; };
