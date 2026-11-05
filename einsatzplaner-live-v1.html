@@ -457,6 +457,7 @@ body.kopiert, body.kopiert *{cursor:copy !important;}
 /* Maschinen-Reservierung: vorläufig gestrichelt, fest durchgezogen; Überschneidung orange (vorläufig) / rot (fest) */
 .band.mres{background:#fff;border:1.5px solid var(--c);color:var(--ink);}
 .band.mres.vorl{border-style:dashed;}
+.row.neuzeile > .nm{padding:2px 6px;} .neuin{width:100%;box-sizing:border-box;border:1px dashed #C3C8CE;border-radius:5px;padding:2px 6px;font:inherit;font-size:12px;background:transparent;color:var(--ink);} .neuin:focus{outline:none;border-style:solid;border-color:var(--primary);background:#fff;} /* Schnupper / Temporär: neue Zeile eintippen */
 .row.mgrpk > .nm,.row.ov.fov.mgrpk > .nm{cursor:pointer;background:var(--kg-tool,var(--primary));padding-left:14px;color:#fff;font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;gap:4px;} .row.mgrpk > .lane{background:#F3F5F7!important;} /* Bagger / Dumper / Diverse: grüne Kopfzeile, auf und zu */
 .row.mleer > .nm{color:var(--muted);font-size:11px;font-style:italic;}
 .row.mgrpk > .nm:hover{filter:brightness(1.1);}
@@ -1837,6 +1838,8 @@ function renderRows(){
     if(!ps.length && (!(isBuero() && g.id !== '_ohne') || /^neu$/i.test(g.name))) return; /* «Neu» nur, wenn jemand drin ist */ const ablK = !EINGEBETTET && /allgemein/i.test(g.name), zu = !ablK && collapsed.has(g.id); // Büro sieht auch leere Gruppen (zum Hinzufügen und Hineinziehen)
     h += `<div class="row grp${zu ? ' zu' : ''}${g === ph ? ' phk' : ''}${ablK ? ' ablk' : ''}" data-g="${g.id}"><div class="nm">${ablK ? `<button type="button" class="ablbar${ABLAGE ? ' on' : ''}" id="ablBtn" title="Drei leere Ablage-Zeilen unter jeder Gruppe ein-/ausblenden">Ablage ${ABLAGE ? 'eingeblendet' : 'ausgeblendet'}</button>` : ''}${I('chev')}${esc(g.name)} <span style="opacity:.6;font-weight:400">(${ps.length})</span>${ablHinweis(g.id)}${isBuero() && g.id !== '_ohne' ? `<button class="gadd" data-gadd="${g.id}" title="Zeile hinzufügen" aria-label="Zeile hinzufügen">${I('plus')}</button>` : ''}</div><div class="lane" style="width:${W}px;height:20px">${provBars('g:' + g.id)}</div></div>`;
     if(!zu) ps.forEach(p => { h += personRow(p, W, bgx); if(openMid === p.id) h += openTyp === 'maschine' ? ovRows(W, bgx, 'maschine', p.id) : vehFocusRows(W, bgx, p.id); }); // Anhänger nur in der Übersicht «Anhänger»
+    // Schnupper / Temporär: unten immer eine leere Zeile zum Eintippen (Name + Enter = neue Zeile, auch ohne Account)
+    if(!zu && !EINGEBETTET && isBuero() && /schnupper|tempor/i.test(g.name)) h += `<div class="row neuzeile"><div class="nm"><input type="text" class="neuin" data-neup="${g.id}" placeholder="+ Name eintippen …" aria-label="Neue Zeile in ${esc(g.name)}"></div><div class="lane" style="width:${W}px;${bgx}"></div></div>`;
     // Ablage-Zeilen (eingeschaltet über den Knopf oben links)
     if(!zu && !EINGEBETTET) ABL.filter(a => a.gruppe_id === g.id).sort((a, b) => a.sortierung - b.sortierung).slice(0, ABLAGE ? 3 : 1).forEach(p => { // immer eine leere Zeile (Abstand), eingeblendet alle drei
       h += personRow({ ...p, name: '' }, W, bgx).replace('<div class="row', '<div class="row ablrow'); }); // Ablage-Zeilen: leer, ohne Namen, sonst wie Mitarbeitende
@@ -2973,13 +2976,14 @@ addEventListener('pointermove', e => {
 // ---------------------------------------------------------------------------
 const grpPersons = gid => PERSONEN.filter(p => (p.gruppe_id || null) === gid).sort((a, b) => (b.aktiv - a.aktiv) || a.sortierung - b.sortierung || a.name.localeCompare(b.name));
 // Schnupper / Temporär: nur schnell einen Namen eintragen, ohne weitere Angaben
+async function personEinfuegen(g, name){
+  const sort = 10 + Math.max(0, ...PERSONEN.filter(p => p.gruppe_id === g.id).map(p => p.sortierung || 0));
+  const { error } = await sb.from('planer_person').insert({ name, gruppe_id: g.id, aktiv: true, sortierung: sort }); if(error){ fehler(error, 'Hinzufügen'); return false; }
+  await neuLaden(); toast(`${name} hinzugefügt`); return true; }
 function schnellPerson(g, rect){
   const pop = popAt(rect, `<b>${esc(g.name)}</b><input type="text" id="spN" placeholder="Vorname Name" style="font:inherit;font-size:13px;border:1px solid var(--line);border-radius:6px;padding:6px 8px"><div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost" id="spNo">Abbrechen</button><button class="btn btn-primary" id="spOk">${I('plus')}Hinzufügen</button></div>`);
   const inp = pop.querySelector('#spN'); inp.focus();
-  const ok = async () => { const name = inp.value.trim(); if(!name){ inp.focus(); return; } closePop();
-    const sort = 10 + Math.max(0, ...PERSONEN.filter(p => p.gruppe_id === g.id).map(p => p.sortierung || 0));
-    const { error } = await sb.from('planer_person').insert({ name, gruppe_id: g.id, aktiv: true, sortierung: sort }); if(error) return fehler(error, 'Hinzufügen');
-    await neuLaden(); toast(`${name} hinzugefügt`); };
+  const ok = async () => { const name = inp.value.trim(); if(!name){ inp.focus(); return; } closePop(); await personEinfuegen(g, name); };
   pop.querySelector('#spOk').onclick = ok; pop.querySelector('#spNo').onclick = closePop; inp.onkeydown = e => { if(e.key === 'Enter') ok(); else if(e.key === 'Escape') closePop(); };
 }
 function sortTarget(d, y){
@@ -3098,6 +3102,10 @@ function bindTimeline(t){
   t.addEventListener('dragleave', e => { const k = e.target.closest?.('#sbar .sright'); if(k && !k.contains(e.relatedTarget)) k.classList.remove('drop'); });
   t.addEventListener('drop', e => { const k = e.target.closest?.('#sbar .sright'); if(!k || !e.dataTransfer?.files?.length) return; e.preventDefault(); k.classList.remove('drop'); skiDateien(e.dataTransfer.files); });
   t.addEventListener('paste', e => { if(!e.target.dataset?.ski) return; const fl = [...(e.clipboardData?.files || [])]; if(!fl.length) return; e.preventDefault(); skiDateien(fl); });
+  t.addEventListener('keydown', async e => { const ni = e.target.dataset?.neup; if(!ni) return; // leere Zeile bei Schnupper / Temporär
+    if(e.key === 'Escape'){ e.target.value = ''; e.target.blur(); return; } if(e.key !== 'Enter') return; e.preventDefault();
+    const name = e.target.value.trim(), g = GRUPPEN.find(x => x.id === ni); if(!name || !g) return; e.target.disabled = true;
+    if(await personEinfuegen(g, name)) document.querySelector(`[data-neup="${ni}"]`)?.focus(); else e.target.disabled = false; });
   t.addEventListener('keydown', e => { if(e.target.dataset?.ski && e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); SKI.text = e.target.value; sbarKI(); } }); t.addEventListener('change', e => { if(e.target.closest('#sbar')) sbarEingabe(e); }); });
   let stT = 0; t.addEventListener('scroll', () => { const o = $('tlTop'); if(o && Math.abs(o.scrollLeft - t.scrollLeft) > 1) o.scrollLeft = t.scrollLeft; if(!stT) stT = requestAnimationFrame(() => { stT = 0; stickLabels(); }); clearTimeout(t._aT); t._aT = setTimeout(aktivNachScroll, 150); }, { passive: true });
   let scT; t.addEventListener('scroll', () => { closePop(); if(zoom === 'tag'){ clearTimeout(scT); scT = setTimeout(() => { const c = Math.floor(UX(t.scrollLeft)); if(c < HR[0] + 3 || c > HR[1] - 4) renderRows();
