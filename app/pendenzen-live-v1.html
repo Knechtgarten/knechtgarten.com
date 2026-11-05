@@ -203,6 +203,7 @@ button:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
 .vks{position:relative;display:block;} .vkm{position:absolute;left:0;right:0;top:36px;background:#fff;border:1px solid #D5DBE1;border-radius:8px;box-shadow:0 8px 24px rgba(35,43,53,.15);z-index:5;display:flex;flex-direction:column;max-height:260px;overflow:auto;}
 .vkm button{all:unset;cursor:pointer;padding:6px 10px;display:flex;flex-direction:column;font-size:13px;color:#232B35;} .vkm button small{color:#8B9097;font-size:11.5px;} .vkm button:hover{background:#F5F7F9;} .vkl{padding:8px 10px;font-size:12.5px;color:#8B9097;}
 /* Kundensuche wie im Offertentool: Lupe im Feld, Treffer aus Kontakte, dann Easybill, sonst «als neuen Kunden erfassen»; gewählt = Feld mit Name + × */
+.zadd.zkunde{display:block;padding:6px 8px;background:none;box-shadow:none;border:0;} .zadd.zkunde input[type=text]{width:100%;box-sizing:border-box;height:32px;border:1px solid #D5DBE1;border-radius:8px;padding:0 10px 0 32px;font:inherit;font-size:13px;}
 .card .tx small.pkd{display:block;font-size:11px;color:#8B9097;font-weight:400;margin-top:1px;} /* Kunde auf der Offerten-Karte */
 .vksi{position:absolute;left:10px;top:9px;color:#8B9097;display:inline-flex;pointer-events:none;}
 /* Kunde an der Offerte (Detailfenster) und neuer Kunde (Easybill) */
@@ -694,7 +695,7 @@ function pdHtml(p, opt = {}){
       : notiz ? '<span class="pr person"></span>' // Notizen haben keine Zeit
       : `<button class="pr" data-zp="${p.id}" style="${p.zeit ? `background:${ZEIT[p.zeit].c}` : ''}" aria-label="Zeit: ${p.zeit ? ZEIT[p.zeit].t : 'irgendwann'}"></button>`}
     ${opt.zeit && a ? `<span class="ty" style="background:${listFarbe(l)}" title="${esc(l.titel)}">${A(a.icon)}</span>` : ''}${herkunft}
-    <span class="tx">${esc(p.titel)}${p.kunde_id && KUNDE_CACHE[p.kunde_id] ? `<small class="pkd">${esc(KUNDE_CACHE[p.kunde_id].name)}</small>` : ''}</span><span class="ind">${ind.join('')}</span></div>`;
+    <span class="tx">${esc(p.titel)}${p.kunde_id && KUNDE_CACHE[p.kunde_id] && KUNDE_CACHE[p.kunde_id].name !== p.titel ? `<small class="pkd">${esc(KUNDE_CACHE[p.kunde_id].name)}</small>` : ''}</span><span class="ind">${ind.join('')}</span></div>`;
 }
 function listHtml(l){
   let kopf, body;
@@ -712,7 +713,8 @@ function listHtml(l){
     // Gruppentitel = Trenner: Titel und Pendenzen in einer Reihenfolge, alles unter einem Titel gehört zu dieser Gruppe
     let akt = null;
     const folge = [...ps.map(p => ({ p, s: p.sortierung })), ...gs.map(g => ({ g, s: g.sortierung }))].sort((a, b) => a.s - b.s || (a.g ? -1 : 1));
-    body = (S.addOffen === l.id && erfassbar ? `<div class="zadd"><input type="text" id="add-${l.id}" placeholder="Neue ${wort} …" aria-label="Neue ${wort} in ${esc(l.titel)}"><button class="kg-ibtn${recZiel === 'add-' + l.id ? ' on' : ''}" data-mic="add-${l.id}" aria-label="Sprechen" title="Sprechen">${K('mikrofon')}</button><button class="kg-ibtn zok" data-zok="${l.id}" aria-label="Speichern" title="Speichern">${K('check')}</button></div>` : '')
+    body = (S.addOffen === l.id && erfassbar && l.art_id === 'offerte' ? `<div class="zadd zkunde vset" data-zk="${l.id}"></div>`
+      : S.addOffen === l.id && erfassbar ? `<div class="zadd"><input type="text" id="add-${l.id}" placeholder="Neue ${wort} …" aria-label="Neue ${wort} in ${esc(l.titel)}"><button class="kg-ibtn${recZiel === 'add-' + l.id ? ' on' : ''}" data-mic="add-${l.id}" aria-label="Sprechen" title="Sprechen">${K('mikrofon')}</button><button class="kg-ibtn zok" data-zok="${l.id}" aria-label="Speichern" title="Speichern">${K('check')}</button></div>` : '')
       + `<div class="cards" data-drop="${l.id}">${folge.map(x => { if(x.g){ akt = x.g;
         return `<div class="gh${x.g.zu ? ' zu' : ''}" draggable="true" data-ghead="${x.g.id}" data-gtog="${x.g.id}" title="Ziehen = Gruppe verschieben, Klick = auf-/zuklappen"><span class="tog">${K('chev')}</span>${esc(x.g.titel)}</div>`; }
       return pdHtml(x.p, { gruppe: akt }); }).join('')}</div>`
@@ -778,6 +780,10 @@ function zeichne(){
   document.documentElement.style.setProperty('--oben', Math.round($('main').getBoundingClientRect().top) + 'px'); // Kopf + weisse Leiste
   document.querySelectorAll('[data-cv]').forEach(c => { const s = sc[c.dataset.cv]; if(s){ c.scrollLeft = s[0]; c.scrollTop = s[1]; } });
   entzerren();
+  // neue Offerte = zuerst den Kunden wählen; gewählt -> Karte mit Kundenname, Fenster öffnet sich für den Titel
+  document.querySelectorAll('[data-zk]').forEach(h => { const l = listeById(h.dataset.zk); if(!l) return;
+    kundenFeld(h, null, async k => { if(!k) return; S.addOffen = null; await neuePendenz(l, k.name, null, { kunde_id: k.id }); }, 'zkq');
+    setTimeout(() => $('zkq')?.focus(), 0); });
   zeichneOver();
 }
 // Freie Anordnung: wächst eine Liste, weichen die Listen darunter nach unten aus (nur Anzeige – gespeicherte Lage bleibt,
@@ -905,15 +911,15 @@ function zeichneOver(){
 async function upd(tab, id, patch, key = 'id'){ const { error } = await sb.from(tab).update(patch).eq(key, id); if(error){ fehler(error, 'Speichern'); return false; } return true; }
 // höchste Stelle in einer Liste (Pendenzen und Gruppentitel teilen sich die Reihenfolge)
 const letzteSort = lid => Math.max(0, ...S.pz.filter(p => p.liste_id === lid).map(p => p.sortierung), ...S.gruppen.filter(g => g.liste_id === lid).map(g => g.sortierung));
-async function neuePendenz(l, titel, gruppe_id = null){
+async function neuePendenz(l, titel, gruppe_id = null, extra = {}){
   // kommt unten an die Liste und gehört damit zum letzten Gruppentitel (falls es Gruppen gibt)
   const max = letzteSort(l.id), letzte = S.gruppen.filter(g => g.liste_id === l.id).sort((a, b) => b.sortierung - a.sortierung)[0];
   if(!gruppe_id && letzte) gruppe_id = letzte.id;
   // in einer Zeitliste erfasst: gehört direkt zu ihr (ohne Pendenzenart) und hat deren Zeit
-  const { data, error } = await sb.from('pendenz').insert({ liste_id: l.id, gruppe_id, titel, zeit: l.zeit || 0, sortierung: max + 1, erstellt_von: ME, ...(OF(l.art_id) ? { offerte_von: ME } : {}) }).select().single();
+  const { data, error } = await sb.from('pendenz').insert({ liste_id: l.id, gruppe_id, titel, zeit: l.zeit || 0, sortierung: max + 1, erstellt_von: ME, ...(OF(l.art_id) ? { offerte_von: ME } : {}), ...extra }).select().single();
   if(error) return fehler(error, 'Erfassen');
   S.pz.push(data);
-  if(l.art_id === 'offerte'){ S.addOffen = null; S.sel = data.id; zeichne(); setTimeout(() => $('dkq')?.focus(), 50); return; } // neue Offerte: Kunde gleich erfassen
+  if(l.art_id === 'offerte'){ S.addOffen = null; S.sel = data.id; zeichne(); setTimeout(() => { const t = $('dtxt'); if(data.kunde_id && t){ t.focus(); t.select(); } else $('dkq')?.focus(); }, 50); return; } // neue Offerte: Titel (Kunde schon gewählt) bzw. Kunde erfassen
   zeichne();
 }
 // Zeit setzen; gehört die Pendenz direkt zu einer Zeitliste, wandert sie in die passende (ohne Liste geht «Irgendwann» nicht)
