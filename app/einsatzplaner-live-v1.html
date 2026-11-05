@@ -509,9 +509,11 @@ body.kopiert, body.kopiert *{cursor:copy !important;}
 .mwarn.o{background:#E08A1E;color:#fff;} .mwarn.r{background:var(--red);color:#fff;}
 /* Arbeitszeit nach Saison */
 /* Zeile «Arbeitszeit & Ferien»: oben wiederkehrende Ferien, Mitte normale Balken, unten Arbeitszeit */
-.row.azz .lane{height:52px;}
-.row.azz .lane > .bar{top:18px!important;height:16px;}
-.row.azz .lane > .azb{top:35px;}
+.row.azz .lane{height:36px;}
+.row.azz .lane > .bar{top:19px!important;height:15px;}
+.row.azz .lane > .ferb.fer-betrieb{top:19px;}
+.azi{position:absolute;top:19px;height:15px;display:inline-flex;align-items:center;gap:2px;cursor:pointer;z-index:3;font-size:10px;color:#323E4E;}
+.azi svg{width:15px;height:15px;} .azi b{font-weight:700;background:rgba(255,255,255,.8);border-radius:3px;padding:0 2px;}
 .ferb{position:absolute;top:2px;height:14px;line-height:12px;border:1px solid #A9B0B7;border-radius:3px;background:#E9ECEF;color:#323E4E;font-size:10.5px;font-weight:600;padding:0 5px;box-sizing:border-box;white-space:nowrap;overflow:hidden;cursor:pointer;z-index:1;display:flex;align-items:center;gap:3px;}
 .ferb .i{width:10px;height:10px;flex:none;}
 .ferb.fer-lernende{background:#F3E9C6;border-color:#C9A94A;}
@@ -1076,15 +1078,27 @@ function azBand(){
   for(let d = 1; d <= NDAYS; d++){ const z = d < NDAYS ? azFuer(d) : null; if(d === NDAYS || z !== cur){ seg(s, d, cur); s = d; cur = z; } }
   return h;
 }
+// Arbeitszeit als Icon (Uhr) am Montag der Wechsel-Woche, Mouse-over = Zeiten; Klick = Info / Verwaltung
+function azIcons(){
+  const y0 = dDate(0).getFullYear(), y1 = dDate(NDAYS - 1).getFullYear(); let h = '';
+  AZ.forEach(z => { for(let y = y0; y <= y1; y++){ const d = kwMonday(y, z.ab_kw); if(d < 0 || d >= NDAYS) continue;
+    h += `<span class="azi" data-az="${z.id}" data-azd="${d}" style="left:${X(d) + 2}px" title="${esc((z.name ? z.name + ': ' : '') + 'ab KW ' + z.ab_kw + ' · ' + azText(z))}">${mkSvg('start')}${dayW >= 18 ? `<b>${esc(z.start || '')}</b>` : ''}</span>`; } });
+  return h;
+}
 // Wiederkehrende Ferien eines Jahres: [von, bis) als Tag-Index (Ausnahme dieses Jahres geht vor)
 function ferLage(f, y){
   const x = FERA.find(a => a.ferien_id === f.id && a.jahr === y);
   if(x?.weg) return null;
   if(x?.von && x?.bis) return { s: fromIso(x.von), e: fromIso(x.bis) + 1, aus: true };
-  const s = kwMonday(y, f.von_kw), e = kwMonday(f.bis_kw < f.von_kw ? y + 1 : y, f.bis_kw) + 5; // Montag bis Freitag
-  return { s, e, aus: false };
+  if(f.von_md){ const [m1, t1] = f.von_md.split('-').map(Number), [m2, t2] = (f.bis_md || f.von_md).split('-').map(Number); // nach Datum, auch ein einzelner Tag
+    const s = dayIdx(new Date(y, m1 - 1, t1)), e = dayIdx(new Date(m2 * 100 + t2 < m1 * 100 + t1 ? y + 1 : y, m2 - 1, t2)) + 1; return { s, e, aus: false }; }
+  if(!f.von_kw) return null;
+  const n = ((((f.bis_kw || f.von_kw) - f.von_kw) % 52) + 52) % 52 + 1, s = kwMonday(y, f.von_kw); // Anzahl Wochen (auch über Neujahr gleich lang)
+  return { s, e: s + 7 * (n - 1) + 5, aus: false }; // Montag der ersten bis Freitag der letzten Woche
 }
 const FERART = { betrieb: 'Alle (Betrieb)', lernende: 'Lernende' };
+// Anzeige von Von/Bis in der Verwaltung: «KW 30» oder «24.12.»
+const ferWert = (f, w) => { const md = f[w + '_md'], kwv = f[w + '_kw']; if(md){ const [m, t] = md.split('-').map(Number); return `${t}.${m}.`; } return kwv ? 'KW ' + kwv : ''; };
 // Ferien für alle (Betriebsferien): im ganzen Planer grau hinterlegt
 let FER_GRAU = [];
 function ferGrau(){ if(!FER.length || !NDAYS) return []; const y0 = dDate(0).getFullYear(), y1 = dDate(NDAYS - 1).getFullYear(), o = [];
@@ -1095,7 +1109,7 @@ function ferBars(){
   FER.forEach(f => { for(let y = y0 - 1; y <= y1; y++){ const L = ferLage(f, y); if(!L || L.e <= 0 || L.s >= NDAYS) continue;
     const s = Math.max(0, L.s), e = Math.min(NDAYS, L.e), w = Math.max(6, XW(s, e) - 2);
     const fc = ferFarbe(f);
-    h += `<div class="ferb fer-${f.art}${L.aus ? ' aus' : ''}" data-fer="${f.id}" data-ferj="${y}" style="left:${X(s) + 1}px;width:${w}px${fc ? `;background:${fc};color:${KG.textAuf(fc)};border-color:${fc}` : ''}" title="${esc(f.name)} · ${esc(dLab(L.s))} – ${esc(dLab(L.e - 1))}${L.aus ? ' (dieses Jahr angepasst)' : ' (jedes Jahr)'}">${w > 30 ? `${I('repeat')}${esc(f.name)}` : ''}</div>`; } });
+    h += `<div class="ferb fer-${f.art === 'lernende' ? 'lernende' : 'betrieb'}${L.aus ? ' aus' : ''}" data-fer="${f.id}" data-ferj="${y}" style="left:${X(s) + 1}px;width:${w}px${fc ? `;background:${fc};color:${KG.textAuf(fc)};border-color:${fc}` : ''}" title="${esc(f.name)} · ${esc(dLab(L.s))} – ${esc(dLab(L.e - 1))}${L.aus ? ' (dieses Jahr angepasst)' : ' (jedes Jahr)'}">${w > 30 ? `${I('repeat')}${esc(f.name)}` : ''}</div>`; } });
   return h;
 }
 // Klick auf das Arbeitszeit-Band: Info, Büro kommt zu den Einstellungen
@@ -1108,7 +1122,7 @@ function azPop(id, d, rect){
 // Klick auf wiederkehrende Ferien: nur dieses Jahr anpassen, weglassen oder zurücksetzen
 function ferPop(fid, y, rect){
   const f = FER.find(x => x.id === fid); if(!f) return; const L = ferLage(f, y), x = FERA.find(a => a.ferien_id === fid && a.jahr === y), ed = isBuero();
-  const pop = popAt(rect, `<b>${esc(f.name)} ${y}</b><span class="muted small">${FERART[f.art] || ''} · jedes Jahr KW ${f.von_kw}${f.bis_kw !== f.von_kw ? '–' + f.bis_kw : ''}${L ? ` · dieses Jahr ${esc(dLab(L.s))} – ${esc(dLab(L.e - 1))}` : ''}${x ? ' · angepasst' : ''}</span>
+  const pop = popAt(rect, `<b>${esc(f.name)} ${y}</b><span class="muted small">${FERART[f.art] || ''} · jedes Jahr ${esc(ferWert(f, 'von'))}${ferWert(f, 'bis') && ferWert(f, 'bis') !== ferWert(f, 'von') ? ' – ' + esc(ferWert(f, 'bis')) : ''}${L ? ` · dieses Jahr ${esc(dLab(L.s))} – ${esc(dLab(L.e - 1))}` : ''}${x ? ' · angepasst' : ''}</span>
     ${ed ? `<div class="azf"><label>Dieses Jahr von<input type="date" id="ferV" value="${L ? isoDate(L.s) : ''}"></label><label>bis<input type="date" id="ferB" value="${L ? isoDate(L.e - 1) : ''}"></label></div>
       <div class="cmrow"><button type="button" class="btn btn-ghost" id="ferWeg">Dieses Jahr weglassen</button>${x ? `<button type="button" class="btn btn-ghost" id="ferReset">Wie jedes Jahr</button>` : ''}<span style="flex:1"></span><button type="button" class="btn btn-primary" id="ferOk">Nur ${y} anpassen</button></div>
       <a class="small" href="#arbeitszeit">Muster für alle Jahre ändern</a>` : ''}`);
@@ -1127,9 +1141,9 @@ function renderArbeitszeit(){
     <div class="card azt"><div class="azh"><span>Name</span><span>Ab KW</span><span>Start</span><span>Ende</span><span>Mittag (Std)</span><span>Stunden</span><span></span></div>
       ${az.map(z => `<div class="azz2" data-azid="${z.id}"><input type="text" data-k="name" value="${esc(z.name || '')}" placeholder="z. B. Arbeitsstart Frühling" aria-label="Name"><input type="number" data-k="ab_kw" min="1" max="53" value="${z.ab_kw}" aria-label="Ab KW"><input type="time" data-k="start" value="${esc(z.start || '')}" aria-label="Start"><input type="time" data-k="ende" value="${esc(z.ende || '17:00')}" aria-label="Ende"><input type="number" data-k="mittag" min="0" max="3" step="0.25" value="${Number(z.mittag ?? 1)}" aria-label="Mittag"><b>${azStd(z) > 0 ? fmtN(azStd(z)) + ' Std' : 'geschlossen'}</b><button type="button" class="kg-ibtn danger" data-azx="${z.id}" title="Zeitraum löschen" aria-label="Zeitraum löschen">${I('trash')}</button></div>`).join('')}
       <button type="button" class="btn btn-ghost" id="azNeu">${I('plus')}Zeitraum</button></div>
-    <h3>Wiederkehrende Ferien</h3><p class="hint">Jedes Jahr gleich, Montag der ersten bis Freitag der letzten Kalenderwoche. «Alle (Betrieb)» wird im ganzen Planer grau hinterlegt. Zum Beispiel Sommerferien Knecht, Winterferien Knecht, Frühlings-, Sommer- und Herbstferien der Lernenden.</p>
-    <div class="card azt"><div class="azh fer"><span>Name</span><span>von KW</span><span>bis KW</span><span>Gilt für</span><span>Farbe</span><span></span></div>
-      ${FER.map(f => `<div class="ferz" data-ferid="${f.id}"><input type="text" data-k="name" value="${esc(f.name)}" aria-label="Name"><input type="number" data-k="von_kw" min="1" max="53" value="${f.von_kw}" aria-label="von KW"><input type="number" data-k="bis_kw" min="1" max="53" value="${f.bis_kw}" aria-label="bis KW"><select data-k="art" aria-label="Gilt für">${Object.entries(FERART).map(([k, t]) => `<option value="${k}"${(f.art === k || (k === 'betrieb' && f.art === 'andere')) ? ' selected' : ''}>${t}</option>`).join('')}</select><button type="button" class="ferfarb" data-ferfarb="${f.id}" style="background:${ferFarbe(f) || '#BCC2C8'}" title="Farbe wählen (Standard grau)" aria-label="Farbe wählen"></button><button type="button" class="kg-ibtn danger" data-ferx="${f.id}" title="Löschen" aria-label="Löschen">${I('trash')}</button></div>`).join('') || '<div class="muted small" style="padding:6px 0">Noch keine.</div>'}
+    <h3>Wiederkehrende Ferien</h3><p class="hint">Jedes Jahr gleich. Von/Bis als Kalenderwoche («KW 30» = Montag bis Freitag) oder als Datum («24.12.», auch ein einzelner Tag: Bis leer lassen). «Alle (Betrieb)» wird im ganzen Planer grau hinterlegt. Zum Beispiel Sommerferien Knecht, Winterferien Knecht, Frühlings-, Sommer- und Herbstferien der Lernenden.</p>
+    <div class="card azt"><div class="azh fer"><span>Name</span><span>Von</span><span>Bis</span><span>Gilt für</span><span>Farbe</span><span></span></div>
+      ${FER.map(f => `<div class="ferz" data-ferid="${f.id}"><input type="text" data-k="name" value="${esc(f.name)}" aria-label="Name"><input type="text" data-k="von" value="${esc(ferWert(f, 'von'))}" placeholder="KW 30 oder 24.12." aria-label="Von"><input type="text" data-k="bis" value="${esc(ferWert(f, 'bis'))}" placeholder="KW 31 oder 31.12." aria-label="Bis"><select data-k="art" aria-label="Gilt für">${Object.entries(FERART).map(([k, t]) => `<option value="${k}"${(f.art === k || (k === 'betrieb' && f.art === 'andere')) ? ' selected' : ''}>${t}</option>`).join('')}</select><button type="button" class="ferfarb" data-ferfarb="${f.id}" style="background:${ferFarbe(f) || '#BCC2C8'}" title="Farbe wählen (Standard grau)" aria-label="Farbe wählen"></button><button type="button" class="kg-ibtn danger" data-ferx="${f.id}" title="Löschen" aria-label="Löschen">${I('trash')}</button></div>`).join('') || '<div class="muted small" style="padding:6px 0">Noch keine.</div>'}
       <button type="button" class="btn btn-ghost" id="ferNeu">${I('plus')}Ferien</button></div>
     ${FERA.length ? `<h3>Ausnahmen einzelner Jahre</h3><div class="card azt">${FERA.map(x => { const f = FER.find(y => y.id === x.ferien_id); return `<div class="ferz aus"><span><b>${esc(f?.name || '?')} ${x.jahr}</b> · ${x.weg ? 'weggelassen' : esc(dLab(fromIso(x.von))) + ' – ' + esc(dLab(fromIso(x.bis)))}</span><button type="button" class="kg-ibtn danger" data-ferax="${x.id}" title="Ausnahme löschen (wieder wie jedes Jahr)" aria-label="Ausnahme löschen">${I('trash')}</button></div>`; }).join('')}</div>` : ''}</div>`;
   const neu = async () => { await ladeArbeitszeit(); renderArbeitszeit(); };
@@ -1140,8 +1154,14 @@ function renderArbeitszeit(){
   document.querySelectorAll('[data-azx]').forEach(b => b.onclick = () => bestaetige('Zeitraum löschen?', '', 'Löschen', async () => { const { error } = await sb.from('planer_arbeitszeit').delete().eq('id', b.dataset.azx); if(error) return fehler(error); neu(); }));
   $('azNeu').onclick = async () => { let w = kw(TODAY); while(AZ.some(a => a.ab_kw === w)) w = w % 53 + 1;
     const { error } = await sb.from('planer_arbeitszeit').insert({ ab_kw: w, start: '07:00', ende: '17:00', mittag: 1, stunden: 9 }); if(error) return fehler(error); neu(); };
-  document.querySelectorAll('.ferz [data-k]').forEach(i => i.onchange = async () => { const id = i.closest('[data-ferid]').dataset.ferid, k = i.dataset.k, v = k.endsWith('_kw') ? Math.min(53, Math.max(1, +i.value || 1)) : i.value.trim();
-    if(k === 'name' && !v) return; const { error } = await sb.from('planer_ferien').update({ [k]: v }).eq('id', id); if(error) return fehler(error); neu(); });
+  document.querySelectorAll('.ferz [data-k]').forEach(i => i.onchange = async () => { const id = i.closest('[data-ferid]').dataset.ferid, k = i.dataset.k, v = i.value.trim(); let row;
+    if(k === 'von' || k === 'bis'){ const w = v.match(/^(?:kw)?\s*(\d{1,2})$/i), d = v.match(/^(\d{1,2})\.(\d{1,2})\.?$/);
+      if(!v && k === 'bis') row = { bis_kw: null, bis_md: null };
+      else if(w && +w[1] >= 1 && +w[1] <= 53) row = k === 'von' ? { von_kw: +w[1], von_md: null, bis_md: null } : { bis_kw: +w[1], bis_md: null };
+      else if(d && +d[1] <= 31 && +d[2] <= 12){ const md = String(d[2]).padStart(2, '0') + '-' + String(d[1]).padStart(2, '0'); row = k === 'von' ? { von_md: md, von_kw: null, bis_kw: null } : { bis_md: md, bis_kw: null }; }
+      else { toast('Bitte «KW 30» oder ein Datum wie «24.12.» eingeben.', null, true); return; } }
+    else { if(k === 'name' && !v) return; row = { [k]: v }; }
+    const { error } = await sb.from('planer_ferien').update(row).eq('id', id); if(error) return fehler(error); neu(); });
   document.querySelectorAll('[data-ferx]').forEach(b => b.onclick = () => bestaetige('Ferien löschen?', '<div>Auch die Ausnahmen einzelner Jahre werden gelöscht.</div>', 'Löschen', async () => { const { error } = await sb.from('planer_ferien').delete().eq('id', b.dataset.ferx); if(error) return fehler(error); neu(); }));
   document.querySelectorAll('[data-ferax]').forEach(b => b.onclick = async () => { const { error } = await sb.from('planer_ferien_ausnahme').delete().eq('id', b.dataset.ferax); if(error) return fehler(error); neu(); });
   // Farbe: kleines Fenster mit der Palette, Standard grau
@@ -2002,7 +2022,7 @@ function personRow(p, W, bgx, offen = false){
     return `<div class="row offen${p.gprov ? ' offg' : ''}" data-offp="${p.id}"><div class="nm" title="Noch nicht abgemacht – hochziehen = abmachen"><span>${esc(p.offLab || 'offen')}</span></div><div class="lane${ed ? ' ed' : ''}" data-mid="${p.id}" data-off="1" style="width:${W}px;height:${n * 17 + 4}px;${bgx}">${feierHTML()}${bars}${provBars('p:' + p.id)}${p.gprov ? provBars('g:' + p.gprov) : ''}</div></div>`;
   }
   const mine = p.benutzer_id === ME;
-  return `<div class="row${istAzZeile(p.id) ? ' azz' : ''}${openMid === p.id ? " fokusp" : ""}${MARKS.includes(p.id) ? " mark" : ""}${P[p.id] && phGruppe()?.id === p.gruppe_id ? " ph" : ""}${GRUPPEN.some(g => g.id === p.gruppe_id && /^neu$/i.test(g.name)) ? " neup" : ""}" data-mid="${p.id}"><div class="nm"${p.farbe ? ` style="--pf:${p.farbe};--pft:${txtOn(p.farbe)}"` : ''} title="${esc(p.name + (p.zusatz ? ' · ' + p.zusatz : ''))}">${isBuero() ? `<span class="pgrip" title="Ziehen: Reihenfolge oder Gruppe ändern">${I('grip')}</span>` : ''}<span class="n">${esc(p.name)}</span>${pzPunkt(p.id)}${p.zusatz ? `<span class="z">${esc(p.zusatz)}</span>` : ''}${mine ? '<span class="me">Ich</span>' : ''}${p.farbe && !p.ist_projektleiter ? `${mabKnopf(p)}<button class="mab mab2${openMid === p.id && openTyp === 'fahrzeug' ? ' on' : ''}" data-mab="${p.id}" data-typ="fahrzeug" title="Lieferwagen und Anhänger einteilen (aufklappen)" aria-label="Lieferwagen einteilen">${I('truck')}</button>` : ''}</div><div class="lane${ed ? ' ed' : ''}" data-mid="${p.id}" style="width:${W}px;${bgx}">${feierHTML()}${istAzZeile(p.id) ? ferBars() + azBand() : ''}${bars}${hatOffen(p.id) ? '' : provBars('p:' + p.id)}${p.id === svcRowId() ? svcRowBars() : ''}${vehIcons(p)}${markHTML(p)}</div></div>`;
+  return `<div class="row${istAzZeile(p.id) ? ' azz' : ''}${openMid === p.id ? " fokusp" : ""}${MARKS.includes(p.id) ? " mark" : ""}${P[p.id] && phGruppe()?.id === p.gruppe_id ? " ph" : ""}${GRUPPEN.some(g => g.id === p.gruppe_id && /^neu$/i.test(g.name)) ? " neup" : ""}" data-mid="${p.id}"><div class="nm"${p.farbe ? ` style="--pf:${p.farbe};--pft:${txtOn(p.farbe)}"` : ''} title="${esc(p.name + (p.zusatz ? ' · ' + p.zusatz : ''))}">${isBuero() ? `<span class="pgrip" title="Ziehen: Reihenfolge oder Gruppe ändern">${I('grip')}</span>` : ''}<span class="n">${esc(p.name)}</span>${pzPunkt(p.id)}${p.zusatz ? `<span class="z">${esc(p.zusatz)}</span>` : ''}${mine ? '<span class="me">Ich</span>' : ''}${p.farbe && !p.ist_projektleiter ? `${mabKnopf(p)}<button class="mab mab2${openMid === p.id && openTyp === 'fahrzeug' ? ' on' : ''}" data-mab="${p.id}" data-typ="fahrzeug" title="Lieferwagen und Anhänger einteilen (aufklappen)" aria-label="Lieferwagen einteilen">${I('truck')}</button>` : ''}</div><div class="lane${ed ? ' ed' : ''}" data-mid="${p.id}" style="width:${W}px;${bgx}">${feierHTML()}${istAzZeile(p.id) ? ferBars() + azIcons() : ''}${bars}${hatOffen(p.id) ? '' : provBars('p:' + p.id)}${p.id === svcRowId() ? svcRowBars() : ''}${vehIcons(p)}${markHTML(p)}</div></div>`;
 }
 // Aufgeklappt (Maschinen / Lieferwagen): Baustellen-Zeitraum der Person mit Rahmen in ihrer Farbe,
 // links und rechts davon grau wie der Rest
