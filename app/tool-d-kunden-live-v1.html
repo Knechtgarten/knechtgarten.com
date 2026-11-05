@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <script src="/kg-pw-schutz.js?v=5"></script>
 <script src="/kg-stil.js?v=44"></script>
+<script src="/kg-doku.js?v=8"></script>
+<script src="/kg-kundenordner.js?v=1"></script>
 <title>Kontakte – Kunden und Lieferanten</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
@@ -161,6 +163,8 @@ tr.offertenrow td{padding:0;border-bottom:1px solid var(--soft);}
 .ovl.show{display:flex;}
 .ovlbox{background:#fff;border-radius:12px;max-width:360px;width:100%;padding:18px 20px;box-shadow:0 12px 40px rgba(0,0,0,.25);}
 .ovlbox.wide{max-width:640px;max-height:88vh;overflow-y:auto;}
+.ordz{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid #EEF1F3;font-size:13px;}
+.ordz a{color:var(--primary);font-weight:600;text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;} .ordz span{color:var(--muted);font-size:12px;} .ordz small{color:var(--muted);}
 .ovlmsg{font-size:15px;font-weight:700;color:var(--primary);margin-bottom:16px;}
 .ovlbtns{display:flex;justify-content:flex-end;gap:8px;margin-top:6px;}
 
@@ -483,6 +487,7 @@ tr.offertenrow > td{border:1px solid #323E4E;border-top:0;padding:0!important;} 
 const SUPABASE_URL = 'https://oalapdxinqlnzwxhyuzy.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_DoeD4uEnwemmnFu4AxE9uw_5lmQYc5P';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+KKO.init(sb); KKO.vorladen(); // Kundenordner im Google Drive
 const ROLLE_LABEL = { admin: 'Admin', buero_team: 'Büro-Team', mitarbeitende: 'Mitarbeitende', service_team: 'Service-Team' };
 
 const $ = id => document.getElementById(id);
@@ -1093,6 +1098,44 @@ const kDat = v => { if(!v) return ''; const [y, m, d] = String(v).slice(0, 10).s
 const kBetrag = n => n == null ? '' : Number(n).toLocaleString('de-CH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const kachel = (titel, links, inhalt, extra = '') => `<section class="kk${extra}"><div class="kkk"><h4>${titel}</h4><span class="kkl">${links}</span></div><div class="kki">${inhalt}</div></section>`;
 const leerT = t => `<span class="kkleer">${t}</span>`;
+// ---------------------------------------------------------------------------
+// Ablage im Google Drive: Kundenordner pro Jahr (verknüpft über die Ordner-ID), anlegen aus der Vorlage, verknüpfen mit Vorschlägen
+// ---------------------------------------------------------------------------
+const ORDNER_K = {}; let GOOGLE_OK = null;
+async function ordnerLaden(id){ if(ORDNER_K[id]?.laedt) return; ORDNER_K[id] = { laedt: true };
+  try { const [l, ok] = await Promise.all([KKO.liste(id), GOOGLE_OK === null ? KKO.verbunden() : GOOGLE_OK]); GOOGLE_OK = ok; ORDNER_K[id] = { liste: l }; }
+  catch(e){ ORDNER_K[id] = { liste: [], fehler: e.message }; }
+  if(geoeffneterKunde === id) renderKundenTable(); }
+function ordnerKnoepfe(k){ const o = ORDNER_K[k.id]; if(!o || o.laedt) return ''; if(!GOOGLE_OK) return `<button type="button" class="kklink" data-gverb="1">Google verbinden</button>`;
+  const j = new Date().getFullYear(); return `<button type="button" class="kklink" data-ordverk="${k.id}">Verknüpfen</button>${o.liste.some(x => x.jahr === j) ? '' : `<button type="button" class="kklink" data-ordneu="${k.id}">${j} anlegen</button>`}`; }
+function ordnerKachel(k){ const o = ORDNER_K[k.id]; if(!o){ ordnerLaden(k.id); return leerT('Lädt …'); } if(o.laedt) return leerT(o.text || 'Lädt …');
+  const l = o.liste.map(x => `<a class="kkz" href="${KKO.link(x.drive_id)}" target="_blank" rel="noopener"><span class="t">${escHtml(x.name || 'Ordner')}</span><span class="d">${x.jahr || 'Stamm'}</span></a>`).join('');
+  return (l || leerT(GOOGLE_OK ? 'Noch kein Ordner verknüpft.' : 'Für die Ordner einmal «Google verbinden».')) + (o.fehler ? `<div class="kkleer">${escHtml(o.fehler)}</div>` : ''); }
+async function ordnerAnlegen(k){ ORDNER_K[k.id] = { laedt: true, text: 'Ordner wird aus der Vorlage angelegt …' }; renderKundenTable();
+  try { const o = await KKO.anlegen(k); showToast(`Ordner «${o.name}» im Drive angelegt.`); } catch(e){ showToast('Drive: ' + e.message, true); }
+  delete ORDNER_K[k.id]; ordnerLaden(k.id); }
+async function ordnerVerknuepfenDlg(k){
+  const w = document.createElement('div'); w.className = 'ovl show'; document.body.appendChild(w);
+  const zeichne = (vor, liste, info) => { w.innerHTML = `<div class="ovlbox wide"><div class="ovlmsg">Drive-Ordner von ${escHtml(anzeigename(k))}</div>
+    ${liste.length ? `<div class="cardlabel-sub" style="margin-top:0">Verknüpft</div>${liste.map(x => `<div class="ordz"><a href="${KKO.link(x.drive_id)}" target="_blank" rel="noopener">${escHtml(x.name || 'Ordner')}</a><span>${x.jahr || 'Stamm'}</span><button type="button" class="kg-ibtn danger" data-olos="${x.id}" title="Verknüpfung lösen (Ordner bleibt im Drive)" aria-label="Verknüpfung lösen">${KG.icon('x', 12)}</button></div>`).join('')}` : ''}
+    <div class="cardlabel-sub">Vorschläge aus den Jahresordnern</div>${vor === null ? '<div class="kkleer">Sucht im Drive …</div>' : vor.length ? vor.map((v, i) => `<div class="ordz"><a href="${KKO.link(v.id)}" target="_blank" rel="noopener">${escHtml(v.name)}</a><span>${v.jahr || ''} · ${escHtml(v.gruende.join(', '))}</span>${liste.some(x => x.drive_id === v.id) ? '<small>verknüpft</small>' : `<button type="button" class="btn" data-ovor="${i}">Verknüpfen</button>`}</div>`).join('') : '<div class="kkleer">Kein passender Ordner gefunden.</div>'}
+    <div class="cardlabel-sub">Oder Link auf einen Drive-Ordner einfügen</div><div class="row"><div class="fld" style="flex:1"><input id="ordLink" placeholder="https://drive.google.com/drive/folders/…" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other"></div><button type="button" class="btn" id="ordLinkOk">Verknüpfen</button></div>
+    ${info ? `<div class="status err">${escHtml(info)}</div>` : ''}<div class="ovlbtns"><button type="button" class="btn" data-ozu>Fertig</button></div></div>`;
+    w._vor = vor; };
+  const neu = async info => { const l = await KKO.liste(k.id); zeichne(w._vor ?? null, l, info); return l; };
+  let liste = await KKO.liste(k.id); zeichne(null, liste);
+  KKO.vorschlaege(k).then(v => zeichne(v, liste)).catch(e => zeichne([], liste, e.message));
+  w.addEventListener('click', async e => { const b = e.target.closest('button'); if(e.target === w || (b && 'ozu' in b.dataset)){ w.remove(); delete ORDNER_K[k.id]; ordnerLaden(k.id); return; } if(!b) return;
+    try {
+      if(b.dataset.ovor != null){ const v = w._vor[+b.dataset.ovor]; await KKO.verknuepfen(k.id, v); liste = await neu(); }
+      else if(b.dataset.olos){ await KKO.loesen(b.dataset.olos); liste = await neu(); }
+      else if(b.id === 'ordLinkOk'){ const o = await KKO.ausLink(w.querySelector('#ordLink').value); await KKO.verknuepfen(k.id, o); liste = await neu(); }
+    } catch(err){ liste = await neu(err.message); } });
+}
+document.addEventListener('click', async e => { const b = e.target.closest('[data-gverb],[data-ordneu],[data-ordverk]'); if(!b) return; e.stopPropagation();
+  if(b.dataset.gverb){ try { await KGD.googleVerbinden(); GOOGLE_OK = true; Object.keys(ORDNER_K).forEach(id => delete ORDNER_K[id]); renderKundenTable(); } catch(err){ showToast(err.message, true); } return; }
+  const k = KUNDEN.find(x => x.id === (b.dataset.ordneu || b.dataset.ordverk)); if(!k) return;
+  if(b.dataset.ordneu) ordnerAnlegen(k); else ordnerVerknuepfenDlg(k); }, true);
 function kundeDetail(k){
   const T = [];
   T.push(kachel('Adresse &amp; Kontakt', MIT_ADR ? `<button type="button" class="kklink km-edit" data-id="${k.id}">Bearbeiten</button>` : '', adresseHtml([anzeigename(k), k.vorname].filter(Boolean).join(' '), k)));
@@ -1119,6 +1162,7 @@ function kundeDetail(k){
     T.push(kachel('Bauprogramm', '', bps.length ? bps.map(b => `<a class="kkz" href="bauprogramm-live-v1.html?programm=${b.id}"><span class="t">Bauprogramm</span><span class="d">ab ${kDat(b.start)}</span><span class="b">öffnen</span></a>`).join('')
       : leerT(AB_SET.has(k.id) ? 'Noch keines. Im Einsatzplaner: Rechtsklick auf den Baustellen-Balken › «Bauprogramm erstellen».' : 'Keines.')));
     const doks = DOKU_PRO_KUNDE[k.id];
+    T.push(kachel('Ablage (Drive)', ordnerKnoepfe(k), ordnerKachel(k)));
     T.push(kachel('Dokumente', `<a class="kklink" href="doku-live-v1.html">Neu</a>`, !doks ? leerT('Lädt …') : !doks.length ? leerT('Keine Dokumente.')
       : doks.map(d => `<a class="kkz" href="doku-dokument-live-v1.html?d=${d.id}"><span class="t">${escHtml(d.vorlage ? d.vorlage.name : 'Dokument')}</span><span class="d">${kDat(d.datum)}</span><span class="b">${d.drive_datei_id ? 'im Drive' : ''}</span></a>`).join('')));
     T.push(kachel('Easybill', k.easybill_id ? `<button type="button" class="kklink eb-kunde" data-id="${k.id}">Jetzt holen</button>` : '', easybillKachel(k)));
