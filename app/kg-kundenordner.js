@@ -66,6 +66,7 @@
       }
       return { ordner: o, dateien: erg };
     },
-    async dateien(ordnerId){ return kinder(ordnerId, false); }
+    async dateien(ordnerId){ return kinder(ordnerId, false); },
+    ROOT, async unterordner(id){ return kinder(id, true); }
   };
 })();
