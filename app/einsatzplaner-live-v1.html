@@ -234,6 +234,7 @@ body.kopiert, body.kopiert *{cursor:copy !important;}
 .aufp{width:300px;flex:none;border-left:1px solid var(--line);border-top:1px solid var(--line);background:#fff;overflow:auto;height:calc(100vh - 200px);min-height:300px;font-size:12px;}
 .aufp.zu{width:34px;overflow:hidden;}
 .aufp.drop{background:#F2F5D6;}
+.vorrat.drop,.vorrat.drop .vnm{background:#F2F5D6;} .vorrat.drop{outline:2px dashed var(--primary);outline-offset:-2px;} /* Balken zurück in den Vorrat ziehen */
 .auftab{all:unset;cursor:pointer;writing-mode:vertical-rl;padding:12px 8px;font-weight:700;color:var(--primary);font-size:12px;}
 .ahead{display:flex;align-items:center;justify-content:space-between;padding:8px 10px;border-bottom:1px solid var(--line);}
 .ahint{font-size:10.5px;color:var(--muted);padding:6px 10px;}
@@ -1082,6 +1083,30 @@ function vorratDialog(v, tage, rect){
     VOR = VOR.filter(x => x !== v); vorratZeichnen();
     toast(`Aus dem Vorrat gelöscht: ${vLab(v)}`, async () => { const { error: e2 } = await sb.from('planer_vorrat').insert(v); if(e2){ fehler(e2); return; } VOR.push(v); vSort(); vorratZeichnen(); });
   };
+}
+// Zurück in den Vorrat: Planer-Balken nach oben in den Vorrat ziehen (z. B. Kunde hat abgesagt).
+// Länge = geplante Arbeitstage (fix) bzw. aktuelle Arbeitstage; der Balken verschwindet, Rückgängig im Hinweis.
+const insVorratOk = it => (it.kind === 'baustelle' || it.kind === 'termin') && !it.wdh && !it.rep && canEdit(it.mid);
+async function zurueckInVorrat(it){
+  if(it.files?.length){ toast('Der Termin hat Dateien – bitte zuerst die Dateien entfernen oder den Termin löschen.', null, true); return; }
+  const tage = Math.max(.5, Math.round((it.soll || LAY[it.id]?.n || (it.e - it.s)) * 2) / 2);
+  const g = GRUPPEN.find(x => x.id === P[it.mid]?.gruppe_id), bereich = it.kind === 'baustelle' ? (/lehrling/i.test(g?.name || '') ? 'lehrling' : 'bau') : 'pflege';
+  const { data: pz } = await sb.from('pendenz').select('id').eq('planer_einsatz_id', it.id).limit(1);
+  const pendenz_id = pz?.[0]?.id || null;
+  const { data: v, error } = await sb.from('planer_vorrat').insert({ kunde_id: it.kid || null, titel: it.title || null, notiz: it.text || null, tage, bereich, geschaetzt: false,
+    projektleiter_id: it.pl || null, erstellt_von: ME, pendenz_id }).select('*').single();
+  if(error){ fehler(error, 'Vorrat'); return; }
+  const kopie = { ...it }, row = itemToRow(kopie); row.id = kopie.id; row.erstellt_von = ME;
+  const { error: e2 } = await sb.from('planer_einsatz').delete().eq('id', it.id);
+  if(e2){ await sb.from('planer_vorrat').delete().eq('id', v.id); fehler(e2, 'Vorrat'); return; }
+  if(pendenz_id) await sb.from('pendenz').update({ planer_einsatz_id: null, eingeplant_am: null }).eq('id', pendenz_id);
+  EINS = EINS.filter(x => x.id !== it.id); if(selId === it.id) closePanel();
+  VOR.push(v); vSort(); if(!VOR_OFFEN){ VOR_OFFEN = true; lsSet('vorratOffen', true); } render();
+  toast(`Zurück im Vorrat: ${vLab(v)} · ${fmtN(tage)} T`, async () => {
+    const { error: e3 } = await sb.from('planer_einsatz').insert(row); if(e3){ fehler(e3); return; }
+    await sb.from('planer_vorrat').delete().eq('id', v.id); VOR = VOR.filter(x => x.id !== v.id);
+    if(pendenz_id) await sb.from('pendenz').update({ planer_einsatz_id: kopie.id, eingeplant_am: new Date().toISOString() }).eq('id', pendenz_id);
+    EINS.push(kopie); render(); });
 }
 // Einplanen: Vorrat-Balken auf eine Personenzeile ziehen (Beginn = Tag unter der Maus, Länge = Arbeitstage)
 async function vorratEinplanen(v, mid, u){
@@ -3208,7 +3233,8 @@ function bindWindow(){
         (m.wdh.aus ||= []).push(isoDate(o.d)); const tmp = { ...o, id: 'T' + o.id }; EINS.push(tmp); drag.occ = { o: { ...o }, m }; drag.id = tmp.id; }
       drag.moved = true; const it = byId(drag.id); const du = snapU(uAt(e.clientX) - drag.u0); const sn = SNAP[zoom];
       if(drag.mode === 'move'){ if(it.fix){ if(du) drag.fixHit = true; } else { it.s = r48(drag.s0 + du); it.e = r48(drag.e0 + du); } // Start fix: nur auf andere Person
-        const el = document.elementFromPoint(e.clientX, e.clientY)?.closest('.lane[data-mid]'); if(el && canEdit(el.dataset.mid)) it.mid = el.dataset.mid; }
+        const ue = document.elementFromPoint(e.clientX, e.clientY), el = ue?.closest('.lane[data-mid]'); if(el && canEdit(el.dataset.mid)) it.mid = el.dataset.mid;
+        if(vorratAn() && !drag.copy && !drag.occ && !it.wdh) $('vorrat')?.classList.toggle('drop', !!ue?.closest('#vorrat') && insVorratOk(it)); }
       else if(drag.mode === 'l'){ it.s = r48(Math.min(drag.e0 - sn, drag.s0 + du)); // Unterbrüche bleiben am gleichen Datum
         if(drag.pz0) it.pz = drag.pz0.map(([a, c]) => [r48(a + drag.s0 - it.s), r48(c + drag.s0 - it.s)]).filter(([a, c]) => c > 0).map(([a, c]) => [Math.max(0, a), c]);
         if(drag.at0){ const dk = Math.floor(drag.s0 * 2 + 1e-9) - Math.floor(it.s * 2 + 1e-9); it.at = drag.at0.map(r => r + dk).filter(r => r >= 0); } }
@@ -3338,6 +3364,12 @@ function bindWindow(){
       const neu = await neuerEinsatz({ mid: tmp.mid, kind: tmp.kind, s: tmp.s, e: tmp.e, kid: tmp.kid, title: tmp.title, pl: tmp.pl, ok: tmp.ok, link: tmp.link, allein: tmp.allein, pz: tmp.pz, kv: d.orig, ueber: tmp.ueber, weicht: tmp.weicht }, false);
       if(neu) toast(`Kopiert: ${labOf(neu)} · ${spanLabel(neu)}${neu.mid !== d.mid0 ? ' · ' + P[neu.mid]?.name : ''}`, () => loescheEinsatz(neu));
       return; }
+    if(d.kind === 'bar') $('vorrat')?.classList.remove('drop');
+    if(d.kind === 'bar' && d.moved && vorratAn() && !d.copy && !d.occ && document.elementFromPoint(e.clientX, e.clientY)?.closest('#vorrat')){
+      const it = byId(d.id); Object.assign(it, { s: d.s0, e: d.e0, mid: d.mid0, ...(d.pz0 ? { pz: d.pz0 } : {}), ...(d.at0 ? { at: d.at0 } : {}) }); renderRows();
+      if(insVorratOk(it)) await zurueckInVorrat(it); else toast('Nur Baustellen und Termine (ohne Wiederholung) können in den Vorrat.', null, true);
+      return;
+    }
     if(d.kind === 'bar' && d.moved && isBuero() && document.elementFromPoint(e.clientX, e.clientY)?.closest('#aufp')){
       const it = byId(d.id); Object.assign(it, { s: d.s0, e: d.e0, mid: d.mid0 }); $('aufp').classList.remove('drop');
       await zurueckInsMagazin(it); return;
@@ -3415,9 +3447,8 @@ function bindWindow(){
       const tagWechsel = Math.floor(it.s + 1e-9) !== Math.floor(d.s0 + 1e-9) || Math.ceil(it.e - 1e-9) !== Math.ceil(d.e0 - 1e-9), aw = !inAblage && tagWechsel ? ausserWunsch(it) : [];
       if(aw.length && (await wunschFrage(it, aw, { x: e.clientX, y: e.clientY })) !== 'ok'){ Object.assign(it, vorher); renderRows(); return; }
       if(!inAblage && (await ablegenPruefen(it, { x: e.clientX, y: e.clientY })) === 'ab'){ Object.assign(it, vorher); renderRows(); return; }
-      // Rand gezogen: fixe Arbeitstage bleiben (Abweichung = rot, «übernehmen» im Hinweis); nur wer nicht mehr lang ist, verliert sie
-      const keinLang = !inAblage && it.soll && !istLang(it); if(keinLang) it.soll = null;
-      const ok = await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true), person_id: it.mid, uebereinander: !!it.ueber, weicht: !!it.weicht, ...(keinLang ? { soll_tage: null } : {}), ...(d.pz0 && d.mode === 'l' ? { pausen: it.pz } : {}), ...(d.at0 && d.mode === 'l' ? { allein_tage: it.at } : {}) });
+      // Rand gezogen: fixe Arbeitstage bleiben, auch wenn der Balken ganz klein wird (Abweichung = rot, «übernehmen» im Hinweis); ausschalten nur von Hand
+      const ok = await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true), person_id: it.mid, uebereinander: !!it.ueber, weicht: !!it.weicht, ...(d.pz0 && d.mode === 'l' ? { pausen: it.pz } : {}), ...(d.at0 && d.mode === 'l' ? { allein_tage: it.at } : {}) });
       if(!ok){ Object.assign(it, vorher); renderRows(); return; }
       tageFixNachholen(); // neu lang geworden = fixe Arbeitstage
       if(!inAblage) await vorabUebernehmen(it); // auf vorgemerktes «Allein» gezogen
@@ -3748,7 +3779,7 @@ function openPanel(id, isNew){
   const abw = it.soll && Math.abs(L.n - it.soll) > .01;
   const fixe = auftrag && !offen ? `<div class="fixe">
     ${it.fix ? `<div class="fx fxinfo" title="Start fix – lösen per Rechtsklick auf den Balken">${I('lock')}<span>Start fix</span><input type="text" id="pFixG" class="fxg" value="${esc(it.fixg)}" placeholder="Grund, z. B. mit Kunde fix abgemacht" ${dis}></div>` : ''}
-    ${istLang(it) && !it.wdh ? `<label class="fx tfix"><input type="checkbox" id="pTageFix"${it.frei ? '' : ' checked'} ${dis}><span>Arbeitstage fix${!it.frei && it.soll ? ': ' + tageTxt(it.soll) : ''}</span></label>` : ''}
+    ${(istLang(it) || it.soll) && !it.wdh ? `<label class="fx tfix"><input type="checkbox" id="pTageFix"${it.frei ? '' : ' checked'} ${dis}><span>Arbeitstage fix${!it.frei && it.soll ? ': ' + tageTxt(it.soll) : ''}</span></label>` : ''}
     ${abw ? `<div class="fxw">Geplant ${tageTxt(it.soll)}, aktuell ${tageTxt(L.n)}${ed ? ` <button class="lk" id="pSollWeg">${tageTxt(L.n)} übernehmen</button>` : ''}</div>` : ''}</div>` : '';
   // Kopie: Herkunft zeigen; Notiz, Fotos und Dokumente erst auf Wunsch vom Original holen
   const orig = it.kv ? byId(it.kv) : null;
