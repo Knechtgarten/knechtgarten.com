@@ -30,7 +30,9 @@
     async verknuepfen(kundeId, o){ const { data, error } = await KKO.sb.from('kunde_ordner').upsert({ kunde_id: kundeId, jahr: o.jahr ? +o.jahr : null, drive_id: o.id, name: o.name }, { onConflict: 'kunde_id,drive_id' }).select().single(); if(error) throw error; return data; },
     async loesen(id){ const { error } = await KKO.sb.from('kunde_ordner').delete().eq('id', id); if(error) throw error; },
     // Vorschläge aus den Jahresordnern (Name, Ort, Strasse) – nur Vorschläge, bestätigen muss man selbst
-    async vorschlaege(k){ return KGD.ordnerVorschlag({ kunde_name: [k.nachname || k.firma || k.name].filter(Boolean).join(' '), ort: k.ort, strasse: k.strasse }); },
+    // Ortsname im Kundennamen («Aarekies Brienz AG») zählt nicht als Name; nur Ordner, bei denen der Name passt
+    async vorschlaege(k){ const ort = ortOhnePlz(k.ort).toLowerCase(), name = String(k.nachname || k.firma || k.name || '').split(/\s+/).filter(w => !ort || w.toLowerCase() !== ort).join(' ');
+      return (await KGD.ordnerVorschlag({ kunde_name: name, ort: k.ort, strasse: k.strasse })).filter(v => v.gruende.includes('Name passt')); },
     async ausLink(text){ const o = await KGD.ordnerAusLink(text); const f = await KGD.gapi(`files/${o.id}?supportsAllDrives=true&fields=id,name,parents`);
       let jahr = null; if(f.parents && f.parents[0]){ try { const p = await KGD.gapi(`files/${f.parents[0]}?supportsAllDrives=true&fields=name`); if(/^\d{4}$/.test(p.name)) jahr = +p.name; } catch(e){} }
       return { id: f.id, name: f.name, jahr }; },
