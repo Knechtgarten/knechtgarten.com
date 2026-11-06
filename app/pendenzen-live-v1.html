@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script src="/kg-pw-schutz.js?v=5"></script>
-<script src="/kg-stil.js?v=43"></script>
+<script src="/kg-stil.js?v=45"></script>
 <script src="/kg-doku.js?v=8"></script>
 <script src="/kg-kundenordner.js?v=3"></script>
 <title>Pendenzen – Knechtgarten</title>
@@ -129,6 +129,7 @@ button:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
 .pane.schmal .pgriff{margin-left:0;}
 .pane.ziel{box-shadow:inset 0 0 0 2px var(--primary);background:var(--accent-blue) !important;}
 .ptitle svg{width:13px;height:13px;}
+.ptitle .pordnen{width:22px;height:22px;margin-left:4px;}
 .pane.schmal .ptitle{padding:8px 0 0;justify-content:center;}
 .pane.schmal .ptitle span{display:none;}
 .canvas{position:relative;overflow-x:hidden;overflow-y:auto;flex:1;min-height:0;}
@@ -548,6 +549,18 @@ const name = uid => { const b = S.benutzer[uid]; return b ? (b.anzeigename || b.
 // wer hat's eingetragen: Anfangsbuchstabe in hellem Ring (S Stefan, B Benno, F Fabian, P Pascal), voller Name beim Drüberfahren
 const kuerzel = uid => { const n = name(uid); return n ? `<span class="kz" title="von ${esc(n)}">${esc(n.trim()[0].toUpperCase())}</span>` : '<span class="kz leer"></span>'; };
 function fehler(e, was){ console.error(e); toast((was ? was + ': ' : '') + (e?.message || e), null, true); }
+// «Ordnen»: Listen in der Mitte zugeklappt in 2–3 Spalten (je nach Platz), Reihenfolge wie bisher (oben links zuerst); rückgängig machbar
+async function ordnen(){
+  const pane = document.querySelector('[data-pane="mitte"]'), W = pane ? pane.clientWidth - 2 * R : 3 * (LW + R);
+  const ls = S.listen.filter(l => bereichOf(l) === 'mitte').sort((a, b) => a.y - b.y || a.x - b.x);
+  const n = Math.max(1, Math.min(3, Math.floor((W + R) / (LW + R)))), schritt = 56;
+  const alt = ls.map(l => ({ l, x: l.x, y: l.y, zu: l.zu, breite: l.breite }));
+  ls.forEach((l, i) => Object.assign(l, { x: (i % n) * (LW + R), y: R + Math.floor(i / n) * schritt, zu: true, breite: null }));
+  zeichne();
+  const speichern = rows => Promise.all(rows.map(r => upd('pendenz_liste', r.l.id, { x: r.x, y: r.y, zu: r.zu, breite: r.breite })));
+  await speichern(ls.map(l => ({ l, x: l.x, y: l.y, zu: l.zu, breite: null })));
+  toast('Listen geordnet', async () => { alt.forEach(r => Object.assign(r.l, { x: r.x, y: r.y, zu: r.zu, breite: r.breite })); zeichne(); await speichern(alt); });
+}
 function toast(t, undo, err){ S.toast = { t, undo, err }; zeichneOver(); clearTimeout(toast.h); toast.h = setTimeout(() => { S.toast = null; zeichneOver(); }, 4500); }
 // Reihenfolge: neuer Wert zwischen den Nachbarn
 const zwischen = (a, b) => a == null && b == null ? 1 : a == null ? b - 1 : b == null ? a + 1 : (a + b) / 2;
@@ -803,7 +816,7 @@ function zeichne(){
     // Linie zwischen zwei festen Bereichen: der eine wird breiter, der andere gleich viel schmaler – nur diese Linie bewegt sich.
     const vor = reihe()[i - 1], paar = vor !== 'mitte' && zn !== 'mitte', fest = vor === 'mitte' ? zn : vor, links = fest === vor;
     return (i ? `<div class="split${S.splitOn === (paar ? vor + '|' + zn : fest) ? ' on' : ''}" ${paar ? `data-paar="${vor}|${zn}"` : `data-split="${fest}" data-links="${links ? 1 : 0}"`} role="separator" aria-label="Breite ändern"><span class="grip"></span></div>` : '')
-      + `<div class="pane ${zn === 'mitte' ? 'flex' : 'seite'}${modus === 'schmal' ? ' schmal' : ''}" data-pane="${zn}"${zn !== 'mitte' ? ` style="width:${w}px"` : ''}>${zn === 'team' ? ablage : ''}<div class="ptitle">${istOfferten() ? `${A('dok', 13)}<span>Offerten${S.ofMeine ? ' – meine' : ' – alle'}</span>` : `${reihe().length > 1 ? `<span class="pgriff" data-pgriff="${zn}" title="Bereich verschieben: ziehen und auf einen anderen Bereich fallen lassen">${KG.icon('griff', 14)}</span>` : ''}${A(BEREICHE[zn][1], 13)}<span>${BEREICHE[zn][0]}</span>`}</div>${inhalt}</div>`; }).join('')}`
+      + `<div class="pane ${zn === 'mitte' ? 'flex' : 'seite'}${modus === 'schmal' ? ' schmal' : ''}" data-pane="${zn}"${zn !== 'mitte' ? ` style="width:${w}px"` : ''}>${zn === 'team' ? ablage : ''}<div class="ptitle">${istOfferten() ? `${A('dok', 13)}<span>Offerten${S.ofMeine ? ' – meine' : ' – alle'}</span>` : `${reihe().length > 1 ? `<span class="pgriff" data-pgriff="${zn}" title="Bereich verschieben: ziehen und auf einen anderen Bereich fallen lassen">${KG.icon('griff', 14)}</span>` : ''}${A(BEREICHE[zn][1], 13)}<span>${BEREICHE[zn][0]}</span>${zn === 'mitte' && ls.length > 1 ? `<button type="button" class="kg-ibtn pordnen" data-ordnen title="Ordnen: alle Listen zugeklappt nebeneinander und untereinander" aria-label="Listen ordnen">${KG.icon('raster', 13)}</button>` : ''}`}</div>${inhalt}</div>`; }).join('')}`
     + (ablSpalte() ? `<div class="pane seite ablspalte${zlist ? ' breit' : ''}"><div style="height:12px"></div>${ablage}</div>` : '') + '</div>';
   KAPPE = Infinity;
   document.documentElement.style.setProperty('--oben', Math.round($('main').getBoundingClientRect().top) + 'px'); // Kopf + weisse Leiste
@@ -1337,6 +1350,7 @@ document.addEventListener('click', async e => {
   if('pickx' in d || d.bg === 'pick'){ S.pick = null; return zeichneOver(); }
   if('psenden' in d){ return sendePick(); }
   if(d.pperson){ const p = S.pz.find(x => x.id === S.pick.id), pe = S.pick.daten.personen.find(x => x.id === d.pperson); return inPlaner(p, pe); }
+  if('ordnen' in d){ e.stopPropagation(); return ordnen(); }
   if(d.tog){ e.stopPropagation(); const l = listeById(d.tog); l.zu = !l.zu; zeichne(); return upd('pendenz_liste', l.id, { zu: l.zu }); }
   if(d.gtog){ const g = S.gruppen.find(x => x.id === d.gtog); g.zu = !g.zu; zeichne(); return upd('pendenz_gruppe', g.id, { zu: g.zu }); }
   if(d.set){ if(S.pop) await gruppeAusFeld(); S.pop = S.pop === d.set ? null : d.set; S.delListe = false; return zeichneOver(); }
