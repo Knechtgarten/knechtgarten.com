@@ -219,6 +219,7 @@ button:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
 .kneu .vrw{display:flex;gap:8px;align-items:center;} .kneu .vrw .sp{flex:1;}
 /* Vorrat-Fenster: Offerten des Kunden zum Anhaken */
 .vofl{display:flex;flex-direction:column;border:1px solid #D5DBE1;border-radius:8px;max-height:min(340px,40vh);overflow:auto;}
+.voz em.vkein{color:#B4655F;font-weight:600;font-size:11.5px;white-space:normal;text-align:right;max-width:150px;}
 .voz.schon{background:#FAFBFC;} .voz.schon b{color:#6B7079;} .voz i{font-style:normal;font-size:10.5px;font-weight:600;color:#4C5C70;background:#EEF1F4;border-radius:99px;padding:1px 7px;margin-left:6px;}
 #vorratDlg .vset{width:min(640px,calc(100vw - 32px));max-width:none;}
 .vset .vzus{flex-wrap:wrap;} .vset .vzus .vfl:first-child{width:150px;flex:none;} .vset .vzus .vfl.vgr{min-width:200px;} .vset .vtot{flex-wrap:wrap;}
@@ -839,6 +840,7 @@ function detHtml(){
     ${l.art_id === 'offerte' || OF(l.art_id) ? `<div class="ofrow okrow"><span class="small muted">Kunde</span><div id="dkunde" class="vset"></div></div>` : ''}
     ${OF(l.art_id) ? `<div class="ofrow"><span class="small muted">Chance</span><div class="seg" role="group" aria-label="Chance">${[1,2,3,0].map(c => `<button data-dchance="${c}" aria-pressed="${(p.chance || 0) === c}">${c ? `<span class="chance c${c}"><i></i><i></i><i></i></span>` : ''}${CHANCE[c]}</button>`).join('')}</div>
       ${l.art_id === 'of_meldet' || l.art_id === 'of_aufgeschoben' ? `<label class="small muted" for="dwieder">Wieder anschauen am</label><input type="date" id="dwieder" value="${esc(p.wieder_am || '')}">` : ''}</div>` : ''}
+    ${istOfferten() && p.offerte_status === 'zugesagt' ? `<div class="ofrow"><span class="small muted">Auftrag</span><span class="small">${(p.vorrat_offerte_ids || []).length + (p.vorrat_easybill || []).length} Offerte(n)${p.vorrat_zusatz_tage ? ` + ${p.vorrat_zusatz_tage} T zusätzlich` : ''} · ${p.eingeplant_am || p.planer_einsatz_id ? 'eingeplant' : S.vorrat.has(p.id) ? 'im Vorrat' : 'noch nicht im Planer'}</span><span class="sp" style="flex:1"></span><button type="button" class="btn btn-ghost" data-vorrat="${p.id}">${S.vorrat.has(p.id) || p.eingeplant_am || p.planer_einsatz_id ? 'Offerten &amp; Zeit anpassen' : 'In den Vorrat'}</button></div>` : ''}
     <div class="ed">${editorHtml('det', p.notiz, 'Notiz schreiben …')}</div>
     ${l.art_id === 'offerte' || OF(l.art_id) ? `<div class="strip"><div class="lab">${K('foto', 13)}Fotos und Dateien im Drive</div><div class="drvz" id="drv">${!p.kunde_id ? '<span class="small muted">Zuerst den Kunden wählen – die Dateien kommen in seinen Ordner im Google Drive.</span>'
       : GOOGLE_OK === false ? '<button type="button" class="btn btn-ghost" data-gverb>Google Drive verbinden</button>'
@@ -1028,8 +1030,11 @@ const vorarbStd = o => ((o.kosten_snapshot?.gruppen) || []).flatMap(g => g.zeile
 function vorratPopup(p){
   document.getElementById('vorratDlg')?.remove();
   const w = document.createElement('div'); w.className = 'dbg oben'; w.id = 'vorratDlg';
-  w.innerHTML = `<div class="set vset" role="dialog" aria-label="In den Arbeitsvorrat"><h2>In den Arbeitsvorrat<button class="kg-ibtn" data-vz aria-label="Schliessen">${K('x')}</button></h2>
-    <p class="vhint">Zugesagt: «${esc(p.titel)}». Die Arbeit erscheint im Einsatzplaner im Vorrat der gewählten Gruppe, in der richtigen Länge.</p>
+  const eingeplant = !!(p.planer_einsatz_id || p.eingeplant_am), imVorrat = S.vorrat.has(p.id), anpassen = eingeplant || imVorrat;
+  w.innerHTML = `<div class="set vset" role="dialog" aria-label="Arbeitsvorrat"><h2>${anpassen ? 'Auftrag anpassen' : 'In den Arbeitsvorrat'}<button class="kg-ibtn" data-vz aria-label="Schliessen">${K('x')}</button></h2>
+    <p class="vhint">${eingeplant ? `«${esc(p.titel)}» ist schon im Einsatzplaner eingeplant. Hier änderst du die zugehörigen Offerten und die Zusatzzeit (fürs Bauprogramm) – die Länge des Balkens passt du im Planer an.`
+      : imVorrat ? `«${esc(p.titel)}» liegt im Arbeitsvorrat. Änderungen passen den Vorrat-Balken im Einsatzplaner an.`
+      : `Zugesagt: «${esc(p.titel)}». Die Arbeit erscheint im Einsatzplaner im Vorrat der gewählten Gruppe, in der richtigen Länge.`}</p>
     <div class="vfl">Kunde<div id="vpKf"></div></div>
     <label class="vfl">Titel<input type="text" id="vpT" value="${esc(p.titel)}" autocomplete="off"></label>
     <div class="vfl">Offerten<div class="vofl" id="vpO"><div class="vosum">Zuerst den Kunden wählen.</div></div></div>
@@ -1038,7 +1043,7 @@ function vorratPopup(p){
     <div class="vtot"><label class="vck"><input type="checkbox" id="vpG"> Dauer noch unklar (Reservation)</label><span class="sp"></span>Total <b id="vpD">–</b></div>
     <span class="seg vseg vspalte" id="vpB"><button type="button" data-vb="bau" aria-pressed="false">Gartenbau</button><button type="button" data-vb="pflege" aria-pressed="false">Pflege</button><button type="button" data-vb="pool" aria-pressed="false" title="Nur technische Pool-Arbeiten (Technik, Filter, UVC)">Pool</button></span>
     <button type="button" class="vtog vspalte" id="vpP" aria-pressed="false" title="AB, Baubewilligung, AVOR … bis zur Zahlung in Kontakte › Projekte">${K('check', 13)}Projekt erstellen</button>
-    <div class="vrw"><span class="sp"></span><button class="btn btn-ghost" data-vz>Abbrechen</button><button class="btn btn-primary" id="vpS">Abschliessen</button></div></div>`;
+    <div class="vrw"><span class="sp"></span><button class="btn btn-ghost" data-vz>Abbrechen</button><button class="btn btn-primary" id="vpS">${anpassen ? 'Speichern' : 'Abschliessen'}</button></div></div>`;
   document.body.appendChild(w);
   let kunde = null, bereich = null, projekt = false, OFF = [], offLauf = 0; // Projekt nur, wenn aktiv gewählt
   const zu = () => w.remove(), pB = w.querySelector('#vpP'), tg = w.querySelector('#vpD'), zus = w.querySelector('#vpZ'), ol = w.querySelector('#vpO');
@@ -1054,7 +1059,7 @@ function vorratPopup(p){
     const s = ol.querySelector('.vosum'); if(s && OFF.length) s.textContent = std > 0 ? `${std.toLocaleString('de-CH')} Std Vorarbeiter ÷ 9 = ${ot.toLocaleString('de-CH')} Tage` : 'Offerten anhaken – die Tage werden aus den Vorarbeiter-Stunden gerechnet.'; };
   zus.oninput = rechne;
   const offertenZeigen = () => { if(!kunde){ ol.innerHTML = '<div class="vosum">Zuerst den Kunden wählen.</div>'; rechne(); return; }
-    ol.innerHTML = OFF.length ? OFF.map((o, i) => `<label class="voz${o.schon ? ' schon' : ''}"><input type="checkbox" data-voi="${i}"${o.an ? ' checked' : ''}><span><b>${esc(o.titel || 'Offerte')}${o.schon ? `<i title="Schon bei «${esc(o.schon)}» eingeplant">schon eingeplant</i>` : ''}</b><small>${[o.eb ? 'Easybill' : 'Offertentool', o.offertnummer, o.datum ? new Date(o.datum).toLocaleDateString('de-CH') : '', o.betrag_total ? Number(o.betrag_total).toLocaleString('de-CH', { minimumFractionDigits: 2 }) + ' CHF' : ''].filter(Boolean).map(esc).join(' · ')}</small></span><em>${o.std ? o.std.toLocaleString('de-CH') + ' Std' : 'keine Vorarbeiter-Std'}</em></label>`).join('') + '<div class="vosum"></div>'
+    ol.innerHTML = OFF.length ? OFF.map((o, i) => `<label class="voz${o.schon ? ' schon' : ''}"><input type="checkbox" data-voi="${i}"${o.an ? ' checked' : ''}><span><b>${esc(o.titel || 'Offerte')}${o.schon ? `<i title="Schon bei «${esc(o.schon)}» eingeplant">schon eingeplant</i>` : ''}</b><small>${[o.eb ? 'Easybill' : 'Offertentool', o.offertnummer, o.datum ? new Date(o.datum).toLocaleDateString('de-CH') : '', o.betrag_total ? Number(o.betrag_total).toLocaleString('de-CH', { minimumFractionDigits: 2 }) + ' CHF' : ''].filter(Boolean).map(esc).join(' · ')}</small></span>${o.std ? `<em>${o.std.toLocaleString('de-CH')} Std</em>` : '<em class="vkein" title="In dieser Offerte stehen keine Vorarbeiter-Stunden. Die Zeit unten bei «Zusätzliche Tage» selbst eintragen.">keine Stunden – Zeit selbst eintragen</em>'}</label>`).join('') + '<div class="vosum"></div>'
       : '<div class="vosum">Für diesen Kunden gibt es weder im Offertentool noch in Easybill (letzte 3 Jahre) eine Offerte. Die Tage unten bei «Zusätzliche Tage» eintragen.</div>';
     ol.querySelectorAll('[data-voi]').forEach(c => c.onchange = () => { OFF[+c.dataset.voi].an = c.checked; rechne(); }); rechne(); };
   // Offerten aus dem Offertentool + direkt in Easybill geschriebene (exportierte Kopien nicht doppelt)
@@ -1076,26 +1081,34 @@ function vorratPopup(p){
       if(!war && OFF.filter(o => !o.schon).length === 1) OFF.find(o => !o.schon).an = true; }
     offertenZeigen(); };
   kundenFeld(w.querySelector('#vpKf'), p.kunde_id, k => { kunde = k; offertenLaden(k?.id); }, 'vpK');
+  // bestehender Vorrat-Eintrag: Titel, Bereich und Reservation übernehmen
+  let V = null;
+  if(imVorrat) sb.from('planer_vorrat').select('*').eq('pendenz_id', p.id).limit(1).then(({ data }) => { V = (data || [])[0] || null; if(!V) return;
+    if(V.titel) w.querySelector('#vpT').value = V.titel; w.querySelector('#vpG').checked = !!V.geschaetzt;
+    if(V.bereich){ bereich = V.bereich; w.querySelectorAll('[data-vb]').forEach(x => x.setAttribute('aria-pressed', x.dataset.vb === bereich)); } });
+  if(eingeplant){ w.querySelector('#vpB').hidden = true; w.querySelector('#vpG').closest('label').hidden = true; }
   setTimeout(() => w.querySelector('#vpK')?.focus(), 0);
   w.querySelector('#vpS').onclick = async () => {
     rechne();
     if(!kunde){ toast('Bitte einen Kunden wählen.', null, true); w.querySelector('#vpK')?.focus(); return; }
-    if(!(tage > 0)){ toast('Bitte Offerten anhaken oder zusätzliche Tage angeben.', null, true); zus.focus(); return; }
-    if(!bereich){ toast('Bitte Gartenbau, Pflege oder Pool wählen.', null, true); return; }
+    if(!(tage > 0) && !eingeplant){ toast('Bitte Offerten anhaken oder zusätzliche Tage angeben.', null, true); zus.focus(); return; }
+    if(!bereich && !eingeplant){ toast('Bitte Gartenbau, Pflege oder Pool wählen.', null, true); return; }
     const kid = kunde.id, zt = w.querySelector('#vpZT').value.trim();
     // Kunde, angehakte Offerten und Zusatzzeit an der Zusage merken (Einsatzplaner/Bauprogramm finden sie über pendenz.planer_einsatz_id)
     const merk = { kunde_id: kid, vorrat_offerte_ids: OFF.filter(o => o.an && o.id).map(o => o.id), vorrat_easybill: OFF.filter(o => o.an && !o.id).map(o => String(o.offertnummer)),
       vorrat_zusatz_tage: Number(zus.value) || null, vorrat_zusatz_text: zt || null };
     if(!(await upd('pendenz', p.id, merk))) return; Object.assign(p, merk);
-    const { data: pl } = await sb.from('planer_person').select('id').eq('benutzer_id', ME).eq('ist_projektleiter', true).maybeSingle();
     // Dauer «noch unklar» = Reservation (im Planer als geschätzt markiert), «laut Offerte / AB» = feste Länge
-    const { error } = await sb.from('planer_vorrat').insert({ kunde_id: kid, titel: w.querySelector('#vpT').value.trim() || null, tage, bereich, geschaetzt: w.querySelector('#vpG').checked, notiz: zt ? `Zusätzlich ${zus.value || 0} T: ${zt}` : null, projektleiter_id: pl ? pl.id : null, pendenz_id: p.id, erstellt_von: ME });
-    if(error) return fehler(error, 'Vorrat');
+    const zeile = { kunde_id: kid, titel: w.querySelector('#vpT').value.trim() || null, tage, bereich, geschaetzt: w.querySelector('#vpG').checked, notiz: zt ? `Zusätzlich ${zus.value || 0} T: ${zt}` : null };
+    if(V){ const { error } = await sb.from('planer_vorrat').update(zeile).eq('id', V.id); if(error) return fehler(error, 'Vorrat'); }
+    else if(!eingeplant){ const { data: pl } = await sb.from('planer_person').select('id').eq('benutzer_id', ME).eq('ist_projektleiter', true).maybeSingle();
+      const { error } = await sb.from('planer_vorrat').insert({ ...zeile, projektleiter_id: pl ? pl.id : null, pendenz_id: p.id, erstellt_von: ME }); if(error) return fehler(error, 'Vorrat'); }
     // Projekt-Ablauf (Kontakte › Projekte), einmal pro zugesagter Offerte
     let pj = false;
     if(projekt){ const { data: da } = await sb.from('projekt').select('id').eq('pendenz_id', p.id).limit(1);
       if(!(da || []).length){ const { error: ep } = await sb.from('projekt').insert({ kunde_id: kid, titel: w.querySelector('#vpT').value.trim() || null, pendenz_id: p.id, projektleiter_id: ME, erstellt_von: ME }); if(ep) fehler(ep, 'Projekt'); else pj = true; } }
-    zu(); S.vorrat.add(p.id); zeichne(); toast(pj ? 'Im Arbeitsvorrat des Einsatzplaners – Projekt erstellt' : 'Im Arbeitsvorrat des Einsatzplaners');
+    zu(); if(!eingeplant) S.vorrat.add(p.id); zeichne();
+    toast(anpassen ? 'Gespeichert' + (pj ? ' – Projekt erstellt' : '') : pj ? 'Im Arbeitsvorrat des Einsatzplaners – Projekt erstellt' : 'Im Arbeitsvorrat des Einsatzplaners');
   };
 }
 // Offerte zugesagt → Büro-Board, Liste «Planung» (bleibt mit Status «zugesagt» für spätere Auswertungen)
