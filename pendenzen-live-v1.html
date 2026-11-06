@@ -498,6 +498,8 @@ const S = { vorrat: new Set(), boards:[], mitglieder:[], archiv:null, pick:null,
 // ---------------------------------------------------------------------------
 const art = id => S.arten[id] || { titel:'?', icon:'dok', farbe:'#8B9097' };
 const artFarbe = id => S.ein.farben[id] || art(id).farbe;
+// Farbe einer neuen Liste: ist die Farbe der Art schon eine Palettenfarbe, genau diese, sonst Stufe 2 der nächsten Familie
+const stdFarbe = hex => famVon(hex) ? hex : PAL[naechsteFam(hex)][1];
 const listeById = id => S.listen.find(l => l.id === id);
 const OF = id => !!id && id.startsWith('of_'); // Listen des Offerten-Boards (Zugestellt … Abgesagt)
 const istOfferten = () => S.board?.typ === 'offerten';
@@ -615,7 +617,7 @@ async function eigenesBoard(uid = ME){
   rows.push({ board_id: b.id, art_id: 'team', titel: art('team').titel, bereich: 'team', x: R, y: R });
   rows.push({ board_id: b.id, art_id: 'sammel', titel: art('sammel').titel, bereich: 'team', x: R, y: R + 130 });
   rows.push({ board_id: b.id, art_id: 'notizen', titel: art('notizen').titel, bereich: 'team', x: R, y: R + 260 });
-  arten.filter(a => !a.funktion).forEach((a, i) => rows.push({ board_id: b.id, art_id: a.id, titel: a.titel, bereich: 'mitte', x: R + (i % 3) * (LW + R), y: R + Math.floor(i / 3) * 140, farbe: PAL[naechsteFam(a.farbe)][1] }));
+  arten.filter(a => !a.funktion).forEach((a, i) => rows.push({ board_id: b.id, art_id: a.id, titel: a.titel, bereich: 'mitte', x: R + (i % 3) * (LW + R), y: R + Math.floor(i / 3) * 140, farbe: stdFarbe(a.farbe) }));
   const { data: neuL, error: e2 } = await sb.from('pendenz_liste').insert(rows).select('id,art_id'); if(e2) throw e2;
   for(const l of (neuL || []).filter(x => x.art_id === 'besprechen')) await besprechenGruppen(l.id, ich?.anzeigename);
   return b;
@@ -1495,7 +1497,7 @@ async function neueListe(artId, pos){
   // aufs Blatt gezogen: nur im passenden Bereich an diese Stelle, sonst ans Ende des richtigen Bereichs
   const ziel = pos && pos.bereich === bereich ? pos : { bereich, x:R, y: Math.ceil((Math.max(0, ...dort.map(l => l.y + estH(l))) + R) / R) * R };
   // Vorgabe: Kopf Stufe 2 der Palettenfamilie, die der Farbe der Art am nächsten liegt (Hintergrund ergibt sich als Stufe 5)
-  const { data, error } = await sb.from('pendenz_liste').insert({ board_id: S.board.id, art_id: artId, titel: a.titel, bereich: ziel.bereich, x: ziel.x, y: ziel.y, farbe: PAL[naechsteFam(artFarbe(artId))][1] }).select().single();
+  const { data, error } = await sb.from('pendenz_liste').insert({ board_id: S.board.id, art_id: artId, titel: a.titel, bereich: ziel.bereich, x: ziel.x, y: ziel.y, farbe: stdFarbe(artFarbe(artId)) }).select().single();
   if(!error && artId === 'besprechen' && S.board.typ === 'person'){ const { data: me } = await sb.from('benutzer').select('anzeigename').eq('id', ME).maybeSingle(); S.gruppen.push(...await besprechenGruppen(data.id, me?.anzeigename)); }
   if(error) return fehler(error, 'Neue Liste');
   S.listen.push(data); zeichne(); toast(`Liste «${a.titel}» erstellt`);
