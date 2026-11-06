@@ -343,23 +343,27 @@ async function programmOeffnen({ einsatz, programm }){
   EINSATZ = ein; if(FENSTER) parent.postMessage({ bp: 'gross' }, location.origin);
   history.replaceState(null, '', '?einsatz=' + ein.id + (FENSTER ? '&fenster=1' : ''));
   const kundeId = ein.kunde_id;
-  const [{ data: k }, { data: abs }, { data: offBest }, { data: andere }] = await Promise.all([
+  const [{ data: k }, { data: abs }, { data: offBest }, { data: andere }, { data: zus }] = await Promise.all([
     sb.from('kunde').select('id,name,firma,vorname,nachname,strasse,ort').eq('id', kundeId).maybeSingle(),
     sb.from('easybill_dokument').select('easybill_id,nummer,datum,angebot_nummern').eq('typ', 'ORDER').eq('kunde_id', kundeId).order('datum', { ascending: false }),
     sb.from('offerte').select('id,titel,easybill_document_number,datum').eq('kunde_id', kundeId).eq('status', 'bestaetigt'),
-    sb.from('bauprogramm').select('id,ab_ids').eq('kunde_id', kundeId)
+    sb.from('bauprogramm').select('id,ab_ids').eq('kunde_id', kundeId),
+    // Zusage aus Pendenzen, aus der dieser Balken kommt: dort beim «In den Arbeitsvorrat» angehakte Offerten
+    sb.from('pendenz').select('vorrat_offerte_ids,vorrat_easybill').eq('planer_einsatz_id', ein.id).limit(1)
   ]);
+  const vz = (zus || [])[0], vOff = vz?.vorrat_offerte_ids || [], vEb = vz?.vorrat_easybill || [];
+  const ausVorrat = (vOff.length || vEb.length) && !(prog && (prog.ab_ids || []).length); // gespeicherte AB-Auswahl geht vor
   if(!k){ $('appMain').innerHTML = '<div class="leer-start">Kunde nicht gefunden.</div>'; return; }
   KUNDE = k; $('bpTitel').textContent = 'Bauprogramm · ' + kname(k);
   ABS = (abs || []).slice().sort((a, b) => String(b.datum || '').localeCompare(String(a.datum || '')));   // neueste zuerst
   // Auswahl: gespeichert, sonst die neueste AB, die noch in keinem anderen Programm steckt
   const belegt = new Set((andere || []).filter(p => !prog || p.id !== prog.id).flatMap(p => p.ab_ids || []).map(Number));
-  ABSEL = prog && (prog.ab_ids || []).length ? prog.ab_ids.map(Number) : ABS.filter(a => !belegt.has(Number(a.easybill_id))).slice(0, 1).map(a => Number(a.easybill_id));
+  ABSEL = prog && (prog.ab_ids || []).length ? prog.ab_ids.map(Number) : ausVorrat ? [] : ABS.filter(a => !belegt.has(Number(a.easybill_id))).slice(0, 1).map(a => Number(a.easybill_id));
   const absSel = ABS.filter(a => ABSEL.includes(Number(a.easybill_id)));
-  const nummern = [...new Set(absSel.flatMap(a => a.angebot_nummern || []))];
+  const nummern = [...new Set([...absSel.flatMap(a => a.angebot_nummern || []), ...(ausVorrat ? vEb : [])])];
   const alleNummern = new Set(ABS.flatMap(a => a.angebot_nummern || []));
   const { data: angebote } = nummern.length ? await sb.from('easybill_dokument').select('easybill_id,nummer,titel,datum,positionen,offerte_id').eq('typ', 'OFFER').in('nummer', nummern) : { data: [] };
-  const offIds = [...new Set([...(angebote || []).map(a => a.offerte_id).filter(Boolean), ...(offBest || []).map(o => o.id)])];
+  const offIds = [...new Set([...(angebote || []).map(a => a.offerte_id).filter(Boolean), ...(offBest || []).map(o => o.id), ...(ausVorrat ? vOff : [])])];
   const [{ data: offs }, { data: tage }] = offIds.length ? await Promise.all([
     sb.from('offerte').select('id,titel,easybill_document_number').in('id', offIds),
     sb.from('offerte_teilschritt_tage').select('offerte_id,anzahl_tage,teilschritt:teilschritt_id(id,name,reihenfolge,arbeitsschritt:arbeitsschritt_id(id,name,reihenfolge))').in('offerte_id', offIds).gt('anzahl_tage', 0)
@@ -383,12 +387,19 @@ async function programmOeffnen({ einsatz, programm }){
     const o = a.offerte_id && (offs || []).find(x => x.id === a.offerte_id);
     return o ? offerteKnoten(o, o.titel, ebLeaf) : ebLeaf;
   };
+  // beim Vorrat angehakte Offerten: direkt als Quelle (ohne AB-Auswahl)
+  if(ausVorrat){
+    const ot = vOff.map(id => (offs || []).find(o => o.id === id)).filter(Boolean)
+      .map(o => offerteKnoten(o, o.titel, { id: 'of:' + o.id, n: o.titel || 'Offerte', nr: o.easybill_document_number || '', quelle: 'ot', klein: 'keine Tage in der Offerte' }));
+    const eb = vEb.map(nr => (angebote || []).find(a => a.nummer === nr) || { easybill_id: 'nr' + nr, nummer: nr, positionen: null }).map(angebotKnoten);
+    WURZELN = [{ id: 'vorrat', n: 'Beim Vorrat angehakte Offerten', kinder: [...ot, ...eb] }].filter(w => w.kinder.length);
+  } else
   WURZELN = absSel.map(ab => ({ id: 'ab:' + ab.easybill_id, n: 'AB ' + ab.nummer,
     kinder: (ab.angebot_nummern || []).map(nr => (angebote || []).find(a => a.nummer === nr)).filter(Boolean).map(angebotKnoten) })).filter(w => w.kinder.length);
   const inAb = new Set((angebote || []).map(a => a.offerte_id).filter(Boolean));
   // bestätigte Offerten ohne AB (in keiner AB des Kunden erwähnt) kommen dazu
   const ohneAb = (offBest || []).filter(o => !inAb.has(o.id) && !alleNummern.has(o.easybill_document_number)).map(o => offerteKnoten(o, o.titel, null)).filter(Boolean);
-  if(ohneAb.length) WURZELN.push({ id: 'best', n: 'Bestätigte Offerten', kinder: ohneAb });
+  if(ohneAb.length && !ausVorrat) WURZELN.push({ id: 'best', n: 'Bestätigte Offerten', kinder: ohneAb });
   WURZELN.forEach(w => knoten(w, null, 0));
   const gesehen = new Set();
   ANG = WURZELN.flatMap(w => w.kinder).filter(a => !gesehen.has(a.id) && gesehen.add(a.id));
