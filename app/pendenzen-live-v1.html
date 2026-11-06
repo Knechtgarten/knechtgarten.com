@@ -645,8 +645,14 @@ async function ladeBoard(){
     const { data: pl } = await sb.from('pendenz_liste').select('*').eq('rolle', 'planung').maybeSingle();
     if(pl){ S.listen.push({ ...pl, bereich: '_aus', versteckt: true });
       const { data: zp } = await sb.from('pendenz').select('*').eq('liste_id', pl.id).eq('erledigt', false).eq('offerte_status', 'zugesagt');
-      // im Planer eingeplant: noch 14 Tage hell sichtbar, dann automatisch ins Archiv
-      const weg = (zp || []).filter(p => p.eingeplant_am && Date.now() - new Date(p.eingeplant_am) > 14 * 864e5);
+      // im Planer eingeplant: bleibt sichtbar, bis die Arbeit vorbei ist (Ende des Planer-Balkens), dann automatisch ins Archiv.
+      // Balken gelöscht: 14 Tage nach dem Einplanen.
+      const eids = (zp || []).map(p => p.planer_einsatz_id).filter(Boolean);
+      const { data: ez0 } = eids.length ? await sb.from('planer_einsatz').select('id,ende').in('id', eids) : { data: [] };
+      const ENDE = new Map((ez0 || []).map(x => [x.id, x.ende])), heute = new Date(); heute.setHours(0, 0, 0, 0);
+      const weg = (zp || []).filter(p => { if(!p.eingeplant_am) return false; const e = ENDE.get(p.planer_einsatz_id);
+        return e ? new Date(e) < heute : Date.now() - new Date(p.eingeplant_am) > 14 * 864e5; });
+      S.ende = ENDE;
       if(weg.length){ const { error: ez } = await sb.from('pendenz').update({ erledigt: true, erledigt_am: new Date().toISOString() }).in('id', weg.map(p => p.id)); if(ez) weg.length = 0; }
       S.pz.push(...(zp || []).filter(p => !weg.includes(p)));
       const zids = (zp || []).map(p => p.id), { data: vr } = zids.length ? await sb.from('planer_vorrat').select('pendenz_id').in('pendenz_id', zids) : { data: [] };
@@ -692,7 +698,7 @@ function pdHtml(p, opt = {}){
     ind.push(`<button class="chance c${p.chance || 0}" data-chance="${p.id}" aria-label="Chance: ${CHANCE[p.chance || 0]}" title="Chance: ${CHANCE[p.chance || 0]}"><i></i><i></i><i></i></button>`); }
   // Zugesagt: Stand im Einsatzplaner (eingeplant / im Vorrat / noch nicht – Knopf zum Nachholen)
   const zuges = istOfferten() && p.offerte_status === 'zugesagt';
-  if(zuges) ind.push(p.eingeplant_am ? '<span class="vst ein" title="Im Einsatzplaner eingeplant – kommt nach 14 Tagen ins Archiv">eingeplant</span>'
+  if(zuges) ind.push(p.eingeplant_am ? `<span class="vst ein" title="Im Einsatzplaner eingeplant – kommt ins Archiv, wenn die Arbeit vorbei ist${S.ende?.get(p.planer_einsatz_id) ? ' (' + new Date(S.ende.get(p.planer_einsatz_id)).toLocaleDateString('de-CH') + ')' : ''}">eingeplant</span>`
     : S.vorrat.has(p.id) ? '<span class="vst" title="Liegt im Arbeitsvorrat des Einsatzplaners">im Vorrat</span>'
     : `<button class="vst neu" data-vorrat="${p.id}" title="Noch nicht im Einsatzplaner – jetzt in den Arbeitsvorrat legen">In den Vorrat</button>`);
   if(!gemeinsam && p.erstellt_von && p.erstellt_von !== ME) ind.push(kuerzel(p.erstellt_von));
@@ -1098,6 +1104,8 @@ function vorratPopup(p){
     const merk = { kunde_id: kid, vorrat_offerte_ids: OFF.filter(o => o.an && o.id).map(o => o.id), vorrat_easybill: OFF.filter(o => o.an && !o.id).map(o => String(o.offertnummer)),
       vorrat_zusatz_tage: Number(zus.value) || null, vorrat_zusatz_text: zt || null };
     if(!(await upd('pendenz', p.id, merk))) return; Object.assign(p, merk);
+    // angehakte Offerten aus dem Offertentool: dort als «bestätigt» markieren (abgehakte bleiben, wie sie sind)
+    if(merk.vorrat_offerte_ids.length){ const { error: eb } = await sb.from('offerte').update({ status: 'bestaetigt', bestaetigt_am: new Date().toISOString().slice(0, 10) }).in('id', merk.vorrat_offerte_ids).neq('status', 'bestaetigt'); if(eb) fehler(eb, 'Offertentool'); }
     // Dauer «noch unklar» = Reservation (im Planer als geschätzt markiert), «laut Offerte / AB» = feste Länge
     const zeile = { kunde_id: kid, titel: w.querySelector('#vpT').value.trim() || null, tage, bereich, geschaetzt: w.querySelector('#vpG').checked, notiz: zt ? `Zusätzlich ${zus.value || 0} T: ${zt}` : null };
     if(V){ const { error } = await sb.from('planer_vorrat').update(zeile).eq('id', V.id); if(error) return fehler(error, 'Vorrat'); }
