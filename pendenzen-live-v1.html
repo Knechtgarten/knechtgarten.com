@@ -233,6 +233,8 @@ button:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
 .vkgew{display:flex;align-items:center;gap:8px;min-height:34px;border:1px solid #9DC2DF;background:#F5F9FC;border-radius:8px;padding:4px 6px 4px 32px;box-sizing:border-box;}
 .vkgew > span{flex:1;min-width:0;display:flex;flex-direction:column;font-size:13.5px;color:#232B35;} .vkgew small{color:#8B9097;font-size:11.5px;}
 .vkg{padding:6px 10px 2px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#8B9097;font-weight:700;border-top:1px solid #EEF1F4;}
+.vkgew .vkw{all:unset;flex:none;cursor:pointer;font-size:12px;font-weight:600;color:#4C5C70;padding:3px 9px;border:1px solid #D5DBE1;border-radius:99px;background:#fff;} .vkgew .vkw:hover{border-color:#323E4E;color:#323E4E;} .vkfrage{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px;padding:8px 10px;border:1px solid #F2CF5E;background:#FFFBEA;border-radius:8px;font-size:12.5px;color:#232B35;} .vkfrage .sp{flex:1;}
+.vset .seg.fehlt{outline:2px solid #B4655F;outline-offset:2px;border-radius:8px;}
 .vkm button.vkneu{flex-direction:row;align-items:center;gap:6px;border-top:1px solid #EEF1F4;color:#323E4E;font-weight:600;}
 .vset select{height:34px;border:1px solid #D5DBE1;border-radius:8px;padding:0 8px;font:inherit;font-size:13.5px;background:#fff;}
 .vset .vrw .vfl.vgr{width:auto;flex:1;}
@@ -966,7 +968,7 @@ function zeichneOver(){
       // Titel = Name des bisherigen Kunden (beim Erfassen so gesetzt)? Dann zum neuen Kunden mitwechseln
       const { data: alt } = p.kunde_id ? await sb.from('kunde').select('name').eq('id', p.kunde_id).maybeSingle() : { data: null };
       const ae = { kunde_id: neu }; const tt = String(p.titel || '').trim(); if(k && (!tt || (alt && tt === String(alt.name || '').trim()))) ae.titel = k.name;
-      Object.assign(p, ae); upd('pendenz', p.id, ae); zeichne(); }, 'dkq');
+      Object.assign(p, ae); upd('pendenz', p.id, ae); zeichne(); }, 'dkq', true);
     if(kq && $('dkq')){ $('dkq').value = kq; if(f === 'dkq') $('dkq').focus(); } }
   if(f && $(f) && (f.startsWith('eb-') || f === 'dtxt' || f === 'lname' || f === 'gname' || f === 'pq')){ $(f).focus(); if(f === 'pq'){ const n = $(f).value.length; $(f).setSelectionRange(n, n); } }
 }
@@ -1026,8 +1028,14 @@ async function kundeAusEasybill(ek){
     kontaktdaten: { telefon1: ek.telefon1 || null, telefon2: ek.telefon2 || null, fax: ek.fax || null, mobil: ek.mobil || null, emails: ek.emails || [] } }).select('id,name,strasse,plz,ort').single();
   if(error) throw error; return (KUNDE_CACHE[data.id] = data);
 }
-function kundenFeld(host, startId, onSet, inputId = 'kfq'){
+function kundenFeld(host, startId, onSet, inputId = 'kfq', gesperrt = false){
   let lauf = 0, ebT = null;
+  // Kunde schon festgelegt: nur anzeigen; «Wechseln» fragt zuerst nach, damit er nicht aus Versehen ändert
+  const zeigeGesperrt = k => { host.innerHTML = `<span class="vks"><span class="vksi">${K('lock', 15)}</span><span class="vkgew"><span><b>${esc(k.name)}</b>${kAdr(k) ? `<small>${esc(kAdr(k))}</small>` : ''}</span><button type="button" class="vkw" data-kfw>Wechseln</button></span></span><div class="vkfrage" hidden>Kunde wirklich wechseln? Titel und Drive-Ordner gehören dann zum neuen Kunden.<span class="sp"></span><button type="button" class="btn btn-ghost" data-kfnein>Abbrechen</button><button type="button" class="btn btn-primary" data-kfja>Ja, wechseln</button></div>`;
+    const fr = host.querySelector('.vkfrage');
+    host.querySelector('[data-kfw]').onclick = () => { fr.hidden = false; };
+    host.querySelector('[data-kfnein]').onclick = () => { fr.hidden = true; };
+    host.querySelector('[data-kfja]').onclick = () => { suche(''); host.querySelector('input')?.focus(); }; };
   const zeigeGewaehlt = k => { host.innerHTML = `<span class="vks"><span class="vksi">${K('suche', 15)}</span><span class="vkgew"><span><b>${esc(k.name)}</b>${kAdr(k) ? `<small>${esc(kAdr(k))}</small>` : ''}</span><button type="button" class="kg-ibtn" data-kfx aria-label="Anderen Kunden wählen" title="Anderen Kunden wählen">${K('x')}</button></span></span>`;
     host.querySelector('[data-kfx]').onclick = () => { onSet(null); suche(''); host.querySelector('input')?.focus(); }; };
   const waehle = k => { zeigeGewaehlt(k); onSet({ id: k.id, name: k.name, adr: kAdr(k) }); };
@@ -1071,7 +1079,7 @@ function kundenFeld(host, startId, onSet, inputId = 'kfq'){
       if(msg || !data?.kunde){ e.target.disabled = false; e.target.textContent = 'In Easybill anlegen'; return toast('Easybill: ' + (msg || 'unbekannter Fehler'), null, true); }
       try { waehle(await kundeAusEasybill(data.kunde)); toast(`${data.kunde.name} in Easybill angelegt${data.kunde.kundennummer ? ' (Nr. ' + data.kunde.kundennummer + ')' : ''}`); } catch(err){ fehler(err, 'Kunde'); } };
   };
-  if(startId) kundeLaden(startId).then(k => { if(!k) return suche(''); zeigeGewaehlt(k); onSet({ id: k.id, name: k.name, adr: kAdr(k) }); }); else suche('');
+  if(startId) kundeLaden(startId).then(k => { if(!k) return suche(''); (gesperrt ? zeigeGesperrt : zeigeGewaehlt)(k); onSet({ id: k.id, name: k.name, adr: kAdr(k) }); }); else suche('');
 }
 // Offerten des Kunden aus dem Offertentool: Vorarbeiter-Stunden aus der Kalkulation (Personalaufwand)
 const vorarbStd = o => ((o.kosten_snapshot?.gruppen) || []).flatMap(g => g.zeilen || []).filter(z => !z.geloescht && /vorarbeiter|polier/i.test(z.bezeichnung || '') && /^std/i.test(z.einheit || '')).reduce((s, z) => s + (Number(z.menge) || 0), 0);
@@ -1129,7 +1137,7 @@ function vorratPopup(p){
       OFF.forEach(o => { o.an = war ? (o.id ? (p.vorrat_offerte_ids || []).includes(o.id) : (p.vorrat_easybill || []).includes(String(o.offertnummer))) : false; });
       if(!war && OFF.filter(o => !o.schon).length === 1) OFF.find(o => !o.schon).an = true; }
     offertenZeigen(); };
-  kundenFeld(w.querySelector('#vpKf'), p.kunde_id, k => { kunde = k; offertenLaden(k?.id); }, 'vpK');
+  kundenFeld(w.querySelector('#vpKf'), p.kunde_id, k => { kunde = k; offertenLaden(k?.id); }, 'vpK', true);
   // bestehender Vorrat-Eintrag: Titel, Bereich und Reservation übernehmen
   let V = null;
   if(imVorrat) sb.from('planer_vorrat').select('*').eq('pendenz_id', p.id).limit(1).then(({ data }) => { V = (data || [])[0] || null; if(!V) return;
@@ -1141,7 +1149,7 @@ function vorratPopup(p){
     rechne();
     if(!kunde){ toast('Bitte einen Kunden wählen.', null, true); w.querySelector('#vpK')?.focus(); return; }
     if(!(tage > 0) && !eingeplant){ toast('Bitte Offerten anhaken oder zusätzliche Tage angeben.', null, true); zus.focus(); return; }
-    if(!bereich && !eingeplant){ toast('Bitte Gartenbau, Pflege oder Pool wählen.', null, true); return; }
+    if(!bereich && !eingeplant){ const vb = w.querySelector('#vpB'); vb.classList.add('fehlt'); setTimeout(() => vb.classList.remove('fehlt'), 2500); toast('Bitte Gartenbau, Pflege oder Pool wählen.', null, true); return; }
     const kid = kunde.id, zt = w.querySelector('#vpZT').value.trim();
     // Kunde, angehakte Offerten und Zusatzzeit an der Zusage merken (Einsatzplaner/Bauprogramm finden sie über pendenz.planer_einsatz_id)
     const merk = { kunde_id: kid, vorrat_offerte_ids: OFF.filter(o => o.an && o.id).map(o => o.id), vorrat_easybill: OFF.filter(o => o.an && !o.id).map(o => String(o.offertnummer)),
