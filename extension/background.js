@@ -22,3 +22,11 @@ chrome.runtime.onStartup.addListener(richteKuerzelAlarmEin);
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === KUERZEL_ALARM) ladeKuerzel();
 });
+
+// Zoll in PEAX (peax-zoll.js): Content-Scripts fragen hier nach dem Google-Token,
+// weil nur der Hintergrund ihn bei Bedarf erneuern kann.
+chrome.runtime.onMessage.addListener((msg, _sender, antwort) => {
+  if (msg?.kg !== 'googleToken') return;
+  holeGespeichertenToken().then((token) => antwort({ token })).catch(() => antwort({ token: null }));
+  return true;
+});

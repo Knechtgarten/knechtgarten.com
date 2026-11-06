@@ -161,7 +161,7 @@
     { k: 'doku', n: 'Doku-Tools', url: 'doku-live-v1.html', farbe: PAL.beere[1], akzent: PAL.beere[3],
       seiten: ['doku-live-v1', 'doku-dokument-live-v1', 'doku-datei-live-v1', 'doku-personen-live-v1'] },
     { k: 'verw', n: 'Einstellungen', url: 'einstellungen-uebersicht-live-v1.html', farbe: '#FFFFFF', akzent: PAL.grau[3], admin: true,
-      seiten: ['einstellungen-uebersicht-live-v1', 'verwaltung-live-v1', 'tools-live-v1', 'mailassistent-verwaltung-live-v1', 'dokumentensuche-verwaltung-live-v1', 'pflege-kategorien-live-v1', 'projekt-einstellungen-live-v1'] }
+      seiten: ['einstellungen-uebersicht-live-v1', 'verwaltung-live-v1', 'tools-live-v1', 'mailassistent-verwaltung-live-v1', 'dokumentensuche-verwaltung-live-v1', 'zoll-live-v1', 'pflege-kategorien-live-v1', 'projekt-einstellungen-live-v1'] }
   ];
   KG.tools = TOOLS;
   KG.toolIcons = TI;
