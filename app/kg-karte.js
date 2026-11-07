@@ -15,6 +15,7 @@
     if(!bereit) bereit = (async () => {
       stil('https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css');
       await Promise.all([skript('https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js'), skript('https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.2/proj4.js')]);
+      await skript('https://cdn.jsdelivr.net/npm/leaflet-rotate@0.2.8/dist/leaflet-rotate-src.js');   // Karte drehen (Ausrichtung für den Ausdruck)
     })();
     return bereit;
   }
@@ -125,9 +126,8 @@
       <aside class="kgk-menu"><div class="kgk-t"><b>${esc(o.titel || 'Grundstück')}</b><small>${esc(o.untertitel || '')}</small><small data-info></small></div>
         <b>Werkzeug</b>
         <div class="kgk-werk" role="group" aria-label="Werkzeug"><button type="button" data-w="pan" aria-pressed="true">Verschieben</button><button type="button" data-w="strecke" aria-pressed="false">Strecke messen</button><button type="button" data-w="flaeche" aria-pressed="false">Fläche messen</button><button type="button" data-w="weg">Messungen löschen</button></div>
-        <b>Hintergrund</b>
-        ${[['luft', 'Luftbild'], ['farbe', 'Landeskarte'], ['grau', 'Landeskarte grau'], ['weiss', 'Keiner']].map(([k, t], i) => `<label><input type="radio" name="kgk-bg" value="${k}"${i ? '' : ' checked'}> ${t}</label>`).join('')}
-        <label class="kgk-dk">Deckkraft <input type="range" min="10" max="100" value="100" data-dk></label>
+        <b>Luftbild</b>
+        <label class="kgk-dk">Deckkraft <input type="range" min="10" max="100" value="80" data-dk></label>
         <b>Darüber</b>
         <label><input type="checkbox" data-av checked> Grenzen &amp; Gebäude</label>
         <label><input type="checkbox" data-hl> Höhenlinien</label>
@@ -135,7 +135,11 @@
         <b>Drucken</b>
         <label>Blatt <select data-blatt style="flex:1;min-width:0"><option value="a4h">A4 hoch</option><option value="a4q">A4 quer</option><option value="a3h">A3 hoch</option><option value="a3q">A3 quer</option></select></label>
         <label>Massstab <select data-mst style="flex:1;min-width:0"><option value="100">1:100</option><option value="200" selected>1:200</option><option value="500">1:500</option><option value="1000">1:1000</option></select></label>
-        <button type="button" class="kgk-knopf" data-rahmen>Rahmen zeigen</button>
+        <label>Drehung <span class="kgk-dreh"><button type="button" data-dr="-1" aria-label="1 Grad zurück">−</button><input type="number" step="1" value="0" data-drehung aria-label="Drehung in Grad"><span>°</span><button type="button" data-dr="1" aria-label="1 Grad weiter">+</button></span></label>
+        <button type="button" class="kgk-knopf" data-ausr="parz">Am Grundstück ausrichten</button>
+        <button type="button" class="kgk-knopf" data-ausr="haus">Am Haus ausrichten</button>
+        <span class="kgk-info">Drehen auch mit Shift + Maus ziehen</span>
+        <button type="button" class="kgk-knopf" data-rahmen>Druckbereich zeigen</button>
         <button type="button" class="kgk-knopf" data-druck>PDF erstellen</button>
         <a class="kgk-ext" target="_blank" rel="noopener" href="https://regiogis-beo.ch/?x=${Math.round(o.e)}&y=${Math.round(o.n)}&z=13">Im RegioGIS öffnen (Leitungen)</a></aside>
       <div class="kgk-rechts"><div class="kgk-karte"></div>
@@ -143,10 +147,11 @@
         <div class="kgk-status"><span data-hoehe></span><span data-mess></span></div></div></div>`;
     document.body.appendChild(h);
     h.addEventListener('mousedown', e => { if(e.target === h) zu(); });
-    const map = L.map(h.querySelector('.kgk-karte'), { zoomControl: true, maxZoom: 22, doubleClickZoom: false }).setView([lat, lon], 20);
+    const map = L.map(h.querySelector('.kgk-karte'), { zoomControl: true, maxZoom: 22, doubleClickZoom: false, rotate: true, bearing: 0, rotateControl: false, touchRotate: true, shiftKeyRotate: true }).setView([lat, lon], 20);
+    map.attributionControl.setPrefix(false);   // nur «© swisstopo», ohne Leaflet-Hinweis
     const wmts = (l, f, max) => L.tileLayer(`https://wmts.geo.admin.ch/1.0.0/${l}/default/current/3857/{z}/{x}/{y}.${f}`, { maxNativeZoom: max, maxZoom: 22, attribution: '© swisstopo' });
-    const BG = { luft: wmts('ch.swisstopo.swissimage', 'jpeg', 20), farbe: wmts('ch.swisstopo.pixelkarte-farbe', 'jpeg', 18), grau: wmts('ch.swisstopo.pixelkarte-grau', 'jpeg', 18), weiss: null };
-    let bg = BG.luft; bg.addTo(map);
+    const BG = { luft: wmts('ch.swisstopo.swissimage', 'jpeg', 20) };
+    let bg = BG.luft; bg.setOpacity(.8); bg.addTo(map);   // leicht durchsichtig, damit die Grenzen gut sichtbar sind
     // Amtliche Vermessung als Linien (geodienste.ch, WFS): Grenzen, Gebäude, Parzellennummern – durchsichtig über jedem Hintergrund
     const av = L.layerGroup().addTo(map); let avT = null, avNr = 0;
     // Grenzen und Gebäude schwarz (auf dem Luftbild gut sichtbar); Parzellennummern auf dem Luftbild weiss
@@ -180,8 +185,7 @@
     setTimeout(() => map.invalidateSize(), 50);
 
     // Hintergrund, Deckkraft, Ebenen
-    let dk = 1;
-    h.querySelectorAll('[name="kgk-bg"]').forEach(r => r.onchange = () => { if(bg) map.removeLayer(bg); bg = BG[r.value]; if(bg){ bg.setOpacity(dk); bg.addTo(map); bg.bringToBack(); } avLaden(); hlZeichnen(); });
+    let dk = .8;
     h.querySelector('[data-dk]').oninput = e => { dk = e.target.value / 100; if(bg) bg.setOpacity(dk); };
     h.querySelector('[data-av]').onchange = e => { if(e.target.checked){ av.addTo(map); avLaden(); } else map.removeLayer(av); };
     // Höhenlinien gelb (auf der Landeskarte goldbraun), ganze Meter kräftiger
@@ -250,10 +254,11 @@
     h.querySelectorAll('[data-w]').forEach(b => b.onclick = () => setW(b.dataset.w));
     // Ausdruck: Rahmen (Kartenfeld des Blatts im gewählten Massstab) auf der Karte verschieben, dann PDF
     const BLATT = { a4h: [210, 297], a4q: [297, 210], a3h: [297, 420], a3q: [420, 297] }, RAND = 10, FUSS = 24;
-    let rahmen = null, rz = [o.e, o.n];
+    let rahmen = null, rz = [o.e, o.n], DREH = 0;   // DREH: Drehung in Grad (Gegenuhrzeigersinn); Karte und Ausdruck zeigen den Druckbereich gerade
     const feld = () => { const [W, H] = BLATT[h.querySelector('[data-blatt]').value], m = +h.querySelector('[data-mst]').value;
       return { W, H, m, mw: W - 2 * RAND, mh: H - 2 * RAND - FUSS, bw: (W - 2 * RAND) * m / 1000, bh: (H - 2 * RAND - FUSS) * m / 1000 }; };
-    const rahmenEcken = () => { const f = feld(), [cx, cy] = rz; return [[cx - f.bw / 2, cy - f.bh / 2], [cx + f.bw / 2, cy - f.bh / 2], [cx + f.bw / 2, cy + f.bh / 2], [cx - f.bw / 2, cy + f.bh / 2]]; };
+    const rahmenEcken = () => { const f = feld(), [cx, cy] = rz, a = DREH * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+      return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([u, v]) => { const lx = u * f.bw / 2, ly = v * f.bh / 2; return [cx + lx * c - ly * s, cy + lx * s + ly * c]; }); };
     const rahmenZeichnen = () => { if(!rahmen) return; rahmen.setLatLngs(rahmenEcken().map(p => zuWgs(p[0], p[1]).reverse())); };
     const rahmenAn = () => { if(rahmen) return;
       rahmen = L.polygon(rahmenEcken().map(p => zuWgs(p[0], p[1]).reverse()), { className: 'kgk-rahmen', color: '#ff7a00', weight: 2, dashArray: '8 5', fillColor: '#ff7a00', fillOpacity: .06 }).addTo(map);
@@ -262,34 +267,61 @@
       rahmen.on('mousedown', e => { if(werkzeug !== 'pan') return; L.DomEvent.stop(e); map.dragging.disable(); start = { p: lv(e.latlng), z: [...rz] }; });
       map.on('mousemove', e => { if(!start) return; const p = lv(e.latlng); rz = [start.z[0] + p[0] - start.p[0], start.z[1] + p[1] - start.p[1]]; rahmenZeichnen(); });
       map.on('mouseup', () => { if(start){ start = null; map.dragging.enable(); } });
-      h.querySelector('[data-rahmen]').classList.add('an'); h.querySelector('[data-rahmen]').textContent = 'Rahmen ausblenden'; };
-    const rahmenAus = () => { if(rahmen) map.removeLayer(rahmen); rahmen = null; h.querySelector('[data-rahmen]').classList.remove('an'); h.querySelector('[data-rahmen]').textContent = 'Rahmen zeigen'; };
+      h.querySelector('[data-rahmen]').classList.add('an'); h.querySelector('[data-rahmen]').textContent = 'Druckbereich ausblenden'; };
+    const rahmenAus = () => { if(rahmen) map.removeLayer(rahmen); rahmen = null; h.querySelector('[data-rahmen]').classList.remove('an'); h.querySelector('[data-rahmen]').textContent = 'Druckbereich zeigen'; };
     h.querySelector('[data-rahmen]').onclick = () => rahmen ? rahmenAus() : rahmenAn();
+    const DR = h.querySelector('[data-drehung]');
+    const setDreh = (g, vonKarte) => { DREH = Math.round(((g % 360) + 540) % 360 - 180); DR.value = DREH; if(!vonKarte) map.setBearing(DREH); rahmenZeichnen(); };
+    map.on('rotate', () => { const g = Math.round(map.getBearing()); if(g !== DREH) setDreh(g, true); });
+    DR.onchange = () => setDreh(+DR.value || 0);
+    h.querySelectorAll('[data-dr]').forEach(b => b.onclick = () => setDreh(DREH + +b.dataset.dr));
+    const kc = h.querySelector('.kgk-karte'); let dz = null;
+    const drehStart = e => { if(!e.shiftKey || e.button) return; e.preventDefault(); e.stopPropagation(); map.dragging.disable();
+      const r = kc.getBoundingClientRect(); dz = { mx: r.left + r.width / 2, my: r.top + r.height / 2, d0: DREH }; dz.a0 = Math.atan2(e.clientY - dz.my, e.clientX - dz.mx); };
+    const drehen = e => { if(!dz) return; setDreh(dz.d0 + (Math.atan2(e.clientY - dz.my, e.clientX - dz.mx) - dz.a0) * 180 / Math.PI); };
+    const drehEnde = () => { if(dz){ dz = null; map.dragging.enable(); } };
+    kc.addEventListener('mousedown', drehStart, true); document.addEventListener('mousemove', drehen); document.addEventListener('mouseup', drehEnde);
+    // Ausrichten: Winkel des kleinsten umschliessenden Rechtecks (Parzelle bzw. grösstes Haus darauf), auf ±45° gebracht
+    const winkel = ring => { let best = null;
+      for(let i = 0; i + 1 < ring.length; i++){ const [ax, ay] = ring[i], [bx, by] = ring[i + 1]; if(Math.hypot(bx - ax, by - ay) < 0.5) continue;
+        const t = Math.atan2(by - ay, bx - ax), c = Math.cos(-t), s = Math.sin(-t); let u0 = Infinity, u1 = -Infinity, v0 = Infinity, v1 = -Infinity;
+        ring.forEach(([x, y]) => { const u = (x - ax) * c - (y - ay) * s, v = (x - ax) * s + (y - ay) * c; u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, v); v1 = Math.max(v1, v); });
+        const fl = (u1 - u0) * (v1 - v0); if(!best || fl < best.fl) best = { fl, t }; }
+      if(!best) return null; let g = best.t * 180 / Math.PI; g = ((g % 90) + 90) % 90; return g > 45 ? g - 90 : g; };
+    const flaecheLv = r => { let s = 0; for(let i = 0; i < r.length; i++){ const a = r[i], b = r[(i + 1) % r.length]; s += a[0] * b[1] - b[0] * a[1]; } return Math.abs(s) / 2; };
+    h.querySelectorAll('[data-ausr]').forEach(b => b.onclick = () => {
+      let ring = null;
+      if(b.dataset.ausr === 'parz') ring = EIGEN_LV;
+      else if(EIGEN_LV){ const hs = HAUS_LV.map(rr => rr[0]).filter(r => r && r.length > 3 && innenRing(r.reduce((s, p) => s + p[0], 0) / r.length, r.reduce((s, p) => s + p[1], 0) / r.length, EIGEN_LV));
+        ring = hs.sort((a, c) => flaecheLv(c) - flaecheLv(a))[0] || null; }
+      const g = ring && winkel(ring); if(g == null){ h.querySelector('[data-mess]').textContent = b.dataset.ausr === 'parz' ? 'Parzelle noch nicht geladen.' : 'Kein Haus auf der Parzelle gefunden.'; return; }
+      setDreh(g); if(!rahmen) rahmenAn(); });
     h.querySelector('[data-blatt]').onchange = h.querySelector('[data-mst]').onchange = () => { if(rahmen){ rahmenZeichnen(); map.fitBounds(rahmen.getBounds(), { padding: [30, 30] }); } else rahmenAn(); };
     h.querySelector('[data-druck]').onclick = async e => { const k = e.target, alt = k.textContent; if(!rahmen){ rahmenAn(); return; }
       k.textContent = 'PDF wird erstellt …'; k.style.pointerEvents = 'none';
       try { await druck(); } catch(err){ alert('PDF: ' + err.message); } finally { k.textContent = alt; k.style.pointerEvents = ''; } };
     async function druck(){
       await skript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
-      const f = feld(), PX = 8, [cx, cy] = rz, x0 = cx - f.bw / 2, x1 = cx + f.bw / 2, y0 = cy - f.bh / 2, y1 = cy + f.bh / 2;
+      const f = feld(), PX = 8, [cx, cy] = rz, w = DREH * Math.PI / 180, E = rahmenEcken();
+      const x0 = Math.min(...E.map(p => p[0])), x1 = Math.max(...E.map(p => p[0])), y0 = Math.min(...E.map(p => p[1])), y1 = Math.max(...E.map(p => p[1]));
       const c = document.createElement('canvas'); c.width = f.W * PX; c.height = f.H * PX; const g = c.getContext('2d');
       g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
       const ox = RAND * PX, oy = RAND * PX, MW = f.mw * PX, MH = f.mh * PX, s = MW / f.bw;
-      const px = x => ox + (x - x0) * s, py = y => oy + (y1 - y) * s;
-      g.save(); g.beginPath(); g.rect(ox, oy, MW, MH); g.clip();
-      // Hintergrund als Bild in Druckauflösung (geo.admin WMS), mit der eingestellten Deckkraft
-      const bgName = h.querySelector('[name="kgk-bg"]:checked').value, WMS = { luft: 'ch.swisstopo.swissimage', farbe: 'ch.swisstopo.pixelkarte-farbe', grau: 'ch.swisstopo.pixelkarte-grau' }[bgName];
-      if(WMS){ const im = new Image(); im.crossOrigin = 'anonymous';
-        im.src = `https://wms.geo.admin.ch/?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&LAYERS=${WMS}&STYLES=&CRS=EPSG:2056&BBOX=${x0},${y0},${x1},${y1}&WIDTH=${Math.min(Math.round(MW), 4000)}&HEIGHT=${Math.min(Math.round(MH), 4000)}&FORMAT=image/jpeg`;
-        await im.decode(); g.globalAlpha = dk; g.drawImage(im, ox, oy, MW, MH); g.globalAlpha = 1; }
-      const wg = bgName === 'luft';
+      // gezeichnet um die Blattmitte, um DREH gedreht; Schrift bleibt aufrecht
+      const px = x => (x - cx) * s, py = y => (cy - y) * s;
+      const auf = (X, Y, fn) => { g.save(); g.translate(X, Y); g.rotate(-w); fn(); g.restore(); };
+      g.save(); g.beginPath(); g.rect(ox, oy, MW, MH); g.clip(); g.translate(ox + MW / 2, oy + MH / 2); g.rotate(w);
+      // Luftbild in Druckauflösung (geo.admin WMS), Ausschnitt um den gedrehten Druckbereich
+      const im = new Image(); im.crossOrigin = 'anonymous';
+      im.src = `https://wms.geo.admin.ch/?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&LAYERS=ch.swisstopo.swissimage&STYLES=&CRS=EPSG:2056&BBOX=${x0},${y0},${x1},${y1}&WIDTH=${Math.min(Math.round((x1 - x0) * s), 4000)}&HEIGHT=${Math.min(Math.round((y1 - y0) * s), 4000)}&FORMAT=image/jpeg`;
+      await im.decode(); g.globalAlpha = dk; g.drawImage(im, px(x0), py(y1), (x1 - x0) * s, (y1 - y0) * s); g.globalAlpha = 1;
       // Höhenlinien und Koten
       let linien = null;
-      if(h.querySelector('[data-hl]').checked && f.bw <= 400 && f.bh <= 400){
+      if(h.querySelector('[data-hl]').checked && x1 - x0 <= 600 && y1 - y0 <= 600){
         const gt = await hoehenGitter(x0 - 2, y0 - 2, x1 + 2, y1 + 2); linien = gt.linien(STUFE).out;
         linien.forEach(l => { const meter = Math.abs(l.hoehe - Math.round(l.hoehe)) < 1e-6; g.beginPath();
           l.seg.forEach(([p, q]) => { g.moveTo(px(p[0]), py(p[1])); g.lineTo(px(q[0]), py(q[1])); });
-          g.strokeStyle = wg ? (meter ? '#ffe14d' : '#fff3a6') : (meter ? '#8a6410' : '#b88a12'); g.lineWidth = meter ? 2.4 : 1.2; g.stroke(); });
+          g.strokeStyle = meter ? '#ffe14d' : '#fff3a6'; g.lineWidth = meter ? 2.4 : 1.2; g.stroke(); });
       }
       // Grenzen, Gebäude, Nummern (amtliche Vermessung)
       const wfs = async t => (await (await fetch(`https://geodienste.ch/db/av_0/deu?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=ms:${t}&BBOX=${x0},${y0},${x1},${y1},urn:ogc:def:crs:EPSG::2056&OUTPUTFORMAT=geojson&SRSNAME=urn:ogc:def:crs:EPSG::2056`)).json()).features || [];
@@ -299,45 +331,45 @@
         const ringe = x => x.geometry?.type === 'Polygon' ? x.geometry.coordinates : x.geometry?.type === 'MultiPolygon' ? x.geometry.coordinates.flat() : [];
         const pfad = rr => { g.beginPath(); rr.forEach(r => r.forEach((p, i) => i ? g.lineTo(px(p[0]), py(p[1])) : g.moveTo(px(p[0]), py(p[1])))); };
         const hs = LCSF.filter(x => x.properties.Art === 'Gebaeude'); haeuser = hs.map(ringe);
-        hs.forEach(x => { pfad(ringe(x)); if(!wg){ g.fillStyle = 'rgba(223,227,232,.7)'; g.fill('evenodd'); } g.lineWidth = 2.6; g.strokeStyle = '#000'; g.stroke(); });
+        hs.forEach(x => { pfad(ringe(x)); g.lineWidth = 2.6; g.strokeStyle = '#000'; g.stroke(); });
         RESF.forEach(x => { pfad(ringe(x)); g.lineWidth = 2; g.strokeStyle = '#111'; g.stroke(); });
         g.font = 'bold 26px Arial'; g.textAlign = 'center'; g.textBaseline = 'middle';
-        OSNR.forEach(x => { const [e, n] = x.geometry.coordinates; g.lineWidth = 4; g.strokeStyle = wg ? '#000' : '#fff'; g.strokeText(x.properties.Nummer, px(e), py(n)); g.fillStyle = wg ? '#fff' : '#323e4e'; g.fillText(x.properties.Nummer, px(e), py(n)); });
+        OSNR.forEach(x => { const [e, n] = x.geometry.coordinates; auf(px(e), py(n), () => { g.lineWidth = 4; g.strokeStyle = '#000'; g.strokeText(x.properties.Nummer, 0, 0); g.fillStyle = '#fff'; g.fillText(x.properties.Nummer, 0, 0); }); });
       }
       if(EIGEN_LV){ g.beginPath(); EIGEN_LV.forEach((p, i) => i ? g.lineTo(px(p[0]), py(p[1])) : g.moveTo(px(p[0]), py(p[1]))); g.lineWidth = 5; g.strokeStyle = '#4F80C2'; g.stroke(); }
       if(linien && EIGEN_LV){ g.font = 'bold 15px Arial'; g.textAlign = 'left'; g.textBaseline = 'alphabetic';
-        kotenPunkte(linien, EIGEN_LV, haeuser).forEach(([x, y, z]) => { g.fillStyle = '#ffe14d'; g.strokeStyle = '#000'; g.lineWidth = 1.5; g.beginPath(); g.arc(px(x), py(y), 4, 0, 7); g.fill(); g.stroke();
-          g.lineWidth = 4; g.strokeStyle = '#fff'; g.strokeText(z.toFixed(2), px(x) + 6, py(y) - 6); g.fillStyle = '#000'; g.fillText(z.toFixed(2), px(x) + 6, py(y) - 6); }); }
+        kotenPunkte(linien, EIGEN_LV, haeuser).forEach(([x, y, z]) => auf(px(x), py(y), () => { g.fillStyle = '#ffe14d'; g.strokeStyle = '#000'; g.lineWidth = 1.5; g.beginPath(); g.arc(0, 0, 4, 0, 7); g.fill(); g.stroke();
+          g.lineWidth = 4; g.strokeStyle = '#fff'; g.strokeText(z.toFixed(2), 6, -6); g.fillStyle = '#000'; g.fillText(z.toFixed(2), 6, -6); })); }
       // Messungen
       g.font = 'bold 17px Arial'; g.textAlign = 'center'; g.textBaseline = 'middle';
       MESS.forEach(m => { const pp = m.typ === 'flaeche' ? [...m.pts, m.pts[0]] : m.pts; g.beginPath(); pp.forEach((p, i) => i ? g.lineTo(px(p[0]), py(p[1])) : g.moveTo(px(p[0]), py(p[1])));
         g.lineWidth = 3; g.strokeStyle = '#ff7a00'; g.stroke();
-        pp.slice(1).forEach((p, i) => { const q = pp[i], d = Math.hypot(p[0] - q[0], p[1] - q[1]); if(d < 0.3) return; const t = d.toFixed(2) + ' m', w = g.measureText(t).width + 10, mx = (px(p[0]) + px(q[0])) / 2, my = (py(p[1]) + py(q[1])) / 2;
-          g.fillStyle = '#fff'; g.fillRect(mx - w / 2, my - 12, w, 24); g.strokeStyle = '#ff7a00'; g.lineWidth = 1.5; g.strokeRect(mx - w / 2, my - 12, w, 24); g.fillStyle = '#7a3a00'; g.fillText(t, mx, my); });
+        pp.slice(1).forEach((p, i) => { const q = pp[i], d = Math.hypot(p[0] - q[0], p[1] - q[1]); if(d < 0.3) return; const t = d.toFixed(2) + ' m', bw = g.measureText(t).width + 10;
+          auf((px(p[0]) + px(q[0])) / 2, (py(p[1]) + py(q[1])) / 2, () => { g.fillStyle = '#fff'; g.fillRect(-bw / 2, -12, bw, 24); g.strokeStyle = '#ff7a00'; g.lineWidth = 1.5; g.strokeRect(-bw / 2, -12, bw, 24); g.fillStyle = '#7a3a00'; g.fillText(t, 0, 0); }); });
         if(m.typ === 'flaeche'){ let a = 0; m.pts.forEach((p, i) => { const q = m.pts[(i + 1) % m.pts.length]; a += p[0] * q[1] - q[0] * p[1]; }); a = Math.abs(a) / 2;
-          const sx = m.pts.reduce((s, p) => s + px(p[0]), 0) / m.pts.length, sy = m.pts.reduce((s, p) => s + py(p[1]), 0) / m.pts.length, t = fa(a), w = g.measureText(t).width + 14;
-          g.fillStyle = '#ff7a00'; g.fillRect(sx - w / 2, sy - 14, w, 28); g.fillStyle = '#fff'; g.fillText(t, sx, sy); } });
+          const sx = m.pts.reduce((s2, p) => s2 + px(p[0]), 0) / m.pts.length, sy = m.pts.reduce((s2, p) => s2 + py(p[1]), 0) / m.pts.length, t = fa(a), bw = g.measureText(t).width + 14;
+          auf(sx, sy, () => { g.fillStyle = '#ff7a00'; g.fillRect(-bw / 2, -14, bw, 28); g.fillStyle = '#fff'; g.fillText(t, 0, 0); }); } });
       g.restore();
-      // Rahmen, Nordpfeil, Massstabsbalken, Fusszeile
+      // Rahmen, Nordpfeil (zeigt nach Norden, auch gedreht), Massstabsbalken, Fusszeile
       g.strokeStyle = '#323e4e'; g.lineWidth = 2; g.strokeRect(ox, oy, MW, MH);
-      const nx = ox + MW - 40, ny = oy + 60; g.beginPath(); g.moveTo(nx, ny - 38); g.lineTo(nx + 15, ny + 14); g.lineTo(nx, ny); g.lineTo(nx - 15, ny + 14); g.closePath();
-      g.fillStyle = '#323e4e'; g.strokeStyle = '#fff'; g.lineWidth = 3; g.stroke(); g.fill(); g.font = 'bold 24px Arial'; g.textAlign = 'center'; g.lineWidth = 4; g.strokeText('N', nx, ny + 38); g.fillText('N', nx, ny + 38);
+      g.save(); g.translate(ox + MW - 40, oy + 60); g.rotate(w); g.beginPath(); g.moveTo(0, -38); g.lineTo(15, 14); g.lineTo(0, 0); g.lineTo(-15, 14); g.closePath();
+      g.fillStyle = '#323e4e'; g.strokeStyle = '#fff'; g.lineWidth = 3; g.stroke(); g.fill(); g.font = 'bold 24px Arial'; g.textAlign = 'center'; g.textBaseline = 'alphabetic'; g.lineWidth = 4; g.strokeText('N', 0, -44); g.fillText('N', 0, -44); g.restore();
       const fy = oy + MH + 8 * PX, SB = [1, 2, 5, 10, 20, 50, 100].find(v => v * s >= 25 * PX) || 100;
       g.textAlign = 'left'; g.textBaseline = 'alphabetic'; g.fillStyle = '#323e4e';
       g.font = 'bold 34px Arial'; g.fillText(o.titel || 'Grundstück', ox, fy);
       g.font = '24px Arial'; g.fillText([o.untertitel, PARZ ? `Parzelle ${PARZ.number}` : ''].filter(Boolean).join(' · '), ox, fy + 34);
       g.font = '18px Arial'; g.fillStyle = '#6b7079';
-      g.fillText(`Massstab 1:${f.m} · ${h.querySelector('[data-blatt]').selectedOptions[0].text} · erstellt ${new Date().toLocaleDateString('de-CH')} · Knechtgarten`, ox, fy + 64);
-      g.fillText(`Quellen: swisstopo (Luftbild, Landeskarte, swissALTI3D ±0.25 m), amtliche Vermessung (geodienste.ch). Nicht rechtsverbindlich.`, ox, fy + 90);
+      g.fillText(`Massstab 1:${f.m} · ${h.querySelector('[data-blatt]').selectedOptions[0].text}${DREH ? ` · gedreht ${DREH}°` : ''} · erstellt ${new Date().toLocaleDateString('de-CH')} · Knechtgarten`, ox, fy + 64);
+      g.fillText(`Quellen: swisstopo (Luftbild, swissALTI3D ±0.25 m), amtliche Vermessung (geodienste.ch). Nicht rechtsverbindlich.`, ox, fy + 90);
       const sx = ox + MW - SB * s, sy = fy + 40; g.fillStyle = '#323e4e'; g.fillRect(sx, sy, SB * s / 2, 10); g.strokeStyle = '#323e4e'; g.lineWidth = 2; g.strokeRect(sx, sy, SB * s, 10);
       g.font = '18px Arial'; g.textAlign = 'center'; [0, SB / 2, SB].forEach(v => g.fillText(v + (v === SB ? ' m' : ''), sx + v * s, sy - 8));
       const d = new window.jspdf.jsPDF({ unit: 'mm', format: [f.W, f.H].sort((a, b) => a - b), orientation: f.W > f.H ? 'landscape' : 'portrait' });
       d.addImage(c.toDataURL('image/jpeg', 0.9), 'JPEG', 0, 0, f.W, f.H);
-      d.save(`Plan ${o.titel || 'Grundstück'} 1-${f.m}`.replace(/[\\/:*?"<>|]/g, '') + '.pdf');
+      d.save(`Plan ${o.titel || 'Grundstück'} 1-${f.m}`.replace(/[\/:*?"<>|]/g, '') + '.pdf');
     }
     const taste = e => { if(e.key === 'Escape'){ if(punkte.length){ punkte = []; if(live) gruppe.removeLayer(live); labels.forEach(l => gruppe.removeLayer(l)); live = null; labels = []; } else zu(); }
       if(e.key === 'Backspace' && punkte.length && !/INPUT|TEXTAREA/.test(document.activeElement?.tagName)){ e.preventDefault(); punkte.pop(); zeichneLive(); } };
-    const zu = () => { document.removeEventListener('keydown', taste, true); map.remove(); h.remove(); };
+    const zu = () => { document.removeEventListener('keydown', taste, true); document.removeEventListener('mousemove', drehen); document.removeEventListener('mouseup', drehEnde); map.remove(); h.remove(); };
     document.addEventListener('keydown', taste, true);
     h.querySelector('[data-zu]').onclick = zu;
     return { map, zu };
@@ -358,6 +390,10 @@
 .kgk-werk button[aria-pressed=true],.kgk-knopf.an{background:#323e4e;border-color:#323e4e;color:#fff}
 .kgk-ext{font-size:12.5px;color:#323e4e;font-weight:600;margin-top:12px}
 .kgk-info{color:#6b7079;font-size:11.5px}
+.kgk-dreh{display:flex;align-items:center;gap:3px;flex:1;min-width:0;justify-content:flex-end}
+.kgk-dreh input{width:52px;height:26px;border:1px solid #d5dbe1;border-radius:6px;font:inherit;font-size:12.5px;text-align:right;padding:0 4px}
+.kgk-dreh button{all:unset;cursor:pointer;width:24px;height:24px;border:1px solid #d5dbe1;border-radius:6px;text-align:center;line-height:22px;color:#4c5c70;font-weight:600;background:#fff}
+.kgk-dreh button:hover{background:#f5f7f9}
 .kgk-rechts{flex:1;min-width:0;position:relative;display:flex;flex-direction:column}
 .kgk-karte{flex:1;min-height:240px}
 .kgk-zu{position:absolute;top:10px;right:10px;z-index:600;width:30px;height:30px}
