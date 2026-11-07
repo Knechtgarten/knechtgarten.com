@@ -121,7 +121,10 @@ Deno.serve(async (req) => {
           if (t) p.set('pageToken', t); const d = await gapi('files?' + p); out.push(...(d.files || [])); t = d.nextPageToken || ''; } while (t);
         return out; };
       const neu = (name: string, parent: string) => gapi('files?supportsAllDrives=true&fields=id,name', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, mimeType: ORDNER, parents: [parent] }) });
-      const kopieren = async (q: string, parent: string, name: string): Promise<any> => { const n = await neu(name, parent); for (const c of await kinder(q)) await kopieren(c.id, n.id, c.name); return n; };
+      // Vorlage: Struktur einmal lesen (Ebenen gleichzeitig), dann alle Ordner einer Ebene gleichzeitig anlegen
+      const lesen = async (id: string): Promise<any[]> => Promise.all((await kinder(id)).map(async (c: any) => ({ name: c.name, kinder: await lesen(c.id) })));
+      const anlegen = (knoten: any[], parent: string): Promise<any> => Promise.all(knoten.map(async (k: any) => { const o = await neu(k.name, parent); await anlegen(k.kinder, o.id); }));
+      const kopieren = async (q: string, parent: string, name: string): Promise<any> => { const [n, baum] = await Promise.all([neu(name, parent), lesen(q)]); await anlegen(baum, n.id); return n; };
       // Kundenordner des aktuellen Jahres (fehlt er: aus der Vorlage anlegen und verknüpfen, wie kg-kundenordner.js)
       const jahr = new Date().getFullYear();
       let { data: ko } = await admin.from('kunde_ordner').select('*').eq('kunde_id', k.id).eq('jahr', jahr).limit(1).maybeSingle();
