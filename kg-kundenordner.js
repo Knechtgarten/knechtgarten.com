@@ -40,9 +40,20 @@
     async jahresOrdner(jahr){ const l = await kinder(ROOT, true); const j = l.find(f => f.name === String(jahr)); return j || ordnerNeu(String(jahr), ROOT); },
     // Muster = erster vorbereitete Kundenordner (nur die Ordnerstruktur wird übernommen, keine Dateien) in der Vorlage («ZZZZZ-…»), sonst die Vorlage selbst
     async vorlage(){ if(vorlageId) return vorlageId; const l = await kinder(VORLAGE, true); const z = l.find(f => /^zzzz/i.test(f.name)); return (vorlageId = z ? z.id : VORLAGE); },
+    // Ordnerstruktur der Vorlage einmal lesen (Ebenen gleichzeitig), einen Tag im Browser gemerkt
+    async baum(quelleId){
+      const key = 'kko-baum-' + quelleId;
+      try { const m = JSON.parse(localStorage.getItem(key) || 'null'); if(m && Date.now() - m.zeit < 864e5) return m.baum; } catch(_){}
+      const lesen = async id => Promise.all((await kinder(id, true)).map(async c => ({ name: c.name, kinder: await lesen(c.id) })));
+      const baum = await lesen(quelleId);
+      try { localStorage.setItem(key, JSON.stringify({ zeit: Date.now(), baum })); } catch(_){}
+      return baum;
+    },
+    // Kundenordner aus der Vorlage: nur Unterordner, keine Dateien (Entscheid 2026-11-05); alle Ordner einer Ebene gleichzeitig anlegen
     async kopieren(quelleId, zielParent, name){
-      const neu = await ordnerNeu(name, zielParent);
-      for(const c of await kinder(quelleId, true)) await KKO.kopieren(c.id, neu.id, c.name); // nur Unterordner, keine Dateien (Entscheid 2026-11-05)
+      const [neu, baum] = await Promise.all([ordnerNeu(name, zielParent), KKO.baum(quelleId)]);
+      const anlegen = (knoten, parent) => Promise.all(knoten.map(async k => { const o = await ordnerNeu(k.name, parent); await anlegen(k.kinder, o.id); }));
+      await anlegen(baum, neu.id);
       return neu;
     },
     // Kundenordner für ein Jahr anlegen (aus der Vorlage) und verknüpfen. Name «Meier Thun», gibt es ihn schon: «Meier Thun (Seestrasse)»
