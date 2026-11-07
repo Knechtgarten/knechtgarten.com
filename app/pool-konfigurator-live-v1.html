@@ -348,6 +348,12 @@ const TEILE=[
   {k:'ablauf',n:'Bodenablauf',modelle:['PPr Flansch D110 inkl. Gitter'],mat:null},
   {k:'gegen',n:'Gegenstrom',modelle:['EVA Stream FIT 3.0','EVA Stream FIT 4.5','EVA Stream FIT 6.5'],mat:null}];
 const TN=Object.fromEntries(TEILE.map(t=>[t.k,t]));
+// Einlaufdüsen nach Aufgabe: Walze (20 cm ab Boden, Skimmerseite), Treib (10 cm unter Wasserlinie, Stirnseite weg vom Skimmer), Sitzbank (unten, Mitte Bank)
+const DUESEN={walze:'Walzendüse',treib:'Treibdüse',bank:'Sitzbankdüse'};
+const KACHELN_TEILE=[{k:'skimmer'},{k:'duese-walze',n:'Walzendüsen'},{k:'duese-treib',n:'Treibdüse'},{k:'duese-bank',n:'Sitzbankdüse'},{k:'licht'},{k:'ablauf'},{k:'gegen'}];
+const teilName=p=>p.k==='duese'?DUESEN[p.art||'walze']:TN[p.k].n;
+const istArt=(p,art)=>p.k==='duese'&&(p.art||'walze')===art;
+function neuTeil(key,extra={}){const [k,art]=key.split('-'),t=TN[k];return {id:nid++,k,...(art?{art}:{}),wand:k==='ablauf'?'boden':'N',modell:t.modelle[k==='licht'?1:0],mat:t.mat?.[0]||null,...extra}}
 const TECHNIK=[{k:'filter',n:'Filter',w:['Sandfilter Ø 600','Glasfilter Ø 600','Vliesfilter']},{k:'pumpe',n:'Pumpe',w:['InverMaster']},
   {k:'pflege',n:'Wasserpflege',w:['Aqua.NET pH/Redox','Aqua.NET + UVC','DA-GEN']},{k:'wp',n:'Wärmepumpe',w:['Silence 30 MPXC150 (passend)','Silence 30 MPXC190','keine']},
   {k:'nachsp',n:'Nachspeisung',w:['automatisch','keine']}];
@@ -496,10 +502,38 @@ function empf(g){return {skimmer:Math.max(Math.ceil(g.A/25),g.B>=4?2:1),duese:Ma
 function startTeile(){const g=geom(),e=empf(g);S.teile=[];
   const add=(k,n,wand)=>{for(let i=0;i<n;i++)S.teile.push({id:nid++,k,wand,modell:TN[k].modelle[k==='licht'?1:0],mat:TN[k].mat?.[0]||null})};
   add('skimmer',e.skimmer,'N');add('duese',e.duese,'S');add('licht',2,'N');add('ablauf',1,'boden');verteile()}
-function verteile(){const g=geom(),x0=S.bank&&S.aseite==='W'?0.6:0.3,x1=g.L-(S.treppe!=='keine'?1.8:0.3);
-  const grp={};S.teile.forEach(p=>{if(!p.fix)(grp[p.wand]=grp[p.wand]||[]).push(p)});
+function verteile(){skimmerCheck();const g=geom(),x0=S.bank&&S.aseite==='W'?0.6:0.3,x1=g.L-(S.treppe!=='keine'?1.8:0.3);
+  const grp={};S.teile.forEach(p=>{if(!p.fix&&p.k!=='duese')(grp[p.wand]=grp[p.wand]||[]).push(p)});
   for(const w in grp)grp[w].forEach((p,i,a)=>{if(w==='boden'){p.x=g.L/2;p.y=g.B/2}else p.pos=x0+(x1-x0)*(i+1)/(a.length+1)});
-  S.teile.forEach(p=>{if(p.k==='gegen'){if(p.wand!=='W'&&p.wand!=='E')p.wand=S.tseite==='E'?'W':'E';p.pos=g.B/2}})}
+  S.teile.forEach(p=>{if(p.k==='gegen'){if(p.wand!=='W'&&p.wand!=='E')p.wand=S.tseite==='E'?'W':'E';p.pos=g.B/2}});legeDuesen()}
+// Ziel der Düsen aus dem Skimmer: Walzendüsen auf seiner Längsseite, Treibdüse auf der Stirnseite weiter weg
+function duesenZiel(){const g=geom(),sk=S.teile.find(p=>p.k==='skimmer');
+  const walze=sk&&(sk.wand==='N'||sk.wand==='S')?sk.wand:'N';
+  const treib=!sk?'E':sk.wand==='W'?'E':sk.wand==='E'?'W':sk.pos<g.L/2?'E':'W';
+  return {walze,treib}}
+const anzahlWalze=()=>Math.max(2,Math.round(geom().L/1.5));   // Faustregel: 1 pro rund 1.5 m Beckenlänge
+function legeDuesen(){const g=geom(),z=duesenZiel(),r=v=>Math.round(v*100)/100;
+  for(const art of ['walze','treib','bank']){const a=S.teile.filter(p=>istArt(p,art)&&!p.fix);if(!a.length)continue;
+    if(art==='walze'){let lo=0.3,hi=g.L-0.3;
+      if(S.bank){if(S.aseite==='W')lo=0.9;else hi=g.L-0.9}
+      if(S.treppe!=='keine'&&S.tecke===z.walze){const tl=1.8+(S.bank&&S.aseite===S.tseite?0.6:0);if(S.tseite==='W')lo=Math.max(lo,tl);else hi=Math.min(hi,g.L-tl)}
+      a.forEach((p,i)=>{p.wand=z.walze;p.pos=r(lo+(hi-lo)*(i+0.5)/a.length)})}
+    else a.forEach((p,i)=>{p.wand=art==='treib'?z.treib:(S.aseite||'W');p.pos=r(g.B*(i+1)/(a.length+1))})}
+  S.teile.forEach(p=>{if(istArt(p,'bank'))p.wand=S.aseite||'W'})}
+// Skimmer auf andere Seite: Düsen bleiben vorerst stehen, Frage ob sie mitkommen (alle auf der alten Skimmer-Linie bzw. Treib-Seite)
+let duesenSig=null;
+function skimmerCheck(){const z=duesenZiel(),sig=z.walze+z.treib;
+  if(duesenSig&&sig!==duesenSig){const alt={walze:duesenSig[0],treib:duesenSig[1]},d=S.teile.filter(p=>p.k==='duese'&&p.art!=='bank');
+    d.forEach(p=>p.fix=true);
+    const mit=d.filter(p=>p.wand===alt.walze||p.wand===alt.treib);
+    if(mit.length)frageDuesen(mit)}
+  duesenSig=sig}
+function frageDuesen(d){document.querySelector('.toast')?.remove();const t=document.createElement('div');t.className='toast';
+  t.innerHTML='Düsen auf die Skimmerseite mitnehmen? <button data-j>Ja</button><button data-n>Nein</button>';document.body.appendChild(t);
+  t.querySelector('[data-j]').onclick=()=>{const z=duesenZiel();d.forEach(p=>{p.fix=false;if(!p.art)p.art='walze';if(p.wand!==z.walze&&p.wand!==z.treib)p.art=p.wand==='N'||p.wand==='S'?'walze':'treib'});t.remove();verteile();alles()};
+  t.querySelector('[data-n]').onclick=()=>t.remove();setTimeout(()=>t.remove(),12000)}
+function satzWeg(a,n){document.querySelector('.toast')?.remove();const d=document.createElement('div');d.className='toast';d.innerHTML=`${n} entfernt <button>Rückgängig</button>`;document.body.appendChild(d);
+  d.querySelector('button').onclick=()=>{S.teile.push(...a);d.remove();alles()};setTimeout(()=>d.remove(),4000)}
 // --- Plan mit Technikraum
 let G=null;
 // Treppe in Weltkoordinaten: lokale Prismen (u ab Stirnwand, v ab Ecke) auf Seite/Ecke spiegeln
@@ -522,7 +556,7 @@ function zeichne(){
   o+=`<rect x="${X(0)}" y="${Y(0)}" width="${g.L*s}" height="${g.B*s}" fill="url(#wasser)" stroke="#323E4E" stroke-width="1.6"/>`;
   { const wv=0.16; o+=`<polygon points="${X(0)},${Y(0)} ${X(g.L)},${Y(0)} ${X(g.L-wv)},${Y(wv)} ${X(wv)},${Y(wv)}" fill="#323E4E" fill-opacity=".11"/><polygon points="${X(0)},${Y(0)} ${X(wv)},${Y(wv)} ${X(wv)},${Y(g.B-wv)} ${X(0)},${Y(g.B)}" fill="#323E4E" fill-opacity=".06"/>`; }
   // Abdeckung
-  if(S.bank){const x=S.aseite==='W'?0:g.L-0.6;const BL=BELAG.find(b=>b.k===S.belag);o+=`<g data-bank style="cursor:grab"><rect x="${X(x)}" y="${Y(0)}" width="${0.6*s}" height="${g.B*s}" fill="${BL.c||F.c}" stroke="#323E4E" stroke-width="1.2"/>`+t(X(x+0.3)+4,Y(g.B/2),'Sitzbank',{fs:10,rot:1,c:'#323E4E'})+'</g>'}
+  if(S.bank){const x=S.aseite==='W'?0:g.L-0.6;const BL=BELAG.find(b=>b.k===S.belag);o+=`<g data-bank style="cursor:grab"><rect x="${X(x)}" y="${Y(0)}" width="${0.6*s}" height="${g.B*s}" fill="${BL.c||F.c}" stroke="#323E4E" stroke-width="1.2"/><defs><linearGradient id="bankwasser" x1="${S.aseite==='W'?1:0}" x2="${S.aseite==='W'?0:1}"><stop offset="0" stop-color="${shade(F.w,-4)}" stop-opacity=".85"/><stop offset="1" stop-color="${shade(F.w,6)}" stop-opacity=".25"/></linearGradient></defs><rect x="${X(x)}" y="${Y(0)}" width="${0.6*s}" height="${g.B*s}" fill="url(#bankwasser)" pointer-events="none"/>`+t(X(x+0.3)+4,Y(g.B/2),'Sitzbank',{fs:10,rot:1,c:'#323E4E'})+'</g>'}
   if(S.kasten==='nische'){const x=S.nseite==='W'?-NISCHE.tief:g.L;o+=`<g data-kasten style="cursor:grab"><rect x="${X(x)}" y="${Y(0)}" width="${NISCHE.tief*s}" height="${g.B*s}" fill="#DCE2E8" fill-opacity=".7" stroke="#4C5C70" stroke-dasharray="5 4"/>${t(X(x+NISCHE.tief/2)+4,Y(g.B/2),'Nische unter dem Rand',{fs:9.5,rot:1,c:'#323E4E'})}</g>`}
   if(S.kasten==='ueber'){const x=S.nseite==='W'?-0.55:g.L+0.05;o+=`<g data-kasten style="cursor:grab"><rect x="${X(x)}" y="${Y(-0.2)}" width="${0.5*s}" height="${(g.B+0.4)*s}" rx="4" fill="#fff" stroke="#4C5C70" filter="url(#schatten)"/>${t(X(x+0.25)+4,Y(g.B/2),'Überflur-Box',{fs:9.5,rot:1,c:'#323E4E'})}</g>`}
   // Treppe (ziehbar)
@@ -546,9 +580,9 @@ function zeichne(){
   o+=`<defs><radialGradient id="lichtschein" cx="0" cy=".5" r=".95"><stop offset="0" stop-color="#FFF3A8" stop-opacity=".95"/><stop offset=".45" stop-color="#F7E27A" stop-opacity=".35"/><stop offset="1" stop-color="#F7E27A" stop-opacity="0"/></radialGradient></defs>`;
   for(const p of S.teile){
     const [mx,my]=p.wand==='boden'?[p.x,p.y]:p.wand==='N'?[p.pos,0]:p.wand==='S'?[p.pos,g.B]:p.wand==='W'?[0,p.pos]:[g.L,p.pos];
-    const rot={N:90,S:-90,W:0,E:180}[p.wand]||0, x=X(mx), y=Y(my);
+    const rot={N:90,S:-90,W:0,E:180}[p.wand]||0, x=X(mx+(p.art==='bank'?(p.wand==='W'?0.6:-0.6):0)), y=Y(my);
     const sym={
-      duese:'<path d="M0.5 -6L10.5 0L0.5 6Z" fill="#323E4E"/>',
+      duese:`<path d="M0.5 -6L10.5 0L0.5 6Z" fill="${p.art==='treib'?'#323E4E':'#8B9097'}"/>`,
       skimmer:'<rect x="-16" y="-10" width="16" height="20" rx="1.5" fill="#C9D1D9" stroke="#323E4E" stroke-width="1.3"/><path d="M-11 -6v12" stroke="#6E7F93" stroke-width="1"/>',
       licht:'<ellipse cx="22" cy="0" rx="24" ry="15" fill="url(#lichtschein)" opacity=".7"/><path d="M0 -5.5A5.5 5.5 0 0 1 0 5.5Z" fill="#F7E27A" stroke="#323E4E" stroke-width="1.1" stroke-linejoin="round"/>',
       gegen:'<rect x="-16" y="-26" width="16" height="52" rx="2" fill="#C9D1D9" stroke="#323E4E" stroke-width="1.3"/>'
@@ -616,16 +650,17 @@ function seite(){
   // Lage eines Teils in cm: an der Wand Abstand ab Ecke, Bodenablauf ab links und ab hinten; Gegenstrom nur Stirnseite (Mitte)
   const lageTeil=p=>{const cm=v=>Math.round(v*100);
     if(p.k==='ablauf')return `<div class="zeile"><label class="fld"><span>ab links</span><span class="inp"><input id="lgX" type="number" step="1" value="${cm(p.x)}"><em>cm</em></span></label><label class="fld"><span>ab hinten</span><span class="inp"><input id="lgY" type="number" step="1" value="${cm(p.y)}"><em>cm</em></span></label></div>`;
+    if(p.art==='bank')return `<div class="zeile"><label class="fld"><span>ab hinten</span><span class="inp"><input id="lgP" type="number" step="1" value="${cm(p.pos)}"><em>cm</em></span></label></div>`;
     const waende=p.k==='gegen'?[['W','Stirnseite links'],['E','Stirnseite rechts']]:[['N','Längsseite hinten'],['S','Längsseite vorne'],['W','Stirnseite links'],['E','Stirnseite rechts']];
     return `<div class="zeile"><label class="fld" style="flex:1"><span>Wand</span><select id="lgW">${waende.map(([w,t])=>`<option value="${w}"${p.wand===w?' selected':''}>${t}</option>`).join('')}</select></label>
       ${p.k==='gegen'?'<p class="klein" style="margin:0 0 6px">immer in der Mitte</p>':`<label class="fld"><span>${p.wand==='N'||p.wand==='S'?'ab links':'ab hinten'}</span><span class="inp"><input id="lgP" type="number" step="1" value="${cm(p.pos)}"><em>cm</em></span></label>`}</div>`;};
   if(b==='teile'){sub=`${S.teile.length} gesetzt`;
     const p=S.teile.find(t=>t.id===S.sel);
-    h=`<div class="kacheln">${TEILE.map(t=>kachel('teil',t.k,t.n,bildTeil(t.k),p?.k===t.k,{zieh:1})).join('')}</div>
-      <div class="einst"><h3>${p?TN[p.k].n+' im Plan':'Einstellungen'}</h3>${p?`<div class="zeile">
+    h=`<div class="kacheln">${KACHELN_TEILE.map(t=>{const [k,art]=t.k.split('-');return kachel('teil',t.k,t.n||TN[k].n,bildTeil(k),art?S.teile.some(q=>istArt(q,art)):p?.k===k&&!p.art,{zieh:1,dis:art==='bank'&&!S.bank})}).join('')}</div>
+      <div class="einst"><h3>${p?teilName(p)+' im Plan':'Einstellungen'}</h3>${p?`<div class="zeile">
         <label class="fld" style="flex:1"><span>Modell</span><select id="selModell">${TN[p.k].modelle.map(m=>`<option${m===p.modell?' selected':''}>${m}</option>`).join('')}</select></label>
         ${TN[p.k].mat?`<label class="fld"><span>Material</span><select id="selMat">${TN[p.k].mat.map(m=>`<option${m===p.mat?' selected':''}>${m}</option>`).join('')}</select></label>`:''}
-        <button class="ibtn danger" id="weg" title="Entfernen (oder Entf-Taste)">${IC.trash}</button></div>${lageTeil(p)}`
+        <button class="ibtn danger" id="weg" title="Entfernen (oder Entf-Taste)">${IC.trash}</button></div>${lageTeil(p)}${p.k==='duese'?`<div class="zeile"><label class="fld"><span>Anzahl</span><span class="inp"><input id="lgN" type="number" min="1" max="12" step="1" value="${S.teile.filter(q=>istArt(q,p.art||'walze')).length}"><em>Stk.</em></span></label></div>`:''}`
         :'<p class="klein">Kachel in den Plan ziehen (genau platzieren) oder anklicken (setzt sich an den Rand). Ein Teil im Plan anklicken zeigt hier Modell und Material. Zum Entfernen aus dem Becken hinausziehen.</p>'}</div>`;}
   if(b==='farbe'){sub=F.n;
     h=`<div class="kacheln">${FARBEN.map(f=>kachel('farbe',f.k,f.n,bildFarbe(f),S.farbe===f.k)).join('')}</div>
@@ -658,6 +693,10 @@ function seite(){
   if(p&&$('lgW'))$('lgW').onchange=ev=>{const g=geom();p.wand=ev.target.value;p.fix=true;if(p.k==='gegen')p.pos=g.B/2;else p.pos=Math.min(p.pos,(p.wand==='N'||p.wand==='S'?g.L:g.B)-0.15);alles()};
   const cmSetzen=(id,f,max)=>{if(!p||!$(id))return;$(id).onchange=ev=>{const v=parseFloat(ev.target.value);if(isNaN(v))return;p[f]=Math.max(0.1,Math.min(max-0.1,v/100));p.fix=true;alles()}};
   {const g=geom();cmSetzen('lgP','pos',p&&(p.wand==='N'||p.wand==='S')?g.L:g.B);cmSetzen('lgX','x',g.L);cmSetzen('lgY','y',g.B)}
+  if(p&&$('lgN'))$('lgN').onchange=ev=>{const n=Math.max(1,Math.min(12,parseInt(ev.target.value)||1)),art=p.art||'walze',a=S.teile.filter(q=>istArt(q,art));
+    while(a.length<n){const q=neuTeil('duese-'+art);S.teile.push(q);a.push(q)}
+    if(a.length>n){const weg=a.slice(n);S.teile=S.teile.filter(q=>!weg.includes(q));if(weg.includes(p))S.sel=a[0].id}
+    S.teile.forEach(q=>{if(istArt(q,art))q.fix=false});verteile();alles()};
   if($('selMat'))$('selMat').onchange=ev=>{p.mat=ev.target.value;auswahl();speichernBald()};
   if($('weg'))$('weg').onclick=()=>entfernen(p);
   if($('techSel'))$('techSel').onchange=ev=>{S.tech[S.techWahl]=ev.target.value;alles()};
@@ -665,15 +704,15 @@ function seite(){
 
 function auswahl(){
   const p=S.teile.find(t=>t.id===S.sel);
-  $('auswahl').innerHTML=p?`${teilIcon(p.k)}<b>${TN[p.k].n}</b><span style="color:var(--muted-t)">${p.modell}${p.mat?' · '+p.mat:''}</span>`
+  $('auswahl').innerHTML=p?`${teilIcon(p.k)}<b>${teilName(p)}</b><span style="color:var(--muted-t)">${p.modell}${p.mat?' · '+p.mat:''}</span>`
     :'';
   $('auswahl').hidden=!p;
 }
 let zuletzt=null;
 function entfernen(p){S.teile=S.teile.filter(t=>t!==p);S.sel=null;zuletzt=p;alles();
-  document.querySelector('.toast')?.remove();const d=document.createElement('div');d.className='toast';d.innerHTML=`${TN[p.k].n} entfernt <button>Rückgängig</button>`;document.body.appendChild(d);
+  document.querySelector('.toast')?.remove();const d=document.createElement('div');d.className='toast';d.innerHTML=`${teilName(p)} entfernt <button>Rückgängig</button>`;document.body.appendChild(d);
   d.querySelector('button').onclick=()=>{S.teile.push(zuletzt);d.remove();alles()};setTimeout(()=>d.remove(),4000)}
-function alles(){seite();zeichne();auswahl();if(ANSICHT==='3d')bau3D();speichernBald()}
+function alles(){skimmerCheck();seite();zeichne();auswahl();if(ANSICHT==='3d')bau3D();speichernBald()}
 
 // --- Info-Fenster (für den Kunden: Fotos und kurzer Text)
 const INFO={treppe:{structa:'Ecktreppe über einen Teil der Breite, daneben bleibt die volle Tiefe frei.',completo:'Treppe über die ganze Beckenbreite – bequemer Einstieg, viel Sitzfläche.',lounge:'Wie Completo, die unterste Stufe ist breit zum Sitzen und Liegen.',minimo:'Kleine Stufen über Eck, braucht am wenigsten Platz.',plage:'Flacher Bereich (Plage) mit Ecktreppe – ideal für Kinder und zum Sitzen im Wasser.'}};
@@ -691,9 +730,13 @@ function info(g,k){
 }
 function waehle(g,k){
   if(g==='koerper'){if(KOERPER.find(x=>x.k===k).folgt)return;S.koerper=k}
-  else if(g==='teil'){const t=TN[k];S.teile.push({id:nid++,k,wand:k==='ablauf'?'boden':k==='gegen'?(S.tseite==='E'?'W':'E'):'N',modell:t.modelle[k==='licht'?1:0],mat:t.mat?.[0]||null});verteile();S.sel=nid-1}
+  else if(g==='teil'){const art=k.split('-')[1];
+    if(art){const da=S.teile.filter(p=>istArt(p,art));   // Düsen: ganzer Satz an den Vorschlags-Ort, zweiter Klick nimmt ihn weg
+      if(da.length){S.teile=S.teile.filter(p=>!da.includes(p));S.sel=null;satzWeg(da,da.length>1?DUESEN[art].replace('düse','düsen'):DUESEN[art])}
+      else if(art!=='bank'||S.bank){const n=art==='walze'?anzahlWalze():1;for(let i=0;i<n;i++)S.teile.push(neuTeil(k));verteile();S.sel=nid-n}}
+    else{S.teile.push(neuTeil(k,{wand:k==='ablauf'?'boden':k==='gegen'?(S.tseite==='E'?'W':'E'):'N'}));verteile();S.sel=nid-1}}
   else if(g==='tech')S.techWahl=k;
-  else if(g==='bank'){S.bank=!S.bank;if(S.bank)S.aseite=S.tseite==='E'?'W':'E';else if(S.abd==='bank')S.abd='keine';verteile()}
+  else if(g==='bank'){S.bank=!S.bank;if(!S.bank)S.teile=S.teile.filter(p=>p.art!=='bank');if(S.bank)S.aseite=S.tseite==='E'?'W':'E';else if(S.abd==='bank')S.abd='keine';verteile()}
   else if(g==='kasten'){const alt=S.kasten;S.kasten=S.kasten===k?null:k;if(S.kasten&&!alt)S.nseite=S.tseite==='E'?'W':'E';if(['nische','ueber'].includes(S.abd)&&S.abd!==S.kasten)S.abd='keine'}
   else if(g==='rolle'){const [eg,ek]=k.split(':'),lage=ROLLE_BEI[ek];
     if(eg==='treppe'&&S.treppe!==ek)S.treppe=ek; if(eg==='bank'&&!S.bank){S.bank=true;S.aseite=S.tseite==='E'?'W':'E'} if(eg==='kasten'&&S.kasten!==ek){S.kasten=ek;S.nseite=S.tseite==='E'?'W':'E'}
@@ -727,6 +770,7 @@ const meter=e=>{const sv=$('plan'),pt=sv.createSVGPoint();pt.x=e.clientX;pt.y=e.
 function setzeTeil(p,mx,my){const g=G.g,cl=(v,a,b)=>Math.max(a,Math.min(b,v)),cm=v=>Math.round(v*100)/100;
   if(p.k==='ablauf'){p.wand='boden';p.x=cm(cl(mx,0.12,g.L-0.12));p.y=cm(cl(my,0.12,g.B-0.12));return}
   if(p.k==='gegen'){p.wand=mx<g.L/2?'W':'E';p.pos=g.B/2;return}
+  if(p.art==='bank'){p.wand=S.aseite||'W';p.pos=cm(cl(my,0.1,g.B-0.1));return}
   const d={N:Math.abs(my),S:Math.abs(my-g.B),W:Math.abs(mx),E:Math.abs(mx-g.L)};let w=Object.keys(d).sort((a,b)=>d[a]-d[b])[0];
   if(d[p.wand]!=null&&d[p.wand]-d[w]<0.4)w=p.wand;   // an der bisherigen Wand bleiben, bis eine andere klar näher ist
   p.wand=w;p.pos=cm(cl(w==='N'||w==='S'?mx:my,0.1,(w==='N'||w==='S'?g.L:g.B)-0.1))}
@@ -750,11 +794,11 @@ $('plan').addEventListener('pointerup',()=>{if(!zug)return;const z=zug;zug=null;
 let neuZug=null,klickSperre=false;
 document.addEventListener('pointerdown',e=>{const t=e.target.closest('[data-teil]');if(!t||e.target.closest('[data-info]'))return;neuZug={k:t.dataset.teil,x:e.clientX,y:e.clientY,geist:null}});
 document.addEventListener('pointermove',e=>{if(!neuZug)return;
-  if(!neuZug.geist&&Math.hypot(e.clientX-neuZug.x,e.clientY-neuZug.y)>8){neuZug.geist=document.createElement('div');neuZug.geist.className='geist';neuZug.geist.innerHTML=teilIcon(neuZug.k);document.body.appendChild(neuZug.geist)}
+  if(!neuZug.geist&&Math.hypot(e.clientX-neuZug.x,e.clientY-neuZug.y)>8){neuZug.geist=document.createElement('div');neuZug.geist.className='geist';neuZug.geist.innerHTML=teilIcon(neuZug.k.split('-')[0]);document.body.appendChild(neuZug.geist)}
   if(neuZug.geist){neuZug.geist.style.left=e.clientX+'px';neuZug.geist.style.top=e.clientY+'px'}});
 document.addEventListener('pointerup',e=>{if(!neuZug)return;const z=neuZug;neuZug=null;if(!z.geist)return;z.geist.remove();klickSperre=true;setTimeout(()=>klickSperre=false,50);
   const r=$('plan').getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)return;
-  const [mx,my]=meter(e),k=z.k;const p={id:nid++,k,wand:'N',fix:true,modell:TN[k].modelle[k==='licht'?1:0],mat:TN[k].mat?.[0]||null};S.teile.push(p);setzeTeil(p,mx,my);S.sel=p.id;S.bereich='teile';alles()});
+  if(z.k==='duese-bank'&&!S.bank)return;const [mx,my]=meter(e),p=neuTeil(z.k,{fix:true});S.teile.push(p);setzeTeil(p,mx,my);S.sel=p.id;S.bereich='teile';alles()});
 
 
 /* =====================================================================================
@@ -805,10 +849,17 @@ function bau3D(){
   for(const p of S.teile){
     const [mx,mz]=p.wand==='boden'?[p.x,p.y]:p.wand==='N'?[p.pos,0]:p.wand==='S'?[p.pos,g.B]:p.wand==='W'?[0,p.pos]:[g.L,p.pos];let m;
     if(p.k==='ablauf'){m=new THREE.Mesh(new THREE.CylinderGeometry(0.14,0.14,0.02,24),mat('#FFFFFF'));m.position.set(mx-cx,-g.T+0.01,mz-cz)}
-    else{const y={skimmer:-0.12,duese:-0.45,licht:-0.65,gegen:-0.5}[p.k],quer=p.wand==='N'||p.wand==='S';
+    else{const y=p.k==='duese'?(p.art==='treib'?-0.2:-g.T+0.2):{skimmer:-0.12,licht:-0.65,gegen:-0.5}[p.k],quer=p.wand==='N'||p.wand==='S';
       if(p.k==='skimmer')m=new THREE.Mesh(new THREE.BoxGeometry(quer?0.3:0.03,0.16,quer?0.03:0.3),dunkel);
-      else{const r={duese:0.05,licht:0.11,gegen:0.13}[p.k];m=new THREE.Mesh(new THREE.CylinderGeometry(r,r,0.03,24),p.k==='licht'?new THREE.MeshBasicMaterial({color:0xf4f7c8}):dunkel);if(quer)m.rotation.x=Math.PI/2;else m.rotation.z=Math.PI/2}
-      const inn=0.015,px=p.wand==='W'?inn:p.wand==='E'?g.L-inn:mx,pz=p.wand==='N'?inn:p.wand==='S'?g.B-inn:mz;m.position.set(px-cx,y,pz-cz)}
+      else if(p.k==='gegen')m=new THREE.Mesh(new THREE.BoxGeometry(quer?0.5:0.03,0.18,quer?0.03:0.5),mat('#C3CBD3'));   // Gegenstrom-Platte ca. 50 × 18 cm
+      else if(p.k==='licht'){   // Scheinwerfer mit Lichtschein ins Becken
+        const sg={N:1,S:-1,W:-1,E:1}[p.wand]||1;m=new THREE.Group();
+        m.add(new THREE.Mesh(new THREE.CylinderGeometry(0.11,0.11,0.03,24),new THREE.MeshBasicMaterial({color:0xfaf6c8})));
+        const halo=new THREE.Mesh(new THREE.CylinderGeometry(0.42,0.42,0.002,32),new THREE.MeshBasicMaterial({color:0xfff3a8,transparent:true,opacity:0.32,depthWrite:false}));halo.position.y=0.02*sg;m.add(halo);
+        const pl=new THREE.PointLight(0xfff1a0,0.9,2.4);pl.position.y=0.35*sg;m.add(pl);
+        if(quer)m.rotation.x=Math.PI/2;else m.rotation.z=Math.PI/2}
+      else{m=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,0.03,24),dunkel);if(quer)m.rotation.x=Math.PI/2;else m.rotation.z=Math.PI/2}
+      const bo=p.art==='bank'?0.6:0,inn=0.015,px=p.wand==='W'?inn+bo:p.wand==='E'?g.L-inn-bo:mx,pz=p.wand==='N'?inn:p.wand==='S'?g.B-inn:mz;m.position.set(px-cx,y,pz-cz)}
     grp.add(m);
   }
   // Wasser oder geschlossene Lamellen
@@ -997,9 +1048,9 @@ function setze(d){
   if(S.treppe !== 'keine') gilt('treppe', TREPPEN); gilt('farbe', FARBEN); gilt('abd', ABDECK); gilt('lamelle', LAMELLEN); gilt('belag', BELAG); gilt('koerper', KOERPER);
   if(!['W', 'E'].includes(S.tseite)) S.tseite = STD.tseite; if(!['W', 'E'].includes(S.aseite)) S.aseite = STD.aseite; if(!['N', 'S'].includes(S.tecke)) S.tecke = STD.tecke;
   S.tech = { ...STD.tech, ...(typeof S.tech === 'object' && S.tech ? S.tech : {}) };
-  S.teile = (Array.isArray(S.teile) ? S.teile : []).map(p => ({ ...p, k: p.k === 'gegenstrom' ? 'gegen' : p.k }))
+  S.teile = (Array.isArray(S.teile) ? S.teile : []).map(p => ({ ...p, k: p.k === 'gegenstrom' ? 'gegen' : p.k, ...(p.k === 'duese' && !p.art ? { art: 'walze' } : {}) }))
     .filter(p => TN[p.k]).map(p => ({ ...p, modell: TN[p.k].modelle.includes(p.modell) ? p.modell : TN[p.k].modelle[p.k === 'licht' ? 1 : 0], mat: TN[p.k].mat ? (p.mat || TN[p.k].mat[0]) : null }));
-  nid = d.nid || (Math.max(0, ...S.teile.map(p => p.id || 0)) + 1); S.sel = null;
+  nid = d.nid || (Math.max(0, ...S.teile.map(p => p.id || 0)) + 1); S.sel = null; duesenSig = null;
   alles(); LADEN = false;
 }
 function speichernBald(){ if(!P || LADEN) return; clearTimeout(timer); $('stand').textContent = `Version ${P.version} · speichert …`; timer = setTimeout(speichern, 900); }
