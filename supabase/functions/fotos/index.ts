@@ -65,6 +65,18 @@ Deno.serve(async (req) => {
       const { data: ks } = kids.length ? await admin.from('kunde').select(KFELDER).in('id', kids) : { data: [] };
       const liste = await Promise.all((ks || []).map(async (k: any) => { await koordinaten(k); const e = einsaetze.find(x => x.kunde_id === k.id);
         return ziel(k, 'Einsatz heute' + (e?.titel ? ' · ' + e.titel : ''), lat, lon); }));
+      // Zweiter Weg: Adressen der Gebäude um den Standort (Gebäuderegister des Bundes) → Kunde mit dieser Adresse
+      if (lat && lon) {
+        try {
+          const d = 0.002, u = `https://api3.geo.admin.ch/rest/services/api/MapServer/identify?geometry=${lon},${lat}&geometryType=esriGeometryPoint&sr=4326&layers=all:ch.bfs.gebaeude_wohnungs_register&tolerance=250&returnGeometry=true&geometryFormat=geojson&imageDisplay=1000,1000,96&mapExtent=${lon - d},${lat - d},${lon + d},${lat + d}&lang=de`;
+          const geb = ((await (await fetch(u)).json()).results || []).map((r: any) => ({ str: (r.properties.strname || [])[0], nr: r.properties.deinr, plz: r.properties.dplz4,
+            m: Math.round(distanz(lat, lon, r.geometry.coordinates[1], r.geometry.coordinates[0])) })).filter((g: any) => g.str && g.nr && g.m <= 150).sort((a: any, b: any) => a.m - b.m).slice(0, 12);
+          for (const g of geb) {
+            const { data: tr } = await admin.from('kunde').select(KFELDER).ilike('strasse', `${g.str} ${g.nr}%`).or(`plz.eq.${g.plz},ort.ilike.${g.plz}%`).limit(3);
+            for (const k of tr || []) if (!liste.some(z => z.kunde_id === k.id)) liste.push({ ...ziel(k, 'Adresse in der Nähe'), distanz: g.m });
+          }
+        } catch (_) { /* Gebäuderegister nicht erreichbar: nur Einsätze */ }
+      }
       liste.sort((a, b) => (a.distanz ?? 9e9) - (b.distanz ?? 9e9));
       return json({ ziele: liste, naechste: liste[0] && liste[0].distanz != null && liste[0].distanz <= 150 ? liste[0].kunde_id : null });
     }
