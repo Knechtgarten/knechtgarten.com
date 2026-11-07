@@ -555,8 +555,10 @@ function zeichne(){
         +[-14,-7,0,7,14].map((v,i)=>`<path d="M5 ${v*0.5}c10 ${(i-2)*-2} 20 ${(i-2)*3} 34 ${v}" fill="none" stroke="#4C5C70" stroke-width=".8" stroke-linecap="round" opacity=".25" stroke-dasharray="4 4"/>`).join(''),
       ablauf:'<circle r="8" fill="#fff" stroke="#323E4E" stroke-width="1.2"/><path d="M-5 -2.5h10M-6 .5h12M-5 3.5h10" stroke="#323E4E" stroke-width=".8"/>'
     }[p.k]||'';
-    o+=`<g data-id="${p.id}" style="cursor:grab">${S.sel===p.id?`<circle cx="${x}" cy="${y}" r="16" fill="none" stroke="#D1DB5F" stroke-width="3"/>`:''}<circle cx="${x}" cy="${y}" r="14" fill="transparent"/>
+    o+=`<g data-id="${p.id}" style="cursor:grab">${S.sel===p.id?`<circle cx="${x}" cy="${y}" r="15" fill="none" stroke="#323E4E" stroke-width="1" stroke-dasharray="3 3" opacity=".6"/>`:''}<circle cx="${x}" cy="${y}" r="14" fill="transparent"/>
       <g transform="translate(${x} ${y}) rotate(${p.k==='ablauf'?0:rot})">${sym}</g></g>`;
+    if(zug&&zug.id===p.id){const txt=p.wand==='boden'?`${Math.round(p.x*100)} cm ab links · ${Math.round(p.y*100)} cm ab hinten`:`${Math.round(p.pos*100)} cm ab ${p.wand==='N'||p.wand==='S'?'links':'hinten'}`,
+      ty=p.wand==='S'?y-26:y+30;o+=`<g pointer-events="none"><rect x="${x-62}" y="${ty-12}" width="124" height="18" rx="9" fill="#323E4E" opacity=".85"/><text x="${x}" y="${ty+1}" font-size="10.5" fill="#fff" text-anchor="middle">${txt}</text></g>`}
   }
   $('plan').innerHTML=o;
   // Massfelder an die Masslinien setzen (in % des SVG, damit es bei jeder Breite passt)
@@ -724,11 +726,12 @@ let zug=null,zugT=null;
   $(id).addEventListener('blur',()=>{$(id).value=S[k]});
 });
 const meter=e=>{const sv=$('plan'),pt=sv.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;const q=pt.matrixTransform(sv.getScreenCTM().inverse());return [(q.x-G.ox)/G.s,(q.y-G.oy)/G.s]};
-function setze(p,mx,my){const g=G.g,cl=(v,a,b)=>Math.max(a,Math.min(b,v));
-  if(p.k==='ablauf'){p.wand='boden';p.x=cl(mx,0.12,g.L-0.12);p.y=cl(my,0.12,g.B-0.12);return}
+function setzeTeil(p,mx,my){const g=G.g,cl=(v,a,b)=>Math.max(a,Math.min(b,v)),cm=v=>Math.round(v*100)/100;
+  if(p.k==='ablauf'){p.wand='boden';p.x=cm(cl(mx,0.12,g.L-0.12));p.y=cm(cl(my,0.12,g.B-0.12));return}
   if(p.k==='gegen'){p.wand=mx<g.L/2?'W':'E';p.pos=g.B/2;return}
-  const d={N:Math.abs(my),S:Math.abs(my-g.B),W:Math.abs(mx),E:Math.abs(mx-g.L)},w=Object.keys(d).sort((a,b)=>d[a]-d[b])[0];
-  p.wand=w;p.pos=cl(w==='N'||w==='S'?mx:my,0.15,(w==='N'||w==='S'?g.L:g.B)-0.15)}
+  const d={N:Math.abs(my),S:Math.abs(my-g.B),W:Math.abs(mx),E:Math.abs(mx-g.L)};let w=Object.keys(d).sort((a,b)=>d[a]-d[b])[0];
+  if(d[p.wand]!=null&&d[p.wand]-d[w]<0.4)w=p.wand;   // an der bisherigen Wand bleiben, bis eine andere klar näher ist
+  p.wand=w;p.pos=cm(cl(w==='N'||w==='S'?mx:my,0.1,(w==='N'||w==='S'?g.L:g.B)-0.1))}
 let zugB=null,zugK=null;
 $('plan').addEventListener('pointerdown',e=>{if(!e.target.closest('[data-id]')&&e.target.closest('[data-kasten]')){zugK=true;S.bereich='treppe';$('plan').setPointerCapture(e.pointerId);seite()}});
 $('plan').addEventListener('pointermove',e=>{if(!zugK)return;const [mx]=meter(e),s=mx<G.g.L/2?'W':'E';if(s!==S.nseite){S.nseite=s;zeichne()}});
@@ -743,8 +746,8 @@ $('plan').addEventListener('pointerup',()=>{if(zugT){zugT=null;verteile();alles(
 $('plan').addEventListener('pointerdown',e=>{if(zugT||zugB||zugK)return;const el=e.target.closest('[data-id]');if(!el){if(!e.target.closest('[data-techplan]')){S.sel=null;alles()}return}
   S.sel=+el.dataset.id;S.bereich='teile';zug={id:S.sel};$('plan').setPointerCapture(e.pointerId);alles()});
 $('plan').addEventListener('pointermove',e=>{if(!zug)return;const p=S.teile.find(t=>t.id===zug.id),[mx,my]=meter(e),g=G.g;
-  zug.raus=mx<-0.9||my<-0.9||mx>g.L+0.9||my>g.B+0.9;p.fix=true;if(!zug.raus)setze(p,mx,my);$('plan').style.opacity=zug.raus?.6:1;zeichne()});
-$('plan').addEventListener('pointerup',()=>{if(zug?.raus){const p=S.teile.find(t=>t.id===zug.id);$('plan').style.opacity=1;entfernen(p)}zug=null});
+  zug.raus=mx<-0.9||my<-0.9||mx>g.L+0.9||my>g.B+0.9;p.fix=true;if(!zug.raus)setzeTeil(p,mx,my);$('plan').style.opacity=zug.raus?.6:1;zeichne()});
+$('plan').addEventListener('pointerup',()=>{if(!zug)return;const z=zug;zug=null;$('plan').style.opacity=1;const p=S.teile.find(t=>t.id===z.id);if(z.raus&&p)entfernen(p);else alles()});
 // Teil aus der Kachel in den Plan ziehen – mit Maus und Finger (Pointer statt HTML-Drag, das auf dem Tablet nicht geht)
 let neuZug=null,klickSperre=false;
 document.addEventListener('pointerdown',e=>{const t=e.target.closest('[data-teil]');if(!t||e.target.closest('[data-info]'))return;neuZug={k:t.dataset.teil,x:e.clientX,y:e.clientY,geist:null}});
@@ -753,7 +756,7 @@ document.addEventListener('pointermove',e=>{if(!neuZug)return;
   if(neuZug.geist){neuZug.geist.style.left=e.clientX+'px';neuZug.geist.style.top=e.clientY+'px'}});
 document.addEventListener('pointerup',e=>{if(!neuZug)return;const z=neuZug;neuZug=null;if(!z.geist)return;z.geist.remove();klickSperre=true;setTimeout(()=>klickSperre=false,50);
   const r=$('plan').getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)return;
-  const [mx,my]=meter(e),k=z.k;const p={id:nid++,k,wand:'N',fix:true,modell:TN[k].modelle[k==='licht'?1:0],mat:TN[k].mat?.[0]||null};S.teile.push(p);setze(p,mx,my);S.sel=p.id;S.bereich='teile';alles()});
+  const [mx,my]=meter(e),k=z.k;const p={id:nid++,k,wand:'N',fix:true,modell:TN[k].modelle[k==='licht'?1:0],mat:TN[k].mat?.[0]||null};S.teile.push(p);setzeTeil(p,mx,my);S.sel=p.id;S.bereich='teile';alles()});
 
 
 /* =====================================================================================
