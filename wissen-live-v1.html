@@ -309,6 +309,14 @@ table.sveint tr.aktiv td{background:#EEF5FB;} table.sveint tr.aktiv td:first-chi
 .sec.warn:not(.open) .sec-h{color:var(--danger);} .sec.warn:not(.open) .sec-h h3{color:var(--danger);} .sec.warn:not(.open) .sec-h .cnt{color:var(--danger);}
 .sec.warn:not(.open) .sec-h:hover{background:#F2D9D6;}
 .sec.open .sec-b{display:flex;}
+.secgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:12px;align-items:start;margin-bottom:12px;}
+.sec.kachel{margin:0;border-radius:12px;}
+.sec.kachel .sec-h{cursor:default;background:var(--kf);color:var(--kt);padding:9px 14px;}
+.sec.kachel .sec-h h3{font-size:14px;color:var(--kt);} .sec.kachel .sec-h .cnt{color:var(--kt);opacity:.8;} .sec.kachel .sec-h:hover{background:var(--kf);}
+.sec.kachel .sec-b{padding:12px 14px 14px;max-height:340px;overflow:auto;}
+.sec.kachel.leer .sec-h h3{color:var(--kt);font-weight:600;} .sec.kachel.leer .sec-h .i{opacity:1;}
+.sec.kachel.warn{background:#fff;box-shadow:none;} .sec.kachel.warn .sec-h,.sec.kachel.warn .sec-h h3,.sec.kachel.warn .sec-h .cnt{color:var(--kt);}
+body.bearb .sec.kachel .sec-b{max-height:none;}
 .kv{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#fff;}
 .kv div{padding:9px 12px;box-shadow:1px 1px 0 var(--line);}
 .kv dt{font-size:11.5px;color:var(--muted);}
@@ -943,6 +951,7 @@ async function oeffne(id, sec, ohneHistory, xid){
 // Render
 // ---------------------------------------------------------------------------
 function render(){
+  document.body.classList.toggle('bearb', darfEdit());   // beim Bearbeiten wachsen die Kacheln mit dem Inhalt
   if(!S.qr){
     const nav = [['suche','grid','Übersicht'],['listen','table','Listen'],['etiketten','label','Etiketten']];
     $('subnavInner').innerHTML = nav.map(([k,i,n]) =>
@@ -1219,13 +1228,12 @@ function vEintrag(){
   const e = byId(S.eid); if(!e) return '<div class="card empty">Eintrag nicht gefunden.</div>';
   const geraet = !!mehrfachVon(e), xs = exVon(e), x = exAktiv(e), rubrik = katVon(e)?.art || e.typ || 'geraet';
   const secs = reiheMitInhalt(e).map(k => SECS.find(z => z[0] === k)).filter(s => s && hatSec(e, s[0]));
-  const alle = secs.every(([k]) => S.open.has(k));
   // Link und Etikette (pro Stück bzw. zum Eintrag) stehen nur beim Bearbeiten im Kopf
   const etikette = darfEdit() && x && rubrik !== 'kurz' && !geraet ? `<span class="kopflinks"><button class="btn btn-ghost btn-sm" data-act="qrKopie" data-v="${QR_BASIS + x.qr_nr}" title="Link kopieren">${ic('link')}knechtgarten.com/g/${x.qr_nr}</button><button class="btn btn-ghost btn-sm" data-act="etikette" data-id="${x.id}">${ic('label')}Etikette${geraet && xs.length > 1 ? ' ' + esc(exName(x)) : ''}</button>
       <a class="btn btn-ghost btn-sm" href="?qr=${x.qr_nr}" style="text-decoration:none">${ic('phone')}QR-Ansicht</a></span>` : '';
   // Anzeigen/Bearbeiten steht oben rechts in der Leiste; hier nur der Knopf für Titel & Co. beim Bearbeiten
   const modus = darfEdit() ? `<button class="btn btn-ghost btn-sm" data-act="edit">${ic('edit')}Titel, Kategorie, Stichwörter</button>` : '';
-  const acts = S.qr ? '' : `<div class="acts">${modus}${!amHandy() && secs.length > 1 ? `<button class="btn btn-ghost" data-act="allopen" style="margin-left:auto">${ic('chev')}${alle ? 'Alle schliessen' : 'Alle öffnen'}</button>` : ''}</div>${etikette ? `<div class="acts" style="margin-top:8px">${etikette}</div>` : ''}`;
+  const acts = S.qr ? '' : `<div class="acts">${modus}</div>${etikette ? `<div class="acts" style="margin-top:8px">${etikette}</div>` : ''}`;
   const titel = `<h2>${esc(e.titel)}${S.qr && x?.nummer ? ' ' + esc(x.nummer) : ''}${S.qr ? '' : ` <button class="sternknopf ${istFav(e.id) ? 'an' : ''}" data-act="fav" data-id="${e.id}" title="${istFav(e.id) ? 'Aus den Favoriten entfernen' : 'Zu meinen Favoriten'}" aria-label="Favorit">${ic('stern')}</button>`}</h2>`;
   const meta = `<div class="meta">${e.kategorie_id ? `<span class="chip">${esc(katName(e.kategorie_id))}</span>` : ''}${e.tags.map(t => `<span class="chip tag">${esc(t)}</span>`).join('')}</div>`;
   // Bildfeld: Büro kann immer (auch in «Anzeigen» und nach dem QR-Scan) ein Foto hinzufügen; ersetzen mit Rückfrage
@@ -1259,15 +1267,22 @@ const mehrZeile = (e, zu) => zu.length ? `<div class="mehr"><span class="lbl">Me
   + zu.filter(([k]) => S.open.has(k)).map(s => secHTML(e, s)).join('') : '';
 // Abschnitte: am PC aufklappbar; auf dem Handy (Ansicht) stehen die zugeklappten als Knöpfe in der Zeile «Mehr»
 function abschnitte(e, secs){
-  if(!amHandy() || darfEdit()) return secs.map(s => secHTML(e, s)).join('');
+  if(kachelModus()) return secs.length ? `<div class="secgrid">${secs.map(s => secHTML(e, s)).join('')}</div>` : '';
+  if(darfEdit()) return secs.map(s => secHTML(e, s)).join('');
   const start = offenVon(e), offen = secs.filter(([k]) => start.includes(k)), zu = secs.filter(([k]) => !start.includes(k));
   return `${offen.map(s => secHTML(e, s)).join('')}
     ${zu.length ? `<div class="mehr"><span class="lbl">Mehr</span>${zu.map(([k, i, n]) => `<button class="${S.open.has(k) ? 'on' : ''}${k === 'sicher' && sichInhalt(e) && !S.open.has(k) ? ' warn' : ''}" data-act="sec" data-k="${k}">${ic(i)}${n}</button>`).join('')}</div>` : ''}
     ${zu.filter(([k]) => S.open.has(k)).map(s => secHTML(e, s)).join('')}`;
 }
-const secHTML = (e, [k, i, n]) => (k === 'steck' && (n = katVon(e)?.infos_titel || 'Technische Daten'), `<section class="card sec ${S.open.has(k) ? 'open' : ''}${k === 'sicher' && sichInhalt(e) ? ' warn' : ''}${hatInhalt(e, k) ? '' : ' leer'}" data-sec="${k}">
-    <button class="sec-h" data-act="sec" data-k="${k}" aria-expanded="${S.open.has(k)}">${ic(i)}<h3>${n}</h3><span class="cnt">${zaehl(e,k)}</span>${ic('chev','chev')}</button>
-    <div class="sec-b">${S.open.has(k) ? secBody(e, k) : ''}</div></section>`);
+// Am PC stehen die Abschnitte als kompakte Kacheln nebeneinander (farbiger Kopf wie bei den Kontakten), auf dem Handy aufklappbar
+const SEC_FARBE = { notizen: KG.palette.blau[1], sicher: KG.palette.beere[1], steck: KG.palette.petrol[1], anw: KG.palette.oliv[1], kontakte: KG.palette.gold[0], docs: KG.palette.grau[1], service: KG.palette.erde[1] };
+const kachelModus = () => !amHandy();
+const mitNotizTechnik = e => ['produkt', 'wissen'].includes(katVon(e)?.art);
+const secTitel = (e, k, n) => k === 'steck' ? (katVon(e)?.infos_titel || 'Technische Daten') : k === 'notizen' && mitNotizTechnik(e) ? 'Notizen, Anwendung, technische Daten' : n;
+const secHTML = (e, [k, i, n]) => { n = secTitel(e, k, n); const kach = kachelModus(), offen = kach || S.open.has(k), f = SEC_FARBE[k] || KG.palette.grau[1];
+  return `<section class="card sec ${offen ? 'open' : ''}${kach ? ' kachel' : ''}${k === 'sicher' && sichInhalt(e) ? ' warn' : ''}${hatInhalt(e, k) ? '' : ' leer'}" data-sec="${k}"${kach ? ` style="--kf:${f};--kt:${KG.textAuf(f)}"` : ''}>
+    ${kach ? `<div class="sec-h">${ic(i)}<h3>${n}</h3><span class="cnt">${zaehl(e,k)}</span></div>` : `<button class="sec-h" data-act="sec" data-k="${k}" aria-expanded="${S.open.has(k)}">${ic(i)}<h3>${n}</h3><span class="cnt">${zaehl(e,k)}</span>${ic('chev','chev')}</button>`}
+    <div class="sec-b">${offen ? secBody(e, k) : ''}</div></section>`; };
 // QR-Ansicht (Handy): alles untereinander in der Reihenfolge der Kategorie; zugeklappte Abschnitte als Knöpfe «Mehr» am Schluss
 function qrInhalt(e, xs, x){
   const start = offenVon(e), zu = [];
@@ -1554,7 +1569,9 @@ function exNotizen(e, x){
 function notizFeld(e, x, d){
   const n = d.notizen.find(n => x ? n.exemplar_id === x.id : !n.exemplar_id);
   const kopf = n?.geaendert_am ? 'zuletzt geändert ' + datumCH(n.geaendert_am.slice(0, 10)) : x ? 'Nur was dieses Exemplar betrifft' : '';
-  return rte(n ? 'notiz' : 'notizneu', n ? n.id : e.id + (x ? '.' + x.id : ''), n?.html || '', kopf, darfEdit());
+  const felder = S.merkmale.filter(m => m.kategorie_id === e.kategorie_id).map(m => m.name);
+  const platz = !x && mitNotizTechnik(e) ? `Anwendung und technische Daten${felder.length ? ', z. B. ' + felder.join(', ') : ''} – als Text, Liste oder Tabelle …` : '';
+  return rte(n ? 'notiz' : 'notizneu', n ? n.id : e.id + (x ? '.' + x.id : ''), n?.html || '', kopf, darfEdit(), null, platz);
 }
 async function notizAnlegen(ed){
   if(!ed.dataset.rte.startsWith('notizneu:')) return;
@@ -1790,7 +1807,7 @@ function secBody(e, k){
 }
 
 // --- Textfeld wie Notizfeld Tool A ---
-function rte(kind, id, html, head, editierbar, notizId){
+function rte(kind, id, html, head, editierbar, notizId, platzhalter){
   const tb = !editierbar ? '' : `<div class="rte-tb">
     <button class="tbtn" data-cmd="bold" title="Fett">${ic('bold')}</button>
     <button class="tbtn" data-cmd="mark" title="Hervorheben">${ic('mark')}</button>
@@ -1803,7 +1820,7 @@ function rte(kind, id, html, head, editierbar, notizId){
     ${kind.startsWith('notiz') ? `<span class="tsep"></span><button class="tbtn" data-cmd="datum" title="Datum einfügen">${ic('cal')}</button>` : ''}
     ${notizId ? `<span class="tsep"></span><button class="tbtn" data-act="notizDel" data-id="${notizId}" title="Notiz löschen">${ic('x')}</button>` : ''}</div>`;
   return `<div class="rte"><div class="rte-h"><span class="nh">${head || ''}</span><span class="saving" data-saving="${kind}:${id}"></span>${tb}</div>
-    <div class="rte-ed" ${editierbar ? 'contenteditable="true"' : ''} data-rte="${kind}:${id}" data-placeholder="${editierbar ? 'Text, Liste oder Tabelle …' : ''}">${html}</div></div>`;
+    <div class="rte-ed" ${editierbar ? 'contenteditable="true"' : ''} data-rte="${kind}:${id}" data-placeholder="${editierbar ? esc(platzhalter || 'Text, Liste oder Tabelle …') : ''}">${html}</div></div>`;
 }
 // Medien in Textfeldern: gespeichert nur mit data-pfad, Link wird beim Anzeigen frisch signiert
 async function medienLaden(root){
