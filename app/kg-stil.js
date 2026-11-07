@@ -178,7 +178,7 @@ button.kg-kachel-kopf,a.kg-kachel-kopf{cursor:pointer;} button.kg-kachel-kopf:ho
     { k: 'home', n: 'Startseite', url: 'index.html', farbe: PAL.oliv[1], akzent: PAL.oliv[3], seiten: ['index'] },
     { k: 'offerten', n: 'Offertentool', url: 'tool-start-live-v1.html', farbe: PAL.blau[1], akzent: PAL.blau[3], modul: 'offertentool',
       seiten: ['tool-start-live-v1', 'tool-a-live-v1', 'tool-a2-allgemein-live-v1', 'tool-a3-artikel-live-v1', 'tool-b-live-v1', 'einstellungen-live-v1'] },
-    { k: 'artikel', n: 'Artikelstamm', url: 'tool-c-live-v1.html', farbe: PAL.blau[1], akzent: PAL.blau[3], modul: 'offertentool', seiten: ['tool-c-live-v1', 'lieferant-abgleich-live-v1'] },
+    { k: 'artikel', n: 'Artikelstamm', url: 'tool-c-live-v1.html', farbe: PAL.blau[1], akzent: PAL.blau[3], modul: 'offertentool', seiten: ['tool-c-live-v1'] },
     // Kontakte = eigenes Haupttool: Kunden, Lieferanten und Pflegekunden (früher «Pflege & Service»)
     { k: 'kunden', n: 'Kontakte', url: 'tool-d-kunden-live-v1.html', farbe: PAL.gold[0], akzent: PAL.gold[3],
       seiten: ['tool-d-kunden-live-v1', 'pflege-kunden-live-v1'] },
@@ -214,7 +214,7 @@ button.kg-kachel-kopf,a.kg-kachel-kopf{cursor:pointer;} button.kg-kachel-kopf:ho
      --------------------------------------------------------------------------- */
   const seite = (location.pathname.split('/').pop() || 'index.html').replace(/\.html?$/, '') || 'index';
   // Diese Seiten brauchen die ganze Bildschirmbreite (sonst gilt die gemeinsame Breite, siehe --kg-breite)
-  if(['einsatzplaner-live-v1', 'bauprogramm-live-v1', 'pendenzen-live-v1', 'tool-c-live-v1', 'lieferant-abgleich-live-v1', 'pflege-kunden-live-v1'].includes(seite)) document.documentElement.classList.add('kg-voll');
+  if(['einsatzplaner-live-v1', 'bauprogramm-live-v1', 'pendenzen-live-v1', 'tool-c-live-v1', 'pflege-kunden-live-v1'].includes(seite)) document.documentElement.classList.add('kg-voll');
   const aktuell = TOOLS.find(t => t.seiten.includes(seite));
   // Browser-Tab: Knecht-Tool-Blatt als Icon (wenn die Seite kein eigenes hat, z. B. Pendenzen-App) und Name «Knecht-Tool · Tool»
   const tabKnecht = () => {
@@ -403,7 +403,7 @@ html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!import
     'tool-start-live-v1': ['offerten', 'offerten'], 'tool-a-live-v1': ['offerten', 'offerten'],
     'tool-a2-allgemein-live-v1': ['offerten', 'offerten'], 'tool-a3-artikel-live-v1': ['offerten', 'offerten'],
     'tool-b-live-v1': ['offerten', 'vorlagen'], 'einstellungen-live-v1': ['offerten', 'vorlagen|einstellungen'],
-    'tool-c-live-v1': ['offerten', 'artikel'], 'lieferant-abgleich-live-v1': ['offerten', 'artikel'],
+    'tool-c-live-v1': ['offerten', 'artikel'],
     'tool-d-kunden-live-v1': [['offerten', 'kunden'], ['pflege', 'kunden']], // Adressen oder Pflege genügt
     'pendenzen-live-v1': ['pend', '_tool'], 'einsatzplaner-live-v1': ['plan', '_tool'], 'bauprogramm-live-v1': ['plan', '_tool'],
     'pflege-kunden-live-v1': ['pflege', 'kunden'], 'pflege-kategorien-live-v1': ['pflege', 'kategorien'], 'projekt-einstellungen-live-v1': ['offerten', 'kunden'],

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script src="/kg-pw-schutz.js?v=5"></script>
-<script src="/kg-stil.js?v=53"></script>
+<script src="/kg-stil.js?v=54"></script>
 <script src="/kg-doku.js?v=8"></script>
 <script src="/kg-kundenordner.js?v=5"></script>
 <script src="/kg-karte.js?v=3"></script>
@@ -726,7 +726,7 @@ async function ladeKontaktDaten(){
     ladeAlleZeilen(() => sb.from('pflege_kunde').select('kunde_id').neq('abo_typ', 'kein_abo')),
     ladeAlleZeilen(() => sb.from('bauprogramm').select('id,kunde_id,start')),
     ladeAlleZeilen(() => sb.from('easybill_lieferant').select('*').order('name')),
-    ladeAlleZeilen(() => sb.from('lieferant').select('id,name,firma,strasse,plz,ort,kontaktdaten,easybill_id,lieferantennummer,sync_typ,archiviert_am')),
+    ladeAlleZeilen(() => sb.from('lieferant').select('id,name,kuerzel,logo_url,firma,strasse,plz,ort,kontaktdaten,easybill_id,lieferantennummer,sync_typ,archiviert_am,lieferant_datenabgleich(*)')),
     sb.rpc('ist_admin')
   ]);
   AB_SET = new Set(ab.map(x => x.kunde_id)); OFFEN_SET = new Set(of.map(x => x.kunde_id));
@@ -739,7 +739,7 @@ async function ladeKontaktDaten(){
     // Lieferanten aus unserer Liste ohne Easybill-Adresse (z. B. Deponiegebühren) erscheinen als «nur bei uns»
     .concat(li.filter(l => !verbunden.has(l.id) && !l.archiviert_am).map(l => ({ art: 'lief', id: 'li' + l.id, eb: null, liste: l,
       name: l.firma || l.name, vorname: '', strasse: l.strasse, plz: l.plz, ort: l.ort, nummer: l.lieferantennummer, kontaktdaten: l.kontaktdaten })));
-  LIEF.forEach(l => { l._name_sort = l.name; l.offerten_count = 0; });
+  LIEF.forEach(l => { l._name_sort = l.name; l.offerten_count = 0; if(l.liste){ const d = l.liste.lieferant_datenabgleich; l.liste.da = (Array.isArray(d) ? d[0] : d) || {}; } });
 }
 // ---------------------------------------------------------------------------
 // Ansicht «Pflege»: Pflegekunden mit Region, Abo, Kategorien, Zuständig (Daten wie im Pflege-Tool).
@@ -935,7 +935,7 @@ function renderKundenTable(){
   document.querySelectorAll('[data-kg-recht="offerten.kunden.erstellen"], #ebAbgleichBtn, #ebStand').forEach(b => b.style.display = lief || pf || !MIT_ADR ? 'none' : '');
   const FILTER = [['ab', 'mit Auftragsbestätigung', AB_SET], ['offerte', 'offene Offerte', OFFEN_SET], ['temp', 'nicht in Easybill', null]];
   $('kfilter').innerHTML = pf ? pfFilterHtml()
-    : lief ? '<span class="khinweis">Lieferanten: Adresse aus Easybill (jede Nacht geholt) und unsere Lieferantenliste (Shop, Preisabgleich).</span>'
+    : lief ? '<span class="khinweis">Lieferanten: Adresse aus Easybill (jede Nacht geholt); Kürzel, Marge und Preisabgleich in der Kachel «Offertentool».</span>'
     // Adressen: die Filter stecken hinter dem Knopf «Filter» (Zahl = aktive Filter)
     : `<button type="button" class="fchip" id="filterAuf" aria-expanded="${filterAuf}">Filter${schnell.size ? ` <small>${schnell.size}</small>` : ''} ${filterAuf ? '▴' : '▾'}</button>`
       + (filterAuf ? FILTER.map(([k, n, set]) => `<button type="button" class="fchip" data-f="${k}" aria-pressed="${schnell.has(k)}">${n}<small>${KUNDEN.filter(x => set ? set.has(x.id) : !x.easybill_id).length}</small></button>`).join('') : '');
@@ -1016,6 +1016,7 @@ function renderKundenTable(){
   document.querySelectorAll('#kfilter [data-f]').forEach(b => b.onclick = () => { schnell.has(b.dataset.f) ? schnell.delete(b.dataset.f) : schnell.add(b.dataset.f); seite = 0; renderKundenTable(); });
   document.querySelectorAll('#abc [data-l]').forEach(b => b.onclick = () => { buchstabe = b.dataset.l || null; seite = 0; renderKundenTable(); });
   document.querySelectorAll('[data-s]').forEach(b => b.onclick = () => { seite += +b.dataset.s; renderKundenTable(); });
+  document.querySelectorAll('[data-lfedit]').forEach(b => b.onclick = e => { e.stopPropagation(); liefBearbeiten(b.dataset.lfedit); });
   document.querySelectorAll('[data-zuord]').forEach(b => b.onclick = e => { e.stopPropagation(); zuordnungSetzen(b.dataset.zuord, b.dataset.wert); });
   document.querySelectorAll('tr.liefrow').forEach(tr => tr.onclick = () => { geoeffneterKunde = geoeffneterKunde === tr.dataset.lid ? null : tr.dataset.lid; renderKundenTable(); });
 
@@ -1090,9 +1091,121 @@ function liefDetail(k){
     + (IST_ADMIN ? `<br><button type="button" class="btn" style="margin-top:6px;padding:3px 9px" data-zuord="${k.eb.easybill_id}" data-wert="ja">Zuordnung bestätigen</button>
       <button type="button" class="btnlink" style="margin-left:8px" data-zuord="${k.eb.easybill_id}" data-wert="nein">Passt nicht</button>` : '<br><span style="color:var(--muted)">Bestätigen kann ein Admin.</span>');
   else liste = 'Nicht in unserer Lieferantenliste (nur Adresse).';
-  return `<div class="det"><section><h4>Adresse</h4>${adresseHtml(k.name + (k.vorname ? ' ' + k.vorname : ''), k)}</section>
-    <section><h4>Unsere Lieferantenliste</h4>${liste}</section>
-    ${k.eb ? `<section><h4>Easybill</h4><div class="z"><span>Lieferantennummer</span>${escHtml(k.nummer || '–')}</div><div class="z"><span>Zuletzt geholt</span>${new Date(k.eb.abgeglichen_am).toLocaleDateString('de-CH')}</div></section>` : ''}</div>`;
+  const imOt = l && (!k.eb || z === 'verbunden' || z === 'bestaetigt');
+  const links = imOt ? `<a class="kklink" href="tool-c-live-v1.html?lieferant=${l.id}">Artikel</a>${IST_ADMIN ? `<a class="kklink" href="tool-c-live-v1.html?lieferant=${l.id}&amp;preisabgleich=1">Preisabgleich</a><button type="button" class="kklink" data-lfedit="${k.id}">Bearbeiten</button>` : ''}`
+    : z !== 'vorschlag' && IST_ADMIN ? `<button type="button" class="kklink" data-lfedit="${k.id}">Aufnehmen</button>` : '';
+  return `<div class="det">${kachel('Adresse', '', adresseHtml(k.name + (k.vorname ? ' ' + k.vorname : ''), k))}
+    ${kachel('Offertentool', links, imOt ? liefOtKachel(k) : `<div style="padding:4px 0;font-size:12.5px;">${z === 'vorschlag' ? liste : leerT('Noch nicht im Offertentool. Mit «Aufnehmen» bekommt er Kürzel und Marge, dann kannst du Artikel anlegen.')}</div>`)}
+    ${k.eb ? kachel('Easybill', '', `<div class="z"><span>Lieferantennummer</span>${escHtml(k.nummer || '–')}</div><div class="z"><span>Zuletzt geholt</span>${new Date(k.eb.abgeglichen_am).toLocaleDateString('de-CH')}</div>`) : ''}</div>`;
+}
+// Kachel «Offertentool»: was der Artikelstamm von diesem Lieferanten braucht (früher in Vorlagen & Berechnung › Lieferanten)
+const LIEF_OT = {};
+const liefMarge = da => da.vp_lieferant_gleich_vp_knecht ? `Listenpreis Lieferant${da.zuschlag_prozent ? ' + ' + da.zuschlag_prozent + ' %' : ''}` : da.minimum_marge_prozent != null ? `Marge ${da.minimum_marge_prozent} % auf Einkauf` : '–';
+const liefShop = da => da.sync_verbindung?.shop_url || '';
+function liefOtKachel(k){
+  const l = k.liste, da = l.da || {}, info = LIEF_OT[l.id];
+  if(!info){ LIEF_OT[l.id] = 'laedt';
+    Promise.all([sb.from('artikel').select('id', { count: 'exact', head: true }).eq('lieferant_id', l.id),
+      sb.from('artikel_preis_verlauf').select('geaendert_am').eq('lieferant_id', l.id).eq('quelle', 'abgleich').order('geaendert_am', { ascending: false }).limit(1)])
+      .then(([a, v]) => { LIEF_OT[l.id] = { anzahl: a.count ?? 0, letzter: v.data?.[0]?.geaendert_am || null }; renderKundenTable(); });
+  }
+  const i = typeof info === 'object' ? info : null, shop = liefShop(da);
+  return `${l.logo_url ? `<img src="${escHtml(l.logo_url)}" alt="" style="height:30px;max-width:150px;object-fit:contain;display:block;margin:4px 0 6px;">` : ''}
+    <div class="z"><span>Kürzel</span>${escHtml(l.kuerzel || '–')}</div>
+    <div class="z"><span>VP Knecht aus</span>${escHtml(liefMarge(da))}</div>
+    <div class="z"><span>Preise</span>${da.mwst_inklusive ? 'inkl.' : 'ohne'} MwSt${da.waehrung && da.waehrung !== 'CHF' ? ' · ' + escHtml(da.waehrung) : ''}</div>
+    ${shop ? `<div class="z"><span>Shop</span><a href="${escHtml(shop)}" target="_blank" rel="noopener">${escHtml(shop.replace(/^https?:\/\/(www\.)?/, '').split('/')[0])}</a></div>` : ''}
+    <div class="z"><span>Artikel</span>${i ? i.anzahl : '…'}</div>
+    <div class="z"><span>Letzter Preisabgleich</span>${i ? (i.letzter ? kDat(i.letzter) : 'noch keiner') : '…'}</div>`;
+}
+// Lieferant bearbeiten bzw. ins Offertentool aufnehmen (nur Admin, wie bisher in Vorlagen & Berechnung)
+async function liefBearbeiten(id){
+  const k = LIEF.find(x => x.id === id); if(!k) return;
+  const neu = !k.liste || (k.eb && !['verbunden', 'bestaetigt'].includes(k.eb.zuordnung));
+  const l = neu ? { name: k.name, kuerzel: '', da: {} } : k.liste, da = l.da || {};
+  const [{ data: kurse }, anz] = await Promise.all([sb.from('wechselkurs').select('waehrung,kurs_zu_chf'),
+    neu ? Promise.resolve({ count: 0 }) : sb.from('artikel').select('id', { count: 'exact', head: true }).eq('lieferant_id', l.id)]);
+  const hatArtikel = (anz.count || 0) > 0;
+  const w = document.createElement('div'); w.className = 'ovl show'; document.body.appendChild(w);
+  const zu = () => w.remove();
+  const vpl = !!da.vp_lieferant_gleich_vp_knecht;
+  const opt = (v, t, sel) => `<option value="${v}"${sel ? ' selected' : ''}>${t}</option>`;
+  w.innerHTML = `<div class="ovlbox wide"><div class="ovlmsg">${neu ? 'Ins Offertentool aufnehmen' : 'Lieferant im Offertentool'}: ${escHtml(k.name)}</div>
+    <div class="row"><div class="fld" style="flex:2;"><label>Name im Artikelstamm</label><input data-f="name" value="${escHtml(l.name)}"></div>
+      <div class="fld" style="flex:1;"><label>Kürzel (vor der Artikelnummer)</label><input data-f="kuerzel" value="${escHtml(l.kuerzel || '')}"${hatArtikel ? ' readonly title="Fest, weil es schon Artikel mit diesem Kürzel gibt"' : ''} placeholder="z. B. IMM"></div></div>
+    <div class="fld"><label>Logo</label><div style="display:flex;gap:8px;align-items:center;"><input data-f="logo" value="${escHtml(l.logo_url || '')}" placeholder="Logo-URL oder hochladen" style="flex:1;">
+      <button type="button" class="kg-ibtn" data-f="logoBtn" title="Logo hochladen">${KG.icon('upload', 14)}</button><input type="file" accept="image/*" hidden data-f="logoDatei"></div></div>
+    <div class="fld"><label>VP Knecht aus</label><select data-f="basis">${opt('marge', 'Einkauf + Marge', !vpl)}${opt('liste', 'Listenpreis Lieferant + Zuschlag (Zoll, Fracht …)', vpl)}</select></div>
+    <div class="row"><div class="fld" style="flex:1;" data-w="marge"${vpl ? ' hidden' : ''}><label>Marge %</label><input data-f="marge" inputmode="decimal" value="${da.minimum_marge_prozent ?? ''}"></div>
+      <div class="fld" style="flex:1;" data-w="zuschlag"${vpl ? '' : ' hidden'}><label>Zuschlag %</label><input data-f="zuschlag" inputmode="decimal" value="${da.zuschlag_prozent ?? ''}"></div>
+      <div class="fld" style="flex:1;"><label>MwSt %</label><input data-f="mwst" inputmode="decimal" value="${da.mwst_satz ?? 8.1}"></div>
+      <div class="fld" style="flex:1;"><label>Preise sind</label><select data-f="inkl">${opt('0', 'ohne MwSt', !da.mwst_inklusive)}${opt('1', 'inkl. MwSt', da.mwst_inklusive)}</select></div>
+      <div class="fld" style="flex:1;"><label>Währung</label><select data-f="waehrung">${['CHF', ...(kurse || []).map(x => x.waehrung).filter(x => x !== 'CHF')].map(x => opt(x, x, (da.waehrung || 'CHF') === x)).join('')}</select></div></div>
+    <div class="row"><div class="fld" style="flex:1;"><label>Kategorie neuer Artikel</label><select data-f="kat">${['material', 'personal', 'maschine', 'logistik'].map(x => opt(x, x[0].toUpperCase() + x.slice(1), (da.kategorie_default || 'material') === x)).join('')}</select></div>
+      <div class="fld" style="flex:2;"><label>Shop</label><input data-f="shop" value="${escHtml(liefShop(da))}" placeholder="https://…"></div></div>
+    <div class="fld"><label>Notiz</label><input data-f="notiz" value="${escHtml(da.notiz || '')}"></div>
+    <div class="status" data-f="status"></div>
+    <div class="ovlbtns">${neu ? '' : `<button class="btnlink" data-f="archiv" style="margin-right:auto;">Archivieren</button>`}<button class="btnlink" data-f="abbr">Abbrechen</button><button class="btn" data-f="ok">${neu ? 'Aufnehmen' : 'Speichern'}</button></div></div>`;
+  const f = n => w.querySelector(`[data-f="${n}"]`);
+  const status = (t, err) => { f('status').textContent = t; f('status').className = 'status' + (err ? ' err' : ''); };
+  w.addEventListener('click', e => { if(e.target === w) zu(); });
+  f('abbr').onclick = zu;
+  f('basis').onchange = () => { w.querySelector('[data-w="marge"]').hidden = f('basis').value !== 'marge'; w.querySelector('[data-w="zuschlag"]').hidden = f('basis').value !== 'liste'; };
+  f('logoBtn').onclick = () => f('logoDatei').click();
+  f('logoDatei').onchange = async () => { const d = f('logoDatei').files[0]; if(!d) return;
+    const pfad = `${crypto.randomUUID()}.${(d.name.split('.').pop() || 'png').toLowerCase()}`;
+    const { error } = await sb.storage.from('lieferanten-logos').upload(pfad, d);
+    if(error){ status(friendlyError(error), true); return; }
+    f('logo').value = sb.storage.from('lieferanten-logos').getPublicUrl(pfad).data.publicUrl; };
+  if(!neu) f('archiv').onclick = async () => {
+    if(!(await confirmDialog('Lieferant archivieren? Seine Artikel bleiben, er ist aber bei neuen Auswahlen nicht mehr wählbar.'))) return;
+    const { error } = await sb.from('lieferant').update({ archiviert_am: new Date().toISOString() }).eq('id', l.id);
+    if(error){ status(friendlyError(error), true); return; }
+    zu(); showToast('Lieferant archiviert.'); await ladeKontaktDaten(); renderKundenTable(); };
+  const zahl = v => { const n = parseFloat(String(v).replace(',', '.')); return isNaN(n) ? null : n; };
+  f('ok').onclick = async () => {
+    const name = f('name').value.trim(), kuerzel = f('kuerzel').value.trim().toUpperCase();
+    if(!name || !kuerzel){ status('Bitte Name und Kürzel ausfüllen.', true); return; }
+    f('ok').disabled = true;
+    const vpGleich = f('basis').value === 'liste';
+    const sv = { ...(da.sync_verbindung || {}) }; if(f('shop').value.trim()) sv.shop_url = f('shop').value.trim(); else delete sv.shop_url;
+    const d = { vp_lieferant_gleich_vp_knecht: vpGleich, zuschlag_prozent: zahl(f('zuschlag').value), minimum_marge_prozent: zahl(f('marge').value),
+      mwst_satz: zahl(f('mwst').value) ?? 8.1, mwst_inklusive: f('inkl').value === '1', waehrung: f('waehrung').value, kategorie_default: f('kat').value,
+      notiz: f('notiz').value.trim() || null, sync_verbindung: sv };
+    let lid = l.id;
+    if(neu){
+      const eb = k.eb || {};
+      const { data, error } = await sb.from('lieferant').insert({ name, kuerzel, logo_url: f('logo').value.trim() || null, sync_typ: 'manuell',
+        easybill_id: eb.easybill_id ?? null, lieferantennummer: eb.nummer ?? null, firma: eb.firma ?? null, strasse: eb.strasse ?? null, plz: eb.plz ?? null, ort: eb.ort ?? null, kontaktdaten: eb.kontaktdaten ?? null }).select('id').single();
+      if(error){ f('ok').disabled = false; status(friendlyError(error), true); return; }
+      lid = data.id;
+      if(k.eb) await sb.from('easybill_lieferant').update({ lieferant_id: lid, zuordnung: 'bestaetigt' }).eq('easybill_id', k.eb.easybill_id);
+    } else {
+      const { error } = await sb.from('lieferant').update({ name, kuerzel, logo_url: f('logo').value.trim() || null }).eq('id', lid);
+      if(error){ f('ok').disabled = false; status(friendlyError(error), true); return; }
+    }
+    const { error } = await sb.from('lieferant_datenabgleich').upsert({ lieferant_id: lid, ...d }, { onConflict: 'lieferant_id' });
+    if(error){ f('ok').disabled = false; status(friendlyError(error), true); return; }
+    // Marge geändert: VP Knecht aller nicht gesperrten Artikel neu (gleiche Formel wie im Artikelstamm)
+    let n = 0;
+    const margeNeu = !neu && (vpGleich !== !!da.vp_lieferant_gleich_vp_knecht || d.zuschlag_prozent !== (da.zuschlag_prozent ?? null) || d.minimum_marge_prozent !== (da.minimum_marge_prozent ?? null) || d.waehrung !== (da.waehrung || 'CHF'));
+    if(margeNeu){
+      status('Berechne VP Knecht neu …');
+      const kurs = w2 => !w2 || w2 === 'CHF' ? 1 : ((kurse || []).find(x => x.waehrung === w2)?.kurs_zu_chf ?? 1);
+      const runde = r => { const s = r <= 5 ? 0.1 : r <= 20 ? 0.5 : 1; return Math.round(Math.round(r / s) * s * 100) / 100; };
+      const { data: art } = await sb.from('artikel').select('id,ep_lieferant,vp_lieferant,waehrung,vp_knecht').eq('lieferant_id', lid).eq('preis_gesperrt', false);
+      for(const a of art || []){
+        let roh = null;
+        if(vpGleich){ if(a.vp_lieferant > 0){ roh = a.vp_lieferant * kurs(a.waehrung); if(d.zuschlag_prozent) roh *= 1 + d.zuschlag_prozent / 100; } }
+        else if(a.ep_lieferant != null && d.minimum_marge_prozent != null && d.minimum_marge_prozent < 100) roh = a.ep_lieferant * kurs(a.waehrung) / (1 - d.minimum_marge_prozent / 100);
+        if(roh == null || runde(roh) === a.vp_knecht) continue;
+        const { error: e2 } = await sb.from('artikel').update({ vp_knecht: runde(roh) }).eq('id', a.id); if(!e2) n++;
+      }
+    }
+    zu(); delete LIEF_OT[lid];
+    showToast(neu ? 'Ins Offertentool aufgenommen.' : n ? `Gespeichert. VP Knecht bei ${n} Artikeln neu berechnet.` : 'Gespeichert.');
+    await ladeKontaktDaten(); renderKundenTable();
+  };
 }
 async function zuordnungSetzen(ebId, wert){
   const k = LIEF.find(x => x.eb && String(x.eb.easybill_id) === String(ebId)); if(!k) return;
@@ -1122,7 +1235,7 @@ const kBetrag = n => n == null ? '' : Number(n).toLocaleString('de-CH', { minimu
 const KK_KOPF = {
   'Adresse': ['kunden', KG.palette.gold[0]], 'Pflege': ['pflege', KG.palette.gruen[1]], 'Offerten': ['offerten', KG.palette.blau[1]],
   'Projekte': ['projekte', KG.palette.erde[1]], 'Bauprogramm': ['plan', KG.palette.petrol[1]], 'Ablage': ['gdrive', KG.palette.grau[1]],
-  'Dokumente': ['doku', KG.palette.beere[1]], 'Easybill': ['rechnung', '#2F49D9'], 'Grundstück': ['karte', KG.palette.grau[2]]
+  'Dokumente': ['doku', KG.palette.beere[1]], 'Offertentool': ['artikel', KG.palette.blau[1]], 'Easybill': ['rechnung', '#2F49D9'], 'Grundstück': ['karte', KG.palette.grau[2]]
 };
 const KK_ICON = Object.assign({}, KG.toolIcons, {
   ordner: '<path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/>',
