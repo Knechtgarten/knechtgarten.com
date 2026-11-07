@@ -417,6 +417,38 @@ const G = () => BEW.find(b => b.id === OFFEN);
 async function unterschriftUrl(plId){ const p = PL.find(x => x.id === plId); if(!p?.unterschrift_pfad) return null;
   const { data } = await sb.storage.from('unterschriften').createSignedUrl(p.unterschrift_pfad, 600); return data?.signedUrl || null; }
 
+// Baureglement der Gemeinde (Edge Function «baureglement»): beim ersten Gesuch einer Gemeinde liest die KI das Reglement
+// im Hintergrund (1–2 Min.), danach Werte der Zone dieser Parzelle, Themen für uns und Fragen dazu
+const REG = {};
+// nachfragen: vom eigenen Takt (alle 15 s, solange gelesen wird); sonst genügt das Gemerkte
+async function reglementLaden(b, neu, nachfragen){
+  const r0 = REG[b.id];
+  if(r0 && !neu && !nachfragen){ reglementZeigen(b); if(r0.status !== 'laeuft' || r0.takt) return; }
+  const { data, error } = await sb.functions.invoke('baureglement', { body: { aktion: 'holen', bewilligung_id: b.id, neu: !!neu } });
+  REG[b.id] = error || data?.error ? { status: 'fehler', fehler: data?.error || error.message } : { ...data, antwort: REG[b.id]?.antwort };
+  if(REG[b.id].status === 'laeuft'){ REG[b.id].takt = true; setTimeout(() => { if(OFFEN === b.id) reglementLaden(b, false, true); else if(REG[b.id]) REG[b.id].takt = false; }, 15000); }
+  if(OFFEN === b.id) reglementZeigen(b);
+}
+function reglementZeigen(b){
+  const el = $('bwReg'), r = REG[b.id]; if(!el || !r) return;
+  const kopf = `<h3><span>Baureglement${r.gemeinde ? ' ' + esc(r.gemeinde) : ''}</span>${r.status === 'fertig' ? `<button type="button" class="kg-ibtn" data-act="regNeu" title="Neu lesen" aria-label="Baureglement neu lesen">${K('undo', 13)}</button>` : ''}</h3>`;
+  if(r.status === 'laeuft'){ el.innerHTML = `${kopf}<div class="klein">Das Baureglement wird gelesen. Das dauert beim ersten Gesuch in dieser Gemeinde 1–2 Minuten.</div>`; return; }
+  if(r.status !== 'fertig'){ el.innerHTML = `${kopf}<div class="klein" style="color:#7A2638">${esc(r.fehler || 'Fehler beim Lesen.')}</div><button type="button" class="btn btn-ghost btn-sm" data-act="regNeu" style="margin-top:8px">Nochmals versuchen</button>`; return; }
+  const zonen = r.auszug?.zonen || [], z = r.zone_index != null ? zonen[r.zone_index] : null;
+  const WERTE = [['gruenflaechenziffer', 'Grünflächenziffer'], ['grenzabstand_klein', 'Grenzabstand klein'], ['grenzabstand_gross', 'Grenzabstand gross'], ['fassadenhoehe', 'Fassadenhöhe'],
+    ['gesamthoehe', 'Gesamthöhe'], ['geschosse', 'Geschosse'], ['gebaeudelaenge', 'Gebäudelänge'], ['ueberbauungsziffer', 'Überbauungsziffer'], ['bauweise', 'Bauweise'], ['es', 'Lärmstufe']];
+  const a = r.antwort;
+  el.innerHTML = `${kopf}<div class="klein" style="margin-bottom:6px">Zone laut ÖREB: <b>${esc(r.zone || '–')}</b>${r.auszug?.stand ? ' · ' + esc(String(r.auszug.stand).slice(0, 60)) + (String(r.auszug.stand).length > 60 ? ' …' : '') : ''}</div>
+    ${z ? `<dl>${WERTE.filter(([k]) => z[k]).map(([k, t]) => `<dt>${t}</dt><dd>${esc(z[k])}</dd>`).join('')}</dl>${z.artikel ? `<div class="klein" style="margin-top:4px">${esc(z.name)} · ${esc(z.artikel)}</div>` : ''}`
+      : `<div class="klein" style="margin-bottom:4px">Zone im Reglement wählen:</div><div class="abkl">${zonen.map((x, i) => `<button type="button" data-act="regZone" data-i="${i}">${esc(x.kuerzel || x.name)}</button>`).join('')}</div>`}
+    ${(r.auszug?.themen || []).length ? `<details style="margin-top:8px"><summary class="klein" style="cursor:pointer;font-weight:600">Themen für uns (${r.auszug.themen.length})</summary>
+      ${r.auszug.themen.map(t => `<div style="margin-top:6px"><b style="font-size:12px">${esc(t.thema)}</b>${t.artikel ? ` <span class="klein">${esc(t.artikel)}</span>` : ''}<div class="klein" style="color:#232B35">${esc(t.text)}</div></div>`).join('')}</details>` : ''}
+    <div class="fl" style="margin-top:10px;display:flex;gap:6px"><input type="text" id="regQ" placeholder="Frage, z. B. Abstand Pool zur Grenze?" value="${esc(a?.q || '')}" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other"><button type="button" class="btn btn-ghost btn-sm" data-act="regFrage">Fragen</button></div>
+    ${a ? `<div class="klein" style="margin-top:8px;color:#232B35;white-space:pre-line">${a.laedt ? 'Sucht im Reglement …' : a.fehler ? esc(a.fehler) : esc(a.text)}</div>
+      ${a.text && !a.original ? `<button type="button" class="btn btn-ghost btn-sm" data-act="regOriginal" style="margin-top:6px">Im Original nachlesen</button>` : ''}` : ''}
+    <div class="klein" style="margin-top:8px">${(r.urls || []).map(u => `<a href="${esc(u.url)}" target="_blank" rel="noopener">${esc(u.titel)}</a>`).join(' · ')}</div>`;
+  $('regQ')?.addEventListener('keydown', e => { if(e.key === 'Enter') el.querySelector('[data-act="regFrage"]').click(); });
+}
 // Dokumente des Gesuchs mit Status: ok (grün) · fehlt (grau) · warn (orange, Angaben fehlen) · fehler (rot, Problem).
 // Klick auf den Namen öffnet die Eingabe dazu, «PDF» erzeugt das Dokument.
 function dokumente(b){
@@ -447,7 +479,7 @@ function zeichneFenster(){
   const dok = dokumente(b);
   const aktion = s => ({
     grundstueck: `<button type="button" class="btn btn-ghost btn-sm" data-act="geo">Neu holen</button>`,
-    situationsplan: `<a class="btn btn-ghost btn-sm" href="https://be-geo.ch/de/shop" target="_blank" rel="noopener" style="text-decoration:none">be-geo öffnen</a><button type="button" class="btn btn-ghost btn-sm" data-act="kopier">Parzelle kopieren</button>`,
+    situationsplan: b.e && b.n ? `<a class="btn btn-ghost btn-sm" href="https://regiogis-beo.ch/?x=${Math.round(b.e)}&y=${Math.round(b.n)}&z=13" target="_blank" rel="noopener" style="text-decoration:none">RegioGIS öffnen</a>` : '',
     ebau: `<a class="btn btn-ghost btn-sm" href="https://www.be.ch/ebau" target="_blank" rel="noopener" style="text-decoration:none">eBau öffnen</a>`
   })[s.k] || '';
   const naechster = f.naechster?.k;
@@ -463,7 +495,7 @@ function zeichneFenster(){
       <aside>
         <div class="kar"><h3><span>Grundstück (automatisch)</span><button type="button" class="kg-ibtn" data-act="geo" title="Neu holen" aria-label="Geodaten neu holen">${K('undo', 13)}</button></h3>
           ${b.e && b.n ? `<button type="button" data-act="karte" title="Karte öffnen" style="all:unset;display:block;cursor:pointer;margin-bottom:10px;width:100%" id="bwVor"><span class="kgk-vor"></span></button>` : ''}
-          ${g.egrid || g.parzelle ? `<dl>${zeile('Parzelle', esc(g.parzelle || b.parzelle || '–'))}${zeile('Fläche', b.flaeche_m2 ? esc(b.flaeche_m2) + ' m²' : '–')}
+          ${g.egrid || g.parzelle ? `<dl>${zeile('Parzelle', `${esc(g.parzelle || b.parzelle || '–')} <button type="button" class="kg-ibtn" data-act="kopier" title="Parzelle, Gemeinde und EGRID kopieren" aria-label="Parzelle kopieren" style="vertical-align:middle;margin-left:4px">${K('copy', 12)}</button>`)}${zeile('Fläche', b.flaeche_m2 ? esc(b.flaeche_m2) + ' m²' : '–')}
             ${zeile('Zone', esc((g.zone || g.bauzone || '–').replace(/_/g, ' ')))}${zeile('Lärmstufe', es)}${zeile('Gewässerschutz', esc(g.gewaesserschutz || '–'))}
             ${zeile('Grundwasserschutz', esc(g.grundwasserschutz || 'nicht betroffen'), !!g.grundwasserschutz)}${zeile('Gewässerraum', esc(g.gewaesserraum || 'nicht betroffen'), !!g.gewaesserraum)}
             ${zeile('Wald', esc(g.wald || 'nicht betroffen'), !!g.wald)}${zeile('Naturgefahren', esc(g.naturgefahren || 'nicht betroffen'), !!g.naturgefahren)}
@@ -473,6 +505,7 @@ function zeichneFenster(){
             ${g.kanton && g.kanton !== 'BE' ? '<div class="klein" style="margin-top:6px">Ausserhalb Kanton Bern: nur Angaben des Bundes.</div>' : ''}`
             : '<div class="klein">Noch keine Geodaten. «Neu holen» sucht über die Adresse des Kunden.</div>'}</div>
         ${g.geometer ? `<div class="kar"><h3><span>Nachführungsgeometer</span></h3>${esc(g.geometer.firma)}<br>${esc(g.geometer.adresse)}<br>${esc(g.geometer.telefon)} · <a href="mailto:${esc(g.geometer.email)}">${esc(g.geometer.email)}</a></div>` : ''}
+        ${b.egrid ? `<div class="kar" id="bwReg"><h3><span>Baureglement</span></h3><div class="klein">Lädt …</div></div>` : ''}
         <div class="kar"><h3><span>Abklärung</span></h3><div class="abkl" id="fAb">${ABKL.map(([k, t]) => `<button type="button" data-ab="${k}" aria-pressed="${!!b.abklaerung?.[k]}">${t}</button>`).join('')}</div></div>
       </aside>
       <div style="min-width:0">
@@ -492,6 +525,7 @@ function zeichneFenster(){
       </aside>
     </div></section></div>`;
   if(b.e && b.n) KGK.vorschau({ e: +b.e, n: +b.n }, { breite: 60 }).then(h => { const el = $('bwVor'); if(el) el.innerHTML = h; });
+  if(b.egrid) reglementLaden(b);
   unterschriftUrl(b.projektleiter_id).then(u => { const el = $('fUb'); if(el) el.innerHTML = u ? `<img src="${u}" alt="Unterschrift">` : '<span>Noch keine Unterschrift hinterlegt</span>'; });
 }
 
@@ -631,6 +665,13 @@ document.addEventListener('click', async e => {
   if(d.act === 'nachbarn'){ AKT_TEIL = 'nachbarn'; return zeichneFenster(); }
   if(d.act === 'schritte'){ AKT_TEIL = null; return zeichneFenster(); }
   if(d.act === 'laerm'){ AKT_TEIL = 'laerm'; return zeichneFenster(); }
+  if(d.act === 'regNeu'){ delete REG[b.id]; return reglementLaden(b, true); }
+  if(d.act === 'regZone'){ const r = REG[b.id]; if(r){ r.zone_index = +d.i; await speichern(b, { reglement: { bfs_nr: r.bfs, zone_oereb: r.zone, zone_index: +d.i } }); reglementZeigen(b); } return; }
+  if(d.act === 'regFrage' || d.act === 'regOriginal'){ const q = $('regQ')?.value.trim(); if(!q) return; const r = REG[b.id]; r.antwort = { laedt: true, q };
+    reglementZeigen(b);
+    const { data, error } = await sb.functions.invoke('baureglement', { body: { aktion: 'frage', bewilligung_id: b.id, frage: q, original: d.act === 'regOriginal' } });
+    r.antwort = error || data?.error ? { q, fehler: data?.error || error.message } : { q, text: data.antwort, original: data.original };
+    if(OFFEN === b.id) reglementZeigen(b); return; }
   if(d.act === 'karte'){ try { await KGK.oeffnen({ e: +b.e, n: +b.n, titel: kundeName(b.kunde), untertitel: standort(b) + (b.parzelle ? ' · Parzelle ' + b.parzelle : '') }); } catch(err){ fehler(err, 'Karte'); } return; }
   if(d.act === 'nbneu'){ await speichern(b, { nachbarn: [...(b.nachbarn || []), { name: '', adresse: '', parzelle: '', naeherbaurecht: !!b.abklaerung?.naeherbaurecht, abstaende: [], unterschrieben: false }] }); return zeichneFenster(); }
   if(d.act === 'plneu'){ await speichern(b, { plaene: [...(b.plaene || []), { titel: '', massstab: '', datum: '' }] }); return zeichneFenster(); }
