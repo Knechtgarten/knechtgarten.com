@@ -61,7 +61,7 @@ Adresse ohne «Schweiz». Anmerkungsgrundstücke und «jeweilige Eigentümer» w
       const r = await claude([{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdf } }, { type: 'text', text: 'Eigentümer als JSON.' }], sys, 4000);
       return json({ eigentuemer: jsonAus(r.text)?.eigentuemer || [] });
     }
-    const { data: b } = await admin.from('bewilligung').select('id,egrid,reglement,geodaten').eq('id', body.bewilligung_id).maybeSingle();
+    const { data: b } = await admin.from('bewilligung').select('id,egrid,parzelle,reglement,geodaten').eq('id', body.bewilligung_id).maybeSingle();
     if (!b?.egrid) return json({ error: 'Gesuch ohne EGRID (zuerst Geodaten holen).' }, 400);
 
     // ÖREB: Gemeinde, Zone der Grundnutzung und Links zum Gemeindebaureglement
@@ -106,8 +106,24 @@ Adresse ohne «Schweiz». Anmerkungsgrundstücke und «jeweilige Eigentümer» w
         try { const r = await claude([{ type: 'text', text: `Zone laut ÖREB-Kataster: «${zone}».\nZonen im Baureglement:\n${zonen}\nWelche Nummer passt? Antworte nur mit JSON {"index": Zahl oder null}.` }], 'Du ordnest Zonen zu. Nur JSON.', 50);
           zi = jsonAus(r.text)?.index ?? null; } catch (_) { zi = null; }
         await admin.from('bewilligung').update({ reglement: { bfs_nr: bfs, zone_oereb: zone, zone_index: zi } }).eq('id', b.id);
+        b.reglement = { bfs_nr: bfs, zone_oereb: zone, zone_index: zi };
       }
-      return json({ gemeinde, bfs, zone, urls: br.urls, status: br.status, fehler: br.fehler, auszug: br.auszug, zone_index: zi ?? null, aktualisiert_am: br.aktualisiert_am });
+      // Werte für genau diese Parzelle (einmal pro Gesuch und Reglement-Stand): Grünflächenziffer und Abstände für unsere Bauteile
+      let werte = b.reglement?.werte?.stand === br?.aktualisiert_am ? b.reglement.werte : null;
+      if (br?.status === 'fertig' && !werte && b.reglement) {
+        const zz = zi != null ? (br.auszug?.zonen || [])[zi] : null;
+        const SYS = `Du wertest den Auszug eines Gemeindebaureglements (Kanton Bern) für EIN Grundstück aus. Antworte NUR mit JSON:
+{"gfz":{"wert":"0.40 oder «keine»","hinweis":"ein kurzer Satz"},"abstaende":[{"bauteil":"Pool / unterirdische Baute","abstand":"1.0 m","hinweis":"kurz","artikel":"Art. 13"}]}
+Grünflächenziffer: Wert für genau diese Zone und Parzelle. Gilt sie nur für bestimmte Parzellen und diese ist nicht dabei, dann «keine». Nicht geregelt: «keine».
+abstaende genau in dieser Reihenfolge: «Pool / unterirdische Baute», «Kleinbaute (z. B. Gartenhaus)», «Anbaute», «Stützmauer», «Einfriedung / Sichtschutz». Abstand zur Nachbargrenze.
+Verweist das Reglement auf das kantonale Recht (EG ZGB), schreibe als hinweis «nach EG ZGB» mit der Regel nur, wenn du sie sicher kennst; sonst abstand "" und hinweis «kantonales Recht (EG ZGB) prüfen». Nichts erfinden. Deutsch, Schweizer Schreibweise.`;
+        try {
+          const r = await claude([{ type: 'text', text: `Parzelle Nr. ${b.parzelle || '?'}, Zone laut ÖREB «${zone}»${zz ? `, Zone im Reglement: ${zz.name}` : ''}.\nAuszug (JSON):\n${JSON.stringify(br.auszug)}` }], SYS, 1500);
+          const w = jsonAus(r.text);
+          if (w) { werte = { ...w, stand: br.aktualisiert_am }; await admin.from('bewilligung').update({ reglement: { ...b.reglement, werte } }).eq('id', b.id); }
+        } catch (_) { /* ohne Werte weiter */ }
+      }
+      return json({ gemeinde, bfs, zone, urls: br.urls, status: br.status, fehler: br.fehler, auszug: br.auszug, zone_index: zi ?? null, werte, aktualisiert_am: br.aktualisiert_am });
     }
 
     if (body.aktion === 'frage') {
