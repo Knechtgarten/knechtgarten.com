@@ -146,6 +146,13 @@ body.buero-rolle .admin-only{display:none !important;}
 .kar dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:6px 10px;} .kar dt{color:#6B7079;} .kar dd{margin:0;} .kar dd.rot{color:#7A2638;font-weight:600;} .kar dd i{font-style:normal;color:#8A6410;font-size:11px;}
 .abkl{display:flex;flex-wrap:wrap;gap:5px;} .abkl button{all:unset;cursor:pointer;border-radius:99px;padding:3px 9px;font-weight:600;background:#EEF1F4;color:#6B7079;border:1px solid transparent;}
 .abkl button[aria-pressed=true]{background:#D3EBC7;color:#2E5A2F;}
+.ebteile{flex-basis:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 12px;margin:4px 0 2px 32px;}
+.ebkopf{grid-column:1/-1;display:flex;align-items:center;gap:8px;margin-bottom:2px;} .ebkopf .balken{flex:1;}
+.ebt{display:flex;gap:8px;align-items:flex-start;padding:5px 6px;border-radius:6px;cursor:pointer;font-size:13px;}
+.ebt:hover{background:#F5F7F9;} .ebt input{margin-top:2px;accent-color:#3F7D3F;flex:none;} .ebt span{display:flex;flex-direction:column;min-width:0;}
+.ebt small{font-size:11.5px;color:#6B7079;} .ebt.ok b{color:#3F7D3F;}
+@media(max-width:700px){.ebteile{grid-template-columns:1fr;margin-left:0;}}
+.dliste select{font:inherit;font-size:12px;border:1px solid var(--line);border-radius:6px;padding:3px 6px;max-width:100%;margin-top:4px;background:#fff;}
 .schritte{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;}
 .schritt{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
 .schritt.akt{border:2px solid #4F80C2;padding:9px 11px;} .schritt .tx{flex:1;min-width:200px;} .schritt .tx small{display:block;color:#6B7079;font-size:12px;}
@@ -315,12 +322,22 @@ function schritteVon(b){
     { k: 'situationsplan', t: 'Situationsplan beglaubigt bestellen', i: 'be-geo (Shop der Berner Geometer), mit Eigentümerliste' },
     { k: 'leitungsplaene', t: 'Leitungspläne anfordern', i: 'Werke / Gemeinde' }];
   // Näherbaurecht, Zustimmung der Nachbarn und Lärmschutznachweis sind keine Schritte: sie stehen als Dokumente mit Status rechts
-  l.push({ k: 'formulare', t: 'Beilagen ausfüllen', i: [a.terrain && 'Terrainveränderung', 'Erdbebensicherheit', 'Bauabfälle'].filter(Boolean).join(' · ') });
   if(a.pool) l.push({ k: 'plaene_pool', t: 'Pläne Pool', i: 'Situation, Grundriss, Schnitte' });
-  l.push({ k: 'ebau', t: 'eBau ausfüllen und Unterlagen hochladen', i: '«Einreichen» klickst du selbst' },
+  l.push({ k: 'ebau', t: 'eBau ausfüllen, Beilagen und Unterlagen', i: '«Einreichen» klickst du selbst' },
     { k: 'papier', t: 'Papier-Exemplare an die Gemeinde', i: '2-fach' },
     { k: 'bewilligung', t: 'Bewilligung erhalten', i: '' });
   return l;
+}
+// Bereiche im eBau (inkl. Beilagen), einzeln abhakbar; «Grundstück» ist erledigt, sobald die Geodaten da sind
+function ebauTeile(b){
+  const a = b.abklaerung || {};
+  return [['personalien', 'Personalien', 'Bauherrschaft, Grundeigentümer, Projektverfasser'], ['grundstueck', 'Grundstück und Zone', 'Parzelle, EGRID, Zone (aus dem ÖREB-Auszug)', !!b.egrid],
+    ['vorhaben', 'Bauvorhaben', 'Beschrieb, Baukosten, Termine'], ['masse', 'Masse und Abstände', 'Höhen, Grenzabstände, Grünflächenziffer'],
+    a.terrain && ['terrain', 'Beilage Terrainveränderung', 'Kubaturen Abtrag/Auftrag'], ['erdbeben', 'Beilage Erdbebensicherheit', 'Formular, Baugrundklasse ' + (b.geodaten?.baugrundklasse || '–')],
+    ['abfaelle', 'Beilage Bauabfälle', 'Entsorgungskonzept'], a.waermepumpe && ['energie', 'Energie / Wärmepumpe', 'Lärmschutznachweis hochladen'],
+    (a.naeherbaurecht || (b.nachbarn || []).length) && ['nachbarn', 'Nachbarn', 'Näherbaurecht und Zustimmungen hochladen'],
+    ['hochladen', 'Pläne und Unterlagen hochladen', 'Situationsplan, Pläne, Dokumente']].filter(Boolean)
+    .map(([k, t, i, auto]) => ({ k, t, i, ok: auto || !!b.schritte?.ebau_teile?.[k]?.erledigt, auto: !!auto }));
 }
 const fortschritt = b => { const l = schritteVon(b); return { n: l.filter(s => b.schritte?.[s.k]?.erledigt).length, von: l.length, naechster: l.find(s => !b.schritte?.[s.k]?.erledigt) }; };
 const geoRot = g => !!(g && (g.grundwasserschutz || g.gewaesserraum || g.wald || g.naturgefahren || g.denkmal || g.belastet));
@@ -469,10 +486,11 @@ function dokumente(b){
   l.push({ n: 'Eigentümerliste', st: nb.length ? 'ok' : 'fehlt', info: nb.length ? `${nb.length} Nachbarn` : 'einlesen', act: 'nachbarn' });
   l.push({ n: 'Leitungspläne', st: sch.leitungsplaene?.erledigt ? 'ok' : 'fehlt' });
   if(a.naeherbaurecht){
-    const nbr = nb.filter(x => x.naeherbaurecht);
-    if(!nbr.length) l.push({ n: 'Näherbaurecht', st: 'warn', info: 'Nachbar mit Näherbaurecht wählen', act: 'nachbarn' });
+    const nbr = nb.filter(x => x.naeherbaurecht), frei = nb.map((x, i) => ({ x, i })).filter(({ x }) => !x.naeherbaurecht);
     nbr.forEach(x => { const voll = x.name && x.parzelle && (x.abstaende || []).some(z => z.bauteil && z.ist);
-      l.push({ n: 'Näherbaurecht ' + (x.name || 'Nachbar'), st: voll ? 'ok' : 'warn', info: voll ? (x.unterschrieben ? 'unterschrieben' : '') : 'Name, Parzelle oder Abstände fehlen', act: 'nachbarn', pdf: 'nbr', i: nb.indexOf(x) }); });
+      l.push({ n: 'Näherbaurecht ' + (x.name || 'Nachbar'), st: voll ? 'ok' : 'warn', info: [x.parzelle && 'Parzelle ' + x.parzelle, voll ? (x.unterschrieben ? 'unterschrieben' : '') : 'Abstände fehlen'].filter(Boolean).join(' · '), act: 'nachbarn', pdf: 'nbr', i: nb.indexOf(x), nbrweg: nb.indexOf(x) }); });
+    if(!nb.length) l.push({ n: 'Näherbaurecht', st: 'warn', info: 'zuerst Eigentümerliste einlesen', act: 'nachbarn' });
+    else if(frei.length) l.push({ n: nbr.length ? 'Weiteres Näherbaurecht' : 'Näherbaurecht', st: nbr.length ? 'fehlt' : 'warn', wahl: frei });
   }
   const unt = nb.filter(x => x.unterschrieben).length;
   l.push({ n: 'Zustimmungserklärung Nachbarn', st: !nb.length ? 'fehlt' : nb.some(x => !x.name) ? 'warn' : 'ok',
@@ -521,12 +539,14 @@ function zeichneFenster(){
       <div style="min-width:0">
         <div id="teil">${AKT_TEIL === 'nachbarn' ? nachbarnHtml(b) : AKT_TEIL === 'laerm' ? laermHtml(b) : `<h3 style="margin:0 0 8px;font-size:13px;color:var(--primary)">Schritte</h3><ol class="schritte">${l.map(s => { const st = b.schritte?.[s.k];
           return `<li class="schritt${s.k === naechster ? ' akt' : ''}"><button type="button" class="haken" data-haken="${s.k}" aria-pressed="${!!st?.erledigt}" aria-label="${esc(s.t)} erledigt">${st?.erledigt ? K('check', 12) : ''}</button>
-            <span class="tx"><b>${esc(s.t)}</b><small>${esc(s.i)}${st?.erledigt && st.am ? ' · erledigt ' + datum(st.am) : ''}</small></span>${aktion(s)}</li>`; }).join('')}</ol>`}</div>
+            <span class="tx"><b>${esc(s.t)}</b><small>${esc(s.i)}${st?.erledigt && st.am ? ' · erledigt ' + datum(st.am) : ''}</small></span>${aktion(s)}${s.k === 'ebau' ? ebauHtml(b) : ''}</li>`; }).join('')}</ol>`}</div>
       </div>
       <aside>
         <div class="kar"><h3><span>Dokumente</span><span class="klein" style="flex:none">${dok.filter(d => d.st === 'ok').length} / ${dok.length}</span></h3><ul class="dliste">${dok.map(d => `<li>
             <i class="pt ${d.st}" title="${{ ok: 'fertig', fehlt: 'fehlt noch', warn: 'Angaben fehlen', fehler: 'Problem' }[d.st]}"></i>
-            ${d.act ? `<button type="button" class="dn" data-act="${d.act}">` : '<span class="dn">'}${esc(d.n)}${d.info ? `<small>${esc(d.info)}</small>` : ''}${d.act ? '</button>' : '</span>'}
+            ${d.wahl ? `<span class="dn">${esc(d.n)}<select data-nbrwahl aria-label="Nachbar für Näherbaurecht wählen"><option value="">Nachbar wählen …</option>${d.wahl.map(({ x, i }) => `<option value="${i}">${esc([x.parzelle && 'Parz. ' + x.parzelle, x.name].filter(Boolean).join(' · ') || 'Nachbar ' + (i + 1))}</option>`).join('')}</select></span>`
+              : `${d.act ? `<button type="button" class="dn" data-act="${d.act}">` : '<span class="dn">'}${esc(d.n)}${d.info ? `<small>${esc(d.info)}</small>` : ''}${d.act ? '</button>' : '</span>'}`}
+            ${d.nbrweg != null ? `<button type="button" class="kg-ibtn" data-nbrweg="${d.nbrweg}" title="Kein Näherbaurecht mit diesem Nachbarn" aria-label="Näherbaurecht entfernen">${K('x', 12)}</button>` : ''}
             ${d.pdf ? `<button type="button" class="btn btn-ghost btn-sm" data-pdf="${d.pdf}"${d.i != null ? ` data-i="${d.i}"` : ''}>PDF</button>` : d.link ? `<a class="btn btn-ghost btn-sm" href="${esc(d.link)}" target="_blank" rel="noopener" style="text-decoration:none">öffnen</a>` : ''}</li>`).join('')}</ul></div>
         <div class="kar"><h3><span>Unterschrift Knechtgarten</span></h3><div class="ubild" id="fUb">Lädt …</div>
           <div class="klein" style="margin-top:6px">${esc(plName(b.projektleiter_id))} · wird in Dokumente gesetzt, die wir unterschreiben.</div>
@@ -537,6 +557,12 @@ function zeichneFenster(){
   if(b.e && b.n) KGK.vorschau({ e: +b.e, n: +b.n }, { breite: 60 }).then(h => { const el = $('bwVor'); if(el) el.innerHTML = h; });
   if(b.egrid) reglementLaden(b);
   unterschriftUrl(b.projektleiter_id).then(u => { const el = $('fUb'); if(el) el.innerHTML = u ? `<img src="${u}" alt="Unterschrift">` : '<span>Noch keine Unterschrift hinterlegt</span>'; });
+}
+
+function ebauHtml(b){
+  const t = ebauTeile(b), n = t.filter(x => x.ok).length;
+  return `<div class="ebteile"><div class="ebkopf"><span class="balken"><i><b style="width:${Math.round(n / t.length * 100)}%"></b></i></span><span class="klein">${n} / ${t.length} Bereiche</span></div>
+    ${t.map(x => `<label class="ebt${x.ok ? ' ok' : ''}"><input type="checkbox" data-teil="${x.k}"${x.ok ? ' checked' : ''}${x.auto ? ' disabled' : ''}><span><b>${esc(x.t)}</b><small>${esc(x.i)}${x.auto ? ' · automatisch' : ''}</small></span></label>`).join('')}</div>`;
 }
 
 // Nachbarn (aus der Eigentümerliste des Geometerplans) und eingesehene Pläne
@@ -589,6 +615,11 @@ function laermRechnung(L){
   const [pwT, pwN, zone] = ESW[L.es] || ESW.II;
   return { lw, fl, dc, r, dist, k2, k3, lpT, lpN, lrT, lrN, pwT, pwN, zone, ok: lrT <= pwT && lrN <= pwN };
 }
+function wpVorschlag(m3){
+  const v = parseFloat(String(m3 || '').replace(',', '.')); if(!v) return null;
+  const l = WPK.filter(w => w.vol_min != null).sort((a, b) => a.vol_min - b.vol_min);
+  return l.find(w => w.vol_min >= v) || { ...l[l.length - 1], zuGross: true };
+}
 function laermHtml(b){
   const L = laermDaten(b), R = laermRechnung(L), att = 'autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other"';
   const inp = (k, t, ph = '') => `<label>${t}<input type="text" data-lf="${k}" value="${esc(L[k] ?? '')}" placeholder="${ph}" ${att}></label>`;
@@ -597,6 +628,9 @@ function laermHtml(b){
   return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><h3 style="margin:0;font-size:13px;color:var(--primary);flex:1">Lärmschutznachweis Wärmepumpe</h3>
       ${L.lwa2 ? '<button type="button" class="btn btn-primary btn-sm" data-pdf="lsn">PDF</button>' : ''}<button type="button" class="btn btn-ghost btn-sm" data-act="schritte">Zurück zu den Schritten</button></div>
     <div class="kar fl"><h3><span>Wärmepumpe</span></h3>
+      ${(() => { const w = wpVorschlag(L.pool_m3);
+        return `<div style="display:flex;gap:10px;align-items:end;margin-bottom:10px;flex-wrap:wrap"><span style="width:150px">${inp('pool_m3', 'Poolvolumen (m³)', 'z. B. 40')}</span>
+        <span class="klein" style="flex:1;min-width:200px;padding-bottom:6px">${w ? `Vorschlag: <b>${esc(w.modell)}</b> (Becken ${w.vol_min}–${w.vol_max} m³, gerechnet mit dem unteren Wert)${w.zuGross ? ' · <span style="color:#A63A52">Pool grösser als der untere Wert aller Modelle, Grösse prüfen</span>' : ''}` : 'Poolvolumen eingeben: die Wärmepumpe wird vorgeschlagen.'}</span></div>`; })()}
       <div class="lgrid" style="grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) minmax(0,1.4fr)">${sel('wp_id', 'Aus der Liste', [['', '– andere (Werte selber eintragen) –'], ...WPK.map(w => [w.id, w.hersteller + ' ' + w.modell])])}${inp('hersteller', 'Hersteller')}${inp('modell', 'Modell/Typ')}</div>
       <div class="lgrid" style="margin-top:8px">${inp('a2_kw', 'Heizleistung A2 Teillast (kW)')}${inp('max_kw', 'max. Heizleistung A-7/W35 (kW)')}${inp('fl_kw', 'Heizleistung A2 Flüstermodus (kW)')}
         ${inp('lwa2', 'Schallleistung A2 Teillast (dB(A))')}${inp('lwa_erp', 'Schallleistung nach ErP (dB(A))')}${inp('lwa_fl', 'Schallleistung A2 Flüstermodus (dB(A))')}</div></div>
@@ -667,7 +701,7 @@ const spaeter = (b, ae) => { Object.assign(b, ae); clearTimeout(spT); spT = setT
 document.addEventListener('click', async e => {
   if(!OFFEN || !e.target.closest('#fenOvl')) return; const b = G(); if(!b) return;
   if(e.target.id === 'fenOvl') return schliessen();
-  const a = e.target.closest('[data-act],[data-haken],[data-ab],[data-pdf],[data-nbweg],[data-abneu],[data-abweg],[data-plweg]'); if(!a) return;
+  const a = e.target.closest('[data-act],[data-haken],[data-ab],[data-pdf],[data-nbweg],[data-abneu],[data-abweg],[data-plweg],[data-nbrweg]'); if(!a) return;
   const d = a.dataset;
   if(d.act === 'zu') return schliessen();
   if(d.act === 'geo'){ a.disabled = true; await geodatenHolen(b); return zeichneFenster(); }
@@ -685,6 +719,7 @@ document.addEventListener('click', async e => {
   if(d.act === 'karte'){ try { await KGK.oeffnen({ e: +b.e, n: +b.n, titel: kundeName(b.kunde), untertitel: standort(b) + (b.parzelle ? ' · Parzelle ' + b.parzelle : '') }); } catch(err){ fehler(err, 'Karte'); } return; }
   if(d.act === 'nbneu'){ await speichern(b, { nachbarn: [...(b.nachbarn || []), { name: '', adresse: '', parzelle: '', naeherbaurecht: !!b.abklaerung?.naeherbaurecht, abstaende: [], unterschrieben: false }] }); return zeichneFenster(); }
   if(d.act === 'plneu'){ await speichern(b, { plaene: [...(b.plaene || []), { titel: '', massstab: '', datum: '' }] }); return zeichneFenster(); }
+  if(d.nbrweg != null){ const nb = structuredClone(b.nachbarn); nb[+d.nbrweg].naeherbaurecht = false; await speichern(b, { nachbarn: nb }); return zeichneFenster(); }
   if(d.nbweg != null){ const nb = [...b.nachbarn]; nb.splice(+d.nbweg, 1); await speichern(b, { nachbarn: nb }); return zeichneFenster(); }
   if(d.plweg != null){ const pl = [...b.plaene]; pl.splice(+d.plweg, 1); await speichern(b, { plaene: pl }); return zeichneFenster(); }
   if('abneu' in d){ const i = +a.closest('[data-nb]').dataset.nb, nb = structuredClone(b.nachbarn); (nb[i].abstaende = nb[i].abstaende || []).push({ bauteil: '', soll: '', ist: '' }); await speichern(b, { nachbarn: nb }); return zeichneFenster(); }
@@ -718,6 +753,7 @@ document.addEventListener('change', async e => {
   if(t.dataset.lf || t.dataset.lb){ const L = laermDaten(b);
     if(t.dataset.lb) L.beilagen = { ...L.beilagen, [t.dataset.lb]: t.checked };
     else L[t.dataset.lf] = t.type === 'checkbox' ? t.checked : t.value.trim();
+    if(t.dataset.lf === 'pool_m3'){ const v = wpVorschlag(L.pool_m3); if(v && v.id) Object.assign(L, { wp_id: v.id, hersteller: v.hersteller, modell: v.modell, a2_kw: v.heiz_a2_kw, lwa2: v.lwa_a2_db, max_kw: v.heiz_max_kw, lwa_erp: v.lwa_erp_db, fl_kw: v.heiz_fluester_kw, lwa_fl: v.lwa_fluester_db }); }
     if(t.dataset.lf === 'wp_id'){ const w = WPK.find(x => x.id === t.value);
       if(w) Object.assign(L, { hersteller: w.hersteller, modell: w.modell, a2_kw: w.heiz_a2_kw, lwa2: w.lwa_a2_db, max_kw: w.heiz_max_kw, lwa_erp: w.lwa_erp_db, fl_kw: w.heiz_fluester_kw, lwa_fl: w.lwa_fluester_db }); }
     else if(['hersteller', 'modell', 'a2_kw', 'lwa2', 'max_kw', 'lwa_erp', 'fl_kw', 'lwa_fl'].includes(t.dataset.lf)) L.wp_id = '';
@@ -725,6 +761,9 @@ document.addEventListener('change', async e => {
     if(L.lwa2 && laermRechnung(L).ok && !b.schritte?.laermschutz?.erledigt) ae.schritte = { ...(b.schritte || {}), laermschutz: { erledigt: true, am: new Date().toISOString(), von: ME } };
     await speichern(b, ae); return zeichneFenster(); }
   const nbEl = t.closest('[data-nb]');
+  if(t.dataset.teil){ const s = { ...(b.schritte || {}) }; s.ebau_teile = { ...(s.ebau_teile || {}), [t.dataset.teil]: { erledigt: t.checked, am: new Date().toISOString(), von: ME } };
+    await speichern(b, { schritte: s }); return zeichneFenster(); }
+  if(t.dataset.nbrwahl != null && t.value !== ''){ const nb = structuredClone(b.nachbarn); nb[+t.value].naeherbaurecht = true; await speichern(b, { nachbarn: nb }); return zeichneFenster(); }
   if(nbEl && t.dataset.nf){ const i = +nbEl.dataset.nb, nb = structuredClone(b.nachbarn); nb[i][t.dataset.nf] = t.type === 'checkbox' ? t.checked : t.value;
     await speichern(b, { nachbarn: nb }); if(t.type === 'checkbox') zeichneFenster(); return; }
 });
