@@ -1454,7 +1454,7 @@ async function ladeProjekte(){
   ]);
   if(p.error){ showToast(friendlyError(p.error), true); return; }
   const ids = (p.data || []).map(x => x.id);
-  PJ.bew = ids.length ? ((await sb.from('bewilligung').select('id,projekt_id,status,eingereicht_am,bewilligt_am,nachbarn').in('projekt_id', ids)).data || []) : [];
+  PJ.bew = ids.length ? ((await sb.from('bewilligung').select('id,projekt_id,status,eingereicht_am,bewilligt_am,nachbarn,dok_stand').in('projekt_id', ids)).data || []) : [];
   PJ.liste = p.data || []; PJ.einst = e.data || { checklisten: { bb: [], avor: [] }, fristen: {} }; PJ.ben = b.data || []; PJ.geladen = true;
   if($('nPj')) $('nPj').textContent = PJ.archiv ? '' : PJ.liste.length;
 }
@@ -1489,6 +1489,8 @@ function pjUnterschriften(p){
     if(x.naeherbaurecht) l.push({ art: 'nbr', bew: b.id, i, name: x.name || 'ohne Namen', parz: x.parzelle, s: x.st_nbr?.s || 'fehlt', am: x.st_nbr?.am }); }));
   return l;
 }
+// Dokumente des Gesuchs (meldet «Pläne & Bewill.», hier nur lesen)
+const pjDoks = p => (PJ.bew || []).filter(b => b.projekt_id === p.id).flatMap(b => b.dok_stand || []);
 // Stand aller Schritte eines Projekts
 function pjSchritte(p){
   const S = p.schritte || {}, F = pjF(), heute = pjIso(pjHeute());
@@ -1497,7 +1499,7 @@ function pjSchritte(p){
   const st = ab.stufe || 0;
   r.ab = { w: st === 2 ? 100 : st === 1 ? 50 : 0, lab: st === 2 ? 'erhalten' : st === 1 ? 'versendet' : 'offen', due: st < 1 ? pjPlus(p.zugesagt_am, F.ab) : null, name: 'AB' };
   if(bb.keine) r.bb = { w: 100, lab: 'keine nötig', due: null, name: 'Baubewilligung' };
-  else { const cl = pjListe(S, 'bb'), us = pjUnterschriften(p), n = cl.filter(c => (bb.punkte || {})[c.k]).length + (bb.vollstaendig ? 1 : 0) + (bb.erhalten ? 1 : 0) + (bb.kosten ? 1 : 0) + us.filter(u => u.s === 'unterschrieben').length, tot = cl.length + 3 + us.length;
+  else { const cl = pjListe(S, 'bb'), us = pjUnterschriften(p), dk = pjDoks(p), n = cl.filter(c => (bb.punkte || {})[c.k]).length + (bb.vollstaendig ? 1 : 0) + (bb.erhalten ? 1 : 0) + (bb.kosten ? 1 : 0) + us.filter(u => u.s === 'unterschrieben').length + dk.filter(d => d.ok).length, tot = cl.length + 3 + us.length + dk.length;
     r.bb = { w: Math.round(n / tot * 100), lab: bb.erhalten ? (bb.kosten ? 'fertig' : 'erhalten') : `${n} / ${tot}`, due: !(bb.punkte || {}).eingereicht ? pjPlus(p.zugesagt_am, F.bb) : null, name: 'Baubewilligung', nachtraege: (bb.nachtraege || []).length }; }
   const cA = pjListe(S, 'avor'), nA = cA.filter(c => (av.punkte || {})[c.k]).length, avFertig = cA.length && nA === cA.length;
   r.avor = { w: cA.length ? Math.round(nA / cA.length * 100) : 0, lab: `${nA} / ${cA.length}`, due: avFertig ? null : p.baustart ? pjPlus(p.baustart, -F.avor_vor_baustart) : pjPlus(p.zugesagt_am, F.avor_ohne_baustart), name: p.baustart ? 'AVOR' : 'AVOR (Baustart eintragen)' };
@@ -1610,13 +1612,15 @@ function pjDialog(p, s){
     return [['offen', 'noch offen'], ['bezahlt', 'vollständig bezahlt'], ['m1', '1. Mahnung verschickt'], ['m2', '2. Mahnung verschickt']].map(([k, t]) => `<button type="button" class="pjopt${z === k ? ' an' : ''}" data-za="${k}"><i class="pjo ${k}"></i>${t}</button>`).join('')
       + `<div class="pjhint">${(S.sr || {}).stufe === 2 ? 'Fällig ' + pjF().zahlung + ' Tage nach der Schlussrechnung.' : 'Die Frist läuft ab der versendeten Schlussrechnung.'}</div>`; };
   const UOFFEN = new Set();
-  const pjUntHtml = () => { const us = pjUnterschriften(p); if(!us.length) return '';
+  const pjUntHtml = () => { const us = pjUnterschriften(p), dk = pjDoks(p); if(!us.length && !dk.length) return '';
     const bew = (PJ.bew || []).find(b => b.projekt_id === p.id), STD = { vorbereitung: 'in Vorbereitung', eingereicht: 'eingereicht', bewilligt: 'bewilligt', abgelehnt: 'abgelehnt', zurueckgezogen: 'zurückgezogen' };
     const gruppe = (art, t) => { const g = us.filter(u => u.art === art); if(!g.length) return ''; const u = g.filter(x => x.s === 'unterschrieben').length, ab = g.some(x => x.s === 'abgelehnt');
       return `<details class="pjunt" data-ug="${art}"${UOFFEN.has(art) ? ' open' : ''}><summary><i class="pjdot ${ab ? 'abgelehnt' : u === g.length ? 'unterschrieben' : g.some(x => x.s !== 'fehlt') ? 'versendet' : ''}"></i><b>${t}</b><span>${u} / ${g.length} unterschrieben</span></summary>
         ${g.map(x => `<div class="pjur"><i class="pjdot ${x.s}"></i><span>${escHtml(x.name)}${x.parz ? `<small>Parz. ${escHtml(x.parz)}</small>` : ''}</span>${x.am && x.s !== 'fehlt' ? `<small class="pjam">${pjKurz(pjD(x.am))}</small>` : ''}
           <select data-ust="${x.bew}|${x.i}|${art}" aria-label="Stand ${escHtml(x.name)}">${PJ_UST.map(([v, l]) => `<option value="${v}"${x.s === v ? ' selected' : ''}>${l}</option>`).join('')}</select></div>`).join('')}</details>`; };
-    return `<div class="pjblk">${gruppe('zust', 'Zustimmungen Nachbarn')}${gruppe('nbr', 'Näherbaurechte')}
+    const doks = dk.length ? `<details class="pjunt" data-ug="dok"${UOFFEN.has('dok') ? ' open' : ''}><summary><i class="pjdot ${dk.every(d => d.ok) ? 'unterschrieben' : dk.some(d => d.ok) ? 'versendet' : ''}"></i><b>Dokumente</b><span>${dk.filter(d => d.ok).length} / ${dk.length} fertig</span></summary>
+      ${dk.map(d => `<div class="pjur"><i class="pjdot ${d.ok ? 'unterschrieben' : ''}"></i><span>${escHtml(d.n)}</span></div>`).join('')}</details>` : '';
+    return `<div class="pjblk">${doks}${gruppe('zust', 'Zustimmungen Nachbarn')}${gruppe('nbr', 'Näherbaurechte')}
       ${bew ? `<div class="pjhint">Gesuch ${STD[bew.status] || bew.status}${bew.eingereicht_am ? ' am ' + pjKurz(pjD(bew.eingereicht_am)) : ''} · <a href="bewilligungen-live-v1.html?gesuch=${bew.id}">in «Pläne & Bewill.» öffnen</a></div>` : ''}</div>`; };
   const zeichnen = () => { w.innerHTML = `<div class="pjdlg" role="dialog" aria-label="${titel}"><div class="pjdk"><div><b>${titel}</b><small>${escHtml(kn.firma || kn.nachname || kn.name || '')}${p.titel ? ' · ' + escHtml(p.titel) : ''}</small></div><button type="button" class="kg-ibtn" data-zu aria-label="Schliessen">${KG.icon('x', 14)}</button></div>
     <div class="pjdi">${inhalt()}</div><div class="pjdf"><button type="button" class="btn btn-primary" data-zu>Fertig</button></div></div>`; };
