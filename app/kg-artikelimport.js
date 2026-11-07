@@ -29,7 +29,8 @@
 .kai-zu{margin-left:auto;}
 .kai-inhalt{padding:14px 20px;overflow:auto;flex:1;min-height:0;}
 .kai-zeile{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:12px;}
-.kai-fld{display:flex;flex-direction:column;gap:4px;}
+.kai-fld{display:flex;flex-direction:column;gap:4px;min-width:0;max-width:100%;}
+.kai-fld[hidden]{display:none;}
 .kai-fld label{font-size:10.5px;font-weight:700;color:#6B7079;text-transform:uppercase;letter-spacing:.03em;}
 .kai-fld select,.kai-fld input,.kai-inhalt textarea{font:inherit;font-size:12.5px;border:1px solid #E1E5E9;border-radius:6px;padding:7px 9px;color:#232B35;background:#fff;}
 .kai-fld input.kurz{width:70px;}
@@ -54,7 +55,7 @@
 .kai-tag.s2{background:#F4E7E6;color:#B3261E;}
 .kai-gruppe{display:flex;align-items:center;gap:10px;margin:18px 0 6px;font-size:12px;font-weight:700;color:#323E4E;}
 .kai-gruppe .kai-link{all:unset;cursor:pointer;font-weight:600;color:#6B7079;text-decoration:underline;}
-.kai-fuss{display:flex;align-items:center;gap:10px;padding:12px 20px;border-top:1px solid #E1E5E9;}
+.kai-fuss{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:12px 20px;border-top:1px solid #E1E5E9;}
 .kai-fuss .kai-info{font-size:12px;color:#6B7079;margin-right:auto;}
 .kai-btn{all:unset;box-sizing:border-box;cursor:pointer;display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 14px;border-radius:7px;font-size:12.5px;font-weight:600;border:1px solid #E1E5E9;background:#fff;color:#323E4E;}
 .kai-btn.haupt{background:#323E4E;border-color:#323E4E;color:#fff;}
