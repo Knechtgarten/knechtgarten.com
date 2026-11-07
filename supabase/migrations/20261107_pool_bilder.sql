@@ -8,3 +8,4 @@ drop policy if exists pool_bilder_loeschen on storage.objects;
 create policy pool_bilder_loeschen on storage.objects for delete to authenticated using (bucket_id = 'pool-bilder' and ist_buero_oder_admin());
 -- Hellgrau: Foto von Stefan (liegt im Tool unter /bilder/pool/)
 update pool_katalog set bild_url = '/bilder/pool/farbe-hellgrau.png' where kategorie = 'farbe' and schluessel = 'hellgrau';
+update pool_katalog set bild_url = '/bilder/pool/farbe-schwarz.png' where kategorie = 'farbe' and schluessel = 'schwarz';
