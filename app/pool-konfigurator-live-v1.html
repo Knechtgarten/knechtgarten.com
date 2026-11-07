@@ -511,15 +511,23 @@ function duesenZiel(){const g=geom(),sk=S.teile.find(p=>p.k==='skimmer');
   const walze=sk&&(sk.wand==='N'||sk.wand==='S')?sk.wand:'N';
   const treib=!sk?'E':sk.wand==='W'?'E':sk.wand==='E'?'W':sk.pos<g.L/2?'E':'W';
   return {walze,treib}}
-const anzahlWalze=()=>Math.max(2,Math.round(geom().L/1.5));   // Faustregel: 1 pro rund 1.5 m Beckenlänge
-function legeDuesen(){const g=geom(),z=duesenZiel(),r=v=>Math.round(v*100)/100;
+const anzahlWalze=()=>Math.max(2,Math.round(geom().L/2));   // Faustregel: 1 pro rund 2 m Beckenlänge (8 m → 4)
+// Ausdehnung der Treppe im Grundriss; voll = über die ganze Beckenbreite
+function treppeBox(g){if(S.treppe==='keine')return null;const tw=treppeWelt(g),xs=tw.flatMap(p=>p.f.map(q=>q[0])),ys=tw.flatMap(p=>p.f.map(q=>q[1]));if(!xs.length)return null;
+  const b={x0:Math.min(...xs),x1:Math.max(...xs),y0:Math.min(...ys),y1:Math.max(...ys)};b.voll=b.y1-b.y0>=g.B-0.05;return b}
+function legeDuesen(){const g=geom(),z=duesenZiel(),r=v=>Math.round(v*100)/100,tb=treppeBox(g);
+  // Sitzbankdüse: Mitte Sitzbank; ohne Sitzbank bei der Treppe – Ecktreppe: Stirnseite gleich neben der Treppe (holt den Schmutz aus dem Eck), volle Treppe: Walzenseite vor der Treppe
+  const bankLage=()=>S.bank?null:!tb?null:tb.voll?{wand:z.walze,pos:S.tseite==='W'?tb.x1+0.3:tb.x0-0.3}:{wand:S.tseite,pos:S.tecke==='N'?tb.y1+0.3:tb.y0-0.3};
+  const bl=bankLage();
   for(const art of ['walze','treib','bank']){const a=S.teile.filter(p=>istArt(p,art)&&!p.fix);if(!a.length)continue;
-    if(art==='walze'){let lo=0.3,hi=g.L-0.3;
-      if(S.bank){if(S.aseite==='W')lo=0.9;else hi=g.L-0.9}
-      if(S.treppe!=='keine'&&S.tecke===z.walze){const tl=1.8+(S.bank&&S.aseite===S.tseite?0.6:0);if(S.tseite==='W')lo=Math.max(lo,tl);else hi=Math.min(hi,g.L-tl)}
-      a.forEach((p,i)=>{p.wand=z.walze;p.pos=r(lo+(hi-lo)*(i+0.5)/a.length)})}
+    if(art==='walze'){let lo=0.5,hi=g.L-0.5;   // bis knapp an Sitzbank und Treppe heran, gleichmässig inkl. Enden
+      if(S.bank){if(S.aseite==='W')lo=0.6+0.4;else hi=g.L-0.6-0.4}
+      if(tb&&(tb.voll||S.tecke===z.walze)){if(S.tseite==='W')lo=Math.max(lo,tb.x1+0.3);else hi=Math.min(hi,tb.x0-0.3)}
+      if(bl&&bl.wand===z.walze&&S.teile.some(p=>istArt(p,'bank'))){if(S.tseite==='W')lo+=0.5;else hi-=0.5}
+      a.forEach((p,i)=>{p.wand=z.walze;p.pos=r(a.length>1?lo+(hi-lo)*i/(a.length-1):(lo+hi)/2)})}
+    else if(art==='bank'&&bl)a.forEach((p,i)=>{p.wand=bl.wand;p.pos=r(Math.max(0.1,Math.min((bl.wand==='N'||bl.wand==='S'?g.L:g.B)-0.1,bl.pos+(S.tseite==='W'?1:-1)*i*0.4)))});
     else a.forEach((p,i)=>{p.wand=art==='treib'?z.treib:(S.aseite||'W');p.pos=r(g.B*(i+1)/(a.length+1))})}
-  S.teile.forEach(p=>{if(istArt(p,'bank'))p.wand=S.aseite||'W'})}
+  if(S.bank)S.teile.forEach(p=>{if(istArt(p,'bank'))p.wand=S.aseite||'W'})}
 // Skimmer auf andere Seite: Düsen bleiben vorerst stehen, Frage ob sie mitkommen (alle auf der alten Skimmer-Linie bzw. Treib-Seite)
 let duesenSig=null;
 function skimmerCheck(){const z=duesenZiel(),sig=z.walze+z.treib;
@@ -588,7 +596,7 @@ function zeichne(){
   o+=`<defs><radialGradient id="lichtschein" cx="0" cy=".5" r=".95"><stop offset="0" stop-color="#FFF3A8" stop-opacity=".95"/><stop offset=".45" stop-color="#F7E27A" stop-opacity=".35"/><stop offset="1" stop-color="#F7E27A" stop-opacity="0"/></radialGradient></defs>`;
   for(const p of S.teile){
     const [mx,my]=p.wand==='boden'?[p.x,p.y]:p.wand==='N'?[p.pos,0]:p.wand==='S'?[p.pos,g.B]:p.wand==='W'?[0,p.pos]:[g.L,p.pos];
-    const rot={N:90,S:-90,W:0,E:180}[p.wand]||0, x=X(mx+(p.art==='bank'?(p.wand==='W'?0.6:-0.6):0)), y=Y(my);
+    const rot={N:90,S:-90,W:0,E:180}[p.wand]||0, x=X(mx+(p.art==='bank'&&S.bank&&p.wand===S.aseite?(p.wand==='W'?0.6:-0.6):0)), y=Y(my);
     const sym={
       duese:`<path d="M0.5 -6L10.5 0L0.5 6Z" fill="${p.art==='treib'?'#323E4E':'#8B9097'}"/>`,
       skimmer:'<rect x="-16" y="-10" width="16" height="20" rx="1.5" fill="#C9D1D9" stroke="#323E4E" stroke-width="1.3"/><path d="M-11 -6v12" stroke="#6E7F93" stroke-width="1"/>',
@@ -664,7 +672,7 @@ function seite(){
       ${p.k==='gegen'?'<p class="klein" style="margin:0 0 6px">immer in der Mitte</p>':`<label class="fld"><span>${p.wand==='N'||p.wand==='S'?'ab links':'ab hinten'}</span><span class="inp"><input id="lgP" type="number" step="1" value="${cm(p.pos)}"><em>cm</em></span></label>`}</div>`;};
   if(b==='teile'){sub=`${S.teile.length} gesetzt`;
     const p=S.teile.find(t=>t.id===S.sel);
-    h=`<div class="kacheln">${KACHELN_TEILE.map(t=>{const [k,art]=t.k.split('-');return kachel('teil',t.k,t.n||TN[k].n,bildTeil(k),art?S.teile.some(q=>istArt(q,art)):p?.k===k&&!p.art,{zieh:1,dis:art==='bank'&&!S.bank})}).join('')}</div>
+    h=`<div class="kacheln">${KACHELN_TEILE.map(t=>{const [k,art]=t.k.split('-');return kachel('teil',t.k,t.n||TN[k].n,bildTeil(k),art?S.teile.some(q=>istArt(q,art)):p?.k===k&&!p.art,{zieh:1,dis:art==='bank'&&!S.bank&&S.treppe==='keine'})}).join('')}</div>
       <div class="einst"><h3>${p?teilName(p)+' im Plan':'Einstellungen'}</h3>${p?`<div class="zeile">
         <label class="fld" style="flex:1"><span>Modell</span><select id="selModell">${TN[p.k].modelle.map(m=>`<option${m===p.modell?' selected':''}>${m}</option>`).join('')}</select></label>
         ${TN[p.k].mat?`<label class="fld"><span>Material</span><select id="selMat">${TN[p.k].mat.map(m=>`<option${m===p.mat?' selected':''}>${m}</option>`).join('')}</select></label>`:''}
@@ -741,10 +749,10 @@ function waehle(g,k){
   else if(g==='teil'){const art=k.split('-')[1];
     if(art){const da=S.teile.filter(p=>istArt(p,art));   // Düsen: ganzer Satz an den Vorschlags-Ort, zweiter Klick nimmt ihn weg
       if(da.length){S.teile=S.teile.filter(p=>!da.includes(p));S.sel=null;satzWeg(da,da.length>1?DUESEN[art].replace('düse','düsen'):DUESEN[art])}
-      else if(art!=='bank'||S.bank){const n=art==='walze'?anzahlWalze():1;for(let i=0;i<n;i++)S.teile.push(neuTeil(k));verteile();S.sel=nid-n}}
+      else if(art!=='bank'||S.bank||S.treppe!=='keine'){const n=art==='walze'?anzahlWalze():1;for(let i=0;i<n;i++)S.teile.push(neuTeil(k));verteile();S.sel=nid-n}}
     else{S.teile.push(neuTeil(k,{wand:k==='ablauf'?'boden':k==='gegen'?(S.tseite==='E'?'W':'E'):'N'}));verteile();S.sel=nid-1}}
   else if(g==='tech')S.techWahl=k;
-  else if(g==='bank'){S.bank=!S.bank;if(!S.bank)S.teile=S.teile.filter(p=>p.art!=='bank');if(S.bank)S.aseite=S.tseite==='E'?'W':'E';else if(S.abd==='bank')S.abd='keine';verteile()}
+  else if(g==='bank'){S.bank=!S.bank;if(!S.bank&&S.treppe==='keine')S.teile=S.teile.filter(p=>p.art!=='bank');if(S.bank)S.aseite=S.tseite==='E'?'W':'E';else if(S.abd==='bank')S.abd='keine';verteile()}
   else if(g==='kasten'){const alt=S.kasten;S.kasten=S.kasten===k?null:k;if(S.kasten&&!alt)S.nseite=S.tseite==='E'?'W':'E';if(['nische','ueber'].includes(S.abd)&&S.abd!==S.kasten)S.abd='keine'}
   else if(g==='rolle'){const [eg,ek]=k.split(':'),lage=ROLLE_BEI[ek];
     if(eg==='treppe'&&S.treppe!==ek)S.treppe=ek; if(eg==='bank'&&!S.bank){S.bank=true;S.aseite=S.tseite==='E'?'W':'E'} if(eg==='kasten'&&S.kasten!==ek){S.kasten=ek;S.nseite=S.tseite==='E'?'W':'E'}
@@ -778,7 +786,7 @@ const meter=e=>{const sv=$('plan'),pt=sv.createSVGPoint();pt.x=e.clientX;pt.y=e.
 function setzeTeil(p,mx,my){const g=G.g,cl=(v,a,b)=>Math.max(a,Math.min(b,v)),cm=v=>Math.round(v*100)/100;
   if(p.k==='ablauf'){p.wand='boden';p.x=cm(cl(mx,0.12,g.L-0.12));p.y=cm(cl(my,0.12,g.B-0.12));return}
   if(p.k==='gegen'){p.wand=mx<g.L/2?'W':'E';p.pos=g.B/2;return}
-  if(p.art==='bank'){p.wand=S.aseite||'W';p.pos=cm(cl(my,0.1,g.B-0.1));return}
+  if(p.art==='bank'&&S.bank){p.wand=S.aseite||'W';p.pos=cm(cl(my,0.1,g.B-0.1));return}
   const d={N:Math.abs(my),S:Math.abs(my-g.B),W:Math.abs(mx),E:Math.abs(mx-g.L)};let w=Object.keys(d).sort((a,b)=>d[a]-d[b])[0];
   if(d[p.wand]!=null&&d[p.wand]-d[w]<0.4)w=p.wand;   // an der bisherigen Wand bleiben, bis eine andere klar näher ist
   p.wand=w;p.pos=cm(cl(w==='N'||w==='S'?mx:my,0.1,(w==='N'||w==='S'?g.L:g.B)-0.1))}
@@ -806,7 +814,7 @@ document.addEventListener('pointermove',e=>{if(!neuZug)return;
   if(neuZug.geist){neuZug.geist.style.left=e.clientX+'px';neuZug.geist.style.top=e.clientY+'px'}});
 document.addEventListener('pointerup',e=>{if(!neuZug)return;const z=neuZug;neuZug=null;if(!z.geist)return;z.geist.remove();klickSperre=true;setTimeout(()=>klickSperre=false,50);
   const r=$('plan').getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)return;
-  if(z.k==='duese-bank'&&!S.bank)return;const [mx,my]=meter(e),p=neuTeil(z.k,{fix:true});S.teile.push(p);setzeTeil(p,mx,my);S.sel=p.id;S.bereich='teile';alles()});
+  if(z.k==='duese-bank'&&!S.bank&&S.treppe==='keine')return;const [mx,my]=meter(e),p=neuTeil(z.k,{fix:true});S.teile.push(p);setzeTeil(p,mx,my);S.sel=p.id;S.bereich='teile';alles()});
 
 
 /* =====================================================================================
@@ -872,7 +880,7 @@ function bau3D(){
         const pl=new THREE.PointLight(0xfff1a0,0.9,2.4);pl.position.y=0.35*sg;m.add(pl);
         if(quer)m.rotation.x=Math.PI/2;else m.rotation.z=Math.PI/2}
       else{m=new THREE.Mesh(new THREE.CylinderGeometry(0.05,0.05,0.03,24),dunkel);if(quer)m.rotation.x=Math.PI/2;else m.rotation.z=Math.PI/2}
-      const bo=p.art==='bank'?0.6:0,inn=p.k==='gegen'?0.003:0.015,px=p.wand==='W'?inn+bo:p.wand==='E'?g.L-inn-bo:mx,pz=p.wand==='N'?inn:p.wand==='S'?g.B-inn:mz;m.position.set(px-cx,y,pz-cz)}
+      const bo=p.art==='bank'&&S.bank&&p.wand===S.aseite?0.6:0,inn=p.k==='gegen'?0.003:0.015,px=p.wand==='W'?inn+bo:p.wand==='E'?g.L-inn-bo:mx,pz=p.wand==='N'?inn:p.wand==='S'?g.B-inn:mz;m.position.set(px-cx,y,pz-cz)}
     grp.add(m);
   }
   // Wasser oder geschlossene Lamellen
