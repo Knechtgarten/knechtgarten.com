@@ -301,7 +301,7 @@ header.app.kg-leiste ~ main.wrap{margin-left:0!important;margin-right:auto!impor
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;font-size:13px;}
 /* Gemeinsame Breite aller Tools: Inhalt höchstens --kg-breite (≈ halber Bildschirm), mittig; Leiste und weisse Zeile richten sich danach.
    Seiten, die die ganze Breite brauchen (Planer, Pendenzen-Board, Artikelstamm, Pflege), bekommen html.kg-voll */
-:root{--kg-breite:1280px;--kg-rand:max(16px,calc((100% - var(--kg-breite)) / 2 + 16px));}
+:root{--kg-breite:1920px;--kg-rand:max(16px,calc((100% - var(--kg-breite)) / 2 + 16px));}
 html:not(.kg-voll) main#appMain,html:not(.kg-voll) main#mainContent{max-width:var(--kg-breite)!important;margin-left:auto!important;margin-right:auto!important;box-sizing:border-box;width:100%;}
 html:not(.kg-voll) .kg-seite{padding-left:var(--kg-rand)!important;padding-right:var(--kg-rand)!important;}
 html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!important;padding-right:var(--kg-rand)!important;}
