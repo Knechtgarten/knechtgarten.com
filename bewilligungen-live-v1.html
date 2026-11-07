@@ -187,12 +187,16 @@ body.buero-rolle .admin-only{display:none !important;}
 .angaben{position:absolute;top:12px;right:12px;width:min(390px,calc(100% - 24px));max-height:calc(100% - 24px);overflow:auto;background:#fff;border:1px solid var(--line);border-radius:12px;box-shadow:0 8px 28px rgba(35,43,53,.18);padding:14px;display:flex;flex-direction:column;gap:12px;box-sizing:border-box;}
 .angaben h4{margin:0;font-size:14px;color:#232B35;display:flex;justify-content:space-between;align-items:baseline;gap:8px;} .angaben h4 small{font-weight:400;color:#6B7079;font-size:11px;text-align:right;}
 .angaben .ag{display:flex;flex-direction:column;gap:5px;} .angaben .ag > span{font-size:11.5px;color:#6B7079;font-weight:600;}
-.angaben input[type=text],.angaben select{height:32px;border:1px solid #D5DBE1;border-radius:7px;padding:0 8px;font:inherit;font-size:12.5px;width:100%;box-sizing:border-box;background:#fff;color:#232B35;}
+.angaben input[type=text],.angaben input[type=date],.angaben select{height:32px;border:1px solid #D5DBE1;border-radius:7px;padding:0 8px;font:inherit;font-size:12.5px;width:100%;box-sizing:border-box;background:#fff;color:#232B35;}
 .angaben .ab{grid-template-columns:minmax(0,1.3fr) 72px 72px 26px;margin:0;} .angaben .pl{grid-template-columns:minmax(0,1.5fr) 62px 84px 26px;margin:0;}
 .angaben .zrow{display:grid;grid-template-columns:minmax(0,1fr) 62px auto 26px;gap:6px;align-items:center;}
 .angaben .fussz{display:flex;gap:8px;border-top:1px solid #EEF1F4;padding-top:10px;} .angaben .fussz .btn-primary{flex:1;}
 .kchk{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#232B35;cursor:pointer;white-space:nowrap;} .kchk input{width:15px;height:15px;margin:0;accent-color:#323E4E;flex:none;}
 .ebt input{width:15px;height:15px;}
+.blattskal .a4 + .a4{margin-top:8mm;}
+.angaben details > div{display:flex;flex-direction:column;gap:8px;margin-top:8px;}
+.angaben .zwei{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+.kg-ibtn[aria-pressed=true]{background:#3F7D3F;border-color:#3F7D3F;color:#fff;}
 .dliste li.dkopf{padding:10px 0 2px;border-bottom:0;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#6B7079;font-weight:600;} .dliste li.dkopf span{flex:1;}
 .dliste label.dn{cursor:pointer;} .dliste label.dn:hover{color:var(--primary);}
 /* Dokument (A4) für PDF */
@@ -211,7 +215,7 @@ body.buero-rolle .admin-only{display:none !important;}
 @media (max-width:700px){ .lgrid{grid-template-columns:1fr !important;} }
 /* Lärmschutznachweis: Blatt in pt wie das Formular nach Cercle Bruit */
 .a4.lsn{padding:0;display:block;position:relative;font-family:"Lato",Arial,sans-serif;color:#000;line-height:1;}
-.lsn span,.lsn i,.lsn img{position:absolute;white-space:nowrap;font-style:normal;}
+.lsn span,.lsn i,.lsn img,.lsn svg{position:absolute;white-space:nowrap;font-style:normal;}
 .lsn .bx{background:rgb(245,245,249);} .lsn .ln{border-top:.75pt solid #000;height:0;} .lsn .dl{border-top:1.5pt double #000;height:0;}
 .lsn .pl{border-top:.6pt dotted #555;height:0;} .lsn .cb{width:6.6pt;height:6.6pt;border:.6pt solid #000;box-sizing:border-box;}
 .regwerte{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;}
@@ -224,6 +228,7 @@ body.buero-rolle .admin-only{display:none !important;}
 
 <header class="app"><div class="wrap">
   <div class="brand"><h1>Pläne &amp; Bewill.</h1><div class="sub">Baugesuche</div></div>
+  <span id="hknoepfe" hidden><button type="button" data-seto aria-label="Meine Einstellungen" title="Meine Einstellungen">Einstellungen</button></span>
   <span class="userbar hidden" id="userbar"><span id="userbarText"></span><button id="logoutBtn">Abmelden</button></span>
 </div></header>
 <div class="wrap hidden" id="loginwrap">
@@ -281,6 +286,7 @@ const ROLLE_LABEL = { admin: 'Admin', buero_team: 'Büro-Team', mitarbeitende: '
 const K = (n, s = 14) => KG.icon(n, s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const datum = v => v ? new Date(String(v).slice(0, 10) + 'T12:00').toLocaleDateString('de-CH') : '';
+const dokDatum = b => b?.dok_datum ? new Date(b.dok_datum + 'T12:00').toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit', year: 'numeric' }) : heute();   // ein Datum für alle Dokumente des Gesuchs
 const heute = () => new Date().toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit', year: 'numeric' });
 function toast(t, err){ const d = document.createElement('div'); d.className = 'toast' + (err ? ' err' : ''); d.textContent = t; $('toastwrap').appendChild(d); setTimeout(() => d.remove(), 4500); }
 const fehler = (e, wo) => toast((wo ? wo + ': ' : '') + (e?.message || e), true);
@@ -494,11 +500,12 @@ function reglementZeigen(b){
 // Dokumente des Gesuchs mit Status: ok (grün) · fehlt (grau) · warn (orange, Angaben fehlen) · fehler (rot, Problem).
 // Klick auf den Namen öffnet die Eingabe dazu, «PDF» erzeugt das Dokument.
 function dokumente(b){
-  const g = b.geodaten || {}, a = b.abklaerung || {}, nb = b.nachbarn || [], sch = b.schritte || {}, l = [];
+  const g = b.geodaten || {}, a = b.abklaerung || {}, nb = b.nachbarn || [], sch = b.schritte || {}, dh = sch.doks || {}, l = [];
   l.push({ n: 'ÖREB-Auszug', st: g.oereb?.pdf ? 'ok' : 'fehlt', link: g.oereb?.pdf });
   l.push({ n: 'Grundstücksplan mit Höhen', st: b.e && b.n ? 'ok' : 'fehlt', pdf: b.e && b.n ? 'hoehen' : null, act: b.e && b.n ? 'karte' : null });
   l.push({ n: 'Situationsplan beglaubigt', st: sch.situationsplan?.erledigt ? 'ok' : 'fehlt' });
-  l.push({ n: 'Eigentümerliste', st: nb.length ? 'ok' : 'fehlt', info: nb.length ? `${nb.length} Nachbarn · neu einlesen` : 'PDF vom Geometer einlesen', datei: true });
+  const haupt = nb.filter(x => !x.weitere), wei = nb.filter(x => x.weitere);
+  l.push({ n: 'Eigentümerliste', st: haupt.length ? 'ok' : 'fehlt', info: haupt.length ? `${haupt.length} Nachbarn · neu einlesen` : 'PDF vom Geometer einlesen', datei: true });
   l.push({ n: 'Leitungspläne', st: sch.leitungsplaene?.erledigt ? 'ok' : 'fehlt' });
   if(a.naeherbaurecht || nb.some(x => x.naeherbaurecht)){
     l.push({ kopf: 'Näherbaurecht', plus: 'nbrneu' });
@@ -506,13 +513,18 @@ function dokumente(b){
     nbr.forEach(x => { const i = nb.indexOf(x), voll = x.name && x.parzelle && (x.abstaende || []).some(z => z.bauteil && z.ist);
       l.push({ n: x.name || 'Nachbar ohne Namen', st: voll ? 'ok' : 'warn', info: [x.parzelle && 'Parzelle ' + x.parzelle, voll ? (x.unterschrieben ? 'unterschrieben' : '') : 'Abstände fehlen'].filter(Boolean).join(' · '), act: 'dok', art: 'nbr', i, pdf: 'nbr', nbrweg: i }); });
     if(!nbr.length) l.push({ n: 'Noch keins erstellt', st: 'warn', info: 'mit + erstellen', act: 'nbrneu' });
-    l.push({ kopf: 'Weitere' });
   }
-  const unt = nb.filter(x => x.unterschrieben).length;
-  l.push({ n: 'Zustimmungserklärung Nachbarn', st: !nb.length ? 'fehlt' : nb.some(x => !x.name) ? 'warn' : 'ok',
-    info: !nb.length ? 'zuerst Eigentümerliste' : nb.some(x => !x.name) ? 'Name fehlt' : `${unt} / ${nb.length} unterschrieben`, act: 'dok', art: 'zust', pdf: nb.length ? 'zust' : null });
+  // Zustimmung: Nachbarn ringsum (eine Seite pro Nachbar), weitere Grundeigentümer (z. B. von der Gemeinde verlangt) je ein eigenes Dokument
+  l.push({ kopf: 'Zustimmung Grundeigentümer', plus: 'zustneu' });
+  const unt = haupt.filter(x => x.unterschrieben).length;
+  l.push({ n: 'Nachbarn ringsum', st: !haupt.length ? 'fehlt' : haupt.some(x => !x.name) ? 'warn' : 'ok',
+    info: !haupt.length ? 'zuerst Eigentümerliste' : haupt.some(x => !x.name) ? 'Name fehlt' : `${haupt.length} Seiten · ${unt} / ${haupt.length} unterschrieben`, act: 'dok', art: 'zust', pdf: haupt.length ? 'zust' : null });
+  wei.forEach(x => { const i = nb.indexOf(x);
+    l.push({ n: x.name || 'Grundeigentümer ohne Namen', st: x.name && x.parzelle ? 'ok' : 'warn', info: [x.parzelle ? 'Parzelle ' + x.parzelle : 'Parzelle fehlt', x.unterschrieben ? 'unterschrieben' : ''].filter(Boolean).join(' · '), act: 'dok', art: 'zustw', i, pdf: 'zustw', weg: i }); });
   if(a.waermepumpe){ const L = laermDaten(b), R = L.lwa2 ? laermRechnung(L) : null;
-    l.push({ n: 'Lärmschutznachweis Wärmepumpe', st: !R ? 'warn' : R.ok ? 'ok' : 'fehler', info: !R ? 'Wärmepumpe wählen' : R.ok ? `Lr ${R.lrT.toFixed(1)} / ${R.lrN.toFixed(1)} dB(A)` : 'Planungswerte überschritten', act: 'laerm', pdf: R ? 'lsn' : null }); }
+    l.push({ kopf: 'Wärmepumpe' });
+    l.push({ n: 'Lärmschutznachweis', st: !R ? 'warn' : R.ok ? 'ok' : 'fehler', info: !R ? 'Wärmepumpe wählen' : R.ok ? `Lr ${R.lrT.toFixed(1)} / ${R.lrN.toFixed(1)} dB(A)` : 'Planungswerte überschritten', act: 'dok', art: 'laerm', pdf: R ? 'lsn' : null });
+    [['wp_situation', 'Situationsplan Standort Wärmepumpe'], ['wp_datenblatt', 'Datenblatt Schallleistung']].forEach(([k, n]) => l.push({ n, st: dh[k]?.erledigt ? 'ok' : 'fehlt', info: dh[k]?.erledigt ? 'beigelegt' : 'abhaken, wenn bereit', haken: k })); }
   return l;
 }
 function zeichneFenster(){
@@ -553,7 +565,7 @@ function zeichneFenster(){
         <div class="kar"><h3><span>Abklärung</span></h3><div class="abkl" id="fAb">${ABKL.map(([k, t]) => `<button type="button" data-ab="${k}" aria-pressed="${!!b.abklaerung?.[k]}">${t}</button>`).join('')}</div></div>
       </aside>
       <div style="min-width:0">
-        <div id="teil">${AKT_TEIL === 'dok' ? dokAnsicht(b) : AKT_TEIL === 'laerm' ? laermHtml(b) : `<h3 style="margin:0 0 8px;font-size:13px;color:var(--primary)">Schritte</h3><ol class="schritte">${l.map(s => { const st = b.schritte?.[s.k];
+        <div id="teil">${AKT_TEIL === 'dok' ? dokAnsicht(b) : `<h3 style="margin:0 0 8px;font-size:13px;color:var(--primary)">Schritte</h3><ol class="schritte">${l.map(s => { const st = b.schritte?.[s.k];
           return `<li class="schritt${s.k === naechster ? ' akt' : ''}"><button type="button" class="haken" data-haken="${s.k}" aria-pressed="${!!st?.erledigt}" aria-label="${esc(s.t)} erledigt">${st?.erledigt ? K('check', 12) : ''}</button>
             <span class="tx"><b>${esc(s.t)}</b><small>${esc(s.i)}${st?.erledigt && st.am ? ' · erledigt ' + datum(st.am) : ''}</small></span>${aktion(s)}${s.k === 'ebau' ? ebauHtml(b) : ''}</li>`; }).join('')}</ol>`}</div>
       </div>
@@ -562,18 +574,16 @@ function zeichneFenster(){
             <i class="pt ${d.st}" title="${{ ok: 'fertig', fehlt: 'fehlt noch', warn: 'Angaben fehlen', fehler: 'Problem' }[d.st]}"></i>
             ${d.datei ? `<label class="dn">${esc(d.n)}${d.info ? `<small>${esc(d.info)}</small>` : ''}<input type="file" accept="application/pdf,.pdf" data-nbpdf hidden></label>`
               : `${d.act ? `<button type="button" class="dn" data-act="${d.act}"${d.art ? ` data-art="${d.art}"` : ''}${d.i != null ? ` data-di="${d.i}"` : ''}>` : '<span class="dn">'}${esc(d.n)}${d.info ? `<small>${esc(d.info)}</small>` : ''}${d.act ? '</button>' : '</span>'}`}
+            ${d.haken ? `<button type="button" class="kg-ibtn" data-dokhaken="${d.haken}" aria-pressed="${d.st === 'ok'}" title="${d.st === 'ok' ? 'wieder offen' : 'erledigt'}" aria-label="${esc(d.n)} erledigt">${K('check', 12)}</button>` : ''}
+            ${d.weg != null ? `<button type="button" class="kg-ibtn danger" data-nbweg="${d.weg}" title="Entfernen" aria-label="Grundeigentümer entfernen">${K('trash', 12)}</button>` : ''}
             ${d.nbrweg != null ? `<button type="button" class="kg-ibtn" data-nbrweg="${d.nbrweg}" title="Kein Näherbaurecht mit diesem Nachbarn" aria-label="Näherbaurecht entfernen">${K('x', 12)}</button>` : ''}
             ${d.pdf ? `<button type="button" class="btn btn-ghost btn-sm" data-pdf="${d.pdf}"${d.i != null ? ` data-i="${d.i}"` : ''}>PDF</button>` : d.link ? `<a class="btn btn-ghost btn-sm" href="${esc(d.link)}" target="_blank" rel="noopener" style="text-decoration:none">öffnen</a>` : ''}</li>`).join('')}</ul></div>
-        <div class="kar"><h3><span>Unterschrift Knechtgarten</span></h3><div class="ubild" id="fUb">Lädt …</div>
-          <div class="klein" style="margin-top:6px">${esc(plName(b.projektleiter_id))} · wird in Dokumente gesetzt, die wir unterschreiben.</div>
-          <label class="btn btn-ghost btn-sm" style="margin-top:8px;display:inline-flex;gap:6px;align-items:center;cursor:pointer">${K('upload', 13)}Unterschrift hochladen<input type="file" accept="image/*" id="fUbIn" hidden></label></div>
         <div class="kar fl"><h3><span>eBau-Nummer</span></h3><input type="text" data-feld="ebau_nr" value="${esc(b.ebau_nr || '')}" placeholder="z. B. 295933" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other"></div>
       </aside>
     </div></section></div>`;
   if(AKT_TEIL === 'dok') blattNeu(b);
   if(b.e && b.n) KGK.vorschau({ e: +b.e, n: +b.n }, { breite: 60 }).then(h => { const el = $('bwVor'); if(el) el.innerHTML = h; });
   if(b.egrid) reglementLaden(b);
-  unterschriftUrl(b.projektleiter_id).then(u => { const el = $('fUb'); if(el) el.innerHTML = u ? `<img src="${u}" alt="Unterschrift">` : '<span>Noch keine Unterschrift hinterlegt</span>'; });
 }
 
 function ebauHtml(b){
@@ -593,15 +603,42 @@ function plaeneHtml(b){
 }
 function angabenHtml(b){
   const d = AKT_DOK, nb = b.nachbarn || [], fuss = `<div class="fussz"><button type="button" class="btn btn-ghost btn-sm" data-act="angzu">Schliessen</button><button type="button" class="btn btn-primary btn-sm" data-act="schritte">Fertig</button></div>`;
-  if(d.art === 'zust') return `<div class="angaben"><h4>Angaben<small>Bauherrschaft, Parzelle und Bauvorhaben stehen schon</small></h4>
-    <div class="ag"><span>Nachbarn</span>${nb.map((x, j) => `<div class="zrow" data-nb="${j}">${tf('name', x.name, 'Name')}${tf('parzelle', x.parzelle, 'Parz.')}
+  const datum = `<label class="ag"><span>Datum (gilt für alle Dokumente)</span><input type="date" data-feld="dok_datum" value="${esc(b.dok_datum || '')}"></label>`;
+  const pl = PL.find(p => p.id === b.projektleiter_id), ohneU = pl && !pl.unterschrift_pfad ? '<span class="klein">Unterschrift Projektverfasser fehlt noch: Personen-Menü › Meine Einstellungen.</span>' : '';
+  if(d.art === 'laerm'){
+    const L = laermDaten(b), R = L.lwa2 ? laermRechnung(L) : null, w = wpVorschlag(L.pool_m3);
+    const inp = (k, ph = '') => `<input type="text" data-lf="${k}" value="${esc(L[k] ?? '')}" placeholder="${esc(ph)}" ${att}>`;
+    const sel = (k, o) => `<select data-lf="${k}">${o.map(([v, x]) => `<option value="${v}"${String(L[k] ?? '') === String(v) ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select>`;
+    const lab = (t, h) => `<label class="ag"><span>${t}</span>${h}</label>`;
+    return `<div class="angaben"><h4>Angaben<small>Gesuchsteller, Parzelle und Verfasser stehen schon</small></h4>${datum}
+      ${lab('Poolvolumen (m³)', inp('pool_m3', 'z. B. 40'))}${w ? `<span class="klein" style="margin-top:-6px">Vorschlag: <b>${esc(w.modell)}</b> (Becken ${w.vol_min}–${w.vol_max} m³, unterer Wert)${w.zuGross ? ' · <span style="color:#A63A52">Pool grösser als alle Modelle, prüfen</span>' : ''}</span>` : ''}
+      ${lab('Wärmepumpe', sel('wp_id', [['', '– andere (Werte unten eintragen) –'], ...WPK.map(x => [x.id, x.hersteller + ' ' + x.modell])]))}
+      ${R ? `<span class="klein" style="color:${R.ok ? '#3F7D3F' : '#A63A52'}"><b>${R.ok ? 'Planungswerte eingehalten' : 'Planungswerte überschritten'}</b> · Lr Tag ${R.lrT.toFixed(1)} / Nacht ${R.lrN.toFixed(1)} dB(A)</span>` : ''}
+      <details${window._lmehr ? ' open' : ''} ontoggle="window._lmehr=this.open"><summary class="klein" style="cursor:pointer;font-weight:600">Weitere Angaben (Aufstellung, Distanz, Nachtbetrieb …)</summary><div>
+        ${lab('Aufstellung', sel('aufstellung', Object.entries(DC).map(([k, [dd, t]]) => [k, `${t} · Dc ${dd} dB`])))}
+        <div class="zwei">${lab('Distanz zum Fenster (m)', inp('distanz', '10'))}${lab('Empfindlichkeitsstufe', sel('es', Object.entries(ESW).map(([k, [t, n, z]]) => [k, `ES ${k} · ${t}/${n} dB(A)`])))}</div>
+        ${lab('Lärmempfindliche Räume', inp('raeume'))}<div class="zwei">${lab('Tongehalt K2', sel('k2', Object.entries(K2T)))}${lab('Impulsgehalt K3', sel('k3', Object.entries(K3T)))}</div>
+        <label class="kchk"><input type="checkbox" data-lf="fluester"${L.fluester ? ' checked' : ''}>Flüstermodus in der Nacht</label>
+        ${L.fluester ? `<div class="zwei">${lab('von', inp('von'))}${lab('bis', inp('bis'))}</div>` : ''}
+        ${lab('Innenaufstellung nicht möglich, Begründung', inp('innen'))}
+        <div class="zwei">${lab('Hersteller', inp('hersteller'))}${lab('Modell', inp('modell'))}${lab('A2 Teillast (kW)', inp('a2_kw'))}${lab('LWA A2 (dB(A))', inp('lwa2'))}${lab('max. A-7/W35 (kW)', inp('max_kw'))}${lab('LWA ErP (dB(A))', inp('lwa_erp'))}${lab('Flüstermodus (kW)', inp('fl_kw'))}${lab('LWA Flüster (dB(A))', inp('lwa_fl'))}</div>
+        <span class="klein" style="font-weight:600">Beilagen (Häkchen im PDF)</span>
+        ${[['situation', 'Situationsplan mit Standort'], ['grundrisse', 'Wohnungsgrundrisse'], ['datenblatt', 'Datenblatt Schallleistung'], ['doku', 'Dokumentation Lärmschutzmassnahmen']].map(([k, t]) => `<label class="kchk"><input type="checkbox" data-lb="${k}"${L.beilagen[k] ? ' checked' : ''}>${t}</label>`).join('')}
+      </div></details>${ohneU}${fuss}</div>`;
+  }
+  if(d.art === 'zust') return `<div class="angaben"><h4>Angaben<small>Eine Seite pro Nachbar, Bauherrschaft und Parzelle stehen schon</small></h4>${datum}
+    <div class="ag"><span>Nachbarn ringsum</span>${nb.map((x, j) => x.weitere ? '' : `<div class="zrow" data-nb="${j}">${tf('name', x.name, 'Name')}${tf('parzelle', x.parzelle, 'Parz.')}
       <label class="kchk" title="hat unterschrieben"><input type="checkbox" data-nf="unterschrieben"${x.unterschrieben ? ' checked' : ''}>unterschrieben</label>
       <button type="button" class="kg-ibtn danger" data-nbweg="${j}" title="Nachbar entfernen" aria-label="Nachbar entfernen">${K('trash', 12)}</button></div>`).join('') || '<span class="klein">Noch keine. Eigentümerliste einlesen oder von Hand dazu.</span>'}
       <div style="display:flex;gap:6px;flex-wrap:wrap"><button type="button" class="btn btn-ghost btn-sm" data-act="nbneu">+ Nachbar</button>
       <label class="btn btn-ghost btn-sm" style="display:inline-flex;gap:6px;align-items:center;cursor:pointer">${K('upload', 12)}Eigentümerliste einlesen<input type="file" accept="application/pdf,.pdf" data-nbpdf hidden></label></div></div>
-    ${plaeneHtml(b)}${fuss}</div>`;
+    ${plaeneHtml(b)}${ohneU}${fuss}</div>`;
+  if(d.art === 'zustw'){ const x = nb[d.i] || {};
+    return `<div class="angaben" data-nb="${d.i}"><h4>Angaben<small>Bauherrschaft und Parzelle stehen schon</small></h4>${datum}
+      <div class="ag"><span>Grundeigentümer/in</span>${tf('name', x.name, 'Name aller Eigentümer/innen')}${tf('adresse', x.adresse, 'Strasse, PLZ Ort')}${tf('parzelle', x.parzelle, 'Parzelle Nr.')}</div>
+      ${plaeneHtml(b)}<label class="kchk"><input type="checkbox" data-nf="unterschrieben"${x.unterschrieben ? ' checked' : ''}>hat unterschrieben</label>${ohneU}${fuss}</div>`; }
   const i = d.i, x = i != null ? nb[i] : null, z = REG[b.id]?.zone_index != null ? REG[b.id].auszug?.zonen?.[REG[b.id].zone_index] : null;
-  return `<div class="angaben"${x ? ` data-nb="${i}"` : ''}><h4>Angaben<small>Bauherrschaft und Parzelle ${esc(b.parzelle || '')} stehen schon</small></h4>
+  return `<div class="angaben"${x ? ` data-nb="${i}"` : ''}><h4>Angaben<small>Bauherrschaft und Parzelle ${esc(b.parzelle || '')} stehen schon</small></h4>${datum}
     <label class="ag"><span>Nachbar</span><select data-dokwahl>${x ? '' : '<option value="">Nachbar wählen …</option>'}${nb.map((y, j) => `<option value="${j}"${j === i ? ' selected' : ''}>${esc([y.parzelle && 'Parz. ' + y.parzelle, y.name].filter(Boolean).join(' · ') || 'Nachbar ' + (j + 1))}${y.naeherbaurecht && j !== i ? ' (hat schon eins)' : ''}</option>`).join('')}
       <option value="neu">Andere Angabe (nicht in der Liste)</option></select></label>
     ${x ? `<div class="ag"><span>Eigentümer/in</span>${tf('name', x.name, 'Name aller Eigentümer/innen')}${tf('adresse', x.adresse, 'Strasse, PLZ Ort')}${tf('parzelle', x.parzelle, 'Parzelle Nr.')}</div>
@@ -610,17 +647,19 @@ function angabenHtml(b){
       <button type="button" class="btn btn-ghost btn-sm" data-abneu style="align-self:flex-start">+ Abstand</button></div>
     ${plaeneHtml(b)}<label class="kchk"><input type="checkbox" data-nf="unterschrieben"${x.unterschrieben ? ' checked' : ''}>Nachbar hat unterschrieben</label>` : ''}${fuss}</div>`;
 }
+const DOK_TITEL = { nbr: 'Näherbaurecht', zust: 'Zustimmung Nachbarn ringsum', zustw: 'Zustimmung Grundeigentümer', laerm: 'Lärmschutznachweis Wärmepumpe' };
 function dokAnsicht(b){
-  const d = AKT_DOK || {}, nb = b.nachbarn || [];
-  const pdf = d.art === 'zust' ? (nb.length ? '<button type="button" class="btn btn-ghost btn-sm" data-pdf="zust">PDF</button>' : '')
-    : d.i != null && nb[d.i] ? `<button type="button" class="btn btn-ghost btn-sm" data-pdf="nbr" data-i="${d.i}">PDF</button>` : '';
-  return `<div class="dokkopf"><h3>${d.art === 'zust' ? 'Zustimmungserklärung Nachbarn' : 'Näherbaurecht'}</h3>${ANG_ZU ? '<button type="button" class="btn btn-ghost btn-sm" data-act="angaben">Angaben</button>' : ''}${pdf}
+  const d = AKT_DOK || {}, nb = b.nachbarn || [], k = (p, i) => `<button type="button" class="btn btn-ghost btn-sm" data-pdf="${p}"${i != null ? ` data-i="${i}"` : ''}>PDF</button>`;
+  const pdf = d.art === 'zust' ? (nb.some(x => !x.weitere) ? k('zust') : '') : d.art === 'laerm' ? (laermDaten(b).lwa2 ? k('lsn') : '')
+    : d.i != null && nb[d.i] ? k(d.art === 'zustw' ? 'zustw' : 'nbr', d.i) : '';
+  return `<div class="dokkopf"><h3>${DOK_TITEL[d.art] || ''}</h3>${ANG_ZU ? '<button type="button" class="btn btn-ghost btn-sm" data-act="angaben">Angaben</button>' : ''}${pdf}
       <button type="button" class="btn btn-ghost btn-sm" data-act="schritte">Zurück zu den Schritten</button></div>
     <div class="blattwrap"><div class="blattplatz" id="blattPlatz"><div class="blattskal" id="blatt"></div></div>${ANG_ZU ? '' : angabenHtml(b)}</div>`;
 }
 async function blattNeu(b){
-  const el = $('blatt'); if(!el || !AKT_DOK) return; const nb = b.nachbarn || [];
-  el.innerHTML = AKT_DOK.art === 'zust' ? await blattZust(b) : blattNbr(b, AKT_DOK.i != null ? nb[AKT_DOK.i] : null);
+  const el = $('blatt'); if(!el || !AKT_DOK) return; const nb = b.nachbarn || [], a = AKT_DOK.art;
+  el.innerHTML = a === 'zust' ? await blattZust(b, nb.filter(x => !x.weitere)) : a === 'zustw' ? await blattZust(b, [nb[AKT_DOK.i] || {}])
+    : a === 'laerm' ? await blattLaerm(b) : blattNbr(b, AKT_DOK.i != null ? nb[AKT_DOK.i] : null);
   blattSkalieren();
 }
 function blattSkalieren(){ const p = $('blattPlatz'), s = $('blatt'); if(!p || !s) return;
@@ -653,36 +692,6 @@ function wpVorschlag(m3){
   const v = parseFloat(String(m3 || '').replace(',', '.')); if(!v) return null;
   const l = WPK.filter(w => w.vol_min != null).sort((a, b) => a.vol_min - b.vol_min);
   return l.find(w => w.vol_min >= v) || { ...l[l.length - 1], zuGross: true };
-}
-function laermHtml(b){
-  const L = laermDaten(b), R = laermRechnung(L), att = 'autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other"';
-  const inp = (k, t, ph = '') => `<label>${t}<input type="text" data-lf="${k}" value="${esc(L[k] ?? '')}" placeholder="${ph}" ${att}></label>`;
-  const sel = (k, t, o) => `<label>${t}<select data-lf="${k}">${o.map(([v, x]) => `<option value="${v}"${String(L[k] ?? '') === String(v) ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select></label>`;
-  const zl = (t, a, c, fett) => `<tr${fett ? ' style="font-weight:700"' : ''}><td>${t}</td><td style="text-align:right">${a}</td><td style="text-align:right">${c}</td></tr>`;
-  return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><h3 style="margin:0;font-size:13px;color:var(--primary);flex:1">Lärmschutznachweis Wärmepumpe</h3>
-      ${L.lwa2 ? '<button type="button" class="btn btn-primary btn-sm" data-pdf="lsn">PDF</button>' : ''}<button type="button" class="btn btn-ghost btn-sm" data-act="schritte">Zurück zu den Schritten</button></div>
-    <div class="kar fl"><h3><span>Wärmepumpe</span></h3>
-      ${(() => { const w = wpVorschlag(L.pool_m3);
-        return `<div style="display:flex;gap:10px;align-items:end;margin-bottom:10px;flex-wrap:wrap"><span style="width:150px">${inp('pool_m3', 'Poolvolumen (m³)', 'z. B. 40')}</span>
-        <span class="klein" style="flex:1;min-width:200px;padding-bottom:6px">${w ? `Vorschlag: <b>${esc(w.modell)}</b> (Becken ${w.vol_min}–${w.vol_max} m³, gerechnet mit dem unteren Wert)${w.zuGross ? ' · <span style="color:#A63A52">Pool grösser als der untere Wert aller Modelle, Grösse prüfen</span>' : ''}` : 'Poolvolumen eingeben: die Wärmepumpe wird vorgeschlagen.'}</span></div>`; })()}
-      <div class="lgrid" style="grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) minmax(0,1.4fr)">${sel('wp_id', 'Aus der Liste', [['', '– andere (Werte selber eintragen) –'], ...WPK.map(w => [w.id, w.hersteller + ' ' + w.modell])])}${inp('hersteller', 'Hersteller')}${inp('modell', 'Modell/Typ')}</div>
-      <div class="lgrid" style="margin-top:8px">${inp('a2_kw', 'Heizleistung A2 Teillast (kW)')}${inp('max_kw', 'max. Heizleistung A-7/W35 (kW)')}${inp('fl_kw', 'Heizleistung A2 Flüstermodus (kW)')}
-        ${inp('lwa2', 'Schallleistung A2 Teillast (dB(A))')}${inp('lwa_erp', 'Schallleistung nach ErP (dB(A))')}${inp('lwa_fl', 'Schallleistung A2 Flüstermodus (dB(A))')}</div></div>
-    <div class="kar fl"><h3><span>Aufstellung und Empfangsort</span></h3>
-      <div class="lgrid">${sel('aufstellung', 'Aufstellung', Object.entries(DC).map(([k, [d, t]]) => [k, `${t} · Dc ${d} dB`]))}${inp('distanz', 'Distanz zum nächsten Fenster (m)', '10')}
-        ${sel('es', 'Empfindlichkeitsstufe', Object.entries(ESW).map(([k, [t, n, z]]) => [k, `ES ${k} (${z}) · ${t}/${n} dB(A)`]))}
-        ${inp('raeume', 'Lärmempfindliche Räume')}${sel('k2', 'Tongehalt K2', Object.entries(K2T))}${sel('k3', 'Impulsgehalt K3', Object.entries(K3T))}</div>
-      <div style="display:flex;gap:10px;align-items:end;margin-top:10px;flex-wrap:wrap"><label class="chk" style="align-self:center"><input type="checkbox" data-lf="fluester"${L.fluester ? ' checked' : ''}> Flüstermodus in der Nacht</label>
-        ${L.fluester ? `<span style="width:90px">${inp('von', 'von')}</span><span style="width:90px">${inp('bis', 'bis')}</span>` : ''}</div>
-      <div style="margin-top:10px">${inp('innen', 'Innenaufstellung nicht möglich, Begründung')}</div></div>
-    <div class="kar"><h3><span>Resultat</span><span class="pill ${R.ok ? 'bewilligt' : 'abgelehnt'}" style="flex:none${R.ok ? '' : ';background:#FCE8E6;color:#7A2638'}">${L.lwa2 ? (R.ok ? 'Planungswerte eingehalten' : 'Planungswerte überschritten') : 'Werte fehlen'}</span></h3>
-      <table class="bwtab" style="min-width:0"><thead><tr><th></th><th style="text-align:right">Tag</th><th style="text-align:right">Nacht</th></tr></thead><tbody>
-        ${zl('Schalldruckpegel L<sub>pA</sub> am Empfangsort', dbf(R.lpT) + ' dB(A)', dbf(R.lpN) + ' dB(A)')}
-        ${zl('Beurteilungspegel L<sub>r</sub>', R.lrT.toFixed(1) + ' dB(A)', R.lrN.toFixed(1) + ' dB(A)', true)}
-        ${zl('Planungswert ES ' + esc(L.es), R.pwT + ' dB(A)', R.pwN + ' dB(A)')}</tbody></table></div>
-    <div class="kar"><h3><span>Beilagen (Häkchen im PDF)</span></h3><div style="display:flex;gap:14px;flex-wrap:wrap">
-      ${[['situation', 'Situationsplan mit Standort'], ['grundrisse', 'Wohnungsgrundrisse'], ['datenblatt', 'Datenblatt Schallleistung'], ['doku', 'Dokumentation Lärmschutzmassnahmen']]
-        .map(([k, t]) => `<label class="chk"><input type="checkbox" data-lb="${k}"${L.beilagen[k] ? ' checked' : ''}> ${t}</label>`).join('')}</div></div>`;
 }
 
 // Eigentümerliste (Grundstückliste der Berner Geometer, PDF) → Nachbarn
@@ -743,7 +752,7 @@ const spaeter = (b, ae) => { Object.assign(b, ae); clearTimeout(spT); spT = setT
 document.addEventListener('click', async e => {
   if(!OFFEN || !e.target.closest('#fenOvl')) return; const b = G(); if(!b) return;
   if(e.target.id === 'fenOvl') return schliessen();
-  const a = e.target.closest('[data-act],[data-haken],[data-ab],[data-pdf],[data-nbweg],[data-abneu],[data-abweg],[data-plweg],[data-nbrweg]'); if(!a) return;
+  const a = e.target.closest('[data-act],[data-haken],[data-ab],[data-pdf],[data-nbweg],[data-abneu],[data-abweg],[data-plweg],[data-nbrweg],[data-dokhaken]'); if(!a) return;
   const d = a.dataset;
   if(d.act === 'zu') return schliessen();
   if(d.act === 'geo'){ a.disabled = true; await geodatenHolen(b); return zeichneFenster(); }
@@ -752,7 +761,11 @@ document.addEventListener('click', async e => {
     AKT_DOK = d.act === 'dok' ? { art: d.art, i: d.di != null ? +d.di : null } : d.act === 'nbrneu' ? { art: 'nbr', i: null } : { art: 'zust' }; return zeichneFenster(); }
   if(d.act === 'angzu' || d.act === 'angaben'){ ANG_ZU = d.act === 'angzu'; return zeichneFenster(); }
   if(d.act === 'schritte'){ AKT_TEIL = null; return zeichneFenster(); }
-  if(d.act === 'laerm'){ AKT_TEIL = 'laerm'; return zeichneFenster(); }
+  if(d.act === 'laerm'){ AKT_TEIL = 'dok'; AKT_DOK = { art: 'laerm' }; ANG_ZU = false; return zeichneFenster(); }
+  if(d.act === 'zustneu'){ const nb = [...(b.nachbarn || []), { name: '', adresse: '', parzelle: '', weitere: true, naeherbaurecht: false, abstaende: [], unterschrieben: false }];
+    AKT_TEIL = 'dok'; AKT_DOK = { art: 'zustw', i: nb.length - 1 }; ANG_ZU = false; await speichern(b, { nachbarn: nb }); return zeichneFenster(); }
+  if(d.dokhaken){ const s = { ...(b.schritte || {}) }, an = !s.doks?.[d.dokhaken]?.erledigt; s.doks = { ...(s.doks || {}), [d.dokhaken]: { erledigt: an, am: new Date().toISOString(), von: ME } };
+    await speichern(b, { schritte: s }); return zeichneFenster(); }
   if(d.act === 'regNeu'){ delete REG[b.id]; return reglementLaden(b, true); }
   if(d.act === 'regZone'){ const r = REG[b.id]; if(r){ r.zone_index = +d.i; await speichern(b, { reglement: { bfs_nr: r.bfs, zone_oereb: r.zone, zone_index: +d.i } }); reglementZeigen(b); } return; }
   if(d.act === 'regFrage' || d.act === 'regOriginal'){ const q = $('regQ')?.value.trim(); if(!q) return; const r = REG[b.id]; r.antwort = { laedt: true, q };
@@ -765,7 +778,7 @@ document.addEventListener('click', async e => {
   if(d.act === 'plneu'){ await speichern(b, { plaene: [...(b.plaene || []), { titel: '', massstab: '', datum: '' }] }); return zeichneFenster(); }
   if(d.nbrweg != null){ if(!confirm('Dieses Näherbaurecht entfernen? Der Nachbar bleibt in der Liste.')) return; const nb = structuredClone(b.nachbarn); nb[+d.nbrweg].naeherbaurecht = false; await speichern(b, { nachbarn: nb }); return zeichneFenster(); }
   if(d.nbweg != null){ if(!confirm(`Nachbar «${b.nachbarn[+d.nbweg]?.name || ''}» entfernen?`)) return; const nb = [...b.nachbarn];
-    if(AKT_DOK?.i != null && AKT_DOK.i >= +d.nbweg) AKT_DOK.i = AKT_DOK.i === +d.nbweg ? null : AKT_DOK.i - 1; nb.splice(+d.nbweg, 1); await speichern(b, { nachbarn: nb }); return zeichneFenster(); }
+    if(AKT_DOK?.i != null && AKT_DOK.i >= +d.nbweg){ if(AKT_DOK.i === +d.nbweg){ if(AKT_DOK.art === 'zustw'){ AKT_TEIL = null; AKT_DOK = null; } else AKT_DOK.i = null; } else AKT_DOK.i--; } nb.splice(+d.nbweg, 1); await speichern(b, { nachbarn: nb }); return zeichneFenster(); }
   if(d.plweg != null){ const pl = [...b.plaene]; pl.splice(+d.plweg, 1); await speichern(b, { plaene: pl }); return zeichneFenster(); }
   if('abneu' in d){ const i = +a.closest('[data-nb]').dataset.nb, nb = structuredClone(b.nachbarn); (nb[i].abstaende = nb[i].abstaende || []).push({ bauteil: '', soll: '', ist: '' }); await speichern(b, { nachbarn: nb }); return zeichneFenster(); }
   if(d.abweg != null){ const i = +a.closest('[data-nb]').dataset.nb, nb = structuredClone(b.nachbarn); nb[i].abstaende.splice(+d.abweg, 1); await speichern(b, { nachbarn: nb }); return zeichneFenster(); }
@@ -774,7 +787,7 @@ document.addEventListener('click', async e => {
     if(d.haken === 'ebau' && an && b.status === 'vorbereitung'){ ae.status = 'eingereicht'; ae.eingereicht_am = new Date().toISOString().slice(0, 10); }
     await speichern(b, ae); return zeichneFenster(); }
   if(d.ab && a.closest('#fAb')){ const ab = { ...(b.abklaerung || {}), [d.ab]: !b.abklaerung?.[d.ab] }; await speichern(b, { abklaerung: ab }); return zeichneFenster(); }
-  if(d.pdf){ a.disabled = true; try { await (d.pdf === 'nbr' ? pdfNaeherbaurecht(b, +d.i) : d.pdf === 'lsn' ? pdfLaerm(b) : d.pdf === 'hoehen' ? pdfHoehenplan(b, a) : pdfZustimmung(b)); } catch(err){ fehler(err, 'PDF'); } a.disabled = false; }
+  if(d.pdf){ a.disabled = true; try { await (d.pdf === 'nbr' ? pdfNaeherbaurecht(b, +d.i) : d.pdf === 'lsn' ? pdfLaerm(b) : d.pdf === 'hoehen' ? pdfHoehenplan(b, a) : d.pdf === 'zustw' ? pdfZustimmung(b, +d.i) : pdfZustimmung(b)); } catch(err){ fehler(err, 'PDF'); } a.disabled = false; }
 });
 document.addEventListener('change', async e => {
   if(!OFFEN || !e.target.closest('#fenOvl')) return; const b = G(); if(!b) return; const t = e.target;
@@ -825,6 +838,31 @@ document.addEventListener('input', e => {
   else if(plEl && t.dataset.pf){ const pl = structuredClone(b.plaene); pl[+plEl.dataset.pl][t.dataset.pf] = t.value; spaeter(b, { plaene: pl }); }
   if(AKT_TEIL === 'dok') blattNeu(b);   // Blatt sofort nachführen
 });
+// Meine Einstellungen (Personen-Menü): Unterschrift, die in Zustimmungserklärung und Lärmschutznachweis gesetzt wird
+document.addEventListener('click', e => { if(e.target.closest('[data-seto]')) einstellungen(); });
+async function einstellungen(){
+  const d = document.createElement('div'); d.className = 'ovl'; d.style.zIndex = 400; document.body.appendChild(d);
+  let wer = PL.some(p => p.id === ME) ? ME : PL[0]?.id;
+  const zu = () => d.remove();
+  const zeichne = async () => { const u = wer ? await unterschriftUrl(wer) : null;
+    d.innerHTML = `<div class="fen" style="width:460px;height:auto"><div class="fkopf"><div class="k"><h2>Meine Einstellungen · Pläne &amp; Bewill.</h2></div><button type="button" class="kg-ibtn" data-zu aria-label="Schliessen">${K('x')}</button></div>
+      <div class="fl" style="padding:16px 20px;display:flex;flex-direction:column;gap:10px">
+        <h3 style="margin:0;font-size:13px;color:var(--primary)">Unterschrift Projektverfasser</h3>
+        <span class="klein">Wird in die Zustimmungserklärungen und den Lärmschutznachweis gesetzt.</span>
+        <label>Projektleiter<select id="seWer">${PL.map(p => `<option value="${p.id}"${p.id === wer ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
+        <div class="ubild">${u ? `<img src="${u}" alt="Unterschrift">` : '<span>Noch keine Unterschrift hinterlegt</span>'}</div>
+        <label class="btn btn-ghost btn-sm" style="align-self:flex-start;display:inline-flex;gap:6px;align-items:center;cursor:pointer">${K('upload', 13)}Unterschrift hochladen<input type="file" accept="image/*" id="seUb" hidden></label>
+      </div></div>`;
+    d.querySelector('[data-zu]').onclick = zu;
+    d.querySelector('#seWer').onchange = e => { wer = e.target.value; zeichne(); };
+    d.querySelector('#seUb').onchange = async e => { const f = e.target.files[0]; if(!f) return; const pfad = `${wer}/${Date.now()}.${(f.name.split('.').pop() || 'png').toLowerCase()}`;
+      const { error } = await sb.storage.from('unterschriften').upload(pfad, f, { upsert: true, contentType: f.type }); if(error) return fehler(error, 'Unterschrift');
+      const { error: e2 } = await sb.from('benutzer').update({ unterschrift_pfad: pfad }).eq('id', wer); if(e2) return fehler(e2, 'Unterschrift');
+      const p = PL.find(x => x.id === wer); if(p) p.unterschrift_pfad = pfad; toast('Unterschrift gespeichert'); zeichne(); if(OFFEN) zeichneFenster(); };
+  };
+  d.addEventListener('click', e => { if(e.target === d) zu(); });
+  zeichne();
+}
 document.addEventListener('keydown', e => { if(e.key === 'Escape' && OFFEN && !document.querySelector('#neuOvl')) schliessen(); });
 
 // ---------------------------------------------------------------------------
@@ -845,7 +883,7 @@ async function pdfAus(html, name){
     doc.save(name.replace(/[\\/:*?"<>|]/g, '').trim() + '.pdf');
   } finally { h.innerHTML = ''; }
 }
-const kopf = () => `<div class="kopf"><img src="/logo-gruen-blau.png" alt="Knechtgarten"><div class="ort">Heimenschwand, ${heute()}</div></div>`;
+const kopf = b => `<div class="kopf"><img src="/logo-gruen-blau.png" alt="Knechtgarten"><div class="ort">Heimenschwand, ${dokDatum(b)}</div></div>`;
 const fuss = '<div class="fuss">Knecht AG Naturnahe Gärten · Badhaus 42 · 3615 Heimenschwand · 033 453 10 20 · info@knechtgarten.ch</div>';
 const bauherr = b => kundeName(b.kunde);
 const standort = b => [b.strasse, [b.plz, b.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ');
@@ -854,7 +892,7 @@ const planListe = b => (b.plaene || []).filter(p => p.titel).map(p => `<li>${esc
 function blattNbr(b, x){
   x = x || {};
   const ab = (x.abstaende || []).filter(a => a.bauteil || a.ist);
-  const html = `<div class="a4">${kopf()}
+  const html = `<div class="a4">${kopf(b)}
     <h1>Näherbaurecht</h1><div class="sub">Zustimmung zur Unterschreitung des Grenzabstands</div>
     <div class="blk"><div class="lab">Bauherrschaft</div>${esc(bauherr(b))}, ${esc(standort(b))}<br>Parzelle Nr. ${esc(b.parzelle || '…')}${b.gemeinde ? ', Gemeinde ' + esc(b.gemeinde) : ''}</div>
     <div class="blk"><div class="lab">Nachbar/in (Eigentümer/in)</div>${esc(x.name || '…')}${x.adresse ? ', ' + esc(x.adresse) : ''}<br>Parzelle Nr. ${esc(x.parzelle || '…')}</div>
@@ -870,27 +908,32 @@ function blattNbr(b, x){
   return html;
 }
 async function pdfNaeherbaurecht(b, i){ const x = (b.nachbarn || [])[i]; if(!x) return; await pdfAus(blattNbr(b, x), `Näherbaurecht ${x.name || 'Nachbar'} – Parzelle ${x.parzelle || ''}`); }
-async function blattZust(b){
-  const nb = b.nachbarn || [], p = PL.find(q => q.id === b.projektleiter_id), u = await unterschriftUrl(b.projektleiter_id);
-  const zeilen = [...nb, {}, {}].map(x => `<tr><td>${esc(x.name || '')}${x.adresse ? '<br><span style="color:#6B7079">' + esc(x.adresse) + '</span>' : ''}</td><td>${esc(x.parzelle || '')}</td><td></td><td></td></tr>`).join('');
-  const html = `<div class="a4">${kopf()}
-    <h1>Zustimmungserklärung der Nachbarschaft</h1><div class="sub">Einspracheverzicht nach Art. 27 Baubewilligungsdekret (BewD)</div>
-    <div class="blk"><div class="lab">Gesuchsteller/in</div>${esc(bauherr(b))}, ${esc(standort(b))}</div>
-    <div class="blk"><div class="lab">Standort</div>Parzelle Nr. ${esc(b.parzelle || '…')}${b.gemeinde ? ', Gemeinde ' + esc(b.gemeinde) : ''}</div>
+async function blattZust(b, liste){
+  const p = PL.find(q => q.id === b.projektleiter_id), u = await unterschriftUrl(b.projektleiter_id);
+  const seite = x => `<div class="a4">${kopf(b)}
+    <h1>Zustimmungserklärung</h1><div class="sub">Einspracheverzicht nach Art. 27 Baubewilligungsdekret (BewD)</div>
+    <div class="blk"><div class="lab">Gesuchsteller/in</div>${esc(bauherr(b))}, ${esc(standort(b))}<br>Parzelle Nr. ${esc(b.parzelle || '…')}${b.gemeinde ? ', Gemeinde ' + esc(b.gemeinde) : ''}</div>
     <div class="blk"><div class="lab">Bauvorhaben</div>${esc(b.bauvorhaben || '…')}</div>
     <div class="blk"><div class="lab">Eingesehene Pläne</div><ul style="margin:0;padding-left:5mm">${planListe(b)}</ul></div>
-    <div class="erkl">Die unterzeichnenden Grundeigentümer/innen bestätigen mit ihrer Unterschrift, dass sie die oben genannten Pläne und Unterlagen eingesehen haben, gegen das Bauvorhaben keine Einwendungen haben und keine Einsprache erheben.</div>
-    <table class="utab"><thead><tr><th style="width:42%">Name, Adresse</th><th style="width:12%">Parzelle</th><th style="width:20%">Ort, Datum</th><th>Unterschrift</th></tr></thead><tbody>${zeilen}</tbody></table>
-    <div class="blk" style="margin-top:6mm"><div class="lab">Projektverfasser/in</div>Knecht AG Naturnahe Gärten, ${esc(p?.name || '')}${p?.telefon ? ', ' + esc(p.telefon) : ''}</div>
-    <div class="unt" style="grid-template-columns:1fr 1fr"><div>Heimenschwand, ${heute()}</div><div>${u ? `<img src="${u}" alt="">` : ''}Unterschrift</div></div>
+    <div class="blk"><div class="lab">Grundeigentümer/in</div>${esc(x.name || '…')}${x.adresse ? ', ' + esc(x.adresse) : ''}<br>Parzelle Nr. ${esc(x.parzelle || '…')}</div>
+    <div class="erkl">Ich/wir, Eigentümer/in der Parzelle Nr. ${esc(x.parzelle || '…')}, bestätige(n), dass ich/wir die oben genannten Pläne und Unterlagen eingesehen habe(n), gegen das Bauvorhaben keine Einwendungen habe(n) und keine Einsprache erhebe(n).</div>
+    <div class="lab">Grundeigentümer/in</div><div class="unt"><div>Ort, Datum</div><div>Unterschrift(en) aller Eigentümer/innen</div></div>
+    <div class="lab" style="margin-top:5mm">Projektverfasser/in</div><div class="unt"><div>Heimenschwand, ${dokDatum(b)}</div><div>${u ? `<img src="${u}" alt="">` : ''}${esc(p?.name || '')}, Knecht AG Naturnahe Gärten${p?.telefon ? ', ' + esc(p.telefon) : ''}</div></div>
     <div class="hinw">Bei Mit- oder Gesamteigentum unterschreiben alle Eigentümer/innen oder eine bevollmächtigte Person (Vollmacht beilegen).</div>
     ${fuss}</div>`;
-  return html;
+  return (liste.length ? liste : [{}]).map(seite).join('');
 }
-async function pdfZustimmung(b){ await pdfAus(await blattZust(b), `Zustimmungserklärung Nachbarn – ${bauherr(b)}`); }
+// ohne i: alle Nachbarn ringsum (eine Seite pro Nachbar, zum einzeln Verschicken); mit i: einzelner weiterer Grundeigentümer
+async function pdfZustimmung(b, i){ const nb = b.nachbarn || [], x = i != null ? nb[i] : null;
+  await pdfAus(await blattZust(b, x ? [x] : nb.filter(y => !y.weitere)), x ? `Zustimmungserklärung ${x.name || 'Grundeigentümer'} – Parzelle ${x.parzelle || ''}` : `Zustimmungserklärungen Nachbarn – ${bauherr(b)}`); }
 
 // Lärmschutznachweis: gleiche Anordnung wie das bisherige Formular (Lato, Masse in pt ab oberem Rand, y = Grundlinie)
-async function pdfLaerm(b){
+const CB_LOGO = `<svg viewBox="15 30 425 300" style="left:470pt;top:40pt;width:64pt" xmlns="http://www.w3.org/2000/svg">
+  <path d="M230 54 A140 140 0 1 0 219 302" fill="none" stroke="#000" stroke-width="7"/>
+  <text x="38" y="186" font-family="Lato,Arial,sans-serif" font-size="50" letter-spacing="3" fill="#000">cercle <tspan font-weight="700">bruit</tspan></text>
+  <text font-family="Lato,Arial,sans-serif" font-size="19" font-weight="700" fill="#000"><tspan x="258" y="248">Vereinigung</tspan><tspan x="258" y="271">kantonaler</tspan><tspan x="258" y="294">Lärmschutzfachleute</tspan></text></svg>`;
+async function pdfLaerm(b){ await pdfAus(await blattLaerm(b), `Lärmschutznachweis ${bauherr(b)}`); }
+async function blattLaerm(b){
   if(!$('latoFont')){ const l = document.createElement('link'); l.id = 'latoFont'; l.rel = 'stylesheet'; l.href = 'https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap'; document.head.appendChild(l);
     await new Promise(ok => { l.onload = l.onerror = ok; }); }
   await Promise.all([document.fonts.load('400 10px Lato'), document.fonts.load('700 10px Lato')]);
@@ -901,10 +944,10 @@ async function pdfLaerm(b){
   const box = (x, y, w, h, c = 'bx') => `<i class="${c}" style="left:${x}pt;top:${y}pt;width:${w}pt;height:${h}pt"></i>`;
   const zwei = (y, a, c, st = '') => TR(501.6, y, 8.5, a, st) + TR(549.8, y, 8.5, c, st);
   const zeit = `${jetzt.getDate()}.${String(jetzt.getMonth() + 1).padStart(2, '0')}.${jetzt.getFullYear()} ${jetzt.toTimeString().slice(0, 8)}`;
-  const kopfL = `<img src="/logo-gruen-blau.png" alt="" style="right:${W - 549.8}pt;top:36pt;width:118pt">
+  const kopfL = `${CB_LOGO}
     ${T(72.4, 76.4, 12.8, 'Lärmschutznachweis für Luft/Wasser-Wärmepumpen', B)}${T(72.4, 86.1, 7.1, 'Beurteilung der Lärmimmissionen von Luft/Wasser-Wärmepumpen (WP) mit einer Heizleistung bis ca. 40kW')}`;
   const fussL = n => T(72.4, 800.6, 7.1, 'gemäss Cercle Bruit Vollzugshilfe 6.21') + T(72.4, 809.0, 7.1, 'Lärmtechnische Beurteilung von Luft/Wasser-Wärmepumpen')
-    + T(303.6, 800.6, 7.1, n + ' / 2') + T(367.4, 800.6, 7.1, zeit) + TR(549.8, 800.6, 7.1, 'Knecht AG Naturnahe Gärten');
+    + T(303.6, 800.6, 7.1, n + ' / 2') + T(367.4, 800.6, 7.1, zeit) + TR(549.8, 800.6, 7.1, '→ <u>Zum Online-Formular</u>');
   const fl = L.fluester ? `Flüstermodus aktiviert von: ${esc(L.von)} bis ${esc(L.bis)} Uhr` : 'keine';
   const s1 = `<div class="a4 lsn">${kopfL}
     ${box(69.4, 113.4, 483.4, 47.8)}${box(69.5, 170.3, 482.8, 27.9)}${box(69.4, 198.2, 483.4, 58)}
@@ -956,12 +999,12 @@ async function pdfLaerm(b){
     ${T(72.3, 609.4, 10, 'Für Rückfragen', B)}${T(72.3, 624.9, 8.3, 'Verfasser/in:')}${T(128.2, 624.9, 8.3, esc([p?.name, 'Knecht AG Naturnahe Gärten', p?.telefon || '033 453 10 20'].filter(Boolean).join(', ')))}
     ${T(72.3, 645.3, 6.9, 'Ort, Datum', 'color:#555')}${T(330.3, 645.3, 6.9, 'Unterschrift', 'color:#555')}
     ${u ? `<img src="${u}" alt="" style="left:334pt;top:648pt;height:25pt;max-width:200pt">` : ''}
-    ${T(72.3, 667.7, 8.3, 'Heimenschwand, ' + heute())}
+    ${T(72.3, 667.7, 8.3, 'Heimenschwand, ' + dokDatum(b))}
     ${box(71.2, 674.5, 240.6, 0, 'pl')}${box(334.2, 674.5, 240.5, 0, 'pl')}
     ${T(72.3, 701.7, 10, 'Beilagen:', B)}
     ${bl.map(([k, t], i) => { const y = 720.6 + i * 15.17; return `<i class="cb" style="left:72.6pt;top:${(y - 6.4).toFixed(2)}pt">${L.beilagen[k] ? haken : ''}</i>` + T(92.0, y, 8.3, t); }).join('')}
     ${fussL(2)}</div>`;
-  await pdfAus(s1 + s2, `Lärmschutznachweis ${bauherr(b)}`);
+  return s1 + s2;
 }
 
 // Grundstücksplan mit Höhen (A4, 1:200): amtliche Vermessung als Vektoren (geodienste.ch, WFS) +
