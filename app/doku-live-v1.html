@@ -22,7 +22,7 @@
 <span class="kg-seg" data-kg-seite="rechts" id="ansicht" role="group" aria-label="Ansicht"><button type="button" data-a="kacheln" aria-pressed="true">Kacheln</button><button type="button" data-a="liste" aria-pressed="false">Liste</button></span>
 <main id="appMain"></main>
 <script>
-// Startseite: links die Ordner, rechts die Dokumenttypen des Ordners, darunter die zuletzt erstellten Dokumente
+// Startseite: jeder Ordner eine Kachel (gemeinsames Muster KG.kachel) mit seinen Dokumenten, darunter die zuletzt erstellten Dokumente
 // (nur Kopiervorlage, kein Archiv – das PDF gehört in den Kundenordner im Drive).
 async function aufbau(main){
   const { esc, ic } = KGD, sb = KGD.sb;
@@ -39,9 +39,8 @@ async function aufbau(main){
   const farbe = f => (KG.palette[f] || KG.palette.grau)[1];
   let ordner = KGD.lsGet('kgd-ordner', null);
   if(!ORDNER.some(x => x.id === ordner)) ordner = ORDNER.length ? ORDNER[0].id : null;
-  main.innerHTML = `<div class="kgd-start"><nav class="kgd-ordner" id="ordnerListe" aria-label="Ordner"></nav>
-    <div class="kgd-typen"><h2 id="ordnerTitel"></h2><div id="typListe"></div>
-      ${KGD.darfBriefe ? '<div class="kgd-zwtitel">Zuletzt erstellt</div><div id="letzte"></div>' : ''}</div></div>`;
+  main.innerHTML = `<div class="kgd-typen" style="max-width:none"><div id="typListe"></div>
+      ${KGD.darfBriefe ? '<div class="kgd-zwtitel">Zuletzt erstellt</div><div id="letzte"></div>' : ''}</div>`;
   const admin = KGD.darfVorlagen; // Ordner verwalten = gleiches Recht wie Vorlagen bearbeiten
   // Briefe → Ausfüllen; PDF (GAV) und Abschnitte (Reglement) → eigene Seite mit PDF, Versionen und Bearbeiten
   const ziel = t => (t.art && t.art !== 'brief' ? 'doku-datei-live-v1.html?v=' : 'doku-dokument-live-v1.html?v=') + t.id;
@@ -53,32 +52,31 @@ async function aufbau(main){
   });
 
   function zeichnen(){
-    const anzahl = id => VORLAGEN.filter(t => t.ordner_id === id).length;
-    $('ordnerListe').innerHTML = '<div class="ueber">Ordner</div>' + ORDNER.map(x => `<div class="kgd-oz" data-o="${x.id}"${admin ? ' draggable="true"' : ''}>
-        ${admin ? `<span class="griff" title="Ziehen zum Verschieben">${ic('griff', 14)}</span>` : ''}
-        <button type="button" class="wahl" data-wahl="${x.id}" aria-pressed="${x.id === ordner}"><span class="fi" style="color:${farbe(x.farbe)}">${ic('ordner', 18)}</span><span>${esc(x.name)}</span><small>${anzahl(x.id)}</small></button>
-        ${admin ? `<span class="aktion"><button type="button" class="kg-ibtn" data-umb="${x.id}" title="Umbenennen" aria-label="Umbenennen">${ic('edit')}</button><button type="button" class="kg-ibtn danger" data-loe="${x.id}"${anzahl(x.id) ? ' disabled title="Nur leere Ordner lassen sich löschen"' : ' title="Löschen"'} aria-label="Löschen">${ic('trash')}</button></span>` : ''}</div>`).join('')
-      + (admin ? '<button type="button" class="kgd-neu" id="ordnerNeu">+ Ordner</button>' : '');
-    const akt = ORDNER.find(x => x.id === ordner), typen = VORLAGEN.filter(t => t.ordner_id === ordner);
-    $('ordnerTitel').textContent = akt ? akt.name : '';
-    $('typListe').innerHTML = !typen.length ? '<div class="kgd-leer">In diesem Ordner gibt es noch keine Dokumente.</div>'
-      : ansicht === 'liste' ? `<div class="kgd-tab"><table><thead><tr><th>Dokument</th><th>Beschreibung</th></tr></thead><tbody>${typen.map(t => `<tr class="klick" data-href="${ziel(t)}"><td><b>${esc(t.name)}</b></td><td style="white-space:normal">${esc(t.beschreibung || '')}</td></tr>`).join('')}</tbody></table></div>`
-      : `<div class="kgd-typliste">${typen.map(t => `<a class="kgd-typ" href="${ziel(t)}">
-        <span class="bl" style="color:${farbe(akt.farbe)}">${ic('dokument', 18)}</span><span><b>${esc(t.name)}</b><small>${esc(t.beschreibung || '')}</small></span></a>`).join('')}</div>`;
-    $('typListe').querySelectorAll('[data-href]').forEach(tr => tr.addEventListener('click', () => location.href = tr.dataset.href));
-    const L = $('ordnerListe');
-    L.querySelectorAll('[data-wahl]').forEach(b => b.addEventListener('click', () => { ordner = b.dataset.wahl; KGD.lsSet('kgd-ordner', ordner); zeichnen(); }));
-    if(admin){
-      L.querySelectorAll('[data-umb]').forEach(b => b.addEventListener('click', () => ordnerName(ORDNER.find(x => x.id === b.dataset.umb))));
-      L.querySelectorAll('[data-loe]').forEach(b => b.addEventListener('click', () => ordnerLoeschen(ORDNER.find(x => x.id === b.dataset.loe))));
-      $('ordnerNeu').addEventListener('click', () => ordnerName(null));
-      L.querySelectorAll('.kgd-oz').forEach(z => {
-        z.addEventListener('dragstart', e => { gezogen = z.dataset.o; z.classList.add('zieht'); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', ''); });
-        z.addEventListener('dragend', () => { z.classList.remove('zieht'); gezogen = null; L.querySelectorAll('.ueber-ziel').forEach(x => x.classList.remove('ueber-ziel')); });
-        z.addEventListener('dragover', e => { if(gezogen && gezogen !== z.dataset.o){ e.preventDefault(); z.classList.add('ueber-ziel'); } });
-        z.addEventListener('dragleave', () => z.classList.remove('ueber-ziel'));
-        z.addEventListener('drop', e => { e.preventDefault(); if(gezogen) verschieben(gezogen, z.dataset.o, e.clientY > z.getBoundingClientRect().top + z.offsetHeight / 2); });
-      });
+    const anzahl = id => VORLAGEN.filter(t => t.ordner_id === id).length, L = $('typListe');
+    const zeile = t => `<a class="kg-kzeile" href="${ziel(t)}"><span class="t"><b>${esc(t.name)}</b>${t.beschreibung ? `<small>${esc(t.beschreibung)}</small>` : ''}</span></a>`;
+    if(ansicht === 'liste'){
+      const name = id => (ORDNER.find(x => x.id === id) || {}).name || '–';
+      L.innerHTML = `<div class="kgd-tab"><table><thead><tr><th>Dokument</th><th>Ordner</th><th>Beschreibung</th></tr></thead><tbody>${ORDNER.flatMap(x => VORLAGEN.filter(t => t.ordner_id === x.id))
+        .map(t => `<tr class="klick" data-href="${ziel(t)}"><td><b>${esc(t.name)}</b></td><td>${esc(name(t.ordner_id))}</td><td style="white-space:normal">${esc(t.beschreibung || '')}</td></tr>`).join('')}</tbody></table></div>`;
+      L.querySelectorAll('[data-href]').forEach(tr => tr.addEventListener('click', () => location.href = tr.dataset.href));
+    } else {
+      L.innerHTML = KG.kacheln(ORDNER.map(x => KG.kachel({ titel: `${esc(x.name)}<small>${anzahl(x.id)}</small>`, farbe: farbe(x.farbe), icon: ic('ordner', 17),
+          links: admin ? `<button type="button" class="kg-klink" data-umb="${x.id}">Umbenennen</button>${anzahl(x.id) ? '' : `<button type="button" class="kg-klink" data-loe="${x.id}">Löschen</button>`}` : '',
+          inhalt: VORLAGEN.filter(t => t.ordner_id === x.id).map(zeile).join('') || '<span class="kg-kleer">Noch keine Dokumente.</span>',
+          attr: `data-o="${x.id}"${admin ? ' draggable="true" title="Ziehen zum Verschieben"' : ''}` })).join(''))
+        + (admin ? '<button type="button" class="kgd-neu" id="ordnerNeu">+ Ordner</button>' : '');
+      if(admin){
+        L.querySelectorAll('[data-umb]').forEach(b => b.addEventListener('click', () => ordnerName(ORDNER.find(x => x.id === b.dataset.umb))));
+        L.querySelectorAll('[data-loe]').forEach(b => b.addEventListener('click', () => ordnerLoeschen(ORDNER.find(x => x.id === b.dataset.loe))));
+        $('ordnerNeu').addEventListener('click', () => ordnerName(null));
+        L.querySelectorAll('.kg-kachel[data-o]').forEach(z => {
+          z.addEventListener('dragstart', e => { gezogen = z.dataset.o; z.style.opacity = '.5'; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', ''); });
+          z.addEventListener('dragend', () => { z.style.opacity = ''; gezogen = null; L.querySelectorAll('.kg-kachel').forEach(x => x.style.outline = ''); });
+          z.addEventListener('dragover', e => { if(gezogen && gezogen !== z.dataset.o){ e.preventDefault(); z.style.outline = '2px solid #4F80C2'; } });
+          z.addEventListener('dragleave', () => z.style.outline = '');
+          z.addEventListener('drop', e => { e.preventDefault(); if(gezogen) verschieben(gezogen, z.dataset.o, e.clientX > z.getBoundingClientRect().left + z.offsetWidth / 2); });
+        });
+      }
     }
     if(KGD.darfBriefe) letzte();
   }
