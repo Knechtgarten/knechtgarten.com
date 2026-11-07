@@ -177,6 +177,13 @@ body.buero-rolle .admin-only{display:none !important;}
 .a4 .unt img{position:absolute;bottom:4mm;left:0;max-height:13mm;}
 .a4 .fuss{font-size:8pt;color:#8B9097;text-align:center;margin-top:4mm;}
 .a4 .utab td{height:12mm;}
+.lgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;}
+@media (max-width:700px){ .lgrid{grid-template-columns:1fr !important;} }
+/* Lärmschutznachweis: Blatt in pt wie das Formular nach Cercle Bruit */
+.a4.lsn{padding:0;display:block;position:relative;font-family:"Lato",Arial,sans-serif;color:#000;line-height:1;}
+.lsn span,.lsn i,.lsn img{position:absolute;white-space:nowrap;font-style:normal;}
+.lsn .bx{background:rgb(245,245,249);} .lsn .ln{border-top:.75pt solid #000;height:0;} .lsn .dl{border-top:1.5pt double #000;height:0;}
+.lsn .pl{border-top:.6pt dotted #555;height:0;} .lsn .cb{width:6.6pt;height:6.6pt;border:.6pt solid #000;box-sizing:border-box;}
 </style>
 </head>
 <body>
@@ -272,15 +279,15 @@ $('pendingLogoutBtn').addEventListener('click', async () => { await sb.auth.sign
 // ---------------------------------------------------------------------------
 // Daten
 // ---------------------------------------------------------------------------
-let BEW = [], PL = [], FILTER = 'alle';
+let BEW = [], PL = [], WPK = [], FILTER = 'alle';
 const STAND = { vorbereitung: 'In Vorbereitung', eingereicht: 'Eingereicht', bewilligt: 'Bewilligt', abgelehnt: 'Abgelehnt', zurueckgezogen: 'Zurückgezogen' };
 async function laden(){
-  const [{ data: b, error }, { data: u }, { data: p }] = await Promise.all([
+  const [{ data: b, error }, { data: u }, { data: p }, { data: wp }] = await Promise.all([
     sb.from('bewilligung').select('*, kunde:kunde_id(id,name,vorname,nachname,firma,strasse,plz,ort)').order('erstellt_am', { ascending: false }),
     sb.from('benutzer').select('id,anzeigename,email,rolle,unterschrift_pfad,aktiv').in('rolle', ['admin', 'buero_team']),
-    sb.rpc('doku_personen')]);
+    sb.rpc('doku_personen'), sb.from('bew_waermepumpe').select('*').eq('aktiv', true).order('hersteller').order('modell')]);
   if(error) return fehler(error, 'Laden');
-  BEW = b || [];
+  BEW = b || []; WPK = wp || [];
   // Projektleiter mit vollem Namen (aus den Personen der Doku-Tools, gleiche Mail)
   PL = (u || []).filter(x => x.aktiv !== false).map(x => { const pers = (p || []).find(q => (q.mail || '').toLowerCase() === (x.email || '').toLowerCase());
     return { ...x, name: pers?.name || x.anzeigename || x.email, telefon: pers?.telefon || '' }; }).sort((a, b) => a.name.localeCompare(b.name, 'de'));
@@ -297,7 +304,7 @@ function schritteVon(b){
     { k: 'leitungsplaene', t: 'Leitungspläne anfordern', i: 'Werke / Gemeinde' }];
   if(a.naeherbaurecht) l.push({ k: 'naeherbaurecht', t: 'Näherbaurecht erstellen', i: 'pro Nachbar mit reduziertem Grenzabstand' });
   l.push({ k: 'nachbarn', t: 'Unterschriften der Nachbarn', i: 'Zustimmungserklärung (Einspracheverzicht)' });
-  if(a.waermepumpe) l.push({ k: 'laermschutz', t: 'Lärmschutznachweis Wärmepumpe', i: 'folgt im Tool (FWS-Rechner)' });
+  if(a.waermepumpe) l.push({ k: 'laermschutz', t: 'Lärmschutznachweis Wärmepumpe', i: 'nach Cercle Bruit, Berechnung im Tool' });
   l.push({ k: 'formulare', t: 'Beilagen ausfüllen', i: [a.terrain && 'Terrainveränderung', 'Erdbebensicherheit', 'Bauabfälle'].filter(Boolean).join(' · ') });
   if(a.pool) l.push({ k: 'plaene_pool', t: 'Pläne Pool', i: 'Situation, Grundriss, Schnitte' });
   l.push({ k: 'ebau', t: 'eBau ausfüllen und Unterlagen hochladen', i: '«Einreichen» klickst du selbst' },
@@ -414,12 +421,13 @@ function zeichneFenster(){
     .concat([['Zustimmungserklärung Nachbarn', nb.length ? `<button type="button" class="btn btn-ghost btn-sm" data-pdf="zust">PDF</button>` : '<span class="fehlt">Nachbarn erfassen</span>'],
       ['Situationsplan beglaubigt', b.schritte?.situationsplan?.erledigt ? '<span class="da">da</span>' : '<span class="fehlt">fehlt</span>'],
       ['Leitungspläne', b.schritte?.leitungsplaene?.erledigt ? '<span class="da">da</span>' : '<span class="fehlt">fehlt</span>']])
-    .concat(b.abklaerung?.waermepumpe ? [['Lärmschutznachweis WP', b.schritte?.laermschutz?.erledigt ? '<span class="da">da</span>' : '<span class="fehlt">fehlt</span>']] : []);
+    .concat(b.abklaerung?.waermepumpe ? [['Lärmschutznachweis WP', b.laerm?.lwa2 ? '<button type="button" class="btn btn-ghost btn-sm" data-pdf="lsn">PDF</button>' : '<span class="fehlt">Wärmepumpe wählen</span>']] : []);
   const aktion = s => ({
     grundstueck: `<button type="button" class="btn btn-ghost btn-sm" data-act="geo">Neu holen</button>`,
     situationsplan: `<a class="btn btn-ghost btn-sm" href="https://be-geo.ch/de/shop" target="_blank" rel="noopener" style="text-decoration:none">be-geo öffnen</a><button type="button" class="btn btn-ghost btn-sm" data-act="kopier">Parzelle kopieren</button>`,
     naeherbaurecht: `<button type="button" class="btn btn-ghost btn-sm" data-act="nachbarn">Nachbarn &amp; Abstände</button>`,
     nachbarn: `<button type="button" class="btn btn-ghost btn-sm" data-act="nachbarn">Nachbarn</button>${nb.length ? '<button type="button" class="btn btn-ghost btn-sm" data-pdf="zust">PDF</button>' : ''}`,
+    laermschutz: `<button type="button" class="btn btn-ghost btn-sm" data-act="laerm">Ausfüllen</button>${b.laerm?.lwa2 ? '<button type="button" class="btn btn-ghost btn-sm" data-pdf="lsn">PDF</button>' : ''}`,
     ebau: `<a class="btn btn-ghost btn-sm" href="https://www.be.ch/ebau" target="_blank" rel="noopener" style="text-decoration:none">eBau öffnen</a>`
   })[s.k] || '';
   const naechster = f.naechster?.k;
@@ -447,13 +455,13 @@ function zeichneFenster(){
         <div class="kar"><h3><span>Abklärung</span></h3><div class="abkl" id="fAb">${ABKL.map(([k, t]) => `<button type="button" data-ab="${k}" aria-pressed="${!!b.abklaerung?.[k]}">${t}</button>`).join('')}</div></div>
       </aside>
       <div style="min-width:0">
-        <div id="teil">${AKT_TEIL === 'nachbarn' ? nachbarnHtml(b) : `<h3 style="margin:0 0 8px;font-size:13px;color:var(--primary)">Schritte</h3><ol class="schritte">${l.map(s => { const st = b.schritte?.[s.k];
+        <div id="teil">${AKT_TEIL === 'nachbarn' ? nachbarnHtml(b) : AKT_TEIL === 'laerm' ? laermHtml(b) : `<h3 style="margin:0 0 8px;font-size:13px;color:var(--primary)">Schritte</h3><ol class="schritte">${l.map(s => { const st = b.schritte?.[s.k];
           return `<li class="schritt${s.k === naechster ? ' akt' : ''}"><button type="button" class="haken" data-haken="${s.k}" aria-pressed="${!!st?.erledigt}" aria-label="${esc(s.t)} erledigt">${st?.erledigt ? K('check', 12) : ''}</button>
             <span class="tx"><b>${esc(s.t)}</b><small>${esc(s.i)}${st?.erledigt && st.am ? ' · erledigt ' + datum(st.am) : ''}</small></span>${aktion(s)}</li>`; }).join('')}</ol>`}</div>
       </div>
       <aside>
         <div class="kar"><h3><span>Dokumente</span></h3><ul class="doks">${dok.map(([t, v]) => `<li><span>${t}</span>${v}</li>`).join('')}</ul>
-          <div class="klein" style="margin-top:8px">Lärmschutznachweis, Beilagen und Pool-Pläne folgen im Tool.</div></div>
+          <div class="klein" style="margin-top:8px">Beilagen (Erdbeben, Bauabfälle …) füllst du direkt im eBau aus.</div></div>
         <div class="kar"><h3><span>Unterschrift Knechtgarten</span></h3><div class="ubild" id="fUb">Lädt …</div>
           <div class="klein" style="margin-top:6px">${esc(plName(b.projektleiter_id))} · wird in Dokumente gesetzt, die wir unterschreiben.</div>
           <label class="btn btn-ghost btn-sm" style="margin-top:8px;display:inline-flex;gap:6px;align-items:center;cursor:pointer">${K('upload', 13)}Unterschrift hochladen<input type="file" accept="image/*" id="fUbIn" hidden></label></div>
@@ -490,6 +498,56 @@ function nachbarnHtml(b){
     <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">${nb.length ? '<button type="button" class="btn btn-primary btn-sm" data-pdf="zust">Zustimmungserklärung PDF</button>' : ''}</div>`;
 }
 
+// Lärmschutznachweis Wärmepumpe (Cercle Bruit Vollzugshilfe 6.21): Werte in bewilligung.laerm
+const ESW = { I: [50, 40, 'Erholungszone'], II: [55, 45, 'Wohnzone'], III: [60, 50, 'Mischzone'], IV: [65, 55, 'Industriezone'] };
+const DC = { frei: [3, 'WP freistehend (> 3m Abstand zur Wand)'], wand: [6, 'WP an Fassade (< 3m Abstand zur Wand)'], ecke: [9, 'WP in Gebäudeecke (< 3m zu zwei Wänden)'] };
+const K2T = { 0: 'nicht hörbar', 2: 'schwach hörbar (Normalbetrieb) +2 dB', 4: 'deutlich hörbar +4 dB', 6: 'stark hörbar +6 dB' };
+const K3T = { 0: 'nicht hörbar', 2: 'schwach hörbar +2 dB', 4: 'deutlich hörbar +4 dB' };
+function laermDaten(b){
+  const m = String(b.geodaten?.laermstufe || '').match(/\b(IV|III|II|I)\b/);
+  const L = { es: m ? m[1] : 'II', aufstellung: 'frei', distanz: '10', fluester: true, von: '19:00', bis: '7:00', raeume: 'Räume in Wohnungen', k2: '2', k3: '0',
+    innen: 'Kein Platz vorhanden', ...(b.laerm || {}) };
+  L.beilagen = { situation: true, grundrisse: false, datenblatt: true, doku: false, ...(b.laerm?.beilagen || {}) };
+  return L;
+}
+const zahl = v => parseFloat(String(v ?? '').replace(',', '.'));
+const dbf = v => { const x = Math.round(v * 10) / 10 || 0; return Number.isInteger(x) ? String(x) : x.toFixed(1); };
+function laermRechnung(L){
+  const lw = zahl(L.lwa2) || 0, lf = zahl(L.lwa_fl), fl = L.fluester && !isNaN(lf) ? lf - lw : 0;
+  const dc = (DC[L.aufstellung] || DC.frei)[0], r = zahl(L.distanz) > 0 ? zahl(L.distanz) : 10, dist = -20 * Math.log10(r);
+  const k2 = +L.k2 || 0, k3 = +L.k3 || 0, lpT = lw - 11 + dc + dist, lpN = lpT + fl;
+  const lrT = Math.round((lpT + 5 + k2 + k3) * 10) / 10, lrN = Math.round((lpN + 10 + k2 + k3) * 10) / 10;
+  const [pwT, pwN, zone] = ESW[L.es] || ESW.II;
+  return { lw, fl, dc, r, dist, k2, k3, lpT, lpN, lrT, lrN, pwT, pwN, zone, ok: lrT <= pwT && lrN <= pwN };
+}
+function laermHtml(b){
+  const L = laermDaten(b), R = laermRechnung(L), att = 'autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other"';
+  const inp = (k, t, ph = '') => `<label>${t}<input type="text" data-lf="${k}" value="${esc(L[k] ?? '')}" placeholder="${ph}" ${att}></label>`;
+  const sel = (k, t, o) => `<label>${t}<select data-lf="${k}">${o.map(([v, x]) => `<option value="${v}"${String(L[k] ?? '') === String(v) ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select></label>`;
+  const zl = (t, a, c, fett) => `<tr${fett ? ' style="font-weight:700"' : ''}><td>${t}</td><td style="text-align:right">${a}</td><td style="text-align:right">${c}</td></tr>`;
+  return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><h3 style="margin:0;font-size:13px;color:var(--primary);flex:1">Lärmschutznachweis Wärmepumpe</h3>
+      ${L.lwa2 ? '<button type="button" class="btn btn-primary btn-sm" data-pdf="lsn">PDF</button>' : ''}<button type="button" class="btn btn-ghost btn-sm" data-act="schritte">Zurück zu den Schritten</button></div>
+    <div class="kar fl"><h3><span>Wärmepumpe</span></h3>
+      <div class="lgrid" style="grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) minmax(0,1.4fr)">${sel('wp_id', 'Aus der Liste', [['', '– andere (Werte selber eintragen) –'], ...WPK.map(w => [w.id, w.hersteller + ' ' + w.modell])])}${inp('hersteller', 'Hersteller')}${inp('modell', 'Modell/Typ')}</div>
+      <div class="lgrid" style="margin-top:8px">${inp('a2_kw', 'Heizleistung A2 Teillast (kW)')}${inp('max_kw', 'max. Heizleistung A-7/W35 (kW)')}${inp('fl_kw', 'Heizleistung A2 Flüstermodus (kW)')}
+        ${inp('lwa2', 'Schallleistung A2 Teillast (dB(A))')}${inp('lwa_erp', 'Schallleistung nach ErP (dB(A))')}${inp('lwa_fl', 'Schallleistung A2 Flüstermodus (dB(A))')}</div></div>
+    <div class="kar fl"><h3><span>Aufstellung und Empfangsort</span></h3>
+      <div class="lgrid">${sel('aufstellung', 'Aufstellung', Object.entries(DC).map(([k, [d, t]]) => [k, `${t} · Dc ${d} dB`]))}${inp('distanz', 'Distanz zum nächsten Fenster (m)', '10')}
+        ${sel('es', 'Empfindlichkeitsstufe', Object.entries(ESW).map(([k, [t, n, z]]) => [k, `ES ${k} (${z}) · ${t}/${n} dB(A)`]))}
+        ${inp('raeume', 'Lärmempfindliche Räume')}${sel('k2', 'Tongehalt K2', Object.entries(K2T))}${sel('k3', 'Impulsgehalt K3', Object.entries(K3T))}</div>
+      <div style="display:flex;gap:10px;align-items:end;margin-top:10px;flex-wrap:wrap"><label class="chk" style="align-self:center"><input type="checkbox" data-lf="fluester"${L.fluester ? ' checked' : ''}> Flüstermodus in der Nacht</label>
+        ${L.fluester ? `<span style="width:90px">${inp('von', 'von')}</span><span style="width:90px">${inp('bis', 'bis')}</span>` : ''}</div>
+      <div style="margin-top:10px">${inp('innen', 'Innenaufstellung nicht möglich, Begründung')}</div></div>
+    <div class="kar"><h3><span>Resultat</span><span class="pill ${R.ok ? 'bewilligt' : 'abgelehnt'}" style="flex:none${R.ok ? '' : ';background:#FCE8E6;color:#7A2638'}">${L.lwa2 ? (R.ok ? 'Planungswerte eingehalten' : 'Planungswerte überschritten') : 'Werte fehlen'}</span></h3>
+      <table class="bwtab" style="min-width:0"><thead><tr><th></th><th style="text-align:right">Tag</th><th style="text-align:right">Nacht</th></tr></thead><tbody>
+        ${zl('Schalldruckpegel L<sub>pA</sub> am Empfangsort', dbf(R.lpT) + ' dB(A)', dbf(R.lpN) + ' dB(A)')}
+        ${zl('Beurteilungspegel L<sub>r</sub>', R.lrT.toFixed(1) + ' dB(A)', R.lrN.toFixed(1) + ' dB(A)', true)}
+        ${zl('Planungswert ES ' + esc(L.es), R.pwT + ' dB(A)', R.pwN + ' dB(A)')}</tbody></table></div>
+    <div class="kar"><h3><span>Beilagen (Häkchen im PDF)</span></h3><div style="display:flex;gap:14px;flex-wrap:wrap">
+      ${[['situation', 'Situationsplan mit Standort'], ['grundrisse', 'Wohnungsgrundrisse'], ['datenblatt', 'Datenblatt Schallleistung'], ['doku', 'Dokumentation Lärmschutzmassnahmen']]
+        .map(([k, t]) => `<label class="chk"><input type="checkbox" data-lb="${k}"${L.beilagen[k] ? ' checked' : ''}> ${t}</label>`).join('')}</div></div>`;
+}
+
 // Klicks und Eingaben im Fenster
 let spT = null;
 const spaeter = (b, ae) => { Object.assign(b, ae); clearTimeout(spT); spT = setTimeout(() => speichern(b, ae), 500); };
@@ -503,6 +561,7 @@ document.addEventListener('click', async e => {
   if(d.act === 'kopier'){ const t = `Parzelle ${b.parzelle || ''}, ${b.gemeinde || b.ort || ''}${b.egrid ? ', EGRID ' + b.egrid : ''}`; try { await navigator.clipboard.writeText(t); toast('Kopiert: ' + t); } catch(_){ toast(t); } return; }
   if(d.act === 'nachbarn'){ AKT_TEIL = 'nachbarn'; return zeichneFenster(); }
   if(d.act === 'schritte'){ AKT_TEIL = null; return zeichneFenster(); }
+  if(d.act === 'laerm'){ AKT_TEIL = 'laerm'; return zeichneFenster(); }
   if(d.act === 'nbneu'){ await speichern(b, { nachbarn: [...(b.nachbarn || []), { name: '', adresse: '', parzelle: '', naeherbaurecht: !!b.abklaerung?.naeherbaurecht, abstaende: [], unterschrieben: false }] }); return zeichneFenster(); }
   if(d.act === 'plneu'){ await speichern(b, { plaene: [...(b.plaene || []), { titel: '', massstab: '', datum: '' }] }); return zeichneFenster(); }
   if(d.nbweg != null){ const nb = [...b.nachbarn]; nb.splice(+d.nbweg, 1); await speichern(b, { nachbarn: nb }); return zeichneFenster(); }
@@ -514,7 +573,7 @@ document.addEventListener('click', async e => {
     if(d.haken === 'ebau' && an && b.status === 'vorbereitung'){ ae.status = 'eingereicht'; ae.eingereicht_am = new Date().toISOString().slice(0, 10); }
     await speichern(b, ae); return zeichneFenster(); }
   if(d.ab && a.closest('#fAb')){ const ab = { ...(b.abklaerung || {}), [d.ab]: !b.abklaerung?.[d.ab] }; await speichern(b, { abklaerung: ab }); return zeichneFenster(); }
-  if(d.pdf){ a.disabled = true; try { await (d.pdf === 'nbr' ? pdfNaeherbaurecht(b, +d.i) : pdfZustimmung(b)); } catch(err){ fehler(err, 'PDF'); } a.disabled = false; }
+  if(d.pdf){ a.disabled = true; try { await (d.pdf === 'nbr' ? pdfNaeherbaurecht(b, +d.i) : d.pdf === 'lsn' ? pdfLaerm(b) : pdfZustimmung(b)); } catch(err){ fehler(err, 'PDF'); } a.disabled = false; }
 });
 document.addEventListener('change', async e => {
   if(!OFFEN || !e.target.closest('#fenOvl')) return; const b = G(); if(!b) return; const t = e.target;
@@ -525,6 +584,15 @@ document.addEventListener('change', async e => {
   if(t.dataset.feld){ const ae = { [t.dataset.feld]: t.value || null };
     if(t.dataset.feld === 'status' && t.value === 'eingereicht' && !b.eingereicht_am) ae.eingereicht_am = new Date().toISOString().slice(0, 10);
     if(t.dataset.feld === 'status' && t.value === 'bewilligt' && !b.bewilligt_am) ae.bewilligt_am = new Date().toISOString().slice(0, 10);
+    await speichern(b, ae); return zeichneFenster(); }
+  if(t.dataset.lf || t.dataset.lb){ const L = laermDaten(b);
+    if(t.dataset.lb) L.beilagen = { ...L.beilagen, [t.dataset.lb]: t.checked };
+    else L[t.dataset.lf] = t.type === 'checkbox' ? t.checked : t.value.trim();
+    if(t.dataset.lf === 'wp_id'){ const w = WPK.find(x => x.id === t.value);
+      if(w) Object.assign(L, { hersteller: w.hersteller, modell: w.modell, a2_kw: w.heiz_a2_kw, lwa2: w.lwa_a2_db, max_kw: w.heiz_max_kw, lwa_erp: w.lwa_erp_db, fl_kw: w.heiz_fluester_kw, lwa_fl: w.lwa_fluester_db }); }
+    else if(['hersteller', 'modell', 'a2_kw', 'lwa2', 'max_kw', 'lwa_erp', 'fl_kw', 'lwa_fl'].includes(t.dataset.lf)) L.wp_id = '';
+    const ae = { laerm: L };
+    if(L.lwa2 && laermRechnung(L).ok && !b.schritte?.laermschutz?.erledigt) ae.schritte = { ...(b.schritte || {}), laermschutz: { erledigt: true, am: new Date().toISOString(), von: ME } };
     await speichern(b, ae); return zeichneFenster(); }
   const nbEl = t.closest('[data-nb]');
   if(nbEl && t.dataset.nf){ const i = +nbEl.dataset.nb, nb = structuredClone(b.nachbarn); nb[i][t.dataset.nf] = t.type === 'checkbox' ? t.checked : t.value;
@@ -597,6 +665,81 @@ async function pdfZustimmung(b){
     <div class="hinw">Bei Mit- oder Gesamteigentum unterschreiben alle Eigentümer/innen oder eine bevollmächtigte Person (Vollmacht beilegen).</div>
     ${fuss}</div>`;
   await pdfAus(html, `Zustimmungserklärung Nachbarn – ${bauherr(b)}`);
+}
+
+// Lärmschutznachweis: gleiche Anordnung wie das bisherige Formular (Lato, Masse in pt ab oberem Rand, y = Grundlinie)
+async function pdfLaerm(b){
+  if(!$('latoFont')){ const l = document.createElement('link'); l.id = 'latoFont'; l.rel = 'stylesheet'; l.href = 'https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap'; document.head.appendChild(l);
+    await new Promise(ok => { l.onload = l.onerror = ok; }); }
+  await Promise.all([document.fonts.load('400 10px Lato'), document.fonts.load('700 10px Lato')]);
+  const L = laermDaten(b), R = laermRechnung(L), p = PL.find(q => q.id === b.projektleiter_id), u = await unterschriftUrl(b.projektleiter_id);
+  const B = 'font-weight:700;', W = 595.28, jetzt = new Date();
+  const T = (x, y, s, t, st = '') => `<span style="left:${x}pt;top:${(y - 0.87 * s).toFixed(2)}pt;font-size:${s}pt;${st}">${t}</span>`;
+  const TR = (xr, y, s, t, st = '') => `<span style="right:${(W - xr).toFixed(2)}pt;top:${(y - 0.87 * s).toFixed(2)}pt;font-size:${s}pt;${st}">${t}</span>`;
+  const box = (x, y, w, h, c = 'bx') => `<i class="${c}" style="left:${x}pt;top:${y}pt;width:${w}pt;height:${h}pt"></i>`;
+  const zwei = (y, a, c, st = '') => TR(501.6, y, 8.5, a, st) + TR(549.8, y, 8.5, c, st);
+  const zeit = `${jetzt.getDate()}.${String(jetzt.getMonth() + 1).padStart(2, '0')}.${jetzt.getFullYear()} ${jetzt.toTimeString().slice(0, 8)}`;
+  const kopfL = `<img src="/logo-gruen-blau.png" alt="" style="right:${W - 549.8}pt;top:36pt;width:118pt">
+    ${T(72.4, 76.4, 12.8, 'Lärmschutznachweis für Luft/Wasser-Wärmepumpen', B)}${T(72.4, 86.1, 7.1, 'Beurteilung der Lärmimmissionen von Luft/Wasser-Wärmepumpen (WP) mit einer Heizleistung bis ca. 40kW')}`;
+  const fussL = n => T(72.4, 800.6, 7.1, 'gemäss Cercle Bruit Vollzugshilfe 6.21') + T(72.4, 809.0, 7.1, 'Lärmtechnische Beurteilung von Luft/Wasser-Wärmepumpen')
+    + T(303.6, 800.6, 7.1, n + ' / 2') + T(367.4, 800.6, 7.1, zeit) + TR(549.8, 800.6, 7.1, 'Knecht AG Naturnahe Gärten');
+  const fl = L.fluester ? `Flüstermodus aktiviert von: ${esc(L.von)} bis ${esc(L.bis)} Uhr` : 'keine';
+  const s1 = `<div class="a4 lsn">${kopfL}
+    ${box(69.4, 113.4, 483.4, 47.8)}${box(69.5, 170.3, 482.8, 27.9)}${box(69.4, 198.2, 483.4, 58)}
+    ${T(72.4, 125.5, 8.5, 'Gesuchsteller/in')}${T(168.7, 125.5, 8.5, esc(bauherr(b)))}
+    ${T(72.4, 141.0, 8.5, 'Adresse')}${T(168.7, 141.0, 8.5, esc(b.strasse || ''))}${T(313.3, 141.0, 8.5, 'Parzelle Nr.')}${T(409, 141.0, 8.5, esc(b.parzelle || ''))}
+    ${T(72.4, 156.4, 8.5, 'PLZ/Ort')}${T(168.7, 156.4, 8.5, esc([b.plz, b.ort].filter(Boolean).join(' ')))}${T(313.3, 156.4, 8.5, 'Baugesuch Nr.')}${T(409, 156.4, 8.5, esc(b.ebau_nr || ''))}
+    ${T(72.2, 180.0, 6.4, 'Dem Lärmschutznachweis ist das Datenblatt mit den Schallpegelangaben der Wärmepumpe beizulegen.', B)}
+    ${T(72.2, 193.8, 7.7, 'Hersteller')}${TR(274.7, 193.8, 7.7, esc(L.hersteller || ''))}${T(291.1, 193.8, 7.7, 'Modell/Typ')}${TR(549.6, 193.8, 7.7, esc(L.modell || ''))}
+    ${T(72.4, 210.3, 8.5, 'Heizleistung bei A2 (Teillast nach')}${T(72.4, 220.5, 8.5, 'EN14825)')}${TR(272.3, 210.3, 8.5, esc(L.a2_kw ?? '') + ' kW')}
+    ${T(290.3, 210.3, 8.5, 'Schallleistungspegel LWA2°C bei A2 (Teillast')}${T(290.3, 220.5, 8.5, 'nach EN14825)')}${TR(549.8, 210.3, 8.5, esc(L.lwa2 ?? '') + ' dB(A)')}
+    ${T(72.4, 236.0, 8.5, 'maximale Heizleistung A-7/W35')}${TR(272.3, 236.0, 8.5, esc(L.max_kw ?? '') + ' kW')}${T(290.3, 236.0, 8.5, 'Schallleistungspegel nach ErP (A7/W47-55)')}${TR(549.8, 236.0, 8.5, esc(L.lwa_erp ?? '') + ' dB(A)')}
+    ${T(72.4, 251.4, 8.5, 'Heizleistung bei A2 (Flüstermodus)')}${TR(272.3, 251.4, 8.5, esc(L.fl_kw ?? '') + ' kW')}${T(290.3, 251.4, 8.5, 'Schallleistungspegel bei A2 (Flüstermodus)')}${TR(549.8, 251.4, 8.5, esc(L.lwa_fl ?? '') + ' dB(A)')}
+    ${T(72.4, 278.4, 8.5, 'Aufstellungsart')}${T(265.1, 278.4, 8.5, 'Aussenaufstellung')}
+    ${T(72.4, 293.8, 8.5, 'Lärmempfindliche Räume am Empfangsort')}${T(265.1, 293.8, 8.5, esc(L.raeume || ''))}${zwei(293.8, 'Tag', 'Nacht', B)}
+    ${T(72.4, 309.3, 8.5, 'Massgebender Planungswert am Empfangsort')}${T(265.1, 309.3, 8.5, `ES ${esc(L.es)} (${R.zone})`)}${zwei(309.3, R.pwT + ' dB(A)', R.pwN + ' dB(A)')}
+    ${T(72.4, 342.9, 10.2, 'Einhaltung Belastungsgrenzwerte', B)}
+    ${T(72.4, 358.7, 8.5, 'Schallleistungspegel')}${zwei(358.7, dbf(R.lw) + ' dB(A)', dbf(R.lw) + ' dB(A)')}
+    ${T(72.4, 374.2, 8.5, 'Umrechnungsterm Schalldruckpegel')}${zwei(374.2, '-11 dB', '-11 dB')}
+    ${T(72.4, 389.6, 8.5, 'Richtwirkungskorrektur D')}${T(169.0, 391.3, 4.7, 'c')}${T(265.1, 389.6, 8.5, (DC[L.aufstellung] || DC.frei)[1])}${zwei(389.6, R.dc + ' dB', R.dc + ' dB')}
+    ${T(72.4, 405.9, 8.5, 'Distanz zum Empfangsort')}${T(265.1, 405.9, 8.5, dbf(R.r) + ' m')}${zwei(405.9, dbf(R.dist) + ' dB', dbf(R.dist) + ' dB')}
+    ${T(72.4, 421.4, 8.5, 'Lärmschutzmassnahmen')}${T(265.1, 421.4, 8.5, fl)}${zwei(421.4, '0 dB', dbf(R.fl) + ' dB')}
+    ${box(456.8, 426.6, 45.9, 0, 'ln')}${box(504.9, 426.6, 46, 0, 'ln')}
+    ${T(72.4, 436.8, 8.5, 'Schalldruckpegel L', B)}${T(142.9, 438.5, 4.7, 'pA', B)}${T(150.9, 436.8, 8.5, 'am Empfangsort', B)}${zwei(437.6, dbf(R.lpT) + ' dB(A)', dbf(R.lpN) + ' dB(A)', B)}
+    ${T(72.4, 460.9, 8.5, 'Korrekturfaktoren', B)}
+    ${T(72.4, 476.4, 8.5, 'Pegelkorrektur K1 (Anlagetyp)')}${T(265.1, 476.4, 8.5, 'für Heizungsanlagen')}${zwei(476.4, '5 dB', '10 dB')}
+    ${T(72.4, 491.8, 8.5, 'Pegelkorrektur K2 (Tongehalt)')}${T(265.1, 491.8, 8.5, K2T[R.k2] || '')}${zwei(491.8, R.k2 + ' dB', R.k2 + ' dB')}
+    ${T(72.4, 507.3, 8.5, 'Pegelkorrektur K3 (Impulsgehalt)')}${T(265.1, 507.3, 8.5, K3T[R.k3] || '')}${zwei(507.3, R.k3 + ' dB', R.k3 + ' dB')}
+    ${T(72.4, 522.7, 8.5, 'Betriebszeitkorrektur')}${T(265.1, 522.7, 8.5, 'Betrieb ohne Zeiteinschränkung')}${zwei(522.7, '0 dB', '0 dB')}
+    ${box(456.8, 527.9, 45.9, 0, 'ln')}${box(504.9, 527.9, 46, 0, 'ln')}
+    ${T(72.4, 538.2, 8.5, 'Beurteilungspegel L', B)}${T(147.3, 539.9, 4.7, 'r', B)}${zwei(538.9, R.lrT.toFixed(1) + ' dB(A)', R.lrN.toFixed(1) + ' dB(A)', B)}
+    ${box(457.1, 542.2, 45.2, 3, 'dl')}${box(505.3, 542.2, 45.2, 3, 'dl')}
+    ${fussL(1)}</div>`;
+  const nacht = L.fluester ? [`Aktiviert in der Zeit von ${esc(L.von)} bis ${esc(L.bis)} Uhr`, 'Die Einstellung ist erforderlich zur Einhaltung der gesetzlichen Vorgaben und darf nicht',
+    'verändert werden. Nutzer und / oder Eigentümer der Anlage wurden auf die Bedeutung', 'dieser Zeitfenster hingewiesen.'] : ['Nicht nötig'];
+  const bl = [['situation', 'Situationsplan mit Standort Wärmepumpe / Schacht'], ['grundrisse', 'Wohnungsgrundrisse'], ['datenblatt', 'Datenblatt mit Schalleistungsangaben'], ['doku', 'Dokumentation Lärmschutzmassnahmen']];
+  const haken = '<svg viewBox="0 0 10 10" style="position:absolute;left:.6pt;top:.4pt;width:5pt;height:5pt"><polyline points="1.5,5.2 4,7.8 8.6,2" fill="none" stroke="#000" stroke-width="1.3"/></svg>';
+  const s2 = `<div class="a4 lsn">${kopfL}
+    ${T(72.4, 127.2, 10.2, 'Prüfung vorsorglicher Massnahmen', B)}
+    ${T(72.4, 143.0, 8.5, 'Innenaufstellung')}${T(216.9, 143.0, 8.5, 'Nein: nicht möglich bzw. unverhältnismässig')}${T(216.9, 153.2, 8.5, 'Begründung: ' + esc(L.innen || ''))}
+    ${T(72.4, 168.7, 8.5, 'Schallleistungspegel')}${T(216.9, 168.7, 8.5, 'Wärmepumpe mit tiefem Schallleistungspegel')}
+    ${T(72.4, 184.1, 8.5, 'Optimierter Aufstellungsort')}${T(216.9, 184.1, 8.5, 'Lärmoptimierter Standort für Nachbarschaft und eigenes Gebäude')}
+    ${T(72.4, 199.6, 8.5, 'Schallreduzierter Nachtbetrieb')}${nacht.map((t, i) => T(216.9, 199.6 + i * 10.2, 8.5, t)).join('')}
+    ${T(72.4, 245.6, 8.5, 'Weitere vorsorgliche Massnahmen')}${T(216.9, 245.6, 8.5, 'Weitere Lärmschutzmassnahmen zur vorsorglichen Emissionsbegrenzung wurden')}
+    ${T(216.9, 255.8, 8.5, 'geprüft, haben sich aber als nicht verhältnismässig herausgestellt (Kosten höher als 1 %')}${T(216.9, 266.0, 8.5, 'der Anlagekosten oder Wirkung geringer als 3 dB)')}
+    ${T(72.4, 284.6, 10.2, 'Lärmbeurteilung', B)}
+    ${T(72.4, 300.5, 8.5, 'Einhaltung Belastungsgrenzwerte')}${T(216.9, 300.5, 8.5, R.ok ? 'Ja' : 'Nein', B)}${T(265.1, 300.5, 8.5, R.ok ? 'Die Planungswerte werden eingehalten.' : 'Die Planungswerte werden nicht eingehalten.')}
+    ${T(72.4, 315.9, 8.5, 'Beurteilung Vorsorge')}${T(216.9, 315.9, 8.5, 'Ja', B)}${T(265.1, 315.9, 8.5, 'Die in Betracht fallenden vorsorglichen Massnahmen wurden geprüft, und')}
+    ${T(265.1, 326.1, 8.5, 'die verhältnismässigen Massnahmen werden umgesetzt. Das')}${T(265.1, 336.3, 8.5, 'Vorsorgeprinzip wird somit erfüllt.')}
+    ${T(72.3, 609.4, 10, 'Für Rückfragen', B)}${T(72.3, 624.9, 8.3, 'Verfasser/in:')}${T(128.2, 624.9, 8.3, esc([p?.name, 'Knecht AG Naturnahe Gärten', p?.telefon || '033 453 10 20'].filter(Boolean).join(', ')))}
+    ${T(72.3, 645.3, 6.9, 'Ort, Datum', 'color:#555')}${T(330.3, 645.3, 6.9, 'Unterschrift', 'color:#555')}
+    ${u ? `<img src="${u}" alt="" style="left:334pt;top:648pt;height:25pt;max-width:200pt">` : ''}
+    ${T(72.3, 667.7, 8.3, 'Heimenschwand, ' + heute())}
+    ${box(71.2, 674.5, 240.6, 0, 'pl')}${box(334.2, 674.5, 240.5, 0, 'pl')}
+    ${T(72.3, 701.7, 10, 'Beilagen:', B)}
+    ${bl.map(([k, t], i) => { const y = 720.6 + i * 15.17; return `<i class="cb" style="left:72.6pt;top:${(y - 6.4).toFixed(2)}pt">${L.beilagen[k] ? haken : ''}</i>` + T(92.0, y, 8.3, t); }).join('')}
+    ${fussL(2)}</div>`;
+  await pdfAus(s1 + s2, `Lärmschutznachweis ${bauherr(b)}`);
 }
 
 pruefeAnmeldung();
