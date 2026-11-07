@@ -491,7 +491,8 @@ function nachbarnHtml(b){
         <button type="button" class="btn btn-ghost btn-sm" data-abneu style="margin-top:6px">+ Abstand</button>
         <button type="button" class="btn btn-ghost btn-sm" data-pdf="nbr" data-i="${i}" style="margin-top:6px">Näherbaurecht PDF</button>` : ''}
     </div>`).join('') || '<div class="klein" style="margin-bottom:8px">Noch keine Nachbarn erfasst.</div>'}
-    <button type="button" class="btn btn-ghost btn-sm" data-act="nbneu">+ Nachbar</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><button type="button" class="btn btn-ghost btn-sm" data-act="nbneu">+ Nachbar</button>
+      <label class="btn btn-ghost btn-sm" style="display:inline-flex;gap:6px;align-items:center;cursor:pointer">${K('upload', 13)}Eigentümerliste einlesen (PDF)<input type="file" accept="application/pdf,.pdf" id="nbPdf" hidden></label></div>
     <h3 style="margin:16px 0 8px;font-size:13px;color:var(--primary)">Eingesehene Pläne</h3>
     ${pl.map((p, i) => `<div class="pl" data-pl="${i}"><input data-pf="titel" value="${esc(p.titel || '')}" placeholder="z. B. Situationsplan"><input data-pf="massstab" value="${esc(p.massstab || '')}" placeholder="1:500"><input data-pf="datum" value="${esc(p.datum || '')}" placeholder="Datum"><button type="button" class="kg-ibtn danger" data-plweg="${i}" aria-label="Plan entfernen">${K('x', 12)}</button></div>`).join('')}
     <button type="button" class="btn btn-ghost btn-sm" data-act="plneu">+ Plan</button>
@@ -548,6 +549,50 @@ function laermHtml(b){
         .map(([k, t]) => `<label class="chk"><input type="checkbox" data-lb="${k}"${L.beilagen[k] ? ' checked' : ''}> ${t}</label>`).join('')}</div></div>`;
 }
 
+// Eigentümerliste (Grundstückliste der Berner Geometer, PDF) → Nachbarn
+// Zeilen: Grundstück · E-GRID · Art · Fläche · Eigentum · «Name Vorname Strasse Nr, PLZ Ort, Schweiz» (mehrere Personen untereinander)
+// Strasse = ein Wort + Hausnummer (mit Vorsatz wie «Obere», «Im», «Chemin de la» davor), dahinter «, PLZ Ort»
+const STRASSE = /^(.*?)\s+((?:(?:Obere|Untere|Alte|Neue|Hintere|Vordere|Innere|Äussere|Grosse|Kleine|Im|Am|Auf|In|Zum|Zur|Chemin|Route|Rue|Avenue|Ch\.)\s+(?:(?:de|du|des|la|le|l')\s+)*)?[A-ZÄÖÜ][\wäöüéèàâ.'-]*\s+\d+\s?[a-zA-Z]?(?:\/\d+)?),\s*(\d{4}\s+.+)$/;
+async function eigentuemerLesen(datei){
+  if(!window.pdfjsLib){ await ladeSkript('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js');
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; }
+  const doc = await pdfjsLib.getDocument({ data: await datei.arrayBuffer() }).promise;
+  let text = '';
+  for(let n = 1; n <= doc.numPages; n++){
+    const items = (await (await doc.getPage(n)).getTextContent()).items.filter(i => i.str.trim());
+    const zeilen = [];   // nach Höhe gruppieren, dann von links nach rechts
+    for(const i of items){ const y = i.transform[5], z = zeilen.find(q => Math.abs(q.y - y) < 2.5); z ? z.i.push(i) : zeilen.push({ y, i: [i] }); }
+    zeilen.sort((a, b) => b.y - a.y).forEach(z => { text += ' ' + z.i.sort((a, b) => a.transform[4] - b.transform[4]).map(i => i.str.trim()).join(' '); });
+  }
+  text = text.replace(/\s+/g, ' ').replace(/Erstelldatum [\d.]+ Seite \d+ \/ \d+/g, ' ').replace(/Grundstückliste Gemeinde .*? Bemerkungen/g, ' ');
+  const rx = /(?:^|\s)(\d+(?:\.\d+)?)\s+(CH\d{12})\s+([A-Z]{2,4})\s+([\d’'.]+)\s+(\S*eigentum|Anmerkungsgrundstück|\S+)\s+(.*?)(?=\s\d+(?:\.\d+)?\s+CH\d{12}\s|$)/g;
+  const nachVorname = s => { const w = s.split(' '); return w.length > 1 ? w.slice(1).join(' ') + ' ' + w[0] : s; };
+  const firma = s => /\b(AG|GmbH|SA|Sàrl|Genossenschaft|Stiftung|Verein|Gemeinde|Einwohnergemeinde|Burgergemeinde|Kanton|Eidgenossenschaft|Kirchgemeinde|Bund|SBB|BKW|Erbengemeinschaft)\b|\(UID/.test(s);
+  const gruppen = new Map();
+  for(const m of text.matchAll(rx)){
+    const [, parzelle, , , , art, rest] = m; if(/Anmerkung/.test(art) || /jeweilige/.test(rest)) continue;
+    const personen = rest.split(/,\s*(?:Schweiz|Deutschland|Österreich|Frankreich|Italien|Liechtenstein)\b/).map(s => s.trim()).filter(s => /\d{4}/.test(s)).map(s => {
+      // Adresse = Strasse + Nr. vor «, PLZ Ort» (oder nur PLZ Ort); davor steht der Name
+      const a = s.match(STRASSE) || s.match(/^(.*?)\s+(\d{4}\s+.+)$/);
+      if(!a) return { name: s, adresse: '' };
+      let name = a[1].replace(/\s*\(UID:[^)]*\)/, '').replace(/,\s*$/, '').trim(), adresse = (a.length === 4 ? a[2] + ', ' + a[3] : a[2]).trim();
+      const pf = name.match(/^(.*?),?\s+(Postfach(?:\s+\d+)?)$/); if(pf){ name = pf[1]; adresse = pf[2] + ', ' + adresse; }
+      return { name, adresse };
+    });
+    if(!personen.length) continue;
+    const schluessel = personen.map(p => p.name).sort().join('|');
+    const g = gruppen.get(schluessel) || { schluessel, personen, parzellen: [] }; g.parzellen.push(parzelle); gruppen.set(schluessel, g);
+  }
+  return [...gruppen.values()].map(g => {
+    const p = g.personen, alle = p.every(x => !firma(x.name)) ? p.map(x => x.name.split(' ')) : null;
+    let name;
+    if(alle && alle.every(w => w[0] === alle[0][0]) && alle.length > 1) name = alle.map(w => w.slice(1).join(' ')).join(' und ') + ' ' + alle[0][0];
+    else name = p.map(x => firma(x.name) ? x.name : nachVorname(x.name)).join(' und ');
+    const adr = [...new Set(p.map(x => x.adresse).filter(Boolean))];
+    return { schluessel: g.schluessel, name, adresse: adr.join(' / '), parzellen: g.parzellen };
+  });
+}
+
 // Klicks und Eingaben im Fenster
 let spT = null;
 const spaeter = (b, ae) => { Object.assign(b, ae); clearTimeout(spT); spT = setTimeout(() => speichern(b, ae), 500); };
@@ -585,6 +630,15 @@ document.addEventListener('change', async e => {
     if(t.dataset.feld === 'status' && t.value === 'eingereicht' && !b.eingereicht_am) ae.eingereicht_am = new Date().toISOString().slice(0, 10);
     if(t.dataset.feld === 'status' && t.value === 'bewilligt' && !b.bewilligt_am) ae.bewilligt_am = new Date().toISOString().slice(0, 10);
     await speichern(b, ae); return zeichneFenster(); }
+  if(t.id === 'nbPdf' && t.files[0]){ try {
+      const liste = await eigentuemerLesen(t.files[0]), eigene = String(b.parzelle || '').trim();
+      const eigen = liste.find(x => x.parzellen.includes(eigene));   // Bauherrschaft: ihre weiteren Parzellen nicht als Nachbar
+      const da = new Set((b.nachbarn || []).flatMap(x => String(x.parzelle || '').split(/\s*,\s*/)));
+      const neu = liste.filter(x => x !== eigen && !(eigen && x.schluessel === eigen.schluessel) && !x.parzellen.some(p => da.has(p)))
+        .map(x => ({ name: x.name, adresse: x.adresse, parzelle: x.parzellen.join(', '), naeherbaurecht: false, abstaende: [], unterschrieben: false }));
+      if(!liste.length) toast('In diesem PDF keine Eigentümer gefunden. Ist es die Grundstückliste vom Geometer?', true);
+      else { await speichern(b, { nachbarn: [...(b.nachbarn || []), ...neu] }); toast(neu.length ? `${neu.length} Nachbarn übernommen` : 'Alle Nachbarn sind schon erfasst.'); }
+    } catch(err){ fehler(err, 'Eigentümerliste'); } t.value = ''; return zeichneFenster(); }
   if(t.dataset.lf || t.dataset.lb){ const L = laermDaten(b);
     if(t.dataset.lb) L.beilagen = { ...L.beilagen, [t.dataset.lb]: t.checked };
     else L[t.dataset.lf] = t.type === 'checkbox' ? t.checked : t.value.trim();
