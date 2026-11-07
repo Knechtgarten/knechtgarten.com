@@ -82,9 +82,13 @@ Deno.serve(async (req) => {
     }
 
     if (body.aktion === 'suche') {
-      const q = String(body.q || '').replace(/[,()%*]/g, ' ').trim(); if (q.length < 2) return json({ ziele: [] });
-      const { data } = await admin.from('kunde').select(KFELDER).or(`name.ilike.%${q}%,nachname.ilike.%${q}%,firma.ilike.%${q}%,ort.ilike.%${q}%,strasse.ilike.%${q}%`).limit(12);
-      return json({ ziele: (data || []).map((k: any) => ziel(k, '')) });
+      // jedes Wort muss irgendwo vorkommen (Name, Ort, Strasse); gesucht wird mit dem längsten Wort, gefiltert mit allen
+      const woerter = String(body.q || '').replace(/[,()%*.]/g, ' ').toLowerCase().split(/\s+/).filter(w => w.length >= 2);
+      if (!woerter.length) return json({ ziele: [] });
+      const w = [...woerter].sort((a, b) => b.length - a.length)[0];
+      const { data } = await admin.from('kunde').select(KFELDER).or(`name.ilike.%${w}%,nachname.ilike.%${w}%,vorname.ilike.%${w}%,firma.ilike.%${w}%,ort.ilike.%${w}%,strasse.ilike.%${w}%`).limit(200);
+      const treffer = (data || []).filter((k: any) => { const t = [k.name, k.vorname, k.nachname, k.firma, k.ort, k.strasse, k.plz].join(' ').toLowerCase(); return woerter.every(x => t.includes(x)); }).slice(0, 12);
+      return json({ ziele: treffer.map((k: any) => ziel(k, '')) });
     }
 
     if (body.aktion === 'hochladen') {
