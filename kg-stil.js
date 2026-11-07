@@ -213,6 +213,8 @@ button.kg-kachel-kopf,a.kg-kachel-kopf{cursor:pointer;} button.kg-kachel-kopf:ho
      Seiten ohne Eintrag in KG.tools (z. B. Datenschutz) bleiben unverändert.
      --------------------------------------------------------------------------- */
   const seite = (location.pathname.split('/').pop() || 'index.html').replace(/\.html?$/, '') || 'index';
+  // Diese Seiten brauchen die ganze Bildschirmbreite (sonst gilt die gemeinsame Breite, siehe --kg-breite)
+  if(['einsatzplaner-live-v1', 'bauprogramm-live-v1', 'pendenzen-live-v1', 'tool-c-live-v1', 'lieferant-abgleich-live-v1', 'pflege-kunden-live-v1'].includes(seite)) document.documentElement.classList.add('kg-voll');
   const aktuell = TOOLS.find(t => t.seiten.includes(seite));
   // Browser-Tab: Knecht-Tool-Blatt als Icon (wenn die Seite kein eigenes hat, z. B. Pendenzen-App) und Name «Knecht-Tool · Tool»
   const tabKnecht = () => {
@@ -297,6 +299,12 @@ header.app.kg-leiste ~ main.wrap{margin-left:0!important;margin-right:auto!impor
 /* Weisse Leiste = Seite: [Ansicht-Segmente][Suche/Filter] … [Nebenaktionen][Hauptaktion] */
 .kg-seite{display:flex;align-items:center;gap:10px;min-height:50px;padding:8px 16px;box-sizing:border-box;background:#fff;border-bottom:1px solid #E1E5E9;flex-wrap:wrap;
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;font-size:13px;}
+/* Gemeinsame Breite aller Tools: Inhalt höchstens --kg-breite (≈ halber Bildschirm), mittig; Leiste und weisse Zeile richten sich danach.
+   Seiten, die die ganze Breite brauchen (Planer, Pendenzen-Board, Artikelstamm, Pflege), bekommen html.kg-voll */
+:root{--kg-breite:1280px;--kg-rand:max(16px,calc((100% - var(--kg-breite)) / 2 + 16px));}
+html:not(.kg-voll) main#appMain,html:not(.kg-voll) main#mainContent{max-width:var(--kg-breite)!important;margin-left:auto!important;margin-right:auto!important;box-sizing:border-box;width:100%;}
+html:not(.kg-voll) .kg-seite{padding-left:var(--kg-rand)!important;padding-right:var(--kg-rand)!important;}
+html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!important;padding-right:var(--kg-rand)!important;}
 .kg-seite.hidden{display:none!important;}
 .kg-seite .kg-l,.kg-seite .kg-m,.kg-seite .kg-r{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
 .kg-seite .kg-m{flex:1 1 260px;min-width:0;}
@@ -318,8 +326,8 @@ header.app.kg-leiste ~ main.wrap{margin-left:0!important;margin-right:auto!impor
 .kg-seg svg,.kg-seite .kg-haupt svg,.kg-seite .kg-neben svg{width:14px;height:14px;flex-shrink:0;}
 .kg-seg > button:hover,.kg-seg > a:hover{color:#232B35;background:#F5F7F9;}
 .kg-seg > .on,.kg-seg > [aria-pressed="true"]{background:var(--kg-tool,#323E4E)!important;color:#fff!important;}
-.kg-seite .kg-haupt{all:unset;box-sizing:border-box;display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 16px;border-radius:8px;background:#323E4E;color:#fff;
-  font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;}
+.kg-seite .kg-haupt{all:unset;box-sizing:border-box;display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 20px;border-radius:8px;background:#323E4E;color:#fff;
+  font-size:13.5px;font-weight:600;cursor:pointer;white-space:nowrap;box-shadow:0 1px 3px rgba(35,43,53,.18);}
 .kg-seite .kg-haupt:hover{background:#4C5C70;}
 .kg-seite .kg-neben{all:unset;box-sizing:border-box;display:inline-flex;align-items:center;gap:6px;height:34px;padding:0 12px;border-radius:8px;border:1px solid #D5DBE1;background:#fff;
   color:#323E4E;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;}
