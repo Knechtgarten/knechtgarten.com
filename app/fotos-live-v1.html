@@ -32,7 +32,11 @@ svg.i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.5;stro
 .klein{font-size:12.5px;color:var(--muted);}
 .ok{color:#3F7D3F;} .warn{color:#8A6410;}
 .vor{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;}
-.vor img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;background:#eef1f4;}
+.vor img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;background:#eef1f4;display:block;}
+.vor .f{position:relative;}
+.vor .f button{all:unset;cursor:pointer;position:absolute;top:3px;right:3px;width:24px;height:24px;border-radius:50%;background:rgba(35,43,53,.7);color:#fff;display:flex;align-items:center;justify-content:center;}
+.vor .f button svg.i{width:14px;height:14px;stroke-width:2;}
+.vor .plus{all:unset;box-sizing:border-box;cursor:pointer;aspect-ratio:1;border-radius:8px;border:1.5px dashed #C5CCD3;color:var(--primary);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:11px;}
 .ziel{all:unset;box-sizing:border-box;cursor:pointer;display:flex;gap:12px;align-items:center;min-height:58px;padding:8px 12px;border-radius:12px;border:1px solid var(--line);}
 .ziel[aria-pressed=true]{border:2px solid var(--primary);background:#F5F7F9;padding:7px 11px;}
 .ziel .p{width:20px;height:20px;border-radius:50%;border:2px solid #D5DBE1;flex:none;}
@@ -58,6 +62,7 @@ svg.i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.5;stro
   <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
   <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s-6.5-6-6.5-11a6.5 6.5 0 0 1 13 0c0 5-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/></symbol>
   <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
 </svg>
 
@@ -107,7 +112,7 @@ const gemerkt = () => { try { const m = JSON.parse(localStorage.getItem(MERK) ||
 const merken = z => { try { localStorage.setItem(MERK, JSON.stringify({ ...z, zeit: Date.now() })); } catch(_){} };
 
 function start(){
-  FOTOS = []; const m = gemerkt();
+  AUSWAHL = false; FOTOS = []; URLS.forEach(u => URL.revokeObjectURL(u)); URLS.clear(); const m = gemerkt();
   $('inhalt').innerHTML = `<button type="button" class="gross" id="bKamera">${I('cam')}Fotos aufnehmen</button>
     <button type="button" class="knopf hell" id="bGalerie">${I('bild')}Aus der Galerie wählen</button>
     ${m ? `<div class="karte"><span class="klein">Fotos gehen zurzeit an</span><b>${esc(m.name)}</b><button type="button" class="knopf hell" id="bVergessen" style="min-height:40px;font-size:14px">Andere Baustelle wählen</button></div>` : ''}
@@ -118,11 +123,14 @@ function start(){
   if($('bVergessen')) $('bVergessen').onclick = () => { try { localStorage.removeItem(MERK); } catch(_){} start(); };
   wsAnzeige();
 }
-const gewaehlt = e => { const f = [...e.target.files].filter(x => /^image\//.test(x.type)); e.target.value = ''; if(!f.length) return; FOTOS = f; bestaetigen(); };
+// Fotos sammeln: jedes neue Foto kommt dazu, bis «Alle ablegen» (die Kamera liefert pro Aufnahme meist nur ein Bild)
+const URLS = new Map(), bildUrl = f => URLS.get(f) || (URLS.set(f, URL.createObjectURL(f)), URLS.get(f));
+let AUSWAHL = false;
+const gewaehlt = e => { const f = [...e.target.files].filter(x => /^image\//.test(x.type)); e.target.value = ''; if(!f.length) return; FOTOS.push(...f); AUSWAHL ? zeichneWahl() : bestaetigen(); };
 $('inKamera').onchange = gewaehlt; $('inGalerie').onchange = gewaehlt;
 
 async function bestaetigen(){
-  const m = gemerkt();
+  AUSWAHL = true; const m = gemerkt();
   WAHL = m ? { kunde_id: m.kunde_id, name: m.name } : null;
   zeichneWahl('Suche Baustellen in deiner Nähe …');
   // Standort (höchstens 6 Sekunden), dann die Einsätze von heute mit Distanz
@@ -140,14 +148,18 @@ function zeichneWahl(laedt){
     : gemerkt() ? `<span class="klein">Wie bei den letzten Fotos</span>`
     : POS ? `<span class="klein warn">Keine Baustelle in deiner Nähe. Bitte auswählen.</span>` : `<span class="klein warn">Standort nicht verfügbar. Bitte auswählen.</span>`;
   const liste = [...ZIELE]; if(WAHL && !liste.some(z => z.kunde_id === WAHL.kunde_id)) liste.unshift({ kunde_id: WAHL.kunde_id, name: WAHL.name, info: 'zuletzt gewählt' });
-  $('inhalt').innerHTML = `<div class="karte"><h2>Wo sollen die ${FOTOS.length} Fotos hin?</h2>${hinweis}
-      <div class="vor">${FOTOS.slice(0, 8).map((_, i) => `<img alt="" data-v="${i}">`).join('')}</div>
+  if(!FOTOS.length){ start(); return; }
+  $('inhalt').innerHTML = `<div class="karte"><h2>${FOTOS.length} Foto${FOTOS.length === 1 ? '' : 's'}</h2>
+      <div class="vor">${FOTOS.map((f, i) => `<span class="f"><img alt="" src="${bildUrl(f)}"><button type="button" data-weg="${i}" aria-label="Foto entfernen">${I('x')}</button></span>`).join('')}
+        <button type="button" class="plus" id="pKam">${I('cam')}Foto</button><button type="button" class="plus" id="pGal">${I('bild')}Galerie</button></div></div>
+    <div class="karte"><h2>Wohin?</h2>${hinweis}
       ${liste.map(z => `<button type="button" class="ziel" data-z="${esc(z.kunde_id)}" aria-pressed="${WAHL?.kunde_id === z.kunde_id}"><i class="p"></i><span class="t"><b>${esc(z.name)}</b><small>${esc([z.info, z.distanz != null ? (z.distanz < 1000 ? z.distanz + ' m entfernt' : (z.distanz / 1000).toFixed(1) + ' km') : ''].filter(Boolean).join(' · '))}</small></span></button>`).join('')}
       <label class="such">${I('search')}<input type="text" id="qKunde" placeholder="Anderen Kunden suchen" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other"></label>
       <div id="trefTer"></div>
-      <button type="button" class="knopf dunkel" id="bAblegen"${WAHL ? '' : ' disabled'}>${WAHL ? `Ja, hier ablegen (${FOTOS.length})` : 'Baustelle auswählen'}</button>
+      <button type="button" class="knopf dunkel" id="bAblegen"${WAHL ? '' : ' disabled'}>${WAHL ? `Alle ${FOTOS.length} hier ablegen` : 'Baustelle auswählen'}</button>
       <button type="button" class="knopf hell" id="bAbbr">Abbrechen</button></div>`;
-  FOTOS.slice(0, 8).forEach((f, i) => { const u = URL.createObjectURL(f), im = $('inhalt').querySelector(`[data-v="${i}"]`); im.src = u; im.onload = () => URL.revokeObjectURL(u); });
+  $('inhalt').querySelectorAll('[data-weg]').forEach(b => b.onclick = () => { const f = FOTOS.splice(+b.dataset.weg, 1)[0]; URL.revokeObjectURL(URLS.get(f)); URLS.delete(f); zeichneWahl(); });
+  $('pKam').onclick = () => $('inKamera').click(); $('pGal').onclick = () => $('inGalerie').click();
   $('inhalt').querySelectorAll('[data-z]').forEach(b => b.onclick = () => { const z = liste.find(x => x.kunde_id === b.dataset.z) || ZIELE.find(x => x.kunde_id === b.dataset.z); WAHL = { kunde_id: z.kunde_id, name: z.name }; zeichneWahl(); });
   let qT = null, nr = 0;
   $('qKunde').oninput = e => { clearTimeout(qT); qT = setTimeout(async () => { const q = e.target.value.trim(), n = ++nr; if(q.length < 2){ $('trefTer').innerHTML = ''; return; }
@@ -158,15 +170,16 @@ function zeichneWahl(laedt){
   $('bAblegen').onclick = ablegen; $('bAbbr').onclick = start;
 }
 
-// Bild verkleinern (längste Seite 2400 px, JPEG) und als base64
+// Bild verkleinern (längste Seite 2000 px, JPEG) – reicht für Baustellenfotos und geht deutlich schneller
 async function verkleinern(f){
   const bmp = await createImageBitmap(f, { imageOrientation: 'from-image' }).catch(() => null);
-  if(!bmp) return { daten: await zuB64(f), typ: f.type };
-  const s = Math.min(1, 2400 / Math.max(bmp.width, bmp.height)), c = document.createElement('canvas');
-  c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s); c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
-  const blob = await new Promise(ok => c.toBlob(ok, 'image/jpeg', 0.85));
-  return { daten: await zuB64(blob), typ: 'image/jpeg' };
+  if(!bmp) return f;
+  const s = Math.min(1, 2000 / Math.max(bmp.width, bmp.height)), c = document.createElement('canvas');
+  c.width = Math.round(bmp.width * s); c.height = Math.round(bmp.height * s); c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height); if(bmp.close) bmp.close();
+  return await new Promise(ok => c.toBlob(b => ok(b || f), 'image/jpeg', 0.82));
 }
+// höchstens n Aufgaben gleichzeitig
+const parallel = async (liste, n, f) => { let i = 0; await Promise.all(Array.from({ length: Math.min(n, liste.length) }, async () => { while(i < liste.length){ const j = i++; await f(liste[j], j); } })); };
 const zuB64 = b => new Promise(ok => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1]); r.readAsDataURL(b); });
 const zeit = () => { const d = new Date(), z = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())}_${z(d.getHours())}-${z(d.getMinutes())}-${z(d.getSeconds())}`; };
 
@@ -174,13 +187,26 @@ async function ablegen(){
   const ziel = WAHL; if(!ziel) return; merken(ziel);
   const wer = String(ICH?.anzeigename || ICH?.email || '').split(/[\s@]/)[0] || 'Foto';
   $('inhalt').innerHTML = `<div class="karte"><h2>Fotos werden abgelegt …</h2><span class="klein" id="fz">0 von ${FOTOS.length}</span><div class="balken"><i id="fb"></i></div></div>`;
-  let ok = 0, offen = 0, ordner = '';
-  for(const [i, f] of FOTOS.entries()){
-    const auftrag = { aktion: 'hochladen', kunde_id: ziel.kunde_id, dateiname: `${zeit()}_${wer}${FOTOS.length > 1 ? '_' + (i + 1) : ''}.jpg`, lat: POS?.lat, lon: POS?.lon, ...(await verkleinern(f)) };
-    try { const d = await fn(auftrag); ok++; ordner = d.ordner; }
-    catch(err){ await wsNeu({ ...auftrag, name: ziel.name }); offen++; }
-    $('fz').textContent = `${i + 1} von ${FOTOS.length}`; $('fb').style.width = Math.round((i + 1) / FOTOS.length * 100) + '%';
-  }
+  // Einmal vorbereiten (Ordner + Upload-Sitzungen), dann direkt vom Handy zu Google, 3 gleichzeitig.
+  // Klappt das nicht: alter Weg über den Server, ohne Netz in die Warteschlange.
+  let ok = 0, offen = 0, fertig = 0, ordner = '', vb = null; const t0 = zeit(), erfasst = [];
+  const blobs = new Array(FOTOS.length); await parallel(FOTOS, 3, async (f, i) => { blobs[i] = await verkleinern(f); });
+  const namen = FOTOS.map((_, i) => `${t0}_${wer}${FOTOS.length > 1 ? '_' + (i + 1) : ''}.jpg`);
+  try { vb = await fn({ aktion: 'vorbereiten', kunde_id: ziel.kunde_id, origin: location.origin, dateien: blobs.map((b, i) => ({ name: namen[i], typ: 'image/jpeg', groesse: b.size })) }); ordner = vb.ordner; }
+  catch(_){ vb = null; }
+  await parallel(blobs, 3, async (b, i) => {
+    try {
+      if(!vb || !vb.sitzungen[i]) throw new Error('ohne Sitzung');
+      const r = await fetch(vb.sitzungen[i], { method: 'PUT', headers: { 'Content-Type': 'image/jpeg' }, body: b });
+      if(!r.ok) throw new Error('Upload ' + r.status);
+      const d = await r.json(); erfasst.push({ id: d.id, name: d.name }); ok++;
+    } catch(_){
+      const auftrag = { aktion: 'hochladen', kunde_id: ziel.kunde_id, dateiname: namen[i], lat: POS?.lat, lon: POS?.lon, typ: 'image/jpeg', daten: await zuB64(b) };
+      try { const d = await fn(auftrag); ok++; ordner = d.ordner; } catch(err){ await wsNeu({ ...auftrag, name: ziel.name }); offen++; }
+    }
+    fertig++; $('fz').textContent = `${fertig} von ${FOTOS.length}`; $('fb').style.width = Math.round(fertig / FOTOS.length * 100) + '%';
+  });
+  if(erfasst.length) fn({ aktion: 'erfasst', kunde_id: ziel.kunde_id, ordner_id: vb.ordner_id, dateien: erfasst, lat: POS?.lat, lon: POS?.lon }).catch(() => {});
   $('inhalt').innerHTML = `<div class="karte fertig"><span class="kreis">${I('check')}</span><h2>${ok} Foto${ok === 1 ? '' : 's'} abgelegt</h2>
       <span>${esc(ziel.name)}${ordner ? ' · ' + esc(ordner) : ''}</span>
       ${offen ? `<span class="klein warn">${offen} Foto${offen === 1 ? '' : 's'} warten auf Netz und werden automatisch nachgeladen.</span>` : ''}

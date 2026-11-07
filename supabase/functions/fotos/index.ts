@@ -6,7 +6,11 @@
 // Aktionen:
 //   { aktion: 'ziele', lat?, lon? }        → Einsätze heute (Planer) mit Distanz zum Standort
 //   { aktion: 'suche', q }                  → Kunden suchen (Name, Ort, Strasse)
-//   { aktion: 'hochladen', kunde_id, dateiname, typ, daten (base64), lat?, lon? }
+//   { aktion: 'vorbereiten', kunde_id, dateien: [{ name, typ, groesse }], origin }
+//        → Ordner einmal suchen/anlegen, pro Foto eine Upload-Sitzung bei Google; das Handy lädt die Bytes
+//          direkt dorthin (schnell, parallel, kein base64 über den Server). Die Sitzung erlaubt nur genau diese Datei.
+//   { aktion: 'erfasst', kunde_id, ordner_id, dateien: [{ id, name }], lat?, lon? } → in foto_ablage festhalten
+//   { aktion: 'hochladen', kunde_id, dateiname, typ, daten (base64), lat?, lon? } → alter Weg (Warteschlange ohne Netz)
 // ============================================================================
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
@@ -91,7 +95,14 @@ Deno.serve(async (req) => {
       return json({ ziele: treffer.map((k: any) => ziel(k, '')) });
     }
 
-    if (body.aktion === 'hochladen') {
+    if (body.aktion === 'erfasst') {
+      const rows = (body.dateien || []).filter((d: any) => d && d.id).map((d: any) => ({ benutzer_id: user.id, kunde_id: body.kunde_id, drive_datei_id: d.id, dateiname: d.name,
+        ordner_id: body.ordner_id, lat: Number(body.lat) || null, lon: Number(body.lon) || null }));
+      if (rows.length) await admin.from('foto_ablage').insert(rows);
+      return json({ ok: true });
+    }
+
+    if (body.aktion === 'hochladen' || body.aktion === 'vorbereiten') {
       const { data: k } = await admin.from('kunde').select(KFELDER + ',kundennummer').eq('id', body.kunde_id).maybeSingle();
       if (!k) return json({ error: 'Kunde nicht gefunden.' }, 404);
       // Zugang des Firmenkontos
@@ -127,6 +138,18 @@ Deno.serve(async (req) => {
       }
       const unter = await kinder(ko.drive_id);
       const u = unter.find(f => /^22\b/.test(f.name)) || unter.find(f => /bauablauf/i.test(f.name)) || await neu('22-Fotos-Bauablauf und Schluss', ko.drive_id);
+      if (body.aktion === 'vorbereiten') {
+        const origin = String(body.origin || '');
+        const sitzungen = await Promise.all((body.dateien || []).map(async (f: any) => {
+          const r = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true&fields=id,name', { method: 'POST',
+            headers: { Authorization: 'Bearer ' + tok.access_token, 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Type': String(f.typ || 'image/jpeg'),
+              ...(f.groesse ? { 'X-Upload-Content-Length': String(f.groesse) } : {}), ...(origin ? { Origin: origin } : {}) },
+            body: JSON.stringify({ name: String(f.name || 'Foto.jpg'), parents: [u.id] }) });
+          if (!r.ok) throw new Error('Google Drive: ' + ((await r.json().catch(() => ({})))?.error?.message || r.status));
+          return r.headers.get('Location');
+        }));
+        return json({ sitzungen, ordner_id: u.id, ordner: `${ko.jahr} › ${u.name}`, kunde: kName(k) });
+      }
       // Datei hochladen
       const bytes = Uint8Array.from(atob(String(body.daten || '')), c => c.charCodeAt(0));
       if (!bytes.length) return json({ error: 'Kein Bild erhalten.' }, 400);
