@@ -139,6 +139,7 @@
     verw: P.gear,
     // Werkzeuge = grosser Schraubenschlüssel (grau); Doku-Tools = Dokument mit Zahnrad (Beere, noch ohne Seite / TOOLS-Eintrag)
     werkzeuge: '<path d="M16.8 3.4a5.2 5.2 0 0 0-6.9 6.6L2.8 17.1a2.2 2.2 0 0 0 3.1 3.1l7.1-7.1a5.2 5.2 0 0 0 6.6-6.9l-3.1 3.1-2.8-.6-.6-2.8z"/>',
+    bew: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 14l2 2 4-4"/>',
     doku: '<path d="M13 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h6"/><path d="M13 3v5h5v3"/><path d="M8 12h4M8 16h2"/><circle cx="18" cy="17.5" r="2"/><path d="M18 13.5v1.2M18 20.3v1.2M14 17.5h1.2M20.8 17.5H22M15.2 14.7l.8.8M20 19.5l.8.8M15.2 20.3l.8-.8M20 15.5l.8-.8"/>'
   };
   // Haupttools: Schlüssel, Name, Einstiegsseite, Icon, Farbe, Modul in modul_sichtbarkeit, zugehörige Seiten
@@ -158,6 +159,8 @@
     { k: 'werkzeuge', n: 'Werkzeuge', url: 'werkzeuge-live-v1.html', farbe: PAL.grau[1], akzent: PAL.grau[3],
       seiten: ['werkzeuge-live-v1', 'werkzeug-pool-chlor-live-v1', 'werkzeug-pool-salz-live-v1', 'werkzeug-pool-alk-live-v1', 'werkzeug-pool-afm-live-v1',
         'werkzeug-pool-volumen-live-v1', 'werkzeug-bau-diagonale-live-v1', 'werkzeug-bau-kies-live-v1', 'werkzeug-bau-stahl-live-v1', 'werkzeug-bau-schalit-live-v1', 'werkzeug-pflege-spritz-live-v1', 'werkzeug-allg-gefaelle-live-v1'] },
+    // Bewilligungen: Baugesuche vorbereiten (Geodaten, Näherbaurecht, Zustimmung Nachbarn, eBau)
+    { k: 'bew', n: 'Bewilligungen', url: 'bewilligungen-live-v1.html', farbe: PAL.gruen[1], akzent: PAL.gruen[3], seiten: ['bewilligungen-live-v1'] },
     { k: 'doku', n: 'Doku-Tools', url: 'doku-live-v1.html', farbe: PAL.beere[1], akzent: PAL.beere[3],
       seiten: ['doku-live-v1', 'doku-dokument-live-v1', 'doku-datei-live-v1', 'doku-personen-live-v1'] },
     { k: 'verw', n: 'Einstellungen', url: 'einstellungen-uebersicht-live-v1.html', farbe: '#FFFFFF', akzent: PAL.grau[3], admin: true,
