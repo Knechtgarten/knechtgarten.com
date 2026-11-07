@@ -446,6 +446,10 @@ $('bwNeu').addEventListener('click', () => {
       bauvorhaben: h.querySelector('#nBv').value.trim() || null, abklaerung: abkl, strasse: k?.strasse || null, plz: k?.plz || null,
       ort: String(k?.ort || '').replace(/^\d{4}\s*/, '') || null, erstellt_von: ME };
     if(!row.plz){ const m = String(k?.ort || '').match(/^(\d{4})/); if(m) row.plz = m[1]; }
+    if(!row.projekt_id){ const { data: pj } = await sb.from('projekt').select('id').eq('kunde_id', kunde.id).is('archiviert_am', null);
+      if((pj || []).length === 1) row.projekt_id = pj[0].id;
+      else if(!(pj || []).length){ const { data: np, error: ep } = await sb.from('projekt').insert({ kunde_id: kunde.id, titel: row.bauvorhaben, projektleiter_id: row.projektleiter_id || ME, erstellt_von: ME }).select('id').single();
+        if(ep) fehler(ep, 'Projekt'); else { row.projekt_id = np.id; toast('Projekt angelegt (Kontakte › Projekte)'); } } }
     const { data: neu, error } = await sb.from('bewilligung').insert(row).select('*, kunde:kunde_id(id,name,vorname,nachname,firma,strasse,plz,ort)').single();
     if(error){ e.target.disabled = false; e.target.textContent = 'Starten'; return fehler(error, 'Anlegen'); }
     BEW.unshift(neu); zu(); oeffne(neu.id); await geodatenHolen(neu); zeichneListe(); if(OFFEN === neu.id) zeichneFenster(); };
@@ -456,7 +460,9 @@ $('bwNeu').addEventListener('click', () => {
 // Arbeitsfenster eines Gesuchs
 // ---------------------------------------------------------------------------
 let OFFEN = null, AKT_TEIL = null, AKT_DOK = null, ANG_ZU = false;   // AKT_DOK = { art: 'nbr'|'zust', i }
-function oeffne(id){ OFFEN = id; AKT_TEIL = null; history.replaceState(null, '', '?gesuch=' + id); zeichneFenster(); }
+async function oeffne(id){ OFFEN = id; AKT_TEIL = null; history.replaceState(null, '', '?gesuch=' + id); zeichneFenster();
+  // Nachbarn frisch holen: den Unterschriften-Stand ändert das Projekt (Kontakte › Projekte)
+  const { data } = await sb.from('bewilligung').select('nachbarn').eq('id', id).maybeSingle(); const b = BEW.find(x => x.id === id); if(data && b){ b.nachbarn = data.nachbarn; if(OFFEN === id) zeichneFenster(); } }
 function schliessen(){ OFFEN = null; $('ovlHost').innerHTML = ''; history.replaceState(null, '', location.pathname); zeichneListe(); }
 const G = () => BEW.find(b => b.id === OFFEN);
 async function unterschriftUrl(plId){ const p = PL.find(x => x.id === plId); if(!p?.unterschrift_pfad) return null;
@@ -525,7 +531,7 @@ function dokumente(b){
     l.push({ n: x.name || 'Grundeigentümer ohne Namen', st: x.name && x.parzelle ? 'ok' : 'warn', info: x.parzelle ? 'Parzelle ' + x.parzelle : 'Parzelle fehlt', act: 'dok', art: 'zustw', i, pdf: 'zustw', weg: i }); });
   if(a.waermepumpe){ const L = laermDaten(b), R = L.lwa2 ? laermRechnung(L) : null;
     l.push({ kopf: 'Wärmepumpe' });
-    l.push({ n: 'Lärmschutznachweis', st: !R ? 'warn' : R.ok ? 'ok' : 'fehler', info: !R ? 'Wärmepumpe wählen' : R.ok ? `Lr ${R.lrT.toFixed(1)} / ${R.lrN.toFixed(1)} dB(A)` : 'Planungswerte überschritten', act: 'dok', art: 'laerm', pdf: R ? 'lsn' : null });
+    l.push({ n: 'Lärmschutznachweis', st: !R ? 'warn' : R.ok ? 'ok' : 'fehler', info: !R ? 'Wärmepumpe wählen' : R.ok ? '' : 'Planungswerte überschritten', act: 'dok', art: 'laerm', pdf: R ? 'lsn' : null });
     const w = WPK.find(x => x.id === L.wp_id);
     l.push({ n: 'Datenblatt Wärmepumpe', st: w?.datenblatt_pfad ? 'ok' : 'fehlt', info: w ? (w.datenblatt_pfad ? w.modell : 'kein Datenblatt hinterlegt') : 'Wärmepumpe wählen', act: 'dok', art: 'datenblatt', pdf: w?.datenblatt_pfad ? 'datenblatt' : null });
     l.push({ n: 'Situationsplan Standort Wärmepumpe', st: dh.wp_situation?.erledigt ? 'ok' : 'fehlt', info: dh.wp_situation?.erledigt ? 'bereit' : 'abhaken, wenn bereit', haken: 'wp_situation' }); }
