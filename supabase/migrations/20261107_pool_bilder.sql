@@ -11,3 +11,4 @@ update pool_katalog set bild_url = '/bilder/pool/farbe-hellgrau.png' where kateg
 update pool_katalog set bild_url = '/bilder/pool/farbe-schwarz.png' where kategorie = 'farbe' and schluessel = 'schwarz';
 update pool_katalog set bild_url = '/bilder/pool/farbe-dunkelgrau.png' where kategorie = 'farbe' and schluessel = 'dunkelgrau';
 update pool_katalog set bild_url = '/bilder/pool/farbe-anthrazit.png' where kategorie = 'farbe' and schluessel = 'anthrazit';
+update pool_katalog set bild_url = '/bilder/pool/farbe-weiss.png' where kategorie = 'farbe' and schluessel = 'weiss';
