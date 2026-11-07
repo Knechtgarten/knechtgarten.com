@@ -6,6 +6,7 @@
 // Aktionen:
 //   { aktion: 'holen', bewilligung_id, neu? }  → Gemeinde, Zone der Parzelle, Auszug (oder status 'laeuft')
 //   { aktion: 'frage', bewilligung_id, frage, original? } → Antwort mit Artikel (original: im PDF nachlesen)
+//   { aktion: 'eigentuemer', pdf (base64) } → Eigentümer aus einer eingescannten Grundstückliste (ohne Textebene)
 // ============================================================================
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
@@ -49,6 +50,17 @@ Deno.serve(async (req) => {
     const { data: ich } = await admin.from('benutzer').select('rolle,aktiv').eq('id', user.id).maybeSingle();
     if (!['admin', 'buero_team'].includes(ich?.rolle) || ich?.aktiv === false) return json({ error: 'Nur für das Büro.' }, 403);
     const body = await req.json();
+
+    if (body.aktion === 'eigentuemer') {
+      const pdf = String(body.pdf || ''); if (!pdf) return json({ error: 'Kein PDF erhalten.' }, 400);
+      const sys = `Du liest eine Grundstückliste (Eigentümerliste) eines Berner Geometers. Antworte NUR mit JSON:
+{"eigentuemer":[{"name":"Sandro und Tamara Bertolino","adresse":"Untere Gasse 55f, 3645 Zwieselberg","parzellen":["369"]}]}
+Regeln: pro Eigentümer bzw. Eigentümergemeinschaft ein Eintrag; gleiche Eigentümer mit mehreren Grundstücken zusammenfassen (alle Nummern in parzellen).
+Personen als «Vorname Nachname», mehrere Personen mit «und» (gleicher Nachname: «Sandro und Tamara Bertolino»). Firmen und Gemeinden unverändert.
+Adresse ohne «Schweiz». Anmerkungsgrundstücke und «jeweilige Eigentümer» weglassen. Nichts erfinden.`;
+      const r = await claude([{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdf } }, { type: 'text', text: 'Eigentümer als JSON.' }], sys, 4000);
+      return json({ eigentuemer: jsonAus(r.text)?.eigentuemer || [] });
+    }
     const { data: b } = await admin.from('bewilligung').select('id,egrid,reglement,geodaten').eq('id', body.bewilligung_id).maybeSingle();
     if (!b?.egrid) return json({ error: 'Gesuch ohne EGRID (zuerst Geodaten holen).' }, 400);
 
