@@ -170,6 +170,7 @@ button.kg-kachel-kopf,a.kg-kachel-kopf{cursor:pointer;} button.kg-kachel-kopf:ho
     anbindung: '<path d="M9 3v4M15 3v4"/><path d="M7 7h10v4a5 5 0 0 1-10 0z"/><path d="M12 16v5"/>',
     // Werkzeuge = grosser Schraubenschlüssel (grau); Doku-Tools = Dokument mit Zahnrad (Beere, noch ohne Seite / TOOLS-Eintrag)
     werkzeuge: '<path d="M16.8 3.4a5.2 5.2 0 0 0-6.9 6.6L2.8 17.1a2.2 2.2 0 0 0 3.1 3.1l7.1-7.1a5.2 5.2 0 0 0 6.6-6.9l-3.1 3.1-2.8-.6-.6-2.8z"/>',
+    pool: '<path d="M3 17c1.5 0 1.5 1 3 1s1.5-1 3-1 1.5 1 3 1 1.5-1 3-1 1.5 1 3 1 1.5-1 3-1"/><path d="M7 14V6a2 2 0 0 1 4 0M13 14V6a2 2 0 0 1 4 0M7 9h6M7 12h6"/>',
     bew: '<path d="M3 6.5l6-2.5 6 2.5 6-2.5v13.5l-6 2.5-6-2.5-6 2.5z"/><path d="M9 4v13.5M15 6.5V20"/><path d="M5.5 12.5l13-3.2M5.5 11.3v2.4M18.5 8.1v2.4"/>',
     doku: '<path d="M13 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h6"/><path d="M13 3v5h5v3"/><path d="M8 12h4M8 16h2"/><circle cx="18" cy="17.5" r="2"/><path d="M18 13.5v1.2M18 20.3v1.2M14 17.5h1.2M20.8 17.5H22M15.2 14.7l.8.8M20 19.5l.8.8M15.2 20.3l.8-.8M20 15.5l.8-.8"/>'
   };
@@ -191,6 +192,8 @@ button.kg-kachel-kopf,a.kg-kachel-kopf{cursor:pointer;} button.kg-kachel-kopf:ho
       seiten: ['werkzeuge-live-v1', 'werkzeug-pool-chlor-live-v1', 'werkzeug-pool-salz-live-v1', 'werkzeug-pool-alk-live-v1', 'werkzeug-pool-afm-live-v1',
         'werkzeug-pool-volumen-live-v1', 'werkzeug-bau-diagonale-live-v1', 'werkzeug-bau-kies-live-v1', 'werkzeug-bau-stahl-live-v1', 'werkzeug-bau-schalit-live-v1', 'werkzeug-pflege-spritz-live-v1', 'werkzeug-allg-gefaelle-live-v1'] },
     // Pläne & Bewilligungen: Grundstückskarte, Baugesuche vorbereiten (Geodaten, Näherbaurecht, Zustimmung Nachbarn, eBau)
+    // Pool-Konfigurator: Rechteckbecken planen (Grundriss, Schnitt, 3D), Kundenblatt, Preisanfrage, Elektriker-Blatt
+    { k: 'pool', n: 'Pool-Konfigurator', url: 'pool-konfigurator-live-v1.html', farbe: PAL.petrol[1], akzent: PAL.petrol[3], seiten: ['pool-konfigurator-live-v1'] },
     { k: 'bew', n: 'Pläne & Bewill.', url: 'bewilligungen-live-v1.html', farbe: PAL.grau[2], akzent: PAL.grau[4], seiten: ['bewilligungen-live-v1'] },
     { k: 'doku', n: 'Doku-Tools', url: 'doku-live-v1.html', farbe: PAL.beere[1], akzent: PAL.beere[3],
       seiten: ['doku-live-v1', 'doku-dokument-live-v1', 'doku-datei-live-v1', 'doku-personen-live-v1'] },
