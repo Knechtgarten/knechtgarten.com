@@ -107,6 +107,10 @@ tr.offertenrow td{padding:0;border-bottom:1px solid var(--soft);}
 .pjdi{display:flex;flex-direction:column;gap:2px;flex:1;} .pjdf{display:flex;justify-content:flex-end;gap:8px;}
 .pjchk{all:unset;box-sizing:border-box;cursor:pointer;display:flex;align-items:center;gap:10px;padding:4px 8px;border-radius:8px;font-size:13.5px;color:#232B35;} .pjchk:hover{background:#F5F7F9;}
 .pjzl{display:flex;align-items:center;border-radius:8px;} .pjzl .pjchk{flex:1;} .pjgr{cursor:grab;color:#A3B0BE;display:flex;padding:0 0 0 2px;} .pjzl:hover .pjgr{color:#4C5C70;} .pjzl.zieht{opacity:.4;} .pjzl.ziel{box-shadow:inset 0 2px 0 #323E4E;}
+.pjunt{border:1px solid #E1E5E9;border-radius:8px;margin:0 0 6px;} .pjunt summary{cursor:pointer;display:flex;align-items:center;gap:8px;padding:7px 10px;font-size:13.5px;} .pjunt summary span{margin-left:auto;font-size:12px;color:#6B7079;}
+.pjur{display:flex;align-items:center;gap:8px;padding:4px 10px;border-top:1px solid #EEF1F4;font-size:13px;} .pjur > span{flex:1;min-width:0;display:flex;flex-direction:column;} .pjur small{font-size:11.5px;color:#6B7079;}
+.pjur select{height:28px;border:1px solid #D5DBE1;border-radius:7px;font:inherit;font-size:12px;padding:0 4px;background:#fff;}
+.pjdot{width:10px;height:10px;border-radius:50%;flex:none;background:#A3B0BE;} .pjdot.versendet{background:#E57E34;} .pjdot.unterschrieben{background:#3F7D3F;} .pjdot.abgelehnt{background:#A63A52;}
 .pjex{margin-left:4px;} .pjblk{flex:1;display:flex;flex-direction:column;} .pjzl:has(.pjblk){align-items:flex-start;} .pjzl:has(.pjblk) .pjgr{padding-top:7px;}
 .pjneu{display:flex;align-items:center;margin-bottom:6px;} .pjneu .pjgr{visibility:hidden;} .pjneu .pjin{flex:1;display:flex;align-items:center;gap:10px;padding:4px 8px;} .pjneu .pjbox{border-style:dashed;border-color:#B9C2CC;}
 .pjneu input{flex:1;min-width:0;height:22px;border:0;border-bottom:1px dashed #B9C2CC;padding:0;background:none;font:inherit;font-size:13.5px;color:#232B35;} .pjneu input:focus{border-bottom:1px solid #323E4E;outline:0;}
@@ -1447,6 +1451,8 @@ async function ladeProjekte(){
     PJ.ben.length ? { data: PJ.ben } : sb.rpc('pflege_zustaendige')
   ]);
   if(p.error){ showToast(friendlyError(p.error), true); return; }
+  const ids = (p.data || []).map(x => x.id);
+  PJ.bew = ids.length ? ((await sb.from('bewilligung').select('id,projekt_id,status,eingereicht_am,bewilligt_am,nachbarn').in('projekt_id', ids)).data || []) : [];
   PJ.liste = p.data || []; PJ.einst = e.data || { checklisten: { bb: [], avor: [] }, fristen: {} }; PJ.ben = b.data || []; PJ.geladen = true;
   if($('nPj')) $('nPj').textContent = PJ.archiv ? '' : PJ.liste.length;
 }
@@ -1472,6 +1478,15 @@ const pjKurz = d => d ? `${d.getDate()}.${d.getMonth() + 1}.` : '';
 const pjBen = id => { const b = PJ.ben.find(x => x.id === id); return b ? (b.anzeigename || String(b.email || '').split('@')[0]).split(' ')[0] : '–'; };
 // Fälligkeit → 0 normal, 1 gelb, 2 orange, 3 rot
 function pjStufe(due){ if(!due) return 0; const F = pjF(), t = (due - pjHeute()) / 864e5; return t < 0 ? 2 : t <= F.gelb ? 1 : 0; }   // 1 bald fällig, 2 überfällig
+// Unterschriften aus «Pläne & Bewill.»: pro Nachbar die Zustimmung, bei Näherbaurecht zusätzlich dieses Dokument
+const PJ_UST = [['fehlt', 'fehlt'], ['versendet', 'versendet'], ['unterschrieben', 'unterschrieben'], ['abgelehnt', 'abgelehnt']];
+function pjUnterschriften(p){
+  const l = [];
+  (PJ.bew || []).filter(b => b.projekt_id === p.id).forEach(b => (b.nachbarn || []).forEach((x, i) => {
+    l.push({ art: 'zust', bew: b.id, i, name: x.name || 'ohne Namen', parz: x.parzelle, s: x.st_zust?.s || 'fehlt', am: x.st_zust?.am });
+    if(x.naeherbaurecht) l.push({ art: 'nbr', bew: b.id, i, name: x.name || 'ohne Namen', parz: x.parzelle, s: x.st_nbr?.s || 'fehlt', am: x.st_nbr?.am }); }));
+  return l;
+}
 // Stand aller Schritte eines Projekts
 function pjSchritte(p){
   const S = p.schritte || {}, F = pjF(), heute = pjIso(pjHeute());
@@ -1480,7 +1495,7 @@ function pjSchritte(p){
   const st = ab.stufe || 0;
   r.ab = { w: st === 2 ? 100 : st === 1 ? 50 : 0, lab: st === 2 ? 'erhalten' : st === 1 ? 'versendet' : 'offen', due: st < 1 ? pjPlus(p.zugesagt_am, F.ab) : null, name: 'AB' };
   if(bb.keine) r.bb = { w: 100, lab: 'keine nötig', due: null, name: 'Baubewilligung' };
-  else { const cl = pjListe(S, 'bb'), n = cl.filter(c => (bb.punkte || {})[c.k]).length + (bb.vollstaendig ? 1 : 0) + (bb.erhalten ? 1 : 0) + (bb.kosten ? 1 : 0), tot = cl.length + 3;
+  else { const cl = pjListe(S, 'bb'), us = pjUnterschriften(p), n = cl.filter(c => (bb.punkte || {})[c.k]).length + (bb.vollstaendig ? 1 : 0) + (bb.erhalten ? 1 : 0) + (bb.kosten ? 1 : 0) + us.filter(u => u.s === 'unterschrieben').length, tot = cl.length + 3 + us.length;
     r.bb = { w: Math.round(n / tot * 100), lab: bb.erhalten ? (bb.kosten ? 'fertig' : 'erhalten') : `${n} / ${tot}`, due: !(bb.punkte || {}).eingereicht ? pjPlus(p.zugesagt_am, F.bb) : null, name: 'Baubewilligung', nachtraege: (bb.nachtraege || []).length }; }
   const cA = pjListe(S, 'avor'), nA = cA.filter(c => (av.punkte || {})[c.k]).length, avFertig = cA.length && nA === cA.length;
   r.avor = { w: cA.length ? Math.round(nA / cA.length * 100) : 0, lab: `${nA} / ${cA.length}`, due: avFertig ? null : p.baustart ? pjPlus(p.baustart, -F.avor_vor_baustart) : pjPlus(p.zugesagt_am, F.avor_ohne_baustart), name: p.baustart ? 'AVOR' : 'AVOR (Baustart eintragen)' };
@@ -1588,10 +1603,19 @@ function pjDialog(p, s){
       const fest = { _keine: box(b.keine, 'data-bbk', 'Braucht keine Baubewilligung'), _nach: nach && `<div class="pjblk">${nach}</div>`,
         _voll: box(b.vollstaendig, 'data-bbv', 'Baubewilligung vollständig (von unserer Seite)', b.vollstaendig),
         _erh: box(b.erhalten, 'data-bbe', 'Baubewilligung erhalten', b.erhalten), _kost: box(b.kosten, 'data-bbc', 'Kosten Baubewilligung verrechnet (vor der 1. Akonto)', b.kosten) };
-      return b.keine ? pjZeilen('bb', b, 'bb', fest, c => c.k === '_keine') : pjZeilen('bb', b, 'bb', fest) + neuFeld; }
+      return b.keine ? pjZeilen('bb', b, 'bb', fest, c => c.k === '_keine') : pjUntHtml() + pjZeilen('bb', b, 'bb', fest) + neuFeld; }
     const z = (S.zahlung || {}).stand || 'offen';
     return [['offen', 'noch offen'], ['bezahlt', 'vollständig bezahlt'], ['m1', '1. Mahnung verschickt'], ['m2', '2. Mahnung verschickt']].map(([k, t]) => `<button type="button" class="pjopt${z === k ? ' an' : ''}" data-za="${k}"><i class="pjo ${k}"></i>${t}</button>`).join('')
       + `<div class="pjhint">${(S.sr || {}).stufe === 2 ? 'Fällig ' + pjF().zahlung + ' Tage nach der Schlussrechnung.' : 'Die Frist läuft ab der versendeten Schlussrechnung.'}</div>`; };
+  const UOFFEN = new Set();
+  const pjUntHtml = () => { const us = pjUnterschriften(p); if(!us.length) return '';
+    const bew = (PJ.bew || []).find(b => b.projekt_id === p.id), STD = { vorbereitung: 'in Vorbereitung', eingereicht: 'eingereicht', bewilligt: 'bewilligt', abgelehnt: 'abgelehnt', zurueckgezogen: 'zurückgezogen' };
+    const gruppe = (art, t) => { const g = us.filter(u => u.art === art); if(!g.length) return ''; const u = g.filter(x => x.s === 'unterschrieben').length, ab = g.some(x => x.s === 'abgelehnt');
+      return `<details class="pjunt" data-ug="${art}"${UOFFEN.has(art) ? ' open' : ''}><summary><i class="pjdot ${ab ? 'abgelehnt' : u === g.length ? 'unterschrieben' : g.some(x => x.s !== 'fehlt') ? 'versendet' : ''}"></i><b>${t}</b><span>${u} / ${g.length} unterschrieben</span></summary>
+        ${g.map(x => `<div class="pjur"><i class="pjdot ${x.s}"></i><span>${escHtml(x.name)}${x.parz ? `<small>Parz. ${escHtml(x.parz)}</small>` : ''}</span>${x.am && x.s !== 'fehlt' ? `<small class="pjam">${pjKurz(pjD(x.am))}</small>` : ''}
+          <select data-ust="${x.bew}|${x.i}|${art}" aria-label="Stand ${escHtml(x.name)}">${PJ_UST.map(([v, l]) => `<option value="${v}"${x.s === v ? ' selected' : ''}>${l}</option>`).join('')}</select></div>`).join('')}</details>`; };
+    return `<div class="pjblk">${gruppe('zust', 'Zustimmungen Nachbarn')}${gruppe('nbr', 'Näherbaurechte')}
+      ${bew ? `<div class="pjhint">Gesuch ${STD[bew.status] || bew.status}${bew.eingereicht_am ? ' am ' + pjKurz(pjD(bew.eingereicht_am)) : ''} · <a href="bewilligungen-live-v1.html?gesuch=${bew.id}">in «Pläne & Bewill.» öffnen</a></div>` : ''}</div>`; };
   const zeichnen = () => { w.innerHTML = `<div class="pjdlg" role="dialog" aria-label="${titel}"><div class="pjdk"><div><b>${titel}</b><small>${escHtml(kn.firma || kn.nachname || kn.name || '')}${p.titel ? ' · ' + escHtml(p.titel) : ''}</small></div><button type="button" class="kg-ibtn" data-zu aria-label="Schliessen">${KG.icon('x', 14)}</button></div>
     <div class="pjdi">${inhalt()}</div><div class="pjdf"><button type="button" class="btn btn-primary" data-zu>Fertig</button></div></div>`; };
   zeichnen(); document.body.appendChild(w);
@@ -1628,7 +1652,13 @@ function pjDialog(p, s){
   w.addEventListener('dragend', () => { zieh = null; w.querySelectorAll('.pjzl').forEach(x => x.classList.remove('zieht', 'ziel')); });
   w.addEventListener('drop', e => { const z = e.target.closest?.('.pjzl'); if(!zieh || !z) return; e.preventDefault(); const von = zieh, nach = z.dataset.zk, art = z.dataset.zart; zieh = null; if(von === nach) return;
     setz(S => { const alt = pjReihe(S, art).map(c => c.k), runter = alt.indexOf(von) < alt.indexOf(nach), keys = alt.filter(k => k !== von), i = keys.indexOf(nach) + (runter ? 1 : 0); keys.splice(i, 0, von); (S[art] = S[art] || {}).reihe = keys; }); });
-  w.addEventListener('change', async e => { if(e.target.id === 'pjBs'){ if(await pjSpeichern(p, { baustart: e.target.value || null })) zeichnen(); } });
+  w.addEventListener('toggle', e => { const d = e.target.closest?.('[data-ug]'); if(d){ if(d.open) UOFFEN.add(d.dataset.ug); else UOFFEN.delete(d.dataset.ug); } }, true);
+  w.addEventListener('change', async e => {
+    if(e.target.dataset.ust){ const [bid, i, art] = e.target.dataset.ust.split('|'), b = (PJ.bew || []).find(x => x.id === bid); if(!b) return;
+      const nb = JSON.parse(JSON.stringify(b.nachbarn || [])); nb[+i]['st_' + art] = { s: e.target.value, am: pjIso(pjHeute()) };
+      const { error } = await sb.from('bewilligung').update({ nachbarn: nb }).eq('id', bid); if(error){ showToast(friendlyError(error), true); return; }
+      b.nachbarn = nb; zeichnen(); projekteZeichnen(); return; }
+    if(e.target.id === 'pjBs'){ if(await pjSpeichern(p, { baustart: e.target.value || null })) zeichnen(); } });
   w.addEventListener('keydown', e => { if(e.key === 'Escape') w.remove(); });
 }
 // Projekt von Hand starten (ohne Offerten-Board)
