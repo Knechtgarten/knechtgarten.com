@@ -9,3 +9,4 @@ create policy pool_bilder_loeschen on storage.objects for delete to authenticate
 -- Hellgrau: Foto von Stefan (liegt im Tool unter /bilder/pool/)
 update pool_katalog set bild_url = '/bilder/pool/farbe-hellgrau.png' where kategorie = 'farbe' and schluessel = 'hellgrau';
 update pool_katalog set bild_url = '/bilder/pool/farbe-schwarz.png' where kategorie = 'farbe' and schluessel = 'schwarz';
+update pool_katalog set bild_url = '/bilder/pool/farbe-dunkelgrau.png' where kategorie = 'farbe' and schluessel = 'dunkelgrau';
