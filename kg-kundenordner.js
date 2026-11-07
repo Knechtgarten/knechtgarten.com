@@ -105,15 +105,30 @@
     await lesen(ordner, [], 1);
     return out;
   }
+  const ORD_ICON = {
+    lupe: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#8b9097" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>',
+    mic: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></svg>',
+    ordner: g => `<svg width="${g}" height="${g}" viewBox="0 0 24 24" fill="${g > 15 ? '#5f6873' : '#9aa2ab'}" aria-hidden="true"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4.6l2 2h8.4A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z"/></svg>`,
+    alle: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2.5"/><path d="M4 9h16M9 9v11"/></svg>',
+    pfeil: '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>' };
   const CSS = `
 .kab-ovl{position:fixed;inset:0;z-index:300;background:rgba(35,43,53,.45);display:flex;align-items:center;justify-content:center;padding:16px}
 .kab-fen{width:min(1240px,100%);height:min(820px,100%);background:#fff;border-radius:14px;overflow:hidden;display:flex;box-shadow:0 20px 60px rgba(0,0,0,.3);position:relative}
-.kab-menu{width:250px;flex:none;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:3px;border-right:1px solid #e1e5e9;font-size:13px}
+.kab-menu{width:300px;flex:none;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:3px;border-right:1px solid #e1e5e9;font-size:13px}
 .kab-menu .t b{color:#323e4e;font-size:14px;display:block}.kab-menu .t small{color:#6b7079;font-size:11.5px}
-.kab-menu input[type=search]{height:34px;border:1px solid #d5dbe1;border-radius:8px;padding:0 10px;font:inherit;font-size:13px;margin:10px 0 6px;width:100%;box-sizing:border-box}
-.kab-g{all:unset;box-sizing:border-box;cursor:pointer;display:flex;flex-direction:column;padding:6px 8px;border-radius:8px;color:#232b35}
-.kab-g:hover{background:#f5f7f9}.kab-g[aria-pressed=true]{background:#323e4e;color:#fff}.kab-g[aria-pressed=true] small{color:#c9d3de}
-.kab-g small{color:#6b7079;font-size:11px}
+.kab-such{display:flex;align-items:center;gap:6px;border:1.5px solid #323e4e;border-radius:12px;padding:0 5px 0 11px;height:44px;margin:12px 0 10px;flex:none}
+.kab-such input{all:unset;flex:1;min-width:0;font-size:14px;color:#232b35}
+.kab-mic{all:unset;cursor:pointer;width:34px;height:34px;border-radius:50%;background:#d6e7f4;color:#323e4e;display:flex;align-items:center;justify-content:center;flex:none}
+.kab-mic.an{background:#323e4e;color:#fff}
+.kg-seg.kab-jahre{display:flex!important;width:100%!important;margin:0 0 10px!important;flex:none}.kg-seg.kab-jahre>button{flex:1;justify-content:center;padding:0 4px}
+.kab-g{all:unset;box-sizing:border-box;cursor:pointer;display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;color:#232b35;font-size:13.5px}
+.kab-g span{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.kab-g svg{flex:none}
+.kab-g:hover{background:#f5f7f9}.kab-g[aria-pressed=true]{background:#d6e7f4;font-weight:600}
+.kab-g small{color:#8b9097;font-size:11.5px;font-weight:400}.kab-g.leer{opacity:.45}
+.kab-g.klein{font-size:12px;padding:4px 10px;gap:8px}
+.kab-trenn{height:1px;background:#eef1f4;margin:4px 6px;flex:none}
+.kab-mehr{all:unset;cursor:pointer;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#8b9097;padding:12px 8px 4px;display:flex;gap:6px;align-items:center}
+.kab-mehr svg{transition:transform .15s}.kab-mehr[aria-expanded=true] svg{transform:rotate(90deg)}
 .kab-rechts{flex:1;min-width:0;display:flex;flex-direction:column}
 .kab-kopf{display:flex;gap:8px;align-items:center;padding:10px 54px 10px 14px;border-bottom:1px solid #e1e5e9;flex-wrap:wrap}
 .kab-kopf h3{margin:0;font-size:15px;color:#323e4e;flex:1;min-width:0}
@@ -140,7 +155,9 @@
     const h = document.createElement('div'); h.className = 'kab-ovl';
     const x = window.KG && KG.icon ? KG.icon('x', 14) : '×';
     h.innerHTML = `<div class="kab-fen" role="dialog" aria-label="Ablage"><aside class="kab-menu"><div class="t"><b>${esc(titel || 'Ablage')}</b><small>${esc(untertitel || '')}</small></div>
-      <input type="search" placeholder="Suchen, z. B. Situation, Plan" data-q autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other">
+      <label class="kab-such">${ORD_ICON.lupe}<input type="search" placeholder="Was suchst du? z. B. Lieferschein Platten" aria-label="Suchen in Namen und Inhalt aller Dateien" data-q autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other">
+        <button type="button" class="kab-mic" data-mic aria-label="Spracheingabe" title="Spracheingabe" hidden>${ORD_ICON.mic}</button></label>
+      <div class="kg-seg kab-jahre" role="group" aria-label="Jahr" data-jahre></div>
       <div data-gruppen><span class="kab-leer">Ordner werden gelesen …</span></div></aside>
       <section class="kab-rechts"><div class="kab-kopf"><h3 data-titel>Alle Dateien</h3>
         <label class="btn btn-ghost btn-sm" style="display:none;cursor:pointer;align-items:center;gap:6px" data-hoch>${window.KG && KG.icon ? KG.icon('upload', 13) : ''}<span>Hochladen</span><input type="file" multiple hidden></label></div>
@@ -148,7 +165,8 @@
       <button type="button" class="kg-ibtn kab-zu" data-zu aria-label="Schliessen" title="Schliessen (Esc)">${x}</button></div>`;
     document.body.appendChild(h);
     const $ = s => h.querySelector(s);
-    let ALLE = [], GRUPPE = '', Q = '', BILDER = [], gross = -1;
+    let ALLE = [], GRUPPE = '', Q = '', BILDER = [], gross = -1, JAHRE = new Set(), WEITERE = false, VOLL = null;
+    const jahrOk = f => !JAHRE.size || JAHRE.has(String(f.jahr));
     const zu = () => { document.removeEventListener('keydown', taste, true); h.remove(); };
     const taste = e => { if(e.key === 'Escape'){ e.stopPropagation(); if(gross >= 0) grossZu(); else zu(); }
       if(gross >= 0 && e.key === 'ArrowRight') grossZeigen(gross + 1); if(gross >= 0 && e.key === 'ArrowLeft') grossZeigen(gross - 1); };
@@ -160,17 +178,25 @@
       ALLE = teile.flat();
     } catch(err){ $('[data-gruppen]').innerHTML = `<span class="kab-leer">${esc(err.message)}</span>`; return; }
     const gruppen = () => { const m = new Map();
-      ALLE.forEach(f => { const k = f.gruppe ? schluessel(f.gruppe) : '_'; const g = m.get(k) || { k, name: f.gruppe ? ohneNr(f.gruppe) : 'Direkt im Kundenordner', nr: parseInt(f.gruppe) || 999, n: 0, jahre: new Set() };
-        if(!f.ordner){ g.n++; g.jahre.add(f.jahr); } m.set(k, g); });
-      return [...m.values()].filter(g => g.n || g.k !== '_').sort((a, b) => a.nr - b.nr || a.name.localeCompare(b.name, 'de')); };
-    const passt = f => { if(f.ordner) return false; if(GRUPPE && (f.gruppe ? schluessel(f.gruppe) : '_') !== GRUPPE) return false;
-      if(!Q) return true; const t = [f.name, ...(f.pfad || [])].join(' ').toLowerCase(); return Q.split(/\s+/).every(w => t.includes(w)); };
-    const zeichneGruppen = () => { const gs = gruppen(), total = ALLE.filter(f => !f.ordner).length;
-      $('[data-gruppen]').innerHTML = `<button type="button" class="kab-g" data-g="" aria-pressed="${!GRUPPE}"><span>Alle Dateien</span><small>${total} Dateien</small></button>`
-        + gs.map(g => `<button type="button" class="kab-g" data-g="${esc(g.k)}" aria-pressed="${GRUPPE === g.k}"><span>${esc(g.name)}</span><small>${g.n ? g.n + ' · ' + [...g.jahre].sort().reverse().join(', ') : 'leer'}</small></button>`).join(''); };
+      ALLE.forEach(f => { const k = f.gruppe ? schluessel(f.gruppe) : '_'; const g = m.get(k) || { k, name: f.gruppe ? ohneNr(f.gruppe) : 'Direkt im Kundenordner', n: 0, ges: 0, da: new Set() };
+        g.da.add(String(f.jahr)); if(!f.ordner){ g.ges++; if(jahrOk(f)) g.n++; } m.set(k, g); });
+      // zuoberst die Ordner, die es in den meisten Jahren gibt, dann nach Anzahl Dateien
+      return [...m.values()].filter(g => g.ges || g.k !== '_').sort((a, b) => b.da.size - a.da.size || b.ges - a.ges || a.name.localeCompare(b.name, 'de')); };
+    const alleJahre = () => [...new Set(ALLE.map(f => String(f.jahr)))].sort((a, b) => (a === 'Stamm') - (b === 'Stamm') || b.localeCompare(a));
+    const passt = f => { if(f.ordner || !jahrOk(f)) return false; if(GRUPPE && (f.gruppe ? schluessel(f.gruppe) : '_') !== GRUPPE) return false;
+      if(!Q) return true; if(VOLL && VOLL.has(f.id)) return true; const t = [f.name, ...(f.pfad || [])].join(' ').toLowerCase(); return Q.split(/\s+/).every(w => t.includes(w)); };
+    const zeichneGruppen = () => { const gs = gruppen(), js = alleJahre(), total = ALLE.filter(f => !f.ordner && jahrOk(f)).length;
+      // Jahre: «Alle» oder ein bis mehrere Jahre zusammen
+      $('[data-jahre]').innerHTML = `<button type="button" data-jahr="" class="${JAHRE.size ? '' : 'on'}">Alle</button>` + js.map(j => `<button type="button" data-jahr="${esc(j)}" class="${JAHRE.has(j) ? 'on' : ''}">${esc(j === 'Stamm' ? 'Stamm' : j)}</button>`).join('');
+      // Hauptordner = in mindestens zwei Jahren vorhanden; Einzelstücke klein unter «Weitere Ordner»
+      const viele = js.length > 1, haupt = gs.filter(g => !viele || g.da.size > 1), weitere = viele ? gs.filter(g => g.da.size <= 1) : [];
+      const zeile = (g, klein) => `<button type="button" class="kab-g${klein ? ' klein' : ''}${g.n ? '' : ' leer'}" data-g="${esc(g.k)}" aria-pressed="${GRUPPE === g.k}">${ORD_ICON.ordner(klein ? 14 : 18)}<span>${esc(g.name)}</span><small>${g.n || '–'}</small></button>`;
+      $('[data-gruppen]').innerHTML = `<button type="button" class="kab-g" data-g="" aria-pressed="${!GRUPPE}">${ORD_ICON.alle}<span>Alle Dateien</span><small>${total}</small></button><div class="kab-trenn"></div>`
+        + haupt.map(g => zeile(g, false)).join('')
+        + (weitere.length ? `<button type="button" class="kab-mehr" data-mehr aria-expanded="${WEITERE}">${ORD_ICON.pfeil}Weitere Ordner (${weitere.length})</button>` + (WEITERE ? weitere.map(g => zeile(g, true)).join('') : '') : ''); };
     const zeichneInhalt = () => {
       const l = ALLE.filter(passt).sort((a, b) => String(b.jahr).localeCompare(String(a.jahr)) || String(b.modifiedTime).localeCompare(String(a.modifiedTime)));
-      const g = gruppen().find(x => x.k === GRUPPE); $('[data-titel]').textContent = (g ? g.name : 'Alle Dateien') + (Q ? ` · Suche «${Q}»` : '') + ` · ${l.length}`;
+      const g = gruppen().find(x => x.k === GRUPPE); $('[data-titel]').textContent = (g ? g.name : 'Alle Dateien') + (JAHRE.size ? ' · ' + [...JAHRE].sort().reverse().join(', ') : '') + (Q ? ` · Suche «${Q}»` : '') + ` · ${l.length}`;
       $('[data-hoch]').style.display = GRUPPE && GRUPPE !== '_' ? 'inline-flex' : 'none';
       BILDER = l.filter(istBild);
       if(!l.length){ $('[data-inhalt]').innerHTML = '<div class="kab-leer">Keine Dateien.</div>'; return; }
@@ -196,8 +222,22 @@
       g.querySelectorAll('[data-p]').forEach(b => b.onclick = () => grossZeigen(gross + +b.dataset.p)); g.querySelector('[data-gzu]').onclick = grossZu;
       const im = g.querySelector('img'), id = f.id; im.onerror = async () => { im.onerror = null; try { const u = await bildUrl(id); if(BILDER[gross]?.id === id) im.src = u; } catch(_){} }; };
     h.addEventListener('click', e => { const b = e.target.closest('[data-g]'); if(b){ GRUPPE = b.dataset.g; zeichneGruppen(); zeichneInhalt(); return; }
+      const jb = e.target.closest('[data-jahr]'); if(jb){ const j = jb.dataset.jahr; if(!j) JAHRE.clear(); else if(JAHRE.has(j)) JAHRE.delete(j); else JAHRE.add(j);
+        if(JAHRE.size === alleJahre().length) JAHRE.clear(); zeichneGruppen(); zeichneInhalt(); return; }
+      if(e.target.closest('[data-mehr]')){ WEITERE = !WEITERE; zeichneGruppen(); return; }
       const bi = e.target.closest('[data-b]'); if(bi) grossZeigen(+bi.dataset.b); });
-    let qT = null; $('[data-q]').oninput = e => { clearTimeout(qT); qT = setTimeout(() => { Q = e.target.value.trim().toLowerCase(); zeichneInhalt(); }, 150); };
+    let qT = null, vT = null, vNr = 0;
+    const vollSuche = async q => { const nr = ++vNr; const w = q.split(/\s+/).filter(x => x.length > 1); if(!w.length || q.length < 3){ VOLL = null; return; }
+      const p = new URLSearchParams({ q: w.map(x => `fullText contains '${x.replace(/['\\]/g, '\\$&')}'`).join(' and ') + ' and trashed=false', corpora: 'drive', driveId: ROOT,
+        includeItemsFromAllDrives: 'true', supportsAllDrives: 'true', fields: 'files(id)', pageSize: '1000' });
+      try { const d = await KGD.gapi('files?' + p); if(nr === vNr){ VOLL = new Set((d.files || []).map(f => f.id)); zeichneInhalt(); } } catch(_){} };
+    const suchen = v => { clearTimeout(qT); clearTimeout(vT); qT = setTimeout(() => { Q = v.trim().toLowerCase(); VOLL = null; zeichneInhalt(); vT = setTimeout(() => vollSuche(Q), 450); }, 150); };
+    $('[data-q]').oninput = e => suchen(e.target.value);
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if(SR){ const mic = $('[data-mic]'); mic.hidden = false; let rec = null;
+      mic.onclick = () => { if(rec){ rec.stop(); return; } rec = new SR(); rec.lang = 'de-CH'; rec.interimResults = true; mic.classList.add('an');
+        rec.onresult = ev => { const t = [...ev.results].map(r => r[0].transcript).join(' '); $('[data-q]').value = t; suchen(t); };
+        rec.onend = rec.onerror = () => { rec = null; mic.classList.remove('an'); }; rec.start(); }; }
     // Hochladen in die gewählte Gruppe im Ordner des aktuellen Jahres (fehlt er: aus der Vorlage anlegen)
     $('[data-hoch] input').onchange = async e => { const files = [...e.target.files]; if(!files.length || !kunde) return; const lab = $('[data-hoch] span'), alt = lab.textContent;
       try { lab.textContent = 'Lädt hoch …'; const o = await KKO.aktuell(kunde), unter = await kinder(o.drive_id, true), u = unter.find(y => schluessel(y.name) === GRUPPE), ziel = u ? u.id : o.drive_id;
