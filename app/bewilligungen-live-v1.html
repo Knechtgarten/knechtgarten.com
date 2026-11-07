@@ -152,6 +152,13 @@ body.buero-rolle .admin-only{display:none !important;}
 .haken{all:unset;cursor:pointer;width:22px;height:22px;border-radius:50%;border:2px solid #D5DBE1;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;color:#fff;flex:none;}
 .haken[aria-pressed=true]{background:#3F7D3F;border-color:#3F7D3F;}
 .btn-sm{padding:6px 11px;font-size:12px;}
+.dliste{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;}
+.dliste li{display:flex;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid #EEF1F4;}
+.dliste li:last-child{border-bottom:0;}
+.dliste .pt{width:11px;height:11px;border-radius:50%;flex:none;background:#A3B0BE;}
+.dliste .pt.ok{background:#3F7D3F;} .dliste .pt.warn{background:#E57E34;} .dliste .pt.fehler{background:#A63A52;}
+.dliste .dn{all:unset;flex:1;min-width:0;display:flex;flex-direction:column;font-size:13px;color:var(--ink);} .dliste button.dn{cursor:pointer;} .dliste button.dn:hover{color:var(--primary);text-decoration:underline;}
+.dliste .dn small{font-size:11.5px;color:#6B7079;}
 .doks{list-style:none;margin:0;padding:0;} .doks li{display:flex;gap:8px;padding:6px 0;border-bottom:1px solid #EEF1F4;align-items:center;} .doks li:last-child{border-bottom:0;} .doks li span{flex:1;}
 .doks .da{color:#2E5A2F;font-weight:600;} .doks .fehlt{color:#6B7079;}
 .ubild{height:54px;border:1px dashed #D5DBE1;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#8B9097;overflow:hidden;background:#fff;} .ubild img{max-height:50px;max-width:100%;}
@@ -303,9 +310,7 @@ function schritteVon(b){
     { k: 'grundstueck', t: 'Grundstück abklären', i: 'Geodaten und ÖREB-Auszug' },
     { k: 'situationsplan', t: 'Situationsplan beglaubigt bestellen', i: 'be-geo (Shop der Berner Geometer), mit Eigentümerliste' },
     { k: 'leitungsplaene', t: 'Leitungspläne anfordern', i: 'Werke / Gemeinde' }];
-  if(a.naeherbaurecht) l.push({ k: 'naeherbaurecht', t: 'Näherbaurecht erstellen', i: 'pro Nachbar mit reduziertem Grenzabstand' });
-  l.push({ k: 'nachbarn', t: 'Unterschriften der Nachbarn', i: 'Zustimmungserklärung (Einspracheverzicht)' });
-  if(a.waermepumpe) l.push({ k: 'laermschutz', t: 'Lärmschutznachweis Wärmepumpe', i: 'nach Cercle Bruit, Berechnung im Tool' });
+  // Näherbaurecht, Zustimmung der Nachbarn und Lärmschutznachweis sind keine Schritte: sie stehen als Dokumente mit Status rechts
   l.push({ k: 'formulare', t: 'Beilagen ausfüllen', i: [a.terrain && 'Terrainveränderung', 'Erdbebensicherheit', 'Bauabfälle'].filter(Boolean).join(' · ') });
   if(a.pool) l.push({ k: 'plaene_pool', t: 'Pläne Pool', i: 'Situation, Grundriss, Schnitte' });
   l.push({ k: 'ebau', t: 'eBau ausfüllen und Unterlagen hochladen', i: '«Einreichen» klickst du selbst' },
@@ -360,7 +365,8 @@ async function geodatenHolen(b){
 // ---------------------------------------------------------------------------
 // Baubewilligung starten: Kunde, Projekt, Projektleiter, Bauvorhaben, Abklärung
 // ---------------------------------------------------------------------------
-const ABKL = [['pool', 'Pool'], ['waermepumpe', 'Wärmepumpe aussen'], ['terrain', 'Terrainveränderung'], ['naeherbaurecht', 'Näherbaurecht nötig'], ['mauer', 'Mauer / Sichtschutz'], ['abbruch', 'Abbruch']];
+// Abklärung: was das Gesuch braucht (kleine Terrainveränderungen sind bewilligungsfrei, darum nur «grössere»)
+const ABKL = [['pool', 'Pool'], ['waermepumpe', 'Wärmepumpe aussen'], ['naeherbaurecht', 'Näherbaurecht nötig'], ['terrain', 'Grössere Terrainveränderung']];
 $('bwNeu').addEventListener('click', () => {
   const h = $('ovlHost'); let kunde = null, lauf = 0; const abkl = { pool: true, waermepumpe: true };
   h.innerHTML = `<div class="ovl" id="neuOvl"><div class="fen" style="width:620px"><div class="fkopf"><div class="k"><h2>Baubewilligung starten</h2></div>
@@ -411,25 +417,37 @@ const G = () => BEW.find(b => b.id === OFFEN);
 async function unterschriftUrl(plId){ const p = PL.find(x => x.id === plId); if(!p?.unterschrift_pfad) return null;
   const { data } = await sb.storage.from('unterschriften').createSignedUrl(p.unterschrift_pfad, 600); return data?.signedUrl || null; }
 
+// Dokumente des Gesuchs mit Status: ok (grün) · fehlt (grau) · warn (orange, Angaben fehlen) · fehler (rot, Problem).
+// Klick auf den Namen öffnet die Eingabe dazu, «PDF» erzeugt das Dokument.
+function dokumente(b){
+  const g = b.geodaten || {}, a = b.abklaerung || {}, nb = b.nachbarn || [], sch = b.schritte || {}, l = [];
+  l.push({ n: 'ÖREB-Auszug', st: g.oereb?.pdf ? 'ok' : 'fehlt', link: g.oereb?.pdf });
+  l.push({ n: 'Grundstücksplan mit Höhen', st: b.e && b.n ? 'ok' : 'fehlt', pdf: b.e && b.n ? 'hoehen' : null, act: b.e && b.n ? 'karte' : null });
+  l.push({ n: 'Situationsplan beglaubigt', st: sch.situationsplan?.erledigt ? 'ok' : 'fehlt' });
+  l.push({ n: 'Eigentümerliste', st: nb.length ? 'ok' : 'fehlt', info: nb.length ? `${nb.length} Nachbarn` : 'einlesen', act: 'nachbarn' });
+  l.push({ n: 'Leitungspläne', st: sch.leitungsplaene?.erledigt ? 'ok' : 'fehlt' });
+  if(a.naeherbaurecht){
+    const nbr = nb.filter(x => x.naeherbaurecht);
+    if(!nbr.length) l.push({ n: 'Näherbaurecht', st: 'warn', info: 'Nachbar mit Näherbaurecht wählen', act: 'nachbarn' });
+    nbr.forEach(x => { const voll = x.name && x.parzelle && (x.abstaende || []).some(z => z.bauteil && z.ist);
+      l.push({ n: 'Näherbaurecht ' + (x.name || 'Nachbar'), st: voll ? 'ok' : 'warn', info: voll ? (x.unterschrieben ? 'unterschrieben' : '') : 'Name, Parzelle oder Abstände fehlen', act: 'nachbarn', pdf: 'nbr', i: nb.indexOf(x) }); });
+  }
+  const unt = nb.filter(x => x.unterschrieben).length;
+  l.push({ n: 'Zustimmungserklärung Nachbarn', st: !nb.length ? 'fehlt' : nb.some(x => !x.name) ? 'warn' : 'ok',
+    info: !nb.length ? 'zuerst Eigentümerliste' : nb.some(x => !x.name) ? 'Name fehlt' : `${unt} / ${nb.length} unterschrieben`, act: 'nachbarn', pdf: nb.length ? 'zust' : null });
+  if(a.waermepumpe){ const L = laermDaten(b), R = L.lwa2 ? laermRechnung(L) : null;
+    l.push({ n: 'Lärmschutznachweis Wärmepumpe', st: !R ? 'warn' : R.ok ? 'ok' : 'fehler', info: !R ? 'Wärmepumpe wählen' : R.ok ? `Lr ${R.lrT.toFixed(1)} / ${R.lrN.toFixed(1)} dB(A)` : 'Planungswerte überschritten', act: 'laerm', pdf: R ? 'lsn' : null }); }
+  return l;
+}
 function zeichneFenster(){
   const b = G(); if(!b) return schliessen();
   const g = b.geodaten || {}, f = fortschritt(b), l = schritteVon(b);
   const zeile = (t, v, rot) => `<dt>${t}</dt><dd${rot ? ' class="rot"' : ''}>${v}</dd>`;
   const es = g.laermstufe || (/Wohnzone|Wohn/i.test(g.zone || '') ? 'ES II <i>(aus Zone abgeleitet, prüfen)</i>' : '–');
-  const nb = b.nachbarn || [], nbr = nb.filter(x => x.naeherbaurecht);
-  const dok = [['ÖREB-Auszug', g.oereb?.pdf ? `<a href="${esc(g.oereb.pdf)}" target="_blank" rel="noopener" class="da">öffnen</a>` : '<span class="fehlt">fehlt</span>'],
-    ['Grundstücksplan mit Höhen', b.e && b.n ? '<button type="button" class="btn btn-ghost btn-sm" data-pdf="hoehen">PDF</button>' : '<span class="fehlt">Geodaten fehlen</span>']]
-    .concat(nbr.map((x, i) => [`Näherbaurecht ${esc(x.name || 'Nachbar ' + (i + 1))}`, `<button type="button" class="btn btn-ghost btn-sm" data-pdf="nbr" data-i="${nb.indexOf(x)}">PDF</button>`]))
-    .concat([['Zustimmungserklärung Nachbarn', nb.length ? `<button type="button" class="btn btn-ghost btn-sm" data-pdf="zust">PDF</button>` : '<span class="fehlt">Nachbarn erfassen</span>'],
-      ['Situationsplan beglaubigt', b.schritte?.situationsplan?.erledigt ? '<span class="da">da</span>' : '<span class="fehlt">fehlt</span>'],
-      ['Leitungspläne', b.schritte?.leitungsplaene?.erledigt ? '<span class="da">da</span>' : '<span class="fehlt">fehlt</span>']])
-    .concat(b.abklaerung?.waermepumpe ? [['Lärmschutznachweis WP', b.laerm?.lwa2 ? '<button type="button" class="btn btn-ghost btn-sm" data-pdf="lsn">PDF</button>' : '<span class="fehlt">Wärmepumpe wählen</span>']] : []);
+  const dok = dokumente(b);
   const aktion = s => ({
     grundstueck: `<button type="button" class="btn btn-ghost btn-sm" data-act="geo">Neu holen</button>`,
     situationsplan: `<a class="btn btn-ghost btn-sm" href="https://be-geo.ch/de/shop" target="_blank" rel="noopener" style="text-decoration:none">be-geo öffnen</a><button type="button" class="btn btn-ghost btn-sm" data-act="kopier">Parzelle kopieren</button>`,
-    naeherbaurecht: `<button type="button" class="btn btn-ghost btn-sm" data-act="nachbarn">Nachbarn &amp; Abstände</button>`,
-    nachbarn: `<button type="button" class="btn btn-ghost btn-sm" data-act="nachbarn">Nachbarn</button>${nb.length ? '<button type="button" class="btn btn-ghost btn-sm" data-pdf="zust">PDF</button>' : ''}`,
-    laermschutz: `<button type="button" class="btn btn-ghost btn-sm" data-act="laerm">Ausfüllen</button>${b.laerm?.lwa2 ? '<button type="button" class="btn btn-ghost btn-sm" data-pdf="lsn">PDF</button>' : ''}`,
     ebau: `<a class="btn btn-ghost btn-sm" href="https://www.be.ch/ebau" target="_blank" rel="noopener" style="text-decoration:none">eBau öffnen</a>`
   })[s.k] || '';
   const naechster = f.naechster?.k;
@@ -463,8 +481,10 @@ function zeichneFenster(){
             <span class="tx"><b>${esc(s.t)}</b><small>${esc(s.i)}${st?.erledigt && st.am ? ' · erledigt ' + datum(st.am) : ''}</small></span>${aktion(s)}</li>`; }).join('')}</ol>`}</div>
       </div>
       <aside>
-        <div class="kar"><h3><span>Dokumente</span></h3><ul class="doks">${dok.map(([t, v]) => `<li><span>${t}</span>${v}</li>`).join('')}</ul>
-          <div class="klein" style="margin-top:8px">Beilagen (Erdbeben, Bauabfälle …) füllst du direkt im eBau aus.</div></div>
+        <div class="kar"><h3><span>Dokumente</span><span class="klein" style="flex:none">${dok.filter(d => d.st === 'ok').length} / ${dok.length}</span></h3><ul class="dliste">${dok.map(d => `<li>
+            <i class="pt ${d.st}" title="${{ ok: 'fertig', fehlt: 'fehlt noch', warn: 'Angaben fehlen', fehler: 'Problem' }[d.st]}"></i>
+            ${d.act ? `<button type="button" class="dn" data-act="${d.act}">` : '<span class="dn">'}${esc(d.n)}${d.info ? `<small>${esc(d.info)}</small>` : ''}${d.act ? '</button>' : '</span>'}
+            ${d.pdf ? `<button type="button" class="btn btn-ghost btn-sm" data-pdf="${d.pdf}"${d.i != null ? ` data-i="${d.i}"` : ''}>PDF</button>` : d.link ? `<a class="btn btn-ghost btn-sm" href="${esc(d.link)}" target="_blank" rel="noopener" style="text-decoration:none">öffnen</a>` : ''}</li>`).join('')}</ul></div>
         <div class="kar"><h3><span>Unterschrift Knechtgarten</span></h3><div class="ubild" id="fUb">Lädt …</div>
           <div class="klein" style="margin-top:6px">${esc(plName(b.projektleiter_id))} · wird in Dokumente gesetzt, die wir unterschreiben.</div>
           <label class="btn btn-ghost btn-sm" style="margin-top:8px;display:inline-flex;gap:6px;align-items:center;cursor:pointer">${K('upload', 13)}Unterschrift hochladen<input type="file" accept="image/*" id="fUbIn" hidden></label></div>
