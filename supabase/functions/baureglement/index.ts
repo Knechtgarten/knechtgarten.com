@@ -104,7 +104,7 @@ Deno.serve(async (req) => {
       if (body.original || !br?.auszug) inhalt.push(...(br?.urls || urls).slice(0, 2).map((u: any) => ({ type: 'document', source: { type: 'url', url: u.url }, title: u.titel })));
       else inhalt.push({ type: 'text', text: 'Auszug aus dem Baureglement (JSON):\n' + JSON.stringify(br.auszug) });
       inhalt.push({ type: 'text', text: `Gemeinde ${gemeinde}, Zone der Parzelle laut ÖREB: «${zone}».\nFrage: ${frage}` });
-      const r = await claude(inhalt, `Du beantwortest Fragen zum Baureglement der Gemeinde für eine Gartenbaufirma. Kurz und konkret, mit Artikel (z. B. «Art. 21 Abs. 2»). Nur was im Reglement steht; steht es nicht drin, sag das klar${body.original ? '' : ' und empfiehl «im Original nachlesen»'}. Deutsch, Schweizer Schreibweise (ss).`, 1200);
+      const r = await claude(inhalt, `Du beantwortest Fragen zum Baureglement der Gemeinde für eine Gartenbaufirma. Kurz und konkret, mit Artikel (z. B. «Art. 21 Abs. 2»). Sprich in der Du-Form. Nur was im Reglement steht; steht es nicht drin, sag das klar${body.original ? '' : ' und empfiehl «im Original nachlesen»'}. Deutsch, Schweizer Schreibweise (ss).`, 1200);
       return json({ antwort: r.text.trim(), original: !!body.original, modell: r.model });
     }
     return json({ error: 'Unbekannte Aktion.' }, 400);
