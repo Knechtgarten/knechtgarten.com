@@ -159,8 +159,8 @@
     { k: 'werkzeuge', n: 'Werkzeuge', url: 'werkzeuge-live-v1.html', farbe: PAL.grau[1], akzent: PAL.grau[3],
       seiten: ['werkzeuge-live-v1', 'werkzeug-pool-chlor-live-v1', 'werkzeug-pool-salz-live-v1', 'werkzeug-pool-alk-live-v1', 'werkzeug-pool-afm-live-v1',
         'werkzeug-pool-volumen-live-v1', 'werkzeug-bau-diagonale-live-v1', 'werkzeug-bau-kies-live-v1', 'werkzeug-bau-stahl-live-v1', 'werkzeug-bau-schalit-live-v1', 'werkzeug-pflege-spritz-live-v1', 'werkzeug-allg-gefaelle-live-v1'] },
-    // Bewilligungen: Baugesuche vorbereiten (Geodaten, Näherbaurecht, Zustimmung Nachbarn, eBau)
-    { k: 'bew', n: 'Bewilligungen', url: 'bewilligungen-live-v1.html', farbe: PAL.gruen[1], akzent: PAL.gruen[3], seiten: ['bewilligungen-live-v1'] },
+    // Pläne & Bewilligungen: Grundstückskarte, Baugesuche vorbereiten (Geodaten, Näherbaurecht, Zustimmung Nachbarn, eBau)
+    { k: 'bew', n: 'Pläne & Bewill.', url: 'bewilligungen-live-v1.html', farbe: PAL.gruen[1], akzent: PAL.gruen[3], seiten: ['bewilligungen-live-v1'] },
     { k: 'doku', n: 'Doku-Tools', url: 'doku-live-v1.html', farbe: PAL.beere[1], akzent: PAL.beere[3],
       seiten: ['doku-live-v1', 'doku-dokument-live-v1', 'doku-datei-live-v1', 'doku-personen-live-v1'] },
     { k: 'verw', n: 'Einstellungen', url: 'einstellungen-uebersicht-live-v1.html', farbe: '#FFFFFF', akzent: PAL.grau[3], admin: true,
