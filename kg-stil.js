@@ -82,7 +82,27 @@
 .kg-ibtn svg{width:14px;height:14px;}
 .kg-ibtn:hover{border-color:var(--primary,#323E4E);color:var(--primary,#323E4E);background:var(--soft,#EEF3F7);}
 .kg-ibtn.danger:hover{border-color:var(--danger,#B4655F);color:var(--danger,#B4655F);background:#FBEFEC;}
-.kg-ibtn[disabled]{opacity:.35;cursor:default;}`;
+.kg-ibtn[disabled]{opacity:.35;cursor:default;}
+/* Gemeinsame Kacheln (wie die Kacheln beim Kunden in Kontakte): farbiger Kopf mit Icon, Titel, Links rechts; Inhalt scrollt.
+   KG.kacheln(html) = Raster, KG.kachel({ titel, farbe, icon, links, inhalt, klick }) = eine Kachel */
+.kg-kacheln{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;align-items:start;}
+.kg-kachel{background:#fff;border:1px solid var(--line,#E1E5E9);border-radius:10px;overflow:hidden;display:flex;flex-direction:column;height:230px;font-size:12.5px;line-height:1.5;min-width:0;}
+.kg-kachel.frei{height:auto;}
+.kg-kachel-kopf{all:unset;box-sizing:border-box;display:flex;align-items:center;gap:7px;padding:6px 8px 6px 10px;min-height:34px;}
+button.kg-kachel-kopf,a.kg-kachel-kopf{cursor:pointer;} button.kg-kachel-kopf:hover,a.kg-kachel-kopf:hover{filter:brightness(1.08);}
+.kg-kachel-kopf svg{width:17px;height:17px;flex:none;}
+.kg-kachel-kopf h4{margin:0;flex:1;font-size:13px;font-weight:700;color:inherit;letter-spacing:0;text-transform:none;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.kg-kachel-kopf h4 small{font-weight:600;opacity:.75;margin-left:4px;}
+.kg-kachel-links{display:flex;gap:4px;}
+.kg-kachel-links .kg-klink{all:unset;box-sizing:border-box;cursor:pointer;font-size:11px;font-weight:600;color:inherit;border:1px solid rgba(255,255,255,.45);padding:1px 8px;border-radius:99px;white-space:nowrap;}
+.kg-kachel-kopf.hell .kg-klink{border-color:rgba(35,43,53,.3);} .kg-kachel-links .kg-klink:hover{background:rgba(255,255,255,.2);}
+.kg-kachel-inhalt{flex:1;overflow:auto;min-height:0;padding:8px 12px 10px;}
+.kg-kzeile{all:unset;box-sizing:border-box;cursor:pointer;display:flex;align-items:center;gap:8px;width:100%;padding:4px 6px;border-radius:6px;color:#232B35;text-decoration:none;min-height:30px;}
+.kg-kzeile:hover{background:#F5F7F9;} div.kg-kzeile{cursor:default;} div.kg-kzeile:hover{background:none;}
+.kg-kzeile .t{flex:1;min-width:0;display:flex;flex-direction:column;} .kg-kzeile .t b{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.kg-kzeile .t small{color:#8B9097;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.kg-kleer{color:#8B9097;font-size:12px;}
+@media (max-width:620px){ .kg-kacheln{grid-template-columns:minmax(0,1fr);} .kg-kachel{height:auto;max-height:320px;} }`;
   const st = document.createElement('style'); st.id = 'kg-stil'; st.textContent = css;
   (document.head || document.documentElement).appendChild(st);
 
@@ -120,6 +140,14 @@
     const f = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
     return 0.2126 * f(n >> 16) + 0.7152 * f((n >> 8) & 255) + 0.0722 * f(n & 255); };
   KG.textAuf = hex => { const L = lum(hex); return 1.05 / (L + 0.05) >= (L + 0.05) / (lum('#232B35') + 0.05) ? '#FFFFFF' : '#232B35'; };
+  // Gemeinsame Kacheln (CSS oben): icon = Name aus KG.pfade oder fertiges <svg>; klick = { act, wert } macht den Kopf zum Knopf
+  KG.kacheln = html => `<div class="kg-kacheln">${html}</div>`;
+  KG.kachel = ({ titel, farbe = PAL.grau[1], icon = '', links = '', inhalt = '', klick = null, frei = false, attr = '' }) => {
+    const t = KG.textAuf(farbe), ic = icon.startsWith('<') ? icon : KG.icon(icon, 17);
+    const kopf = klick ? `<button type="button" class="kg-kachel-kopf${t === '#FFFFFF' ? '' : ' hell'}" style="background:${farbe};color:${t}" data-act="${klick.act}" data-v="${klick.wert ?? ''}">`
+      : `<div class="kg-kachel-kopf${t === '#FFFFFF' ? '' : ' hell'}" style="background:${farbe};color:${t}">`;
+    return `<section class="kg-kachel${frei ? ' frei' : ''}" ${attr}>${kopf}${ic}<h4>${titel}</h4>${links ? `<span class="kg-kachel-links">${links}</span>` : ''}${klick ? '</button>' : '</div>'}<div class="kg-kachel-inhalt">${inhalt}</div></section>`;
+  };
 
   /* ---------------------------------------------------------------------------
      Tool-Icons (Haupttools): Linien-Icon auf farbiger Kachel, Farbe = Stufe 2.
@@ -137,6 +165,9 @@
     rechner: '<rect x="5" y="3" width="14" height="18" rx="2"/><rect x="8" y="6" width="8" height="3" rx=".5"/><path d="M8 13h1M11.5 13h1M15 13h1M8 17h1M11.5 17h1M15 17h1"/>',
     projekte: '<path d="M12 3.5A8.5 8.5 0 0 1 16.88 18.96" stroke-width="2" stroke-dasharray="0.1 3.6"/><path d="M16.88 18.96A8.5 8.5 0 1 1 12 3.5"/>',   // Projekte: Rand, Anfang gepunktet (läuft noch)
     verw: P.gear,
+    // Einstellungs-Kacheln ohne eigenes Tool: Verwaltung = Regler, Anbindungen = Stecker (hellgrau)
+    verwaltung: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
+    anbindung: '<path d="M9 3v4M15 3v4"/><path d="M7 7h10v4a5 5 0 0 1-10 0z"/><path d="M12 16v5"/>',
     // Werkzeuge = grosser Schraubenschlüssel (grau); Doku-Tools = Dokument mit Zahnrad (Beere, noch ohne Seite / TOOLS-Eintrag)
     werkzeuge: '<path d="M16.8 3.4a5.2 5.2 0 0 0-6.9 6.6L2.8 17.1a2.2 2.2 0 0 0 3.1 3.1l7.1-7.1a5.2 5.2 0 0 0 6.6-6.9l-3.1 3.1-2.8-.6-.6-2.8z"/>',
     bew: '<path d="M3 6.5l6-2.5 6 2.5 6-2.5v13.5l-6 2.5-6-2.5-6 2.5z"/><path d="M9 4v13.5M15 6.5V20"/><path d="M5.5 12.5l13-3.2M5.5 11.3v2.4M18.5 8.1v2.4"/>',
@@ -169,7 +200,7 @@
   KG.tools = TOOLS;
   KG.toolIcons = TI;
   KG.toolIcon = (k, size = 26) => {
-    const t = TOOLS.find(x => x.k === k) || {}; const hell = t.farbe === '#FFFFFF';
+    const t = TOOLS.find(x => x.k === k) || (k === 'verwaltung' || k === 'anbindung' ? { farbe: PAL.grau[3] } : {}); const hell = t.farbe === '#FFFFFF' || t.farbe === PAL.grau[3];
     const g = Math.round(size * 0.74);
     return `<span class="kg-ti" style="width:${size}px;height:${size}px;border-radius:${Math.round(size * 0.26)}px;background:${t.farbe || PAL.grau[1]};color:${hell ? '#323E4E' : '#FFFFFF'}">`
       + `<svg width="${g}" height="${g}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${TI[k] || ''}</svg></span>`;
