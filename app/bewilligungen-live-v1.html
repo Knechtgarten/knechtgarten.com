@@ -416,7 +416,8 @@ function zeichneFenster(){
   const zeile = (t, v, rot) => `<dt>${t}</dt><dd${rot ? ' class="rot"' : ''}>${v}</dd>`;
   const es = g.laermstufe || (/Wohnzone|Wohn/i.test(g.zone || '') ? 'ES II <i>(aus Zone abgeleitet, prüfen)</i>' : '–');
   const nb = b.nachbarn || [], nbr = nb.filter(x => x.naeherbaurecht);
-  const dok = [['ÖREB-Auszug', g.oereb?.pdf ? `<a href="${esc(g.oereb.pdf)}" target="_blank" rel="noopener" class="da">öffnen</a>` : '<span class="fehlt">fehlt</span>']]
+  const dok = [['ÖREB-Auszug', g.oereb?.pdf ? `<a href="${esc(g.oereb.pdf)}" target="_blank" rel="noopener" class="da">öffnen</a>` : '<span class="fehlt">fehlt</span>'],
+    ['Grundstücksplan mit Höhen', b.e && b.n ? '<button type="button" class="btn btn-ghost btn-sm" data-pdf="hoehen">PDF</button>' : '<span class="fehlt">Geodaten fehlen</span>']]
     .concat(nbr.map((x, i) => [`Näherbaurecht ${esc(x.name || 'Nachbar ' + (i + 1))}`, `<button type="button" class="btn btn-ghost btn-sm" data-pdf="nbr" data-i="${nb.indexOf(x)}">PDF</button>`]))
     .concat([['Zustimmungserklärung Nachbarn', nb.length ? `<button type="button" class="btn btn-ghost btn-sm" data-pdf="zust">PDF</button>` : '<span class="fehlt">Nachbarn erfassen</span>'],
       ['Situationsplan beglaubigt', b.schritte?.situationsplan?.erledigt ? '<span class="da">da</span>' : '<span class="fehlt">fehlt</span>'],
@@ -618,7 +619,7 @@ document.addEventListener('click', async e => {
     if(d.haken === 'ebau' && an && b.status === 'vorbereitung'){ ae.status = 'eingereicht'; ae.eingereicht_am = new Date().toISOString().slice(0, 10); }
     await speichern(b, ae); return zeichneFenster(); }
   if(d.ab && a.closest('#fAb')){ const ab = { ...(b.abklaerung || {}), [d.ab]: !b.abklaerung?.[d.ab] }; await speichern(b, { abklaerung: ab }); return zeichneFenster(); }
-  if(d.pdf){ a.disabled = true; try { await (d.pdf === 'nbr' ? pdfNaeherbaurecht(b, +d.i) : d.pdf === 'lsn' ? pdfLaerm(b) : pdfZustimmung(b)); } catch(err){ fehler(err, 'PDF'); } a.disabled = false; }
+  if(d.pdf){ a.disabled = true; try { await (d.pdf === 'nbr' ? pdfNaeherbaurecht(b, +d.i) : d.pdf === 'lsn' ? pdfLaerm(b) : d.pdf === 'hoehen' ? pdfHoehenplan(b, a) : pdfZustimmung(b)); } catch(err){ fehler(err, 'PDF'); } a.disabled = false; }
 });
 document.addEventListener('change', async e => {
   if(!OFFEN || !e.target.closest('#fenOvl')) return; const b = G(); if(!b) return; const t = e.target;
@@ -794,6 +795,133 @@ async function pdfLaerm(b){
     ${bl.map(([k, t], i) => { const y = 720.6 + i * 15.17; return `<i class="cb" style="left:72.6pt;top:${(y - 6.4).toFixed(2)}pt">${L.beilagen[k] ? haken : ''}</i>` + T(92.0, y, 8.3, t); }).join('')}
     ${fussL(2)}</div>`;
   await pdfAus(s1 + s2, `Lärmschutznachweis ${bauherr(b)}`);
+}
+
+// Grundstücksplan mit Höhen (A4, 1:200): amtliche Vermessung als Vektoren (geodienste.ch, WFS) +
+// Höhenlinien und Koten aus swissALTI3D (swisstopo, Raster 0.5 m, neueste Befliegung je Kachel)
+function lv95zuWgs(E, N){ const y = (E - 2600000) / 1e6, x = (N - 1200000) / 1e6;
+  const l = 2.6779094 + 4.728982 * y + 0.791484 * y * x + 0.1306 * y * x * x - 0.0436 * y * y * y;
+  const p = 16.9023892 + 3.238272 * x - 0.270978 * y * y - 0.002528 * x * x - 0.0447 * y * y * x - 0.0140 * x * x * x;
+  return [l * 100 / 36, p * 100 / 36]; }
+async function pdfHoehenplan(b, knopf){
+  const alt = knopf?.textContent; const status = t => { if(knopf) knopf.textContent = t; };
+  try {
+  if(!window.GeoTIFF) await ladeSkript('https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js');
+  if(!window.jspdf) await ladeSkript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+  const GEO = 'https://api3.geo.admin.ch/rest/services', E = +b.e, N = +b.n;
+  status('Grenzen …');
+  const eig = (await (await fetch(`${GEO}/api/MapServer/identify?geometry=${E},${N}&geometryType=esriGeometryPoint&sr=2056&layers=all:ch.kantone.cadastralwebmap-farbe&tolerance=0&returnGeometry=true&geometryFormat=geojson&imageDisplay=500,500,96&mapExtent=${E - 50},${N - 50},${E + 50},${N + 50}`)).json()).results?.[0];
+  if(!eig) throw new Error('Parzelle an dieser Adresse nicht gefunden.');
+  const ring = eig.geometry.type === 'MultiPolygon' ? eig.geometry.coordinates[0][0] : eig.geometry.coordinates[0];
+  const xs = ring.map(p => p[0]), ys = ring.map(p => p[1]);
+  // Kartenfeld 180 x 240 mm; Massstab 1:200, bei grossen Parzellen 1:500
+  const breit = Math.max(...xs) - Math.min(...xs), hoch = Math.max(...ys) - Math.min(...ys);
+  const MST = breit + 6 <= 36 && hoch + 6 <= 48 ? 200 : breit + 10 <= 90 && hoch + 10 <= 120 ? 500 : 1000;
+  const MW = 0.18 * MST, MH = 0.24 * MST, cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+  const x0 = cx - MW / 2, x1 = cx + MW / 2, y0 = cy - MH / 2, y1 = cy + MH / 2;
+  const PXMM = 8, PXM = 1000 / MST * PXMM, W = 180 * PXMM, H = 240 * PXMM, ox = 15 * PXMM, oy = 26 * PXMM, sk = 200 / MST;
+  const c = document.createElement('canvas'); c.width = 210 * PXMM; c.height = 297 * PXMM; const g = c.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+  const px = x => ox + (x - x0) * PXM, py = y => oy + (y1 - y) * PXM;
+  status('Vermessung …');
+  const wfs = async t => (await (await fetch(`https://geodienste.ch/db/av_0/deu?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=ms:${t}&BBOX=${x0 - 5},${y0 - 5},${x1 + 5},${y1 + 5},urn:ogc:def:crs:EPSG::2056&OUTPUTFORMAT=geojson&SRSNAME=urn:ogc:def:crs:EPSG::2056`)).json()).features || [];
+  const [LCSF, RESF, SOSF, SOLI, OSNR] = await Promise.all(['LCSF', 'RESF', 'SOSF', 'SOLI', 'OSNR'].map(t => wfs(t).catch(() => [])));
+  const ringe = f => f.geometry?.type === 'Polygon' ? f.geometry.coordinates : f.geometry?.type === 'MultiPolygon' ? f.geometry.coordinates.flat() : [];
+  const pfad = rr => { g.beginPath(); rr.forEach(r => r.forEach((p, i) => i ? g.lineTo(px(p[0]), py(p[1])) : g.moveTo(px(p[0]), py(p[1])))); };
+  const FARBE = { Gebaeude: '#f4dada', Strasse_Weg: '#e6e8eb', Trottoir: '#eef0f2', Verkehrsinsel: '#eef0f2', uebrige_befestigte: '#eef0f2', Wasserbecken: '#d6e7f4', fliessendes_Gewaesser: '#d6e7f4', stehendes_Gewaesser: '#d6e7f4' };
+  const HAUS = LCSF.filter(f => f.properties.Art === 'Gebaeude');
+  const haeuser = () => HAUS.forEach(f => { pfad(ringe(f)); g.fillStyle = '#f4dada'; g.fill('evenodd'); g.lineWidth = 2; g.strokeStyle = '#9a6b6b'; g.stroke(); });
+  g.save(); g.beginPath(); g.rect(ox, oy, W, H); g.clip();
+  LCSF.forEach(f => { const fa = FARBE[f.properties.Art]; if(!fa) return; pfad(ringe(f)); g.fillStyle = fa; g.fill('evenodd'); });
+  pfad([ring]); g.fillStyle = 'rgba(209,219,95,.18)'; g.fill();
+  status('Höhen …');
+  // Kacheln 1 x 1 km, neueste Befliegung je Kachel
+  const [l0, p0] = lv95zuWgs(x0, y0), [l1, p1] = lv95zuWgs(x1, y1);
+  const stac = await (await fetch(`https://data.geo.admin.ch/api/stac/v0.9/collections/ch.swisstopo.swissalti3d/items?bbox=${l0},${p0},${l1},${p1}&limit=100`)).json();
+  const RES = 0.5, nc = Math.ceil(MW / RES) + 1, nr = Math.ceil(MH / RES) + 1, roh = new Float32Array(nc * nr).fill(NaN);
+  const gx = k => x0 + (k + 0.5) * RES, gy = r => y1 - (r + 0.5) * RES;
+  let jahr = '';
+  for(let kx = Math.floor(x0 / 1000); kx <= Math.floor(x1 / 1000); kx++) for(let ky = Math.floor(y0 / 1000); ky <= Math.floor(y1 / 1000); ky++){
+    const it = (stac.features || []).filter(f => f.id.endsWith(`_${kx}-${ky}`)).sort((p, q) => q.id.localeCompare(p.id))[0]; if(!it) continue;
+    const href = Object.values(it.assets).find(s => /_0\.5_2056_\d+\.tif$/.test(s.href))?.href; if(!href) continue;
+    jahr = it.id.match(/_(\d{4})_/)?.[1] || jahr;
+    const bild = await (await GeoTIFF.fromUrl(href)).getImage(), [tx0, , , ty1] = bild.getBoundingBox(), tw = bild.getWidth(), th = bild.getHeight();
+    const cA = Math.max(0, Math.floor((x0 - tx0) / RES)), cE = Math.min(tw, Math.ceil((x1 - tx0) / RES) + 1), rA = Math.max(0, Math.floor((ty1 - y1) / RES)), rE = Math.min(th, Math.ceil((ty1 - y0) / RES) + 1);
+    if(cA >= cE || rA >= rE) continue;
+    const [w] = await bild.readRasters({ window: [cA, rA, cE, rE] }), ww = cE - cA;
+    for(let r = rA; r < rE; r++) for(let k = cA; k < cE; k++){ const gk = Math.round((tx0 + (k + 0.5) * RES - x0) / RES - 0.5), gr = Math.round((y1 - (ty1 - (r + 0.5) * RES)) / RES - 0.5);
+      if(gk >= 0 && gk < nc && gr >= 0 && gr < nr) roh[gr * nc + gk] = w[(r - rA) * ww + (k - cA)]; }
+  }
+  // leicht glätten (3x3), damit die Linien nicht zittern
+  const z = new Float32Array(nc * nr);
+  for(let r = 0; r < nr; r++) for(let k = 0; k < nc; k++){ let s = 0, n = 0;
+    for(let dr = -1; dr <= 1; dr++) for(let dk = -1; dk <= 1; dk++){ const rr = r + dr, kk = k + dk; if(rr >= 0 && rr < nr && kk >= 0 && kk < nc && !isNaN(roh[rr * nc + kk])){ s += roh[rr * nc + kk]; n++; } }
+    z[r * nc + k] = n ? s / n : NaN; }
+  const hoehe = (x, y) => { const k = (x - x0) / RES - 0.5, r = (y1 - y) / RES - 0.5, k0 = Math.floor(k), r0 = Math.floor(r), fk = k - k0, fr = r - r0;
+    const v = (rr, kk) => z[Math.min(Math.max(rr, 0), nr - 1) * nc + Math.min(Math.max(kk, 0), nc - 1)];
+    return (v(r0, k0) * (1 - fk) + v(r0, k0 + 1) * fk) * (1 - fr) + (v(r0 + 1, k0) * (1 - fk) + v(r0 + 1, k0 + 1) * fk) * fr; };
+  let zmin = Infinity, zmax = -Infinity; z.forEach(v => { if(!isNaN(v)){ if(v < zmin) zmin = v; if(v > zmax) zmax = v; } });
+  if(!isFinite(zmin)) throw new Error('Keine Höhendaten für dieses Gebiet gefunden.');
+  // Höhenlinien (Marching Squares): 0.25 m bei 1:200, sonst 0.5 m; jeder Meter kräftig und beschriftet
+  const STUFE = MST <= 200 ? 0.25 : 0.5, beschr = [];
+  for(let lv = Math.ceil(zmin / STUFE) * STUFE; lv <= zmax; lv += STUFE){
+    const meter = Math.abs(lv - Math.round(lv)) < 1e-6, halb = !meter && Math.abs(lv * 2 - Math.round(lv * 2)) < 1e-6;
+    g.beginPath(); let n = 0, best = null;
+    for(let r = 0; r < nr - 1; r++) for(let k = 0; k < nc - 1; k++){
+      const a1 = z[r * nc + k], b1 = z[r * nc + k + 1], c1 = z[(r + 1) * nc + k + 1], d1 = z[(r + 1) * nc + k], pts = [];
+      if(isNaN(a1 + b1 + c1 + d1)) continue;
+      const kante = (va, vb, xa, ya, xb, yb) => { if((va - lv) * (vb - lv) < 0){ const t = (lv - va) / (vb - va); pts.push([xa + (xb - xa) * t, ya + (yb - ya) * t]); } };
+      kante(a1, b1, gx(k), gy(r), gx(k + 1), gy(r)); kante(b1, c1, gx(k + 1), gy(r), gx(k + 1), gy(r + 1));
+      kante(c1, d1, gx(k + 1), gy(r + 1), gx(k), gy(r + 1)); kante(d1, a1, gx(k), gy(r + 1), gx(k), gy(r));
+      for(let i = 0; i + 1 < pts.length; i += 2){ g.moveTo(px(pts[i][0]), py(pts[i][1])); g.lineTo(px(pts[i + 1][0]), py(pts[i + 1][1])); n++;
+        if(meter && (n === 8 || n % 80 === 40)) best = [pts[i][0], pts[i][1]]; }
+    }
+    g.strokeStyle = meter ? '#8a5a1e' : '#c08a4a'; g.lineWidth = meter ? 3 : halb ? 1.6 : 0.9; g.setLineDash(meter || halb ? [] : [6, 5]); g.stroke(); g.setLineDash([]);
+    if(meter && best) beschr.push([best[0], best[1], lv]);
+  }
+  g.font = 'bold 22px Arial'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  beschr.forEach(([x, y, lv]) => { const t = lv.toFixed(0), w = g.measureText(t).width + 8; g.fillStyle = '#fff'; g.fillRect(px(x) - w / 2, py(y) - 13, w, 26); g.fillStyle = '#8a5a1e'; g.fillText(t, px(x), py(y)); });
+  // Gebäude deckend darüber (unter Häusern ist das Höhenmodell nur geschätzt), dann Linien und Grenzen
+  haeuser();
+  SOSF.forEach(f => { pfad(ringe(f)); g.lineWidth = 1.5; g.strokeStyle = '#9a6b6b'; g.setLineDash([6, 4]); g.stroke(); g.setLineDash([]); });
+  SOLI.forEach(f => { const ls = f.geometry?.type === 'LineString' ? [f.geometry.coordinates] : f.geometry?.coordinates || []; g.beginPath(); ls.forEach(l => l.forEach((p, i) => i ? g.lineTo(px(p[0]), py(p[1])) : g.moveTo(px(p[0]), py(p[1])))); g.lineWidth = 1.5; g.strokeStyle = '#6b7079'; g.stroke(); });
+  RESF.forEach(f => { pfad(ringe(f)); g.lineWidth = 2.2; g.strokeStyle = '#232b35'; g.stroke(); });
+  pfad([ring]); g.lineWidth = 5; g.strokeStyle = '#323e4e'; g.stroke();
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  OSNR.forEach(f => { const p = f.geometry.coordinates, eigen = f.properties.Nummer === eig.properties.number;
+    g.font = eigen ? 'bold 38px Arial' : '30px Arial'; g.fillStyle = eigen ? '#323e4e' : '#4c5c70'; g.fillText(f.properties.Nummer, px(p[0]), py(p[1])); });
+  // Koten: Raster in der eigenen Parzelle (nicht in Gebäuden) + Grenzecken (fett)
+  const inRing = (x, y, rg) => { let r = false; for(let i = 0, j = rg.length - 1; i < rg.length; j = i++){ const [xi, yi] = rg[i], [xj, yj] = rg[j]; if(((yi > y) !== (yj > y)) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) r = !r; } return r; };
+  const frei = (x, y) => inRing(x, y, ring) && !HAUS.some(f => ringe(f).some(rg => inRing(x, y, rg)));
+  const kote = (x, y, fett) => { const h = hoehe(x, y); if(isNaN(h)) return; g.strokeStyle = '#323e4e'; g.lineWidth = 2; g.beginPath(); g.moveTo(px(x) - 6, py(y)); g.lineTo(px(x) + 6, py(y)); g.moveTo(px(x), py(y) - 6); g.lineTo(px(x), py(y) + 6); g.stroke();
+    g.font = (fett ? 'bold ' : '') + '17px Arial'; g.textAlign = 'left'; g.fillStyle = '#323e4e'; g.fillText(h.toFixed(2), px(x) + 7, py(y) - 10); };
+  const RA = 4 / sk;
+  for(let x = Math.ceil(Math.min(...xs) / RA) * RA + RA / 4; x < Math.max(...xs); x += RA) for(let y = Math.ceil(Math.min(...ys) / RA) * RA + RA / 4; y < Math.max(...ys); y += RA) if(frei(x, y)) kote(x, y, false);
+  const pts = ring.slice(0, -1), dist = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1]);
+  pts.filter((p, i) => { const q = pts[(i + pts.length - 1) % pts.length], s = pts[(i + 1) % pts.length];
+    let w = Math.abs(Math.atan2(p[1] - q[1], p[0] - q[0]) - Math.atan2(s[1] - p[1], s[0] - p[0])); if(w > Math.PI) w = 2 * Math.PI - w;
+    return w > 0.44 && dist(p, q) >= 1 && dist(p, s) >= 1; }).forEach(p => kote(p[0], p[1], true));
+  g.restore();
+  // Rahmen, Kopf, Legende, Massstab, Nordpfeil
+  g.strokeStyle = '#323e4e'; g.lineWidth = 2; g.strokeRect(ox, oy, W, H);
+  g.fillStyle = '#323e4e'; g.textAlign = 'left'; g.textBaseline = 'alphabetic';
+  g.font = 'bold 46px Arial'; g.fillText('Grundstücksplan mit Höhen', ox, 15 * PXMM);
+  g.font = '28px Arial'; g.fillText(`Parzelle ${eig.properties.number}${b.gemeinde ? ' ' + b.gemeinde : ''} · ${standort(b)} · ${kundeName(b.kunde)}`, ox, 21 * PXMM);
+  g.textAlign = 'right'; g.font = 'bold 28px Arial'; g.fillText('Knechtgarten', ox + W, 15 * PXMM); g.font = '24px Arial'; g.fillText(`Massstab 1:${MST} (A4)`, ox + W, 21 * PXMM);
+  const ny = oy + H; g.textAlign = 'left'; g.font = '21px Arial';
+  [`Höhenlinien alle ${STUFE.toFixed(2)} m (ganze Meter kräftig und beschriftet), Koten in m ü. M. (Grenzecken fett). Unter Gebäuden keine Höhen.`,
+   `Höhen: swisstopo swissALTI3D ${jahr} (Raster 0.5 m), Genauigkeit ca. ±0.25 m – Grundlage, nicht für Absteckung oder Höhenkontrolle.`,
+   `Grenzen und Gebäude: amtliche Vermessung (geodienste.ch). Rechtsverbindlich ist der beglaubigte Plan des Geometers. Erstellt ${heute()}.`]
+    .forEach((t, i) => g.fillText(t, ox, ny + 40 + i * 30));
+  const SB = MST <= 200 ? 10 : MST <= 500 ? 20 : 50, mx = ox + W - SB * PXM, my = ny + 150;
+  g.fillRect(mx, my, SB / 2 * PXM, 10); g.strokeRect(mx, my, SB * PXM, 10);
+  g.font = '20px Arial'; g.textAlign = 'center'; [0, SB / 2, SB].forEach(m => g.fillText(m + (m === SB ? ' m' : ''), mx + m * PXM, my - 8));
+  const nx = ox + W - 40, nyy = oy + 70; g.beginPath(); g.moveTo(nx, nyy - 40); g.lineTo(nx + 16, nyy + 14); g.lineTo(nx, nyy); g.lineTo(nx - 16, nyy + 14); g.closePath(); g.fillStyle = '#323e4e'; g.fill();
+  g.font = 'bold 24px Arial'; g.fillText('N', nx, nyy + 44);
+  const d = new window.jspdf.jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+  d.addImage(c.toDataURL('image/jpeg', 0.92), 'JPEG', 0, 0, 210, 297);
+  d.save(`Grundstücksplan Höhen Parzelle ${eig.properties.number} – ${kundeName(b.kunde)}`.replace(/[\\/:*?"<>|]/g, '') + '.pdf');
+  } finally { if(knopf) knopf.textContent = alt; }
 }
 
 pruefeAnmeldung();
