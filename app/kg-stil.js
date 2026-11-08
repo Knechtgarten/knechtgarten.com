@@ -369,7 +369,7 @@ html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!import
       if(!session) return sicht;
       const [{ data: ben }, { data: mods }, { data: menue }] = await Promise.all([
         client.from('benutzer').select('rolle,recht_gruppe_id').eq('id', session.user.id).maybeSingle(),
-        client.from('modul_sichtbarkeit').select('modul_key,name,kurzname,url,ist_extern,fuer_buero_team,fuer_mitarbeitende,fuer_service_team'),
+        client.from('modul_sichtbarkeit').select('modul_key,name,kurzname,url,icon_url,ist_extern,fuer_buero_team,fuer_mitarbeitende,fuer_service_team'),
         client.from('tool_menue').select('app_key,sortierung,an').eq('benutzer_id', session.user.id)
       ]);
       sicht.menue = menue || [];
@@ -663,31 +663,76 @@ html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!import
     (document.head || document.documentElement).appendChild(s);
   });
 
-  // Handy-Leiste unten (Start · Kontakte · Foto · Reservieren · Apps; Werkzeuge über Apps) – auf allen Seiten, nur auf schmalen Bildschirmen.
-  // Seiten mit eigener Leiste (Heute, Pflege-Handy) behalten ihre. Beim Tippen in ein Feld verschwindet sie.
+  // Handy-Leiste unten: Start · Kontakte · Foto · Reservieren · Links. Hochziehen (oder Griff antippen) = zweite Reihe mit Apps und Dashlane.
+  // Auf allen Seiten, nur auf schmalen Bildschirmen. Seiten mit eigener Leiste (Pflege-Handy) behalten ihre; der Handy-Start nutzt KG.handyLeisteIn.
+  // Beim Tippen in ein Feld verschwindet sie. «Links» öffnet ein Blatt mit den externen Links (Logo-Kacheln, mit Stern zuerst).
+  const hic = (p, g = 24) => `<svg viewBox="0 0 24 24" width="${g}" height="${g}" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p || ''}</svg>`;
+  function leisteCss(){
+    if(document.getElementById('kg-handyleiste-css')) return;
+    const st = document.createElement('style'); st.id = 'kg-handyleiste-css';
+    st.textContent = `.kg-handyleiste{display:none;position:fixed;left:0;right:0;bottom:0;z-index:90;background:#fff;border-top:1px solid #E1E5E9;
+    padding:0 max(8px,env(safe-area-inset-left,0px)) calc(6px + env(safe-area-inset-bottom,0px));font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;touch-action:none}
+@media (max-width:760px){ .kg-handyleiste{display:block} body.kg-mit-leiste{padding-bottom:calc(76px + env(safe-area-inset-bottom,0px)) !important} }
+.kg-handyleiste.kg-hl-immer{display:block}
+body.kg-tippt .kg-handyleiste{display:none !important}
+.kg-hl-haupt{display:flex;justify-content:space-around}
+.kg-handyleiste a{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:11px;color:#6B7079;text-decoration:none;padding:4px 0}
+.kg-handyleiste a.akt{color:#323E4E;font-weight:600}
+.kg-handyleiste a.kam span{width:52px;height:52px;margin-top:-22px;border-radius:50%;background:#323E4E;color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(50,62,78,.25)}
+.kg-hl-griff{all:unset;display:block;width:64px;height:12px;margin:0 auto;cursor:pointer}
+.kg-hl-griff i{display:block;width:34px;height:4px;border-radius:2px;background:#D5DBE1;margin:4px auto 0}
+.kg-hl-mehr{display:flex;max-height:0;overflow:hidden;transition:max-height .2s}
+.kg-handyleiste.auf .kg-hl-mehr{max-height:90px;border-bottom:1px solid #EEF1F4;margin-bottom:8px;padding-bottom:4px}
+.kg-hl-mehr a{flex:0 0 20%}
+.kg-lb{position:fixed;inset:0;z-index:120;background:rgba(35,43,53,.45);display:flex;align-items:flex-end;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+.kg-lb-in{background:#fff;width:100%;max-width:560px;margin:0 auto;max-height:85vh;overflow-y:auto;border-radius:18px 18px 0 0;padding:10px 14px calc(16px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:8px}
+.kg-lb-in .gr{width:40px;height:4px;border-radius:2px;background:#D5DBE1;align-self:center}
+.kg-lb-in b{font-size:13px;letter-spacing:.04em;text-transform:uppercase;color:#8B9097;font-weight:600}
+.kg-lbk{display:grid;grid-template-columns:2fr 1fr;align-items:center;gap:10px;height:52px;padding:0 12px;border:1px solid #E1E5E9;border-radius:12px;text-decoration:none;color:#232B35}
+.kg-lbk .lg{display:flex;align-items:center;height:36px;min-width:0} .kg-lbk .lg img{max-height:36px;max-width:100%;object-fit:contain}
+.kg-lbk .tx{font-size:13.5px;font-weight:600;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kg-lb-leer{font-size:14px;color:#8B9097;padding:8px 2px}`;
+    document.head.appendChild(st);
+  }
+  function leisteHtml(akt){
+    return `<button type="button" class="kg-hl-griff" aria-label="Mehr: Apps und Dashlane" aria-expanded="false"><i></i></button>
+      <div class="kg-hl-mehr"><a href="heute-live-v1.html#apps" data-hl="apps">${hic(P.raster)}Apps</a><a href="https://app.dashlane.com" target="_blank" rel="noopener" data-hl="dash">${hic(P.lock)}Dashlane</a></div>
+      <div class="kg-hl-haupt"><a href="heute-live-v1.html" data-hl="start"${akt === 'start' ? ' class="akt"' : ''}>${hic(P.home || TI.home)}Start</a>`
+      + `<a href="kontakte-handy-live-v1.html" data-hl="kontakte"${akt === 'kontakte' ? ' class="akt"' : ''}>${hic(TI.kunden)}Kontakte</a>`
+      + `<a class="kam${akt === 'foto' ? ' akt' : ''}" href="fotos-live-v1.html" data-hl="foto"><span>${hic(P.foto, 26)}</span>Foto</a>`
+      + `<a href="reservieren-live-v1.html" data-hl="reservieren"${akt === 'reservieren' ? ' class="akt"' : ''}>${hic(P.anhaenger)}Reservieren</a>`
+      + `<a href="#" data-hl="links">${hic(EXT)}Links</a></div>`;
+  }
+  // Blatt «Links»: externe Links der Gruppe als breite Kacheln (Logo ⅔, Name ⅓); mit Stern (Handy › Apps) zuerst
+  async function linksBlatt(){
+    const s = await ladeSichtbarkeit(); let fav = [];
+    try { if(KG._sb){ const { data } = await KG._sb.from('app_favorit').select('app_key').order('sortierung'); fav = (data || []).map(x => x.app_key); } } catch(e){}
+    const rang = m => { const i = fav.indexOf('ext:' + m.modul_key); return i < 0 ? 999 : i; };
+    const L = (s.extern || []).slice().sort((a, b) => rang(a) - rang(b) || (a.kurzname || a.name).localeCompare(b.kurzname || b.name, 'de'));
+    const logo = m => { if(m.icon_url) return m.icon_url; try { return 'https://www.google.com/s2/favicons?domain=' + new URL(m.url).hostname + '&sz=128'; } catch(e){ return ''; } };
+    const b = document.createElement('div'); b.className = 'kg-lb';
+    b.innerHTML = `<div class="kg-lb-in"><span class="gr"></span><b>Links</b>${L.map(m => `<a class="kg-lbk" href="${esc(m.url)}" target="_blank" rel="noopener"><span class="lg">${logo(m) ? `<img src="${esc(logo(m))}" alt="">` : ''}</span><span class="tx">${esc(m.kurzname || m.name)}</span></a>`).join('') || '<div class="kg-lb-leer">Für dich sind noch keine Links freigegeben.</div>'}</div>`;
+    document.body.appendChild(b);
+    b.addEventListener('click', e => { if(e.target === b || e.target.closest('.kg-lbk')) b.remove(); });
+  }
+  KG.linksBlatt = linksBlatt;
+  function leisteBinden(n){
+    const g = n.querySelector('.kg-hl-griff'), auf = an => { n.classList.toggle('auf', an); g.setAttribute('aria-expanded', an); };
+    g.addEventListener('click', () => auf(!n.classList.contains('auf')));
+    let y0 = null; n.addEventListener('touchstart', e => { y0 = e.touches[0].clientY; }, { passive: true });
+    n.addEventListener('touchend', e => { if(y0 === null) return; const dy = e.changedTouches[0].clientY - y0; y0 = null; if(dy < -25) auf(true); else if(dy > 25) auf(false); }, { passive: true });
+    n.querySelector('[data-hl="links"]').addEventListener('click', e => { e.preventDefault(); auf(false); linksBlatt(); });
+    ladeSichtbarkeit().then(s => { const d = (s.extern || []).find(m => /dashlane/i.test(m.name + ' ' + m.url)); if(d && d.url) n.querySelector('[data-hl="dash"]').href = d.url; });
+  }
+  // eigene Leiste einer Seite (Handy-Start) mit demselben Aufbau
+  KG.handyLeisteIn = (n, akt) => { leisteCss(); n.classList.add('kg-handyleiste', 'kg-hl-immer'); n.innerHTML = leisteHtml(akt); leisteBinden(n); return n; };
   function handyLeiste(){
     if(!document.body || document.querySelector('nav.unten, .mh-tabbar, [data-kg-ohne-leiste]')) return;
     const s = location.pathname.split('/').pop().replace(/\.html$/, '');
     const akt = /^(tool-d-kunden|pflege-kunden|kontakte-handy)/.test(s) ? 'kontakte' : /^fotos/.test(s) ? 'foto' : /^reservieren/.test(s) ? 'reservieren' : '';
-    const ic = (p, g = 24) => `<svg viewBox="0 0 24 24" width="${g}" height="${g}" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p || ''}</svg>`;
-    const st = document.createElement('style'); st.id = 'kg-handyleiste-css';
-    st.textContent = `.kg-handyleiste{display:none}
-@media (max-width:760px){
-  .kg-handyleiste{position:fixed;left:0;right:0;bottom:0;z-index:90;background:#fff;border-top:1px solid #E1E5E9;display:flex;justify-content:space-around;
-    padding:6px max(8px,env(safe-area-inset-left,0px)) calc(6px + env(safe-area-inset-bottom,0px));font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
-  .kg-handyleiste a{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:11px;color:#6B7079;text-decoration:none;padding:4px 0}
-  .kg-handyleiste a.akt{color:#323E4E;font-weight:600}
-  .kg-handyleiste a.kam span{width:52px;height:52px;margin-top:-22px;border-radius:50%;background:#323E4E;color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(50,62,78,.25)}
-  body.kg-mit-leiste{padding-bottom:calc(76px + env(safe-area-inset-bottom,0px)) !important}
-  body.kg-tippt .kg-handyleiste{display:none}
-}`;
-    document.head.appendChild(st);
+    leisteCss();
     const n = document.createElement('nav'); n.className = 'kg-handyleiste'; n.setAttribute('aria-label', 'Hauptnavigation');
-    n.innerHTML = `<a href="heute-live-v1.html">${ic(P.home || TI.home)}Start</a>`
-      + `<a href="kontakte-handy-live-v1.html"${akt === 'kontakte' ? ' class="akt"' : ''}>${ic(TI.kunden)}Kontakte</a>`
-      + `<a class="kam${akt === 'foto' ? ' akt' : ''}" href="fotos-live-v1.html"><span>${ic(P.foto, 26)}</span>Foto</a>`
-      + `<a href="reservieren-live-v1.html"${akt === 'reservieren' ? ' class="akt"' : ''}>${ic(P.anhaenger)}Reservieren</a>`
-      + `<a href="heute-live-v1.html#apps">${ic(P.raster)}Apps</a>`;
+    n.innerHTML = leisteHtml(akt); leisteBinden(n);
     document.body.appendChild(n); document.body.classList.add('kg-mit-leiste');
     const feld = e => e.target.matches && e.target.matches('input:not([type=checkbox]):not([type=radio]):not([type=button]):not([type=file]),textarea,select,[contenteditable=""],[contenteditable=true]');
     document.addEventListener('focusin', e => { if(feld(e)) document.body.classList.add('kg-tippt'); });
