@@ -123,6 +123,7 @@ button:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
 .pane.flex{flex:1;}
 .pane.seite{background:#EFF2F5;}
 /* Planer-Listen (Magazin, Vorrat, offene Aufträge): Zeilen wie Pendenzen, Haken bzw. Abfalleimer beim Darüberfahren */
+body.ohnelisten [data-set]{display:none;}
 .plz{font-weight:400;opacity:.75;margin-left:2px;font-size:11.5px;}
 .plz-z{height:auto;min-height:30px;padding:3px 4px 3px 8px;cursor:default;} .plz-z[draggable]{cursor:grab;}
 .plz-z .t{flex:1;min-width:0;display:flex;flex-direction:column;font-size:13px;line-height:1.3;} .plz-z .t small{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -803,6 +804,10 @@ function listHtml(l){
 // Planer-Listen: normale Listen (frei verschieben/stapeln), Inhalt direkt aus dem Einsatzplaner – keine Kopie.
 // pl_magazin = Magazin (quelle_wert kurz|mittel|lang), pl_vorrat = Vorrat einer Planer-Gruppe (vorrat_bereich), pl_offen = offene Aufträge einer Person.
 // Erfassen/erledigen/löschen wirkt sofort im Planer; wer was eingetragen oder gelöscht hat, steht im Archiv (planer_protokoll).
+// Rechte (Verwaltung › Pendenzen): Listen in gemeinsamen Boards verwalten nur mit Schalter (sonst Admin); endgültig löschen Eigene/Alle
+const listenRecht = () => !S.board || S.board.typ === 'person' || ROLLE === 'admin' || !(window.KG && KG.darf) || KG.darf('pend', 'listen', 'an') !== 'N';
+const darfEndgueltig = p => { if(!S.board || S.board.typ === 'person' || ROLLE === 'admin' || !(window.KG && KG.darf)) return true;
+  const w = KG.darf('pend', 'gemeinsam', 'loeschen'); return w === null || w === 'A' || w === 'G' || (w === 'E' && p.erstellt_von === ME); };
 const PLART = id => id === 'pl_magazin' || id === 'pl_vorrat' || id === 'pl_offen';
 const PL = { mag: [], vor: [], off: [], kunden: {}, personen: {}, neu: null, zieh: null };
 async function plLaden(){
@@ -902,7 +907,8 @@ function zeichne(){
   const rechts = (reihe().includes('zeit') ? `<button class="kg-neben" data-druck aria-haspopup="menu">${K('drucken')}Drucken</button>` : '')
     + (eigeneLage() && ROLLE === 'admin' ? `<button class="kg-neben" data-lagefest title="Deine Anordnung wird zur Standard-Anordnung für alle, die nichts selber verschoben haben">Als Standard für alle</button>` : '')
     + (eigeneLage() && Object.keys((S.ein.breiten._lage || {})[S.board.id] || {}).length ? `<button class="kg-neben" data-lagestd title="Eigene Anordnung verwerfen, wieder die Standard-Anordnung zeigen">Anordnung zurücksetzen</button>` : '')
-    + (istOfferten() || MA ? '' : `<button class="kg-haupt" data-neuliste>${K('plus')}Liste</button>`);
+    + (istOfferten() || MA || !listenRecht() ? '' : `<button class="kg-haupt" data-neuliste>${K('plus')}Liste</button>`);
+  document.body.classList.toggle('ohnelisten', !listenRecht());
   $('pzSeite').innerHTML = `<div class="kg-l">${seg}${seg2}</div>${rechts ? `<div class="kg-r">${rechts}</div>` : ''}`;
   // Ablagefelder: Offerten-Board nur Archivieren (Zugesagt ist dort eine Liste); «In anderes Board» braucht es dort nicht
   document.body.classList.toggle('offest', istOfferten());
@@ -1033,7 +1039,7 @@ function zeichneOver(){
     h += `<div class="dbg" data-bg="archiv"><div class="set" role="dialog" aria-label="Archiv"><h2>Archiv<button class="kg-ibtn" data-archivx aria-label="Schliessen">${K('x')}</button></h2>
       ${a.rows == null ? '<div class="muted small">Lade …</div>' : a.rows.length ? a.rows.map(p => { const l = listeById(p.liste_id), ar = l && l.art_id ? art(l.art_id) : null;
         return `<div class="arow"><span class="ty" style="background:${ar ? listFarbe(l) : '#8B9097'}">${ar ? A(ar.icon) : ''}</span><span class="n2">${esc(p.titel)}<small>${esc(l ? l.titel : '')} · ${esc(datumCH(p.erledigt_am))}${p.erledigt_von && p.erledigt_von !== ME ? ' · ' + esc(name(p.erledigt_von)) : ''}</small></span>
-          <button class="kg-ibtn" data-zurueck="${p.id}" aria-label="Zurückholen" title="Zurückholen">${K('undo')}</button><button class="kg-ibtn danger" data-adel="${p.id}" aria-label="Endgültig löschen" title="Endgültig löschen">${K('trash')}</button></div>
+          <button class="kg-ibtn" data-zurueck="${p.id}" aria-label="Zurückholen" title="Zurückholen">${K('undo')}</button>${darfEndgueltig(p) ? `<button class="kg-ibtn danger" data-adel="${p.id}" aria-label="Endgültig löschen" title="Endgültig löschen">${K('trash')}</button>` : ''}</div>
           ${a.del === p.id ? `<div class="confirm">Endgültig löschen? Das geht nicht mehr rückgängig.<span class="sp"></span><button class="btn btn-ghost" data-adelno>Abbrechen</button><button class="btn btn-danger" data-adelyes="${p.id}">Löschen</button></div>` : ''}`; }).join('')
         : '<div class="muted small">Noch nichts archiviert.</div>'}
       ${a.pl && a.pl.length ? `<h3 style="margin:18px 0 6px;font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)">Planer-Listen · wer hat was gemacht</h3>` + a.pl.map(p => {
@@ -1507,6 +1513,7 @@ document.addEventListener('click', async e => {
   if('ordnen' in d){ e.stopPropagation(); return ordnen(); }
   if(d.tog){ e.stopPropagation(); const l = listeById(d.tog); l.zu = !l.zu; zeichne(); return upd('pendenz_liste', l.id, { zu: l.zu }); }
   if(d.gtog){ const g = S.gruppen.find(x => x.id === d.gtog); g.zu = !g.zu; zeichne(); return upd('pendenz_gruppe', g.id, { zu: g.zu }); }
+  if(d.set && !listenRecht()) return toast('Listen verwalten darf nur, wer das Recht dazu hat (Verwaltung › Pendenzen).');
   if(d.set){ if(S.pop) await gruppeAusFeld(); S.pop = S.pop === d.set ? null : d.set; S.delListe = false; return zeichneOver(); }
   if('lfarbo' in d){ S.farbwahl = S.pop; return zeichneOver(); }
   if('fwx' in d || d.bg === 'farbwahl'){ S.farbwahl = null; return zeichneOver(); }
