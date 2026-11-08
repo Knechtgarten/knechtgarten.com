@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script src="/kg-pw-schutz.js?v=5"></script>
-<script src="/kg-stil.js?v=66"></script>
+<script src="/kg-stil.js?v=67"></script>
 <title>Einstellungen – Knechtgarten</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
@@ -213,7 +213,16 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 .pefest{display:flex;flex-direction:column;gap:3px;margin-top:4px;} .pefest span{font-size:12.5px;color:#6B7079;padding:3px 8px;background:#F5F7F9;border-radius:6px;}
 </style>
 <style>
-.eukacheln{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;}
+.eukacheln{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;}
+@media (max-width:900px){ .eukacheln{grid-template-columns:repeat(2,minmax(0,1fr));} }
+@media (max-width:600px){ .eukacheln{grid-template-columns:1fr;} }
+/* Tool-Auswahl: Schalter Computer (Menü) und Handy (Schnellzugriff), Reihenfolge am Griff ziehen */
+.eugriff{color:#B6BCC3;cursor:grab;display:inline-flex;margin-left:-4px;} .euk.zieht{opacity:.4;} .euk.ueber{outline:2px dashed var(--primary);outline-offset:2px;}
+.euw{all:unset;box-sizing:border-box;cursor:pointer;width:26px;height:26px;border-radius:7px;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;color:#A9B0B7;}
+.euw svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;}
+.euw[aria-pressed="true"]{background:var(--primary);border-color:var(--primary);color:#fff;}
+.euleer{font-size:12px;color:var(--muted);padding:5px 6px;}
+.euh{font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);font-weight:700;margin:22px 0 8px;}
 /* gleich wie die Kacheln in Kontakte: weiss, feiner Rand, Titel klein oben, Link oben rechts, gleich hoch */
 .euk{background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 12px 8px;height:200px;display:flex;flex-direction:column;box-sizing:border-box;}
 .eukk{display:flex;align-items:center;gap:9px;margin-bottom:6px;} .eukk h4{flex:1;margin:0;font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);}
@@ -278,7 +287,7 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--primary)
 
 <main class="wrap hidden" id="appMain">
   <h1 class="page">Einstellungen</h1>
-  <p class="pagesub">Alle Einstellungen an einem Ort: pro Tool die Seiten für Vorlagen, Listen und Fristen, dazu die allgemeine Verwaltung. Du siehst nur, wofür du Rechte hast.</p>
+  <p class="pagesub">Pro Tool die Einstellungen, für die du Rechte hast. Mit den Knöpfen oben rechts wählst du, ob ein Tool in deinem Menü am <b>Computer</b> und im Schnellzugriff auf dem <b>Handy</b> steht. Am Griff ziehen = Reihenfolge im Menü.</p>
   <div class="eukacheln" id="euKacheln"></div>
 </main>
 
@@ -390,11 +399,6 @@ async function pruefeAnmeldung(){
   $('userbar').classList.remove('hidden');
   $('userbarText').textContent = `${benutzer.email} (${ROLLE_LABEL[benutzer.rolle] || benutzer.rolle})`;
 
-  if(aktuelleRolle !== 'admin' && aktuelleRolle !== 'buero_team'){
-    $('keinZugriff').classList.remove('hidden');
-    $('appMain').classList.add('hidden');
-    return false;
-  }
   $('keinZugriff').classList.add('hidden');
   $('appMain').classList.remove('hidden');
   await ladeAlles();
@@ -433,15 +437,48 @@ const KACHELN = [
     ['tool-d-kunden-live-v1.html?aktion=ordner', 'Drive-Ordner zuordnen', 'Bestehende Kundenordner im Google Drive den Kunden zuordnen']] }
 ];
 const BUERO = r => r === 'admin' || r === 'buero_team';
+const SVG_PC = '<svg viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="12" rx="1.5"/><path d="M8.5 20h7M12 16.5V20"/></svg>';
+const SVG_HANDY = '<svg viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M11 18.5h2"/></svg>';
+// Tool-Auswahl pro Person: Menü am Computer (tool_menue, an + Reihenfolge) und Schnellzugriff auf dem Handy (app_favorit)
+let REIHE = [], MENUE = new Map(), FAV = new Set();
 async function ladeAlles(){
   if(KG.ladeRechte) await KG.ladeRechte();
   const darf = href => { const s = href.split(/[?#]/)[0].replace(/\.html?$/, ''); const ok = KG.seiteErlaubt ? KG.seiteErlaubt(s) : null;
     // Seiten ohne eigenes Recht (Planer-Ansichten, Verwaltung): Büro/Admin
     return ok === null || ok === undefined ? BUERO(aktuelleRolle) && (s !== 'verwaltung-live-v1' && s !== 'tools-live-v1' || aktuelleRolle === 'admin') : ok !== false; };
-  const html = KACHELN.map(K => { const L = K.links.filter(([h]) => darf(h)); if(!L.length) return '';
-    return `<section class="euk"><div class="eukk"><span class="euic">${KG.toolIcon ? KG.toolIcon(K.tool, 26) : ''}</span><h4>${esc(K.t)}</h4><a class="eub" href="${L[0][0]}">Bearbeiten</a></div>
-      <div class="eui">${L.map(([h, t, u]) => `<a class="eul" href="${h}"><b>${esc(t)}</b><small>${esc(u)}</small></a>`).join('')}</div></section>`; }).join('');
-  $('euKacheln').innerHTML = html || '<p class="pehint">Für dich gibt es hier keine Einstellungen.</p>';
+  const [{ data: m }, { data: f }] = await Promise.all([sb.from('tool_menue').select('app_key,sortierung,an'), sb.from('app_favorit').select('app_key')]);
+  MENUE = new Map((m || []).map(x => [x.app_key, x])); FAV = new Set((f || []).map(x => x.app_key));
+  const tools = (KG.tools || []).filter(t => t.k !== 'home' && !t.admin && (!KG.toolSichtbar || KG.toolSichtbar(t)));
+  const pos = t => MENUE.has(t.k) ? MENUE.get(t.k).sortierung : 1000 + KG.tools.indexOf(t);
+  REIHE = tools.sort((a, b) => pos(a) - pos(b)).map(t => t.k);
+  const kachel = (t, links, wahl) => `<section class="euk"${wahl ? ` draggable="true" data-tk="${t.k}"` : ''}><div class="eukk">${wahl ? `<span class="eugriff" title="Ziehen = Reihenfolge im Menü">${KG.icon('griff', 14)}</span>` : ''}<span class="euic">${KG.toolIcon ? KG.toolIcon(t.k, 26) : ''}</span><h4>${esc(t.n)}</h4>
+      ${wahl ? `<button type="button" class="euw" data-pc="${t.k}" aria-pressed="${!MENUE.has(t.k) || MENUE.get(t.k).an}" title="Im Menü am Computer" aria-label="${esc(t.n)} im Menü am Computer">${SVG_PC}</button><button type="button" class="euw" data-handy="${t.k}" aria-pressed="${FAV.has(t.k)}" title="Im Schnellzugriff auf dem Handy" aria-label="${esc(t.n)} im Schnellzugriff auf dem Handy">${SVG_HANDY}</button>` : ''}</div>
+      <div class="eui">${links.length ? links.map(([h, tt, u]) => `<a class="eul" href="${h}"><b>${esc(tt)}</b><small>${esc(u)}</small></a>`).join('') : '<span class="euleer">Keine Einstellungen.</span>'}</div></section>`;
+  const tk = REIHE.map(k => { const t = KG.tools.find(x => x.k === k), K = KACHELN.find(x => x.tool === k); return kachel(t, K ? K.links.filter(([h]) => darf(h)) : [], true); }).join('');
+  const allg = KACHELN.filter(K => !KG.tools.some(t => t.k === K.tool)).map(K => { const L = K.links.filter(([h]) => darf(h)); return L.length ? kachel({ k: K.tool, n: K.t }, L, false) : ''; }).join('');
+  $('euKacheln').innerHTML = (tk || '<p class="pehint">Für dich gibt es hier keine Tools.</p>') + (allg ? `</div><div class="euh">Allgemein</div><div class="eukacheln">${allg}` : '');
+  binden();
+}
+async function reiheSpeichern(){
+  const rows = REIHE.map((k, i) => ({ app_key: k, sortierung: (i + 1) * 10, an: !MENUE.has(k) || MENUE.get(k).an }));
+  const { error } = await sb.from('tool_menue').upsert(rows); if(error) return alert('Konnte nicht gespeichert werden: ' + error.message);
+  rows.forEach(r => MENUE.set(r.app_key, r));
+}
+function binden(){
+  const box = document.querySelector('main') || document.body;
+  box.querySelectorAll('[data-pc]').forEach(b => b.onclick = async () => { const k = b.dataset.pc, an = b.getAttribute('aria-pressed') !== 'true';
+    MENUE.set(k, { app_key: k, sortierung: (REIHE.indexOf(k) + 1) * 10, an }); b.setAttribute('aria-pressed', an); await reiheSpeichern(); });
+  box.querySelectorAll('[data-handy]').forEach(b => b.onclick = async () => { const k = b.dataset.handy, an = b.getAttribute('aria-pressed') !== 'true';
+    const { error } = an ? await sb.from('app_favorit').insert({ app_key: k, sortierung: FAV.size }) : await sb.from('app_favorit').delete().eq('app_key', k);
+    if(error) return alert('Konnte nicht gespeichert werden: ' + error.message); an ? FAV.add(k) : FAV.delete(k); b.setAttribute('aria-pressed', an); });
+  let von = null;
+  box.querySelectorAll('[data-tk]').forEach(s => {
+    s.addEventListener('dragstart', e => { von = s.dataset.tk; e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', von); } catch(x){} setTimeout(() => s.classList.add('zieht'), 0); });
+    s.addEventListener('dragend', () => { von = null; box.querySelectorAll('.zieht,.ueber').forEach(x => x.classList.remove('zieht', 'ueber')); });
+    s.addEventListener('dragover', e => { if(!von) return; e.preventDefault(); box.querySelectorAll('.ueber').forEach(x => x.classList.remove('ueber')); s.classList.add('ueber'); });
+    s.addEventListener('drop', async e => { e.preventDefault(); const nach = s.dataset.tk; if(!von || von === nach) return;
+      const nachHinten = REIHE.indexOf(von) < REIHE.indexOf(nach), r = REIHE.filter(k => k !== von); r.splice(r.indexOf(nach) + (nachHinten ? 1 : 0), 0, von); REIHE = r; von = null;
+      await reiheSpeichern(); ladeAlles(); }); });
 }
 
 pruefeAnmeldung();

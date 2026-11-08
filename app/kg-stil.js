@@ -181,7 +181,7 @@ button.kg-kachel-kopf,a.kg-kachel-kopf{cursor:pointer;} button.kg-kachel-kopf:ho
     { k: 'home', n: 'Startseite', url: 'index.html', farbe: PAL.oliv[1], akzent: PAL.oliv[3], seiten: ['index'] },
     { k: 'offerten', n: 'Offertentool', url: 'tool-start-live-v1.html', farbe: PAL.blau[1], akzent: PAL.blau[3], modul: 'offertentool',
       seiten: ['tool-start-live-v1', 'tool-a-live-v1', 'tool-a2-allgemein-live-v1', 'tool-a3-artikel-live-v1', 'tool-b-live-v1', 'einstellungen-live-v1'] },
-    { k: 'artikel', n: 'Artikelstamm', url: 'tool-c-live-v1.html', farbe: PAL.blau[1], akzent: PAL.blau[3], modul: 'offertentool', seiten: ['tool-c-live-v1'] },
+    { k: 'artikel', n: 'Artikelstamm', url: 'tool-c-live-v1.html', farbe: PAL.blau[0], akzent: PAL.blau[3], modul: 'offertentool', seiten: ['tool-c-live-v1'] },
     // Kontakte = eigenes Haupttool: Kunden, Lieferanten und Pflegekunden (früher «Pflege & Service»)
     { k: 'kunden', n: 'Kontakte', url: 'tool-d-kunden-live-v1.html', farbe: PAL.gold[0], akzent: PAL.gold[3],
       seiten: ['tool-d-kunden-live-v1', 'pflege-kunden-live-v1', 'kontakte-handy-live-v1'] },
@@ -195,7 +195,7 @@ button.kg-kachel-kopf,a.kg-kachel-kopf{cursor:pointer;} button.kg-kachel-kopf:ho
         'werkzeug-pool-volumen-live-v1', 'werkzeug-bau-diagonale-live-v1', 'werkzeug-bau-kies-live-v1', 'werkzeug-bau-stahl-live-v1', 'werkzeug-bau-schalit-live-v1', 'werkzeug-pflege-spritz-live-v1', 'werkzeug-allg-gefaelle-live-v1'] },
     // Pläne & Bewilligungen: Grundstückskarte, Baugesuche vorbereiten (Geodaten, Näherbaurecht, Zustimmung Nachbarn, eBau)
     // Pool-Konfigurator: Rechteckbecken planen (Grundriss, Schnitt, 3D), Kundenblatt, Preisanfrage, Elektriker-Blatt
-    { k: 'pool', n: 'Pool-Konfigurator', url: 'pool-konfigurator-live-v1.html', farbe: PAL.petrol[1], akzent: PAL.petrol[3], seiten: ['pool-konfigurator-live-v1'] },
+    { k: 'pool', n: 'Pool-Konfigurator', url: 'pool-konfigurator-live-v1.html', farbe: PAL.blau[2], akzent: PAL.blau[4], seiten: ['pool-konfigurator-live-v1'] },
     { k: 'bew', n: 'Pläne & Bewill.', url: 'bewilligungen-live-v1.html', farbe: PAL.grau[2], akzent: PAL.grau[4], seiten: ['bewilligungen-live-v1'] },
     { k: 'doku', n: 'Doku-Tools', url: 'doku-live-v1.html', farbe: PAL.beere[1], akzent: PAL.beere[3],
       seiten: ['doku-live-v1', 'doku-dokument-live-v1', 'doku-datei-live-v1', 'doku-personen-live-v1'] },
@@ -248,6 +248,7 @@ header.app .wrap{min-height:46px;}
 .kg-twmenu .kg-it .kg-ti[style*="#FFFFFF"]{border:1px solid #E1E5E9;}
 .kg-twmenu .kg-sep{height:1px;background:#E1E5E9;margin:12px 0;}
 .kg-twmenu .kg-ext{display:flex;flex-wrap:wrap;gap:6px;padding:0 4px;}
+.kg-twmenu .kg-links summary{cursor:pointer;list-style:none;} .kg-twmenu .kg-links summary::-webkit-details-marker{display:none;} .kg-twmenu .kg-links summary::after{content:" ›";} .kg-twmenu .kg-links[open] summary::after{content:" ‹";} .kg-twmenu .kg-links[open] .kg-ext{padding-bottom:6px;}
 .kg-twmenu .kg-ext a{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 10px;border:1px solid #E1E5E9;border-radius:13px;font-size:12px;color:#232B35;text-decoration:none;}
 .kg-twmenu .kg-ext a:hover{border-color:#323E4E;}
 .kg-twmenu .kg-ext svg{width:12px;height:12px;color:#6B7079;}
@@ -366,10 +367,12 @@ html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!import
       const client = KG._sb;
       const { data: { session } } = await client.auth.getSession();
       if(!session) return sicht;
-      const [{ data: ben }, { data: mods }] = await Promise.all([
+      const [{ data: ben }, { data: mods }, { data: menue }] = await Promise.all([
         client.from('benutzer').select('rolle,recht_gruppe_id').eq('id', session.user.id).maybeSingle(),
-        client.from('modul_sichtbarkeit').select('modul_key,name,kurzname,url,ist_extern,fuer_buero_team,fuer_mitarbeitende,fuer_service_team')
+        client.from('modul_sichtbarkeit').select('modul_key,name,kurzname,url,ist_extern,fuer_buero_team,fuer_mitarbeitende,fuer_service_team'),
+        client.from('tool_menue').select('app_key,sortierung,an').eq('benutzer_id', session.user.id)
       ]);
+      sicht.menue = menue || [];
       sicht.rolle = ben && ben.rolle;
       // Gruppen & Rechte: ohne Gruppe (alte Konten) gilt weiter die alte Rollen-Logik
       if(ben && ben.recht_gruppe_id){
@@ -397,6 +400,7 @@ html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!import
      null = keine Gruppe zugeteilt (dann alte Rollen-Logik). Administrator: immer alles.
      --------------------------------------------------------------------------- */
   KG.ladeRechte = ladeSichtbarkeit;
+  KG.toolSichtbar = t => sichtbar(t, sicht || { rolle: null, module: null, extern: [] });   // für Einstellungen (Tool-Auswahl)
   KG.darf = (tool, bereich, aktion) => {
     const r = sicht && sicht.rechte; if(!r) return null;
     const jn = aktion === 'erstellen' || aktion === 'an' || aktion === 'sichtbar';
@@ -466,8 +470,8 @@ html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!import
   let vorschau = false;
 
   function sichtbar(t, s){
-    if(t.k === 'home' || t.k === aktuell.k) return true;
-    if(t.admin) return s.rolle === 'admin' || s.rolle === 'buero_team' || !!(s.rechte && s.rechte.admin) || !!(s.module && s.module.get('tools'));   // Einstellungen: Admin + Büro
+    if(t.k === 'home' || (aktuell && t.k === aktuell.k)) return true;
+    if(t.admin) return !!s.rolle;   // Einstellungen: alle (mindestens eigene Tool-Auswahl), Inhalt je nach Rechten
     const neu = erlaubt(TOOLRECHT[t.k]);
     if(neu !== null) return neu;
     if(!s.module || !t.modul) return true;
@@ -509,11 +513,14 @@ html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!import
   if(SEITENRECHT[seite]){ if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', rechteBeobachten); else rechteBeobachten(); }
 
   function menuHtml(s){
-    const verwUrl = !s.rolle || s.rolle === 'admin' || s.rolle === 'buero_team' ? 'einstellungen-uebersicht-live-v1.html' : 'tools-live-v1.html';
-    const items = TOOLS.filter(t => sichtbar(t, s)).map(t =>
+    const verwUrl = 'einstellungen-uebersicht-live-v1.html';
+    // eigene Auswahl (Einstellungen: Schalter «Computer», Reihenfolge per Ziehen); Startseite und Einstellungen immer
+    const M = new Map((s.menue || []).map(m => [m.app_key, m])), pos = t => M.has(t.k) ? M.get(t.k).sortierung : 1000 + TOOLS.indexOf(t);
+    const items = TOOLS.filter(t => sichtbar(t, s) && (t.k === 'home' || t.admin || !M.has(t.k) || M.get(t.k).an))
+      .sort((a, b) => (a.k === 'home' ? -1 : b.k === 'home' ? 1 : a.admin ? 1 : b.admin ? -1 : pos(a) - pos(b))).map(t =>
       `<a class="kg-it${t.k === aktuell.k ? ' on' : ''}" href="${t.k === 'verw' ? verwUrl : t.url}">${KG.toolIcon(t.k, 32)}<span>${esc(t.n)}</span></a>`).join('');
-    const ext = s.extern.length ? `<div class="kg-sep"></div><div class="kg-h">Externe Links</div><div class="kg-ext">${s.extern.map(m =>
-      `<a href="${esc(m.url)}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${EXT}</svg>${esc(m.kurzname || m.name)}</a>`).join('')}</div>` : '';
+    const ext = s.extern.length ? `<div class="kg-sep"></div><details class="kg-links"><summary class="kg-h">Links</summary><div class="kg-ext">${s.extern.map(m =>
+      `<a href="${esc(m.url)}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${EXT}</svg>${esc(m.kurzname || m.name)}</a>`).join('')}</div></details>` : '';
     return `<div class="kg-h">Tools</div><div class="kg-grid">${items}</div>${ext}`;
   }
 

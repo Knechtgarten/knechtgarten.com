@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script src="/kg-pw-schutz.js?v=5"></script>
-<script src="/kg-stil.js?v=66"></script>
+<script src="/kg-stil.js?v=67"></script>
 <title>Heute – Knechtgarten</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#323E4E">
@@ -120,6 +120,7 @@ svg.i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.5;stro
 #einsatz{overflow-y:auto;display:flex;flex-direction:column;gap:8px;}
 /* Apps: alle Funktionen, Stern = in den Schnellzugriff */
 .apps{display:flex;flex-direction:column;}
+.appsh{margin-top:16px;padding-bottom:4px;}
 .app{display:flex;align-items:center;gap:12px;height:56px;border-top:1px solid var(--line);}
 .app:first-child{border-top:0;}
 .app a{flex:1;display:flex;align-items:center;gap:12px;text-decoration:none;color:var(--ink);font-size:15px;min-width:0;}
@@ -253,20 +254,25 @@ async function appsListe(){
       const r = KG.seiteErlaubt ? KG.seiteErlaubt(t.url.replace(/[?#].*$/, '').replace(/\.html$/, '')) : null; return r === null || r === undefined ? buero || ohneGruppe : r !== false; })
     .map(t => ({ k: t.k, n: t.n, url: HANDY_URL[t.k] || t.url }));
 }
+// Externe Links (Verwaltung › Externe Links, je nach Rolle) als eigene Apps; Stern-Schlüssel «ext:<modul_key>»
+const LINK_IC = '<span class="kg-ti" style="width:34px;height:34px;border-radius:9px;background:#DCE2E8;color:#323E4E"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></span>';
+async function linksListe(){ const s = KG.ladeRechte ? await KG.ladeRechte() : null; return ((s && s.extern) || []).map(m => ({ k: 'ext:' + m.modul_key, n: m.kurzname || m.name, url: m.url, ext: true })); }
+const appIcon = (a, g) => a.ext ? LINK_IC.replace(/34px/g, g + 'px') : KG.toolIcon(a.k, g);
 async function ladeFav(){ if(FAV) return FAV;
   const { data } = await sb.from('app_favorit').select('app_key').order('sortierung').order('erstellt_am');
   FAV = data ? data.map(d => d.app_key) : []; return FAV; }
 const BEISPIELE = ['wissen', 'plan', 'pend', 'projekte'];
 async function schnell(){
-  const [L, F] = await Promise.all([appsListe(), ladeFav()]);
+  const [T, X, F] = await Promise.all([appsListe(), linksListe(), ladeFav()]), L = T.concat(X);
   const l = (F.length ? F : BEISPIELE).map(k => L.find(a => a.k === k)).filter(Boolean);
-  $('schnell').innerHTML = l.length ? l.map(a => `<a href="${a.url}">${KG.toolIcon(a.k, 40)}<span>${esc(a.n)}</span></a>`).join('')
+  $('schnell').innerHTML = l.length ? l.map(a => `<a href="${a.url}"${a.ext ? ' target="_blank" rel="noopener"' : ''}>${appIcon(a, 40)}<span>${esc(a.n)}</span></a>`).join('')
     : '<div class="leer" style="grid-column:1/-1">Noch leer. Unter «Apps» mit dem Stern hinzufügen.</div>';
 }
 const STERN = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"><path d="M12 3.5l2.6 5.3 5.8.8-4.2 4.1 1 5.8L12 16.8l-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z"/></svg>';
 async function zeigeApps(){
-  const [L, F] = await Promise.all([appsListe(), ladeFav()]);
-  $('apps').innerHTML = L.map(a => `<div class="app"><a href="${a.url}">${KG.toolIcon(a.k, 34)}<span>${esc(a.n)}</span></a><button type="button" data-stern="${a.k}" aria-pressed="${F.includes(a.k)}" aria-label="${esc(a.n)} im Schnellzugriff">${STERN}</button></div>`).join('');
+  const [L, X, F] = await Promise.all([appsListe(), linksListe(), ladeFav()]);
+  const zeile = a => `<div class="app"><a href="${a.url}"${a.ext ? ' target="_blank" rel="noopener"' : ''}>${appIcon(a, 34)}<span>${esc(a.n)}</span></a><button type="button" data-stern="${a.k}" aria-pressed="${F.includes(a.k)}" aria-label="${esc(a.n)} im Schnellzugriff">${STERN}</button></div>`;
+  $('apps').innerHTML = L.map(zeile).join('') + (X.length ? `<h2 class="appsh">Links</h2>${X.map(zeile).join('')}` : '');
   $('apps').querySelectorAll('[data-stern]').forEach(b => b.onclick = async () => { const k = b.dataset.stern, an = b.getAttribute('aria-pressed') !== 'true';
     b.setAttribute('aria-pressed', an);
     const { error } = an ? await sb.from('app_favorit').insert({ app_key: k, sortierung: FAV.length }) : await sb.from('app_favorit').delete().eq('app_key', k);
