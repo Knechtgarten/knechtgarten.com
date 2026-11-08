@@ -6,6 +6,7 @@
 // Der wörtliche Text landet in der Notiz der Pendenz, damit nichts verloren geht.
 //
 // Aufruf: sb.functions.invoke('pendenz-diktat', { body: { audio_base64, mime_type } })
+//   oder:  sb.functions.invoke('pendenz-diktat', { body: { text } })  – «Aufräumen»: diktierten/getippten Text zu einer kurzen Pendenz machen
 // ============================================================================
 
 const corsHeaders = {
@@ -27,8 +28,9 @@ function extrahiereJsonObjekt(text: string): Record<string, unknown> {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   try {
-    const { audio_base64, mime_type } = await req.json().catch(() => ({}));
-    if (!audio_base64 || typeof audio_base64 !== 'string') return json({ error: 'audio_base64 ist erforderlich.' }, 400);
+    const { audio_base64, mime_type, text: eingabe } = await req.json().catch(() => ({}));
+    const nurText = typeof eingabe === 'string' && eingabe.trim().length > 0;
+    if (!nurText && (!audio_base64 || typeof audio_base64 !== 'string')) return json({ error: 'audio_base64 oder text ist erforderlich.' }, 400);
     // Browser liefern z. B. "audio/webm;codecs=opus" – Gemini will nur den Grundtyp
     const mime = String(mime_type || 'audio/webm').split(';')[0].trim();
 
@@ -51,7 +53,9 @@ Antworte AUSSCHLIESSLICH mit einem JSON-Objekt, ohne Markdown: {"wortlich": stri
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modell}:generateContent?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }, { inline_data: { mime_type: mime, data: audio_base64 } }] }],
+        body: JSON.stringify({ contents: [{ parts: nurText
+            ? [{ text: prompt.replace('Das ist eine kurze Sprachnotiz', 'Das ist der Text einer kurzen Sprachnotiz (vom Handy direkt abgeschrieben, kann Fehler enthalten)') + '\n\nText: ' + eingabe.trim().slice(0, 4000) }]
+            : [{ text: prompt }, { inline_data: { mime_type: mime, data: audio_base64 } }] }],
           generationConfig: { temperature: 0.2, responseMimeType: 'application/json' } }),
       });
       if (res.ok) { antwort = res; break; }

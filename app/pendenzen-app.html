@@ -116,7 +116,7 @@ h2{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute
   <div class="feld" id="feld">
     <textarea id="text" placeholder="Was soll nicht vergessen gehen?" aria-label="Neue Pendenz" enterkeyhint="done"></textarea>
     <div class="aufnahme hidden" id="aufnahme"><div class="pegel" id="pegel"></div><div class="zeit"><b>●</b> <span id="zeit">0:00</span> · zum Beenden nochmals tippen</div></div>
-    <div class="unten"><span class="tipp" id="tipp">Mikrofon antippen und sprechen.</span><span class="fotos" id="fotos"></span><button type="button" class="mini" id="kam" aria-label="Foto aufnehmen"></button><input type="file" id="datei" accept="image/*" capture="environment" hidden><button class="mic hidden" id="mic" aria-label="Diktieren"></button><button type="button" class="mini ab" id="speichern" aria-label="In die Sammelbox" title="In die Sammelbox"></button></div>
+    <div class="unten"><span class="tipp" id="tipp">Mikrofon antippen und sprechen.</span><span class="fotos" id="fotos"></span><button type="button" class="mini hidden" id="ki" aria-label="Mit KI kürzen" title="Mit KI kürzen" style="font-size:10.5px;font-weight:700">KI</button><button type="button" class="mini" id="kam" aria-label="Foto aufnehmen"></button><input type="file" id="datei" accept="image/*" capture="environment" hidden><button class="mic hidden" id="mic" aria-label="Diktieren"></button><button type="button" class="mini ab" id="speichern" aria-label="In die Sammelbox" title="In die Sammelbox"></button></div>
   </div>
   <div class="meldung" id="meldung"></div>
   <h2 id="wartetTitel" class="hidden">Wartet auf Netz</h2>
@@ -282,9 +282,25 @@ async function diktatAuswerten(blob){
   if(error || data?.error) throw new Error(data?.error || error?.message || 'Diktat fehlgeschlagen');
   return { titel: data.titel || '', wortlich: data.wortlich || '' };
 }
-if(navigator.mediaDevices?.getUserMedia && (window.AudioContext || window.webkitAudioContext)){
-  const mic = $('mic'); mic.classList.remove('hidden'); mic.innerHTML = K('mikrofon', 24);
-  mic.addEventListener('click', () => aufn ? aufnahmeStopp() : aufnahmeStart());
+// Mikrofon: Spracheingabe des Handys schreibt sofort mit (mit Netz); «KI» kürzt bei Bedarf zu einer sauberen Pendenz.
+// Ohne Spracheingabe oder ohne Netz: Aufnahme wie bisher – die KI schreibt den Titel (ohne Netz später).
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const kiZeigen = () => $('ki').classList.toggle('hidden', $('text').value.trim().length < 35);
+$('text').addEventListener('input', kiZeigen);
+$('ki').innerHTML = 'KI';
+$('ki').onclick = async () => { const t = $('text').value.trim(); if(!t || !sb) return; $('feld').classList.add('schreibt');
+  try { const { data, error } = await sb.functions.invoke('pendenz-diktat', { body: { text: t } }); if(error || data?.error) throw new Error(data?.error || error?.message);
+    if(data.titel) $('text').value = data.titel; } catch(e){ meldung(navigator.onLine ? 'KI hat nicht geklappt – bitte nochmals.' : 'Ohne Netz geht die KI nicht.'); }
+  $('feld').classList.remove('schreibt'); kiZeigen(); };
+if(SR || (navigator.mediaDevices?.getUserMedia && (window.AudioContext || window.webkitAudioContext))){
+  const mic = $('mic'); mic.classList.remove('hidden'); mic.innerHTML = K('mikrofon', 24); let rec = null;
+  mic.addEventListener('click', () => {
+    if(rec){ rec.stop(); return; } if(aufn) return aufnahmeStopp();
+    if(SR && navigator.onLine){ rec = new SR(); rec.lang = 'de-CH'; rec.interimResults = true; rec.continuous = true; const basis = $('text').value.trim(); mic.classList.add('an'); $('tipp').textContent = 'Hört zu … nochmals tippen zum Beenden';
+      rec.onresult = ev => { const t = [...ev.results].map(r => r[0].transcript).join(' ').trim(); $('text').value = (basis ? basis + ' ' : '') + t; kiZeigen(); };
+      rec.onend = rec.onerror = () => { rec = null; mic.classList.remove('an'); $('tipp').textContent = 'Mikrofon antippen und sprechen.'; };
+      try { rec.start(); } catch(e){ rec = null; mic.classList.remove('an'); } return; }
+    aufnahmeStart(); });
 } else $('tipp').textContent = 'Tipp: Mikrofon der Tastatur zum Diktieren';
 $('text').addEventListener('input', () => { if(!$('text').value.trim()) diktatNotiz = ''; });
 
