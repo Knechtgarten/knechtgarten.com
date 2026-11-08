@@ -655,6 +655,38 @@ html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!import
     (document.head || document.documentElement).appendChild(s);
   });
 
+  // Handy-Leiste unten (Start · Kontakte · Foto · Werkzeuge · Apps) – auf allen Seiten, nur auf schmalen Bildschirmen.
+  // Seiten mit eigener Leiste (Heute, Pflege-Handy) behalten ihre. Beim Tippen in ein Feld verschwindet sie.
+  function handyLeiste(){
+    if(!document.body || document.querySelector('nav.unten, .mh-tabbar, [data-kg-ohne-leiste]')) return;
+    const s = location.pathname.split('/').pop().replace(/\.html$/, '');
+    const akt = /^(tool-d-kunden|pflege-kunden)/.test(s) ? 'kontakte' : /^fotos/.test(s) ? 'foto' : /^werkzeug/.test(s) ? 'werkzeuge' : '';
+    const ic = (p, g = 24) => `<svg viewBox="0 0 24 24" width="${g}" height="${g}" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p || ''}</svg>`;
+    const st = document.createElement('style'); st.id = 'kg-handyleiste-css';
+    st.textContent = `.kg-handyleiste{display:none}
+@media (max-width:760px){
+  .kg-handyleiste{position:fixed;left:0;right:0;bottom:0;z-index:90;background:#fff;border-top:1px solid #E1E5E9;display:flex;justify-content:space-around;
+    padding:6px max(8px,env(safe-area-inset-left,0px)) calc(6px + env(safe-area-inset-bottom,0px));font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+  .kg-handyleiste a{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:11px;color:#6B7079;text-decoration:none;padding:4px 0}
+  .kg-handyleiste a.akt{color:#323E4E;font-weight:600}
+  .kg-handyleiste a.kam span{width:52px;height:52px;margin-top:-22px;border-radius:50%;background:#323E4E;color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 12px rgba(50,62,78,.25)}
+  body.kg-mit-leiste{padding-bottom:calc(76px + env(safe-area-inset-bottom,0px)) !important}
+  body.kg-tippt .kg-handyleiste{display:none}
+}`;
+    document.head.appendChild(st);
+    const n = document.createElement('nav'); n.className = 'kg-handyleiste'; n.setAttribute('aria-label', 'Hauptnavigation');
+    n.innerHTML = `<a href="heute-live-v1.html">${ic(P.home)}Start</a>`
+      + `<a href="tool-d-kunden-live-v1.html"${akt === 'kontakte' ? ' class="akt"' : ''}>${ic(TI.kunden)}Kontakte</a>`
+      + `<a class="kam${akt === 'foto' ? ' akt' : ''}" href="fotos-live-v1.html"><span>${ic(P.foto, 26)}</span>Foto</a>`
+      + `<a href="werkzeuge-live-v1.html"${akt === 'werkzeuge' ? ' class="akt"' : ''}>${ic(TI.werkzeuge)}Werkzeuge</a>`
+      + `<a href="heute-live-v1.html#apps">${ic(P.raster)}Apps</a>`;
+    document.body.appendChild(n); document.body.classList.add('kg-mit-leiste');
+    const feld = e => e.target.matches && e.target.matches('input:not([type=checkbox]):not([type=radio]):not([type=button]):not([type=file]),textarea,select,[contenteditable=""],[contenteditable=true]');
+    document.addEventListener('focusin', e => { if(feld(e)) document.body.classList.add('kg-tippt'); });
+    document.addEventListener('focusout', e => { if(feld(e)) document.body.classList.remove('kg-tippt'); });
+  }
+  if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', handyLeiste); else handyLeiste();
+
   // Anmeldung – EINE Stelle für alle Seiten (statt je eigenem signInWithPassword).
   // Gibt wie Supabase { data, error } zurück; Fehlermeldungen auf Deutsch.
   // Hier kommen später zweiter Faktor (Code-App) und Passkeys dazu – die Seiten bleiben dann unverändert.
