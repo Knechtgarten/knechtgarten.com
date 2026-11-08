@@ -139,7 +139,7 @@ svg.i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.5;stro
     <div class="karte slot" data-w="erfassen"><h2>Pendenz erfassen</h2>
       <div class="erf" id="erf"><textarea id="pzText" placeholder="Was soll nicht vergessen gehen?" aria-label="Neue Pendenz" enterkeyhint="send" autocomplete="off"></textarea>
         <div class="aufn hidden" id="pzAufn"><span class="pegel" id="pzPegel"></span><span><b style="color:#C0392B">●</b> <span id="pzZeit">0:00</span> · nochmals tippen zum Beenden</span></div>
-        <div class="erfknoepfe"><span class="erffotos" id="pzFotos"></span><button type="button" class="kam" id="pzKam" aria-label="Foto aufnehmen" title="Foto"></button><input type="file" id="pzDatei" accept="image/*" capture="environment" hidden><button type="button" class="mic hidden" id="pzMic" aria-label="Diktieren"></button><button type="button" class="ab" id="pzAb" disabled></button></div></div></div>
+        <div class="erfknoepfe"><span class="erffotos" id="pzFotos"></span><button type="button" class="kam hidden" id="pzKI" aria-label="Mit KI kürzen" title="Mit KI kürzen" style="font-size:10.5px;font-weight:700">KI</button><button type="button" class="kam" id="pzKam" aria-label="Foto aufnehmen" title="Foto"></button><input type="file" id="pzDatei" accept="image/*" capture="environment" hidden><button type="button" class="mic hidden" id="pzMic" aria-label="Diktieren"></button><button type="button" class="ab" id="pzAb" disabled></button></div></div></div>
     <div class="karte slot" data-w="pend"><h2>Meine Pendenzen heute<a class="plus" href="pendenzen-app.html" aria-label="Pendenzen-App öffnen" title="Pendenzen-App">+</a></h2><div id="pend"><div class="leer">Lädt …</div></div></div>
     <div class="karte slot" data-w="einsatz"><h2>Mein Einsatz<a href="einsatzplaner-live-v1.html">Planer</a></h2><div class="tage" id="tage"></div><div id="einsatz"><div class="leer">Lädt …</div></div></div>
     <div class="karte slot" data-w="schnell"><h2>Schnellzugriff</h2><div class="schnell" id="schnell"></div></div>
@@ -390,7 +390,7 @@ async function inSammelbox(){
       if(e1){ toast('Foto konnte nicht hochgeladen werden: ' + e1.message, true); continue; }
       await sb.from('pendenz_datei').insert({ id: fid, pendenz_id: pid, art: 'foto', name: 'Foto.jpg', storage_pfad: pfad }); }
     FOTOS.forEach(f => URL.revokeObjectURL(f.url)); FOTOS = []; zeigeFotos();
-    $('pzText').value = ''; diktatNotiz = ''; toast(ma ? 'Bei Heute eingetragen' : 'In der Sammelbox'); if(ma) ladePend();
+    $('pzText').value = ''; diktatNotiz = ''; $('pzKI').classList.add('hidden'); toast(ma ? 'Bei Heute eingetragen' : 'In der Sammelbox'); if(ma) ladePend();
   } catch(e){ toast(navigator.onLine ? 'Konnte nicht gespeichert werden: ' + e.message : 'Kein Netz – bitte die Pendenzen-App (+) benutzen, sie speichert auch ohne Netz.', true); }
   $('pzAb').disabled = !$('pzText').value.trim() && !FOTOS.length;
 }
@@ -439,7 +439,22 @@ function erfassenEinrichten(){
   $('pzKam').innerHTML = I('foto'); $('pzKam').onclick = () => $('pzDatei').click();
   $('pzDatei').onchange = async e => { for(const d of [...e.target.files]){ const blob = await verkleinern(d); FOTOS.push({ blob, url: URL.createObjectURL(blob) }); } e.target.value = ''; zeigeFotos(); };
   $('pzText').onkeydown = e => { if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); inSammelbox(); } };
-  if(navigator.mediaDevices?.getUserMedia && (window.AudioContext || window.webkitAudioContext)){
+  // Mikrofon: Spracheingabe des Handys schreibt sofort mit; «KI» kürzt bei Bedarf zu einer sauberen Pendenz.
+  // Ohne Spracheingabe im Browser: wie bisher Aufnahme, die KI schreibt den Titel.
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const kiZeigen = () => $('pzKI').classList.toggle('hidden', $('pzText').value.trim().length < 35);
+  $('pzText').addEventListener('input', kiZeigen);
+  $('pzKI').onclick = async () => { const t = $('pzText').value.trim(); if(!t) return; $('erf').classList.add('schreibt');
+    try { const { data, error } = await sb.functions.invoke('pendenz-diktat', { body: { text: t } }); if(error || data?.error) throw new Error(data?.error || error?.message);
+      if(data.titel) $('pzText').value = data.titel; } catch(e){ toast(navigator.onLine ? 'KI hat nicht geklappt – bitte nochmals.' : 'Ohne Netz geht die KI nicht.', true); }
+    $('erf').classList.remove('schreibt'); kiZeigen(); };
+  if(SR){ let rec = null; $('pzMic').classList.remove('hidden'); $('pzMic').innerHTML = I('mikrofon');
+    $('pzMic').onclick = () => { if(rec){ rec.stop(); return; }
+      rec = new SR(); rec.lang = 'de-CH'; rec.interimResults = true; rec.continuous = true; const basis = $('pzText').value.trim(); $('pzMic').classList.add('an');
+      rec.onresult = ev => { const t = [...ev.results].map(r => r[0].transcript).join(' ').trim(); $('pzText').value = (basis ? basis + ' ' : '') + t; $('pzAb').disabled = !$('pzText').value.trim() && !FOTOS.length; kiZeigen(); };
+      rec.onend = rec.onerror = () => { rec = null; $('pzMic').classList.remove('an'); };
+      try { rec.start(); } catch(e){ rec = null; $('pzMic').classList.remove('an'); } }; }
+  else if(navigator.mediaDevices?.getUserMedia && (window.AudioContext || window.webkitAudioContext)){
     $('pzMic').classList.remove('hidden'); $('pzMic').innerHTML = I('mikrofon'); $('pzMic').onclick = () => aufn ? aufnahmeStopp() : aufnahmeStart(); }
   const plus = document.querySelector('a.plus'); if(plus) plus.innerHTML = I('plus');
 }
