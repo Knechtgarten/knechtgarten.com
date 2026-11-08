@@ -33,8 +33,8 @@ h1.page{font-size:20px;color:var(--primary);}
 .wz label{flex:1;display:flex;align-items:center;gap:8px;cursor:pointer;}
 .wz input{width:16px;height:16px;accent-color:var(--primary);}
 .wz .aus{color:var(--muted);}
-.wz button{width:24px;height:24px;}
-.wz button svg{transform:rotate(-90deg);}
+.wz .griff{color:#A9B0B7;cursor:grab;display:inline-flex;width:16px;}
+.wz[draggable=true]{cursor:grab;} .wz.zieht{opacity:.4;} .wz.ueber{box-shadow:inset 0 2px 0 var(--primary);}
 .klein{font-size:12px;color:var(--muted);line-height:1.45;}
 .klein a{color:var(--primary);font-weight:600;}
 .handy{width:414px;padding:12px;border-radius:46px;background:#1F252D;box-shadow:0 14px 34px rgba(35,43,53,.22);}
@@ -83,15 +83,26 @@ function zeige(){
     Was die Gruppe sieht und darf, stellst du in <a href="verwaltung-live-v1.html">Verwaltung › Gruppen &amp; Rechte</a> ein.</div>`;
   $('f').src = 'heute-live-v1.html?als_gruppe=' + g.id;
 }
-// Widgets: gewählte in ihrer Reihenfolge oben, nicht gewählte grau darunter; Pfeil = eins nach oben
+// Widgets: gewählte in ihrer Reihenfolge oben (mit der Maus ziehen zum Sortieren), nicht gewählte grau darunter
+// Ziehen & Ablegen: Zeilen mit data-zk umsortieren, Ergebnis = neue Reihenfolge der Schlüssel
+function KG_ZIEHEN(box, an, fertig){
+  let von = null;
+  box.querySelectorAll('[data-zk]').forEach(z => {
+    z.addEventListener('dragstart', e => { von = z.dataset.zk; z.classList.add('zieht'); e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', von); } catch(x){} });
+    z.addEventListener('dragend', () => { z.classList.remove('zieht'); box.querySelectorAll('.ueber').forEach(x => x.classList.remove('ueber')); });
+    z.addEventListener('dragover', e => { if(!von) return; e.preventDefault(); box.querySelectorAll('.ueber').forEach(x => x.classList.remove('ueber')); z.classList.add('ueber'); });
+    z.addEventListener('drop', e => { e.preventDefault(); const nach = z.dataset.zk; if(!von || von === nach) return;
+      const neu = an.filter(k => k !== von); neu.splice(neu.indexOf(nach), 0, von); von = null; fertig(neu); });
+  });
+}
 function zeichneWahl(g){
   const an = g.handy_widgets && g.handy_widgets.length ? g.handy_widgets.slice() : STANDARD.slice();
   const liste = [...an, ...W.map(w => w[0]).filter(k => !an.includes(k))];
   $('wahl').innerHTML = '<h3>Widgets auf der Startseite</h3>' + liste.map((k, i) => { const on = an.includes(k), n = (W.find(w => w[0] === k) || [k, k])[1];
-    return `<div class="wz"><label class="${on ? '' : 'aus'}"><input type="checkbox" data-k="${k}"${on ? ' checked' : ''}${DARF ? '' : ' disabled'}>${esc(n)}</label>${on && i > 0 && DARF ? `<button type="button" class="kg-ibtn" data-hoch="${k}" title="Nach oben" aria-label="${esc(n)} nach oben">${KG.icon('chev', 12)}</button>` : ''}</div>`; }).join('')
+    return `<div class="wz"${on && DARF ? ` draggable="true" data-zk="${k}"` : ''}>${on && DARF ? `<span class="griff">${KG.icon('griff', 14)}</span>` : ''}<label class="${on ? '' : 'aus'}"><input type="checkbox" data-k="${k}"${on ? ' checked' : ''}${DARF ? '' : ' disabled'}>${esc(n)}</label></div>`; }).join('')
     + (DARF ? '' : '<div class="klein">Ändern kann nur der Admin.</div>');
   $('wahl').querySelectorAll('[data-k]').forEach(c => c.onchange = () => speichern(g, c.checked ? [...an, c.dataset.k] : an.filter(x => x !== c.dataset.k)));
-  $('wahl').querySelectorAll('[data-hoch]').forEach(b => b.onclick = () => { const i = an.indexOf(b.dataset.hoch); const neu = an.slice(); [neu[i - 1], neu[i]] = [neu[i], neu[i - 1]]; speichern(g, neu); });
+  KG_ZIEHEN($('wahl'), an, neu => speichern(g, neu));
 }
 async function speichern(g, neu){
   const { error } = await sb.from('recht_gruppe').update({ handy_widgets: neu }).eq('id', g.id);
