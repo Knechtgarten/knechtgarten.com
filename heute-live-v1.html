@@ -31,7 +31,12 @@ svg.i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.5;stro
 .karte h2 a{margin-left:auto;text-transform:none;letter-spacing:0;font-size:13px;color:var(--primary);text-decoration:none;font-weight:600;}
 .klein{font-size:12.5px;color:var(--muted);}
 .leer{font-size:14px;color:var(--muted);padding:4px 0;}
-/* Tage */
+/* Tage: Datum klein neben dem Titel, Tag wechseln durch Wischen (oder ‹ ›) */
+.edatum{display:inline-flex;align-items:center;gap:2px;color:var(--ink);}
+.tagpf{all:unset;cursor:pointer;width:20px;height:20px;border-radius:6px;text-align:center;line-height:19px;font-size:15px;color:var(--muted);}
+.tagpf:hover{background:var(--bg);color:var(--primary);} .tagpf[disabled]{opacity:.25;cursor:default;background:none;}
+#einsatz{touch-action:pan-y;}
+.eins .mit{font-size:13.5px;color:var(--ink);} .eins .mit span{color:var(--muted);}
 .tage{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin:0 -2px;padding:2px;}
 .tage::-webkit-scrollbar{display:none;}
 .tag{all:unset;box-sizing:border-box;cursor:pointer;flex:none;width:52px;height:56px;border-radius:12px;border:1px solid var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:12px;color:var(--muted);position:relative;}
@@ -141,7 +146,7 @@ svg.i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.5;stro
         <div class="aufn hidden" id="pzAufn"><span class="pegel" id="pzPegel"></span><span><b style="color:#C0392B">●</b> <span id="pzZeit">0:00</span> · nochmals tippen zum Beenden</span></div>
         <div class="erfknoepfe"><span class="erffotos" id="pzFotos"></span><button type="button" class="kam hidden" id="pzKI" aria-label="Mit KI kürzen" title="Mit KI kürzen" style="font-size:10.5px;font-weight:700">KI</button><button type="button" class="kam" id="pzKam" aria-label="Foto aufnehmen" title="Foto"></button><input type="file" id="pzDatei" accept="image/*" capture="environment" hidden><button type="button" class="mic hidden" id="pzMic" aria-label="Diktieren"></button><button type="button" class="ab" id="pzAb" disabled></button></div></div></div>
     <div class="karte slot" data-w="pend"><h2>Meine Pendenzen heute<a class="plus" href="pendenzen-app.html" aria-label="Pendenzen-App öffnen" title="Pendenzen-App">+</a></h2><div id="pend"><div class="leer">Lädt …</div></div></div>
-    <div class="karte slot" data-w="einsatz"><h2>Mein Einsatz<a href="einsatzplaner-live-v1.html">Planer</a></h2><div class="tage" id="tage"></div><div id="einsatz"><div class="leer">Lädt …</div></div></div>
+    <div class="karte slot" data-w="einsatz"><h2>Mein Einsatz<span class="edatum"><button type="button" class="tagpf" data-tagpf="-1" aria-label="Vorheriger Tag">‹</button><span id="tage"></span><button type="button" class="tagpf" data-tagpf="1" aria-label="Nächster Tag">›</button></span><a href="einsatzplaner-live-v1.html">Planer</a></h2><div id="einsatz"><div class="leer">Lädt …</div></div></div>
     <div class="karte slot" data-w="schnell"><h2>Schnellzugriff</h2><div class="schnell" id="schnell"></div></div>
   </div>
   <div class="w hidden" id="appsSeite">
@@ -164,7 +169,7 @@ const tagKey = d => new Date(d).toLocaleDateString('sv');   // JJJJ-MM-TT in Ort
 const WT = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
 const ART = { baustelle: 'Baustelle', termin: 'Termin', hilfe: 'Mithilfe', absenz: 'Abwesend' };
 
-let ICH = null, PERS = [], TAGE = [], EINS = [], HAUPT = [], KUNDEN = {}, INFOS = [], TAG = null;
+let ICH = null, PERS = [], TAGE = [], EINS = [], HAUPT = [], HELFER = [], KUNDEN = {}, INFOS = [], TAG = null;
 
 async function pruefeAnmeldung(){
   const { data: { session } } = await sb.auth.getSession();
@@ -263,13 +268,16 @@ async function ladeEinsatz(){
   const bis = new Date(heute); bis.setDate(bis.getDate() + 12);
   const { data: pp } = await sb.from('planer_person').select('id,name').eq('benutzer_id', ICH.id).eq('aktiv', true);
   PERS = (pp || []).map(p => p.id);
-  if(!PERS.length){ $('tage').innerHTML = ''; $('einsatz').innerHTML = '<div class="leer">Du bist im Planer noch keiner Person zugeordnet. Das Büro kann das in der Verwaltung nachholen.</div>'; return; }
+  if(!PERS.length){ $('tage').textContent = ''; $('einsatz').innerHTML = '<div class="leer">Du bist im Planer noch keiner Person zugeordnet. Das Büro kann das in der Verwaltung nachholen.</div>'; return; }
   const felder = 'id,person_id,mit_person_id,art,beginn,ende,kunde_id,titel,notiz';
   const { data: e, error } = await sb.from('planer_einsatz').select(felder).in('person_id', PERS).lt('beginn', bis.toISOString()).gte('ende', heute.toISOString()).order('beginn');
   if(error){ $('einsatz').innerHTML = '<div class="leer">Planer konnte nicht geladen werden.</div>'; return; }
   EINS = e || [];
   const mit = [...new Set(EINS.filter(x => x.art === 'hilfe' && x.mit_person_id).map(x => x.mit_person_id))];
   HAUPT = mit.length ? ((await sb.from('planer_einsatz').select(felder + ',person:person_id(name)').in('person_id', mit).in('art', ['baustelle', 'termin']).lt('beginn', bis.toISOString()).gte('ende', heute.toISOString())).data || []) : [];
+  // Mit wem: Mithilfen bei mir oder bei der Person, bei der ich helfe
+  const chefs = [...new Set([...PERS, ...mit])];
+  HELFER = ((await sb.from('planer_einsatz').select('id,person_id,mit_person_id,beginn,ende,person:person_id(name)').eq('art', 'hilfe').in('mit_person_id', chefs).lt('beginn', bis.toISOString()).gte('ende', heute.toISOString())).data || []).filter(x => !PERS.includes(x.person_id));
   const kIds = [...new Set([...EINS, ...HAUPT].map(x => x.kunde_id).filter(Boolean))];
   if(kIds.length) ((await sb.from('kunde').select('id,name,firma,strasse,plz,ort,geo_lat,geo_lon').in('id', kIds)).data || []).forEach(k => KUNDEN[k.id] = k);
   const eIds = [...EINS, ...HAUPT].map(x => x.id);
@@ -284,10 +292,17 @@ const deckt = (x, t) => tagKey(x.beginn) <= t && tagKey(x.ende) >= t;
 const anTag = t => EINS.filter(x => deckt(x, t));
 
 function zeigeTage(){
-  $('tage').innerHTML = TAGE.map((t, i) => { const d = new Date(t + 'T12:00');
-    return `<button type="button" class="tag" data-t="${t}" aria-pressed="${t === TAG}">${i ? WT[d.getDay()] : 'Heute'}<b>${d.getDate()}</b>${anTag(t).some(x => x.art !== 'absenz') ? '<i></i>' : ''}</button>`; }).join('');
-  $('tage').querySelectorAll('.tag').forEach(b => b.onclick = () => { TAG = b.dataset.t; zeigeTage(); zeigeEinsatz(); });
+  const i = TAGE.indexOf(TAG), d = new Date(TAG + 'T12:00');
+  $('tage').textContent = `${i ? '' : 'Heute · '}${WT[d.getDay()]} ${d.getDate()}.${d.getMonth() + 1}.`;
+  document.querySelectorAll('[data-tagpf]').forEach(b => { b.disabled = !TAGE[i + +b.dataset.tagpf]; });
 }
+function tagWechseln(r){ const t = TAGE[TAGE.indexOf(TAG) + r]; if(!t) return; TAG = t; zeigeTage(); zeigeEinsatz(); }
+document.querySelectorAll('[data-tagpf]').forEach(b => b.onclick = () => tagWechseln(+b.dataset.tagpf));
+// Wischen nach links = nächster Arbeitstag, nach rechts = zurück
+(() => { const k = document.querySelector('[data-w="einsatz"]'); let x0 = null, y0 = 0;
+  k.addEventListener('touchstart', e => { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; }, { passive: true });
+  k.addEventListener('touchend', e => { if(x0 === null) return; const dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0; x0 = null;
+    if(Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) tagWechseln(dx < 0 ? 1 : -1); }, { passive: true }); })();
 
 function einsatzHtml(x){
   let ziel = x, bei = '';
@@ -297,8 +312,11 @@ function einsatzHtml(x){
   const nav = k && (k.geo_lat ? `${k.geo_lat},${k.geo_lon}` : adr);
   const infos = INFOS.filter(i => i.einsatz_id === x.id || i.einsatz_id === ziel.id).filter(i => !i.tag || i.tag === TAG).map(i => i.text);
   if(ziel.notiz) infos.unshift(ziel.notiz);
+  // Mit wem ich arbeite: Person, bei der ich helfe, und alle Mithilfen bei ihr bzw. bei mir an diesem Tag
+  const chef = x.art === 'hilfe' ? x.mit_person_id : x.person_id;
+  const team = [...new Set([...(x.art === 'hilfe' && ziel !== x && ziel.person ? [ziel.person.name] : []), ...HELFER.filter(h => h.mit_person_id === chef && deckt(h, TAG)).map(h => h.person && h.person.name)].filter(Boolean))];
   return `<div class="eins ${x.art}"><span class="art">${bei || ART[x.art] || ''}${tagKey(x.beginn) !== tagKey(x.ende) ? ` · bis ${new Date(x.ende).toLocaleDateString('de-CH', { weekday: 'short', day: 'numeric', month: 'numeric' })}` : ''}</span>
-    ${name ? `<span class="n">${esc(name)}</span>` : ''}${adr ? `<span class="adr">${esc(adr)}</span>` : ''}
+    ${name ? `<span class="n">${esc(name)}</span>` : ''}${adr ? `<span class="adr">${esc(adr)}</span>` : ''}${team.length && x.art !== 'absenz' ? `<span class="mit"><span>Mit </span>${team.map(esc).join(', ')}</span>` : ''}
     ${infos.map(t => `<div class="info">${esc(t)}</div>`).join('')}
     ${x.art !== 'absenz' ? `<div class="knoepfe">${nav ? `<a class="knopf hell" href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(nav)}" target="_blank" rel="noopener">${I('karte')}Navigation</a>` : ''}<a class="knopf dunkel" href="fotos-live-v1.html"${nav ? '' : ' style="grid-column:1/-1"'}>${I('foto')}Fotos</a></div>` : ''}</div>`;
 }
