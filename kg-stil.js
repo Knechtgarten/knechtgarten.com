@@ -654,4 +654,20 @@ html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!import
     s.onload = () => ok(KG.infos); s.onerror = () => ok(null);
     (document.head || document.documentElement).appendChild(s);
   });
+
+  // Anmeldung – EINE Stelle für alle Seiten (statt je eigenem signInWithPassword).
+  // Gibt wie Supabase { data, error } zurück; Fehlermeldungen auf Deutsch.
+  // Hier kommen später zweiter Faktor (Code-App) und Passkeys dazu – die Seiten bleiben dann unverändert.
+  KG.anmelden = async (sb, { email, password }) => {
+    const r = await sb.auth.signInWithPassword({ email: String(email || '').trim(), password });
+    if(r.error){
+      const m = r.error.message || '';
+      const de = /invalid login credentials/i.test(m) ? 'E-Mail oder Passwort stimmt nicht.'
+        : /email not confirmed/i.test(m) ? 'Die E-Mail-Adresse ist noch nicht bestätigt.'
+        : /rate limit|too many/i.test(m) ? 'Zu viele Versuche – bitte kurz warten.'
+        : /fetch|network/i.test(m) ? 'Keine Verbindung zum Server.' : m;
+      return { data: r.data, error: { ...r.error, message: de } };
+    }
+    return r;
+  };
 })();
