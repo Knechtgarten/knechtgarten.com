@@ -251,7 +251,7 @@ nav.subnav a.on{color:#323E4E;border-bottom-color:#323E4E;}
         <button type="button" id="loginBtn">Anmelden</button><div class="status" id="loginStatus"></div></div></div>`;
       const los = async () => {
         $('loginStatus').textContent = 'Melde an …'; $('loginStatus').className = 'status';
-        const { error } = await KGD.sb.auth.signInWithPassword({ email: $('loginEmail').value.trim(), password: $('loginPassword').value });
+        const { error } = await KG.anmelden(KGD.sb, { email: $('loginEmail').value.trim(), password: $('loginPassword').value });
         if(error){ $('loginStatus').textContent = 'Login fehlgeschlagen: ' + error.message; $('loginStatus').className = 'status err'; return; }
         main.innerHTML = ''; KGD.start(fertig);
       };

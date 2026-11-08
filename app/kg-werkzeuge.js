@@ -159,7 +159,7 @@ header.app .brand h1{font-size:15px;margin:0;}
         <button type="button" id="loginBtn">Anmelden</button><div class="status" id="loginStatus"></div></div></div>`;
       const los = async () => {
         $('loginStatus').textContent = 'Melde an …'; $('loginStatus').className = 'status';
-        const { error } = await KGW.sb.auth.signInWithPassword({ email: $('loginEmail').value.trim(), password: $('loginPassword').value });
+        const { error } = await KG.anmelden(KGW.sb, { email: $('loginEmail').value.trim(), password: $('loginPassword').value });
         if(error){ $('loginStatus').textContent = 'Login fehlgeschlagen: ' + error.message; $('loginStatus').className = 'status err'; return; }
         main.innerHTML = ''; KGW.start(fertig);
       };
