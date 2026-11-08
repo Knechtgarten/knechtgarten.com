@@ -35,7 +35,17 @@ svg.i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.5;stro
 .edatum{display:inline-flex;align-items:center;gap:2px;color:var(--ink);}
 .tagpf{all:unset;cursor:pointer;width:20px;height:20px;border-radius:6px;text-align:center;line-height:19px;font-size:15px;color:var(--muted);}
 .tagpf:hover{background:var(--bg);color:var(--primary);} .tagpf[disabled]{opacity:.25;cursor:default;background:none;}
-#einsatz{touch-action:pan-y;}
+#einsatz{touch-action:pan-y;gap:0 !important;}
+/* Einsatz kompakt: zwei Zeilen pro Einsatz, drei passen ohne Scrollen */
+.ez{display:grid;grid-template-columns:40px minmax(0,1fr) 28px;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line);}
+.ez:first-child{border-top:0;padding-top:0;}
+.ez .zt{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;align-self:start;padding-top:1px;}
+.ez .tx{display:flex;flex-direction:column;min-width:0;}
+.ez .l1{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--muted);} .ez .l1 b{color:var(--ink);font-weight:600;}
+.ez .l2{font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ez.absenz .l1 b{color:var(--muted);font-weight:500;}
+.ezd{all:unset;box-sizing:border-box;cursor:pointer;width:28px;height:28px;border-radius:50%;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;color:var(--muted);}
+.ezd svg{width:14px;height:14px;} .ezd:active{background:var(--bg);}
 .eins .mit{font-size:13.5px;color:var(--ink);} .eins .mit span{color:var(--muted);}
 .tage{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin:0 -2px;padding:2px;}
 .tage::-webkit-scrollbar{display:none;}
@@ -304,7 +314,8 @@ document.querySelectorAll('[data-tagpf]').forEach(b => b.onclick = () => tagWech
   k.addEventListener('touchend', e => { if(x0 === null) return; const dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0; x0 = null;
     if(Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) tagWechseln(dx < 0 ? 1 : -1); }, { passive: true }); })();
 
-function einsatzHtml(x){
+// Daten eines Einsatzes am gewählten Tag: Kunde, Adresse, Navigation, Infos, mit wem ich arbeite
+function eDaten(x){
   let ziel = x, bei = '';
   if(x.art === 'hilfe'){ const h = HAUPT.find(y => y.person_id === x.mit_person_id && deckt(y, TAG)); bei = `Mithilfe bei ${esc((h && h.person && h.person.name) || '')}`; if(h) ziel = h; }
   const k = KUNDEN[ziel.kunde_id], name = (k && (k.name || k.firma)) || ziel.titel || (x.art === 'hilfe' ? '' : ART[x.art]);
@@ -315,6 +326,11 @@ function einsatzHtml(x){
   // Mit wem ich arbeite: Person, bei der ich helfe, und alle Mithilfen bei ihr bzw. bei mir an diesem Tag
   const chef = x.art === 'hilfe' ? x.mit_person_id : x.person_id;
   const team = [...new Set([...(x.art === 'hilfe' && ziel !== x && ziel.person ? [ziel.person.name] : []), ...HELFER.filter(h => h.mit_person_id === chef && deckt(h, TAG)).map(h => h.person && h.person.name)].filter(Boolean))];
+  return { bei, name, adr, nav, infos, team };
+}
+// Ganze Karte (im Detail-Blatt): Art, Kunde, Adresse, mit wem, Infos, Navigation / Fotos
+function einsatzHtml(x){
+  const { bei, name, adr, nav, infos, team } = eDaten(x);
   return `<div class="eins ${x.art}"><span class="art">${bei || ART[x.art] || ''}${tagKey(x.beginn) !== tagKey(x.ende) ? ` · bis ${new Date(x.ende).toLocaleDateString('de-CH', { weekday: 'short', day: 'numeric', month: 'numeric' })}` : ''}</span>
     ${name ? `<span class="n">${esc(name)}</span>` : ''}${adr ? `<span class="adr">${esc(adr)}</span>` : ''}${team.length && x.art !== 'absenz' ? `<span class="mit"><span>Mit </span>${team.map(esc).join(', ')}</span>` : ''}
     ${infos.map(t => `<div class="info">${esc(t)}</div>`).join('')}
@@ -322,8 +338,17 @@ function einsatzHtml(x){
 }
 function zeigeEinsatz(){
   const l = anTag(TAG);
-  $('einsatz').innerHTML = l.length ? l.map(einsatzHtml).join('')
+  // Kompakt: links Startzeit, Mitte Kunde (fett) + Adresse und darunter klein mit wem, rechts Knopf für Details
+  $('einsatz').innerHTML = l.length ? l.map(x => { const { name, adr, team, bei } = eDaten(x);
+      const zeit = tagKey(x.beginn) === TAG ? new Date(x.beginn).toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' }) : '';
+      const unten = x.art === 'absenz' ? '' : team.length ? 'mit ' + team.join(', ') : bei || ART[x.art] || '';
+      return `<div class="ez ${x.art}"><span class="zt">${zeit}</span><span class="tx"><span class="l1"><b>${esc(name || ART[x.art] || '')}</b>${adr ? ' ' + esc(adr) : ''}</span>${unten ? `<span class="l2">${esc(unten)}</span>` : ''}</span>
+        <button type="button" class="ezd" data-ezd="${x.id}" aria-label="Details zu ${esc(name || '')}">${I('chev')}</button></div>`; }).join('')
     : `<div class="leer">An diesem Tag ist für dich nichts geplant.</div>${TAG === TAGE[0] && $('einsatz').dataset.naechster ? `<div class="klein">${esc($('einsatz').dataset.naechster)}</div>` : ''}`;
+  $('einsatz').querySelectorAll('[data-ezd]').forEach(b => b.onclick = () => { const x = EINS.find(e => e.id === b.dataset.ezd); if(!x) return;
+    const bl = document.createElement('div'); bl.className = 'blatt';
+    bl.innerHTML = `<div class="in"><span class="griff"></span><span class="klein">${esc($('tage').textContent)}</span>${einsatzHtml(x)}<button type="button" class="knopf hell" data-zu>Schliessen</button></div>`;
+    document.body.appendChild(bl); bl.addEventListener('click', e => { if(e.target === bl || e.target.closest('[data-zu]')) bl.remove(); }); });
 }
 
 /* ---------- Meine Pendenzen heute (Zeit = Heute), wie auf der Startseite ---------- */
