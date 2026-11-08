@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<script src="/kg-pw-schutz.js?v=5"></script>
+<script src="/kg-stil.js?v=62"></script>
+<title>Handy-Ansichten – Knechtgarten</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+/* Einstellungen › Handy-Ansichten: pro Benutzergruppe die Handy-Startseite in Originalgrösse (390 × 844) und die Wahl der Widgets.
+   Die Vorschau zeigt Aufbau und Rechte der Gruppe, aber mit den eigenen Daten (Pendenzen, Einsatz). */
+:root{ --bg:#F5F7F9; --card:#FFFFFF; --primary:#323E4E; --primary-l:#4C5C70; --ink:#232B35; --muted:#8B9097; --line:#E1E5E9; }
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;font-size:14px;}
+.hidden{display:none !important;}
+header.app{background:var(--primary);color:#fff;}
+header.app .wrap{display:flex;align-items:center;gap:20px;padding:0 16px;}
+header.app .brand{padding:11px 0;}
+header.app .brand h1{font-size:15px;font-weight:600;color:#fff;}
+main{padding:18px 16px 30px;}
+h1.page{font-size:20px;color:var(--primary);}
+.pagesub{color:var(--muted);font-size:13px;margin:4px 0 16px;max-width:760px;}
+.reihe{display:flex;gap:22px;overflow-x:auto;padding-bottom:12px;align-items:flex-start;}
+.gr{flex:none;width:414px;display:flex;flex-direction:column;gap:10px;}
+.gr h2{font-size:15px;color:var(--primary);display:flex;align-items:baseline;gap:8px;}
+.gr h2 small{font-size:12px;color:var(--muted);font-weight:400;}
+.wahl{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:6px 8px;display:flex;flex-direction:column;}
+.wz{display:flex;align-items:center;gap:8px;height:32px;padding:0 4px;border-top:1px solid #EEF1F4;font-size:13px;}
+.wz:first-child{border-top:0;}
+.wz label{flex:1;display:flex;align-items:center;gap:8px;cursor:pointer;}
+.wz input{width:16px;height:16px;accent-color:var(--primary);}
+.wz .aus{color:var(--muted);}
+.wz button{width:24px;height:24px;}
+.wz button svg{transform:rotate(-90deg);}
+.handy{width:414px;padding:12px;border-radius:46px;background:#1F252D;box-shadow:0 14px 34px rgba(35,43,53,.22);}
+.handy iframe{display:block;width:390px;height:844px;border:0;border-radius:34px;background:var(--bg);}
+.leer{color:var(--muted);padding:20px 0;}
+</style>
+</head>
+<body>
+<header class="app"><div class="wrap"><div class="brand"><h1>Handy-Ansichten</h1></div><span class="userbar hidden" id="userbar"><button id="logoutBtn">Abmelden</button></span></div></header>
+<main>
+  <h1 class="page">Handy-Ansichten</h1>
+  <p class="pagesub">So sieht jede Gruppe die Startseite auf dem Handy (390 × 844 Pixel). Oben wählst du die Widgets und ihre Reihenfolge, das Handy darunter zeigt es sofort. Gezeigt werden Aufbau und Rechte der Gruppe – mit deinen eigenen Pendenzen und Einsätzen.</p>
+  <div class="reihe" id="reihe"><div class="leer">Lädt …</div></div>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+const sb = window.supabase.createClient('https://oalapdxinqlnzwxhyuzy.supabase.co', 'sb_publishable_DoeD4uEnwemmnFu4AxE9uw_5lmQYc5P');
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const W = [['erfassen', 'Pendenz erfassen'], ['pend', 'Meine Pendenzen heute'], ['einsatz', 'Mein Einsatz'], ['schnell', 'Schnellzugriff']];
+const STANDARD = ['erfassen', 'pend', 'einsatz', 'schnell'];
+let GR = [], DARF = false;
+
+async function start(){
+  const { data: { session } } = await sb.auth.getSession();
+  if(!session){ location.href = 'einstellungen-uebersicht-live-v1.html'; return; }
+  const { data: b } = await sb.from('benutzer').select('rolle').eq('id', session.user.id).maybeSingle();
+  if(!b || !['admin', 'buero_team'].includes(b.rolle)){ $('reihe').innerHTML = '<div class="leer">Diese Seite ist nur für Büro und Admin.</div>'; return; }
+  DARF = b.rolle === 'admin';   // speichern darf nur der Admin (Rechte-Gruppen)
+  const { data } = await sb.from('recht_gruppe').select('id,name,bereich,sortierung,handy_widgets').order('sortierung');
+  GR = data || [];
+  $('reihe').innerHTML = GR.map(g => `<section class="gr" data-g="${g.id}"><h2>${esc(g.name)}<small>${g.bereich === 'buero' ? 'Büro' : 'Aussendienst'}</small></h2>
+    <div class="wahl" data-wahl></div>
+    <div class="handy"><iframe loading="lazy" title="Handy-Ansicht ${esc(g.name)}" src="heute-live-v1.html?als_gruppe=${g.id}"></iframe></div></section>`).join('') || '<div class="leer">Keine Gruppen.</div>';
+  GR.forEach(zeichneWahl);
+}
+// Liste: gewählte Widgets in ihrer Reihenfolge oben, nicht gewählte grau darunter; Pfeil = eins nach oben
+function zeichneWahl(g){
+  const an = g.handy_widgets && g.handy_widgets.length ? g.handy_widgets.slice() : STANDARD.slice();
+  const liste = [...an, ...W.map(w => w[0]).filter(k => !an.includes(k))];
+  const el = document.querySelector(`[data-g="${g.id}"] [data-wahl]`);
+  el.innerHTML = liste.map((k, i) => { const on = an.includes(k), n = (W.find(w => w[0] === k) || [k, k])[1];
+    return `<div class="wz"><label class="${on ? '' : 'aus'}"><input type="checkbox" data-k="${k}"${on ? ' checked' : ''}${DARF ? '' : ' disabled'}>${esc(n)}</label>${on && i > 0 && DARF ? `<button type="button" class="kg-ibtn" data-hoch="${k}" title="Nach oben" aria-label="${esc(n)} nach oben">${KG.icon('chev', 12)}</button>` : ''}</div>`; }).join('');
+  el.querySelectorAll('[data-k]').forEach(c => c.onchange = () => speichern(g, c.checked ? [...an, c.dataset.k] : an.filter(x => x !== c.dataset.k)));
+  el.querySelectorAll('[data-hoch]').forEach(b => b.onclick = () => { const i = an.indexOf(b.dataset.hoch); const neu = an.slice(); [neu[i - 1], neu[i]] = [neu[i], neu[i - 1]]; speichern(g, neu); });
+}
+async function speichern(g, neu){
+  const { error } = await sb.from('recht_gruppe').update({ handy_widgets: neu }).eq('id', g.id);
+  if(error){ alert('Konnte nicht gespeichert werden: ' + error.message); return zeichneWahl(g); }
+  g.handy_widgets = neu; zeichneWahl(g);
+  const f = document.querySelector(`[data-g="${g.id}"] iframe`); if(f && f.contentWindow) f.contentWindow.location.reload();
+}
+start();
+</script>
+</body>
+</html>

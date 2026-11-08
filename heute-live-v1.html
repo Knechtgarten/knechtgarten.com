@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script src="/kg-pw-schutz.js?v=5"></script>
-<script src="/kg-stil.js?v=61"></script>
+<script src="/kg-stil.js?v=62"></script>
 <title>Heute – Knechtgarten</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#323E4E">
@@ -118,13 +118,13 @@ svg.i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.5;stro
   <div class="kopf"><span class="t"><b id="gruss">Guten Tag</b><small id="datum"></small></span><button type="button" id="logoutBtn">Abmelden</button></div>
   <div class="w" id="startSeite">
     <div data-kg-infos></div><!-- Infos vom Büro (kg-infos.js) -->
-    <div class="karte slot"><h2>Pendenz erfassen</h2>
+    <div class="karte slot" data-w="erfassen"><h2>Pendenz erfassen</h2>
       <div class="erf" id="erf"><textarea id="pzText" placeholder="Was soll nicht vergessen gehen?" aria-label="Neue Pendenz" enterkeyhint="send" autocomplete="off"></textarea>
         <div class="aufn hidden" id="pzAufn"><span class="pegel" id="pzPegel"></span><span><b style="color:#C0392B">●</b> <span id="pzZeit">0:00</span> · nochmals tippen zum Beenden</span></div>
         <div class="erfknoepfe"><button type="button" class="mic hidden" id="pzMic" aria-label="Diktieren"></button><button type="button" class="ab" id="pzAb" disabled></button></div></div></div>
-    <div class="karte slot"><h2>Meine Pendenzen heute<a class="plus" href="pendenzen-app.html" aria-label="Pendenzen-App öffnen" title="Pendenzen-App">+</a></h2><div id="pend"><div class="leer">Lädt …</div></div></div>
-    <div class="karte slot"><h2>Mein Einsatz<a href="einsatzplaner-live-v1.html">Planer</a></h2><div class="tage" id="tage"></div><div id="einsatz"><div class="leer">Lädt …</div></div></div>
-    <div class="karte slot"><h2>Schnellzugriff</h2><div class="schnell" id="schnell"></div></div>
+    <div class="karte slot" data-w="pend"><h2>Meine Pendenzen heute<a class="plus" href="pendenzen-app.html" aria-label="Pendenzen-App öffnen" title="Pendenzen-App">+</a></h2><div id="pend"><div class="leer">Lädt …</div></div></div>
+    <div class="karte slot" data-w="einsatz"><h2>Mein Einsatz<a href="einsatzplaner-live-v1.html">Planer</a></h2><div class="tage" id="tage"></div><div id="einsatz"><div class="leer">Lädt …</div></div></div>
+    <div class="karte slot" data-w="schnell"><h2>Schnellzugriff</h2><div class="schnell" id="schnell"></div></div>
   </div>
   <div class="w hidden" id="appsSeite">
     <div class="karte"><h2>Apps</h2><div class="klein">Mit dem Stern kommt eine App in deinen Schnellzugriff auf der Startseite.</div><div class="apps" id="apps"></div></div>
@@ -161,7 +161,21 @@ $('loginBtn').onclick = async () => { $('loginStatus').textContent = 'Melde an �
   if(error){ $('loginStatus').textContent = 'Anmelden hat nicht geklappt: ' + error.message; return; } pruefeAnmeldung(); };
 $('logoutBtn').onclick = async () => { await sb.auth.signOut(); location.reload(); };
 
-function start(){
+// Widgets der eigenen Gruppe (Einstellungen › Handy-Ansichten); ?als_gruppe=… zeigt die Ansicht einer anderen Gruppe (Vorschau)
+const STANDARD_W = ['erfassen', 'pend', 'einsatz', 'schnell'];
+let GRUPPE = null;
+async function widgetsAnwenden(){
+  const als = new URLSearchParams(location.search).get('als_gruppe');
+  const gid = als || ((await sb.from('benutzer').select('recht_gruppe_id').eq('id', ICH.id).maybeSingle()).data || {}).recht_gruppe_id;
+  if(gid) GRUPPE = (await sb.from('recht_gruppe').select('id,schluessel,ist_admin,handy_widgets').eq('id', gid).maybeSingle()).data;
+  if(als && KG.rechteVorschau) await KG.rechteVorschau(als);
+  const W = GRUPPE && GRUPPE.handy_widgets && GRUPPE.handy_widgets.length ? GRUPPE.handy_widgets : STANDARD_W, box = $('startSeite');
+  document.querySelectorAll('[data-w]').forEach(c => c.classList.toggle('hidden', !W.includes(c.dataset.w)));
+  W.forEach(k => { const c = document.querySelector(`[data-w="${k}"]`); if(c) box.appendChild(c); });
+  if(als) $('logoutBtn').classList.add('hidden');
+}
+async function start(){
+  await widgetsAnwenden();
   const h = new Date().getHours(), vn = (ICH.anzeigename || '').split(' ')[0];
   $('gruss').textContent = (h < 11 ? 'Guten Morgen' : h < 17 ? 'Guten Tag' : 'Guten Abend') + (vn ? ', ' + vn : '');
   $('datum').textContent = new Date().toLocaleDateString('de-CH', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -194,7 +208,7 @@ let FAV = null;
 const HANDY_URL = { pend: 'pendenzen-app.html' };
 async function appsListe(){
   if(KG.ladeRechte) await KG.ladeRechte();
-  return (KG.tools || []).filter(t => t.k !== 'home').filter(t => t.admin ? ['admin', 'buero_team'].includes(ICH.rolle) : !(KG.seiteErlaubt && KG.seiteErlaubt(t.url.replace(/\.html.*$/, '')) === false))
+  return (KG.tools || []).filter(t => t.k !== 'home').filter(t => t.admin ? (new URLSearchParams(location.search).get('als_gruppe') ? !!GRUPPE && (GRUPPE.ist_admin || GRUPPE.schluessel === 'buero') : ['admin', 'buero_team'].includes(ICH.rolle)) : !(KG.seiteErlaubt && KG.seiteErlaubt(t.url.replace(/\.html.*$/, '')) === false))
     .map(t => ({ k: t.k, n: t.n, url: HANDY_URL[t.k] || t.url }));
 }
 async function ladeFav(){ if(FAV) return FAV;
