@@ -34,6 +34,7 @@
     drucken:'<path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M7 14h10v7H7z"/>',
     senden: '<path d="M4 12h13M12 6l6 6-6 6"/>',
     kalender: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4M7 14h6"/>',
+    anhaenger: '<rect x="2" y="9" width="15.5" height="4" rx="1"/><path d="M17.5 12.5l4.5 1"/><circle cx="7.5" cy="16" r="1.9"/><circle cx="12" cy="16" r="1.9"/>',   // Anhänger (Reservieren)
     karte:  '<path d="M3 6.5l6-2.5 6 2.5 6-2.5v13.5l-6 2.5-6-2.5-6 2.5z"/><path d="M9 4v13.5M15 6.5V20"/>',
     mikrofon:'<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
     chev: '<path d="M6 9l6 6 6-6"/>',
@@ -678,7 +679,7 @@ html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!import
     n.innerHTML = `<a href="heute-live-v1.html">${ic(P.home)}Start</a>`
       + `<a href="kontakte-handy-live-v1.html"${akt === 'kontakte' ? ' class="akt"' : ''}>${ic(TI.kunden)}Kontakte</a>`
       + `<a class="kam${akt === 'foto' ? ' akt' : ''}" href="fotos-live-v1.html"><span>${ic(P.foto, 26)}</span>Foto</a>`
-      + `<a href="reservieren-live-v1.html"${akt === 'reservieren' ? ' class="akt"' : ''}>${ic(P.kalender)}Reservieren</a>`
+      + `<a href="reservieren-live-v1.html"${akt === 'reservieren' ? ' class="akt"' : ''}>${ic(P.anhaenger)}Reservieren</a>`
       + `<a href="heute-live-v1.html#apps">${ic(P.raster)}Apps</a>`;
     document.body.appendChild(n); document.body.classList.add('kg-mit-leiste');
     const feld = e => e.target.matches && e.target.matches('input:not([type=checkbox]):not([type=radio]):not([type=button]):not([type=file]),textarea,select,[contenteditable=""],[contenteditable=true]');
