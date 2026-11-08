@@ -183,7 +183,7 @@ button.kg-kachel-kopf,a.kg-kachel-kopf{cursor:pointer;} button.kg-kachel-kopf:ho
     { k: 'artikel', n: 'Artikelstamm', url: 'tool-c-live-v1.html', farbe: PAL.blau[1], akzent: PAL.blau[3], modul: 'offertentool', seiten: ['tool-c-live-v1'] },
     // Kontakte = eigenes Haupttool: Kunden, Lieferanten und Pflegekunden (früher «Pflege & Service»)
     { k: 'kunden', n: 'Kontakte', url: 'tool-d-kunden-live-v1.html', farbe: PAL.gold[0], akzent: PAL.gold[3],
-      seiten: ['tool-d-kunden-live-v1', 'pflege-kunden-live-v1'] },
+      seiten: ['tool-d-kunden-live-v1', 'pflege-kunden-live-v1', 'kontakte-handy-live-v1'] },
     // Projekte: Direktweg zu Kontakte › Projekte (eigene Seite gibt es nicht)
     { k: 'projekte', n: 'Projekte', url: 'tool-d-kunden-live-v1.html?modus=projekte', farbe: PAL.erde[1], akzent: PAL.erde[3], seiten: [] },
     { k: 'pend', n: 'Pendenzen', url: 'pendenzen-live-v1.html', farbe: PAL.orange[1], akzent: PAL.orange[3], modul: 'pendenzen', seiten: ['pendenzen-live-v1'] },
@@ -408,7 +408,7 @@ html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!import
     'tool-a2-allgemein-live-v1': ['offerten', 'offerten'], 'tool-a3-artikel-live-v1': ['offerten', 'offerten'],
     'tool-b-live-v1': ['offerten', 'vorlagen'], 'einstellungen-live-v1': ['offerten', 'vorlagen|einstellungen'],
     'tool-c-live-v1': ['offerten', 'artikel'],
-    'tool-d-kunden-live-v1': [['offerten', 'kunden'], ['pflege', 'kunden']], // Adressen oder Pflege genügt
+    'tool-d-kunden-live-v1': [['offerten', 'kunden'], ['pflege', 'kunden']], 'kontakte-handy-live-v1': [['offerten', 'kunden'], ['pflege', 'kunden']], // Adressen oder Pflege genügt
     'pendenzen-live-v1': ['pend', '_tool'], 'einsatzplaner-live-v1': ['plan', '_tool'], 'bauprogramm-live-v1': ['plan', '_tool'],
     'pflege-kunden-live-v1': ['pflege', 'kunden'], 'pflege-kategorien-live-v1': ['pflege', 'kategorien'], 'projekt-einstellungen-live-v1': ['offerten', 'kunden'],
     'pflege-handy-live-v1': ['pflege', 'jahresplan'], 'wissen-live-v1': ['wissen', '_tool'],
@@ -660,7 +660,7 @@ html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!import
   function handyLeiste(){
     if(!document.body || document.querySelector('nav.unten, .mh-tabbar, [data-kg-ohne-leiste]')) return;
     const s = location.pathname.split('/').pop().replace(/\.html$/, '');
-    const akt = /^(tool-d-kunden|pflege-kunden)/.test(s) ? 'kontakte' : /^fotos/.test(s) ? 'foto' : /^werkzeug/.test(s) ? 'werkzeuge' : '';
+    const akt = /^(tool-d-kunden|pflege-kunden|kontakte-handy)/.test(s) ? 'kontakte' : /^fotos/.test(s) ? 'foto' : /^werkzeug/.test(s) ? 'werkzeuge' : '';
     const ic = (p, g = 24) => `<svg viewBox="0 0 24 24" width="${g}" height="${g}" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p || ''}</svg>`;
     const st = document.createElement('style'); st.id = 'kg-handyleiste-css';
     st.textContent = `.kg-handyleiste{display:none}
@@ -676,7 +676,7 @@ html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!import
     document.head.appendChild(st);
     const n = document.createElement('nav'); n.className = 'kg-handyleiste'; n.setAttribute('aria-label', 'Hauptnavigation');
     n.innerHTML = `<a href="heute-live-v1.html">${ic(P.home)}Start</a>`
-      + `<a href="tool-d-kunden-live-v1.html"${akt === 'kontakte' ? ' class="akt"' : ''}>${ic(TI.kunden)}Kontakte</a>`
+      + `<a href="kontakte-handy-live-v1.html"${akt === 'kontakte' ? ' class="akt"' : ''}>${ic(TI.kunden)}Kontakte</a>`
       + `<a class="kam${akt === 'foto' ? ' akt' : ''}" href="fotos-live-v1.html"><span>${ic(P.foto, 26)}</span>Foto</a>`
       + `<a href="werkzeuge-live-v1.html"${akt === 'werkzeuge' ? ' class="akt"' : ''}>${ic(TI.werkzeuge)}Werkzeuge</a>`
       + `<a href="heute-live-v1.html#apps">${ic(P.raster)}Apps</a>`;
