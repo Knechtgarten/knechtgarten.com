@@ -122,6 +122,17 @@ button:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
 .pane{display:flex;flex-direction:column;min-width:0;flex:none;}
 .pane.flex{flex:1;}
 .pane.seite{background:#EFF2F5;}
+/* Büro-Board: Magazin links (Kurz / Mittel / Lang), gleiche Einträge wie im Einsatzplaner */
+.mgwrap{padding:0 20px 20px;display:flex;flex-direction:column;gap:20px;overflow-y:auto;height:calc(100% - 34px);box-sizing:border-box;}
+.mgl{background:var(--soft);border-radius:10px;box-shadow:0 1px 2px rgba(35,43,53,.08);display:flex;flex-direction:column;}
+.mgl.ueber{outline:2px dashed var(--primary);outline-offset:2px;}
+.mgs{font-weight:400;opacity:.75;font-size:11.5px;margin-left:4px;}
+.mgb{padding:4px;display:flex;flex-direction:column;gap:3px;}
+.mgz{background:#fff;border-radius:6px;min-height:30px;display:flex;align-items:center;gap:6px;padding:0 4px 0 8px;cursor:grab;font-size:13px;border:1px solid transparent;}
+.mgz:hover{border-color:var(--line);} .mgz.zieht{opacity:.4;} .mgz.ueber{box-shadow:inset 0 2px 0 var(--primary);}
+.mgz .t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;} .mgz > svg{color:var(--muted);flex:none;}
+.mgok{all:unset;cursor:pointer;width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#B6BCC3;flex:none;opacity:0;}
+.mgz:hover .mgok{opacity:1;} .mgok:hover{color:#3F7D3F;background:#EEF1F4;}
 .ptitle{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700;height:34px;box-sizing:border-box;padding:0 20px;display:flex;gap:6px;align-items:center;flex:none;}
 .pgriff{cursor:grab;display:inline-flex;margin-left:-14px;color:#B8BEC4;border-radius:4px;touch-action:none;}
 .pgriff:hover{color:var(--primary);background:rgba(50,62,78,.08);}
@@ -522,11 +533,11 @@ const listHg = l => l.farbe_hg || (famVon(listFarbe(l)) ? PAL[famVon(listFarbe(l
 // nur das eigene Board hat drei Bereiche; gemeinsame Boards (Büro, Offerten) haben nur die eine Fläche
 const bereichOf = l => l.versteckt ? '_aus' : S.board?.typ === 'person' ? l.bereich || 'mitte' : 'mitte';
 // Drei Bereiche (zeit, mitte, team) in frei wählbarer Reihenfolge: aussen eingestellte Breite, Mitte = Rest
-const SEITE_MIN = LW + 2 * R, STD_BREITE = { zeit:SEITE_MIN, mitte:680, team:SEITE_MIN }, MITTE_MIN = SEITE_MIN; // Seitenbereich = eine Liste plus 20 px Rand
+const SEITE_MIN = LW + 2 * R, STD_BREITE = { zeit:SEITE_MIN, mitte:680, team:SEITE_MIN, mag:SEITE_MIN }, MITTE_MIN = SEITE_MIN; // Seitenbereich = eine Liste plus 20 px Rand
 const breite = b => { const v = S.ein.breiten[b] ?? STD_BREITE[b]; return v <= 60 || b === 'mitte' ? v : Math.max(v, SEITE_MIN); };
 // fest für alle; eigenes Board: Zeit | Arten | Team, gemeinsame Boards: Arten | Team. Jede Liste bleibt in ihrem Bereich
 // Reihenfolge pro Person (am Griff tauschbar), gespeichert in pendenz_benutzer.breiten._reihe / _reiheG
-const reihe = () => { if(MA) return ['zeit', 'team']; if(S.board && S.board.typ !== 'person') return ['mitte']; const eigen = S.board?.typ === 'person', std = eigen ? ['zeit', 'mitte', 'team'] : ['mitte', 'team'], r = S.ein.breiten[eigen ? '_reihe' : '_reiheG'];
+const reihe = () => { if(MA) return ['zeit', 'team']; if(S.board && S.board.typ !== 'person') return istOfferten() ? ['mitte'] : ['mag', 'mitte']; const eigen = S.board?.typ === 'person', std = eigen ? ['zeit', 'mitte', 'team'] : ['mitte', 'team'], r = S.ein.breiten[eigen ? '_reihe' : '_reiheG'];
   return Array.isArray(r) && r.length === std.length && std.every(z => r.includes(z)) ? r : std; };
 const bereichFuerArt = artId => artId === 'team' || artId === 'notizen' || artId === 'sammel' ? 'team' : 'mitte'; // rechts: Team-box, Sammelbox, Dauernde Notizen
 const ABL_W = 220; // eigene graue Spalte für die Ablagefelder, wenn das Board keinen Bereich «Allgemein» hat
@@ -668,6 +679,7 @@ async function ladeAlles(){
 async function ladeBoard(){
   const { data: ls, error } = await sb.from('pendenz_liste').select('*').eq('board_id', S.board.id); if(error) return fehler(error, 'Listen');
   S.listen = ls; const ids = ls.map(l => l.id);
+  if(eigeneLage()){ const L = (S.ein.breiten._lage || {})[S.board.id] || {}; ls.forEach(l => { if(L[l.id]) Object.assign(l, L[l.id]); }); }
   const [rg, rp] = await Promise.all([
     sb.from('pendenz_gruppe').select('*').in('liste_id', ids).order('sortierung'),
     sb.from('pendenz').select('*').in('liste_id', ids).eq('erledigt', false)
@@ -789,6 +801,48 @@ function listHtml(l){
   const tint = !l.zeit && l.farbe_hg ? `;background:${l.farbe_hg}` : '';
   return `<div class="list zl${l.zu ? ' zu' : ''}" data-list="${l.id}" style="left:${lX(l)}px;top:${l._fy ?? l.y}px;width:${lBreite(l)}px${tint}">${kopf}<div class="body">${body}</div><div class="lresize" data-rz="${l.id}" title="Breite ziehen, Doppelklick = Standard"></div></div>`;
 }
+// Büro-Board links: Magazin des Einsatzplaners (Arbeiten auf Vorrat, planer_magazin) – dieselben Einträge wie im Planer.
+// Hier erfassen (+), per Ziehen sortieren oder zwischen Kurz/Mittel/Lang schieben, mit dem Haken erledigen. Einplanen im Planer.
+const MAGD = [['kurz', 'Kurz', 'bis 2 Std.', 3], ['mittel', 'Mittel', '½–1 Tag', 2], ['lang', 'Lang', 'mehr als 1 Tag', 1]];
+let MAGZ = null, magNeu = null, magZieh = null;
+async function magLaden(){ const { data, error } = await sb.from('planer_magazin').select('id,titel,dauer,sort,notiz').is('erledigt_am', null).order('sort');
+  if(error) return fehler(error, 'Magazin'); MAGZ = data || []; zeichne(); }
+const magL = k => (MAGZ || []).filter(m => m.dauer === k).sort((a, b) => a.sort - b.sort);
+function magPane(w){
+  if(MAGZ === null){ MAGZ = []; magLaden(); }
+  const listen = MAGD.map(([k, t, s, st]) => { const c = KG.palette.petrol[st], ms = magL(k), hell = KG.textAuf(c) !== '#FFFFFF';
+    return `<div class="mgl" data-mgl="${k}"><div class="lh${hell ? ' hell' : ''}" style="background:${c};cursor:default"><b>${t} <span class="mgs">${s}</span></b><button class="kg-ibtn lplus" data-mgplus="${k}" aria-label="Neu in ${t}" title="Neu">${K('plus')}</button></div>
+      <div class="mgb">${magNeu === k ? `<div class="zadd"><input type="text" id="mgIn" placeholder="Neue Arbeit …" aria-label="Neue Arbeit in ${t}"><button class="kg-ibtn zok" data-mgok="${k}" aria-label="Speichern">${K('check')}</button></div>` : ''}
+      ${ms.map(m => `<div class="mgz" draggable="true" data-mgz="${m.id}"${m.notiz ? ` title="${esc(m.notiz)}"` : ''}><span class="t">${esc(m.titel)}</span>${m.notiz ? K('notiz', 12) : ''}<button class="mgok" data-mgerl="${m.id}" aria-label="Erledigt" title="Erledigt">${K('check', 13)}</button></div>`).join('')}
+      ${!ms.length && magNeu !== k ? '<div class="zhint">Nichts.</div>' : ''}</div></div>`; }).join('');
+  return `<div class="pane seite" data-pane="mag" style="width:${w}px"><div class="ptitle"><svg class="i" viewBox="0 0 24 24" style="width:13px;height:13px"><path d="M21 8l-9-5-9 5 9 5 9-5Z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg><span>Magazin</span></div>${w > 60 ? `<div class="mgwrap">${listen}<div class="zhint">Gleiche Einträge wie im Einsatzplaner › Magazin. Einplanen dort.</div></div>` : ''}</div>`;
+}
+function magBinden(){
+  const P = document.querySelector('[data-pane="mag"]'); if(!P) return;
+  const stop = e => { e.stopPropagation(); e.preventDefault(); };
+  P.querySelectorAll('[data-mgplus]').forEach(b => b.addEventListener('click', e => { stop(e); magNeu = magNeu === b.dataset.mgplus ? null : b.dataset.mgplus; zeichne(); setTimeout(() => $('mgIn')?.focus(), 0); }));
+  const speichern = async k => { const t = ($('mgIn')?.value || '').trim(); if(!t){ magNeu = null; return zeichne(); }
+    const sort = Math.max(0, ...magL(k).map(m => m.sort)) + 1;
+    const { data, error } = await sb.from('planer_magazin').insert({ titel: t, dauer: k, sort, erstellt_von: ME }).select('id,titel,dauer,sort,notiz').single();
+    if(error) return fehler(error, 'Magazin'); MAGZ.push(data); magNeu = k; zeichne(); setTimeout(() => $('mgIn')?.focus(), 0); };
+  P.querySelectorAll('[data-mgok]').forEach(b => b.addEventListener('click', e => { stop(e); speichern(b.dataset.mgok); }));
+  const inp = $('mgIn'); if(inp) inp.addEventListener('keydown', e => { if(e.key === 'Enter') speichern(magNeu); if(e.key === 'Escape'){ magNeu = null; zeichne(); } });
+  P.querySelectorAll('[data-mgerl]').forEach(b => b.addEventListener('click', async e => { stop(e); const m = MAGZ.find(x => x.id === b.dataset.mgerl); if(!m) return;
+    const { error } = await sb.from('planer_magazin').update({ erledigt_am: new Date().toISOString(), erledigt_von: ME }).eq('id', m.id); if(error) return fehler(error, 'Magazin');
+    MAGZ = MAGZ.filter(x => x !== m); zeichne();
+    toast(`«${m.titel}» erledigt`, async () => { await sb.from('planer_magazin').update({ erledigt_am: null, erledigt_von: null }).eq('id', m.id); MAGZ.push(m); zeichne(); }); }));
+  // Ziehen: vor eine Zeile legen oder ans Ende einer Liste (Kurz/Mittel/Lang)
+  P.querySelectorAll('[data-mgz]').forEach(z => {
+    z.addEventListener('dragstart', e => { e.stopPropagation(); magZieh = z.dataset.mgz; e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', magZieh); } catch(x){} setTimeout(() => z.classList.add('zieht'), 0); });
+    z.addEventListener('dragend', () => { magZieh = null; P.querySelectorAll('.zieht,.ueber').forEach(x => x.classList.remove('zieht', 'ueber')); }); });
+  P.querySelectorAll('[data-mgl]').forEach(l => {
+    l.addEventListener('dragover', e => { if(!magZieh) return; e.preventDefault(); e.stopPropagation(); P.querySelectorAll('.ueber').forEach(x => x.classList.remove('ueber')); (e.target.closest('[data-mgz]') || l).classList.add('ueber'); });
+    l.addEventListener('drop', async e => { if(!magZieh) return; stop(e); const m = MAGZ.find(x => x.id === magZieh), k = l.dataset.mgl, vor = e.target.closest('[data-mgz]'); magZieh = null; if(!m) return;
+      const rest = magL(k).filter(x => x !== m), i = vor ? rest.findIndex(x => x.id === vor.dataset.mgz) : rest.length;
+      const a = rest[i - 1] ? rest[i - 1].sort : (rest[0] ? rest[0].sort - 1 : 0), b = rest[i] ? rest[i].sort : a + 2;
+      m.dauer = k; m.sort = (a + b) / 2; zeichne();
+      const { error } = await sb.from('planer_magazin').update({ dauer: k, sort: m.sort }).eq('id', m.id); if(error) fehler(error, 'Magazin'); }); });
+}
 function zeichne(){
   const sc = {}; document.querySelectorAll('[data-cv]').forEach(c => sc[c.dataset.cv] = [c.scrollLeft, c.scrollTop]);
   $('hknoepfe').innerHTML = `<button class="hbtn" data-archivo aria-label="Archiv" title="Archiv">${K('archiv', 16)}</button><button class="hbtn" data-zettel aria-pressed="${S.zettel}" aria-label="Notizzettel" title="Notizzettel">${K('notiz', 16)}</button><button class="hbtn" data-seto aria-label="Einstellungen" title="Einstellungen">${K('gear', 16)}</button>`;
@@ -807,6 +861,8 @@ function zeichne(){
   const seg = bfolge.length > 1 && !MA ? `<span class="kg-seg" role="group" aria-label="Board">${bfolge.map(o => `<button class="${o.an ? 'on' : ''}" data-bwahl="${o.v}">${esc(o.t)}</button>`).join('')}</span>` : '';
   const seg2 = '';
   const rechts = (reihe().includes('zeit') ? `<button class="kg-neben" data-druck aria-haspopup="menu">${K('drucken')}Drucken</button>` : '')
+    + (eigeneLage() && ROLLE === 'admin' ? `<button class="kg-neben" data-lagefest title="Deine Anordnung wird zur Standard-Anordnung für alle, die nichts selber verschoben haben">Als Standard für alle</button>` : '')
+    + (eigeneLage() && Object.keys((S.ein.breiten._lage || {})[S.board.id] || {}).length ? `<button class="kg-neben" data-lagestd title="Eigene Anordnung verwerfen, wieder die Standard-Anordnung zeigen">Anordnung zurücksetzen</button>` : '')
     + (istOfferten() || MA ? '' : `<button class="kg-haupt" data-neuliste>${K('plus')}Liste</button>`);
   $('pzSeite').innerHTML = `<div class="kg-l">${seg}${seg2}</div>${rechts ? `<div class="kg-r">${rechts}</div>` : ''}`;
   // Ablagefelder: Offerten-Board nur Archivieren (Zugesagt ist dort eine Liste); «In anderes Board» braucht es dort nicht
@@ -818,7 +874,7 @@ function zeichne(){
     // darunter nur eine ruhige Liste der zugesagten Offerten (abgelegt wird oben auf «Zugesagt»)
     + (zlist ? (() => { const zp = S.pz.filter(p => p.offerte_status === 'zugesagt' && listeById(p.liste_id)?.versteckt);
       return `<div class="ablzu"><div class="ptitle" style="padding:0"><span>Zugesagte Offerten</span></div><div class="zuliste">${zp.map(p => pdHtml(p)).join('') || '<div class="zhint">Noch keine.</div>'}</div><div class="zhint">Liegt auch im Büro-Board unter «Planung».</div></div>`; })() : '');
-  $('main').innerHTML = `<div class="zones">${reihe().map((zn, i) => { const ls = S.listen.filter(l => bereichOf(l) === zn && l !== zlist && !(MA && (l.art_id === 'team' || l.art_id === 'sammel' || (l.zeit && l.zeit !== 1)))), w = bw[zn], modus = modusFuer(ls, w, zn); KAPPE = w - 2 * R; if(istOfferten()) ofLage(ls, w);
+  $('main').innerHTML = `<div class="zones">${reihe().map((zn, i) => { if(zn === 'mag') return magPane(bw.mag); const ls = S.listen.filter(l => bereichOf(l) === zn && l !== zlist && !(MA && (l.art_id === 'team' || l.art_id === 'sammel' || (l.zeit && l.zeit !== 1)))), w = bw[zn], modus = modusFuer(ls, w, zn); KAPPE = w - 2 * R; if(istOfferten()) ofLage(ls, w);
     const geordnet = [...ls].sort((a, c) => a.y - c.y || a.x - c.x);
     const strip = l => { const z = l.zeit && ZEIT[l.zeit], a = !l.zeit && art(l.art_id); return `<button class="vstrip${(z ? z.hell : hellAuf(listFarbe(l))) ? ' hell' : ''}" data-open="${zn}" style="background:${z ? z.c : listFarbe(l)}" title="${esc(l.titel)}">${A(z ? z.icon : a.icon)}${esc(l.titel)}</button>`; };
     let inhalt;
@@ -844,7 +900,7 @@ function zeichne(){
   document.querySelectorAll('[data-zk]').forEach(h => { const l = listeById(h.dataset.zk); if(!l) return;
     kundenFeld(h, null, async k => { if(!k) return; S.addOffen = null; await neuePendenz(l, k.name, null, { kunde_id: k.id }); }, 'zkq');
     setTimeout(() => $('zkq')?.focus(), 0); });
-  zeichneOver();
+  zeichneOver(); magBinden();
 }
 // Freie Anordnung: wächst eine Liste, weichen die Listen darunter nach unten aus (nur Anzeige – gespeicherte Lage bleibt,
 // wird die Liste wieder kürzer, rücken sie zurück). Mindestabstand 20 px.
@@ -980,7 +1036,16 @@ function zeichneOver(){
 // ---------------------------------------------------------------------------
 // Speichern
 // ---------------------------------------------------------------------------
-async function upd(tab, id, patch, key = 'id'){ const { error } = await sb.from(tab).update(patch).eq(key, id); if(error){ fehler(error, 'Speichern'); return false; } return true; }
+// Gemeinsame Boards (Büro-Board): Lage, Breite und auf/zu jeder Liste pro Person in pendenz_benutzer.breiten._lage[board][liste];
+// die Liste selbst behält die Standard-Anordnung (für alle, die nichts verschoben haben, und für neue Listen)
+const LAGE = ['x', 'y', 'zu', 'breite'];
+const eigeneLage = () => !!S.board && S.board.typ !== 'person' && !istOfferten();
+function lageMerken(id, patch){ const L = S.ein.breiten._lage = S.ein.breiten._lage || {}, b = L[S.board.id] = L[S.board.id] || {};
+  b[id] = Object.assign(b[id] || {}, patch); speichereEin(); }
+async function upd(tab, id, patch, key = 'id'){
+  if(tab === 'pendenz_liste' && key === 'id' && eigeneLage() && S.listen.some(l => l.id === id)){
+    const lage = Object.fromEntries(Object.entries(patch).filter(([k]) => LAGE.includes(k))), rest = Object.fromEntries(Object.entries(patch).filter(([k]) => !LAGE.includes(k)));
+    if(Object.keys(lage).length) lageMerken(id, lage); if(!Object.keys(rest).length) return true; patch = rest; } const { error } = await sb.from(tab).update(patch).eq(key, id); if(error){ fehler(error, 'Speichern'); return false; } return true; }
 // höchste Stelle in einer Liste (Pendenzen und Gruppentitel teilen sich die Reihenfolge)
 const letzteSort = lid => Math.max(0, ...S.pz.filter(p => p.liste_id === lid).map(p => p.sortierung), ...S.gruppen.filter(g => g.liste_id === lid).map(g => g.sortierung));
 async function neuePendenz(l, titel, gruppe_id = null, extra = {}){
@@ -1335,6 +1400,11 @@ document.addEventListener('click', async e => {
   const menusZu = keep => document.querySelectorAll('.emenu').forEach(m => { if(m.id !== keep) m.hidden = true; });
   if(!t){ menusZu(); if(S.zpick || S.neuListe || S.bmenu || S.druck || (S.pop && !e.target.closest('.pop'))){ S.zpick = null; S.neuListe = false; S.bmenu = false; S.druck = false; if(S.pop && !e.target.closest('.pop')){ await gruppeAusFeld(); S.pop = null; S.delListe = false; } zeichne(); } return; }
   const d = t.dataset;
+  // Büro-Board: eigene Anordnung verwerfen bzw. (Admin) als Standard für alle speichern
+  if(d.lagestd !== undefined){ if(S.ein.breiten._lage) delete S.ein.breiten._lage[S.board.id]; speichereEin(); await ladeBoard(); return toast('Standard-Anordnung'); }
+  if(d.lagefest !== undefined){ const L = (S.ein.breiten._lage || {})[S.board.id] || {};
+    for(const [id, p] of Object.entries(L)){ const { error } = await sb.from('pendenz_liste').update(p).eq('id', id); if(error) return fehler(error, 'Standard'); }
+    delete S.ein.breiten._lage[S.board.id]; speichereEin(); await ladeBoard(); return toast('Deine Anordnung ist jetzt der Standard für alle'); }
   if(d.bg && e.target !== t){ menusZu(); return; }
   if(d.mic){ sprechen(d.mic); return; }
   if(d.vorrat){ const p = S.pz.find(x => x.id === d.vorrat); if(p) vorratPopup(p); return; }
