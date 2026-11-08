@@ -1,7 +1,7 @@
 // Service Worker der Pendenzen-App: hält die Erfassungsseite auf dem Handy bereit, damit sie auch ohne Empfang startet.
 // Immer zuerst frisch aus dem Netz (Updates kommen sofort), ohne Netz aus dem Zwischenspeicher.
 // Gemeinsame Skripte (kg-stil.js?v=…) werden ohne Versionsnummer verglichen, damit ein neues ?v= nichts kaputt macht.
-const CACHE = 'pendenzen-app-v3';
+const CACHE = 'pendenzen-app-v4';
 const PFADE = ['/pendenzen-app.html', '/kg-pw-schutz.js', '/kg-stil.js', '/pendenzen-app-manifest.json', '/knecht-tool-192.png', '/knecht-tool.svg'];
 const FREMD = ['https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => Promise.all([...PFADE, ...FREMD].map(u => c.add(new Request(u, { cache: 'reload' })).catch(() => {}))))); self.skipWaiting(); });
