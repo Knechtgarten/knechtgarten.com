@@ -58,6 +58,21 @@ svg.i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.5;stro
 .pz input{width:22px;height:22px;accent-color:var(--gruen);flex:none;}
 .pz span{flex:1;min-width:0;font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .pz small{flex:none;max-width:38%;font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+/* Pendenz erfassen: eine flache Zeile – Textfeld, Mikrofon, ab in die Sammelbox */
+.erf{display:flex;align-items:center;gap:8px;}
+.erf input{flex:1;min-width:0;height:46px;border:1.5px solid #9DC2DF;border-radius:12px;padding:0 12px;font:inherit;font-size:16px;color:var(--ink);background:#fff;outline:none;}
+.erf.schreibt input{opacity:.4;}
+.erf button{all:unset;cursor:pointer;width:46px;height:46px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex:none;}
+.erf .mic{background:#D6E7F4;color:var(--primary);}
+.erf .mic.an{background:#C0392B;color:#fff;animation:puls 1.2s ease-in-out infinite;}
+.erf .ab{background:var(--primary);color:#fff;border-radius:12px;}
+.erf .ab[disabled]{opacity:.35;pointer-events:none;}
+@keyframes puls{0%,100%{box-shadow:0 0 0 0 rgba(192,57,43,.45);}50%{box-shadow:0 0 0 8px rgba(192,57,43,0);}}
+.aufn{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums;}
+.pegel{display:flex;align-items:center;gap:3px;height:28px;flex:1;}
+.pegel i{width:5px;border-radius:3px;background:var(--primary);height:3px;transition:height .08s;}
+.karte h2 a.plus{width:28px;height:28px;border-radius:50%;border:1px solid #D5DBE1;display:flex;align-items:center;justify-content:center;}
+.karte h2 a.plus svg.i{width:16px;height:16px;}
 /* Widgets höchstens so hoch: schmal wenn wenig drin, wachsen nie darüber hinaus */
 #pend{max-height:192px;overflow:hidden;display:flex;flex-direction:column;}
 #pend .mehr{margin-top:auto;font-size:13px;font-weight:600;color:var(--primary);text-decoration:none;padding-top:6px;}
@@ -100,7 +115,10 @@ svg.i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.5;stro
   <div class="w" id="startSeite">
     <div data-kg-infos></div><!-- Infos vom Büro (kg-infos.js) -->
     <div class="karte"><h2>Mein Einsatz<a href="einsatzplaner-live-v1.html">Planer</a></h2><div class="tage" id="tage"></div><div id="einsatz"><div class="leer">Lädt …</div></div></div>
-    <div class="karte"><h2>Meine Pendenzen heute<a href="pendenzen-app.html">Alle</a></h2><div id="pend"><div class="leer">Lädt …</div></div></div>
+    <div class="karte"><h2>Pendenz erfassen</h2>
+      <div class="erf" id="erf"><input id="pzText" type="text" placeholder="Was soll nicht vergessen gehen?" aria-label="Neue Pendenz" enterkeyhint="send" autocomplete="off"><button type="button" class="mic hidden" id="pzMic" aria-label="Diktieren"></button><button type="button" class="ab" id="pzAb" aria-label="In die Sammelbox" title="In die Sammelbox" disabled></button></div>
+      <div class="aufn hidden" id="pzAufn"><span class="pegel" id="pzPegel"></span><span><b style="color:#C0392B">●</b> <span id="pzZeit">0:00</span> · nochmals tippen zum Beenden</span></div></div>
+    <div class="karte"><h2>Meine Pendenzen heute<a class="plus" href="pendenzen-app.html" aria-label="Pendenzen-App öffnen" title="Pendenzen-App">+</a></h2><div id="pend"><div class="leer">Lädt …</div></div></div>
     <div class="karte"><h2>Schnellzugriff</h2><div class="schnell" id="schnell"></div></div>
   </div>
   <div class="w hidden" id="appsSeite">
@@ -142,7 +160,7 @@ function start(){
   const h = new Date().getHours(), vn = (ICH.anzeigename || '').split(' ')[0];
   $('gruss').textContent = (h < 11 ? 'Guten Morgen' : h < 17 ? 'Guten Tag' : 'Guten Abend') + (vn ? ', ' + vn : '');
   $('datum').textContent = new Date().toLocaleDateString('de-CH', { weekday: 'long', day: 'numeric', month: 'long' });
-  leisteUnten(); schnell(); ladeEinsatz(); ladePend();
+  leisteUnten(); schnell(); ladeEinsatz(); ladePend(); erfassenEinrichten();
 }
 
 function leisteUnten(){
@@ -261,6 +279,76 @@ async function ladePend(){
     if(e2){ c.checked = false; toast('Konnte nicht gespeichert werden: ' + e2.message, true); return; }
     toast('Erledigt'); ladePend();   // neu laden, damit die nächste nachrückt
   }));
+}
+
+/* ---------- Pendenz erfassen: Text oder KI-Diktat, landet in der Sammelbox (wie die Pendenzen-App) ---------- */
+const SAMMEL_ICON = '<svg class="i" viewBox="0 0 24 24"><path d="M3 13h5l1.5 3h5l1.5-3h5"/><path d="M5.5 5h13L21 13v6H3v-6z"/></svg>';
+let diktatNotiz = '', aufn = null;
+async function sammelListe(){
+  try { const l = JSON.parse(localStorage.getItem('pzapp_liste') || 'null'); if(l && l.me === ICH.id) return l.id; } catch(e){}
+  const { data: b } = await sb.from('pendenz_board').select('id').eq('typ', 'person').eq('besitzer_id', ICH.id).maybeSingle();
+  if(!b) throw new Error('Bitte das Pendenzentool einmal am PC öffnen.');
+  let { data: l } = await sb.from('pendenz_liste').select('id').eq('board_id', b.id).eq('art_id', 'sammel').maybeSingle();
+  if(!l) ({ data: l } = await sb.from('pendenz_liste').insert({ board_id: b.id, art_id: 'sammel', titel: 'Sammelbox', bereich: 'team', x: 20, y: 150 }).select('id').single());
+  try { localStorage.setItem('pzapp_liste', JSON.stringify({ me: ICH.id, id: l.id })); } catch(e){}
+  return l.id;
+}
+async function inSammelbox(){
+  const t = $('pzText').value.trim(); if(!t) return $('pzText').focus();
+  $('pzAb').disabled = true;
+  try { const lid = await sammelListe();
+    const { error } = await sb.from('pendenz').insert({ liste_id: lid, titel: t, notiz: diktatNotiz ? `<p><em>Diktat wörtlich:</em> ${esc(diktatNotiz)}</p>` : null, sortierung: Date.now() / 1000, erstellt_von: ICH.id, herkunft: 'handy' });
+    if(error) throw error;
+    $('pzText').value = ''; diktatNotiz = ''; toast('In der Sammelbox');
+  } catch(e){ toast(navigator.onLine ? 'Konnte nicht gespeichert werden: ' + e.message : 'Kein Netz – bitte die Pendenzen-App (+) benutzen, sie speichert auch ohne Netz.', true); }
+  $('pzAb').disabled = !$('pzText').value.trim();
+}
+function wav(teile, rate){   // 16-Bit-WAV, 16 kHz mono (gleich wie Pendenzen-App)
+  const roh = new Float32Array(teile.reduce((s, t) => s + t.length, 0)); let o = 0; teile.forEach(t => { roh.set(t, o); o += t.length; });
+  const ziel = 16000, f = rate / ziel, n = Math.floor(roh.length / f), daten = new Int16Array(n);
+  for(let i = 0; i < n; i++){ const v = Math.max(-1, Math.min(1, roh[Math.floor(i * f)])); daten[i] = v < 0 ? v * 0x8000 : v * 0x7FFF; }
+  const kopf = new DataView(new ArrayBuffer(44)), txt = (p, s) => [...s].forEach((c, i) => kopf.setUint8(p + i, c.charCodeAt(0)));
+  txt(0, 'RIFF'); kopf.setUint32(4, 36 + n * 2, true); txt(8, 'WAVE'); txt(12, 'fmt '); kopf.setUint32(16, 16, true); kopf.setUint16(20, 1, true); kopf.setUint16(22, 1, true);
+  kopf.setUint32(24, ziel, true); kopf.setUint32(28, ziel * 2, true); kopf.setUint16(32, 2, true); kopf.setUint16(34, 16, true); txt(36, 'data'); kopf.setUint32(40, n * 2, true);
+  return new Blob([kopf.buffer, daten.buffer], { type: 'audio/wav' });
+}
+async function aufnahmeStart(){
+  let stream; try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }); }
+  catch(e){ return toast('Kein Zugriff aufs Mikrofon – bitte in den Handy-Einstellungen erlauben.', true); }
+  const ctx = new (window.AudioContext || window.webkitAudioContext)(), src = ctx.createMediaStreamSource(stream), proc = ctx.createScriptProcessor(4096, 1, 1);
+  aufn = { stream, ctx, proc, teile: [], start: Date.now(), pegel: Array(24).fill(0) };
+  proc.onaudioprocess = e => { const d = e.inputBuffer.getChannelData(0); aufn.teile.push(new Float32Array(d));
+    let s = 0; for(let i = 0; i < d.length; i++) s += d[i] * d[i]; aufn.pegel.push(Math.min(1, Math.sqrt(s / d.length) * 6)); aufn.pegel.shift(); };
+  src.connect(proc); proc.connect(ctx.destination);
+  $('pzMic').classList.add('an'); $('pzAufn').classList.remove('hidden'); $('pzPegel').innerHTML = '<i></i>'.repeat(24);
+  const male = () => { if(!aufn) return; const sek = Math.floor((Date.now() - aufn.start) / 1000);
+    $('pzZeit').textContent = `${Math.floor(sek / 60)}:${String(sek % 60).padStart(2, '0')}`;
+    [...$('pzPegel').children].forEach((b, i) => b.style.height = (3 + aufn.pegel[i] * 25) + 'px');
+    if(sek >= 120) return aufnahmeStopp(); requestAnimationFrame(male); };
+  male();
+}
+async function aufnahmeStopp(){
+  const a = aufn; if(!a) return; aufn = null;
+  a.proc.disconnect(); a.stream.getTracks().forEach(t => t.stop()); const rate = a.ctx.sampleRate; a.ctx.close().catch(() => {});
+  $('pzMic').classList.remove('an'); $('pzAufn').classList.add('hidden');
+  if(Date.now() - a.start < 700) return toast('Zu kurz – Mikrofon antippen, sprechen, nochmals antippen.');
+  $('erf').classList.add('schreibt'); $('pzText').placeholder = 'KI schreibt …';
+  try { const b64 = await new Promise(ok => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1] || ''); r.readAsDataURL(wav(a.teile, rate)); });
+    const { data, error } = await sb.functions.invoke('pendenz-diktat', { body: { audio_base64: b64, mime_type: 'audio/wav' } });
+    if(error || data?.error) throw new Error(data?.error || error?.message);
+    if(!data.titel) toast('Nichts verstanden – bitte nochmals versuchen.');
+    else { const t = $('pzText').value.trim(); $('pzText').value = (t ? t + ' ' : '') + data.titel; diktatNotiz = [diktatNotiz, data.wortlich].filter(Boolean).join(' '); }
+  } catch(e){ toast(navigator.onLine ? 'Diktat hat nicht geklappt – bitte nochmals.' : 'Kein Netz – bitte die Pendenzen-App (+) benutzen, sie nimmt auch ohne Netz auf.', true); }
+  $('erf').classList.remove('schreibt'); $('pzText').placeholder = 'Was soll nicht vergessen gehen?';
+  $('pzAb').disabled = !$('pzText').value.trim();
+}
+function erfassenEinrichten(){
+  $('pzAb').innerHTML = SAMMEL_ICON; $('pzAb').onclick = inSammelbox;
+  $('pzText').oninput = () => { $('pzAb').disabled = !$('pzText').value.trim(); if(!$('pzText').value.trim()) diktatNotiz = ''; };
+  $('pzText').onkeydown = e => { if(e.key === 'Enter'){ e.preventDefault(); inSammelbox(); } };
+  if(navigator.mediaDevices?.getUserMedia && (window.AudioContext || window.webkitAudioContext)){
+    $('pzMic').classList.remove('hidden'); $('pzMic').innerHTML = I('mikrofon'); $('pzMic').onclick = () => aufn ? aufnahmeStopp() : aufnahmeStart(); }
+  const plus = document.querySelector('a.plus'); if(plus) plus.innerHTML = I('plus');
 }
 
 pruefeAnmeldung();
