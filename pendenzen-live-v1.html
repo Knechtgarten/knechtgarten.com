@@ -492,7 +492,7 @@ const PFARBEN = ['#579DFF','#FEA362','#F5CD47','#4BCE97','#9F8FEF','#F87168','#6
 const AVF = ['#5F8A6B','#4F7C8A','#B07A4A','#6B5F8A','#9A6B7E','#3F6E8C','#7A8F4E','#8A6F5F'];
 const R = 20, LW = 320;
 
-let ME = null, ROLLE = null;
+let ME = null, ROLLE = null, MA = false; // MA = Mitarbeiter-Ansicht (Gruppe: pendenzen_ansicht = 'mitarbeiter'): nur Heute + Notizen + Archivieren
 const S = { vorrat: new Set(), boards:[], mitglieder:[], archiv:null, pick:null, arten:{}, board:null, listen:[], gruppen:[], pz:[], dateien:[], benutzer:{}, ein:{ oeffnen:'fenster', breiten:{}, farben:{}, notizzettel:'' },
   erinn:[], ofMeine:false, sel:null, del:false, delDatei:null, delListe:false, pop:null, zpick:null, neuListe:false, set:false, zettel:false, toast:null, urls:{}, splitOn:null, pwLast:{ zeit:360, team:380 } };
 
@@ -526,7 +526,7 @@ const SEITE_MIN = LW + 2 * R, STD_BREITE = { zeit:SEITE_MIN, mitte:680, team:SEI
 const breite = b => { const v = S.ein.breiten[b] ?? STD_BREITE[b]; return v <= 60 || b === 'mitte' ? v : Math.max(v, SEITE_MIN); };
 // fest für alle; eigenes Board: Zeit | Arten | Team, gemeinsame Boards: Arten | Team. Jede Liste bleibt in ihrem Bereich
 // Reihenfolge pro Person (am Griff tauschbar), gespeichert in pendenz_benutzer.breiten._reihe / _reiheG
-const reihe = () => { if(S.board && S.board.typ !== 'person') return ['mitte']; const eigen = S.board?.typ === 'person', std = eigen ? ['zeit', 'mitte', 'team'] : ['mitte', 'team'], r = S.ein.breiten[eigen ? '_reihe' : '_reiheG'];
+const reihe = () => { if(MA) return ['zeit', 'team']; if(S.board && S.board.typ !== 'person') return ['mitte']; const eigen = S.board?.typ === 'person', std = eigen ? ['zeit', 'mitte', 'team'] : ['mitte', 'team'], r = S.ein.breiten[eigen ? '_reihe' : '_reiheG'];
   return Array.isArray(r) && r.length === std.length && std.every(z => r.includes(z)) ? r : std; };
 const bereichFuerArt = artId => artId === 'team' || artId === 'notizen' || artId === 'sammel' ? 'team' : 'mitte'; // rechts: Team-box, Sammelbox, Dauernde Notizen
 const ABL_W = 220; // eigene graue Spalte für die Ablagefelder, wenn das Board keinen Bereich «Allgemein» hat
@@ -587,6 +587,9 @@ async function pruefeAnmeldung(){
   if(!b || !b.rolle){ zeige('pendingWrap'); return; }
   ME = session.user.id; ROLLE = b.rolle;
   if(window.KG && KG.ladeRechte) await KG.ladeRechte(); // Gruppen & Rechte: welche Boards sichtbar sind
+  // Mitarbeiter: nur Wann? (Heute/Woche/Monat), Sammelbox, Dauernde Notizen und Archivieren – kein Mittelteil, keine anderen Boards
+  try { const { data: bg } = await sb.from('benutzer').select('recht_gruppe_id').eq('id', ME).maybeSingle();
+    if(bg && bg.recht_gruppe_id){ const { data: g } = await sb.from('recht_gruppe').select('pendenzen_ansicht').eq('id', bg.recht_gruppe_id).maybeSingle(); MA = !!g && g.pendenzen_ansicht === 'mitarbeiter'; } } catch(e){}
   $('userbar').classList.remove('hidden');
   $('userbarText').textContent = `${b.anzeigename || b.email} (${ROLLE_LABEL[b.rolle] || b.rolle})`;
   zeige('appMain');
@@ -655,7 +658,8 @@ async function ladeAlles(){
     S.boards = [eigen, ...(gb || [])];
     let gew = null; try { gew = localStorage.getItem('pz_board'); } catch(e){}
     const [gid, gm] = (gew || '').split('|');
-    S.board = S.boards.find(b => b.id === gid) || eigen; S.ofMeine = gm === 'm';
+    S.board = MA ? eigen : S.boards.find(b => b.id === gid) || eigen; S.ofMeine = !MA && gm === 'm';
+    if(MA) S.boards = [eigen];
     await ladeBoard();
     // aus Einstellungen › Pendenzen («Meine Einstellungen»): Fenster gleich offen
     if(location.hash === '#einstellungen'){ S.set = true; zeichneOver(); history.replaceState(null, '', location.pathname + location.search); }
@@ -800,21 +804,21 @@ function zeichne(){
     .map(b => ({ v: b.id, t: bname(b), an: b.id === S.board.id }))
     .concat(S.boards.filter(b => b.typ === 'offerten' && sicht('offerten') !== 'K').flatMap(b => [{ v: b.id + '|m', t: 'Meine Offerten', an: b.id === S.board.id && S.ofMeine }]
       .concat(['A', 'G'].includes(sicht('offerten')) ? [{ v: b.id, t: 'Alle Offerten', an: b.id === S.board.id && !S.ofMeine }] : [])));
-  const seg = bfolge.length > 1 ? `<span class="kg-seg" role="group" aria-label="Board">${bfolge.map(o => `<button class="${o.an ? 'on' : ''}" data-bwahl="${o.v}">${esc(o.t)}</button>`).join('')}</span>` : '';
+  const seg = bfolge.length > 1 && !MA ? `<span class="kg-seg" role="group" aria-label="Board">${bfolge.map(o => `<button class="${o.an ? 'on' : ''}" data-bwahl="${o.v}">${esc(o.t)}</button>`).join('')}</span>` : '';
   const seg2 = '';
   const rechts = (reihe().includes('zeit') ? `<button class="kg-neben" data-druck aria-haspopup="menu">${K('drucken')}Drucken</button>` : '')
-    + (istOfferten() ? '' : `<button class="kg-haupt" data-neuliste>${K('plus')}Liste</button>`);
+    + (istOfferten() || MA ? '' : `<button class="kg-haupt" data-neuliste>${K('plus')}Liste</button>`);
   $('pzSeite').innerHTML = `<div class="kg-l">${seg}${seg2}</div>${rechts ? `<div class="kg-r">${rechts}</div>` : ''}`;
   // Ablagefelder: Offerten-Board nur Archivieren (Zugesagt ist dort eine Liste); «In anderes Board» braucht es dort nicht
   document.body.classList.toggle('offest', istOfferten());
-  const dzs = (istOfferten() ? [['archiv', 'archiv', 'Archivieren'], ['zusage', 'check', 'Zugesagt']] : [['archiv', 'archiv', 'Archivieren'], ['board', 'senden', 'In anderes Board'], ['planer', 'kalender', 'In den Planer'], ...(S.board.typ === 'person' && ofBoard() ? [['offerte', 'check', 'Offerte zugestellt']] : [])]).map(([z, ic, t]) => `<div class="dz${S.treffer === z ? ' treffer' : ''}" data-dzone="${z}" title="${t}">${K(ic, 15)}<span>${t}</span></div>`).join('');
+  const dzs = (MA ? [['archiv', 'archiv', 'Archivieren']] : istOfferten() ? [['archiv', 'archiv', 'Archivieren'], ['zusage', 'check', 'Zugesagt']] : [['archiv', 'archiv', 'Archivieren'], ['board', 'senden', 'In anderes Board'], ['planer', 'kalender', 'In den Planer'], ...(S.board.typ === 'person' && ofBoard() ? [['offerte', 'check', 'Offerte zugestellt']] : [])]).map(([z, ic, t]) => `<div class="dz${S.treffer === z ? ' treffer' : ''}" data-dzone="${z}" title="${t}">${K(ic, 15)}<span>${t}</span></div>`).join('');
   // Offerten-Board: «Zugesagt» steht rechts unter «Archivieren» – hineinziehen = zugesagt, darunter die zugesagten Offerten
   const zlist = istOfferten() ? S.listen.find(l => l.art_id === 'of_zugesagt') : null;
   const ablage = `<div class="ablage"><div class="ptitle" style="padding:0"><span>Hierher ziehen</span></div><div class="dzs">${dzs}</div></div>`
     // darunter nur eine ruhige Liste der zugesagten Offerten (abgelegt wird oben auf «Zugesagt»)
     + (zlist ? (() => { const zp = S.pz.filter(p => p.offerte_status === 'zugesagt' && listeById(p.liste_id)?.versteckt);
       return `<div class="ablzu"><div class="ptitle" style="padding:0"><span>Zugesagte Offerten</span></div><div class="zuliste">${zp.map(p => pdHtml(p)).join('') || '<div class="zhint">Noch keine.</div>'}</div><div class="zhint">Liegt auch im Büro-Board unter «Planung».</div></div>`; })() : '');
-  $('main').innerHTML = `<div class="zones">${reihe().map((zn, i) => { const ls = S.listen.filter(l => bereichOf(l) === zn && l !== zlist), w = bw[zn], modus = modusFuer(ls, w, zn); KAPPE = w - 2 * R; if(istOfferten()) ofLage(ls, w);
+  $('main').innerHTML = `<div class="zones">${reihe().map((zn, i) => { const ls = S.listen.filter(l => bereichOf(l) === zn && l !== zlist && !(MA && (l.art_id === 'team' || l.art_id === 'sammel' || (l.zeit && l.zeit !== 1)))), w = bw[zn], modus = modusFuer(ls, w, zn); KAPPE = w - 2 * R; if(istOfferten()) ofLage(ls, w);
     const geordnet = [...ls].sort((a, c) => a.y - c.y || a.x - c.x);
     const strip = l => { const z = l.zeit && ZEIT[l.zeit], a = !l.zeit && art(l.art_id); return `<button class="vstrip${(z ? z.hell : hellAuf(listFarbe(l))) ? ' hell' : ''}" data-open="${zn}" style="background:${z ? z.c : listFarbe(l)}" title="${esc(l.titel)}">${A(z ? z.icon : a.icon)}${esc(l.titel)}</button>`; };
     let inhalt;
@@ -1226,14 +1230,20 @@ function farbSpalte(hex){
 // Mitarbeitende bekommen sie in ihre Pendenzen im Einsatzplaner («Heute»). Nur Mitarbeitende gewählt = Pendenz hier archivieren.
 async function sendePick(){
   const pk = S.pick, p = S.pz.find(x => x.id === pk.id); if(!p || !pk.sel.size) return;
-  const ziele = [...pk.sel], listen = [], namen = [], ofl = new Set();
+  const ziele = [...pk.sel], listen = [], namen = [], ofl = new Set(), heuteL = new Set();
   // Offerten-Board: in «Zugestellt», die Offerte gehört dann mir (für «meine» und die Erinnerung)
-  const zusatz = lid => ofl.has(lid) ? { herkunft: null, offerte_von: ME } : { herkunft: 'board' };
+  const zusatz = lid => ({ ...(ofl.has(lid) ? { herkunft: null, offerte_von: ME } : { herkunft: 'board' }), ...(heuteL.has(lid) ? { zeit: 1, zeit_sortierung: Date.now() / 1000 } : {}) });
   try {
     for(const z of ziele){ const [typ, id] = z.split(':');
       if(typ === 'b'){ const b = S.boards.find(x => x.id === id); const { data } = await sb.from('pendenz_liste').select('id,art_id').eq('board_id', id); const l = (data || []).find(x => x.art_id === 'team' || x.art_id === 'of_zugestellt') || (data || [])[0]; if(l){ listen.push(l.id); if(l.art_id === 'of_zugestellt') ofl.add(l.id); namen.push(b.typ === 'person' ? 'Mein Board' : b.name); } }
       if(typ === 'u'){ const b = await eigenesBoard(id); const { data } = await sb.from('pendenz_liste').select('id').eq('board_id', b.id).eq('art_id', 'team').maybeSingle(); if(data){ listen.push(data.id); namen.push(name(id)); } } }
-    const ma = ziele.filter(z => z.startsWith('p:')).map(z => z.slice(2));
+    const ma = [];
+    for(const pid of ziele.filter(z => z.startsWith('p:')).map(z => z.slice(2))){
+      const pers = pk.daten.spalten.flat().find(x => x.id === pid);
+      // Mitarbeitende mit Anmeldung: direkt in ihr «Heute» (liegt in der Team-box, Zeit Heute)
+      if(pers && pers.benutzer_id){ const b = await eigenesBoard(pers.benutzer_id); const { data } = await sb.from('pendenz_liste').select('id').eq('board_id', b.id).eq('art_id', 'team').maybeSingle();
+        if(data){ listen.push(data.id); heuteL.add(data.id); namen.push(pers.name.split(' ')[0]); continue; } }
+      ma.push(pid); }
     if(ma.length){ const { error } = await sb.from('planer_pendenz').insert(ma.map(pid => ({ person_id: pid, spalte: 'tag', tag: isoTag(new Date()), text: p.titel, erstellt_von: ME }))); if(error) throw error;
       ma.forEach(pid => namen.push(pk.daten.spalten.flat().find(x => x.id === pid)?.name.split(' ')[0] || '')); }
     if(listen.length){
