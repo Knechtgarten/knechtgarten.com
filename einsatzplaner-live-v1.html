@@ -802,8 +802,26 @@ table.ft td{padding:7px 10px;border-bottom:1px solid var(--soft);}
 .m-mag .mdet textarea,.m-mag .mcl label,.m-mag .mcladd{font-size:15px;}
 .m-mag .mcl label input{width:20px;height:20px;}
 .m-mag .mfotos{grid-template-columns:repeat(auto-fill,minmax(80px,1fr));}
-.m-sw{display:flex;gap:8px;padding:10px 12px;}
+.m-sw{display:flex;gap:8px;padding:10px 12px;align-items:stretch;}
 .m-sw .seg{flex:1;} .m-sw .seg button{flex:1;text-align:center;padding:7px 0;}
+.m-magb{all:unset;cursor:pointer;flex:none;padding:0 14px;border:1px solid var(--line);border-radius:8px;background:#fff;font-size:13px;font-weight:600;color:var(--muted);display:flex;align-items:center;}
+.m-magb[aria-pressed="true"]{background:var(--primary);border-color:var(--primary);color:#fff;}
+.m-top label.ti{cursor:pointer;position:relative;} .m-top label.ti input{position:absolute;inset:0;opacity:0;pointer-events:none;width:100%;}
+/* Handy-Liste wie das Widget «Mein Einsatz»: Zeit | Kunde fett + Adresse / klein mit wem | Knopf Details */
+.m-liste{margin:4px 12px 8px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:4px 12px;}
+.mz{display:grid;grid-template-columns:40px minmax(0,1fr) 28px;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--soft);}
+.mz:first-child{border-top:0;}
+.mz .zt{font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;align-self:start;padding-top:1px;}
+.mz .tx{display:flex;flex-direction:column;min-width:0;}
+.mz .l1{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--muted);} .mz .l1 b{color:var(--ink);font-weight:600;}
+.mz .l1 i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;vertical-align:1px;}
+.mz .l2{font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;} .mz .l2 b{color:var(--ink);font-weight:600;}
+.mzd{all:unset;box-sizing:border-box;cursor:pointer;width:28px;height:28px;border-radius:50%;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;color:var(--muted);}
+.mzd .i{width:14px;height:14px;}
+.m-rest{padding:6px 12px;} .mr{font-size:12.5px;color:var(--ink);padding:4px 0;} .mr span{display:inline-block;min-width:110px;color:var(--muted);}
+.m-det{position:fixed;inset:0;z-index:200;background:rgba(35,43,53,.45);display:flex;}
+.m-det-in{background:var(--bg,#F5F7F9);width:100%;height:100%;overflow-y:auto;padding:calc(12px + env(safe-area-inset-top,0px)) 0 calc(16px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:8px;}
+.m-det-in .mc{cursor:default;} .m-det-in > .btn{margin:0 12px;justify-content:center;} .m-det-in > [data-zu]{margin-top:auto;}
 .m-day{padding:12px 12px 4px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700;}
 .m-day.td{color:var(--primary);}
 .mc{margin:6px 12px;background:#fff;border:1px solid var(--line);border-left:4px solid var(--c);border-radius:9px;padding:10px 12px;display:flex;flex-direction:column;gap:4px;cursor:pointer;}
@@ -4229,43 +4247,108 @@ document.addEventListener('keydown', e => { if(e.key === 'Escape'){ closePop(); 
 // HANDY
 // ---------------------------------------------------------------------------
 const M = { mode: 'tag', who: 'ich', off: 0, mid: null };
+// Handy: ein Tag pro Bildschirm (wischen = Tag wechseln, Tipp aufs Datum = Kalender). Ich = eigene Einsätze wie das Widget
+// auf dem Handy-Start, Team = pro Baustelle eine Zeile mit allen Leuten, unten Abwesende und Nicht eingeteilte.
+const mIts = d => ALL.filter(i => LAY[i.id] && i.s < d + 1 - 1e-6 && i.e > d + 1e-6 && LAY[i.id].free.some(k => (k >> 1) === d));
+const mUeber = (a, b) => a.s < b.e - 1e-6 && b.s < a.e - 1e-6;
+const mZeit = (it, d) => { const a = Math.max(it.s, d), b = Math.min(it.e, d + 1); return a - d < 1e-6 && b - d > 1 - 1e-6 ? '' : hOf(a, d); };
+// Vorname, bei gleichem Vornamen mit Anfangsbuchstaben des Nachnamens
+function mVn(mid){ const n = P[mid]?.name || '', v = first(n);
+  return PERSONEN.some(p => p.id !== mid && p.aktiv && first(p.name) === v) && n.split(' ')[1] ? `${v} ${n.split(' ')[1][0]}.` : v; }
+// Haupteinsatz, bei dem eine Mithilfe dabei ist (gleiche Person, gleiche Zeit)
+const mChefIt = (h, its) => its.find(m => m.mid === h.mp && m.kind !== 'hilfe' && m.kind !== 'absenz' && mUeber(m, h)) || byId(h.link);
+const mHelfer = (it, its) => its.filter(h => h.kind === 'hilfe' && h.mid !== it.mid && (h.link === it.id || (h.mp === it.mid && mUeber(h, it))));
+function mZeile(zeit, farbe, name, adr, unten, id){
+  return `<div class="mz">${zeit !== null ? `<span class="zt">${zeit}</span>` : ''}<span class="tx"><span class="l1">${farbe ? `<i style="background:${farbe}"></i>` : ''}<b>${esc(name)}</b>${adr ? ' ' + esc(adr) : ''}</span>${unten ? `<span class="l2">${unten}</span>` : ''}</span>
+    ${id ? `<button type="button" class="mzd" data-mzd="${id}" aria-label="Details">${I('down')}</button>` : '<span></span>'}</div>`;
+}
+function mIch(d){
+  const its = mIts(d), mein = its.filter(i => i.mid === M.mid).sort((a, b) => a.s - b.s);
+  return mein.map(it => {
+    if(it.kind === 'absenz') return mZeile(mZeit(it, d), null, titleOf(it), '', '', null);
+    const haupt = it.kind === 'hilfe' ? mChefIt(it, its) : it, k = haupt && KUNDEN[haupt.kid];
+    const leute = it.kind === 'hilfe' ? [it.mp, ...its.filter(h => h.kind === 'hilfe' && h.mp === it.mp && h.mid !== it.mid && mUeber(h, it)).map(h => h.mid)]
+      : mHelfer(it, its).map(h => h.mid);
+    const name = haupt && haupt !== it ? (kName(k) || haupt.title || titleOf(it)) : titleOf(it);
+    return mZeile(mZeit(it, d), null, name, kOrt(k), [...new Set(leute)].filter(m => P[m]).length ? 'mit ' + esc([...new Set(leute)].filter(m => P[m]).map(mVn).join(', ')) : '', (haupt || it).id);
+  }).join('');
+}
+function mTeam(d){
+  const its = mIts(d), gruppen = new Map(), los = [];
+  its.filter(i => i.kind !== 'hilfe' && i.kind !== 'absenz').sort((a, b) => a.s - b.s).forEach(it => {
+    const key = istAllg(it.mid) ? 'a' + it.id : it.kid ? 'k' + it.kid : 't' + (it.title || it.id);
+    if(!gruppen.has(key)) gruppen.set(key, []); gruppen.get(key).push(it); });
+  // Mithilfen ohne passenden Haupteinsatz: eigene Zeile «Mithilfe bei …»
+  its.filter(h => h.kind === 'hilfe' && !mChefIt(h, its)).forEach(h => los.push(h));
+  let h = [...gruppen.values()].map(g => { const it = g[0], k = KUNDEN[it.kid];
+    const chefs = istAllg(it.mid) ? [] : [...new Set(g.map(x => x.mid))], hel = [...new Set(g.flatMap(x => mHelfer(x, its)).map(x => x.mid))].filter(m => !chefs.includes(m));
+    const unten = chefs.map(m => `<b>${esc(mVn(m))}</b>`).concat(hel.map(m => esc(mVn(m)))).join(', ');
+    return mZeile(mZeit(it, d), barStyle(it).bg, titleOf(it), kOrt(k), unten, it.id); }).join('');
+  const losG = new Map(); los.forEach(x => { if(!losG.has(x.mp)) losG.set(x.mp, []); losG.get(x.mp).push(x); });
+  h += [...losG.entries()].map(([mp, l]) => mZeile(mZeit(l[0], d), null, `Mithilfe bei ${mVn(mp)}`, '', esc(l.map(x => mVn(x.mid)).join(', ')), l[0].id)).join('');
+  // Unten: Abwesende nach Grund, und wer an einem Arbeitstag nirgends eingeteilt ist
+  const abs = new Map(); its.filter(i => i.kind === 'absenz').forEach(i => { const t = titleOf(i); if(!abs.has(t)) abs.set(t, []); abs.get(t).push(i.mid); });
+  const da = new Set(its.map(i => i.mid)), ohneGr = new Set(GRUPPEN.filter(g => ['Allgemein', 'Planungshilfe', 'Büro', 'Neu'].includes(g.name)).map(g => g.id));
+  const frei = isOff(d) ? [] : PERSONEN.filter(p => p.aktiv && !da.has(p.id) && !ohneGr.has(p.gruppe_id)).sort((a, b) => a.name.localeCompare(b.name, 'de'));
+  const rest = [...abs.entries()].map(([t, l]) => `<div class="mr"><span>${esc(t)}</span>${esc([...new Set(l)].map(mVn).join(', '))}</div>`).join('')
+    + (frei.length ? `<div class="mr"><span>Nicht eingeteilt</span>${esc(frei.map(p => mVn(p.id)).join(', '))}</div>` : '');
+  return (h || '') + (rest ? `</div><div class="m-liste m-rest">${rest}` : '');
+}
+// Details eines Einsatzes: ganze Höhe, Karte offen (Notiz, Dateien), Navigation
+function mDetail(id, d){
+  const it = byId(id); if(!it) return; const k = KUNDEN[it.kid] || (it.kind === 'hilfe' ? KUNDEN[byId(it.link)?.kid] : null);
+  const ov = document.createElement('div'); ov.className = 'm-det';
+  ov.innerHTML = `<div class="m-det-in">${mCard(it, d).replace('class="mc', 'class="mc open')}
+    ${k && kOrt(k) ? `<a class="btn btn-ghost" target="_blank" rel="noopener" href="https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(kOrt(k))}">Navigation</a>` : ''}
+    <button type="button" class="btn btn-primary" data-zu>Schliessen</button></div>`;
+  document.body.appendChild(ov); ov.addEventListener('click', e => { if(e.target === ov || e.target.closest('[data-zu]')) ov.remove(); });
+  const c = ov.querySelector('.mc'); c.onclick = null; mFiles(c);
+  const ab = ov.querySelector('[data-mabm]'); if(ab) ab.onclick = e => { e.stopPropagation(); ov.remove(); openAbmachen({ it }, ab.getBoundingClientRect()); };
+}
+function mLeiste(){
+  return `<div class="m-sw"><div class="seg"><button data-mw="ich" aria-pressed="${M.mode === 'tag' && M.who === 'ich'}">Ich</button><button data-mw="team" aria-pressed="${M.mode === 'tag' && M.who === 'team'}">Team</button></div>
+    <button class="m-magb" data-mm="${M.mode === 'magazin' ? 'tag' : 'magazin'}" aria-pressed="${M.mode === 'magazin'}">Magazin</button></div>`;
+}
+function mLeisteBinden(){
+  document.querySelectorAll('[data-mm]').forEach(b => b.onclick = () => { M.mode = b.dataset.mm; renderHandy(); });
+  document.querySelectorAll('[data-mw]').forEach(b => b.onclick = () => { if(b.dataset.mw === 'ich' && !M.mid){ toast('Dein Login ist noch keiner Zeile zugeordnet.'); return; } M.who = b.dataset.mw; M.mode = 'tag'; renderHandy(); });
+}
 function renderHandy(){
   $('fokusFertig')?.remove();
   const me = myPerson(); M.mid = me ? me.id : null; // «Ich» = immer die eigene Zeile
   if(M.mode === 'magazin'){
     $('appMain').innerHTML = `<div class="m">
       <div class="m-top"><span></span><div class="ti"><b>Magazin</b><span>Arbeiten auf Vorrat</span></div><button class="m-madd" id="magAddB" aria-label="Erfassen">${I('plus')}</button></div>
-      <div class="m-sw"><div class="seg"><button data-mm="tag">Tag</button><button data-mm="woche">Woche</button><button data-mm="magazin" aria-pressed="true">Magazin</button></div></div>
+      ${mLeiste()}
       <div class="m-q">Wie viel Zeit hast du?</div>
       <div class="m-mag">${magBody()}</div></div>`;
-    document.querySelectorAll('[data-mm]').forEach(b => b.onclick = () => { M.mode = b.dataset.mm; renderHandy(); });
-    bindMag($('appMain')); return;
+    mLeisteBinden(); bindMag($('appMain')); return;
   }
   if(!M.mid && M.who === 'ich') M.who = 'team';
-  const day = TODAY + M.off; const x = dDate(day);
-  const days = M.mode === 'tag' ? [day] : [...Array(7)].map((_, i) => day - ((x.getDay() + 6) % 7) + i);
-  const title = M.mode === 'tag' ? `${WDL[x.getDay()]}, ${x.getDate()}. ${MONL[x.getMonth()]}` : `KW ${kw(day)}`;
-  const sub = M.off === 0 ? 'heute' : M.mode === 'tag' ? `KW ${kw(day)}` : `${dLab(days[0])} – ${dLab(days[6])}`;
-  let body = '';
-  days.forEach(d => {
-    const its = ALL.filter(i => LAY[i.id] && i.s < d + 1 - 1e-6 && i.e > d + 1e-6 && (LAY[i.id].free.some(k => (k >> 1) === d) ) && (M.who === 'team' || i.mid === M.mid)).sort((a, b) => a.s - b.s || (P[a.mid]?.name || '').localeCompare(P[b.mid]?.name || ''));
-    if(M.mode === 'woche' || M.who === 'team') body += `<div class="m-day${d === TODAY ? ' td' : ''}">${WDL[dDate(d).getDay()]} ${dDate(d).getDate()}.${dDate(d).getMonth() + 1}.${FEIER.has(d) ? ' · ' + esc(FEIER.get(d)) : ''}</div>`;
-    body += mInfo(d); // Infos für alle aus «Anlässe / Betrieb» und «Diverses»
-    body += its.length ? its.map(i => mCard(i, d)).join('') : `<div class="m-empty">${isOff(d) ? 'Frei.' : 'Nichts eingeteilt.'}</div>`;
-  });
-  $('appMain').innerHTML = `<div class="m">
-    <div class="m-top"><button class="nav" id="mPrev" aria-label="Zurück">${I('back')}</button><div class="ti"><b>${title}</b><span>${sub}${M.who === 'ich' && P[M.mid] ? ' · ' + esc(P[M.mid].name) : ''}</span></div><button class="nav" id="mNext" aria-label="Weiter">${I('next')}</button></div>
-    <div class="m-sw"><div class="seg"><button data-mm="tag" aria-pressed="${M.mode === 'tag'}">Tag</button><button data-mm="woche" aria-pressed="${M.mode === 'woche'}">Woche</button><button data-mm="magazin">Magazin</button></div>
-      <div class="seg"><button data-mw="ich" aria-pressed="${M.who === 'ich'}">Ich</button><button data-mw="team" aria-pressed="${M.who === 'team'}">Team</button></div></div>
+  const day = TODAY + M.off, x = dDate(day);
+  const liste = M.who === 'team' ? mTeam(day) : mIch(day);
+  $('appMain').innerHTML = `<div class="m" id="mWisch">
+    <div class="m-top"><button class="nav" id="mPrev" aria-label="Vorheriger Tag">${I('back')}</button>
+      <label class="ti" title="Datum wählen"><b>${WDL[x.getDay()]}, ${x.getDate()}. ${MONL[x.getMonth()]}</b><span>${M.off === 0 ? 'heute' : `KW ${kw(day)}`}${FEIER.has(day) ? ' · ' + esc(FEIER.get(day)) : ''}</span>
+        <input type="date" id="mDatum" value="${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}" aria-label="Datum wählen"></label>
+      <button class="nav" id="mNext" aria-label="Nächster Tag">${I('next')}</button></div>
+    ${mLeiste()}
     ${!me && !isBuero() ? `<div class="m-empty">Dein Login ist noch keiner Zeile im Planer zugeordnet. Das Büro kann das unter «Personen &amp; Gruppen» einstellen.</div>` : ''}
-    ${body}
+    ${mInfo(day)}
+    <div class="m-liste">${liste || `<div class="m-empty" style="margin:0">${isOff(day) ? 'Frei.' : 'Nichts eingeteilt.'}</div>`}</div>
   </div>`;
-  $('mPrev').onclick = () => { M.off -= M.mode === 'tag' ? 1 : 7; renderHandy(); };
-  $('mNext').onclick = () => { M.off += M.mode === 'tag' ? 1 : 7; renderHandy(); };
-  document.querySelectorAll('[data-mm]').forEach(b => b.onclick = () => { M.mode = b.dataset.mm; renderHandy(); });
-  document.querySelectorAll('[data-mw]').forEach(b => b.onclick = () => { if(b.dataset.mw === 'ich' && !M.mid){ toast('Dein Login ist noch keiner Zeile zugeordnet.'); return; } M.who = b.dataset.mw; renderHandy(); });
-  document.querySelectorAll('.mc').forEach(c => c.onclick = () => { c.classList.toggle('open'); if(c.classList.contains('open')) mFiles(c); });
-  document.querySelectorAll('[data-mabm]').forEach(b => b.onclick = e => { e.stopPropagation(); const it = byId(b.dataset.mabm); if(it) openAbmachen({ it }, b.getBoundingClientRect()); });
+  const wechsel = r => { M.off += r; renderHandy(); };
+  $('mPrev').onclick = () => wechsel(-1); $('mNext').onclick = () => wechsel(1);
+  const dt = $('mDatum');
+  dt.onchange = () => { if(!dt.value) return; const [y, m, t] = dt.value.split('-').map(Number); M.off = dayIdx(new Date(y, m - 1, t)) - TODAY; renderHandy(); };
+  dt.closest('label').onclick = e => { if(e.target === dt) return; e.preventDefault(); try { dt.showPicker(); } catch(_){ dt.focus(); dt.click(); } };
+  // Wischen nach links = nächster Tag, nach rechts = vorheriger
+  const w = $('mWisch'); let x0 = null, y0 = 0;
+  w.addEventListener('touchstart', e => { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; }, { passive: true });
+  w.addEventListener('touchend', e => { if(x0 === null) return; const dx = e.changedTouches[0].clientX - x0, dy = e.changedTouches[0].clientY - y0; x0 = null;
+    if(Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) wechsel(dx < 0 ? 1 : -1); }, { passive: true });
+  mLeisteBinden();
+  document.querySelectorAll('[data-mzd]').forEach(b => b.onclick = () => mDetail(b.dataset.mzd, day));
 }
 function resLine(it, d){
   const per = vehOn(it.mid); const vs = [...new Set([...(per[d * 2] || []), ...(per[d * 2 + 1] || [])].map(x => resName(resById(x.rid))))];
@@ -4316,7 +4399,7 @@ function mCard(it, d){
   const zeit = a - d === 0 && b - d === 1 ? 'ganzer Tag' : a - d === 0 && b - d === .5 ? 'Vormittag' : a - d === .5 && b - d === 1 ? 'Nachmittag' : `${hOf(a, d)}–${hOf(b, d)}`;
   const multi = it.e - it.s > 1 + 1e-6; const L = LAY[it.id];
   const tag = multi && L && it.kind !== 'hilfe' ? ` · Tag ${[...new Set(L.free.map(k => k >> 1))].indexOf(d) + 1} von ${fmtN(L.n)}` : '';
-  const mit = it.kind === 'baustelle' ? ALL.filter(h => h.kind === 'hilfe' && h.link === it.id && h.s < d + 1 && h.e > d).map(h => first(P[h.mid]?.name)) : [];
+  const mit = it.kind !== 'hilfe' && it.kind !== 'absenz' ? ALL.filter(h => h.kind === 'hilfe' && (h.link === it.id || (h.mp === it.mid && h.s < it.e && it.s < h.e)) && h.s < d + 1 && h.e > d).map(h => first(P[h.mid]?.name)) : [];
   return `<div class="mc${it.ok === false ? ' provi' : ''}" style="--c:${st.bg}" data-id="${it.id}">
     <div class="h">${I('cal').replace('class="i"', 'class="i" style="width:14px;height:14px"')}${zeit}${tag}${it.ok === false ? ' · noch nicht abgemacht' : ''}<span class="who">${M.who === 'team' ? esc(P[it.mid]?.name || '') : esc(ART[it.kind])}</span></div>
     <b>${esc(titleOf(it))}</b>${k && kOrt(k) ? `<span class="o">${esc(kOrt(k))}</span>` : ''}${k && it.title ? `<span class="o">${esc(it.title)}</span>` : ''}
