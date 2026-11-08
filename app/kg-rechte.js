@@ -23,6 +23,7 @@
     { k: 'plan', n: 'Einsatzplaner', icon: 'plan', bereiche: [
       B('einsaetze', 'Einsätze', 'Eigene = eigene Zeile + Titelzeile der Gruppe, Gruppe = alle Zeilen der Planer-Gruppe'),
       B('abwesenheit', 'Abwesenheiten & Ferien'),
+      S('reservieren', 'Geräte selber reservieren', 'Anhänger usw. mit Haken «selber reservierbar»: Handy › Reservieren und im Planer, nur eigene ändern'),
       S('einstellungen', 'Planer-Einstellungen', 'Personen, Fahrzeuge, Feiertage') ] },
     { k: 'pflege', n: 'Pflege & Service', icon: 'pflege', bereiche: [
       B('kunden', 'Pflegekunden'),
