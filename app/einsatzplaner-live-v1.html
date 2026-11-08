@@ -936,6 +936,7 @@ html.ep-eingebettet .tl,html.ep-eingebettet .tltop + .tl{height:calc(100vh - 14p
 <div class="toastwrap" id="toastwrap"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="/kg-pendenz.js?v=1"></script>
 <script>
 (function(){
 const $ = id => document.getElementById(id);
@@ -1367,6 +1368,7 @@ async function ladeAlles(){
     MAG = au; PZ = pz; ABST = at; VNOT = {}; vn.forEach(x => VNOT[`${x.kunde_kategorie_id}_${x.jahr}_${x.kw}`] = { n: x.notiz || '', pl: x.projektleiter_id });
     MARK = mk || []; INFO = new Map((ei || []).map(x => [x.einsatz_id + '|' + x.tag, x])); RES = r; ladeTypen(wx, we); RESE = z.map(x => ({ id: x.id, rid: x.ressource_id || (x.typ_eintrag_id ? 'T:' + x.typ_eintrag_id : null), typ: x.typ_eintrag_id || null, wunsch: x.wunsch_ressource_id || null, txt: x.freitext || null, art: x.art, eid: x.einsatz_id, mid: x.person_id, s: x.beginn ? toU(x.beginn) : null, e: x.ende ? toU(x.ende) : null, fest: !!x.fest, ab: x.ab_slot || 0, bv: x.bis_vor_ende_slot || 0, pz: x.pausen || [] }));
     GRUPPEN = g; PERSONEN = p.filter(x => !x.ist_ablage); ABL = p.filter(x => x.ist_ablage && x.aktiv); P = {}; p.forEach(x => P[x.id] = x); // Ablage-Personen nur für die Ablage-Zeilen
+    await ladeToolPendenzen();
     EINS = e.concat(s.filter(x => !e.some(y => y.id === x.id))).map(rowToItem); // s = wiederkehrende, auch wenn der erste Termin vor dem Bereich liegt
     FEIER = new Map(); f.forEach(x => FEIER.set(fromIso(x.datum), x.name));
     if(k) setzeKunden(k);
@@ -2924,11 +2926,24 @@ const PZ_SPALTEN = [{ sp: 'tag', t: 'Heute', c: '#D1DB5F' }, { sp: 'woche', t: '
 const pzList = (mid, spalte) => PZ.filter(z => !z.erledigt && z.person_id === mid && (!spalte || z.spalte === spalte));
 function pzPunkt(mid){ const l = pzList(mid); if(!l.length) return ''; const od = l.some(z => z.spalte === 'tag' && z.tag && fromIso(z.tag) < TODAY); // kleiner Punkt am Namen: offene (rot = überfällige) Pendenzen
   return `<span class="pzp${od ? ' od' : ''}" title="${l.length} ${l.length === 1 ? 'Pendenz' : 'Pendenzen'} offen${od ? ', überfällig' : ''}"></span>`; }
+// Personen mit Anmeldung: Pendenzen aus dem Pendenzen-Tool (kg-pendenz.js) – zwei Spalten «Heute» (Zeit Heute) und «Notizen» (Liste Dauernde Notizen)
+const PZ_ZWEI = [{ sp: 'tag', t: 'Heute', c: '#D1DB5F' }, { sp: 'notiz', t: 'Notizen', c: '#A9B0B7' }];
+async function ladeToolPendenzen(){
+  const uids = [...new Set(PERSONEN.filter(x => x.benutzer_id && x.aktiv).map(x => x.benutzer_id))]; if(!uids.length) return;
+  const { data: bs } = await sb.from('pendenz_board').select('id,besitzer_id').eq('typ', 'person').in('besitzer_id', uids);
+  const bIds = (bs || []).map(b => b.id); if(!bIds.length) return;
+  const ls = await fetchAll(() => sb.from('pendenz_liste').select('id,board_id,art_id').in('board_id', bIds)); if(!ls.length) return;
+  const lB = Object.fromEntries(ls.map(l => [l.id, l])), bU = Object.fromEntries((bs || []).map(b => [b.id, b.besitzer_id]));
+  const pz = await fetchAll(() => sb.from('pendenz').select('id,titel,zeit,liste_id,erstellt_am').eq('erledigt', false).in('liste_id', ls.map(l => l.id)));
+  pz.forEach(z => { const l = lB[z.liste_id], sp = z.zeit === 1 ? 'tag' : l && l.art_id === 'notizen' ? 'notiz' : null; if(!sp) return;
+    const pers = PERSONEN.find(x => x.benutzer_id === bU[l.board_id] && x.aktiv); if(!pers) return;
+    PZ.push({ id: z.id, tool: true, person_id: pers.id, spalte: sp, text: z.titel, tag: sp === 'tag' ? (z.erstellt_am || '').slice(0, 10) : null, erstellt_am: z.erstellt_am, erledigt: false }); });
+}
 let boardRef = null;
-function openBoard(mid){ boardRef = mid; renderBoard(); }
+function openBoard(mid){ if(P[mid] && !P[mid].benutzer_id && !pzList(mid).length) return toast('Pendenzen gibt es nur für Personen mit Anmeldung.'); boardRef = mid; renderBoard(); }
 function renderBoard(){
   document.querySelector('.dlg.boardd')?.remove(); const p = boardRef && P[boardRef]; if(!p) return;
-  const cols = PZ_SPALTEN;
+  const cols = p.benutzer_id ? PZ_ZWEI : PZ_SPALTEN;
   const dLabel = z => { if(!z.tag) return ''; const d = fromIso(z.tag); return d < TODAY ? `<span class="dt od">seit ${esc(dLab(d))} offen</span>` : ''; };
   const d = document.createElement('div'); d.className = 'dlg boardd';
   d.innerHTML = `<div class="in board"><div style="display:flex;align-items:center"><b style="font-size:15px">Pendenzen · ${esc(p.name)}</b><button class="icon-btn" id="bX" style="margin-left:auto" aria-label="Schliessen">${I('x')}</button></div>
@@ -2940,12 +2955,21 @@ function renderBoard(){
   d.onclick = e => { if(e.target === d){ boardRef = null; d.remove(); } };
   const add = async ci => { const c = cols[ci]; const inp = d.querySelector(`[data-pin="${ci}"]`); const t = inp.value.trim(); if(!t) return;
     const day = c.sp === 'tag' ? TODAY : null; // Heute = die nächsten ~24 h; wandert mit, bis erledigt
-    const { error } = await sb.from('planer_pendenz').insert({ person_id: p.id, spalte: c.sp, text: t, tag: day != null ? isoDate(day) : null, erstellt_von: ME });
+    let error;
+    if(p.benutzer_id){ try { const b = await KGPZ.board(sb, p.benutzer_id), heute = c.sp === 'tag';
+        ({ error } = await sb.from('pendenz').insert({ liste_id: heute ? b.team : b.notizen, titel: t, ...(heute ? { zeit: 1, zeit_sortierung: Date.now() / 1000 } : {}), sortierung: Date.now() / 1000, erstellt_von: ME, herkunft: 'board' })); } catch(e){ error = e; } }
+    else ({ error } = await sb.from('planer_pendenz').insert({ person_id: p.id, spalte: c.sp, text: t, tag: day != null ? isoDate(day) : null, erstellt_von: ME }));
     if(error) return fehler(error); await neuLaden(); document.querySelector(`.dlg.boardd [data-pin="${ci}"]`)?.focus(); };
   d.querySelectorAll('[data-pgo]').forEach(b => b.onclick = () => add(+b.dataset.pgo));
   d.querySelectorAll('[data-pin]').forEach(i => i.onkeydown = e => { if(e.key === 'Enter') add(+i.dataset.pin); });
-  d.querySelectorAll('[data-pdone]').forEach(c => c.onchange = async () => { const { error } = await sb.from('planer_pendenz').update({ erledigt: true, erledigt_am: new Date().toISOString() }).eq('id', c.dataset.pdone); if(error) return fehler(error); await neuLaden(); toast('Erledigt', async () => { await sb.from('planer_pendenz').update({ erledigt: false, erledigt_am: null }).eq('id', c.dataset.pdone); await neuLaden(); }); });
-  d.querySelectorAll('[data-pdel]').forEach(b => b.onclick = async () => { const { error } = await sb.from('planer_pendenz').delete().eq('id', b.dataset.pdel); if(error) return fehler(error); await neuLaden(); });
+  const tabelle = id => PZ.find(z => z.id === id && z.tool) ? 'pendenz' : 'planer_pendenz';
+  d.querySelectorAll('[data-pdone]').forEach(c => c.onchange = async () => { const tb = tabelle(c.dataset.pdone), ext = tb === 'pendenz' ? { erledigt_von: ME } : {};
+    const { error } = await sb.from(tb).update({ erledigt: true, erledigt_am: new Date().toISOString(), ...ext }).eq('id', c.dataset.pdone); if(error) return fehler(error); await neuLaden();
+    toast('Erledigt', async () => { await sb.from(tb).update({ erledigt: false, erledigt_am: null }).eq('id', c.dataset.pdone); await neuLaden(); }); });
+  // Entfernen: Pendenzen aus dem Pendenzen-Tool nur abhaken (erledigt), damit nichts verloren geht
+  d.querySelectorAll('[data-pdel]').forEach(b => b.onclick = async () => { const tb = tabelle(b.dataset.pdel);
+    const { error } = tb === 'pendenz' ? await sb.from('pendenz').update({ erledigt: true, erledigt_am: new Date().toISOString(), erledigt_von: ME }).eq('id', b.dataset.pdel) : await sb.from('planer_pendenz').delete().eq('id', b.dataset.pdel);
+    if(error) return fehler(error); await neuLaden(); });
 }
 
 // ---------------------------------------------------------------------------

@@ -126,6 +126,7 @@ h2{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--mute
 </main>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="/kg-pendenz.js?v=1"></script>
 <script>
 (function(){
 const $ = id => document.getElementById(id);
@@ -190,14 +191,14 @@ async function sende(){
   if(sendet || !warte.length || !navigator.onLine || !sb || !me) return zeichne();
   sendet = true;
   try {
-    const lid = await sammelListe();
+    const ziel = await KGPZ.ziel(sb, me);   // Mitarbeiter → Heute, Büro → Sammelbox
     for(const w of [...warte]){
       // Sprachnotiz ohne Netz aufgenommen: jetzt zuerst von der KI schreiben lassen
       let titel = w.titel, wortlich = w.wortlich || '';
       if(w.audio){ const blob = await audioHolen(w.id);
         if(blob){ const r = await diktatAuswerten(blob); titel = r.titel || 'Sprachnotiz (nicht verstanden)'; wortlich = r.wortlich; } else titel = 'Sprachnotiz (Aufnahme fehlt)'; }
       // feste ID: wird ein Eintrag doppelt gesendet (Netz bricht ab), entsteht trotzdem nur eine Pendenz
-      const { error } = await sb.from('pendenz').insert({ id: w.id, liste_id: lid, titel, notiz: notizHtml(wortlich), sortierung: Date.parse(w.am) / 1000, erstellt_von: me, herkunft: 'handy' });
+      const { error } = await sb.from('pendenz').insert({ id: w.id, ...ziel, titel, notiz: notizHtml(wortlich), sortierung: Date.parse(w.am) / 1000, erstellt_von: me, herkunft: 'handy' });
       if(error && error.code !== '23505') throw error;
       for(const fid of (w.fotoIds || [])){ const blob = await audioHolen('foto_' + fid); if(!blob) continue; const pfad = `${w.id}/${fid}.jpg`;
         const { error: e1 } = await sb.storage.from('pendenz-dateien').upload(pfad, blob, { contentType: 'image/jpeg', upsert: true }); if(e1) throw e1;
@@ -287,7 +288,9 @@ if(navigator.mediaDevices?.getUserMedia && (window.AudioContext || window.webkit
 } else $('tipp').textContent = 'Tipp: Mikrofon der Tastatur zum Diktieren';
 $('text').addEventListener('input', () => { if(!$('text').value.trim()) diktatNotiz = ''; });
 
-const REITER = [[1, 'Heute'], [2, 'Woche'], [3, 'Monat'], ['sammel', 'Sammelbox']];
+// Mitarbeiter (Gruppe): nur Heute und Notizen; Büro: Heute / Woche / Monat / Sammelbox. Gemerkt fürs Erfassen ohne Netz.
+let MA = lies('pzapp_ma', false);
+const reiterListe = () => MA ? [[1, 'Heute'], ['notiz', 'Notizen']] : [[1, 'Heute'], [2, 'Woche'], [3, 'Monat'], ['sammel', 'Sammelbox']];
 let MEINE = [], LISTEN = {}, REITER_AKT = lies('pzapp_reiter', 1);
 async function ladeMeine(){
   if(!sb || !me || !navigator.onLine){ $('meine').innerHTML = '<div class="leer">Ohne Netz sind deine Pendenzen nicht sichtbar – Erfassen geht trotzdem.</div>'; return; }
@@ -300,9 +303,9 @@ async function ladeMeine(){
     MEINE = pz || []; zeigeMeine();
   } catch(e){ console.error(e); $('meine').innerHTML = '<div class="leer">Pendenzen konnten nicht geladen werden.</div>'; }
 }
-const imReiter = (p, r) => r === 'sammel' ? (LISTEN[p.liste_id] || {}).art_id === 'sammel' : p.zeit === r;
+const imReiter = (p, r) => r === 'sammel' ? (LISTEN[p.liste_id] || {}).art_id === 'sammel' : r === 'notiz' ? (LISTEN[p.liste_id] || {}).art_id === 'notizen' && !p.zeit : p.zeit === r;
 function zeigeMeine(){
-  $('reiter').innerHTML = REITER.map(([r, t]) => `<button type="button" role="tab" data-r="${r}" class="${String(r) === String(REITER_AKT) ? 'on' : ''}"><b>${MEINE.filter(p => imReiter(p, r)).length}</b>${t}</button>`).join('');
+  $('reiter').innerHTML = reiterListe().map(([r, t]) => `<button type="button" role="tab" data-r="${r}" class="${String(r) === String(REITER_AKT) ? 'on' : ''}"><b>${MEINE.filter(p => imReiter(p, r)).length}</b>${t}</button>`).join('');
   $('reiter').querySelectorAll('[data-r]').forEach(b => b.onclick = () => { REITER_AKT = isNaN(+b.dataset.r) ? b.dataset.r : +b.dataset.r; schreib('pzapp_reiter', REITER_AKT); zeigeMeine(); });
   const l = MEINE.filter(p => imReiter(p, REITER_AKT));
   $('meine').innerHTML = l.map(p => `<div class="pz"><button type="button" class="ok" data-erl="${p.id}" aria-label="Erledigt" title="Erledigt">${K('x', 14)}</button><button type="button" class="t" data-det="${p.id}"><span>${esc(p.titel)}</span><small>${esc((LISTEN[p.liste_id] || {}).titel || '')}</small></button></div>`).join('')
@@ -325,10 +328,12 @@ async function details(id){
   const b = document.createElement('div'); b.className = 'blatt';
   b.innerHTML = `<div class="in"><span class="griff"></span><h3>${esc(p.titel)}</h3><div class="meta" data-meta><span>${esc((LISTEN[p.liste_id] || {}).titel || '')}</span></div>
     <div class="notiz" data-notiz><span class="tipp">Lädt …</span></div><div class="bilder" data-bilder></div>
-    <div class="knoepfe"><button type="button" class="hell" data-zu>Schliessen</button><button type="button" class="dunkel" data-ok>${K('check', 18)}Erledigt</button></div></div>`;
+    <div class="knoepfe"><button type="button" class="hell" data-zu>Schliessen</button><button type="button" class="dunkel" data-ok>${K('check', 18)}Erledigt</button>${MA ? `<button type="button" class="hell" data-zu-ebene style="grid-column:1/-1">${p.zeit === 1 ? 'Zu Notizen verschieben' : 'Zu Heute verschieben'}</button>` : ''}</div></div>`;
   document.body.appendChild(b); const q = s => b.querySelector(s);
   b.addEventListener('click', e => { if(e.target === b || e.target.closest('[data-zu]')) b.remove(); });
   q('[data-ok]').onclick = () => erledigt(id);
+  if(q('[data-zu-ebene]')) q('[data-zu-ebene]').onclick = async () => { const { error } = await KGPZ.verschiebe(sb, me, id, p.zeit === 1 ? 'notizen' : 'heute');
+    if(error) return meldung('Konnte nicht verschoben werden: ' + error.message); b.remove(); meldung(p.zeit === 1 ? 'Zu Notizen verschoben' : 'Zu Heute verschoben', true); ladeMeine(); };
   const [{ data: d }, { data: fs }] = await Promise.all([sb.from('pendenz').select('notiz,erstellt_am,kunde_id').eq('id', id).maybeSingle(), sb.from('pendenz_datei').select('storage_pfad,art').eq('pendenz_id', id)]);
   const meta = []; if(d && d.erstellt_am) meta.push('erfasst ' + new Date(d.erstellt_am).toLocaleDateString('de-CH', { day: 'numeric', month: 'short' }));
   if(d && d.kunde_id){ const { data: k } = await sb.from('kunde').select('name,firma,vorname,nachname').eq('id', d.kunde_id).maybeSingle(); if(k) meta.push(k.firma || [k.vorname, k.nachname].filter(Boolean).join(' ') || k.name); }
@@ -344,7 +349,11 @@ async function details(id){
 async function start(){
   if(sb){ try { const { data: { session } } = await sb.auth.getSession(); if(session){ me = session.user.id; schreib('pzapp_me', me); } } catch(e){} }
   if(!me){ $('login').classList.remove('hidden'); $('erfassen').classList.add('hidden'); return; }
-  $('login').classList.add('hidden'); $('erfassen').classList.remove('hidden'); zeichne(); sende(); ladeMeine();
+  $('login').classList.add('hidden'); $('erfassen').classList.remove('hidden'); zeichne();
+  if(sb && navigator.onLine){ try { MA = (await KGPZ.ansicht(sb, me)) === 'mitarbeiter'; schreib('pzapp_ma', MA); } catch(e){} }
+  if(MA && !reiterListe().some(([r]) => String(r) === String(REITER_AKT))) REITER_AKT = 1;
+  $('speichern').title = $('speichern').ariaLabel = MA ? 'Bei Heute eintragen' : 'In die Sammelbox';
+  sende(); ladeMeine();
 }
 $('loginBtn').addEventListener('click', async () => {
   if(!sb) return $('loginStatus').textContent = 'Kein Netz – zum ersten Anmelden braucht es Empfang.';
