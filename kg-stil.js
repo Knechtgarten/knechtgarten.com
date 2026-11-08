@@ -676,7 +676,7 @@ html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!import
 }`;
     document.head.appendChild(st);
     const n = document.createElement('nav'); n.className = 'kg-handyleiste'; n.setAttribute('aria-label', 'Hauptnavigation');
-    n.innerHTML = `<a href="heute-live-v1.html">${ic(P.home)}Start</a>`
+    n.innerHTML = `<a href="heute-live-v1.html">${ic(P.home || TI.home)}Start</a>`
       + `<a href="kontakte-handy-live-v1.html"${akt === 'kontakte' ? ' class="akt"' : ''}>${ic(TI.kunden)}Kontakte</a>`
       + `<a class="kam${akt === 'foto' ? ' akt' : ''}" href="fotos-live-v1.html"><span>${ic(P.foto, 26)}</span>Foto</a>`
       + `<a href="reservieren-live-v1.html"${akt === 'reservieren' ? ' class="akt"' : ''}>${ic(P.anhaenger)}Reservieren</a>`
