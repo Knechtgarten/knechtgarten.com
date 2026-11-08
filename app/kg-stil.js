@@ -224,7 +224,7 @@ button.kg-kachel-kopf,a.kg-kachel-kopf{cursor:pointer;} button.kg-kachel-kopf:ho
   // Browser-Tab: Knecht-Tool-Blatt als Icon (wenn die Seite kein eigenes hat, z. B. Pendenzen-App) und Name «Knecht-Tool · Tool»
   const tabKnecht = () => {
     if(!document.querySelector('link[rel~="icon"]')){
-      [['icon', '/favicon.ico', ''], ['icon', '/knecht-tool-32.png', 'image/png'], ['apple-touch-icon', '/knecht-tool-180.png', '']].forEach(([rel, href, type]) => {
+      [['icon', '/favicon.ico', ''], ['icon', '/kg-icon-32.png', 'image/png'], ['apple-touch-icon', '/kg-icon-180.png', '']].forEach(([rel, href, type]) => {
         const l = document.createElement('link'); l.rel = rel; l.href = href; if(type) l.type = type; document.head.appendChild(l); }); }
     if(aktuell) document.title = aktuell.k === 'home' ? 'Knecht-Tool' : `Knecht-Tool · ${aktuell.n}`;
   };
