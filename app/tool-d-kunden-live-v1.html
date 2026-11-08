@@ -2111,8 +2111,8 @@ async function maZeichnen(){
     [['_wartet', 'Wartet auf Freischaltung', anz(b => !b.recht_gruppe_id && !b.rolle && !b.ist_platzhalter)], ['_gesperrt', 'Gesperrt', anz(b => b.aktiv === false)]].filter(x => x[2]));
   const L = maGefiltert();
   w.innerHTML = `<div class="kfilter">${chips.map(([k, n, c]) => `<button type="button" class="fchip" data-mag="${k}" aria-pressed="${MA.gruppe === k}">${escHtml(n)}<small>${c}</small></button>`).join('')}
-      <span style="flex:1"></span><button type="button" class="btn kg-neben" data-maneu="temp" title="Name und Handy genügen, Anmeldung über einen persönlichen Link, nur ansehen">+ Temporär</button><button type="button" class="btn kg-neben" data-maneu="ohne" title="Person ohne Login, z. B. im Pflege-Tool zuständig">+ Ohne Login</button></div>
-    ${MA.neu ? maNeuForm() : ''}
+      <span style="flex:1"></span><button type="button" class="fchip" data-maausw aria-pressed="${!!MA.ausw}" title="Geburtstage, Dienstjubiläen, Lernende">Auswertungen</button><button type="button" class="btn kg-neben" data-maneu="temp" title="Name und Handy genügen, Anmeldung über einen persönlichen Link, nur ansehen">+ Temporär</button><button type="button" class="btn kg-neben" data-maneu="ohne" title="Person ohne Login, z. B. im Pflege-Tool zuständig">+ Ohne Login</button></div>
+    ${MA.neu ? maNeuForm() : ''}${MA.ausw ? maAuswertung() : ''}
     <table class="kundentable matab"><thead><tr><th style="width:20px;"></th><th style="width:22%;">Name</th><th style="width:18%;">Gruppe</th><th style="width:14%;">Handy</th><th style="width:14%;">Einsatzplaner</th><th>Merkmale</th><th style="width:10%;">Login</th></tr></thead><tbody>
     ${L.map(b => { const p = maPP(b.id), gr = MA.gruppen.find(g => g.id === b.recht_gruppe_id), mks = MA.bm.filter(x => x.benutzer_id === b.id).map(x => MA.merkmale.find(m => m.id === x.merkmal_id)).filter(Boolean), lg = maLogin(b);
       return `<tr class="kundenrow marow${MA.offen === b.id ? ' open' : ''}" data-ma="${b.id}"><td><span class="chev">${ICON.chevronRight}</span></td>
@@ -2122,10 +2122,32 @@ async function maZeichnen(){
         ${MA.offen === b.id ? `<tr class="offertenrow"><td colspan="7"><div class="offertenwrap">${maDetail(b)}</div></td></tr>` : ''}`; }).join('') || '<tr><td colspan="7" class="leer" style="padding:14px;color:var(--muted);">Keine Person gefunden.</td></tr>'}
     </tbody></table>`;
   w.querySelectorAll('[data-mag]').forEach(x => x.onclick = () => { MA.gruppe = x.dataset.mag; maZeichnen(); });
+  w.querySelectorAll('[data-maausw]').forEach(x => x.onclick = () => { MA.ausw = !MA.ausw; maZeichnen(); });
+  w.querySelectorAll('[data-maaz]').forEach(x => x.onclick = () => { MA.offen = x.dataset.maaz; MA.ausw = false; maZeichnen(); });
   w.querySelectorAll('[data-maneu]').forEach(x => x.onclick = () => { MA.neu = MA.neu === x.dataset.maneu ? null : x.dataset.maneu; maZeichnen(); });
   w.querySelectorAll('tr.marow').forEach(tr => tr.onclick = () => { MA.offen = MA.offen === tr.dataset.ma ? null : tr.dataset.ma; maZeichnen(); });
   if(MA.neu) maNeuBinden();
   const b = MA.personen.find(x => x.id === MA.offen); if(b) maBinden(b, maPP(b.id));
+}
+// Auswertungen: nächste Geburtstage, Dienstjubiläen (5er-Jahre, 10 = Dienstaltersgeschenk), Lernende mit Lehrjahr
+function maAuswertung(){
+  const heute = new Date(); heute.setHours(12, 0, 0, 0);
+  const dat = v => v ? new Date(v + 'T12:00') : null, kurz = d => d ? `${d.getDate()}.${d.getMonth() + 1}.${d.getFullYear()}` : '';
+  const P = MA.personen.filter(b => !b.ist_temporaer && b.aktiv !== false), tage = d => Math.round((d - heute) / 864e5);
+  const naechster = d => { const j = heute.getFullYear(), x = new Date(j, d.getMonth(), d.getDate(), 12); return x < heute ? new Date(j + 1, d.getMonth(), d.getDate(), 12) : x; };
+  const wann = n => n === 0 ? '<b>heute</b>' : n === 1 ? '<b>morgen</b>' : n <= 14 ? `<b>in ${n} Tagen</b>` : `in ${n} Tagen`;
+  const geb = P.filter(b => b.geburtsdatum).map(b => { const d = dat(b.geburtsdatum), n = naechster(d); return { b, n, alter: n.getFullYear() - d.getFullYear() }; }).sort((x, y) => x.n - y.n);
+  const jub = P.filter(b => b.eintritt).map(b => { const d = dat(b.eintritt), n = naechster(d); return { b, n, j: n.getFullYear() - d.getFullYear() }; })
+    .filter(x => x.j > 0 && x.j % 5 === 0 && tage(x.n) <= 365).sort((x, y) => x.n - y.n);
+  const mkL = MA.merkmale.find(m => m.schluessel === 'lernende');
+  const lern = P.filter(b => mkL && MA.bm.some(x => x.benutzer_id === b.id && x.merkmal_id === mkL.id)).map(b => { const d = dat(b.eintritt); if(!d) return { b };
+    const mo = (heute.getFullYear() - d.getFullYear()) * 12 + heute.getMonth() - d.getMonth(); return { b, lj: Math.floor(mo / 12) + 1, ende: new Date(d.getFullYear() + 3, d.getMonth(), d.getDate(), 12) }; });
+  const z = (b, ...t) => `<a class="kkz" data-maaz="${b.id}"><span class="t">${escHtml(maName(b))}</span>${t.map(x => `<span class="d">${x}</span>`).join('')}</a>`;
+  const ohne = f => P.filter(b => !b[f]).length;
+  return `<div class="det" style="margin-bottom:12px">
+    ${kachel(`Geburtstage <small>${geb.length} von ${P.length}</small>`, '', (geb.slice(0, 12).map(x => z(x.b, `${x.n.getDate()}.${x.n.getMonth() + 1}. · wird ${x.alter}`, wann(tage(x.n)))).join('') || leerT('Noch keine Geburtsdaten erfasst.')) + (ohne('geburtsdatum') ? leerT(`${ohne('geburtsdatum')} ohne Geburtsdatum`) : ''), ' ma')}
+    ${kachel('Dienstjubiläen <small>nächste 12 Monate</small>', '', (jub.map(x => z(x.b, `${x.j} Jahre${x.j === 10 ? ' · Dienstaltersgeschenk' : ''}`, kurz(x.n))).join('') || leerT('Kein Jubiläum (5, 10, 15 … Jahre) in den nächsten 12 Monaten.')) + (ohne('eintritt') ? leerT(`${ohne('eintritt')} ohne Eintrittsdatum`) : ''), ' ma')}
+    ${kachel(`Lernende <small>${lern.length}</small>`, '', (lern.map(x => z(x.b, x.lj ? (x.lj > 3 ? 'Lehre abgeschlossen?' : x.lj + '. Lehrjahr') : 'ohne Eintritt', x.lj ? 'bis ' + kurz(x.ende) : '')).join('') || leerT('Noch niemand mit dem Merkmal «Lernende».')), ' ma')}</div>`;
 }
 function maNeuForm(){
   const temp = MA.neu === 'temp';
