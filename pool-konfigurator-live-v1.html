@@ -337,6 +337,9 @@ const IC={trash:'<svg class="ic" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14
   x:'<svg class="ic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>'};
 
 // --- Kataloge (Platzhalter; später aus der Datenbank, gefiltert nach Beckenkörper)
+// Polypropylen-Becken: höchstens 3,70 m breit, Skimmer an der Stirnseite (gegenüber der Treppe)
+const B_MAX=()=>S.koerper==='edelstahl'||S.koerper==='folie'?7:3.7;
+const skimmerStirn=()=>S.koerper!=='edelstahl'&&S.koerper!=='folie';
 const KOERPER=[{k:'pp',n:'Polypropylen'},{k:'edelstahl',n:'Edelstahl',folgt:1},{k:'folie',n:'Folie',folgt:1}];
 const FARBEN=[{k:'weiss',n:'Weiss',c:'#F2F4F5',w:'#CFE6F2'},{k:'hellgrau',n:'Hellgrau',c:'#D5D8DB',w:'#BDD6E2'},{k:'dunkelgrau',n:'Dunkelgrau',c:'#B7BCC1',w:'#ABC6D3'},
   {k:'anthrazit',n:'Anthrazit',c:'#9AA0A6',w:'#98B6C4'},{k:'schwarz',n:'Schwarz',c:'#7C848C',w:'#86A6B4'}];   // Plan-Töne: Schwarz = dunkelster, alle gleichmässig bis Weiss
@@ -384,7 +387,7 @@ const S={bereich:'treppe',tbreite:1.25,koerper:'pp',treppe:'keine',tseite:'E',te
   tech:{filter:0,pumpe:0,pflege:0,wp:0,nachsp:0},teile:[]};
 let nid=1;
 const geom=()=>{const L=+($('L')?.value||S.L||8),B=+($('B')?.value||S.B||4),T=+($('T')?.value||S.T||1.5);return {L,B,T,A:L*B,V:L*B*(T-0.15)}};
-S.L=8;S.B=4;S.T=1.5;
+S.L=8;S.B=3.7;S.T=1.5;
 
 /* ------------------------------------------------------------------
    Bilder: kleines Schrägbild (Isometrie) aus Prismen – weiss in weiss wie Carro.
@@ -522,10 +525,13 @@ function bildTech(k){
 function empf(g){return {skimmer:Math.max(Math.ceil(g.A/25),g.B>=4?2:1),duese:Math.max(2,Math.ceil(g.V/4/5)),licht:Math.max(1,Math.ceil(g.A/20)),ablauf:1,gegen:0}}
 function startTeile(){const g=geom(),e=empf(g);S.teile=[];
   const add=(k,n,wand)=>{for(let i=0;i<n;i++)S.teile.push({id:nid++,k,wand,modell:TN[k].modelle[k==='licht'?1:0],mat:TN[k].mat?.[0]||null})};
-  add('skimmer',e.skimmer,'N');add('duese',e.duese,'S');add('licht',2,'N');add('ablauf',1,'boden');verteile()}
-function verteile(){skimmerCheck();const g=geom(),x0=S.bank&&S.aseite==='W'?0.6:0.3,x1=g.L-(S.treppe!=='keine'?1.8:0.3);
+  add('skimmer',e.skimmer,skimmerStirn()?(S.tseite==='W'?'E':'W'):'N');add('duese',e.duese,'S');add('licht',2,'N');add('ablauf',1,'boden');verteile()}
+function verteile(){
+  if(S.B>B_MAX())S.B=B_MAX();
+  if(skimmerStirn())S.teile.forEach(p=>{if(p.k==='skimmer'&&p.wand!=='W'&&p.wand!=='E'){p.wand=S.tseite==='W'?'E':'W';p.fix=false}});   // PP: Skimmer immer an der Stirnseite
+  skimmerCheck();const g=geom(),x0=S.bank&&S.aseite==='W'?0.6:0.3,x1=g.L-(S.treppe!=='keine'?1.8:0.3);
   const grp={};S.teile.forEach(p=>{if(!p.fix&&p.k!=='duese')(grp[p.wand]=grp[p.wand]||[]).push(p)});
-  for(const w in grp)grp[w].forEach((p,i,a)=>{if(w==='boden'){p.x=g.L/2;p.y=g.B/2}else p.pos=x0+(x1-x0)*(i+1)/(a.length+1)});
+  for(const w in grp)grp[w].forEach((p,i,a)=>{if(w==='boden'){p.x=g.L/2;p.y=g.B/2}else p.pos=w==='W'||w==='E'?g.B*(i+1)/(a.length+1):x0+(x1-x0)*(i+1)/(a.length+1)});
   S.teile.forEach(p=>{if(p.k==='gegen'){if(p.wand!=='W'&&p.wand!=='E')p.wand=S.tseite==='E'?'W':'E';p.pos=g.B/2}});legeDuesen()}
 // Ziel der Düsen aus dem Skimmer: Walzendüsen auf seiner Längsseite, Treibdüse auf der Stirnseite weiter weg
 function duesenZiel(){const g=geom(),sk=S.teile.find(p=>p.k==='skimmer');
@@ -631,7 +637,7 @@ function zeichne(){
   $('plan').innerHTML=o;
   // Massfelder an die Masslinien setzen (in % des SVG, damit es bei jeder Breite passt)
   const pos=(id,x,y)=>{const el=$(id);el.style.left=(x/W*100)+'%';el.style.top=(y/H*100)+'%'};
-  [['mL','L'],['mB','B'],['mT','T']].forEach(([id,k])=>{if(document.activeElement!==$(id))$(id).value=g[k]});
+  [['mL','L'],['mB','B'],['mT','T']].forEach(([id,k])=>{if(document.activeElement!==$(id))$(id).value=g[k]});$('mB').max=B_MAX();
   // Längsschnitt: Bodenprofil aus den Treppen-Prismen (Schnitt dort, wo die Treppe ist)
   const sh=170,ss=Math.min((W-120)/g.L,(sh-50)/g.T),sx=60,sy=22,SX=m=>sx+m*ss,SY=m=>sy+m*ss;
   const pr=treppeWelt(g),vy=S.tecke==='N'?0.3:g.B-0.3;
@@ -798,13 +804,16 @@ document.addEventListener('keydown',e=>{if((e.key==='Delete'||e.key==='Backspace
 // Ziehen im Plan: an die nächste Wand einrasten; aus dem Becken hinaus = entfernen
 let zug=null,zugT=null;
 [['mL','L',3,20],['mB','B',2,7],['mT','T',1,2.5]].forEach(([id,k,mi,ma])=>{
-  $(id).addEventListener('input',()=>{const v=parseFloat($(id).value);if(!(v>=mi&&v<=ma))return;S[k]=v;verteile();zeichne();if(ANSICHT==='3d')bau3D();speichernBald()});
+  $(id).addEventListener('input',()=>{let v=parseFloat($(id).value);
+    if(k==='B'&&v>B_MAX()){v=B_MAX();$(id).value=v;toast('Polypropylen-Becken: maximale Beckenbreite 3,70 m.',true)}
+    if(!(v>=mi&&v<=ma))return;S[k]=v;verteile();zeichne();if(ANSICHT==='3d')bau3D();speichernBald()});
   $(id).addEventListener('blur',()=>{$(id).value=S[k]});
 });
 const meter=e=>{const sv=$('plan'),pt=sv.createSVGPoint();pt.x=e.clientX;pt.y=e.clientY;const q=pt.matrixTransform(sv.getScreenCTM().inverse());return [(q.x-G.ox)/G.s,(q.y-G.oy)/G.s]};
 function setzeTeil(p,mx,my){const g=G.g,cl=(v,a,b)=>Math.max(a,Math.min(b,v)),cm=v=>Math.round(v*100)/100;
   if(p.k==='ablauf'){p.wand='boden';p.x=cm(cl(mx,0.12,g.L-0.12));p.y=cm(cl(my,0.12,g.B-0.12));return}
   if(p.k==='gegen'){p.wand=mx<g.L/2?'W':'E';p.pos=g.B/2;return}
+  if(p.k==='skimmer'&&skimmerStirn()){p.wand=mx<g.L/2?'W':'E';p.pos=cm(cl(my,0.3,g.B-0.3));return}   // PP: Skimmer nur an der Stirnseite
   if(p.art==='bank'&&rolleSeite()){p.wand=rolleSeite();p.pos=cm(cl(my,0.15,g.B-0.15));return}   // Rollladendüse bleibt unter dem Rollladen (auch in der Nische), nur entlang verschiebbar
   const d={N:Math.abs(my),S:Math.abs(my-g.B),W:Math.abs(mx),E:Math.abs(mx-g.L)};let w=Object.keys(d).sort((a,b)=>d[a]-d[b])[0];
   if(d[p.wand]!=null&&d[p.wand]-d[w]<0.4)w=p.wand;   // an der bisherigen Wand bleiben, bis eine andere klar näher ist
@@ -1087,6 +1096,8 @@ function setze(d){
   const gilt = (k, liste) => { if(!liste.some(x => x.k === S[k])) S[k] = STD[k]; };
   if(S.treppe !== 'keine') gilt('treppe', TREPPEN); gilt('farbe', FARBEN); gilt('abd', ABDECK); gilt('lamelle', LAMELLEN); gilt('belag', BELAG); gilt('koerper', KOERPER);
   if(!['W', 'E'].includes(S.tseite)) S.tseite = STD.tseite; if(!['W', 'E'].includes(S.aseite)) S.aseite = STD.aseite; if(!['N', 'S'].includes(S.tecke)) S.tecke = STD.tecke;
+  if(S.B > B_MAX()) S.B = B_MAX();   // Polypropylen: höchstens 3,70 m breit (auch ältere Planungen)
+  if(skimmerStirn() && Array.isArray(S.teile) && S.teile.some(p => p.k === 'skimmer' && p.wand !== 'W' && p.wand !== 'E')){ S.teile.filter(p => p.k === 'skimmer' && p.wand !== 'W' && p.wand !== 'E').forEach((p, i, a) => { p.wand = S.tseite === 'W' ? 'E' : 'W'; p.fix = false; p.pos = S.B * (i + 1) / (a.length + 1); }); }   // PP: Skimmer an die Stirnseite
   S.tech = { ...STD.tech, ...(typeof S.tech === 'object' && S.tech ? S.tech : {}) };
   S.teile = (Array.isArray(S.teile) ? S.teile : []).map(p => ({ ...p, k: p.k === 'gegenstrom' ? 'gegen' : p.k, ...(p.k === 'duese' && !p.art ? { art: 'walze' } : {}) }))
     .filter(p => TN[p.k]).map(p => ({ ...p, modell: TN[p.k].modelle.includes(p.modell) ? p.modell : TN[p.k].modelle[p.k === 'licht' ? 1 : 0], mat: TN[p.k].mat ? (p.mat || TN[p.k].mat[0]) : null }));
