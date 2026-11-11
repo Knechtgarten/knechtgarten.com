@@ -357,9 +357,16 @@ html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!import
   const EXT = '<path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>';
   let sicht = null; // { rolle, module: Map modul_key -> sichtbar, extern: [] } – erst beim ersten Öffnen geladen
 
-  async function ladeSichtbarkeit(){
-    if(sicht) return sicht;
-    sicht = { rolle: null, module: null, extern: [] };
+  // Gleichzeitige Aufrufe (Leiste + Seite) warten auf dieselbe Abfrage – vorher bekam der zweite Aufruf
+  // ein halb geladenes Objekt ohne Rechte zurück (Büro sah dann keine Bearbeiten-Knöpfe).
+  let sichtLaden = null;
+  function ladeSichtbarkeit(){
+    if(sicht) return Promise.resolve(sicht);
+    if(!sichtLaden){ const p = ladeSichtbarkeitJetzt().then(s => { sicht = s; if(sichtLaden === p) sichtLaden = null; return s; }); sichtLaden = p; }
+    return sichtLaden;
+  }
+  async function ladeSichtbarkeitJetzt(){
+    const sicht = { rolle: null, module: null, extern: [] };
     try {
       // eigener Client (gleiche Anmeldung wie die Seite), weil nicht jede Seite sb global anlegt
       if(!window.supabase || !window.supabase.createClient) return sicht;
@@ -480,7 +487,7 @@ html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!import
 
   // Reiter ohne Recht ausblenden und Seite sperren, wenn die Gruppe sie nicht sehen darf
   async function rechteAnwenden(){
-    if(!vorschau){ sicht = null; await ladeSichtbarkeit(); }
+    if(!vorschau){ sicht = null; sichtLaden = null; await ladeSichtbarkeit(); }
     if(!sicht.rechte) return;
     document.querySelectorAll('.kg-reiter a[href]').forEach(a => {
       const ziel = (a.getAttribute('href') || '').split(/[?#]/)[0].replace(/\.html?$/, '');
