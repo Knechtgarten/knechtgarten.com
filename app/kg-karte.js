@@ -217,7 +217,7 @@
     map.on('mousemove', e => { if(!gitter) return; const [x, y] = zuLv(e.latlng.lng, e.latlng.lat), z = gitter.hoehe(x, y);
       h.querySelector('[data-hoehe]').textContent = isNaN(z) ? 'Höhe: ausserhalb' : `Höhe: ${z.toFixed(2)} m ü. M.`; });
 
-    // Messen: Strecke (Segmente + Total) und Fläche (Fläche + Umfang); Doppelklick beendet, Esc bricht ab, Rücktaste löscht den letzten Punkt
+    // Messen: Strecke (Segmente + Total) und Fläche (Fläche + Umfang); Klick auf letzten Punkt / Doppelklick beendet, Esc bricht ab, Rücktaste löscht den letzten Punkt
     let werkzeug = 'pan', punkte = [], live = null, gruppe = L.layerGroup().addTo(map), labels = [];
     const lv = ll => zuLv(ll.lng, ll.lat);
     const laenge = pp => pp.slice(1).reduce((s, p, i) => { const a = lv(pp[i]), b = lv(p); return s + Math.hypot(b[0] - a[0], b[1] - a[1]); }, 0);
@@ -242,12 +242,14 @@
       else { if(live) gruppe.removeLayer(live); labels.forEach(l => gruppe.removeLayer(l)); labels = []; }
       punkte.forEach(p => gruppe.addLayer(L.circleMarker(p, { radius: 3, color: '#ff7a00', weight: 1, fillOpacity: 1, interactive: false })));
       live = null; labels = []; punkte = []; };
-    map.on('click', e => { if(werkzeug === 'pan') return; punkte.push(e.latlng); gruppe.addLayer(L.circleMarker(e.latlng, { radius: 3, color: '#ff7a00', weight: 1, fillOpacity: 1, interactive: false })); zeichneLive(); });
+    // Beenden: Klick auf den letzten Punkt (also auch jeder Doppelklick) oder bei der Fläche auf den ersten Punkt
+    const nahe = (a, b) => map.latLngToContainerPoint(a).distanceTo(map.latLngToContainerPoint(b)) < 12;
+    map.on('click', e => { if(werkzeug === 'pan') return;
+      const n = punkte.length;
+      if(n && (nahe(e.latlng, punkte[n - 1]) || (werkzeug === 'flaeche' && n > 2 && nahe(e.latlng, punkte[0])))){ fertig(); return; }
+      punkte.push(e.latlng); gruppe.addLayer(L.circleMarker(e.latlng, { radius: 3, color: '#ff7a00', weight: 1, fillOpacity: 1, interactive: false })); zeichneLive(); });
     map.on('mousemove', e => { if(werkzeug !== 'pan' && punkte.length) zeichneLive(e.latlng); });
-    // Doppelklick: der zweite Klick hat den letzten Punkt doppelt gesetzt → weg damit, dann abschliessen
-    map.on('dblclick', e => { if(werkzeug === 'pan') return; L.DomEvent.stop(e);
-      const n = punkte.length; if(n > 1 && map.latLngToContainerPoint(punkte[n - 1]).distanceTo(map.latLngToContainerPoint(punkte[n - 2])) < 6) punkte.pop();
-      fertig(); });
+    map.on('dblclick', e => { if(werkzeug !== 'pan') L.DomEvent.stop(e); });
     const setW = w => { if(w === 'weg'){ gruppe.clearLayers(); punkte = []; live = null; labels = []; MESS.length = 0; h.querySelector('[data-mess]').textContent = ''; return; }
       fertig(); werkzeug = w; h.querySelectorAll('[data-w]').forEach(b => b.dataset.w !== 'weg' && b.setAttribute('aria-pressed', String(b.dataset.w === w)));
       h.querySelector('.kgk-karte').style.cursor = w === 'pan' ? '' : 'crosshair'; };
