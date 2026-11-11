@@ -217,6 +217,7 @@ input[type=checkbox].appcheck:checked::after{content:'';position:absolute;left:5
    Kontrollen werden per body-Klasse ausgeblendet (deckungsgleich mit den
    RLS-Regeln in der Datenbank: lesen fuer alle, schreiben nur Admin). */
 body.mitarbeiter-rolle .admin-only{display:none !important;}
+body.ohne-berechnung .nur-berechnung{display:none !important;}
 .ot-name-editable{cursor:pointer;}
 .ot-name-editable:hover{text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px;}
 .ot-name-editable input{font:inherit;font-weight:700;color:var(--ink);border:1px solid var(--primary);border-radius:5px;padding:2px 6px;width:100%;}
@@ -865,17 +866,16 @@ function naechsteReihenfolge(liste){
 // ---------------------------------------------------------------------------
 // Unternavigation
 // ---------------------------------------------------------------------------
-// Rechte: ohne «Berechnung & Einstellungen» (Offertentool) nur der Reiter «Vorlagen» – Preise, Formeln/Felder,
-// Vorauswahlen, Berechnungsregeln und Sonderpositionen sind dann ausgeblendet (Administrator: immer alles)
-let NUR_VORLAGEN = false;
+// Rechte: ohne «Sonderpositionen & neue Formeln/Felder» (Offertentool) ist der Reiter «Sonderpositionen» ausgeblendet (Administrator: immer alles)
+let NUR_VORLAGEN = false; // true = ohne «Sonderpositionen & neue Formeln/Felder»: Reiter Sonderpositionen ausgeblendet
 async function nurVorlagenPruefen(){
   if(window.KG && KG.ladeRechte) await KG.ladeRechte();
   const w = window.KG && KG.darf ? KG.darf('offerten', 'einstellungen', 'an') : null;
   NUR_VORLAGEN = w === 'N';
-  document.querySelectorAll('#settingsnav a').forEach(a => { if(NUR_VORLAGEN && a.dataset.abschnitt !== 'offertentyp') a.remove(); });
+  document.querySelectorAll('#settingsnav a').forEach(a => { if(NUR_VORLAGEN && a.dataset.abschnitt === 'sonderpositionen') a.remove(); });
 }
 function zeigeAbschnitt(name){
-  if(NUR_VORLAGEN) name = 'offertentyp';
+  if(NUR_VORLAGEN && name === 'sonderpositionen') name = 'offertentyp';
   document.querySelectorAll('#settingsnav a').forEach(a => a.classList.toggle('on', a.dataset.abschnitt === name));
   ['offertentyp','formelbibliothek','datenabgleich','rechenlogik','sonderpositionen','vorauswahlen'].forEach(n => {
     $(`abschnitt-${n}`).classList.toggle('hidden', n !== name);
@@ -1275,7 +1275,7 @@ function renderOffertentypen(){
       <td>${new Date(ot.papierkorb_am).toLocaleDateString('de-CH')}</td>
       <td>
         <button class="icobtn admin-only" onclick="stelleOtWiederHer('${ot.id}')" title="Wiederherstellen">${ICON.restore}</button>
-        <button class="icobtn danger admin-only" onclick="openDeleteOffertentyp('${ot.id}')" title="Endgültig löschen">${ICON.trash}</button>
+        <button class="icobtn danger admin-only nur-berechnung" onclick="openDeleteOffertentyp('${ot.id}')" title="Endgültig löschen">${ICON.trash}</button>
       </td>
     </tr>`).join('') || '<tr><td colspan="4" class="hint">Papierkorb ist leer.</td></tr>';
 }
@@ -3738,7 +3738,14 @@ async function pruefeAnmeldung(){
   // Mitarbeiter laut RLS ohnehin voll nutzbar.
   $keinZugriff.classList.add('hidden');
   $appMain.classList.remove('hidden');
-  document.body.classList.toggle('mitarbeiter-rolle', aktuelleRolle !== 'admin');
+  // Rechte (Verwaltung › Offertentool): «Vorlagen bearbeiten» = alles anpassen; nur mit «Sonderpositionen & neue Formeln/Felder»
+  // (oder Admin) die Knöpfe zum Anlegen/Löschen von Eingabefeldern und Formeln bzw. die Sonderpositionen.
+  if(window.KG && KG.ladeRechte) await KG.ladeRechte();
+  const recht = (b, a) => window.KG && KG.darf ? KG.darf('offerten', b, a) : null, istAdm = aktuelleRolle === 'admin';
+  const darfVorl = istAdm || (recht('vorlagen', 'bearbeiten') !== null && recht('vorlagen', 'bearbeiten') !== 'K');
+  const darfBer = istAdm || recht('einstellungen', 'an') === 'J';
+  document.body.classList.toggle('mitarbeiter-rolle', !darfVorl);
+  document.body.classList.toggle('ohne-berechnung', !darfBer);
   const ladeAufgaben = [loadArtikelgruppen()];
   if(aktuelleRolle === 'admin') ladeAufgaben.push(loadDatenabgleich());
   await Promise.all(ladeAufgaben);

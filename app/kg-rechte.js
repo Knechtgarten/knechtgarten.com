@@ -15,8 +15,8 @@
       B('offerten', 'Offerten', 'Eingabe und Abschluss'),
       B('kunden', 'Kunden', 'Kontakte: Kunden erfassen, ändern, löschen', ['erstellen', 'bearbeiten', 'loeschen']),
       J('artikel', 'Artikelstamm & Preise', 'inkl. Lieferanten-Abgleich', ['erstellen', 'bearbeiten', 'loeschen']),
-      J('vorlagen', 'Vorlagen bearbeiten', 'Vorlagen & Berechnung › Vorlagen und Tool B'),
-      S('einstellungen', 'Berechnung & Einstellungen', 'Preise, Formeln/Felder, Vorauswahlen, Berechnungsregeln, Sonderpositionen'),
+      J('vorlagen', 'Vorlagen bearbeiten', 'Vorlagen & Berechnung: Vorlagen, Preise, Formeln/Felder ändern, Vorauswahlen, Berechnungsregeln; Tool B'),
+      S('einstellungen', 'Sonderpositionen & neue Formeln/Felder', 'Sonderpositionen ändern; Eingabefelder und Formeln anlegen oder löschen. Alles andere in Vorlagen & Berechnung geht mit «Vorlagen bearbeiten»'),
       S('easybill', 'Export nach Easybill', 'Offerte als Angebot übertragen') ] },
     { k: 'pend', n: 'Pendenzen', icon: 'pend', bereiche: [
       J('buero', 'Gemeinsame Boards', 'Büro-Board, Poolboard … (wer Mitglied ist)', ['anzeigen']),
