@@ -65,6 +65,25 @@ function chfZuRappen(chf: number): number {
   return Math.round((chf || 0) * 100);
 }
 
+// Ersteller im Easybill-Angebot (Feld login_id, in Easybill als Bearbeiter
+// sichtbar): Login mit derselben E-Mail wie der Ersteller der Offerte im
+// Knecht-Tool, sonst wie die Person, die gerade exportiert. Ohne Treffer
+// bleibt das Feld weg (Easybill nimmt dann den API-Login).
+async function easybillLoginFuer(emails: (string | null | undefined)[], auth: string): Promise<number | undefined> {
+  const gesucht = emails.map(e => (e || '').trim().toLowerCase()).filter(Boolean);
+  if (!gesucht.length) return undefined;
+  try {
+    const res = await fetch(`${EASYBILL_BASE_URL}/logins?limit=1000`, { headers: { Authorization: auth } });
+    if (!res.ok) return undefined;
+    const logins = ((await res.json())?.items || []) as { id: number; email: string }[];
+    for (const e of gesucht) {
+      const l = logins.find(x => (x.email || '').trim().toLowerCase() === e);
+      if (l) return l.id;
+    }
+  } catch (_) { /* ohne Login-Zuordnung weiter */ }
+  return undefined;
+}
+
 // Easybill vergibt einem Dokument im Entwurfsstatus laut API-Doku keine
 // Beleg-/Angebotsnummer (Feld "number" bleibt leer) - erst POST
 // /documents/{id}/done "fertigstellt" das Dokument und loest die
@@ -140,7 +159,8 @@ Deno.serve(async (req) => {
       .select(`
         id, titel, offertnummer, kosten_snapshot, easybill_document_id, easybill_document_number,
         beschreibung_block, optionen_text_liste,
-        kunde:kunde_id ( easybill_id, name )
+        kunde:kunde_id ( easybill_id, name ),
+        ersteller:erstellt_von ( email )
       `)
       .eq('id', offerte_id)
       .single();
@@ -210,11 +230,16 @@ Deno.serve(async (req) => {
       items.push({ type: 'TEXT', description: offerte.optionen_text_liste.trim() });
     }
 
+    const token = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+    const aufrufer = token ? (await sb.auth.getUser(token).catch(() => null))?.data?.user?.email : undefined;
+    const login_id = await easybillLoginFuer([(offerte.ersteller as any)?.email, aufrufer], auth);
+
     const payload = {
       type: 'OFFER',
       title: offerte.titel || undefined,
       customer_id: kunde.easybill_id,
       currency: 'CHF',
+      login_id,
       items,
     };
 
