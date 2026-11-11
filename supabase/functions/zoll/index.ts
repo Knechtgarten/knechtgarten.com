@@ -42,6 +42,80 @@ const artVon = (name: string, t: string) => /mwst|tva|vat/i.test(name) ? 'mwst' 
   : /taxationDecisionVAT|VERANLAGUNGSVERF\S*\s+MWST|D\S*CISION DE TAXATION TVA/i.test(t) ? 'mwst'
   : /taxationDecisionCustomsDuties|VERANLAGUNGSVERF\S*\s+ZOLL/i.test(t) ? 'zoll' : 'unbekannt';
 
+// ---------------------------------------------------------------- Passar (B2B Hub Chartera Output v4)
+// Token: Key Manager, Refresh mit Key/Secret (Basic) – Access 24 h, Refresh 7 Tage und wird jedes Mal ersetzt (sofort speichern).
+// Meldungen: GET /v4/messages (Liste, JSON) → GET /v4/messages/{id} (DocumentPost-XML mit PDF/A-3 als Base64).
+// PAIAD = Veranlagungsverfügung Einfuhr (enthält die MWST) → als 'mwst' wie die Mail-Verfügungen; CorrelationId = Nummer der Zollanmeldung.
+const KEYMANAGER = 'https://keymanager.api.admin.ch/token/v2';
+const HUB = 'https://charteraoutput-b2bhub.bazg.admin.ch/api/v4/messages';
+const xmlFeld = (x: string, n: string) => (x.match(new RegExp(`<(?:\\w+:)?${n}>([\\s\\S]*?)</(?:\\w+:)?${n}>`)) || [])[1]?.trim() || '';
+
+async function passarAbruf(admin: any) {
+  const { data: p } = await admin.from('zoll_passar').select('*').eq('id', 1).maybeSingle();
+  if (!p?.refresh_token) return { error: 'Passar nicht eingerichtet' };
+  const fehler = async (text: string) => { await admin.from('zoll_passar').update({ letzter_fehler: text.slice(0, 500), fehler_seit: p.fehler_seit || new Date().toISOString() }).eq('id', 1); return { error: text }; };
+
+  // Access Token alle ~6 Std. erneuern (BAZG empfiehlt 3–4× täglich), sonst wenn er bald abläuft
+  let access = p.access_token as string | null;
+  const alt = !p.access_von || Date.now() - new Date(p.access_von).getTime() > 6 * 3600e3;
+  if (!access || alt || !p.access_bis || new Date(p.access_bis).getTime() - Date.now() < 3600e3) {
+    let r: Response;
+    try {
+      r = await fetch(KEYMANAGER, { method: 'POST', signal: AbortSignal.timeout(70000),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: 'Basic ' + btoa(`${p.client_key}:${p.client_secret}`) },
+        body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: p.refresh_token }) });
+    } catch (e) { return fehler('Key Manager nicht erreichbar: ' + String((e as any)?.message || e)); }
+    const t = await r.json().catch(() => ({}));
+    if (!r.ok || !t.access_token) return fehler(r.status === 401 ? 'Key oder Secret ungültig (401). Im API-Portal neuen Satz erzeugen und hier eintragen.'
+      : r.status === 400 ? 'Refresh Token ungültig oder abgelaufen (400). Im API-Portal neuen Satz erzeugen und hier eintragen.'
+      : `Token-Erneuerung fehlgeschlagen (${r.status}) ${t.error_description || t.error || ''}`.trim());
+    const jetzt = Date.now();
+    await admin.from('zoll_passar').update({ access_token: t.access_token, access_von: new Date(jetzt).toISOString(),
+      access_bis: new Date(jetzt + (Number(t.expires_in) || 86400) * 1000).toISOString(),
+      refresh_token: t.refresh_token || p.refresh_token,
+      refresh_bis: new Date(jetzt + (Number(t.refresh_expires_in) || 7 * 86400) * 1000).toISOString() }).eq('id', 1);
+    access = t.access_token;
+  }
+
+  const kopf = (accept: string) => ({ Authorization: 'Bearer ' + access, 'bp-id': p.bp_id, Accept: accept, 'Content-Type': accept });
+  let zeiger = p.letzte_message_id as string | null, neu = 0, andere = 0, gelesen = 0;
+  try {
+    for (let runde = 0; runde < 5; runde++) {
+      const url = HUB + '?size=50' + (zeiger ? '&lastMessageId=' + encodeURIComponent(zeiger) : '');
+      const r = await fetch(url, { headers: kopf('application/json'), signal: AbortSignal.timeout(30000) });
+      if (!r.ok) return fehler(`Meldungsliste ${r.status}: ${(await r.text()).slice(0, 200)}`);
+      const liste = ((await r.json())?.messages || []) as any[];
+      const offen = liste.filter((m) => m.messageId && m.messageId !== zeiger);
+      if (!offen.length) break;
+      for (const m of offen) {
+        gelesen++;
+        const schon = await admin.from('zoll_evv').select('id').eq('gmail_id', 'passar:' + m.messageId).maybeSingle();
+        const typ = m.metadata?.documentType || '';
+        if (!schon.data && /^document(post)?$/i.test(m.messageType || '') && (!typ || typ === 'PAIAD')) {
+          const d = await fetch(`${HUB}/${encodeURIComponent(m.messageId)}`, { headers: kopf('application/xml'), signal: AbortSignal.timeout(30000) });
+          if (!d.ok) return fehler(`Meldung ${m.messageId}: ${d.status}`);
+          const x = await d.text();
+          const dokTyp = xmlFeld(x, 'DocumentType'), daten = xmlFeld(x, 'DocumentData');
+          if (dokTyp === 'PAIAD' && daten) {
+            const nr = xmlFeld(x, 'CorrelationId') || m.metadata?.correlationId || null;
+            const pfad = `${new Date().toISOString().slice(0, 7)}/${crypto.randomUUID()}.pdf`;
+            const { error: eu } = await admin.storage.from('zoll').upload(pfad, b64(daten.replace(/\s+/g, '')), { contentType: 'application/pdf' });
+            if (eu) return fehler('Ablage: ' + eu.message);
+            await admin.from('zoll_evv').insert({ zanr: nr, art: 'mwst', quelle: 'passar', dateiname: xmlFeld(x, 'DocumentName') || `${nr}.pdf`,
+              storage_pfad: pfad, gmail_id: 'passar:' + m.messageId, status: nr ? 'neu' : 'ohne_nummer' });
+            neu++;
+          } else andere++;
+        } else if (!schon.data) andere++;
+        zeiger = m.messageId;
+        await admin.from('zoll_passar').update({ letzte_message_id: zeiger }).eq('id', 1);
+      }
+      if (liste.length < 50) break;
+    }
+  } catch (e) { return fehler('Abruf: ' + String((e as any)?.message || e)); }
+  await admin.from('zoll_passar').update({ letzter_abruf: new Date().toISOString(), letzter_fehler: null, fehler_seit: null }).eq('id', 1);
+  return { ok: true, gelesen, neu, andere };
+}
+
 async function googleEmail(token: string) {
   const r = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', { headers: { Authorization: `Bearer ${token}` } });
   if (!r.ok) return null; const p = await r.json(); return String(p?.emailAddress || '').toLowerCase();
@@ -78,6 +152,8 @@ Deno.serve(async (req) => {
     const { error } = await admin.from('zoll_evv').update(ae).eq('id', body.id);
     return error ? json({ error: error.message }, 500) : json({ ok: true });
   }
+
+  if (body.aktion === 'passar') return json(await passarAbruf(admin));
 
   // ---------------------------------------------------------------- Abruf zoll@ (pg_cron)
   if (body.aktion !== 'abruf') return json({ error: 'Unbekannte Aktion' }, 400);

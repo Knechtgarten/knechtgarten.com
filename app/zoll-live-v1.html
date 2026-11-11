@@ -167,6 +167,18 @@ body.buero-rolle .admin-only{display:none !important;}
     <div class="zfil" id="zFil"></div>
     <div style="overflow-x:auto"><table class="logtbl"><thead><tr><th>Eingang</th><th>Zollanmeldung</th><th>Art</th><th>Stand</th><th>Rechnung in PEAX</th><th></th></tr></thead><tbody id="zListe"></tbody></table></div>
   </section>
+  <section class="card hidden" id="pCard">
+    <div class="cardhead"><div><div class="cardlabel">Passar-Verbindung (BAZG)</div><div class="cardnote" id="pStand">Lädt …</div></div>
+      <button class="btn btn-ghost" id="pJetzt">Jetzt abrufen</button></div>
+    <div class="zinfo" style="margin-bottom:10px">Neuer Zugang: im <a class="zlink" href="https://selfservice.api.admin.ch/api-selfservice/" target="_blank" rel="noopener">API-Selfservice-Portal</a> unter «Anwendungen» bei <code>prod_knechtgartenzoll</code> einen neuen Satz erzeugen und die Werte hier einfügen. Danach erneuert das Tool die Tokens selbst.</div>
+    <div class="fldgrid">
+      <div class="fld"><label>Key</label><input id="pKey" autocomplete="off" spellcheck="false"></div>
+      <div class="fld"><label>Secret</label><input id="pSecret" autocomplete="off" spellcheck="false"></div>
+      <div class="fld"><label>Refresh Token</label><input id="pRefresh" autocomplete="off" spellcheck="false"></div>
+      <div class="fld"><label>Access Token</label><input id="pAccess" autocomplete="off" spellcheck="false"></div>
+    </div>
+    <button class="btn btn-primary" id="pSpeichern">Speichern und testen</button>
+  </section>
   <section class="card">
     <div class="cardlabel">So funktioniert es</div>
     <div class="zinfo" style="margin-top:8px">
@@ -174,7 +186,7 @@ body.buero-rolle .admin-only{display:none !important;}
         <li>Verfügungen kommen per Mail an <code>zoll@knechtgarten.ch</code>: aus e-dec-web (dort diese Adresse angeben) oder von Hand weitergeleitet. Abruf alle 5 Minuten.</li>
         <li>Die Browser-Erweiterung «Knechtgarten» hängt die MWST-Verfügung beim Öffnen von PEAX an die Spediteur-Rechnung mit derselben Zollanmeldungsnummer (z. B. 26CHEI…). Eindeutige Treffer ohne Klick.</li>
         <li>Steht die Rechnung noch nicht in PEAX, versucht es die Erweiterung später wieder. Bei mehreren passenden Rechnungen bleibt die Verfügung hier unter «Unklar».</li>
-        <li>Passar (neues Zollsystem): automatischer Abruf beim BAZG folgt, sobald die API im ePortal abonniert ist.</li>
+        <li>Passar (neues Zollsystem): Die Verfügungen werden alle 2 Stunden direkt beim BAZG abgeholt und landen ebenfalls hier.</li>
       </ul>
     </div>
   </section>
@@ -207,8 +219,38 @@ async function pruefeAnmeldung(){
   $('userbarText').textContent = `${benutzer.email} (${ROLLE_LABEL[benutzer.rolle] || benutzer.rolle})`;
   if(benutzer.rolle !== 'admin' && benutzer.rolle !== 'buero_team'){ $('keinZugriff').classList.remove('hidden'); return; }
   $('appMain').classList.remove('hidden');
+  if(benutzer.rolle === 'admin'){ $('pCard').classList.remove('hidden'); passarStand(); }
   await laden();
 }
+
+// ---------------------------------------------------------------------------
+// Passar-Zugang (nur Admin): Werte aus dem API-Portal eintragen, Stand ohne Geheimnisse anzeigen
+// ---------------------------------------------------------------------------
+async function passarStand(){
+  const { data, error } = await sb.rpc('zoll_passar_status');
+  const s = (data || [])[0];
+  if(error){ $('pStand').textContent = error.message; return; }
+  if(!s || !s.verbunden){ $('pStand').textContent = 'Noch nicht eingerichtet.'; return; }
+  $('pStand').innerHTML = s.letzter_fehler
+    ? `<span style="color:var(--danger)">${esc(s.letzter_fehler)}</span>`
+    : `Verbunden · letzter Abruf ${s.letzter_abruf ? fmtZeit(s.letzter_abruf) : 'noch keiner'} · Token gültig bis ${s.refresh_bis ? fmtZeit(s.refresh_bis) : '–'}`;
+}
+async function passarAbrufen(){
+  $('pJetzt').disabled = true;
+  try {
+    const { data, error } = await sb.functions.invoke('zoll', { body: { aktion: 'passar' } });
+    if(error || data?.error) showToast('Passar: ' + (data?.error || error.message), true);
+    else showToast(`Passar: ${data.neu} neue Verfügung${data.neu === 1 ? '' : 'en'} (${data.gelesen} Meldungen gelesen).`);
+  } finally { $('pJetzt').disabled = false; await passarStand(); await laden(); }
+}
+$('pJetzt').addEventListener('click', passarAbrufen);
+$('pSpeichern').addEventListener('click', async () => {
+  const { error } = await sb.rpc('zoll_passar_setzen', { p_key: $('pKey').value, p_secret: $('pSecret').value, p_refresh: $('pRefresh').value, p_access: $('pAccess').value });
+  if(error) return showToast(error.message, true);
+  ['pKey', 'pSecret', 'pRefresh', 'pAccess'].forEach(id => $(id).value = '');
+  showToast('Gespeichert. Verbindung wird getestet …');
+  await passarAbrufen();
+});
 $('loginBtn').addEventListener('click', async () => {
   const { error } = await KG.anmelden(sb, { email: $('loginEmail').value.trim(), password: $('loginPassword').value });
   if(error){ $('loginStatus').textContent = 'Login fehlgeschlagen: ' + error.message; $('loginStatus').className = 'status err'; return; }
