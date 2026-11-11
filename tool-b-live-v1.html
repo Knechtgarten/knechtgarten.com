@@ -3335,16 +3335,14 @@ $('addOptConfirm').addEventListener('click', async () => {
   const eigenePosition = $('addOptEigenePositionInput').checked;
   const eigenePositionTitel = $('addOptEigenePositionTitelInput').value.trim() || null;
   if(addOptEditingId){
-    // Eine Optionsgruppe mischt keine Optionen mit und ohne Mehrfachauswahl - wuerde sie dadurch gemischt, vorher nachfragen
-    let ausGruppe = null;
+    // Eine Optionsgruppe mischt keine Optionen mit und ohne Mehrfachauswahl: «Mehrfachauswahl» gilt fuer die ganze Gruppe
+    // (Gruppe mit Haken = als Ganzes mit anderen Optionen kombinierbar, innerhalb der Gruppe trotzdem nur eine)
+    let gruppeAndere = [];
     {
       const afAlt = findeAuswahlfeldZuOption(addOptEditingId);
       const optAlt = afAlt?.auswahloption?.find(x => x.id === addOptEditingId);
       const andere = optAlt?.optionsgruppe_id ? (afAlt.auswahloption || []).filter(x => x.optionsgruppe_id === optAlt.optionsgruppe_id && x.id !== optAlt.id) : [];
-      if(andere.some(x => !!x.mehrfachauswahl !== !!mehrfachauswahl)){
-        if(!(await confirmDialog(`Mit dieser Einstellung von «Mehrfachauswahl» kann die Option «${name}» nicht in der Gruppe «${optAlt.optionsgruppe_name || 'Gruppe'}» bleiben. Sie wird aus der Gruppe entfernt. Fortfahren?`))) return;
-        ausGruppe = { af: afAlt, opt: optAlt };
-      }
+      gruppeAndere = andere.filter(x => !!x.mehrfachauswahl !== !!mehrfachauswahl).map(x => x.id);
     }
     const payload = {
       name,
@@ -3361,10 +3359,14 @@ $('addOptConfirm').addEventListener('click', async () => {
     };
     const { error } = await sb.from('auswahloption').update(payload).eq('id', addOptEditingId);
     if(error){ showToast(friendlyError(error), true); return; }
+    if(gruppeAndere.length){
+      const { error: gErr } = await sb.from('auswahloption').update({ mehrfachauswahl }).in('id', gruppeAndere);
+      if(gErr){ showToast(friendlyError(gErr), true); return; }
+    }
     await syncAuswahlgruppenZeile(addOptEditingId, auswahlgruppeId);
     $('addOptOverlay').classList.remove('show');
-    if(ausGruppe) await optionAusGruppeEntfernen(ausGruppe.af, ausGruppe.opt);
-    else await loadArbeitsschritte();
+    await loadArbeitsschritte();
+    if(gruppeAndere.length) showToast(`Mehrfachauswahl gilt für die ganze Gruppe – ${gruppeAndere.length + 1} Optionen angepasst`);
   }else{
     if(await addOption(addOptContext, name, mengenoption, mengenoptionEinheit, mehrfachauswahl, eigenePosition, mengenoptionStandardmenge, eigenePositionTitel, verweis)) $('addOptOverlay').classList.remove('show');
   }
