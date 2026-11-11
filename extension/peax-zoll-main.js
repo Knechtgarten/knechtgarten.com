@@ -67,7 +67,7 @@
     if (kand.length > 1) return { ergebnis: 'mehrdeutig', hinweis: kand.length + ' Rechnungen: ' + kand.map((k) => k.titel).join(', ') };
     const ziel = kand[0];
     // 3. Seitenzahl der Rechnung, Verfügung holen, hinten anhängen
-    const pdf = await (await peax('/core-feature-media/api/v1/media/document/' + ziel.id, { headers: { Accept: 'application/pdf' } })).arrayBuffer();
+    const pdf = await (await peax('/core-feature-media/api/v1/media/document/' + ziel.id, { headers: { Accept: '*/*' } })).arrayBuffer();
     const n = await seiten(pdf);
     const evv = await fetch(url); if (!evv.ok) throw new Error('Verfügung nicht ladbar');
     const fd = new FormData();
@@ -77,9 +77,25 @@
     return { ergebnis: 'angehaengt', peax_doc_id: ziel.id, peax_titel: (ziel.sender ? ziel.sender + ' · ' : '') + ziel.titel };
   }
 
+  // Für den Knopf «Verfügung anfordern»: offene Rechnung als PDF (Base64) mit Absender, nur Typ INVOICE
+  async function rechnungPdf({ id }) {
+    if (!(await bereit(15000))) return { fehler: 'PEAX-Anmeldung nicht erkannt' };
+    const d = await (await peax('/document/api/v3/documents/' + id)).json();
+    if (d?.type !== 'INVOICE') return { skip: true };
+    const buf = await (await peax('/core-feature-media/api/v1/media/document/' + id, { headers: { Accept: '*/*' } })).arrayBuffer();
+    let s = ''; const u8 = new Uint8Array(buf);
+    for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+    return { titel: d.title || '', sender: d.sender?.name || '', pdf: btoa(s) };
+  }
+
   window.addEventListener('message', async (e) => {
-    if (e.source !== window || e.data?.kanal !== KANAL || e.data.typ !== 'auftrag') return;
+    if (e.source !== window || e.data?.kanal !== KANAL || !['auftrag', 'pdf'].includes(e.data.typ)) return;
     let antwort;
+    if (e.data.typ === 'pdf') {
+      try { antwort = await rechnungPdf(e.data.evv); } catch (err) { antwort = { fehler: String(err?.message || err).slice(0, 200) }; }
+      window.postMessage({ kanal: KANAL, typ: 'antwort', nr: e.data.nr, antwort }, '*');
+      return;
+    }
     try { antwort = await anhaengen(e.data.evv); } catch (err) { antwort = { ergebnis: 'fehler', hinweis: String(err?.message || err).slice(0, 200) }; }
     window.postMessage({ kanal: KANAL, typ: 'antwort', nr: e.data.nr, antwort }, '*');
   });

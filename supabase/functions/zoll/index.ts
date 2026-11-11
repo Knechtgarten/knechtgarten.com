@@ -5,6 +5,10 @@
 //                          Angenommen: Absender @knechtgarten.ch (weitergeleitet) oder *.admin.ch (BAZG/e-dec-web).
 //   { aktion: 'offen', googleAccessToken }      – Erweiterung: offene MWST-Verfügungen holen (mit Riegel 3 Min gegen Doppelarbeit)
 //   { aktion: 'ergebnis', googleAccessToken, id, ergebnis, peax_doc_id?, peax_titel? } – Erweiterung meldet das Resultat
+//   { aktion: 'lesen', googleAccessToken, pdf }  – Knopf in PEAX: Zollanmeldungen + Zugangscode einer Spediteur-Rechnung per KI
+//   { aktion: 'stand', googleAccessToken, nrn }  – Knopf in PEAX: ist die MWST-Verfügung schon da / angehängt?
+//   { aktion: 'passar' }                         – pg_cron alle 2 Std.: Passar-Verfügungen beim BAZG abholen
+// Doppelt-Schutz: zweite MWST-Verfügung zur gleichen Nummer wird abgelegt (Status «ignoriert»), nie zweimal angehängt.
 // Gibt beim Abruf nur Anzahlen zurück.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -101,8 +105,10 @@ async function passarAbruf(admin: any) {
             const pfad = `${new Date().toISOString().slice(0, 7)}/${crypto.randomUUID()}.pdf`;
             const { error: eu } = await admin.storage.from('zoll').upload(pfad, b64(daten.replace(/\s+/g, '')), { contentType: 'application/pdf' });
             if (eu) return fehler('Ablage: ' + eu.message);
+            const doppelt = await schonDa(admin, nr, 'mwst');
             await admin.from('zoll_evv').insert({ zanr: nr, art: 'mwst', quelle: 'passar', dateiname: xmlFeld(x, 'DocumentName') || `${nr}.pdf`,
-              storage_pfad: pfad, gmail_id: 'passar:' + m.messageId, status: nr ? 'neu' : 'ohne_nummer' });
+              storage_pfad: pfad, gmail_id: 'passar:' + m.messageId, status: doppelt ? 'ignoriert' : nr ? 'neu' : 'ohne_nummer',
+              hinweis: doppelt ? 'Doppelt – diese Verfügung ist schon vorhanden' : null });
             neu++;
           } else andere++;
         } else if (!schon.data) andere++;
@@ -116,6 +122,37 @@ async function passarAbruf(admin: any) {
   return { ok: true, gelesen, neu, andere };
 }
 
+// Doppelt-Schutz: gibt es zur Nummer schon eine MWST-Verfügung (nicht ignoriert), wird die neue nur abgelegt, nicht angehängt
+async function schonDa(admin: any, zanr: string | null, art: string) {
+  if (!zanr || art === 'zoll') return false;
+  const { data } = await admin.from('zoll_evv').select('id').eq('zanr', zanr).in('art', ['mwst', 'unbekannt']).neq('status', 'ignoriert').limit(1);
+  return !!data?.length;
+}
+
+// Spediteur-Rechnung lesen (Knopf «Verfügung anfordern» in PEAX): Zollanmeldungsnummer(n) + Zugangscode per KI aus dem PDF
+const KI_MODELLE = ['claude-haiku-5-5', 'claude-haiku-4-5-20251001', 'claude-sonnet-5-5'];
+const KI_SYS = `Du liest eine Rechnung eines Spediteurs oder Paketdienstes (Verzollung Import Schweiz).
+Antworte NUR mit JSON: {"zollanmeldungen":[{"nr":"26CHEI004567593991","code":"6LjEWz8K4cnE3hzJ"}]}
+- nr: Zollanmeldungsnummer bzw. eVV-Nummer, z. B. 26CHEI004505039773 (ohne Zusatz wie ".1") oder Passar-MRN wie 26CH02IMQML5N08LN6. Auch «ZQNr.», «Quittung», «eVV Nummer».
+- code: Zugangscode, auch «EVV Code», «Accesscode», «Access code». Gross-/Kleinschreibung exakt übernehmen. Fehlt er: null.
+- Mehrere Zollanmeldungen: alle aufführen. Keine gefunden: leere Liste. Nichts erfinden.`;
+async function kiLesen(pdf: string) {
+  const key = Deno.env.get('ANTHROPIC_API_KEY'); if (!key) throw new Error('ANTHROPIC_API_KEY fehlt');
+  let letzter = '';
+  for (const model of KI_MODELLE) {
+    const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST',
+      headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({ model, max_tokens: 1000, system: KI_SYS, messages: [{ role: 'user', content: [
+        { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdf } }, { type: 'text', text: 'Zollanmeldungen als JSON.' }] }] }) });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok) { const t = (d.content || []).filter((c: any) => c.type === 'text').map((c: any) => c.text).join('');
+      const j = JSON.parse((t.match(/\{[\s\S]*\}/) || ['{}'])[0]); return (j.zollanmeldungen || []) as { nr: string; code: string | null }[]; }
+    letzter = d?.error?.message || String(r.status);
+    if (r.status !== 404 && r.status !== 400 && r.status !== 529) break;
+  }
+  throw new Error('KI: ' + letzter);
+}
+
 async function googleEmail(token: string) {
   const r = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', { headers: { Authorization: `Bearer ${token}` } });
   if (!r.ok) return null; const p = await r.json(); return String(p?.emailAddress || '').toLowerCase();
@@ -127,9 +164,26 @@ Deno.serve(async (req) => {
   const body = await req.json().catch(() => ({}));
 
   // ---------------------------------------------------------------- Erweiterung
-  if (body.aktion === 'offen' || body.aktion === 'ergebnis') {
+  if (['offen', 'ergebnis', 'lesen', 'stand'].includes(body.aktion)) {
     const email = body.googleAccessToken ? await googleEmail(body.googleAccessToken) : null;
     if (!email || !email.endsWith('@knechtgarten.ch')) return json({ error: 'Nur für @knechtgarten.ch-Konten.' }, 403);
+    if (body.aktion === 'stand') {   // { nrn: [...] } → { stand: { nr: 'angehaengt' | 'vorhanden' } }
+      const nrn = (Array.isArray(body.nrn) ? body.nrn : []).map(String).slice(0, 20);
+      const { data } = nrn.length ? await admin.from('zoll_evv').select('zanr,status').in('zanr', nrn).in('art', ['mwst', 'unbekannt']).neq('status', 'ignoriert') : { data: [] };
+      const stand: Record<string, string> = {};
+      for (const r of data || []) stand[r.zanr] = r.status === 'angehaengt' || stand[r.zanr] === 'angehaengt' ? 'angehaengt' : 'vorhanden';
+      return json({ stand });
+    }
+    if (body.aktion === 'lesen') {
+      if (!body.pdf) return json({ error: 'PDF fehlt' }, 400);
+      try {
+        const liste = (await kiLesen(String(body.pdf))).filter((z) => z?.nr).map((z) => ({ nr: String(z.nr).replace(/\.\d+$/, '').replace(/\s+/g, ''), code: z.code ? String(z.code).trim() : null }));
+        const nrn = [...new Set(liste.map((z) => z.nr))];
+        const { data } = nrn.length ? await admin.from('zoll_evv').select('zanr,status').in('zanr', nrn).in('art', ['mwst', 'unbekannt']).neq('status', 'ignoriert') : { data: [] };
+        return json({ zollanmeldungen: liste.map((z) => ({ ...z, edec: /^\d{2}CHEI\d/.test(z.nr),
+          stand: (data || []).some((r: any) => r.zanr === z.nr && r.status === 'angehaengt') ? 'angehaengt' : (data || []).some((r: any) => r.zanr === z.nr) ? 'vorhanden' : null })) });
+      } catch (e) { return json({ error: String((e as any)?.message || e).slice(0, 200) }, 500); }
+    }
     if (body.aktion === 'offen') {
       const jetzt = new Date().toISOString();
       const { data } = await admin.from('zoll_evv').select('id,zanr,dateiname,storage_pfad,in_arbeit_bis')
@@ -196,8 +250,10 @@ Deno.serve(async (req) => {
         const art = artVon(a.filename, inhalt);
         const pfad = `${new Date().toISOString().slice(0, 7)}/${crypto.randomUUID()}.pdf`;
         const { error: eu } = await admin.storage.from('zoll').upload(pfad, daten, { contentType: 'application/pdf' }); if (eu) throw eu;
+        const doppelt = await schonDa(admin, zanr, art);
         await admin.from('zoll_evv').insert({ zanr, art, quelle: 'mail', dateiname: a.filename, storage_pfad: pfad, gmail_id: id,
-          status: zanr ? 'neu' : 'ohne_nummer', hinweis: !zanr && nr.length > 1 ? 'Mehrere Nummern im PDF: ' + nr.join(', ') : null });
+          status: doppelt ? 'ignoriert' : zanr ? 'neu' : 'ohne_nummer',
+          hinweis: doppelt ? 'Doppelt – diese Verfügung ist schon vorhanden' : !zanr && nr.length > 1 ? 'Mehrere Nummern im PDF: ' + nr.join(', ') : null });
         neu++;
       }
       await admin.from('zoll_mail').insert({ gmail_id: id, von, betreff, status: 'ok' });
