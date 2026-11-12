@@ -17,6 +17,7 @@
     copy: '<rect x="9" y="9" width="11" height="11" rx="1.5"/><path d="M5 15V5a1.5 1.5 0 0 1 1.5-1.5H15"/>',
     foto: '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10.5" r="1.5"/><path d="M21 16l-5-5-9 9"/>',
     lock: '<rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+    sanduhr: '<path d="M6 3h12M6 21h12M8 3l4 9-4 9M16 3l-4 9 4 9"/>',
     unlock: '<rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-1.8"/>',
     x: '<path d="M18 6 6 18M6 6l12 12"/>',
     check: '<path d="M5 13l4 4L19 7"/>',
