@@ -1611,7 +1611,7 @@ function offenLayout(list){
   });
   OFFLV[list[0].mid] = ende.length;
 }
-let DUPS = [];
+let DUPS = [], LEER = {}; // LEER: Vorarbeiter-Halbtage ohne Auftrag und ohne Hilfskraft (roter Strich)
 function compute(){
   floatOffene();
   ALL = EINS.filter(it => !wdhAusSelbst(it)).concat(occs()); LAY = {}; DUPS = []; OFFLV = {};
@@ -1662,6 +1662,14 @@ function compute(){
   // Vorarbeiter-Baustelle oder -Termin (z. B. Pflege) ohne Mithilfe (und nicht «allein») = Personal fehlt (nur ab heute)
   // Mithilfe zählt pro Person und Halbtag: «Mit Cornelia» deckt alle Termine von Cornelia in diesem Halbtag
   const cover = {}; ALL.forEach(h => { if(h.kind !== 'hilfe' || !LAY[h.id]) return; const m = (h.link && byId(h.link)?.mid) || h.mp; if(m) LAY[h.id].free.forEach(k => (cover[m] ??= new Set()).add(k)); });
+  // Vorarbeiter an leeren Arbeitstagen (ab heute) ohne Hilfskraft: auch dort «Personal fehlt» – sieht man vor dem Einplanen eines Kunden
+  // Belegt = eigener Auftrag/Absenz (auch Reserve), Mithilfe eingeteilt, «Allein» vorgemerkt, Wochenende/Feiertag, Betriebsferien
+  LEER = {}; PERSONEN.filter(p => p.aktiv && !p.archiviert_am && p.ist_vorarbeiter).forEach(p => {
+    const bel = new Set(); ALL.forEach(i => { if(i.mid !== p.id || istOffen(i) || !LAY[i.id]) return; LAY[i.id].free.forEach(k => bel.add(k)); (LAY[i.id].res || []).forEach(k => bel.add(k)); });
+    MARK.forEach(m => { if(m.person_id !== p.id || m.art !== 'allein') return; const d = fromIso(m.tag); if(m.teil !== 'nm') bel.add(d * 2); if(m.teil !== 'vm') bel.add(d * 2 + 1); });
+    const c = cover[p.id] || new Set(), out = [];
+    for(let d = Math.max(0, TODAY); d < NDAYS; d++){ if(isOff(d) || FER_GRAU.some(([a, b]) => d >= a && d < b)) continue; [d * 2, d * 2 + 1].forEach(k => { if(!bel.has(k) && !c.has(k)) out.push(k); }); }
+    LEER[p.id] = out; });
   // Blau = an diesem Halbtag allein (kein Personal nötig); blau + Mithilfe eingeteilt = Konflikt (roter Rand)
   ALL.forEach(b => { if(istOffen(b) || istKurs(b) || !(b.kind === 'baustelle' || (b.kind === 'termin' && b.e - b.s >= 2 / 12 - 1e-6)) || !P[b.mid]?.ist_vorarbeiter || !LAY[b.id] || LAY[b.id].mini) return; const c = cover[b.mid] || new Set(), A = soloSet(b), L = LAY[b.id];
     L.solo = L.free.filter(k => A.has(k)); L.soloCf = new Set(L.solo.filter(k => c.has(k)));
@@ -2071,8 +2079,16 @@ function personRow(p, W, bgx, offen = false){
     return `<div class="row offen${p.gprov ? ' offg' : ''}" data-offp="${p.id}"><div class="nm" title="Noch nicht abgemacht – hochziehen = abmachen"><span>${esc(p.offLab || 'offen')}</span></div><div class="lane${ed ? ' ed' : ''}" data-mid="${p.id}" data-off="1" style="width:${W}px;height:${n * 17 + 4}px;${bgx}">${feierHTML()}${bars}${provBars('p:' + p.id)}${p.gprov ? provBars('g:' + p.gprov) : ''}</div></div>`;
   }
   const mine = p.benutzer_id === ME;
-  return `<div class="row${istAzZeile(p.id) ? ' azz' : ''}${openMid === p.id ? " fokusp" : ""}${MARKS.includes(p.id) ? " mark" : ""}${P[p.id] && phGruppe()?.id === p.gruppe_id ? " ph" : ""}${GRUPPEN.some(g => g.id === p.gruppe_id && /^neu$/i.test(g.name)) ? " neup" : ""}" data-mid="${p.id}"><div class="nm"${p.farbe ? ` style="--pf:${p.farbe};--pft:${txtOn(p.farbe)}"` : ''} title="${esc(p.name + (p.zusatz ? ' · ' + p.zusatz : ''))}">${isBuero() ? `<span class="pgrip" title="Ziehen: Reihenfolge oder Gruppe ändern">${I('grip')}</span>` : ''}<span class="n">${esc(p.name)}</span>${pzPunkt(p.id)}${p.zusatz ? `<span class="z">${esc(p.zusatz)}</span>` : ''}${mine ? '<span class="me">Ich</span>' : ''}${isBuero() && !EINGEBETTET && !p.archiviert_am && GRUPPEN.some(g => g.id === p.gruppe_id && /schnupper|tempor/i.test(g.name)) ? `<button class="kg-ibtn danger parch" data-parch="${p.id}" title="Ins Archiv" aria-label="${esc(p.name)} archivieren">${I('trash')}</button>` : ''}${p.farbe && !p.ist_projektleiter ? `${mabKnopf(p)}<button class="mab mab2${openMid === p.id && openTyp === 'fahrzeug' ? ' on' : ''}" data-mab="${p.id}" data-typ="fahrzeug" title="Lieferwagen und Anhänger einteilen (aufklappen)" aria-label="Lieferwagen einteilen">${I('truck')}</button>` : ''}</div><div class="lane${ed ? ' ed' : ''}" data-mid="${p.id}" style="width:${W}px;${bgx}">${feierHTML()}${istAzZeile(p.id) ? ferBars() + azIcons() : ''}${bars}${hatOffen(p.id) ? '' : provBars('p:' + p.id)}${provBars('pf:' + p.id)}${p.id === svcRowId() ? svcRowBars() : ''}${vehIcons(p)}${markHTML(p)}</div></div>`;
+  return `<div class="row${istAzZeile(p.id) ? ' azz' : ''}${openMid === p.id ? " fokusp" : ""}${MARKS.includes(p.id) ? " mark" : ""}${P[p.id] && phGruppe()?.id === p.gruppe_id ? " ph" : ""}${GRUPPEN.some(g => g.id === p.gruppe_id && /^neu$/i.test(g.name)) ? " neup" : ""}" data-mid="${p.id}"><div class="nm"${p.farbe ? ` style="--pf:${p.farbe};--pft:${txtOn(p.farbe)}"` : ''} title="${esc(p.name + (p.zusatz ? ' · ' + p.zusatz : ''))}">${isBuero() ? `<span class="pgrip" title="Ziehen: Reihenfolge oder Gruppe ändern">${I('grip')}</span>` : ''}<span class="n">${esc(p.name)}</span>${pzPunkt(p.id)}${p.zusatz ? `<span class="z">${esc(p.zusatz)}</span>` : ''}${mine ? '<span class="me">Ich</span>' : ''}${isBuero() && !EINGEBETTET && !p.archiviert_am && GRUPPEN.some(g => g.id === p.gruppe_id && /schnupper|tempor/i.test(g.name)) ? `<button class="kg-ibtn danger parch" data-parch="${p.id}" title="Ins Archiv" aria-label="${esc(p.name)} archivieren">${I('trash')}</button>` : ''}${p.farbe && !p.ist_projektleiter ? `${mabKnopf(p)}<button class="mab mab2${openMid === p.id && openTyp === 'fahrzeug' ? ' on' : ''}" data-mab="${p.id}" data-typ="fahrzeug" title="Lieferwagen und Anhänger einteilen (aufklappen)" aria-label="Lieferwagen einteilen">${I('truck')}</button>` : ''}</div><div class="lane${ed ? ' ed' : ''}" data-mid="${p.id}" style="width:${W}px;${bgx}">${feierHTML()}${istAzZeile(p.id) ? ferBars() + azIcons() : ''}${bars}${hatOffen(p.id) ? '' : provBars('p:' + p.id)}${provBars('pf:' + p.id)}${p.id === svcRowId() ? svcRowBars() : ''}${vehIcons(p)}${markHTML(p)}${leerStriche(p)}</div></div>`;
 }
+// Leerer Tag beim Vorarbeiter ohne Hilfskraft: roter Strich wie auf den Aufträgen (halber Tag = halber Strich, oben VM, unten NM)
+function leerStriche(p){ const L = LEER[p.id]; if(!L?.length || zoom === 'jahr') return ''; const S = new Set(L); let h = '';
+  [...new Set(L.map(k => k >> 1))].forEach((d, j) => { if(zoom === 'quartal' && j % Math.max(1, Math.ceil(10 / dayW))) return;
+    const vm = S.has(d * 2), nm = S.has(d * 2 + 1), halb = vm !== nm;
+    const x = zoom === 'quartal' ? X(d) + 2 : zoom === 'tag' ? X(d + (vm ? 0 : .5)) + 4 : X(d) + 8;
+    const sty = halb && zoom !== 'tag' ? `;background:linear-gradient(180deg,${vm ? 'var(--prot)' : 'transparent'} 50%,${nm ? 'var(--prot)' : 'transparent'} 50%)` : '';
+    h += `<span class="rdot leer" style="left:${x}px${sty}" title="Personal fehlt – noch keine Hilfskraft${halb ? (vm ? ' (Vormittag)' : ' (Nachmittag)') : ''}"></span>`; });
+  return h; }
 // Aufgeklappt (Maschinen / Lieferwagen): Baustellen-Zeitraum der Person mit Rahmen in ihrer Farbe,
 // links und rechts davon grau wie der Rest
 // Bagger aufgeklappt: genau eine Baustelle ist aktiv (weiss), Häkchen/Schloss gelten für sie. Automatisch die Baustelle
