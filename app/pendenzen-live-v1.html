@@ -1001,7 +1001,7 @@ function detHtml(){
     ${mails.length ? `<div class="strip"><div class="lab">${A('brief', 13)}Mails und Anhänge</div><div class="tiles">${mails.map(dateiTile).join('')}</div></div>` : ''}
     ${dd ? `<div class="confirm">«${esc(dd.name)}» wirklich löschen?<span class="sp"></span><button class="btn btn-ghost" data-ddno>Abbrechen</button><button class="btn btn-danger" data-ddyes>Löschen</button></div>` : ''}
     ${p.planer_einsatz_id ? `<div class="strip"><div class="lab">${K('kalender', 13)}Im Einsatzplaner</div><a class="small" href="einsatzplaner-live-v1.html" target="_blank" rel="noopener">Offener Auftrag – im Planer anschauen</a></div>` : ''}
-    <div class="foot"><span class="sp"></span>${OF(l.art_id) ? `<button class="btn btn-ghost" data-zusage="${p.id}">${K('check', 15)}Zugesagt → Planung</button>` : ''}<button class="btn btn-ghost" data-archiv="${p.id}">${K('archiv', 15)}Archivieren</button></div>
+    <div class="foot">${S.board.typ === 'person' && p.zeit && !l.zeit ? `<button class="btn btn-ghost" data-auszeit="${p.id}" title="Aus «${esc(ZEIT[p.zeit].t)}» nehmen – die Pendenz bleibt in «${esc(l.titel)}»">${K('zurueck', 15)}Zurück in «${esc(l.titel)}»</button>` : ''}<span class="sp"></span>${OF(l.art_id) ? `<button class="btn btn-ghost" data-zusage="${p.id}">${K('check', 15)}Zugesagt → Planung</button>` : ''}<button class="btn btn-ghost" data-archiv="${p.id}">${K('archiv', 15)}Archivieren</button></div>
   </aside>`;
 }
 function zeichneOver(){
@@ -1115,6 +1115,13 @@ function setzeZeit(p, z){
   if(home?.zeit){ if(!z){ zeichne(); return toast('Erst in eine Pendenzen-Liste ziehen – sonst hätte sie keinen Platz mehr.'); }
     const ziel = S.listen.find(l => l.zeit === z); if(ziel) patch.liste_id = ziel.id; }
   Object.assign(p, patch); zeichne(); return upd('pendenz', p.id, patch);
+}
+// aus Heute/Woche/Monat nehmen: Pendenz liegt dann nur noch in ihrer eigenen Liste (geht nur, wenn sie eine hat)
+function ausZeit(p){
+  const home = listeById(p.liste_id); if(!p.zeit || !home || home.zeit) return zeichne();
+  const alt = { zeit: p.zeit, zeit_sortierung: p.zeit_sortierung };
+  if(S.sel === p.id) S.sel = null; setzeZeit(p, 0);
+  toast(`Zurück in «${home.titel}»`, async () => { if(await upd('pendenz', p.id, alt)){ Object.assign(p, alt); zeichne(); } });
 }
 async function archivieren(p){
   S.pz = S.pz.filter(x => x !== p); if(S.sel === p.id) S.sel = null; zeichne();
@@ -1484,6 +1491,7 @@ document.addEventListener('click', async e => {
   if(d.plus){ e.stopPropagation(); const l = listeById(d.plus); S.addOffen = S.addOffen === l.id ? null : l.id; S.addG = undefined; if(l.zu){ l.zu = false; upd('pendenz_liste', l.id, { zu: false }); } zeichne(); return $('add-' + l.id)?.focus(); }
   if(d.bwahl) return wechsleBoard(d.bwahl);
   if(d.archiv){ const p = S.pz.find(x => x.id === d.archiv); if(p) return archivieren(p); return; }
+  if(d.auszeit){ const p = S.pz.find(x => x.id === d.auszeit); if(p) ausZeit(p); return; }
   // Offerten: Chance (Klick auf die Balken = nächste Stufe), Zugesagt, Erinnerung in «Heute» öffnet die Offerte
   if(d.chance){ e.stopPropagation(); const p = S.pz.find(x => x.id === d.chance); p.chance = ((p.chance || 0) + 1) % 4 || null; zeichne(); return upd('pendenz', p.id, { chance: p.chance }); }
   if(d.dchance != null){ const p = S.pz.find(x => x.id === S.sel); p.chance = +d.dchance || null; zeichne(); return upd('pendenz', p.id, { chance: p.chance }); }
@@ -1710,15 +1718,18 @@ document.addEventListener('pointerup', e => {
   el.remove(); zeichne(); });
 
 // Pendenzen ziehen: in Liste/Gruppe (wechselt Liste), in Zeitliste (setzt Zeit); Pendenzenart aufs Blatt = neue Liste
-let dc = null, dArt = null, dg = null;
+let dc = null, dcVon = null, dArt = null, dg = null;
 document.addEventListener('dragstart', e => {
   const a = e.target.closest('[data-neuart]'); if(a){ dArt = a.dataset.neuart; e.dataTransfer.setData('text/plain', dArt); document.querySelectorAll('.canvas').forEach(c => c.classList.add('ziehen')); return; }
   // Gruppentitel ziehen: nur innerhalb seiner Liste verschieben
   const gh = e.target.closest('[data-ghead]'); if(gh){ dg = S.gruppen.find(g => g.id === gh.dataset.ghead); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dg.id); setTimeout(() => gh.classList.add('dragging')); return; }
-  const c = e.target.closest('[data-card]'); if(!c) return; dc = c.dataset.card; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dc); document.body.classList.add('zieht-pendenz'); setTimeout(() => c.classList.add('dragging')); });
+  const c = e.target.closest('[data-card]'); if(!c) return; dc = c.dataset.card; dcVon = c.closest('[data-drop]')?.dataset.drop || null; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dc); document.body.classList.add('zieht-pendenz'); setTimeout(() => c.classList.add('dragging')); });
 document.addEventListener('dragend', () => { dc = null; dArt = null; dg = null; document.body.classList.remove('zieht-pendenz'); document.querySelectorAll('.dz.hot').forEach(z => z.classList.remove('hot')); document.querySelectorAll('.ph').forEach(p => p.remove()); document.querySelectorAll('.ziehen').forEach(c => c.classList.remove('ziehen')); document.querySelectorAll('.dragging').forEach(c => c.classList.remove('dragging')); });
 // Ablageziel: die ganze Liste zählt (auch Kopf und leere Listen), nicht nur der Bereich mit den Pendenzen
-const dropZone = el => el.closest('[data-drop]') || el.closest('[data-list]')?.querySelector('.body > [data-drop]') || null;
+// leere Fläche im Mittelteil (Pendenzen-Listen) des eigenen Boards, und die gezogene Pendenz hat eine Zeit + eigene Liste
+const mitteLeer = el => { if(S.board?.typ !== 'person' || !el.closest?.('[data-cv="mitte"]')) return false;
+  const p = S.pz.find(x => x.id === dc), home = p && listeById(p.liste_id); return !!(p?.zeit && home && !home.zeit); };
+const dropZone = el =>el.closest('[data-drop]') || el.closest('[data-list]')?.querySelector('.body > [data-drop]') || null;
 // Rückmeldung oben: Feld wippt kurz, wenn eine Pendenz darauf abgelegt wurde (überlebt das Neuzeichnen der Leiste)
 function treffer(zone){ S.treffer = zone; document.querySelector(`[data-dzone="${zone}"]`)?.classList.add('treffer');
   clearTimeout(treffer.t); treffer.t = setTimeout(() => { S.treffer = null; document.querySelectorAll('.dz.treffer').forEach(x => x.classList.remove('treffer')); }, 900); }
@@ -1742,7 +1753,9 @@ document.addEventListener('dragover', e => {
   const dz = e.target.closest('[data-dzone]'); // Ablageflächen oben: Archivieren, anderes Board, Planer
   document.querySelectorAll('.dz.hot').forEach(x => { if(x !== dz) x.classList.remove('hot'); });
   if(dz){ e.preventDefault(); dz.classList.add('hot'); return; }
-  const z = dropZone(e.target); if(!z) return; e.preventDefault();
+  const z = dropZone(e.target);
+  if(!z){ if(mitteLeer(e.target)){ e.preventDefault(); document.querySelectorAll('.ph').forEach(p => p.remove()); } return; }
+  e.preventDefault();
   document.querySelectorAll('.ph').forEach(p => p.remove()); const { cs, i } = dropIdx(z, e.clientY); const ph = document.createElement('div'); ph.className = 'ph';
   if(cs[i]) z.insertBefore(ph, cs[i]); else z.appendChild(ph); });
 document.addEventListener('drop', async e => {
@@ -1758,8 +1771,11 @@ document.addEventListener('drop', async e => {
     if(listeById(p.liste_id)?.art_id === 'privat' && dz.dataset.dzone !== 'archiv') return toast('Private Pendenzen bleiben in deinem Board.');
     treffer(dz.dataset.dzone);
     return dz.dataset.dzone === 'archiv' ? archivieren(p) : dz.dataset.dzone === 'zusage' ? zusagen(p) : dz.dataset.dzone === 'offerte' ? offerteZugestellt(p) : oeffnePick(dz.dataset.dzone, p); }
-  const z = dropZone(e.target); if(!z) return; e.preventDefault();
-  const p = S.pz.find(x => x.id === dc), to = listeById(z.dataset.drop), { cs, i } = dropIdx(z, e.clientY); dc = null;
+  const z = dropZone(e.target);
+  // Pendenz aus Heute/Woche/Monat in die leere Mitte gezogen: zurück in ihre eigene Liste (Zeit weg)
+  if(!z){ if(mitteLeer(e.target)){ e.preventDefault(); const p = S.pz.find(x => x.id === dc); dc = null; if(p) ausZeit(p); } return; }
+  e.preventDefault();
+  const p = S.pz.find(x => x.id === dc), to = listeById(z.dataset.drop), { cs, i } = dropIdx(z, e.clientY), dcVonZiel = dcVon; dc = null;
   const vor = cs[i - 1] && S.pz.find(x => x.id === cs[i - 1].dataset.card), nach = cs[i] && S.pz.find(x => x.id === cs[i].dataset.card);
   const von = listeById(p.liste_id);
   // Team-box nimmt nur von aussen (eigene Pendenzen nicht hineinziehen); Notizen bekommen keine Zeit
@@ -1776,8 +1792,10 @@ document.addEventListener('drop', async e => {
   if(p.liste_id !== to.id) p.liste_seit = new Date().toISOString(); // Erinnerung zählt ab jetzt (in der DB per Trigger)
   // Gruppe = Titel darüber; direkt unter einen zugeklappten Titel gelegt → Gruppe aufklappen, damit die Pendenz sichtbar bleibt
   const gr = gruppeVor(cs, i); if(gr?.zu){ gr.zu = false; upd('pendenz_gruppe', gr.id, { zu: false }); }
-  p.liste_id = to.id; p.gruppe_id = gr ? gr.id : null; p.sortierung = sNeu;
-  zeichne(); upd('pendenz', p.id, { liste_id: p.liste_id, gruppe_id: p.gruppe_id, sortierung: p.sortierung }); });
+  // aus Heute/Woche/Monat in eine Liste der Mitte gezogen: Zeit weg (liegt dann nur noch dort)
+  const zeitWeg = p.zeit && listeById(dcVonZiel)?.zeit && bereichOf(to) === 'mitte' && to.art_id !== 'notizen';
+  p.liste_id = to.id; p.gruppe_id = gr ? gr.id : null; p.sortierung = sNeu; if(zeitWeg){ p.zeit = 0; p.zeit_sortierung = null; }
+  zeichne(); upd('pendenz', p.id, { liste_id: p.liste_id, gruppe_id: p.gruppe_id, sortierung: p.sortierung, ...(zeitWeg ? { zeit: 0, zeit_sortierung: null } : {}) }); });
 
 pruefeAnmeldung();
 })();
