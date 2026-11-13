@@ -4525,23 +4525,24 @@ async function mFiles(card){
 // ---------------------------------------------------------------------------
 // PERSONEN & GRUPPEN (Büro / Admin)
 // ---------------------------------------------------------------------------
+const KONTAKTE_MA = '/tool-d-kunden-live-v1.html?modus=mitarbeitende';
 function renderPersonen(){
   const grps = GRUPPEN.concat([{ id: null, name: 'Ohne Gruppe' }]);
   $('appMain').innerHTML = `<div class="page">
     <h2>Personen &amp; Gruppen</h2>
-    <p class="hint">Jede Person ist eine Zeile im Planer. Lernende, Temporäre und Schnupperlehrlinge brauchen kein Login. Ist ein Login verknüpft, darf diese Person ihre eigene Zeile bearbeiten (auch auf dem Handy).</p>
-    <div style="display:flex;gap:8px;margin-top:12px"><button class="btn btn-primary" id="addP">${I('plus')}Person</button><button class="btn btn-ghost" id="addG">${I('plus')}Gruppe</button></div>
+    <p class="hint">Personen erfasst und bearbeitet ihr in <a href="${KONTAKTE_MA}" target="_blank" rel="noopener">Kontakte › Mitarbeitende</a> (Gruppe, Kürzel, Vorarbeiter, Farbe). Hier nur Gruppen, Reihenfolge und Zeilen ohne Person wie «Termine &amp; Infos».</p>
+    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap"><a class="btn btn-primary" href="${KONTAKTE_MA}&neu=temp" target="_blank" rel="noopener">${I('plus')}Temporär</a><a class="btn btn-ghost" href="${KONTAKTE_MA}&neu=ohne" target="_blank" rel="noopener">${I('plus')}Ohne Login</a><button class="btn btn-ghost" id="addG">${I('plus')}Gruppe</button><button class="btn btn-ghost" id="addP">${I('plus')}Zeile ohne Person</button></div>
     ${grps.map((g, gi) => { const ps = PERSONEN.filter(p => (p.gruppe_id || null) === g.id).sort((a, b) => a.sortierung - b.sortierung || a.name.localeCompare(b.name)); if(!g.id && !ps.length) return '';
       return `<div class="card gcard"><div class="ghead"><b>${esc(g.name)}</b><span class="muted small">${ps.length} Personen</span>${g.id ? `<span style="margin-left:auto" class="acts"><button class="icon-btn" data-gu="${g.id}" aria-label="Nach oben" ${gi === 0 ? 'disabled' : ''}>${I('up')}</button><button class="icon-btn" data-gd="${g.id}" aria-label="Nach unten">${I('down')}</button><button class="icon-btn" data-ge="${g.id}" aria-label="Umbenennen">${I('edit')}</button>${ps.length ? '' : `<button class="icon-btn danger" data-gx="${g.id}" aria-label="Gruppe löschen">${I('trash')}</button>`}</span>` : ''}</div>
         ${ps.map((p, i) => `<div class="prow${p.aktiv ? '' : ' off'}"><span class="dot" style="width:14px;height:14px;border-radius:3px;background:${p.farbe || '#fff'};border:1px solid rgba(50,62,78,.25)"></span>
           <span><b>${esc(p.name)}</b>${p.kuerzel ? ` <span class="muted small">${esc(p.kuerzel)}</span>` : ''}${p.zusatz ? ` <span class="muted small">· ${esc(p.zusatz)}</span>` : ''}</span>
           <span>${p.ist_vorarbeiter ? '<span class="tag">Vorarbeiter</span>' : ''}${p.ist_projektleiter ? '<span class="tag">Projektleiter</span>' : ''}${p.aktiv ? '' : '<span class="tag">inaktiv</span>'}</span>
           <span class="small muted">${p.benutzer_id ? esc(BENUTZER.find(b => b.id === p.benutzer_id)?.email || 'Benutzer ohne Login') : 'kein Benutzer'}</span>
-          <span class="acts"><button class="icon-btn" data-pu="${p.id}" aria-label="Nach oben" ${i === 0 ? 'disabled' : ''}>${I('up')}</button><button class="icon-btn" data-pd="${p.id}" aria-label="Nach unten" ${i === ps.length - 1 ? 'disabled' : ''}>${I('down')}</button><button class="icon-btn" data-pe="${p.id}" aria-label="Bearbeiten">${I('edit')}</button></span></div>`).join('') || '<div class="prow"><span></span><span class="muted small">Noch niemand in dieser Gruppe</span></div>'}
+          <span class="acts"><button class="icon-btn" data-pu="${p.id}" aria-label="Nach oben" ${i === 0 ? 'disabled' : ''}>${I('up')}</button><button class="icon-btn" data-pd="${p.id}" aria-label="Nach unten" ${i === ps.length - 1 ? 'disabled' : ''}>${I('down')}</button>${p.benutzer_id ? `<a class="icon-btn" href="${KONTAKTE_MA}&person=${p.benutzer_id}" target="_blank" rel="noopener" title="In Kontakte bearbeiten" aria-label="In Kontakte bearbeiten">${I('ext')}</a>` : `<button class="icon-btn" data-pe="${p.id}" aria-label="Bearbeiten">${I('edit')}</button>`}</span></div>`).join('') || '<div class="prow"><span></span><span class="muted small">Noch niemand in dieser Gruppe</span></div>'}
       </div>`; }).join('')}
   </div>`;
   const q = s => $('appMain').querySelectorAll(s);
-  $('addP').onclick = () => personDlg(null);
+  $('addP').onclick = () => personDlg(null, null, true);
   $('addG').onclick = async () => { const n = await frage('Name der neuen Gruppe'); if(!n) return; const { error } = await sb.from('planer_gruppe').insert({ name: n, sortierung: (Math.max(0, ...GRUPPEN.map(g => g.sortierung)) + 10) }); if(error) return fehler(error); await neuLaden(); };
   q('[data-ge]').forEach(b => b.onclick = async () => { const g = GRUPPEN.find(x => x.id === b.dataset.ge); const n = await frage('Gruppe umbenennen', g.name); if(!n) return; const { error } = await sb.from('planer_gruppe').update({ name: n }).eq('id', g.id); if(error) return fehler(error); await neuLaden(); });
   q('[data-gx]').forEach(b => b.onclick = async () => { const { error } = await sb.from('planer_gruppe').delete().eq('id', b.dataset.gx); if(error) return fehler(error); await neuLaden(); });
@@ -4549,7 +4550,7 @@ function renderPersonen(){
   q('[data-gu]').forEach(b => b.onclick = () => moveG(b.dataset.gu, -1)); q('[data-gd]').forEach(b => b.onclick = () => moveG(b.dataset.gd, 1));
   const moveP = async (id, dir) => { const p = P[id]; const l = PERSONEN.filter(x => (x.gruppe_id || null) === (p.gruppe_id || null)).sort((a, b) => a.sortierung - b.sortierung || a.name.localeCompare(b.name)); const i = l.findIndex(x => x.id === id), j = i + dir; if(j < 0 || j >= l.length) return; [l[i], l[j]] = [l[j], l[i]]; await Promise.all(l.map((x, k) => sb.from('planer_person').update({ sortierung: (k + 1) * 10 }).eq('id', x.id))); await neuLaden(); };
   q('[data-pu]').forEach(b => b.onclick = () => moveP(b.dataset.pu, -1)); q('[data-pd]').forEach(b => b.onclick = () => moveP(b.dataset.pd, 1));
-  q('[data-pe]').forEach(b => b.onclick = () => personDlg(P[b.dataset.pe]));
+  q('[data-pe]').forEach(b => b.onclick = () => personDlg(P[b.dataset.pe], null, true));
 }
 function frage(titel, wert){
   return new Promise(res => { const d = document.createElement('div'); d.className = 'dlg';
@@ -4559,19 +4560,19 @@ function frage(titel, wert){
     d.querySelector('#fOk').onclick = () => fertig(inp.value.trim()); d.querySelector('#fNo').onclick = () => fertig(null);
     inp.onkeydown = e => { if(e.key === 'Enter') fertig(inp.value.trim()); if(e.key === 'Escape') fertig(null); }; });
 }
-function personDlg(p, gid){
+function personDlg(p, gid, nurZeile){ // nurZeile: Zeile ohne Person (Termine & Infos …) – Personen werden in Kontakte gepflegt
   if(p && istAzZeile(p.id)){ location.hash = 'arbeitszeit'; return; } // keine Person: eigene Liste (Arbeitszeit & Ferien)
   const neu = !p; p = p || { name: '', kuerzel: '', zusatz: '', farbe: null, gruppe_id: gid || GRUPPEN[0]?.id || null, ist_vorarbeiter: false, ist_projektleiter: false, benutzer_id: null, aktiv: true };
   const vergeben = new Set(PERSONEN.filter(x => x.benutzer_id && x.id !== p.id).map(x => x.benutzer_id));
   const d = document.createElement('div'); d.className = 'dlg';
   d.innerHTML = `<div class="in">
-    <div style="display:flex;align-items:center"><b style="font-size:15px">${neu ? 'Neue Person' : esc(p.name)}</b><button class="icon-btn" id="dX" style="margin-left:auto" aria-label="Schliessen">${I('x')}</button></div>
+    <div style="display:flex;align-items:center"><b style="font-size:15px">${neu ? (nurZeile ? 'Neue Zeile ohne Person' : 'Neue Person') : esc(p.name)}</b><button class="icon-btn" id="dX" style="margin-left:auto" aria-label="Schliessen">${I('x')}</button></div>
     <div class="two"><div class="fld"><label>Name</label><input type="text" id="dN" value="${esc(p.name)}" placeholder="Vorname Nachname"></div><div class="fld"><label>Kürzel</label><input type="text" id="dK" value="${esc(p.kuerzel || '')}" placeholder="z. B. SK"></div></div>
     <div class="two"><div class="fld"><label>Gruppe</label><select id="dG"><option value="">Ohne Gruppe</option>${GRUPPEN.map(g => `<option value="${g.id}"${g.id === p.gruppe_id ? ' selected' : ''}>${esc(g.name)}</option>`).join('')}</select></div><div class="fld"><label>Zusatz</label><input type="text" id="dZ" value="${esc(p.zusatz || '')}" placeholder="z. B. 2. Lj., 80 %"></div></div>
-    <div class="fld"><label>Farbe (Balken)</label><div class="pal" id="dF"><button data-c="" aria-pressed="${!p.farbe}" aria-label="Keine Farbe" title="Keine Farbe (Lehrlinge, Hilfskräfte)" style="background:#fff;border:2px dashed #C3C8CE"></button>${PALETTE.map(c => `<button style="background:${c}" data-c="${c}" aria-pressed="${c === p.farbe}" aria-label="Farbe ${c}"></button>`).join('')}</div></div>
+    ${nurZeile ? '' : `<div class="fld"><label>Farbe (Balken)</label><div class="pal" id="dF"><button data-c="" aria-pressed="${!p.farbe}" aria-label="Keine Farbe" title="Keine Farbe (Lehrlinge, Hilfskräfte)" style="background:#fff;border:2px dashed #C3C8CE"></button>${PALETTE.map(c => `<button style="background:${c}" data-c="${c}" aria-pressed="${c === p.farbe}" aria-label="Farbe ${c}"></button>`).join('')}</div></div>
     <label class="chk"><input type="checkbox" id="dV" ${p.ist_vorarbeiter ? 'checked' : ''}>Vorarbeiter (Baustellen und Termine ohne Mithilfe zeigen «Personal fehlt»)</label>
     <label class="chk"><input type="checkbox" id="dP" ${p.ist_projektleiter ? 'checked' : ''}>Projektleiter (Baustellen bekommen seine Farbe)</label>
-    <div class="fld"><label>Login</label><select id="dB"><option value="">Kein Login (z. B. Lernende, Temporäre)</option>${BENUTZER.filter(b => (b.email || b.id === p.benutzer_id) && !vergeben.has(b.id)).map(b => `<option value="${b.id}"${b.id === p.benutzer_id ? ' selected' : ''}>${esc(b.email || (p.name + ' (Benutzer ohne Login)'))} (${esc(ROLLE_LABEL[b.rolle] || b.rolle)})</option>`).join('')}</select></div>
+    <div class="fld"><label>Login</label><select id="dB"><option value="">Kein Login (z. B. Lernende, Temporäre)</option>${BENUTZER.filter(b => (b.email || b.id === p.benutzer_id) && !vergeben.has(b.id)).map(b => `<option value="${b.id}"${b.id === p.benutzer_id ? ' selected' : ''}>${esc(b.email || (p.name + ' (Benutzer ohne Login)'))} (${esc(ROLLE_LABEL[b.rolle] || b.rolle)})</option>`).join('')}</select></div>`}
     <label class="chk"><input type="checkbox" id="dA" ${p.aktiv ? 'checked' : ''}>Aktiv (im Planer sichtbar)</label>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:6px">${neu ? '' : `<span class="small muted" style="margin-right:auto;align-self:center">Löschen geht nicht, damit alte Einsätze erhalten bleiben – «Aktiv» abwählen.</span>`}<button class="btn btn-ghost" id="dNo">Abbrechen</button><button class="btn btn-primary" id="dOk">Speichern</button></div>
   </div>`;
@@ -4580,7 +4581,8 @@ function personDlg(p, gid){
   d.querySelectorAll('#dF button').forEach(b => b.onclick = () => { farbe = b.dataset.c; d.querySelectorAll('#dF button').forEach(x => x.setAttribute('aria-pressed', x === b)); });
   d.querySelector('#dX').onclick = d.querySelector('#dNo').onclick = () => d.remove();
   d.querySelector('#dOk').onclick = async () => {
-    const row = { name: d.querySelector('#dN').value.trim(), kuerzel: d.querySelector('#dK').value.trim() || null, zusatz: d.querySelector('#dZ').value.trim() || null, gruppe_id: d.querySelector('#dG').value || null, farbe: farbe || null, ist_vorarbeiter: d.querySelector('#dV').checked, ist_projektleiter: d.querySelector('#dP').checked, benutzer_id: d.querySelector('#dB').value || null, aktiv: d.querySelector('#dA').checked };
+    const row = { name: d.querySelector('#dN').value.trim(), kuerzel: d.querySelector('#dK').value.trim() || null, zusatz: d.querySelector('#dZ').value.trim() || null, gruppe_id: d.querySelector('#dG').value || null, aktiv: d.querySelector('#dA').checked };
+    if(!nurZeile) Object.assign(row, { farbe: farbe || null, ist_vorarbeiter: d.querySelector('#dV').checked, ist_projektleiter: d.querySelector('#dP').checked, benutzer_id: d.querySelector('#dB').value || null });
     if(!row.name){ toast('Bitte einen Namen eingeben.', null, true); return; }
     if(neu) row.sortierung = 10 + Math.max(0, ...PERSONEN.filter(x => (x.gruppe_id || null) === row.gruppe_id).map(x => x.sortierung));
     const { error } = neu ? await sb.from('planer_person').insert(row) : await sb.from('planer_person').update(row).eq('id', p.id);
