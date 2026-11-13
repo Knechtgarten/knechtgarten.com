@@ -24,9 +24,9 @@
       B('gemeinsam', 'In gemeinsamen Boards löschen', 'Pendenzen endgültig löschen (Archiv)', ['loeschen']),
       S('listen', 'Listen in gemeinsamen Boards verwalten', 'Listen hinzufügen, umbenennen, löschen; Pendenzenarten') ] },
     { k: 'plan', n: 'Einsatzplaner', icon: 'plan', bereiche: [
-      B('einsaetze', 'Einsätze', 'Eigene = eigene Zeile, Gruppe = alle Zeilen der Planer-Gruppe', ['bearbeiten'], true),
+      B('einsaetze', 'Planen', 'Eigene = eigene Zeile mit offenen Aufträgen, dazu den Vorrat der eigenen Gruppe in die eigene Zeile ziehen. Gruppe = alle Zeilen der Planer-Gruppe', ['bearbeiten'], true),
       B('abwesenheit', 'Abwesenheiten & Ferien', '', ['bearbeiten'], true),
-      S('reservieren', 'Geräte selber reservieren', 'Anhänger usw. mit Haken «selber reservierbar»: Handy › Reservieren und im Planer, nur eigene ändern'),
+      S('reservieren', 'Anhänger selber reservieren', 'Anhänger mit Haken «selber reservierbar»: Handy › Reservieren und im Planer, nur eigene ändern'),
       S('einstellungen', 'Planer-Einstellungen', 'Personen, Fahrzeuge, Feiertage') ] },
     { k: 'pflege', n: 'Pflege & Service', icon: 'pflege', bereiche: [
       J('kunden', 'Pflegekunden bearbeiten', '', ['erstellen', 'bearbeiten', 'loeschen']),
