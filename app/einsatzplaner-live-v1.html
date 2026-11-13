@@ -1209,11 +1209,16 @@ let VOR = [], VOR_OFFEN = lsGet('vorratOffen', true), vDrag = null;
 // Zwei Quellen in denselben Zeilen: Vorrat-Einträge (z. B. zugesagte Offerten) und Pflege-Vorschläge ohne zuständige Person. Alle weiss gestrichelt wie offene Aufträge.
 const VZ = 6, VH = 20, VKOPF = 16; // höchstens 6 Zeilen pro Gruppe, dann in die Breite
 const VBER = { bau: 'Gartenbau', pflege: 'Pflege', pool: 'Pool' }; // Lehrlinge: Schulferien in Arbeitszeit & Ferien, Prüfungen in Termine & Infos // «Allgemein» (andere) gibt es nicht mehr
-// Büro: alle Vorräte, erfassen/ändern/löschen. Wer «Planen» (Eigene/Gruppe/Alle) darf: Vorrat der eigenen Planer-Gruppe sehen
-// und Einträge in Zeilen ziehen, die er bearbeiten darf (Eigene = nur die eigene Zeile und ihre offene Linie).
+// Wer «Planen» (Eigene/Gruppe/Alle) darf: Vorrat der eigenen Planer-Gruppe sehen und Einträge in Zeilen ziehen, die er bearbeiten darf.
+// Erfassen/ändern/löschen nach Recht «Vorrat bearbeiten»: Alle = jeder Vorrat, Gruppe = Vorrat der eigenen Planer-Gruppe,
+// Eigene = selbst erfasste Einträge (neu nur im Vorrat der eigenen Gruppe), Keine = nur einplanen. Ohne Rechte-Gruppe: Büro = Alle.
 const planenRecht = () => { const w = window.KG && KG.darf ? KG.darf('plan', 'einsaetze', 'bearbeiten') : null; return w === 'A' || w === 'G' || w === 'E'; };
-const vorratAn = () => !EINGEBETTET && (isBuero() || planenRecht());
-const vorratGruppe = gid => isBuero() || myPerson()?.gruppe_id === gid;
+const vorratRecht = () => { const w = window.KG && KG.darf ? KG.darf('plan', 'vorrat', 'bearbeiten') : null; return w === null ? (isBuero() ? 'A' : 'K') : w; };
+const meinBereich = () => GRUPPEN.find(g => g.id === myPerson()?.gruppe_id)?.vorrat_bereich || null;
+const vorratNeuOk = ber => { const w = vorratRecht(); return w === 'A' || ((w === 'G' || w === 'E') && ber === meinBereich()); };
+const vorratEditOk = v => { const w = vorratRecht(); return w === 'A' || (w === 'G' && (v.bereich || 'bau') === meinBereich()) || (w === 'E' && v.erstellt_von === ME); };
+const vorratAn = () => !EINGEBETTET && (isBuero() || planenRecht() || vorratRecht() !== 'K');
+const vorratGruppe = gid => isBuero() || vorratRecht() === 'A' || myPerson()?.gruppe_id === gid;
 async function ladeVorrat(){ if(!vorratAn()) return; const { data, error } = await sb.from('planer_vorrat').select('*').order('erstellt_am'); if(!error) VOR = data || []; }
 const vX = i => { const q = Math.floor(i / 5), r = i - 5 * q; return (q * (5 + 2 * WEK) + r) * dayW; };
 const vI = x => { const W7 = (5 + 2 * WEK) * dayW, q = Math.floor(x / W7), rx = x - q * W7; return q * 5 + Math.min(4.999, rx / dayW); };
@@ -1264,7 +1269,7 @@ function vorratDialog(v, tage, rect, ber0){
     <input type="text" id="vT" placeholder="Titel (optional)" value="${esc(v?.titel || '')}">
     <div class="vrow"><label>Tage <input type="number" id="vD" min="0.5" step="0.5" value="${v ? Number(v.tage) : tage}"></label>
       <label class="vchk"><input type="checkbox" id="vG"${v?.geschaetzt ? ' checked' : ''}> geschätzt</label></div>
-    <div class="seg" id="vB">${Object.keys(VBER).map(b => `<button type="button" data-b="${b}" aria-pressed="${ber === b}">${VBER[b]}</button>`).join('')}</div>
+    <div class="seg" id="vB">${Object.keys(VBER).filter(b => vorratRecht() === 'A' || b === ber).map(b => `<button type="button" data-b="${b}" aria-pressed="${ber === b}">${VBER[b]}</button>`).join('')}</div>
     <div class="vrow">${v ? `<button type="button" class="kg-ibtn danger" id="vX" title="Aus dem Vorrat löschen" aria-label="Löschen">${I('trash')}</button>` : ''}<span class="sp"></span><button type="button" class="btn btn-ghost" id="vA">Abbrechen</button><button type="button" class="btn btn-primary" id="vS">${v ? 'Speichern' : 'In den Vorrat'}</button></div>`);
   pop.classList.add('vpop');
   let bereich = ber;
@@ -1335,7 +1340,7 @@ addEventListener('pointerdown', e => {
   // Pflege-Vorschlag: gleiches Ziehen wie im Plan (Personenzeile = abgemacht, offene Linie = offen)
   if(b?.dataset.prov){ e.preventDefault(); drag = { kind: 'prov', pid: b.dataset.prov, x0: e.clientX, y0: e.clientY, moved: false, rect: b.getBoundingClientRect() }; return; }
   if(b){ const v = VOR.find(x => x.id === b.dataset.v); if(!v) return; e.preventDefault(); vDrag = { art: 'bar', v, b, x0: e.clientX, y0: e.clientY, moved: false }; return; }
-  if(f && isBuero()){ e.preventDefault(); const r = f.getBoundingClientRect(); vDrag = { art: 'neu', ber: el.dataset.ber, f, r, x0: e.clientX, y0: e.clientY, i0: Math.floor(vI(e.clientX - r.left)), moved: false }; }
+  if(f && vorratNeuOk(el.dataset.ber)){ e.preventDefault(); const r = f.getBoundingClientRect(); vDrag = { art: 'neu', ber: el.dataset.ber, f, r, x0: e.clientX, y0: e.clientY, i0: Math.floor(vI(e.clientX - r.left)), moved: false }; }
 });
 addEventListener('pointermove', e => {
   if(!vDrag) return; const d = vDrag;
@@ -1357,7 +1362,7 @@ addEventListener('pointerup', e => {
   document.querySelectorAll('.lane.vziel').forEach(x => x.classList.remove('vziel'));
   if(d.g) d.g.remove(); document.querySelectorAll('.vorrat .ziehe').forEach(x => x.classList.remove('ziehe'));
   if(d.art === 'bar'){
-    if(!d.moved){ if(isBuero()) vorratDialog(d.v, null, d.b.getBoundingClientRect()); else toast('In deine Zeile ziehen, um es einzuplanen.'); return; }
+    if(!d.moved){ if(vorratEditOk(d.v)) vorratDialog(d.v, null, d.b.getBoundingClientRect()); else toast('In deine Zeile ziehen, um es einzuplanen.'); return; }
     const lane = document.elementFromPoint(e.clientX, e.clientY)?.closest('#tl .lane[data-mid]');
     if(lane && P[lane.dataset.mid]) vorratEinplanen(d.v, lane.dataset.mid, uAt(e.clientX), lane.dataset.off === '1');
   } else vorratDialog(null, d.moved ? d.n : 5, { left: e.clientX, bottom: e.clientY }, d.ber);

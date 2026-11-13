@@ -25,6 +25,7 @@
       S('listen', 'Listen in gemeinsamen Boards verwalten', 'Listen hinzufügen, umbenennen, löschen; Pendenzenarten') ] },
     { k: 'plan', n: 'Einsatzplaner', icon: 'plan', bereiche: [
       B('einsaetze', 'Planen', 'Eigene = eigene Zeile mit offenen Aufträgen, dazu den Vorrat der eigenen Gruppe in die eigene Zeile ziehen. Gruppe = alle Zeilen der Planer-Gruppe', ['bearbeiten'], true),
+      B('vorrat', 'Vorrat bearbeiten', 'Einträge im Vorrat erfassen, ändern, löschen. Eigene = selbst erfasste, Gruppe = Vorrat der eigenen Planer-Gruppe. Einplanen geht mit «Planen»', ['bearbeiten'], true),
       B('abwesenheit', 'Abwesenheiten & Ferien', '', ['bearbeiten'], true),
       S('reservieren', 'Anhänger selber reservieren', 'Anhänger mit Haken «selber reservierbar»: Handy › Reservieren und im Planer, nur eigene ändern'),
       S('einstellungen', 'Planer-Einstellungen', 'Personen, Fahrzeuge, Feiertage') ] },
