@@ -2075,7 +2075,10 @@ async function uebernehmeEasybillKunde(kundeId, ek){
 // Person & Kontakt, Login & Gruppe, Einsatzplaner (planer_person.benutzer_id), Merkmale.
 // Ersetzt «Personen» und «Benutzerverwaltung» der Verwaltung; Gruppen und Rechte bleiben dort.
 // ---------------------------------------------------------------------------
-const MA = { geladen: false, personen: [], gruppen: [], pp: [], pg: [], merkmale: [], bm: [], zust: {}, gruppe: '', offen: null, alleFarben: false, link: {}, neu: null };
+const MA = { geladen: false, personen: [], gruppen: [], pp: [], pg: [], merkmale: [], bm: [], zust: {}, gruppe: '', offen: null, alleFarben: false, link: {}, neu: null, scrollen: false };
+// Aufruf aus dem Einsatzplaner: ?modus=mitarbeitende&person=<id> öffnet die Person, &neu=temp|ohne das Erfassen
+(() => { const q = new URLSearchParams(location.search), pid = q.get('person'), n = q.get('neu');
+  if(pid){ MA.offen = pid; MA.scrollen = true; } if(n === 'temp' || n === 'ohne') MA.neu = n; })();
 const maName = b => b.anzeigename || (b.email || '').split('@')[0] || '?';
 const maPP = id => MA.pp.find(p => p.benutzer_id === id && p.aktiv !== false && !p.archiviert_am);
 const maLogin = b => b.ist_temporaer ? 'temporär' : b.ist_platzhalter ? 'ohne Login' : !b.rolle ? 'wartet' : b.aktiv === false ? 'gesperrt' : 'aktiv';
@@ -2084,7 +2087,7 @@ async function maLaden(){
   const [b, g, pp, pg, mk, bm, z] = await Promise.all([
     sb.from('benutzer').select('id,email,anzeigename,rolle,aktiv,ist_platzhalter,ist_temporaer,pflege_zustaendig,recht_gruppe_id,erstellt_am,strasse,plz_ort,telefon,geburtsdatum,eintritt,pensum,notfallkontakt,notizen,name_dokumente,mail_dokumente'),
     sb.from('recht_gruppe').select('id,name,schluessel,bereich,sortierung,ist_admin').order('sortierung'),
-    sb.from('planer_person').select('id,name,kuerzel,farbe,gruppe_id,ist_vorarbeiter,ist_projektleiter,benutzer_id,aktiv,archiviert_am').eq('ist_ablage', false),
+    sb.from('planer_person').select('id,name,kuerzel,farbe,gruppe_id,ist_vorarbeiter,ist_projektleiter,benutzer_id,aktiv,archiviert_am,sortierung').eq('ist_ablage', false),
     sb.from('planer_gruppe').select('id,name,sortierung').order('sortierung'),
     sb.from('merkmal').select('id,name,schluessel,sortierung').order('sortierung').order('name'),
     sb.from('benutzer_merkmal').select('benutzer_id,merkmal_id'),
@@ -2128,6 +2131,7 @@ async function maZeichnen(){
   w.querySelectorAll('tr.marow').forEach(tr => tr.onclick = () => { MA.offen = MA.offen === tr.dataset.ma ? null : tr.dataset.ma; maZeichnen(); });
   if(MA.neu) maNeuBinden();
   const b = MA.personen.find(x => x.id === MA.offen); if(b) maBinden(b, maPP(b.id));
+  if(MA.scrollen){ MA.scrollen = false; const z = w.querySelector(`tr.marow[data-ma="${MA.offen}"]`); if(z) z.scrollIntoView({ block: 'start' }); }
 }
 // Auswertungen: nächste Geburtstage, Dienstjubiläen (5er-Jahre, 10 = Dienstaltersgeschenk), Lernende mit Lehrjahr
 function maAuswertung(){
@@ -2192,7 +2196,7 @@ function maLinkHtml(b){
 function maFarbwahl(p){
   const P = KG.palette || {}, T = KG.planerTeams || {};
   const vergeben = new Map(MA.pp.filter(x => x.farbe && x.id !== p.id && x.aktiv !== false && !x.archiviert_am).map(x => [x.farbe.toUpperCase(), x.name]));
-  const sw = c => `<button type="button" class="masw${p.farbe && p.farbe.toUpperCase() === c.toUpperCase() ? ' on' : ''}${vergeben.has(c.toUpperCase()) ? ' vergeben' : ''}" data-farbe="${c}" style="background:${c}" title="${c}${vergeben.has(c.toUpperCase()) ? ' – vergeben an ' + escHtml(vergeben.get(c.toUpperCase())) : ''}"></button>`;
+  const sw = c => `<button type="button" class="masw${p.farbe && p.farbe.toUpperCase() === c.toUpperCase() ? ' on' : ''}${vergeben.has(c.toUpperCase()) ? ' vergeben' : ''}" data-farbe="${c}" style="background:${c}"${vergeben.has(c.toUpperCase()) ? ` title="${escHtml(vergeben.get(c.toUpperCase()))}"` : ''}></button>`;
   const reihen = MA.alleFarben ? [['gruen', 'Grün'], ['oliv', 'Oliv'], ['gold', 'Gold'], ['orange', 'Orange'], ['beere', 'Beere'], ['violett', 'Violett'], ['blau', 'Blau'], ['petrol', 'Petrol'], ['erde', 'Erde'], ['grau', 'Grau-Blau']].filter(([k]) => P[k]).map(([k, n]) => [n, P[k]])
     : [['projektleiter', 'Projektleiter'], ['gartenpflege', 'Gartenpflege'], ['gartenbau', 'Gartenbau'], ['pool', 'Pool'], ['selber', 'Selber abgemacht']].filter(([k]) => T[k]).map(([k, n]) => [n, T[k]]);
   return `<div class="mafarben"><div class="mafr"><span>Keine</span><button type="button" class="masw keine${!p.farbe ? ' on' : ''}" data-farbe="" title="Keine Farbe (Lehrlinge, Hilfsarbeitende)"></button></div>`
@@ -2223,12 +2227,12 @@ function maDetail(b){
   // Einsatzplaner: Zeile verknüpfen, Planer-Gruppe, Kürzel, Haken, Farbe
   const frei = MA.pp.filter(x => x.aktiv !== false && !x.archiviert_am && (!x.benutzer_id || x.id === (p && p.id))).sort((x, y) => x.name.localeCompare(y.name, 'de'));
   T.push(kachel('Einsatzplaner', p ? `<a class="kklink" href="einsatzplaner-live-v1.html">Öffnen</a>` : '', `<div class="mag">
-      <label class="voll">Zeile im Einsatzplaner<select data-mappwahl><option value="">– keine Zeile –</option>${frei.map(x => `<option value="${x.id}"${p && x.id === p.id ? ' selected' : ''}>${escHtml(x.name)} (${escHtml((MA.pg.find(g => g.id === x.gruppe_id) || {}).name || 'ohne Gruppe')})</option>`).join('')}</select></label>
+      <label class="voll">Zeile im Einsatzplaner<select data-mappwahl><option value="">– keine Zeile –</option>${p ? '' : '<option value="_neu">+ Neue Zeile anlegen</option>'}${frei.map(x => `<option value="${x.id}"${p && x.id === p.id ? ' selected' : ''}>${escHtml(x.name)} (${escHtml((MA.pg.find(g => g.id === x.gruppe_id) || {}).name || 'ohne Gruppe')})</option>`).join('')}</select></label>
       ${p ? `<label>Planer-Gruppe<select data-mapp="gruppe_id">${MA.pg.map(g => `<option value="${g.id}"${g.id === p.gruppe_id ? ' selected' : ''}>${escHtml(g.name)}</option>`).join('')}</select></label>
       <label>Kürzel<input type="text" data-mapp="kuerzel" value="${escHtml(p.kuerzel || '')}" ${MA_PW}></label>
       <label class="ck"><input type="checkbox" data-mappck="ist_projektleiter"${p.ist_projektleiter ? ' checked' : ''}>Projektleiter</label>
       <label class="ck"><input type="checkbox" data-mappck="ist_vorarbeiter"${p.ist_vorarbeiter ? ' checked' : ''}>Vorarbeiter</label>
-      <div class="voll">${maFarbwahl(p)}</div>` : `<span class="kkleer voll">Ohne Zeile erscheint die Person nicht im Einsatzplaner.</span>`}</div>`, ' ma'));
+      ${p.ist_vorarbeiter || p.ist_projektleiter || p.farbe ? `<div class="voll">${maFarbwahl(p)}</div>` : ''}` : `<span class="kkleer voll">Ohne Zeile erscheint die Person nicht im Einsatzplaner.</span>`}</div>`, ' ma'));
   // Merkmale: Projektleiter, Vorarbeiter, Lernende … (für Doku-Tools, Listen, Planer)
   const hat = new Set(MA.bm.filter(x => x.benutzer_id === b.id).map(x => x.merkmal_id));
   T.push(kachel('Merkmale', '', `<div class="mamk">${MA.merkmale.map(m => `<button type="button" class="fchip" data-mamk="${m.id}" aria-pressed="${hat.has(m.id)}">${escHtml(m.name)}</button>`).join('')}<button type="button" class="kklink" data-mamkneu>+ Merkmal</button></div>
@@ -2282,6 +2286,10 @@ function maBinden(b, p){
   const pw = d.querySelector('[data-mappwahl]');
   if(pw) pw.addEventListener('change', async () => {
     if(p){ const { error } = await sb.from('planer_person').update({ benutzer_id: null }).eq('id', p.id); if(error) return showToast(friendlyError(error), true); p.benutzer_id = null; }
+    if(pw.value === '_neu'){ const g = MA.pg[MA.pg.length - 1];
+      const { data, error } = await sb.from('planer_person').insert({ name: maName(b), benutzer_id: b.id, gruppe_id: g ? g.id : null, aktiv: true, sortierung: 10 + Math.max(0, ...MA.pp.filter(x => x.gruppe_id === (g && g.id)).map(x => x.sortierung || 0)) })
+        .select('id,name,kuerzel,farbe,gruppe_id,ist_vorarbeiter,ist_projektleiter,benutzer_id,aktiv,archiviert_am').single();
+      if(error) return showToast(friendlyError(error), true); MA.pp.push(data); showToast('Zeile im Einsatzplaner angelegt.'); return maZeichnen(); }
     if(pw.value){ const neu = MA.pp.find(x => x.id === pw.value); const { error } = await sb.from('planer_person').update({ benutzer_id: b.id }).eq('id', neu.id); if(error) return showToast(friendlyError(error), true); neu.benutzer_id = b.id; }
     showToast(pw.value ? 'Mit der Planer-Zeile verknüpft.' : 'Verknüpfung entfernt.'); maZeichnen(); });
   d.querySelectorAll('[data-mapp]').forEach(el => el.addEventListener('change', async () => { if(await setP(el.dataset.mapp, el.value.trim() || null)) maZeichnen(); }));
