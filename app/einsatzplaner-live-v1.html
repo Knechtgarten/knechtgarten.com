@@ -1209,7 +1209,11 @@ let VOR = [], VOR_OFFEN = lsGet('vorratOffen', true), vDrag = null;
 // Zwei Quellen in denselben Zeilen: Vorrat-Einträge (z. B. zugesagte Offerten) und Pflege-Vorschläge ohne zuständige Person. Alle weiss gestrichelt wie offene Aufträge.
 const VZ = 6, VH = 20, VKOPF = 16; // höchstens 6 Zeilen pro Gruppe, dann in die Breite
 const VBER = { bau: 'Gartenbau', pflege: 'Pflege', pool: 'Pool' }; // Lehrlinge: Schulferien in Arbeitszeit & Ferien, Prüfungen in Termine & Infos // «Allgemein» (andere) gibt es nicht mehr
-const vorratAn = () => !EINGEBETTET && isBuero();
+// Büro: alle Vorräte, erfassen/ändern/löschen. Wer «Planen» (Eigene/Gruppe/Alle) darf: Vorrat der eigenen Planer-Gruppe sehen
+// und Einträge in Zeilen ziehen, die er bearbeiten darf (Eigene = nur die eigene Zeile und ihre offene Linie).
+const planenRecht = () => { const w = window.KG && KG.darf ? KG.darf('plan', 'einsaetze', 'bearbeiten') : null; return w === 'A' || w === 'G' || w === 'E'; };
+const vorratAn = () => !EINGEBETTET && (isBuero() || planenRecht());
+const vorratGruppe = gid => isBuero() || myPerson()?.gruppe_id === gid;
 async function ladeVorrat(){ if(!vorratAn()) return; const { data, error } = await sb.from('planer_vorrat').select('*').order('erstellt_am'); if(!error) VOR = data || []; }
 const vX = i => { const q = Math.floor(i / 5), r = i - 5 * q; return (q * (5 + 2 * WEK) + r) * dayW; };
 const vI = x => { const W7 = (5 + 2 * WEK) * dayW, q = Math.floor(x / W7), rx = x - q * W7; return q * 5 + Math.min(4.999, rx / dayW); };
@@ -1331,7 +1335,7 @@ addEventListener('pointerdown', e => {
   // Pflege-Vorschlag: gleiches Ziehen wie im Plan (Personenzeile = abgemacht, offene Linie = offen)
   if(b?.dataset.prov){ e.preventDefault(); drag = { kind: 'prov', pid: b.dataset.prov, x0: e.clientX, y0: e.clientY, moved: false, rect: b.getBoundingClientRect() }; return; }
   if(b){ const v = VOR.find(x => x.id === b.dataset.v); if(!v) return; e.preventDefault(); vDrag = { art: 'bar', v, b, x0: e.clientX, y0: e.clientY, moved: false }; return; }
-  if(f){ e.preventDefault(); const r = f.getBoundingClientRect(); vDrag = { art: 'neu', ber: el.dataset.ber, f, r, x0: e.clientX, y0: e.clientY, i0: Math.floor(vI(e.clientX - r.left)), moved: false }; }
+  if(f && isBuero()){ e.preventDefault(); const r = f.getBoundingClientRect(); vDrag = { art: 'neu', ber: el.dataset.ber, f, r, x0: e.clientX, y0: e.clientY, i0: Math.floor(vI(e.clientX - r.left)), moved: false }; }
 });
 addEventListener('pointermove', e => {
   if(!vDrag) return; const d = vDrag;
@@ -1353,7 +1357,7 @@ addEventListener('pointerup', e => {
   document.querySelectorAll('.lane.vziel').forEach(x => x.classList.remove('vziel'));
   if(d.g) d.g.remove(); document.querySelectorAll('.vorrat .ziehe').forEach(x => x.classList.remove('ziehe'));
   if(d.art === 'bar'){
-    if(!d.moved){ vorratDialog(d.v, null, d.b.getBoundingClientRect()); return; }
+    if(!d.moved){ if(isBuero()) vorratDialog(d.v, null, d.b.getBoundingClientRect()); else toast('In deine Zeile ziehen, um es einzuplanen.'); return; }
     const lane = document.elementFromPoint(e.clientX, e.clientY)?.closest('#tl .lane[data-mid]');
     if(lane && P[lane.dataset.mid]) vorratEinplanen(d.v, lane.dataset.mid, uAt(e.clientX), lane.dataset.off === '1');
   } else vorratDialog(null, d.moved ? d.n : 5, { left: e.clientX, bottom: e.clientY }, d.ber);
@@ -1420,7 +1424,7 @@ const kOrt = k => k ? [k.strasse, [k.plz, k.ort].filter(Boolean).join(' ')].filt
 const kLabel = k => `${kName(k)}${k.ort ? ' · ' + k.ort : ''}`;
 const byId = id => EINS.find(x => x.id === id) || (String(id).startsWith('R') ? ALL.find(x => x.id === id) : undefined); // R… = berechnete Wiederholung
 const first = n => String(n || '').split(' ')[0];
-// Bearbeiten nach Gruppen & Rechte (Einsatzplaner › Einsätze › Bearbeiten):
+// Bearbeiten nach Gruppen & Rechte (Einsatzplaner › Planen › Bearbeiten):
 // Alle = jede Zeile, Eigene = nur die eigene Zeile, Gruppe = Zeilen der eigenen Planer-Gruppe, Keine = nur ansehen.
 // Die Titelzeile einer Gruppe darf bearbeiten, wer eine Zeile dieser Gruppe bearbeiten darf (siehe Team-Lane).
 // Ohne Gruppe (alte Konten): wie bisher Büro alles, sonst die eigene Zeile.
@@ -2152,7 +2156,7 @@ function renderRows(){
     if(!ps.length && (!(isBuero() && g.id !== '_ohne') || /^neu$/i.test(g.name))) return; /* «Neu» nur, wenn jemand drin ist */ const ablK = !EINGEBETTET && /allgemein/i.test(g.name), zu = !ablK && collapsed.has(g.id); // Büro sieht auch leere Gruppen (zum Hinzufügen und Hineinziehen)
     h += `<div class="row grp${zu ? ' zu' : ''}${g === ph ? ' phk' : ''}${ablK ? ' ablk' : ''}" data-g="${g.id}"><div class="nm">${ablK ? `<button type="button" class="ablbar${ABLAGE ? ' on' : ''}" id="ablBtn" title="Drei leere Ablage-Zeilen unter jeder Gruppe ein-/ausblenden">Ablage ${ABLAGE ? 'eingeblendet' : 'ausgeblendet'}</button>` : ''}${I('chev')}<span class="gn" title="${esc(g.name)}">${esc(g.name)}</span>${ablHinweis(g.id)}${g.offene_linie ? `<button type="button" class="goff${OFFEN_ZU.has(g.id) ? '' : ' on'}" data-goff="${g.id}" title="Offene Linien dieser Gruppe ${OFFEN_ZU.has(g.id) ? 'einblenden' : 'ausblenden'}">offen</button>` : ''}${isBuero() && g.id !== '_ohne' ? `<button class="gadd" data-gadd="${g.id}" title="Zeile hinzufügen" aria-label="Zeile hinzufügen">${I('plus')}</button>` : ''}</div><div class="lane" style="width:${W}px;height:20px">${g.offene_linie ? '' : provBars('g:' + g.id)}</div></div>`;
     const offAn = !!g.offene_linie && !zu && !OFFEN_ZU.has(g.id), abl0 = ABL.filter(a => a.gruppe_id === g.id).sort((a, b) => a.sortierung - b.sortierung)[0];
-    if(offAn && g.vorrat_bereich && vorratAn()) h += vorratBlock(g.vorrat_bereich, g.id, 'Vorrat'); // Arbeitsvorrat der Gruppe (auf/zu mit «offen»)
+    if(offAn && g.vorrat_bereich && vorratAn() && vorratGruppe(g.id)) h += vorratBlock(g.vorrat_bereich, g.id, 'Vorrat'); // Arbeitsvorrat der Gruppe (auf/zu mit «offen»)
     if(!zu) ps.forEach(p => { h += personRow(p, W, bgx); if(openMid === p.id) h += openTyp === 'maschine' ? ovRows(W, bgx, 'maschine', p.id) : vehFocusRows(W, bgx, p.id); if(offAn) h += personRow({ ...p, offLab: 'offen' }, W, bgx, true); }); // Anhänger nur in der Übersicht «Anhänger»
     // Schnupper / Temporär: unten immer eine leere Zeile zum Eintippen (Name + Enter = neue Zeile, auch ohne Account)
     if(!zu && !EINGEBETTET && isBuero() && /schnupper|tempor/i.test(g.name)) h += `<div class="row neuzeile"><div class="nm"><input type="text" class="neuin" data-neup="${g.id}" placeholder="+ Name eintippen …" aria-label="Neue Zeile in ${esc(g.name)}"></div><div class="lane" style="width:${W}px;${bgx}"></div></div>`;
@@ -4606,7 +4610,7 @@ function renderRessourcen(){
           <span class="acts">${isBuero() ? `<button class="kg-ibtn${r.selbst_reservierbar ? ' on' : ''}" data-rsel="${r.id}" aria-pressed="${!!r.selbst_reservierbar}" title="${r.selbst_reservierbar ? 'Selber reservierbar (Handy › Reservieren) – ausschalten' : 'Selber reservierbar machen (Handy › Reservieren)'}" aria-label="Selber reservierbar">${I('cal')}</button>` : ''}${r.typ === 'fahrzeug' && isBuero() ? `<button class="kg-ibtn" data-re="${r.id}" title="Stamm-Fahrer" aria-label="Stamm-Fahrer">${I('user')}</button>` : ''}<a class="kg-ibtn" href="${wl(r)}" target="_blank" rel="noopener" title="Im Nachschlagewerk öffnen" aria-label="Im Nachschlagewerk öffnen">${I('ext')}</a></span></div>`).join('') || '<div class="prow"><span></span><span class="muted small">Noch keine erfasst</span></div>'}</div>`; }).join('')}</div>`;
   const q = s => $('appMain').querySelectorAll(s);
   q('[data-re]').forEach(b => b.onclick = () => resDlg(resById(b.dataset.re)));
-  // Haken «selber reservierbar»: erscheint auf dem Handy unter Reservieren (Recht «Geräte selber reservieren»)
+  // Haken «selber reservierbar»: erscheint auf dem Handy unter Reservieren (Recht «Anhänger selber reservieren»)
   q('[data-rsel]').forEach(b => b.onclick = async () => { const r = resById(b.dataset.rsel), an = !r.selbst_reservierbar;
     const { error } = await sb.from('planer_ressource').update({ selbst_reservierbar: an }).eq('id', r.id); if(error) return fehler(error, 'Speichern');
     r.selbst_reservierbar = an; toast(an ? `${resName(r)}: selber reservierbar` : `${resName(r)}: nur noch Büro`); renderRessourcen(); });
