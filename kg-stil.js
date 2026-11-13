@@ -40,6 +40,7 @@
     karte:  '<path d="M3 6.5l6-2.5 6 2.5 6-2.5v13.5l-6 2.5-6-2.5-6 2.5z"/><path d="M9 4v13.5M15 6.5V20"/>',
     mikrofon:'<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
     chev: '<path d="M6 9l6 6 6-6"/>',
+    offen: '<path d="M3 6h11M8 12h13M4 18h14" stroke-width="3" stroke-linecap="butt" stroke-dasharray="3 2"/>',   // offene Aufträge (Planer: Gruppenkopf)
     fett: '<path d="M7 5h6a3.5 3.5 0 0 1 0 7H7zM7 12h7a3.5 3.5 0 0 1 0 7H7z"/>',
     kursiv: '<path d="M10 5h8M6 19h8M14 5l-4 14"/>',
     aufzaehlung: '<path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r=".8"/><circle cx="4.5" cy="12" r=".8"/><circle cx="4.5" cy="18" r=".8"/>',
