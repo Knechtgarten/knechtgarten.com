@@ -183,7 +183,7 @@ button.kg-kachel-kopf,a.kg-kachel-kopf{cursor:pointer;} button.kg-kachel-kopf:ho
   const TOOLS = [
     { k: 'home', n: 'Startseite', url: 'index.html', farbe: PAL.oliv[1], akzent: PAL.oliv[3], seiten: ['index'] },
     { k: 'offerten', n: 'Offertentool', url: 'tool-start-live-v1.html', farbe: PAL.blau[1], akzent: PAL.blau[3], modul: 'offertentool',
-      seiten: ['tool-start-live-v1', 'tool-a-live-v1', 'tool-a-dokument-live-v1', 'tool-a2-allgemein-live-v1', 'tool-a3-artikel-live-v1', 'tool-b-live-v1', 'einstellungen-live-v1'] },
+      seiten: ['tool-start-live-v1', 'tool-a-live-v1', 'tool-a-alt-live-v1', 'tool-a2-allgemein-live-v1', 'tool-a3-artikel-live-v1', 'tool-b-live-v1', 'einstellungen-live-v1'] },
     { k: 'artikel', n: 'Artikelstamm', url: 'tool-c-live-v1.html', farbe: PAL.blau[0], akzent: PAL.blau[3], modul: 'offertentool', seiten: ['tool-c-live-v1'] },
     // Kontakte = eigenes Haupttool: Kunden, Lieferanten und Pflegekunden (früher «Pflege & Service»)
     { k: 'kunden', n: 'Kontakte', url: 'tool-d-kunden-live-v1.html', farbe: PAL.gold[0], akzent: PAL.gold[3],
@@ -419,7 +419,7 @@ html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!import
   };
   // Welche Seite gehört zu welchem Tool/Bereich (für Menü, Reiter und Seitenschutz)
   const SEITENRECHT = {
-    'tool-start-live-v1': ['offerten', 'offerten'], 'tool-a-live-v1': ['offerten', 'offerten'], 'tool-a-dokument-live-v1': ['offerten', 'offerten'],
+    'tool-start-live-v1': ['offerten', 'offerten'], 'tool-a-live-v1': ['offerten', 'offerten'], 'tool-a-alt-live-v1': ['offerten', 'offerten'],
     'tool-a2-allgemein-live-v1': ['offerten', 'offerten'], 'tool-a3-artikel-live-v1': ['offerten', 'offerten'],
     'tool-b-live-v1': ['offerten', 'vorlagen'], 'einstellungen-live-v1': ['offerten', 'vorlagen|einstellungen'],
     'tool-c-live-v1': ['offerten', 'artikel'],
