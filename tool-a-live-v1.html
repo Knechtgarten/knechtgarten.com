@@ -7482,11 +7482,11 @@ function dokNotizKnopf(offen){
 .dokstk,.doknochbtn{width:28px !important;height:28px !important}
 .dokstk:not(.an){color:#b5bac0}
 /* Leuchtstift links neben der Zeile (nur mit «Noch offen») */
-#costbody tr[data-sk]>td:first-child{position:relative;overflow:visible}
-.dleucht{position:absolute;left:-30px;top:50%;transform:translateY(-50%);width:22px;height:22px;border-radius:50%;border:0;background:none;color:#c3c8ce;cursor:pointer;display:none;align-items:center;justify-content:center;padding:0}
-#costwrap.dokhatnoch .dleucht{display:inline-flex}
+#costwrap{position:relative}
+.dleuchtlayer{position:absolute;left:0;top:0;width:0;height:0;z-index:4}
+.dleucht{position:absolute;width:22px;height:22px;border-radius:50%;border:0;background:none;color:#c3c8ce;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;padding:0}
 .dleucht:hover{color:#8A6410;background:#FAEBB0}
-#costbody tr.dmark .dleucht{color:#8A6410;background:#F2CF5E}
+.dleucht.an{color:#8A6410;background:#F2CF5E}
 #costbody tr.dmark>td{background:#FDF5D8}
 #costbody tr.dmark>td:first-child{box-shadow:inset 3px 0 0 #E0AE24}
 .doknoch{border-radius:8px;padding:9px 12px 6px;margin:4px 0 14px;clear:both}
@@ -7551,18 +7551,19 @@ function dokNotizKnopf(offen){
   window.dokStatusRender = render;
 
   // Leuchtstift: links neben jeder Zeile, nur solange «Noch offen» etwas enthält; Klick markiert die ganze Zeile
+  // Knöpfe liegen in einer eigenen Ebene im Blatt (nicht in der Zelle, sonst laufen lange Bezeichnungen über)
   const cw = $$('costwrap');
+  const layer = document.createElement('div'); layer.className = 'dleuchtlayer'; if(cw) cw.appendChild(layer);
   const leuchtRender = () => {
     const voll = (offerteNochOffen || '').trim() !== '';
-    if(cw) cw.classList.toggle('dokhatnoch', voll);
-    document.querySelectorAll('#costbody tr[data-sk]').forEach(tr => {
-      const td = tr.querySelector('td'); if(!td) return;
-      if(!td.querySelector('.dleucht')){ const b = document.createElement('button'); b.type = 'button'; b.className = 'dleucht'; b.innerHTML = KG.icon('leuchtstift', 13); td.prepend(b); }
-      const an = voll && offerteMarkiert.has(tr.dataset.sk);
-      tr.classList.toggle('dmark', an);
-      const b = td.querySelector('.dleucht'); b.title = an ? 'Markierung entfernen' : 'Zeile markieren (noch offen)'; b.setAttribute('aria-pressed', an);
-    });
+    const rows = [...document.querySelectorAll('#costbody tr[data-sk]')].filter(tr => tr.offsetParent);
+    rows.forEach(tr => tr.classList.toggle('dmark', voll && offerteMarkiert.has(tr.dataset.sk)));
+    if(!voll || !cw){ layer.innerHTML = ''; return; }
+    const c = cw.getBoundingClientRect();
+    layer.innerHTML = rows.map(tr => { const r = tr.getBoundingClientRect(), an = offerteMarkiert.has(tr.dataset.sk);
+      return `<button type="button" class="dleucht${an ? ' an' : ''}" data-sk="${esc(tr.dataset.sk)}" style="left:${Math.round(r.left - c.left - 30)}px;top:${Math.round(r.top - c.top + (r.height - 22) / 2)}px" title="${an ? 'Markierung entfernen' : 'Zeile markieren (noch offen)'}" aria-pressed="${an}">${KG.icon('leuchtstift', 13)}</button>`; }).join('');
   };
+  window.addEventListener('resize', () => { clearTimeout(tLeucht); tLeucht = setTimeout(leuchtRender, 100); });
   let tLeucht = null;
   const cb = $$('costbody');
   if(cb) new MutationObserver(() => { clearTimeout(tLeucht); tLeucht = setTimeout(leuchtRender, 30); }).observe(cb, { childList: true, subtree: true });
@@ -7572,9 +7573,9 @@ function dokNotizKnopf(offen){
     if(error){ $saveStatus.textContent = 'Fehler beim Speichern der Markierung: ' + error.message; $saveStatus.className = 'status err'; }
   };
   document.addEventListener('click', e => {
-    const b = e.target.closest('#costbody .dleucht'); if(!b) return;
+    const b = e.target.closest('.dleuchtlayer .dleucht'); if(!b) return;
     e.preventDefault(); e.stopPropagation();
-    const sk = b.closest('tr[data-sk]')?.dataset.sk; if(!sk) return;
+    const sk = b.dataset.sk; if(!sk) return;
     offerteMarkiert.has(sk) ? offerteMarkiert.delete(sk) : offerteMarkiert.add(sk);
     leuchtRender(); markSpeichern();
   }, true);
