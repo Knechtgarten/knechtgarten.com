@@ -824,6 +824,28 @@ main.wrap#appMain{max-width:none;padding-left:16px;padding-right:16px}
 .doklk{border:0;background:none;color:var(--primary);font:inherit;font-size:12px;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
 .doktip{position:fixed;z-index:950;background:#323e4e;color:#fff;font-size:11.5px;padding:5px 8px;border-radius:5px;pointer-events:none;white-space:nowrap}
 .doktip[hidden]{display:none}
+/* Zeilen ziehen */
+#costbody tr[data-sk] td:first-child{position:relative}
+#costbody .dgrip{position:absolute;left:-18px;top:50%;transform:translateY(-50%);color:var(--muted);opacity:0;cursor:grab;display:grid;place-items:center;width:16px;height:22px}
+#costbody tr[data-sk]:hover .dgrip{opacity:1}
+#costbody tr.dzieh{opacity:.35}
+#costbody tr.dziel td{box-shadow:inset 0 2px 0 var(--primary)}
+#costbody tr.dneu td{animation:dneu 1.2s ease}
+@keyframes dneu{0%{background:#d6e7f4}100%{background:transparent}}
+/* Textzeile */
+#costbody tr.eztext textarea{width:100%;box-sizing:border-box;border:1px solid transparent;background:transparent;border-radius:4px;padding:3px 5px;font:inherit;font-size:12px;color:var(--muted);resize:none;overflow:hidden;line-height:1.5}
+#costbody tr.eztext textarea:hover{border-color:var(--line)}
+#costbody tr.eztext textarea:focus{outline:none;border-color:var(--primary);color:var(--ink);background:#fff}
+/* Knopfleiste unten statt Links pro Gruppe */
+#costbody tr.ezlinksrow{display:none}
+.dokleiste{display:flex;flex-wrap:wrap;gap:4px 16px;align-items:center;padding:10px 0 8px;border-bottom:1px solid var(--line);position:relative;margin-bottom:6px}
+.dokleiste>button{border:0;background:none;color:#3f6f9f;display:inline-flex;align-items:center;gap:4px;padding:3px 2px;font:inherit;font-size:12.5px;font-weight:500;cursor:pointer}
+.dokleiste>button:hover{color:var(--ink)}
+.dokmenu{position:absolute;top:100%;z-index:40;background:#fff;border:1px solid var(--line);border-radius:6px;box-shadow:0 8px 24px rgba(50,62,78,.16);padding:5px;min-width:200px;margin-top:2px}
+.dokmenu[hidden]{display:none}
+.dokmenu .dmk{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);padding:5px 9px 3px}
+.dokmenu button{display:block;width:100%;text-align:left;border:0;background:none;padding:7px 9px;border-radius:4px;font:inherit;font-size:12.5px;cursor:pointer}
+.dokmenu button:hover{background:var(--soft)}
 </style>
 </head>
 <body>
@@ -5511,6 +5533,26 @@ async function speichereZeilenKorrekturen(offerteId){
 function renderEigeneZeilenFuerKategorie(kat, container){
   let summe = 0;
   eigeneZeilen.filter(z => z.kategorie === kat && !z.geloescht).forEach(z => {
+    if(!z.schluessel) z.schluessel = 'ez-' + crypto.randomUUID();
+    // Neue Ansicht: Textzeile (zählt nicht, nicht im Snapshot/Easybill-Export)
+    if(z.typ === 'text'){
+      const trT = document.createElement('tr');
+      trT.className = 'crow ezrow eztext';
+      trT.dataset.sk = z.schluessel;
+      trT.innerHTML = `<td colspan="4"><textarea class="ez-text" rows="1" placeholder="Text eingeben …" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other">${escHtml(z.bezeichnung === 'Text' ? '' : z.bezeichnung)}</textarea></td><td class="cbetrag"><span class="cbetrag-icons"><button type="button" class="icobtn ez-del" title="Textzeile löschen">${ICON.trash}</button></span></td>`;
+      container.appendChild(trT);
+      const ta = trT.querySelector('textarea');
+      const hoehe = () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; };
+      requestAnimationFrame(hoehe);
+      ta.addEventListener('input', hoehe);
+      ta.addEventListener('change', () => { z.bezeichnung = ta.value.trim() || 'Text'; planAutosave(); });
+      trT.querySelector('.ez-del').addEventListener('click', () => {
+        if(!confirm('Textzeile löschen?')) return;
+        eigeneZeilen = eigeneZeilen.filter(x => x.clientKey !== z.clientKey);
+        recalc(); planAutosave();
+      });
+      return;
+    }
     const betrag = rundeCHF((z.menge || 0) * (z.preis || 0));
     summe += betrag;
     snapshotZeile(KAT_LABEL[kat], { bezeichnung: z.bezeichnung, menge: z.menge || 0, einheit: z.einheit || '', preis: z.preis || 0, betrag, geloescht: false });
@@ -5522,6 +5564,7 @@ function renderEigeneZeilenFuerKategorie(kat, container){
     if(istUnvollstaendig) unvollstaendigeFreitextZeilen.push(z);
     const tr = document.createElement('tr');
     tr.className = 'crow ezrow' + (betrag === 0 ? ' betragnull' : '');
+    tr.dataset.sk = z.schluessel;
     tr.title = istUnvollstaendig ? 'Menge oder Preis noch nicht erfasst' : '';
     tr.innerHTML = `<td><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="ez-bez" value="${z.bezeichnung}"></td>
       <td style="text-align:right"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="ez-menge" type="number" step="0.01" value="${z.menge}"></td>
@@ -5580,7 +5623,7 @@ async function ladeEigeneZeilen(offerteId){
     return {
       clientKey: 'ez' + eigeneZeileCounter, dbId: r.id, kategorie: r.kategorie, bezeichnung: r.bezeichnung, menge: r.menge, einheit: r.einheit, preis: r.preis,
       freitextVorlageId: r.freitext_vorlage_id, foto1Url: r.foto1_url || null, foto2Url: r.foto2_url || null, foto3Url: r.foto3_url || null,
-      geloescht: !!r.geloescht
+      geloescht: !!r.geloescht, schluessel: r.schluessel || ('ez-' + crypto.randomUUID()), typ: r.typ || null
     };
   });
 }
@@ -5590,7 +5633,7 @@ async function speichereEigeneZeilen(offerteId){
   if(delErr) throw delErr;
   const echte = eigeneZeilen.filter(z => z.bezeichnung.trim());
   if(echte.length){
-    const rows = echte.map((z, i) => ({ offerte_id: offerteId, kategorie: z.kategorie, bezeichnung: z.bezeichnung.trim(), menge: z.menge || 0, einheit: z.einheit || '', preis: z.preis || 0, reihenfolge: i, freitext_vorlage_id: z.freitextVorlageId ?? null, foto1_url: z.foto1Url ?? null, foto2_url: z.foto2Url ?? null, foto3_url: z.foto3Url ?? null, geloescht: !!z.geloescht })); // immer mitsenden: bei gemischten Zeilen setzt PostgREST fehlende Schluessel sonst auf NULL (Not-null-Fehler)
+    const rows = echte.map((z, i) => ({ offerte_id: offerteId, kategorie: z.kategorie, bezeichnung: z.bezeichnung.trim(), menge: z.menge || 0, einheit: z.einheit || '', preis: z.preis || 0, reihenfolge: i, freitext_vorlage_id: z.freitextVorlageId ?? null, foto1_url: z.foto1Url ?? null, foto2_url: z.foto2Url ?? null, foto3_url: z.foto3Url ?? null, geloescht: !!z.geloescht, schluessel: z.schluessel || null, typ: z.typ || null })); // immer mitsenden: bei gemischten Zeilen setzt PostgREST fehlende Schluessel sonst auf NULL (Not-null-Fehler)
     const { error: insErr } = await sb.from('offerte_eigene_zeile').insert(rows);
     if(insErr) throw insErr;
   }
@@ -5752,6 +5795,7 @@ async function recalcJetzt(){
         snapshotZeile(KAT_LABEL[schluessel.split(':')[0]] || schluessel, { bezeichnung, menge: effMenge, einheit: effEinheit, preis: effPreis, betrag: effBetrag, geloescht });
         const tr = document.createElement('tr');
         tr.className = 'crow' + (geloescht ? ' zgeloescht' : (effBetrag === 0 ? ' betragnull' : ''));
+        tr.dataset.sk = schluessel;
         const rechnungswegSimple = `${toolMenge} ${einheit} × ${fmtCHF(toolPreis)} = ${fmtCHF(toolBetrag)}`;
         tr.addEventListener('mouseenter', e => { if(!e.target.closest || !e.target.closest('input,select,button')) zeigeRechnungsweg(tr, rechnungsweg, rechnungswegSimple); });
         tr.addEventListener('mouseleave', versteckeRechnungsweg);
@@ -7038,6 +7082,133 @@ $('supportChatInput').addEventListener('keydown', (e) => {
     const r = t.getBoundingClientRect();
     tip.style.left = Math.max(8, r.right - tip.offsetWidth) + 'px'; tip.style.top = (r.top - 30) + 'px';
   });
+})();
+</script>
+<script>
+/* ===== Neue Ansicht: Zeilen ziehen (Reihenfolge pro Offerte), Knopfleiste unten, Projektleiter im Kopf ===== */
+(function(){
+  const $$ = id => document.getElementById(id);
+  const body = $$('costbody'), cw = $$('costwrap');
+  if(!body || !cw) return;
+  let reihenfolge = [], geladenFuer = null, plFuer = null;
+  const GRIP = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="6" r=".8"/><circle cx="15" cy="6" r=".8"/><circle cx="9" cy="12" r=".8"/><circle cx="15" cy="12" r=".8"/><circle cx="9" cy="18" r=".8"/><circle cx="15" cy="18" r=".8"/></svg>';
+
+  // Gruppen im Dokument: ab jeder Gruppenzeile (.cgrouphead) bis zur nächsten
+  const gruppen = () => {
+    const out = []; let g = null;
+    [...body.children].forEach(tr => {
+      if(tr.classList.contains('cgrouphead')){ g = { kopf: tr, zeilen: [], ende: null }; out.push(g); return; }
+      if(!g) return;
+      if(tr.dataset.sk) g.zeilen.push(tr); else if(!g.ende) g.ende = tr;
+    });
+    return out;
+  };
+  // gespeicherte Reihenfolge anwenden: bekannte Zeilen nach Liste, neue ans Ende ihrer Gruppe
+  const sortieren = () => {
+    if(!reihenfolge.length) return;
+    const idx = new Map(reihenfolge.map((k, i) => [k, i]));
+    gruppen().forEach(g => {
+      if(g.zeilen.length < 2) return;
+      const sortiert = g.zeilen.map((tr, i) => ({ tr, i, r: idx.has(tr.dataset.sk) ? idx.get(tr.dataset.sk) : 1e9 + i })).sort((a, b) => a.r - b.r);
+      if(sortiert.every((x, i) => x.i === i)) return;
+      const anker = g.zeilen[g.zeilen.length - 1].nextSibling; // Linkzeile, nächste Gruppe oder Ende
+      sortiert.forEach(x => body.insertBefore(x.tr, anker));
+    });
+  };
+  const griffe = () => {
+    body.querySelectorAll('tr[data-sk]').forEach(tr => {
+      if(tr.querySelector('.dgrip')) return;
+      tr.draggable = true;
+      const g = document.createElement('span'); g.className = 'dgrip'; g.title = 'Ziehen zum Verschieben'; g.innerHTML = GRIP;
+      tr.cells[0].prepend(g);
+    });
+  };
+  const speichern = async () => {
+    reihenfolge = [...body.querySelectorAll('tr[data-sk]')].map(tr => tr.dataset.sk);
+    if(typeof currentOfferteId === 'undefined' || !currentOfferteId) return;
+    const { error } = await sb.from('offerte').update({ zeilen_reihenfolge: reihenfolge }).eq('id', currentOfferteId);
+    if(error) console.error('Reihenfolge speichern:', error);
+  };
+  new MutationObserver(() => { sortieren(); griffe(); }).observe(body, { childList: true });
+
+  // Ziehen: nur innerhalb derselben Gruppe
+  let zieh = null;
+  const gruppeVon = tr => { let x = tr; while(x && !x.classList.contains('cgrouphead')) x = x.previousElementSibling; return x; };
+  body.addEventListener('dragstart', e => {
+    const tr = e.target.closest && e.target.closest('tr[data-sk]');
+    if(!tr || e.target.closest('input,select,textarea,button')){ if(tr) e.preventDefault(); return; }
+    zieh = tr; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', tr.dataset.sk);
+    setTimeout(() => tr.classList.add('dzieh'));
+  });
+  body.addEventListener('dragover', e => {
+    if(!zieh) return;
+    const tr = e.target.closest('tr[data-sk]');
+    if(!tr || tr === zieh || gruppeVon(tr) !== gruppeVon(zieh)) return;
+    e.preventDefault();
+    body.querySelectorAll('.dziel').forEach(x => x.classList.remove('dziel'));
+    tr.classList.add('dziel');
+  });
+  body.addEventListener('drop', e => {
+    if(!zieh) return;
+    const tr = e.target.closest('tr[data-sk]');
+    if(!tr || tr === zieh || gruppeVon(tr) !== gruppeVon(zieh)) return;
+    e.preventDefault();
+    body.insertBefore(zieh, tr);
+    speichern();
+  });
+  document.addEventListener('dragend', () => { if(zieh) zieh.classList.remove('dzieh'); zieh = null; body.querySelectorAll('.dziel').forEach(x => x.classList.remove('dziel')); });
+
+  // Reihenfolge und Projektleiter laden, sobald eine andere Offerte offen ist
+  setInterval(async () => {
+    const id = (typeof currentOfferteId !== 'undefined') ? currentOfferteId : null;
+    if(!id || id === geladenFuer) return;
+    geladenFuer = id;
+    const { data } = await sb.from('offerte').select('zeilen_reihenfolge, erstellt_von').eq('id', id).maybeSingle();
+    reihenfolge = Array.isArray(data?.zeilen_reihenfolge) ? data.zeilen_reihenfolge : [];
+    sortieren(); griffe();
+    const pl = $$('dkPl');
+    if(pl){ pl.textContent = '';
+      if(data?.erstellt_von && data.erstellt_von !== plFuer){
+        const { data: b } = await sb.from('benutzer').select('anzeigename, email').eq('id', data.erstellt_von).maybeSingle();
+        if(geladenFuer === id && b) pl.textContent = 'Projektleiter ' + (b.anzeigename || (b.email || '').split('@')[0]);
+      }
+    }
+  }, 600);
+  const sub = document.querySelector('.dokkopf .sub');
+  if(sub && !$$('dkPl')){ const s = document.createElement('span'); s.className = 't'; s.id = 'dkPl'; sub.appendChild(s); }
+
+  // Knopfleiste unten (wie Easybill): Artikel, Leere Zeile, Textzeile – Gruppe wählen, dann einfügen
+  const KATS = (typeof KAT_ORDER !== 'undefined' ? KAT_ORDER : ['personal', 'maschine', 'logistik', 'material']).map(k => [k, (typeof KAT_LABEL !== 'undefined' && KAT_LABEL[k]) || k]);
+  const leiste = document.createElement('div');
+  leiste.className = 'dokleiste';
+  const PLUS = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
+  leiste.innerHTML = `<button type="button" data-neu="artikel">${PLUS}Artikel</button><button type="button" data-neu="leer">${PLUS}Leere Zeile</button><button type="button" data-neu="text">${PLUS}Textzeile</button><div class="dokmenu" hidden></div>`;
+  const tab = cw.querySelector('table.cost');
+  if(tab) tab.after(leiste);
+  const menu = leiste.querySelector('.dokmenu');
+  const neueEigene = (kat, felder) => {
+    eigeneZeileCounter++;
+    const z = { clientKey: 'ez' + eigeneZeileCounter, dbId: null, kategorie: kat, menge: 1, einheit: 'Stk.', preis: 0, schluessel: 'ez-' + crypto.randomUUID(), ...felder };
+    eigeneZeilen.push(z);
+    recalc(); planAutosave();
+    setTimeout(() => { const tr = body.querySelector(`tr[data-sk="${z.schluessel}"]`); if(!tr) return; tr.classList.add('dneu'); const el = tr.querySelector('textarea, .ez-bez'); if(el){ el.focus(); if(el.select) el.select(); } }, 400);
+  };
+  leiste.addEventListener('click', async e => {
+    const b = e.target.closest('button'); if(!b) return;
+    if(b.dataset.neu){
+      const art = b.dataset.neu;
+      menu.innerHTML = `<div class="dmk">In welche Gruppe?</div>` + KATS.map(([k, l]) => `<button type="button" data-kat="${k}" data-art="${art}">${l}</button>`).join('');
+      menu.style.left = b.offsetLeft + 'px'; menu.hidden = false; return;
+    }
+    if(b.dataset.kat){
+      menu.hidden = true;
+      const kat = b.dataset.kat, art = b.dataset.art;
+      if(art === 'leer') return neueEigene(kat, { bezeichnung: 'Neue Position' });
+      if(art === 'text') return neueEigene(kat, { typ: 'text', bezeichnung: 'Text', menge: 0, einheit: '', preis: 0 });
+      if(art === 'artikel') await openArtikelstammPicker(kat, a => neueEigene(kat, { bezeichnung: a.bezeichnung, einheit: a.einheit, preis: a.vp_knecht ?? 0 }));
+    }
+  });
+  document.addEventListener('click', e => { if(!e.target.closest('.dokleiste')) menu.hidden = true; });
 })();
 </script>
 </body>
