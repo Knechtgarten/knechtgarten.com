@@ -1984,6 +1984,7 @@ let bereichZugaenglichkeitStufe = 2;
 let transportWahl = { kies: null, beton: null }; // gewaehltes Werk pro Stoff, null = automatisch das guenstigste
 let bereichKonfigEingeklappt = false;
 let bereichAfOffenState = {};
+let bereichZugOffen = false, bereichWerkOffen = false; // Zugänglichkeit + Werk: standardmässig zu, Wert rechts im Balken
 // Auf/Zu-Zustand der Zwischentitel bei den Eingabefeldern - rein visueller
 // Render-Zustand (nicht in der DB gespeichert, wie bereichAfOffenState),
 // unabhaengig von den Gewaehlte/Alle-oeffnen/schliessen-Sammelbuttons der
@@ -2341,7 +2342,11 @@ function renderTransportWahl(){
     if(!kand.length) return `<select disabled aria-label="${stoff === 'kies' ? 'Kieswerk' : 'Betonwerk'}"><option>–</option></select>`;
     return `<select class="twSel" data-stoff="${stoff}" aria-label="${stoff === 'kies' ? 'Kieswerk' : 'Betonwerk'}">${kand.map(e => `<option value="${e.werk.id}"${info.gewaehlt[stoff] === e ? ' selected' : ''}>${escHtml(e.werk.name)}${info.guenstigster[stoff] === e ? ' (günstigster)' : ''}</option>`).join('')}</select>`;
   };
-  box.innerHTML = `<label class="flabel">Werk</label><div class="dokwerk"><span class="lab">Kieswerk</span><span class="lab">Betonwerk</span><span class="lab"></span>${sel('kies')}${sel('beton')}</div>`;
+  // zuklappbar wie die Auswahlfelder, gewählte Werke rechts im Balken
+  const wname = stoff => { const g = info.gewaehlt[stoff]; return g ? escHtml(g.werk.name) : ''; };
+  const wl = [['Kies', wname('kies')], ['Beton', wname('beton')]].filter(x => x[1]);
+  box.classList.toggle('afzu', !bereichWerkOffen);
+  box.innerHTML = `<label class="flabel afklapp" data-klapp="werk"><span class="afname"><button type="button" class="afToggle aktiv" tabindex="-1">${ICON.chevronDown}</button>Werk</span><span class="afgew">${wl.map(x => `<span>${x[0]}: ${x[1]}</span>`).join('')}</span></label><div class="dokwerk"><span class="lab">Kieswerk</span><span class="lab">Betonwerk</span><span class="lab"></span>${sel('kies')}${sel('beton')}</div>`;
   box.querySelectorAll('.twSel').forEach(s => s.addEventListener('change', () => {
     transportWahl[s.dataset.stoff] = s.value;
     planAutosave();
@@ -3578,6 +3583,7 @@ function aktualisiereZugAnzeige(container){
   const handle = container.querySelector('.zughandle');
   handle.style.left = pct + '%';
   handle.title = ZUGANG_LABELS[stufe - 1];
+  const zw = container.querySelector('.zugwert'); if(zw) zw.innerHTML = `<span>${stufe} · ${escHtml(ZUGANG_LABELS[stufe - 1])}</span>`;
   container.querySelectorAll('.zugstop').forEach(el => {
     el.classList.toggle('on', parseInt(el.dataset.v) === stufe);
     el.title = ZUGANG_LABELS[parseInt(el.dataset.v) - 1];
@@ -3604,8 +3610,8 @@ function renderBereich(){
         ${formenAktivFuerOffertentyp ? '<div class="formenblock" id="formenBlock"></div>' : ''}
         <div class="dimsrows"></div>
         ${(zugaenglichkeitAktivFuerOffertentyp || transportWahlRelevant()) ? '<div class="zugRow">' : ''}
-        ${zugaenglichkeitAktivFuerOffertentyp ? `<div class="afblock zugblock">
-          <label class="flabel">Zugänglichkeit Standort</label>
+        ${zugaenglichkeitAktivFuerOffertentyp ? `<div class="afblock zugblock${bereichZugOffen ? '' : ' afzu'}">
+          <label class="flabel afklapp" data-klapp="zug"><span class="afname"><button type="button" class="afToggle aktiv" tabindex="-1">${ICON.chevronDown}</button>Zugänglichkeit Standort</span><span class="afgew zugwert"></span></label>
           <div class="zugwrap">
             <div class="zugslider">
               <div class="zugtrack"><div class="zugfill"></div></div>
@@ -3623,11 +3629,6 @@ function renderBereich(){
         ${(zugaenglichkeitAktivFuerOffertentyp || transportWahlRelevant()) ? '</div>' : ''}
         ${VORAUSWAHLEN.length ? `<div class="vorauswahlRow">
           ${VORAUSWAHLEN.map(v => `<button type="button" class="vwbtn${aktiveVorauswahlId === v.id ? ' active' : ''}" data-vw="${v.id}">${v.name}</button>`).join('')}
-        </div>` : ''}
-        ${auswahlfelder.length ? `<div class="afBulkRow">
-          <button type="button" class="afBulkBtn" data-mode="gewaehlt">${ICON.chevronDown}Gewählte öffnen</button>
-          <button type="button" class="afBulkBtn" data-mode="alle">${ICON.chevronDown}Alle öffnen</button>
-          <button type="button" class="afBulkBtn" data-mode="keine">${ICON.chevronDown}Alle schliessen</button>
         </div>` : ''}
         <div class="afwrap"></div>
       </div>
@@ -3811,7 +3812,8 @@ function renderBereich(){
     // siehe .afToggle.aktiv).
     const hatAktiveOption = af.optionen.some(o => bereichSelectedOptions.has(o.id));
     const manuellerZustand = bereichAfOffenState?.[af.id];
-    const offen = manuellerZustand != null ? manuellerZustand : hatAktiveOption;
+    // Neue Ansicht: standardmässig zu (Gewähltes steht rechts im Balken), immer nur ein Abschnitt offen
+    const offen = manuellerZustand === true;
     if(offen !== hatAktiveOption) bulkGewaehltPasst = false;
     if(!offen) bulkAllePasst = false;
     if(offen) bulkKeinePasst = false;
@@ -3884,7 +3886,13 @@ function renderBereich(){
         </span>${ex.extras}
       </span>`;
     }
-    div.innerHTML = `<label class="flabel"><button type="button" class="afToggle${hatAktiveOption ? ' aktiv' : ''}" title="${offen ? 'Optionen ausblenden' : 'Optionen anzeigen'}">${ICON.chevronDown}</button>${af.name}${hatAnzeige ? `<span class="tsanzeigewert" data-ts="${zugehoerigerTs.id}"></span>` : ''}</label>
+    // Gewähltes rechts im Balken, untereinander (Gruppe: «Name: Wahl», Mengenoption mit Anzahl + Einheit)
+    const gewaehlt = af.optionen.filter(o => bereichSelectedOptions.has(o.id)).map(o => {
+      const t = (o.optionsgruppeId ? (o.optionsgruppeName || 'Gruppe') + ': ' : '') + o.name;
+      const m = o.mengenoption ? ` ${(bereichOptionAnzahl[o.id] ?? 0).toLocaleString('de-CH')} ${o.mengenoptionEinheit || 'Stk.'}` : '';
+      return `<span title="${escHtml(t + m)}">${escHtml(t)}${m ? `<i>${escHtml(m)}</i>` : ''}</span>`;
+    }).join('');
+    div.innerHTML = `<label class="flabel afklapp"><span class="afname"><button type="button" class="afToggle${hatAktiveOption ? ' aktiv' : ''}" title="${offen ? 'Optionen ausblenden' : 'Optionen anzeigen'}">${ICON.chevronDown}</button>${af.name}${hatAnzeige ? `<span class="tsanzeigewert" data-ts="${zugehoerigerTs.id}"></span>` : ''}</span>${gewaehlt ? `<span class="afgew">${gewaehlt}</span>` : ''}</label>
       <div class="optrow">${optButtons}</div>`;
     afWrap.appendChild(div);
     div.querySelectorAll(".verweisbtn").forEach(btn => {
@@ -3894,9 +3902,11 @@ function renderBereich(){
       btn.classList.toggle("leer", verweisSummen(o).summe <= 0);
       btn.addEventListener("click", e => { e.stopPropagation(); oeffneVerweisPopup(btn, o); });
     });
-    div.querySelector('.afToggle')?.addEventListener('click', e => {
-      e.stopPropagation();
-      bereichAfOffenState[af.id] = !offen;
+    // ganzer Balken klappt auf/zu; beim Öffnen schliessen sich alle anderen
+    div.querySelector('.flabel')?.addEventListener('click', e => {
+      e.preventDefault(); e.stopPropagation();
+      bereichAfOffenState = {};
+      if(!offen) bereichAfOffenState[af.id] = true;
       renderBereich();
     });
     // Klick auf eine Option (Button oder Eintrag im Gruppen-Dropdown)
@@ -7680,6 +7690,28 @@ function dokNotizKnopf(offen){
   document.addEventListener('keydown', e => { if(e.key === 'Escape') zu(); });
   window.addEventListener('scroll', e => { if(menu && e.target !== menu) zu(); }, true);
 })();
+</script>
+<style id="dokKlappStil">
+/* Konfigurator: Balken klappen auf/zu, Gewähltes rechts untereinander (rechtes Drittel) */
+.afblock.afzu .zugwrap,.afblock.afzu .dokwerk{display:none}
+.afblock label.flabel.afklapp{cursor:pointer;display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);align-items:start;gap:4px}
+.flabel.afklapp:hover{background:#eaeef3}
+.flabel.afklapp .afname{display:flex;align-items:center;gap:6px;min-width:0}
+.flabel.afklapp .afgew{display:flex;flex-direction:column;gap:1px;font-weight:500;font-size:11px;line-height:1.35;color:var(--ink);min-width:0;padding-top:1px}
+.flabel.afklapp .afgew span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.flabel.afklapp .afgew i{font-style:normal;color:var(--muted)}
+.afblock.afzu{margin-bottom:0}
+</style>
+<script>
+/* Zugänglichkeit und Werk auf-/zuklappen (Zustand bleibt beim Neuzeichnen) */
+document.addEventListener('click', e => {
+  const l = e.target.closest('.flabel.afklapp[data-klapp]'); if(!l) return;
+  e.preventDefault(); e.stopPropagation();
+  const blk = l.closest('.afblock'); if(!blk) return;
+  const auf = blk.classList.contains('afzu');
+  if(l.dataset.klapp === 'zug') bereichZugOffen = auf; else bereichWerkOffen = auf;
+  blk.classList.toggle('afzu', !auf);
+}, true);
 </script>
 </body>
 </html>
