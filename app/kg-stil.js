@@ -140,7 +140,7 @@ button.kg-kachel-kopf,a.kg-kachel-kopf{cursor:pointer;} button.kg-kachel-kopf:ho
     { k: 'zugesagt',   t: 'Zugesagt',  icon: 'check2', bg: PAL.gruen[2], fg: '#FFFFFF',    d: 'Auftrag erteilt, abgeglichen mit Pendenzen und Planer' },
     { k: 'abgelehnt',  t: 'Abgelehnt', icon: 'x',      bg: PAL.beere[2], fg: '#FFFFFF',    d: 'Kunde hat abgesagt' }
   ];
-  KG.offNochOffen = { icon: 'halbkreis', bg: PAL.gold[3], fg: PAL.gold[0], t: 'Noch offen' };
+  KG.offNochOffen = { icon: 'halbkreis', bg: PAL.gold[3], fg: PAL.gold[0], t: 'In Abklärung' };
   KG.grund = { primary: '#323E4E', primaryL: '#4C5C70', ink: '#232B35', muted: '#8B9097', mutedText: '#6B7079',
     line: '#E1E5E9', bg: '#F5F7F9', accentBlue: '#D6E7F4', accentLime: '#D1DB5F', danger: '#B4655F' };
   KG.planerTeams = {
