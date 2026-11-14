@@ -786,6 +786,42 @@ main.wrap#appMain{max-width:none;padding-left:16px;padding-right:16px}
   #dokKonf{grid-column:1;grid-row:auto;position:static;max-height:none}
   .layout>*,#bauteilCard>*,#offerteContentWrap>*{grid-column:1}
 }
+/* Handänderungen im Dokument: ↺ im Feld, gelb = kleine, rot = grosse Abweichung */
+#costbody .berechnet-val{display:none}
+#costbody .dcw{position:relative;display:inline-block}
+#costbody .dcw .korrektur-feld{text-align:right}
+#costbody .drs{position:absolute;left:3px;top:50%;transform:translateY(-50%);width:14px;height:14px;border:0;background:none;padding:0;color:#8a7a33;display:none;place-items:center;cursor:pointer}
+#costbody td.hand .drs{display:grid}
+#costbody td.hand .korrektur-feld{background:#fff7d6;border-color:#e6cf6b;padding-left:18px}
+#costbody td.hand.gross .korrektur-feld{background:#fde4e1;border-color:#e7a49c}
+#costbody td.hand.gross .drs{color:#a65a52}
+#costbody .dein{width:64px;border:1px solid transparent;background:transparent;border-radius:4px;padding:2px 4px;font:inherit;font-size:inherit;color:var(--muted)}
+#costbody .dein:hover{border-color:var(--line)}
+#costbody .dein:focus{outline:none;border-color:var(--primary);color:var(--ink);background:#fff}
+#costbody td.dz-e.hand .dein{background:#fff7d6;border-color:#e6cf6b;color:var(--ink)}
+/* ausgeblendete Zeile: bleibt hellgrau sichtbar, zählt nicht */
+#costbody tr.zgeloescht td{color:#a3a8ae}
+#costbody tr.zgeloescht td:first-child{text-decoration:line-through;text-decoration-color:rgba(139,144,151,.5)}
+#costbody tr.zgeloescht .korrektur-feld,#costbody tr.zgeloescht .dein{color:#a3a8ae;text-decoration:line-through}
+#costbody tr.zgeloescht .zeile-del{opacity:1;color:var(--ink)}
+/* Popup und Tooltip */
+.dokovl{position:fixed;inset:0;background:rgba(20,26,34,.38);z-index:900;display:grid;place-items:center;padding:16px}
+.dokdlg{background:#fff;border-radius:8px;box-shadow:0 12px 40px rgba(0,0,0,.25);width:min(540px,100%);max-height:85vh;overflow:auto;padding:18px 20px 16px}
+.dokdlg h3{margin:0 0 4px;font-size:15px}
+.dokdlg p{margin:0 0 12px;color:var(--muted);font-size:12px;line-height:1.5}
+.dokkz{border-top:1px solid var(--line);padding:10px 0;display:grid;grid-template-columns:1fr auto;gap:4px 12px;align-items:center;font-size:12.5px}
+.dokkz small{grid-column:1;color:var(--muted);font-size:11.5px}
+.dokkz .dokseg{grid-row:1 / span 2;grid-column:2;display:flex}
+.dokseg button{border:1px solid var(--line);background:#fff;font:inherit;font-size:11.5px;padding:4px 9px;cursor:pointer}
+.dokseg button+button{border-left:0}
+.dokseg button:first-child{border-radius:5px 0 0 5px}
+.dokseg button:last-child{border-radius:0 5px 5px 0}
+.dokseg button[aria-pressed="true"]{background:var(--primary);color:#fff;border-color:var(--primary)}
+.dokfuss{display:flex;gap:8px;justify-content:flex-end;align-items:center;margin-top:12px;flex-wrap:wrap}
+.dokfuss .sp{flex:1}
+.doklk{border:0;background:none;color:var(--primary);font:inherit;font-size:12px;padding:0;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+.doktip{position:fixed;z-index:950;background:#323e4e;color:#fff;font-size:11.5px;padding:5px 8px;border-radius:5px;pointer-events:none;white-space:nowrap}
+.doktip[hidden]{display:none}
 </style>
 </head>
 <body>
@@ -5441,14 +5477,20 @@ function freitextAggregatZeilen(){
 
 // Korrektur einzelner berechneter Zeilen (Menge/Preis ueberschreiben, ohne den
 // berechneten Wert zu verlieren) - siehe addRow() weiter unten.
-let zeilenKorrekturen = {}; // { [zeilen_schluessel]: {menge_korrektur, preis_korrektur, geloescht} }
+let zeilenKorrekturen = {}; // { [zeilen_schluessel]: {menge_korrektur, preis_korrektur, geloescht, basis_menge, basis_preis, einheit_korrektur} }
+// Neue Ansicht: grosse Abweichung ab 20 % oder 500 CHF (Zeilentotal), Konflikte/gerenderte Schlüssel pro Berechnung
+const DOK_GROSS_PROZ = 20, DOK_GROSS_CHF = 500;
+let dokKonflikteNeu = [], dokGerendertNeu = new Set(), dokNamen = {};
+const DOK_ICON_UNDO = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>';
+const DOK_ICON_AUGE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
+const DOK_ICON_AUGE_ZU = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l18 18"/><path d="M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4.2M6.6 6.6A17 17 0 0 0 2 12s3.5 7 10 7a9.6 9.6 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>';
 
 async function ladeZeilenKorrekturen(offerteId){
   const { data, error } = await sb.from('offerte_zeilen_korrektur').select('*').eq('offerte_id', offerteId);
   if(error) throw error;
   zeilenKorrekturen = {};
   (data || []).forEach(r => {
-    zeilenKorrekturen[r.zeilen_schluessel] = { menge_korrektur: r.menge_korrektur, preis_korrektur: r.preis_korrektur, geloescht: r.geloescht };
+    zeilenKorrekturen[r.zeilen_schluessel] = { menge_korrektur: r.menge_korrektur, preis_korrektur: r.preis_korrektur, geloescht: r.geloescht, basis_menge: r.basis_menge, basis_preis: r.basis_preis, einheit_korrektur: r.einheit_korrektur };
   });
 }
 
@@ -5456,8 +5498,8 @@ async function speichereZeilenKorrekturen(offerteId){
   const { error: delErr } = await sb.from('offerte_zeilen_korrektur').delete().eq('offerte_id', offerteId);
   if(delErr) throw delErr;
   const rows = Object.entries(zeilenKorrekturen)
-    .filter(([, k]) => k.menge_korrektur != null || k.preis_korrektur != null || k.geloescht)
-    .map(([schluessel, k]) => ({ offerte_id: offerteId, zeilen_schluessel: schluessel, menge_korrektur: k.menge_korrektur, preis_korrektur: k.preis_korrektur, geloescht: k.geloescht }));
+    .filter(([, k]) => k.menge_korrektur != null || k.preis_korrektur != null || k.geloescht || k.einheit_korrektur)
+    .map(([schluessel, k]) => ({ offerte_id: offerteId, zeilen_schluessel: schluessel, menge_korrektur: k.menge_korrektur, preis_korrektur: k.preis_korrektur, geloescht: !!k.geloescht, basis_menge: k.basis_menge ?? null, basis_preis: k.basis_preis ?? null, einheit_korrektur: k.einheit_korrektur || null }));
   if(rows.length){
     const { error: insErr } = await sb.from('offerte_zeilen_korrektur').insert(rows);
     if(insErr) throw insErr;
@@ -5646,6 +5688,7 @@ async function recalcJetzt(){
   if(!offertentypId) return;
   const meineGeneration = ++recalcGeneration;
   snapshotGruppen = {};
+  dokKonflikteNeu = []; dokGerendertNeu = new Set();
   unvollstaendigeFreitextZeilen = [];
   try{
     let grandTotal = 0;
@@ -5676,69 +5719,73 @@ async function recalcJetzt(){
       let blockTotal = 0;
 
       function addRow(bezeichnung, menge, einheit, preis, betrag, schluessel, rundungMengeFn = rundeMenge, rundungPreisFn = rundeCHF, rechnungsweg = null, preisKorrigierbar = false){
-        // Preis ist bei normalen berechneten Zeilen NICHT korrigierbar (nur
-        // die Menge) - der Preis einer Sammelzeile (z.B. "Materialpaket X")
-        // ist eine Summe aus mehreren Artikeln mit je eigenem Preis aus dem
-        // Artikelstamm; ihn hier zu ueberschreiben war ein zu grobes Werkzeug.
-        // Ausnahme: Zeilen, die (ausschliesslich) aus einer Freitext-Position
-        // stammen (siehe freitextAggregatZeilen()) - dort gibt es gar keinen
-        // echten Artikel-Preis im Hintergrund, der Vorschlagspreis aus Tool B
-        // ist nur ein Startwert und muss pro Offerte änderbar sein.
+        // Neue Ansicht: Menge, Preis und Einheit sind bei jeder Zeile von Hand änderbar.
+        // Jede Handänderung merkt sich den Tool-Wert beim Ändern (basis_menge/basis_preis).
+        // Rechnet das Tool später etwas anderes (Konfigurator geändert), meldet dokNachRecalc() das im Popup.
+        // Farbe: gelb = kleine, rot = grosse Abweichung des Zeilentotals (ab DOK_GROSS_PROZ % oder DOK_GROSS_CHF CHF).
         const k = zeilenKorrekturen[schluessel] || {};
+        const toolMenge = rundungMengeFn(menge), toolPreis = rundungPreisFn(preis);
         const effMenge = rundungMengeFn(k.menge_korrektur != null ? k.menge_korrektur : menge);
         const effPreis = rundungPreisFn(k.preis_korrektur != null ? k.preis_korrektur : preis);
+        const effEinheit = k.einheit_korrektur || einheit;
         const effBetrag = rundeCHF(effMenge * effPreis);
         const geloescht = !!k.geloescht;
-        // Der urspruengliche Berechnungswert wird nur fein daneben angezeigt,
-        // wenn tatsaechlich eine abweichende Korrektur eingetragen ist - sonst
-        // bleibt die Stelle leer (auch wenn ein Korrekturwert gespeichert ist,
-        // der zufaellig wieder dem Berechnungswert entspricht).
-        const mengeAbweicht = k.menge_korrektur != null && rundungMengeFn(k.menge_korrektur) !== rundungMengeFn(menge);
-        const preisAbweicht = k.preis_korrektur != null && rundungPreisFn(k.preis_korrektur) !== rundungPreisFn(preis);
+        const mengeAbweicht = k.menge_korrektur != null && rundungMengeFn(k.menge_korrektur) !== toolMenge;
+        const preisAbweicht = k.preis_korrektur != null && rundungPreisFn(k.preis_korrektur) !== toolPreis;
+        const einheitAbweicht = !!k.einheit_korrektur && k.einheit_korrektur !== einheit;
+        // ältere Handänderungen ohne Basis: Basis = aktueller Tool-Wert (kein Popup für Altbestand)
+        if(k.menge_korrektur != null && k.basis_menge == null) k.basis_menge = toolMenge;
+        if(k.preis_korrektur != null && k.basis_preis == null) k.basis_preis = toolPreis;
+        if(typeof dokGerendertNeu !== 'undefined'){ dokGerendertNeu.add(schluessel); dokNamen[schluessel] = bezeichnung; }
+        if(!geloescht && typeof dokKonflikteNeu !== 'undefined'){
+          const felder = [];
+          if(k.menge_korrektur != null && k.basis_menge != null && Math.abs(toolMenge - k.basis_menge) > 1e-9) felder.push({ feld: 'menge', hand: k.menge_korrektur, alt: k.basis_menge, neu: toolMenge });
+          if(k.preis_korrektur != null && k.basis_preis != null && Math.abs(toolPreis - k.basis_preis) > 0.004) felder.push({ feld: 'preis', hand: k.preis_korrektur, alt: k.basis_preis, neu: toolPreis });
+          if(felder.length) dokKonflikteNeu.push({ schluessel, bezeichnung, felder, toolMenge, toolPreis });
+        }
+        const toolBetrag = rundeCHF(toolMenge * toolPreis), diff = effBetrag - toolBetrag;
+        const diffProz = toolBetrag ? diff / toolBetrag * 100 : 0;
+        const gross = Math.abs(diff) >= DOK_GROSS_CHF || Math.abs(diffProz) >= DOK_GROSS_PROZ;
         if(!geloescht) blockTotal += effBetrag;
-        snapshotZeile(KAT_LABEL[schluessel.split(':')[0]] || schluessel, { bezeichnung, menge: effMenge, einheit, preis: effPreis, betrag: effBetrag, geloescht });
-        // Vorbefuellung des Menge-/Preis-Korrektur-Felds mit dem berechneten
-        // Wert gilt bewusst NUR fuer Offerte-Typ "Formel" - fuer "Tagessatz"
-        // (Allgemein) unveraendert das alte Verhalten (leer ausser bei
-        // echter Korrektur).
-        const istFormel = currentBerechnungsmodell === 'formel';
-        const mengeFeldWert = k.menge_korrektur != null ? k.menge_korrektur : (istFormel ? rundungMengeFn(menge) : '');
-        const preisFeldWert = k.preis_korrektur != null ? k.preis_korrektur : (istFormel ? rundungPreisFn(preis) : '');
+        snapshotZeile(KAT_LABEL[schluessel.split(':')[0]] || schluessel, { bezeichnung, menge: effMenge, einheit: effEinheit, preis: effPreis, betrag: effBetrag, geloescht });
         const tr = document.createElement('tr');
         tr.className = 'crow' + (geloescht ? ' zgeloescht' : (effBetrag === 0 ? ' betragnull' : ''));
-        // Rechnungsweg-Tooltip: bei einer einfachen Zeile (kein Breakdown
-        // uebergeben) reicht "Menge x Preis = Betrag" - sonst zeigt das
-        // eigene Popup die einzelnen Beitraege in zwei sauberen Spalten
-        // (z.B. Stunden pro Teilschritt bei Personal, Betrag pro Artikel bei
-        // einem Materialpaket), siehe Aufrufstellen weiter unten. Ein
-        // natives title-Attribut kann weder lange Artikelnamen kuerzen noch
-        // Spalten ausrichten, darum ein eigenes Popup statt title.
-        const rechnungswegSimple = `${effMenge} ${einheit} × ${fmtCHF(effPreis)} = ${fmtCHF(effBetrag)}`;
-        tr.addEventListener('mouseenter', () => zeigeRechnungsweg(tr, rechnungsweg, rechnungswegSimple));
+        const rechnungswegSimple = `${toolMenge} ${einheit} × ${fmtCHF(toolPreis)} = ${fmtCHF(toolBetrag)}`;
+        tr.addEventListener('mouseenter', e => { if(!e.target.closest || !e.target.closest('input,select,button')) zeigeRechnungsweg(tr, rechnungsweg, rechnungswegSimple); });
         tr.addEventListener('mouseleave', versteckeRechnungsweg);
-        const preisZelle = preisKorrigierbar
-          ? `<span class="berechnet-val">${preisAbweicht ? fmtCHF(rundungPreisFn(preis)) : ''}</span><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="korrektur-feld" data-feld="preis" placeholder="Korr." value="${preisFeldWert}" ${geloescht ? 'disabled' : ''} title="Freitext-Position: Preis frei erfassbar, kein Artikel hinterlegt">`
-          : fmtCHF(effPreis);
+        const tip = feld => ` data-dtip="Tool: ${feld === 'menge' ? toolMenge : fmtCHF(toolPreis)} · Zeile ${diffProz >= 0 ? '+' : ''}${Math.round(diffProz)} % (${diff >= 0 ? '+' : ''}${fmtCHF(diff)})"`;
+        const hand = (an) => an ? ` hand${gross ? ' gross' : ''}` : '';
+        const feldHtml = (feld, wert, an) => `<div class="dcw"><button type="button" class="drs" data-feld="${feld}" title="Zurück auf den Tool-Wert" aria-label="Tool-Wert">${DOK_ICON_UNDO}</button><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="korrektur-feld" data-feld="${feld}" value="${wert}" ${geloescht ? 'disabled' : ''}${an ? tip(feld) : ''} aria-label="${feld === 'menge' ? 'Menge' : 'Preis'}"></div>`;
         tr.innerHTML = `<td title="${String(bezeichnung).replace(/"/g, '&quot;')}">${bezeichnung}</td>
-          <td style="text-align:right"><span class="berechnet-val">${mengeAbweicht ? rundungMengeFn(menge) : ''}</span><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="korrektur-feld" data-feld="menge" placeholder="Korr." value="${mengeFeldWert}" ${geloescht ? 'disabled' : ''}></td>
-          <td style="color:var(--muted)">${einheit}</td>
-          <td style="text-align:right">${preisZelle}</td>
-          <td class="cbetrag"><span class="cbetrag-val">${fmtCHF(effBetrag)}</span><span class="cbetrag-icons"><button type="button" class="icobtn zeile-del" title="${geloescht ? 'Zeile wiederherstellen' : 'Zeile entfernen'}">${geloescht ? ICON.restore : ICON.trash}</button></span></td>`;
+          <td class="dz-m${hand(mengeAbweicht)}" style="text-align:right">${feldHtml('menge', effMenge, mengeAbweicht)}</td>
+          <td class="dz-e${einheitAbweicht ? ' hand' : ''}"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="dein" value="${escHtml(effEinheit || '')}" ${geloescht ? 'disabled' : ''}${einheitAbweicht ? ` data-dtip="Tool: ${escHtml(einheit || '')}"` : ''} aria-label="Einheit"></td>
+          <td class="dz-p${hand(preisAbweicht)}" style="text-align:right">${feldHtml('preis', effPreis.toFixed(2), preisAbweicht)}</td>
+          <td class="cbetrag"><span class="cbetrag-val">${geloescht ? '' : fmtCHF(effBetrag)}</span><span class="cbetrag-icons"><button type="button" class="icobtn zeile-del" title="${geloescht ? 'Wieder einblenden' : 'Ausblenden: zählt nicht, nicht in der Offerte'}">${geloescht ? DOK_ICON_AUGE_ZU : DOK_ICON_AUGE}</button></span></td>`;
         container.appendChild(tr);
+        const korr = () => zeilenKorrekturen[schluessel] || (zeilenKorrekturen[schluessel] = { menge_korrektur:null, preis_korrektur:null, geloescht:false });
         tr.querySelectorAll('.korrektur-feld').forEach(inp => {
           inp.addEventListener('change', e => {
-            const v = e.target.value.trim();
-            const feld = e.target.dataset.feld === 'preis' ? 'preis_korrektur' : 'menge_korrektur';
-            if(!zeilenKorrekturen[schluessel]) zeilenKorrekturen[schluessel] = { menge_korrektur:null, preis_korrektur:null, geloescht:false };
-            zeilenKorrekturen[schluessel][feld] = (v === '' || isNaN(parseFloat(v))) ? null : parseFloat(v);
-            recalc();
+            const v = String(e.target.value).replace(/['’\s]/g, '').replace(',', '.');
+            const n = parseFloat(v), istMenge = e.target.dataset.feld !== 'preis';
+            const tool = istMenge ? toolMenge : toolPreis;
+            const kk = korr();
+            if(v === '' || isNaN(n) || Math.abs(n - tool) < (istMenge ? 1e-9 : 0.005)){ kk[istMenge ? 'menge_korrektur' : 'preis_korrektur'] = null; }
+            else { kk[istMenge ? 'menge_korrektur' : 'preis_korrektur'] = n; kk.basis_menge = toolMenge; kk.basis_preis = toolPreis; }
+            recalc(); planAutosave();
           });
         });
+        tr.querySelectorAll('.drs').forEach(b => b.addEventListener('click', () => {
+          const kk = korr(); kk[b.dataset.feld === 'preis' ? 'preis_korrektur' : 'menge_korrektur'] = null;
+          recalc(); planAutosave();
+        }));
+        tr.querySelector('.dein').addEventListener('change', e => {
+          const v = e.target.value.trim(), kk = korr();
+          kk.einheit_korrektur = (!v || v === einheit) ? null : v;
+          recalc(); planAutosave();
+        });
         tr.querySelector('.zeile-del').addEventListener('click', () => {
-          if(!zeilenKorrekturen[schluessel]) zeilenKorrekturen[schluessel] = { menge_korrektur:null, preis_korrektur:null, geloescht:false };
-          zeilenKorrekturen[schluessel].geloescht = !zeilenKorrekturen[schluessel].geloescht;
-          recalc();
-          planAutosave();
+          const kk = korr(); kk.geloescht = !kk.geloescht;
+          recalc(); planAutosave();
         });
       }
 
@@ -6680,6 +6727,7 @@ const lwModusToggleHtml = '<span style="display:flex;gap:4px;">' + [['zeit', 'St
       grandTotal
     };
     $status.textContent = 'Live neu berechnet.';
+    if(typeof window.dokNachRecalc === 'function') window.dokNachRecalc(dokKonflikteNeu, dokGerendertNeu);
     $status.classList.remove('err');
     flash();
   }catch(e){
@@ -6914,6 +6962,80 @@ $('supportChatInput').addEventListener('keydown', (e) => {
     });
   };
   if(body) new MutationObserver(nachbearbeiten).observe(body, { childList: true });
+})();
+</script>
+<script>
+/* ===== Neue Ansicht: Rückfrage, wenn sich von Hand geänderte Zeilen durch den Konfigurator ändern oder wegfallen ===== */
+(function(){
+  let letzteGerendert = null, letzteAktion = 0, offen = false;
+  const merke = () => { letzteAktion = Date.now(); };
+  // Aktionen, die neu rechnen lassen: alles im Konfigurator + die Auswahlfelder im Dokument
+  document.addEventListener('click', e => { if(e.target.closest('#dokKonf, #costbody select')) merke(); }, true);
+  document.addEventListener('change', e => { if(e.target.closest('#dokKonf, #costbody select')) merke(); }, true);
+  document.addEventListener('input', e => { if(e.target.closest('#dokKonf')) merke(); }, true);
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' })[c]);
+  const zahl = (f, n) => f === 'preis' ? fmtCHF(n) : String(Math.round(n * 100) / 100);
+  window.dokNachRecalc = (konfl, gerendert) => {
+    const aktiv = Date.now() - letzteAktion < 10000;
+    const weg = [];
+    if(letzteGerendert && aktiv) letzteGerendert.forEach(s => {
+      if(gerendert.has(s)) return;
+      const k = zeilenKorrekturen[s];
+      if(k && !k.geloescht && (k.menge_korrektur != null || k.preis_korrektur != null || k.einheit_korrektur)) weg.push(s);
+    });
+    letzteGerendert = gerendert;
+    if(!aktiv || offen || (!konfl.length && !weg.length)) return;
+    letzteAktion = 0;
+    zeige(konfl, weg);
+  };
+  function zeige(konfl, weg){
+    offen = true;
+    konfl.forEach(c => c.wahl = 'neu');
+    const host = document.createElement('div');
+    host.className = 'dokovl';
+    const zeichne = () => {
+      const n = konfl.length + weg.length;
+      host.innerHTML = `<div class="dokdlg" role="dialog" aria-modal="true" aria-labelledby="dokDlgT">
+        <h3 id="dokDlgT">${n === 1 ? 'Von Hand geänderte Zeile betroffen' : n + ' von Hand geänderte Zeilen betroffen'}</h3>
+        <p>${konfl.length ? 'Das Tool rechnet hier jetzt etwas anderes als bei deiner Änderung. ' : ''}${weg.length ? 'Zeilen mit deinen Änderungen fallen weg.' : ''}</p>
+        ${konfl.map((c, i) => `<div class="dokkz"><b>${esc(c.bezeichnung)}</b><small>${c.felder.map(f => `${f.feld === 'menge' ? 'Menge' : 'Preis'}: deine <b>${zahl(f.feld, f.hand)}</b> · Tool bisher ${zahl(f.feld, f.alt)} → neu <b>${zahl(f.feld, f.neu)}</b>`).join('<br>')}</small>
+          <div class="dokseg"><button type="button" data-i="${i}" data-v="neu" aria-pressed="${c.wahl === 'neu'}">Neuen Wert</button><button type="button" data-i="${i}" data-v="beh" aria-pressed="${c.wahl === 'beh'}">Meinen behalten</button></div></div>`).join('')}
+        ${weg.map(s => `<div class="dokkz"><b>${esc(dokNamen[s] || s)}</b><small>fällt weg – deine Änderung wird aufbewahrt und kommt zurück, wenn die Zeile wieder erscheint</small></div>`).join('')}
+        <div class="dokfuss">${konfl.length > 1 ? '<button type="button" class="doklk" data-alle="neu">Alle neu</button><button type="button" class="doklk" data-alle="beh">Alle behalten</button>' : ''}<span class="sp"></span>${weg.length ? '<button type="button" class="dokkonfbtn" data-weg="loeschen">Änderungen der weggefallenen Zeilen löschen</button>' : ''}<button type="button" class="dokkonfbtn on" data-ok>Übernehmen</button></div>
+      </div>`;
+      host.querySelector('[data-ok]').focus();
+    };
+    zeichne();
+    document.body.appendChild(host);
+    let wegLoeschen = false;
+    const fertig = () => {
+      konfl.forEach(c => {
+        const k = zeilenKorrekturen[c.schluessel]; if(!k) return;
+        if(c.wahl === 'neu') c.felder.forEach(f => { k[f.feld === 'menge' ? 'menge_korrektur' : 'preis_korrektur'] = null; });
+        k.basis_menge = c.toolMenge; k.basis_preis = c.toolPreis;
+      });
+      if(wegLoeschen) weg.forEach(s => { delete zeilenKorrekturen[s]; });
+      host.remove(); offen = false;
+      recalc(); planAutosave();
+    };
+    host.addEventListener('click', e => {
+      const b = e.target.closest('button'); if(!b) return;
+      if(b.dataset.i != null){ konfl[+b.dataset.i].wahl = b.dataset.v; zeichne(); return; }
+      if(b.dataset.alle){ konfl.forEach(c => c.wahl = b.dataset.alle); zeichne(); return; }
+      if(b.dataset.weg){ wegLoeschen = true; fertig(); return; }
+      if(b.hasAttribute('data-ok')) fertig();
+    });
+    host.addEventListener('keydown', e => { if(e.key === 'Escape'){ konfl.forEach(c => c.wahl = 'beh'); fertig(); } });
+  }
+  // Tooltip für geänderte Felder: Tool-Wert und Abweichung
+  const tip = document.createElement('div'); tip.className = 'doktip'; tip.hidden = true; document.body.appendChild(tip);
+  document.addEventListener('mouseover', e => {
+    const t = e.target.closest && e.target.closest('[data-dtip]');
+    if(!t){ tip.hidden = true; return; }
+    tip.textContent = t.dataset.dtip; tip.hidden = false;
+    const r = t.getBoundingClientRect();
+    tip.style.left = Math.max(8, r.right - tip.offsetWidth) + 'px'; tip.style.top = (r.top - 30) + 'px';
+  });
 })();
 </script>
 </body>
