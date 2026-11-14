@@ -22,6 +22,8 @@
     unlock: '<rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-1.8"/>',
     x: '<path d="M18 6 6 18M6 6l12 12"/>',
     check: '<path d="M5 13l4 4L19 7"/>',
+    check2: '<path d="M3 12.5l4 4L13 9"/><path d="M11 15.5l1 1L21 7"/>',   // zwei Häkchen (Offerte zugesagt)
+    halbkreis: '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17a8.5 8.5 0 0 0 0-17z" fill="currentColor"/>',   // noch nicht fertig (Offerte: noch offen)
     upload: '<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>',
     undo: '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>',
     zurueck: '<path d="M19 12H5"/><path d="M11 6l-6 6 6 6"/>',
@@ -132,6 +134,13 @@ button.kg-kachel-kopf,a.kg-kachel-kopf{cursor:pointer;} button.kg-kachel-kopf:ho
     grau:    ['#323E4E', '#4C5C70', '#6E7F93', '#A3B0BE', '#DCE2E8']
   };
   KG.palette = PAL;
+  // Offerten-Status (Offertenliste, Offerte): 'offen' = ohne Status. Farben Stufe 3/2, nicht Stufe 1.
+  KG.offStatus = [
+    { k: 'bestaetigt', t: 'Bestätigt', icon: 'check',  bg: PAL.gruen[3], fg: PAL.gruen[0], d: 'Mündlich bestätigt, Auftrag noch nicht fix' },
+    { k: 'zugesagt',   t: 'Zugesagt',  icon: 'check2', bg: PAL.gruen[2], fg: '#FFFFFF',    d: 'Auftrag erteilt, abgeglichen mit Pendenzen und Planer' },
+    { k: 'abgelehnt',  t: 'Abgelehnt', icon: 'x',      bg: PAL.beere[2], fg: '#FFFFFF',    d: 'Kunde hat abgesagt' }
+  ];
+  KG.offNochOffen = { icon: 'halbkreis', bg: PAL.gold[3], fg: PAL.gold[0], t: 'Noch offen' };
   KG.grund = { primary: '#323E4E', primaryL: '#4C5C70', ink: '#232B35', muted: '#8B9097', mutedText: '#6B7079',
     line: '#E1E5E9', bg: '#F5F7F9', accentBlue: '#D6E7F4', accentLime: '#D1DB5F', danger: '#B4655F' };
   KG.planerTeams = {

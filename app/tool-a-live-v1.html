@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script src="/kg-pw-schutz.js?v=5"></script>
-<script src="/kg-stil.js?v=73"></script>
+<script src="/kg-stil.js?v=74"></script>
 <script>if(/[?&]offerte=/.test(location.search)) document.documentElement.classList.add('doklaedt');</script>
 <title>Tool A (live) – Offerten-Eingabe</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -1725,7 +1725,8 @@ const $bauteiltitel = document.getElementById('bauteiltitel');
 const $formelInhalt = document.getElementById('formelInhalt');
 const $tagessatzInhalt = document.getElementById('tagessatzInhalt');
 
-let offerteStatus = 'offen'; // 'offen' | 'bestaetigt' | 'abgelehnt'
+let offerteStatus = 'offen'; // 'offen' (= ohne Status) | 'bestaetigt' | 'zugesagt' | 'abgelehnt'
+let offerteBereich = null, offerteNochOffen = ''; // Bereich beim Kunden (Nordseite …), «Noch offen»-Liste
 let letzterGrandTotal = 0;
 // Fester MwSt-Satz - bislang der einzige bei Knechtgarten verwendete Satz
 // (gleiche Konvention wie beim Easybill-Export, siehe
@@ -1764,6 +1765,7 @@ function setStatus(neu){
   $statusOffen.classList.toggle('active', offerteStatus === 'offen');
   $statusBestaetigt.classList.toggle('active', offerteStatus === 'bestaetigt');
   $statusAbgelehnt.classList.toggle('active', offerteStatus === 'abgelehnt');
+  if(typeof window.dokStatusRender === 'function') window.dokStatusRender();
 }
 
 // Status ist neu ein Dreier-Radio (offen/bestaetigt/abgelehnt) - immer genau
@@ -4767,7 +4769,7 @@ function setMode(neu){
 
 async function ladeBestehendeOfferte(offerteId){
   const { data: offerte, error: oErr } = await sb
-    .from('offerte').select('id, titel, datum, status, notiz, offertentyp_id, lieferwagen_modus, lieferwagen_budget, lieferwagen_frequenz, vorarbeiter_frequenz, vorarbeiter_typ, gartenarbeiter_frequenz, zugaenglichkeit_stufe, beschreibung_block, beschreibung_manuell, optionen_text_liste, optionen_text_manuell, kosten_snapshot, offertnummer, easybill_document_id, easybill_document_number, vorauswahl_id, transport_werk_kies_id, transport_werk_beton_id, formen_daten').eq('id', offerteId).single();
+    .from('offerte').select('id, titel, datum, status, notiz, offertentyp_id, lieferwagen_modus, lieferwagen_budget, lieferwagen_frequenz, vorarbeiter_frequenz, vorarbeiter_typ, gartenarbeiter_frequenz, zugaenglichkeit_stufe, beschreibung_block, beschreibung_manuell, optionen_text_liste, optionen_text_manuell, kosten_snapshot, offertnummer, easybill_document_id, easybill_document_number, vorauswahl_id, transport_werk_kies_id, transport_werk_beton_id, formen_daten, bereich, noch_offen').eq('id', offerteId).single();
   if(oErr){ console.error(oErr); $saveStatus.textContent = 'Fehler beim Laden: ' + oErr.message; $saveStatus.className='status err'; return; }
   if(window.KG && KG.pruefeOfferteBearbeiten) KG.pruefeOfferteBearbeiten(offerteId); // Gruppen & Rechte: «Nur ansehen», wenn man diese Offerte nicht bearbeiten darf
 
@@ -4878,6 +4880,7 @@ async function ladeBestehendeOfferte(offerteId){
   $('notizPanel').classList.add('hidden');
   $('offerteContentWrap').classList.remove('hidden');
   (typeof dokNotizKnopf === 'function' ? dokNotizKnopf(false) : ($('notizOpenBtn').textContent = 'Notizen + Berechnungen'));
+  offerteBereich = offerte.bereich || null; offerteNochOffen = offerte.noch_offen || '';
   setStatus(offerte.status || 'offen');
   currentOfferteId = offerte.id;
   currentOffertnummer = offerte.offertnummer || null;
@@ -4948,6 +4951,10 @@ async function starteNeueOfferte(otId){
   renderEasybillWrap();
   const ot = OFFERTENTYPEN.find(o => o.id === otId);
   $offerteTitel.value = (ot?.name || 'Offerte') + ' - Neubau';
+  // Titel und Bereich aus dem Fenster «Neue Offerte» (Offertenliste)
+  { const up = new URLSearchParams(location.search);
+    if(up.get('titel')) $offerteTitel.value = up.get('titel');
+    offerteBereich = up.get('bereich') || null; offerteNochOffen = ''; }
   $offerteDatum.value = heuteAlsDatumsstring();
   $offerteNotiz.innerHTML = '';
   $('notizPanel').classList.add('hidden');
@@ -5091,7 +5098,7 @@ async function speichereNeueOfferte(titelVal){
   const { data: offerte, error: oErr } = await sb.from('offerte')
     .insert({
       kunde_id: kundeId, offertentyp_id: offertentypId, titel: titelVal,
-      datum: $offerteDatum.value || heuteAlsDatumsstring(), status: offerteStatus, notiz: notizWert(),
+      datum: $offerteDatum.value || heuteAlsDatumsstring(), status: offerteStatus, notiz: notizWert(), bereich: offerteBereich || null, noch_offen: (offerteNochOffen || '').trim() || null,
       betrag_total: letzterBruttoTotal, lieferwagen_modus: lieferwagenModus, lieferwagen_budget: lieferwagenBudget > 0 ? lieferwagenBudget : null,
       lieferwagen_frequenz: lieferwagenFrequenz, vorarbeiter_frequenz: vorarbeiterFrequenz, vorarbeiter_typ: vorarbeiterTyp, gartenarbeiter_frequenz: gartenarbeiterFrequenz,
       zugaenglichkeit_stufe: bereichZugaenglichkeitStufe ?? 2, vorauswahl_id: aktiveVorauswahlId, transport_werk_kies_id: transportWahl.kies || null, transport_werk_beton_id: transportWahl.beton || null,
@@ -5158,7 +5165,7 @@ async function speichereNeueOfferte(titelVal){
 async function speichereAenderungen(titelVal){
   const { error: oErr } = await sb.from('offerte').update({
     titel: titelVal, datum: $offerteDatum.value || heuteAlsDatumsstring(),
-    status: offerteStatus, notiz: notizWert(),
+    status: offerteStatus, notiz: notizWert(), bereich: offerteBereich || null, noch_offen: (offerteNochOffen || '').trim() || null,
     betrag_total: letzterBruttoTotal, lieferwagen_modus: lieferwagenModus, lieferwagen_budget: lieferwagenBudget > 0 ? lieferwagenBudget : null,
     lieferwagen_frequenz: lieferwagenFrequenz, vorarbeiter_frequenz: vorarbeiterFrequenz, vorarbeiter_typ: vorarbeiterTyp, gartenarbeiter_frequenz: gartenarbeiterFrequenz,
     zugaenglichkeit_stufe: bereichZugaenglichkeitStufe ?? 2, vorauswahl_id: aktiveVorauswahlId, transport_werk_kies_id: transportWahl.kies || null, transport_werk_beton_id: transportWahl.beton || null,
@@ -7056,7 +7063,7 @@ $('supportChatInput').addEventListener('keydown', (e) => {
   const cw = $$('costwrap');
   const kopf = document.createElement('div');
   kopf.className = 'dokkopf';
-  kopf.innerHTML = '<h2></h2><div class="sub"><span class="t" id="dkAdr"></span><span class="t" id="dkNr"></span><span class="t" id="dkDat">vom </span><span class="t" id="dkTyp"></span></div>';
+  kopf.innerHTML = '<h2></h2><div class="sub"><span class="t" id="dkAdr"></span><span class="t" id="dkNr"></span><span class="t" id="dkDat">vom </span><span class="t" id="dkTyp"></span><span class="t dkberwrap"><button type="button" class="dkber" id="dkBer"></button></span></div>';
   const h2 = kopf.querySelector('h2');
   if($$('offerteTitel')) h2.appendChild($$('offerteTitel'));
   const kn = document.createElement('span'); kn.className = 'kname'; kn.id = 'dkKunde'; h2.appendChild(kn);
@@ -7452,6 +7459,143 @@ function dokNotizKnopf(offen){
     const alt = document.querySelector('.dokwechsel'), cw = $$('costwrap');
     if(alt && cw){ const f = document.createElement('div'); f.className = 'dokfussalt'; f.appendChild(alt); cw.appendChild(f); }
   }
+})();
+</script>
+<style id="dokStatusStil">
+/* Status, «Noch offen» und Bereich im Blatt (Farben/Icons aus kg-stil.js: KG.offStatus, KG.offNochOffen) */
+.dokakt #statusOffen,.dokakt #statusBestaetigt,.dokakt #statusAbgelehnt{display:none !important}
+.dokstwrap{position:relative}
+.dokst{display:inline-flex;align-items:center;gap:7px;height:28px;border-radius:999px;padding:0 11px 0 9px;border:0;font:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap}
+.dokst.leer{background:#fff;color:var(--muted);border:1px dashed var(--line);font-weight:400}
+.dokst .plchev{display:inline-block;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid currentColor;opacity:.6}
+.dokstmenu{right:0;left:auto !important;min-width:190px}
+.dokstmenu button{display:flex !important;align-items:center;gap:8px}
+.dokstmenu .stdot{width:10px;height:10px;border-radius:50%;flex:none}
+.dokstmenu button.on{font-weight:700}
+.doknochbtn{width:28px;height:28px}
+.doknoch{border-radius:8px;padding:9px 12px 6px;margin:4px 0 14px;clear:both}
+.doknoch[hidden]{display:none}
+.doknoch .dnhd{display:flex;align-items:center;gap:7px;font-weight:600;font-size:12.5px}
+.doknoch .dnerl{margin-left:auto;font:inherit;font-size:11.5px;font-weight:400;border:1px solid currentColor;background:transparent;color:inherit;border-radius:6px;padding:2px 9px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;opacity:.85}
+.doknoch .dnerl:hover{opacity:1}
+.doknoch textarea{display:block;width:100%;min-height:64px;margin-top:4px;border:0;background:transparent;resize:vertical;font:inherit;font-size:13px;line-height:1.55;color:inherit;outline:none;padding:0}
+.doknoch textarea::placeholder{color:inherit;opacity:.55}
+.dkber{border:0;background:none;padding:0;font:inherit;color:inherit;cursor:pointer}
+.dkber:hover{color:var(--primary);text-decoration:underline}
+.dkber.leer{opacity:.7}
+.dkberpop{position:absolute;z-index:70;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(50,62,78,.16);padding:5px;min-width:200px}
+.dkberpop button{display:block;width:100%;text-align:left;border:0;background:none;padding:6px 10px;border-radius:5px;font:inherit;font-size:12.5px;cursor:pointer;color:var(--primary)}
+.dkberpop button:hover{background:var(--soft)}
+.dkberpop button.on{font-weight:700}
+.dkberpop input{width:100%;border:1px solid var(--line);border-radius:6px;padding:5px 8px;font:inherit;font-size:12.5px;margin-top:4px}
+.dkberpop .strich{height:1px;background:var(--line);margin:5px 4px}
+</style>
+<script>
+/* ===== Neue Ansicht: Status-Knopf, «Noch offen» und Bereich ===== */
+(function(){
+  const $$ = id => document.getElementById(id);
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' })[c]);
+  if(!(window.KG && KG.offStatus)) return;
+  const akt = document.querySelector('.dokakt'), kopf = document.querySelector('.dokkopf');
+  if(!akt || !kopf) return;
+  const NO = KG.offNochOffen;
+
+  // Status-Knopf + «Noch offen»-Knopf vorne in der Aktionsleiste oben rechts
+  const stw = document.createElement('div'); stw.className = 'dokstwrap';
+  stw.innerHTML = '<button type="button" class="dokst" id="dokSt"></button><div class="plmenu dokstmenu" id="dokStMenu" role="menu" hidden></div>';
+  const nb = document.createElement('button'); nb.type = 'button'; nb.className = 'kg-ibtn doknochbtn'; nb.id = 'dokNochBtn';
+  akt.prepend(nb); akt.prepend(stw);
+
+  // gelbes Feld «Noch offen» unter dem Kopf
+  const box = document.createElement('div'); box.className = 'doknoch'; box.id = 'dokNoch'; box.hidden = true;
+  box.style.background = NO.bg + '55'; box.style.border = '1px solid ' + NO.bg; box.style.color = NO.fg;
+  box.innerHTML = `<div class="dnhd">${KG.icon(NO.icon, 14)}Noch offen<button type="button" class="dnerl" id="dokNochErl">${KG.icon('check', 12)}Alles erledigt</button></div>`
+    + '<textarea id="dokNochText" rows="3" placeholder="Was fehlt noch? Zum Beispiel: Holzart mit Kunde klären"></textarea>';
+  kopf.after(box);
+  const ta = $$('dokNochText');
+  let boxAuf = null, letzteId = undefined;
+
+  const render = () => {
+    const s = KG.offStatus.find(x => x.k === offerteStatus), b = $$('dokSt');
+    b.className = 'dokst' + (s ? '' : ' leer');
+    b.style.background = s ? s.bg : ''; b.style.color = s ? s.fg : '';
+    b.innerHTML = s ? KG.icon(s.icon, 14) + esc(s.t) + '<span class="plchev"></span>' : KG.icon('plus', 12) + 'Status setzen';
+    b.title = s ? s.d : 'Status setzen';
+    const voll = (offerteNochOffen || '').trim() !== '';
+    if(letzteId !== currentOfferteId){ letzteId = currentOfferteId; boxAuf = null; } // andere Offerte geladen
+    if(document.activeElement !== ta) ta.value = offerteNochOffen || '';
+    nb.innerHTML = KG.icon(NO.icon, 14);
+    nb.style.background = voll ? NO.bg : ''; nb.style.color = voll ? NO.fg : ''; nb.style.borderColor = voll ? NO.bg : '';
+    nb.title = voll ? 'Noch offen: ein-/ausblenden' : 'Notieren, was noch offen ist';
+    box.hidden = boxAuf === null ? !voll : !boxAuf; // null = automatisch (sichtbar, wenn etwas drinsteht)
+    const be = $$('dkBer');
+    if(be){ be.textContent = offerteBereich ? 'Bereich ' + offerteBereich : '+ Bereich'; be.classList.toggle('leer', !offerteBereich); }
+  };
+  window.dokStatusRender = render;
+
+  // Status wählen
+  const menu = $$('dokStMenu');
+  $$('dokSt').addEventListener('click', e => {
+    e.stopPropagation();
+    if(!menu.hidden){ menu.hidden = true; return; }
+    menu.innerHTML = KG.offStatus.map(s => `<button type="button" data-st="${s.k}" class="${offerteStatus === s.k ? 'on' : ''}"><span class="stdot" style="background:${s.bg}"></span>${esc(s.t)}</button>`).join('')
+      + (offerteStatus && offerteStatus !== 'offen' ? '<div class="plstrich"></div><button type="button" data-st="offen">Status entfernen</button>' : '');
+    menu.hidden = false;
+  });
+  menu.addEventListener('click', async e => {
+    const b = e.target.closest('[data-st]'); if(!b) return;
+    menu.hidden = true;
+    const neu = b.dataset.st; if(neu === offerteStatus) return;
+    setStatus(neu); await speichereStatus();
+    if(neu === 'zugesagt' && currentOfferteId && mode !== 'new') await sb.from('offerte').update({ bestaetigt_am: new Date().toISOString().slice(0, 10) }).eq('id', currentOfferteId);
+  });
+  document.addEventListener('click', e => { if(!e.target.closest('.dokstwrap')) menu.hidden = true; });
+
+  // «Noch offen»: Knopf blendet das Feld ein/aus, Text wird automatisch gespeichert
+  nb.addEventListener('click', () => { boxAuf = box.hidden; render(); if(!box.hidden) ta.focus(); });
+  let tSpeichern = null;
+  const speichern = async () => {
+    if(mode === 'new' || !currentOfferteId) return; // neue Offerte: wird beim ersten Speichern mitgenommen
+    const { error } = await sb.from('offerte').update({ noch_offen: (offerteNochOffen || '').trim() || null }).eq('id', currentOfferteId);
+    if(error){ $saveStatus.textContent = 'Fehler beim Speichern von «Noch offen»: ' + error.message; $saveStatus.className = 'status err'; }
+  };
+  ta.addEventListener('input', () => { offerteNochOffen = ta.value; boxAuf = true; render(); clearTimeout(tSpeichern); tSpeichern = setTimeout(speichern, 700); });
+  ta.addEventListener('blur', () => { clearTimeout(tSpeichern); speichern(); });
+  let erlWarten = null;
+  $$('dokNochErl').addEventListener('click', () => {
+    const b = $$('dokNochErl');
+    if(!erlWarten){ b.innerHTML = 'Wirklich alles löschen?'; erlWarten = setTimeout(() => { erlWarten = null; b.innerHTML = KG.icon('check', 12) + 'Alles erledigt'; }, 3000); return; }
+    clearTimeout(erlWarten); erlWarten = null; b.innerHTML = KG.icon('check', 12) + 'Alles erledigt';
+    offerteNochOffen = ''; boxAuf = null; ta.value = ''; render(); clearTimeout(tSpeichern); speichern();
+  });
+
+  // Bereich: Auswahl aus den Bereichen dieses Kunden oder neu
+  let pop = null;
+  const popZu = () => { if(pop){ pop.remove(); pop = null; } };
+  document.addEventListener('click', async e => {
+    const be = e.target.closest('#dkBer');
+    if(!be){ if(!e.target.closest('.dkberpop')) popZu(); return; }
+    if(pop){ popZu(); return; }
+    let ber = [];
+    if(currentKundeId){ const { data } = await sb.from('offerte').select('bereich').eq('kunde_id', currentKundeId).not('bereich', 'is', null); ber = [...new Set((data || []).map(x => x.bereich).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'de')); }
+    pop = document.createElement('div'); pop.className = 'dkberpop';
+    pop.innerHTML = ber.map(b => `<button type="button" data-b="${esc(b)}" class="${b === offerteBereich ? 'on' : ''}">${esc(b)}</button>`).join('')
+      + (offerteBereich ? '<button type="button" data-b="">Kein Bereich</button>' : '')
+      + (ber.length || offerteBereich ? '<div class="strich"></div>' : '') + '<input type="text" id="dkBerNeu" placeholder="Neuer Bereich, Enter" autocomplete="off" data-lpignore="true" data-1p-ignore="true">';
+    const r = be.getBoundingClientRect();
+    pop.style.left = (r.left + scrollX) + 'px'; pop.style.top = (r.bottom + scrollY + 4) + 'px';
+    document.body.appendChild(pop);
+    const setze = async wert => {
+      popZu(); offerteBereich = wert || null; render();
+      if(mode !== 'new' && currentOfferteId){ const { error } = await sb.from('offerte').update({ bereich: offerteBereich }).eq('id', currentOfferteId); if(error){ $saveStatus.textContent = 'Fehler beim Speichern des Bereichs: ' + error.message; $saveStatus.className = 'status err'; } }
+    };
+    pop.addEventListener('click', ev => { const b = ev.target.closest('[data-b]'); if(b){ ev.stopPropagation(); setze(b.dataset.b); } });
+    const inp = pop.querySelector('#dkBerNeu');
+    inp.addEventListener('keydown', ev => { if(ev.key === 'Enter' && inp.value.trim()) setze(inp.value.trim()); if(ev.key === 'Escape') popZu(); });
+    if(!ber.length) inp.focus();
+  });
+
+  render();
 })();
 </script>
 </body>
