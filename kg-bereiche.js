@@ -15,7 +15,7 @@
 .kgb button.kgb-c{font:inherit;font-size:12.5px;border:1px solid var(--line,#E1E5E9);background:#fff;color:var(--primary,#323E4E);border-radius:999px;padding:4px 11px 4px 5px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;line-height:1.2}
 .kgb button.kgb-c.kein{padding-left:11px}
 .kgb button.kgb-c.on{background:var(--primary,#323E4E);color:#fff;border-color:var(--primary,#323E4E)}
-.kgb .kgb-l{width:20px;height:20px;border-radius:50%;background:#D6E7F4;color:#323E4E;font-weight:600;font-size:11px;display:inline-flex;align-items:center;justify-content:center;flex:none}
+.kgb .kgb-l{width:20px;height:20px;border-radius:50%;background:#DCE2E8;color:#323E4E;font-weight:600;font-size:11px;display:inline-flex;align-items:center;justify-content:center;flex:none}
 .kgb button.kgb-c.on .kgb-l{background:#fff}
 .kgb .kgb-plus{border-style:dashed !important;color:#8B9097 !important;padding-left:11px !important}
 .kgb .kgb-alt{border:0;background:none;font:inherit;font-size:11.5px;color:#8B9097;cursor:pointer;padding:2px 4px;text-decoration:underline}
@@ -29,7 +29,7 @@
 .kgb .kgb-t{border:1px solid var(--line,#E1E5E9);background:#fff;font:inherit;font-size:11.5px;border-radius:6px;padding:3px 8px;cursor:pointer;color:var(--primary,#323E4E)}
 .kgb .kgb-t.rot{color:#B4655F;border-color:#e7c3bf}
 .kgb .kgb-frage{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--primary,#323E4E);background:#F5F7F9;border-radius:8px;padding:6px 8px;width:100%}
-.kgb-badge{width:22px;height:22px;border-radius:50%;background:#D6E7F4;color:#323E4E;font-weight:600;font-size:11.5px;display:inline-flex;align-items:center;justify-content:center;cursor:help}
+.kgb-badge{width:22px;height:22px;border-radius:50%;background:#DCE2E8;color:#323E4E;font-weight:600;font-size:11.5px;display:inline-flex;align-items:center;justify-content:center;cursor:help}
 .kgb-badge.aus{opacity:.5}
 .kgb-badge.klein{width:18px;height:18px;font-size:10.5px}`;
   const st = document.createElement('style'); st.id = 'kg-bereiche-stil'; st.textContent = css;
@@ -47,7 +47,8 @@
   const naechster = liste => { const max = liste.reduce((m, b) => Math.max(m, (b.buchstabe || 'A').charCodeAt(0)), 64); return String.fromCharCode(max + 1); };
   const aktuell = (b, wert) => b.id === wert || (!b.ausgeblendet && (Date.now() - new Date(b.letzte || b.erstellt_am).getTime() < ZWEI_JAHRE));
   const titel = b => `Bereich ${b.buchstabe}${b.name ? ': ' + b.name : ''}${b.ausgeblendet ? ' (ausgeblendet)' : ''}`;
-  const badge = (b, klein) => b ? `<span class="kgb-badge${klein ? ' klein' : ''}${b.ausgeblendet ? ' aus' : ''}" title="${esc(titel(b))}">${esc(b.buchstabe)}</span>` : '';
+  const kurz = b => (b.name || 'Bereich ' + b.buchstabe) + (b.ausgeblendet ? ' (ausgeblendet)' : ''); // Mouse-over: nur der Name, der Buchstabe steht ja schon da
+  const badge = (b, klein) => b ? `<span class="kgb-badge${klein ? ' klein' : ''}${b.ausgeblendet ? ' aus' : ''}" title="${esc(kurz(b))}">${esc(b.buchstabe)}</span>` : '';
 
   function picker(el, opt){
     const { sb, kundeId } = opt;
@@ -109,5 +110,5 @@
     zeichne(); api.neuLaden();
     return api;
   }
-  window.KGBereiche = { laden, picker, badge, titel };
+  window.KGBereiche = { laden, picker, badge, titel, kurz };
 })();
