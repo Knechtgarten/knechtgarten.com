@@ -815,7 +815,7 @@ async function ladeOffertenSeite(anhaengen){
   const von = anhaengen ? ALLE_OFFERTEN.length : 0;
   const bis = von + OFFERTEN_SEITENGROESSE - 1;
   let query = sb.from('offerte')
-    .select('id, titel, datum, status, betrag_total, kunde_id, offertnummer, erstellt_von, offertentyp(name, berechnungsmodell), easybill_document_id, easybill_document_number, noch_offen, bereich', { count: 'exact' });
+    .select('id, titel, datum, status, betrag_total, kunde_id, offertnummer, erstellt_von, offertentyp(name, berechnungsmodell), easybill_document_id, easybill_document_number, noch_offen, bereich, kosten_snapshot', { count: 'exact' });
   if(plFilterId()) query = query.eq('erstellt_von', plFilterId());
   const { data, error, count } = await query
     .order('datum', { ascending:false })
@@ -843,6 +843,8 @@ async function ladeOffertenSeite(anhaengen){
       _kunde_sort: kunde ? anzeigename(kunde) : '',
       _typ_sort: o.offertentyp?.name || '',
       _st_sort: ({ zugesagt: 1, bestaetigt: 2, offen: 3, abgelehnt: 4 })[o.status] || 3,
+      _null: ((o.kosten_snapshot && o.kosten_snapshot.gruppen) || []).flatMap(g => g.zeilen || []).filter(z => !z.geloescht && Number(z.betrag || 0) === 0 && z.bezeichnung).map(z => z.bezeichnung), // Zeilen mit 0 CHF = noch nicht fertig
+      kosten_snapshot: undefined,
     };
   });
   ALLE_OFFERTEN = anhaengen ? ALLE_OFFERTEN.concat(gemappt) : gemappt;
@@ -890,7 +892,10 @@ function offStatusZelle(o){
   const knopf = s
     ? `<button type="button" class="ostat" data-ost="${o.id}" style="background:${s.bg};color:${s.fg}" title="${s.t}: ${s.d} – klicken zum Ändern" aria-label="Status ${s.t}">${KG.icon(s.icon, 14)}</button>`
     : `<button type="button" class="ostat leer" data-ost="${o.id}" title="Status setzen" aria-label="Status setzen">${KG.icon('plus', 12)}</button>`;
-  return `<span class="stwrap">${knopf}${n ? `<span class="onoch" style="background:${no.bg};color:${no.fg}" title="${escO(no.t)}:\n${escO(n)}">${KG.icon(no.icon, 14)}</span>` : ''}</span>`;
+  // gleiches Icon für eigene Notizen und für Zeilen mit 0 CHF (noch nicht fertig)
+  const nz = o._null || [];
+  const tip = [n, nz.length ? `Zeilen mit 0 CHF: ${nz.slice(0, 8).join(', ')}${nz.length > 8 ? ` … (+${nz.length - 8})` : ''}` : ''].filter(Boolean).join('\n');
+  return `<span class="stwrap">${knopf}${tip ? `<span class="onoch" style="background:${no.bg};color:${no.fg}" title="${escO(no.t)}:\n${escO(tip)}">${KG.icon(no.icon, 14)}</span>` : ''}</span>`;
 }
 // Filter als Knöpfe rechts vom Suchfeld: nichts gewählt = alle, sonst die gewählten Status oder «In Abklärung» (Eintrag im gelben Feld)
 function zeichneStFilter(){
@@ -955,7 +960,7 @@ function gefilterteOfferten(){
   let liste = ALLE_OFFERTEN;
   if(kpanelFilterId) liste = liste.filter(o => o.kunde_id === kpanelFilterId);
   if(kpanelFilterId && berFilter) liste = liste.filter(o => (o.bereich || '') === berFilter);
-  if(stFilter.size || nurNochOffen) liste = liste.filter(o => stFilter.has(o.status) || (nurNochOffen && (o.noch_offen || '').trim())); // nichts gewählt = alle
+  if(stFilter.size || nurNochOffen) liste = liste.filter(o => stFilter.has(o.status) || (nurNochOffen && ((o.noch_offen || '').trim() || (o._null || []).length))); // nichts gewählt = alle
   const von = $('offVonInput').value;
   const bis = $('offBisInput').value;
   if(von) liste = liste.filter(o => o.datum && o.datum >= von);
