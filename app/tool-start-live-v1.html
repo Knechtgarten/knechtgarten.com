@@ -291,6 +291,7 @@ tr.typ-artikel td:first-child{border-left:2px solid #6666ff;}
             <th data-sort="titel">Titel</th>
             <th data-sort="datum" style="width:8%;">Datum</th>
             <th data-sort="betrag_total" style="width:9%;text-align:right;">Betrag</th>
+            <th data-sort="_pl_sort" style="width:10%;padding-left:16px;">Projektleiter</th>
             <th style="width:14%;"></th>
           </tr>
         </thead>
@@ -668,6 +669,7 @@ let offSortDir = -1;
 const OFFERTEN_SEITENGROESSE = 100;
 let offertenGesamtAnzahl = 0;
 let offertenKundenMap = {};
+let offertenBenutzerMap = null; // Projektleiter = wer die Offerte erstellt hat (offerte.erstellt_von)
 
 // Gruppen & Rechte (kg-stil.js): «+ Offerte neu» nur mit Erstellen-Recht, «Alle / Nur eigene» nur wenn man alle sehen darf
 async function rechteOfferten(){
@@ -698,10 +700,15 @@ async function ladeOffertenSeite(anhaengen){
     kunden.forEach(k => { offertenKundenMap[k.id] = k; });
   }
 
+  if(!offertenBenutzerMap){
+    const { data: bs } = await sb.from('benutzer').select('id,anzeigename,email');
+    offertenBenutzerMap = Object.fromEntries((bs || []).map(b => [b.id, b.anzeigename || (b.email || '').split('@')[0]]));
+  }
   const gemappt = data.map(o => {
     const kunde = offertenKundenMap[o.kunde_id];
     return {
       ...o,
+      _pl_sort: (o.erstellt_von && offertenBenutzerMap[o.erstellt_von]) || '',
       _kunde_name: kunde ? anzeigename(kunde) : '',
       _kunde_sort: kunde ? anzeigename(kunde) : '',
       _typ_sort: o.offertentyp?.name || '',
@@ -796,13 +803,14 @@ function renderOffertenTable(){
       <td class="titelzelle" title="${o.titel.replace(/"/g,'&quot;')}">${o.titel}</td>
       <td style="white-space:nowrap;">${o.datum || ''}</td>
       <td style="white-space:nowrap;text-align:right;">${fmtCHF(o.betrag_total).replace(' CHF', '')}</td>
+      <td class="titelzelle" style="padding-left:16px;" title="${o._pl_sort.replace(/"/g,'&quot;')}">${o._pl_sort || '–'}</td>
       <td style="white-space:nowrap;">
         <a class="btn" href="${ziel}?offerte=${o.id}" style="display:inline-block;padding:2px 6px;font-size:10px;line-height:1.6;text-decoration:none;">Öffnen</a>
         ${window.KG && KG.darf && KG.darf('offerten', 'offerten', 'erstellen') === 'N' ? '' : `<button type="button" class="icobtn offerte-kopieren-btn" data-id="${o.id}" title="Offerte kopieren" style="margin-left:3px;">${ICON.copy}</button>`}
         ${window.KG && KG.darfBei && KG.darfBei('offerten', 'offerten', 'loeschen', o.erstellt_von) === false ? '' : `<button type="button" class="icobtn danger offerte-loeschen-btn" data-id="${o.id}" data-titel="${o.titel.replace(/"/g,'&quot;')}" title="Offerte löschen" style="margin-left:3px;">${ICON.trash}</button>`}
       </td>
     </tr>`;
-  }).join('') || '<tr><td colspan="7" style="padding:14px;color:var(--muted);">Keine Offerten gefunden.</td></tr>';
+  }).join('') || '<tr><td colspan="9" style="padding:14px;color:var(--muted);">Keine Offerten gefunden.</td></tr>';
 
   $('offertenBody').querySelectorAll('.offerte-kopieren-btn').forEach(btn => {
     btn.addEventListener('click', () => starteOfferteKopieren(btn.dataset.id));
