@@ -144,6 +144,17 @@ tr.typ-artikel td:first-child{border-left:2px solid #6666ff;}
 #otwButtons.gesperrt button{opacity:.4;pointer-events:none}
 /* Fenster «Neue Offerte»: breit, Kundentabelle mit Alphabet und Scrollbalken, Typen in 3 Spalten nach Themen */
 .otwbox{max-width:min(1040px,94vw) !important;padding-bottom:22px !important;max-height:92vh;overflow:auto;position:relative}
+/* «Meine Offerten ▾» und Datumsfelder weg (selten gebraucht) */
+.daterange{display:none !important}
+.plwahl{position:relative}
+.plwahl .plchev{display:inline-block;width:0;height:0;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid currentColor;margin-left:8px;opacity:.6}
+.plmenu{position:absolute;top:calc(100% + 4px);left:0;z-index:60;min-width:210px;background:#fff;border:1px solid var(--line,#E1E5E9);border-radius:8px;box-shadow:0 8px 24px rgba(50,62,78,.16);padding:5px}
+.plmenu[hidden]{display:none}
+.plmenu button{display:block;width:100%;text-align:left;border:0;background:none;padding:7px 10px;border-radius:5px;font:inherit;font-size:12.5px;cursor:pointer;color:var(--primary,#323E4E)}
+.plmenu button:hover{background:var(--soft,#F5F7F9)}
+.plmenu button.on{font-weight:700;background:var(--accent-blue,#D6E7F4)}
+.plmenu .plstrich{height:1px;background:var(--line,#E1E5E9);margin:5px 4px}
+.plmenu .plkopf{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);padding:4px 10px 2px}
 .otwzu{position:absolute;top:12px;right:12px;width:28px;height:28px;border-radius:50%;border:1px solid var(--line,#E1E5E9);background:#fff;color:var(--muted);display:grid;place-items:center;cursor:pointer;padding:0}
 .otwzu:hover{color:var(--primary,#323E4E);border-color:var(--muted)}
 /* Offerte auch per Klick auf Nummer, Kunde oder Titel öffnen */
@@ -290,9 +301,9 @@ tr.typ-artikel td:first-child{border-left:2px solid #6666ff;}
     <div class="dashleft">
       <a class="kg-haupt" id="kundenBtn" href="tool-d-kunden-live-v1.html" data-kg-seite="rechts" title="Kontakte › Kunden: pro Kunde direkt zu seinen Offerten">Kunden</a>
       <button type="button" class="btn kg-haupt" id="offerteNeuBtn" data-kg-seite="rechts">+ Offerte neu</button>
-      <div class="wahlschalter kg-seg" data-kg-seite="links" id="offWahlschalter" title="Welche Offerten angezeigt werden – bleibt gespeichert">
-        <button type="button" data-eigene="0" class="on">Alle Offerten</button>
-        <button type="button" data-eigene="1">Nur eigene</button>
+      <div class="plwahl" data-kg-seite="links" id="offWahlschalter">
+        <button type="button" class="kg-neben" id="plBtn" aria-haspopup="menu" aria-expanded="false"><span id="plText">Meine Offerten</span><span class="plchev"></span></button>
+        <div class="plmenu" id="plMenu" role="menu" hidden></div>
       </div>
 
       <div class="card">
@@ -638,35 +649,46 @@ async function renderKundeChip(){
   }
 }
 
-// «Alle Offerten / Nur eigene»: pro Benutzer in benutzer_startseite_einstellung gespeichert.
-// Eigene = offerte.erstellt_von = angemeldeter Benutzer (ältere Offerten haben keinen Ersteller).
+// «Meine Offerten ▾»: Meine (Standard, immer beim Öffnen) · Alle · einzelne Projektleiter.
+// Projektleiter = offerte.erstellt_von. Per URL: ?pl=alle | ?pl=<benutzer-id>; mit ?kunde= gelten alle Projektleiter.
 let meineBenutzerId = null;
-let nurEigeneOfferten = false;
-
-function zeigeWahlschalter(){
-  document.querySelectorAll('#offWahlschalter button').forEach(b => b.classList.toggle('on', (b.dataset.eigene === '1') === nurEigeneOfferten));
+let plFilter = 'mein';
+let nurEigeneOfferten = false; // bleibt für ältere Stellen: true, sobald nach einem Projektleiter gefiltert wird
+let PL_LISTE = []; // [{id, name}]
+{
+  const p = new URLSearchParams(location.search);
+  if(p.get('pl')) plFilter = p.get('pl');
+  if(p.get('kunde')) plFilter = 'alle';
 }
-
+const plFilterId = () => plFilter === 'alle' ? null : (plFilter === 'mein' ? meineBenutzerId : plFilter);
+function zeigeWahlschalter(){
+  const pl = PL_LISTE.find(x => x.id === plFilter);
+  $('plText').textContent = plFilter === 'alle' ? 'Alle Offerten' : plFilter === 'mein' ? 'Meine Offerten' : (pl ? 'Offerten ' + pl.name : 'Offerten');
+  nurEigeneOfferten = !!plFilterId();
+}
 async function ladeOffertenEinstellung(){
   const { data: { session } } = await sb.auth.getSession();
   meineBenutzerId = session?.user?.id || null;
-  if(!meineBenutzerId) return;
-  const { data } = await sb.from('benutzer_startseite_einstellung').select('offerten_nur_eigene').eq('benutzer_id', meineBenutzerId).maybeSingle();
-  nurEigeneOfferten = !!data?.offerten_nur_eigene;
+  // Projektleiter mit Offerten fürs Menü
+  const [{ data: ofs }, { data: bs }] = await Promise.all([sb.from('offerte').select('erstellt_von').not('erstellt_von', 'is', null).range(0, 9999), sb.from('benutzer').select('id, anzeigename, email')]);
+  const ids = [...new Set((ofs || []).map(o => o.erstellt_von))];
+  PL_LISTE = ids.map(id => { const b = (bs || []).find(x => x.id === id); return { id, name: b ? (b.anzeigename || (b.email || '').split('@')[0]) : '?' }; }).sort((a, b) => a.name.localeCompare(b.name, 'de'));
   zeigeWahlschalter();
 }
-
-document.querySelectorAll('#offWahlschalter button').forEach(b => b.addEventListener('click', async () => {
-  const neu = b.dataset.eigene === '1';
-  if(neu === nurEigeneOfferten || !meineBenutzerId) return;
-  nurEigeneOfferten = neu;
-  zeigeWahlschalter();
-  kpanelFilterId = null;
-  const { error } = await sb.from('benutzer_startseite_einstellung')
-    .upsert({ benutzer_id: meineBenutzerId, offerten_nur_eigene: neu }, { onConflict: 'benutzer_id' });
-  if(error) showToast('Einstellung konnte nicht gespeichert werden: ' + error.message, true);
+function plMenuZeichnen(){
+  const eintrag = (v, t) => `<button type="button" role="menuitemradio" aria-checked="${plFilter === v}" data-pl="${v}"${plFilter === v ? ' class="on"' : ''}>${escHtml(t)}</button>`;
+  $('plMenu').innerHTML = eintrag('mein', 'Meine Offerten') + eintrag('alle', 'Alle Offerten') + (PL_LISTE.length ? '<div class="plstrich"></div><div class="plkopf">Projektleiter</div>' + PL_LISTE.filter(p => p.id !== meineBenutzerId).map(p => eintrag(p.id, p.name)).join('') : '');
+}
+$('plBtn').addEventListener('click', e => { e.stopPropagation(); const m = $('plMenu'); if(m.hidden){ plMenuZeichnen(); m.hidden = false; $('plBtn').setAttribute('aria-expanded', 'true'); } else { m.hidden = true; $('plBtn').setAttribute('aria-expanded', 'false'); } });
+document.addEventListener('click', e => { if(!e.target.closest('#offWahlschalter')){ $('plMenu').hidden = true; $('plBtn').setAttribute('aria-expanded', 'false'); } });
+$('plMenu').addEventListener('click', async e => {
+  const b = e.target.closest('[data-pl]'); if(!b) return;
+  $('plMenu').hidden = true;
+  if(b.dataset.pl === plFilter) return;
+  plFilter = b.dataset.pl; zeigeWahlschalter();
+  const u = new URL(location.href); if(plFilter === 'mein') u.searchParams.delete('pl'); else u.searchParams.set('pl', plFilter); history.replaceState(null, '', u.pathname + u.search);
   await Promise.all([ladeKundenPanel(), ladeOfferten()]);
-}));
+});
 
 async function ladeKundenPanel(){
   // Fuer "10 zuletzt aktive Kunden" reichen die neuesten paar hundert
@@ -675,7 +697,7 @@ async function ladeKundenPanel(){
   // ganzen, mit der Zeit immer groesser werdenden offerte-Tabelle nur fuer
   // dieses Panel war unnoetig teuer. .limit() statt .range(0,9999).
   let oQuery = sb.from('offerte').select('kunde_id, erstellt_am');
-  if(nurEigeneOfferten && meineBenutzerId) oQuery = oQuery.eq('erstellt_von', meineBenutzerId);
+  if(plFilterId()) oQuery = oQuery.eq('erstellt_von', plFilterId());
   const { data: offerten, error: oErr } = await oQuery
     .order('erstellt_am', { ascending: false })
     .limit(300);
@@ -753,7 +775,7 @@ async function ladeOffertenSeite(anhaengen){
   const bis = von + OFFERTEN_SEITENGROESSE - 1;
   let query = sb.from('offerte')
     .select('id, titel, datum, status, betrag_total, kunde_id, offertnummer, erstellt_von, offertentyp(name, berechnungsmodell), easybill_document_id, easybill_document_number', { count: 'exact' });
-  if(nurEigeneOfferten && meineBenutzerId) query = query.eq('erstellt_von', meineBenutzerId);
+  if(plFilterId()) query = query.eq('erstellt_von', plFilterId());
   const { data, error, count } = await query
     .order('datum', { ascending:false })
     .range(von, bis);
@@ -921,6 +943,8 @@ document.querySelectorAll('#appMain table th[data-sort]').forEach(th => {
 // Suche gilt immer über alle Offerten: ein links gewählter Kunde wird aufgehoben, noch nicht geladene Offerten werden nachgeladen
 $('offSearchInput').addEventListener('input', async () => {
   if(kpanelFilterId && $('offSearchInput').value.trim()){ kpanelFilterId = null; renderKundenPanel(); }
+  // Suche gilt über alle Projektleiter
+  if($('offSearchInput').value.trim() && plFilter !== 'alle'){ plFilter = 'alle'; zeigeWahlschalter(); await ladeOfferten(); }
   renderOffertenTable();
   if($('offSearchInput').value.trim() && offertenGesamtAnzahl > ALLE_OFFERTEN.length && !ladeAlleLaeuft){
     ladeAlleLaeuft = true;
@@ -1419,7 +1443,12 @@ async function kopiereOfferteFuerKunde(zielKunde){
 // ---------------------------------------------------------------------------
 async function init(){
   await ladeOffertenEinstellung();
+  // Aus der offenen Offerte (gleiche weisse Leiste): ?q= Suchtext, ?neu=1 öffnet «Neue Offerte»
+  const pInit = new URLSearchParams(location.search);
+  if(pInit.get('q')){ $('offSearchInput').value = pInit.get('q'); plFilter = 'alle'; zeigeWahlschalter(); }
   await Promise.all([ladeKundenPanel(), ladeOfferten()]);
+  if(pInit.get('q')) $('offSearchInput').dispatchEvent(new Event('input'));
+  if(pInit.get('neu') === '1') $('offerteNeuBtn').click();
   // "Kopie erstellen" direkt aus Tool A heraus (siehe easybillWrap-Zeile dort):
   // verlinkt hierher mit ?kopieren=<offerteId> und oeffnet automatisch den
   // bestehenden Kopier-Ablauf (Zielkunde waehlen), statt die ganze, recht
