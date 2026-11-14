@@ -131,7 +131,17 @@ tr.typ-artikel td:first-child{border-left:2px solid #6666ff;}
 .hidden{display:none !important;}
 
 /* Start-Dashboard */
-.dashgrid{display:grid;grid-template-columns:250px 1fr;gap:16px;align-items:start;}
+.dashgrid{display:grid;grid-template-columns:1fr;gap:16px;align-items:start;}
+/* Kundenliste links entfällt (Kunden über Kontakte bzw. Suche), Filter-Chip zeigt einen gewählten Kunden */
+.dashleft .card{display:none !important}
+.kundechip{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 4px 0 11px;border-radius:999px;background:var(--accent-blue,#D6E7F4);color:var(--primary,#323E4E);font-size:12.5px;font-weight:600;white-space:nowrap}
+.kundechip[hidden]{display:none}
+.kundechip button{width:22px;height:22px;border-radius:50%;border:0;background:rgba(255,255,255,.7);color:inherit;cursor:pointer;font-size:15px;line-height:1;padding:0}
+.kundechip button:hover{background:#fff}
+#otwKundeListe .otwk{display:flex;justify-content:space-between;gap:12px;width:100%;text-align:left;border:0;background:none;padding:7px 9px;border-radius:6px;cursor:pointer;font:inherit;font-size:12.5px}
+#otwKundeListe .otwk:hover,#otwKundeListe .otwk.akt{background:var(--soft,#F5F7F9)}
+#otwKundeListe .otwk span:last-child{color:var(--muted);font-size:11.5px}
+#otwButtons.gesperrt button{opacity:.4;pointer-events:none}
 .dashleft{display:flex;flex-direction:column;gap:16px;}
 @media (max-width: 820px){ .dashgrid{grid-template-columns:1fr;} }
 .kpanel-item{padding:7px 4px;border-bottom:1px solid var(--soft);cursor:pointer;font-size:12.5px;border-radius:5px;
@@ -255,6 +265,7 @@ tr.typ-artikel td:first-child{border-left:2px solid #6666ff;}
 <main class="wrap hidden" id="appMain">
   <div class="dashgrid">
     <div class="dashleft">
+      <a class="kg-neben" href="tool-d-kunden-live-v1.html" data-kg-seite="rechts" title="Kontakte › Kunden: pro Kunde direkt zu seinen Offerten">Kunden</a>
       <button type="button" class="btn kg-haupt" id="offerteNeuBtn" data-kg-seite="rechts">+ Offerte neu</button>
       <div class="wahlschalter kg-seg" data-kg-seite="links" id="offWahlschalter" title="Welche Offerten angezeigt werden – bleibt gespeichert">
         <button type="button" data-eigene="0" class="on">Alle Offerten</button>
@@ -276,6 +287,7 @@ tr.typ-artikel td:first-child{border-left:2px solid #6666ff;}
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.2" y2="16.2"/></svg>
           <input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="text" id="offSearchInput" placeholder="Suchen nach Titel oder Kunde…">
         </div>
+        <span class="kundechip" id="kundeChip" hidden><span id="kundeChipName"></span><button type="button" id="kundeChipX" title="Alle Kunden zeigen" aria-label="Kundenfilter aufheben">×</button></span>
         <div class="daterange">
           <label>Von</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="date" id="offVonInput">
           <label>Bis</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="date" id="offBisInput">
@@ -335,6 +347,14 @@ tr.typ-artikel td:first-child{border-left:2px solid #6666ff;}
   <div class="ovlbox" style="max-width:420px;padding-bottom:26px;">
     <div class="ovlmsg" style="margin-bottom:3px;padding:0 20px;">Neue Offerte</div>
     <div id="otwKundeInfo" style="font-size:12px;font-weight:400;color:var(--muted);margin-bottom:20px;padding:0 20px;"></div>
+    <div id="otwKundeSuche" hidden style="padding:0 20px;margin:-8px 0 16px;">
+      <div class="kundensearch-wrap" style="max-width:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.2" y2="16.2"/></svg>
+        <input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="text" id="otwKundeInput" placeholder="Kunde suchen: Name, Ort, Strasse …">
+      </div>
+      <div id="otwKundeListe" style="margin-top:4px;"></div>
+      <button type="button" class="btnlink" id="otwKundeNeu" style="margin-top:4px;font-size:12px;">Kunde nicht gefunden? Neu erfassen</button>
+    </div>
     <div id="otwButtons" style="display:flex;flex-direction:column;gap:10px;padding:0 20px;"></div>
     <div class="ovlbtns" style="justify-content:flex-start;padding:0 20px;"><button class="btnlink" id="otwCancel">Abbrechen</button></div>
   </div>
@@ -572,6 +592,26 @@ async function vergibOffertnummer(berechnungsmodell){
 // ---------------------------------------------------------------------------
 let KUNDEN_MIT_OFFERTEN = [];
 let kpanelFilterId = null;
+// Aus Kontakte › Kunden: ?kunde=<id> zeigt nur die Offerten dieses Kunden (Chip «Name ×» oben)
+const URL_KUNDE = new URLSearchParams(location.search).get('kunde');
+if(URL_KUNDE) kpanelFilterId = URL_KUNDE;
+const kundeChipCache = {};
+async function renderKundeChip(){
+  const chip = $('kundeChip'); if(!chip) return;
+  if(!kpanelFilterId){ chip.hidden = true; return; }
+  let k = (typeof offertenKundenMap !== 'undefined' && offertenKundenMap[kpanelFilterId]) || kundeChipCache[kpanelFilterId];
+  if(!k){
+    const { data } = await sb.from('kunde').select('id,name,firma,nachname,vorname,strasse,plz,ort').eq('id', kpanelFilterId).maybeSingle();
+    if(data){ kundeChipCache[data.id] = data; k = data; }
+  }
+  $('kundeChipName').textContent = k ? anzeigename(k) : 'Kunde';
+  chip.hidden = false;
+  // ältere Offerten des Kunden könnten noch nicht geladen sein
+  if(offertenGesamtAnzahl > ALLE_OFFERTEN.length && !ladeAlleLaeuft){
+    ladeAlleLaeuft = true;
+    try{ while(offertenGesamtAnzahl - ALLE_OFFERTEN.length > 0) await ladeWeitereOfferten(); } finally { ladeAlleLaeuft = false; }
+  }
+}
 
 // «Alle Offerten / Nur eigene»: pro Benutzer in benutzer_startseite_einstellung gespeichert.
 // Eigene = offerte.erstellt_von = angemeldeter Benutzer (ältere Offerten haben keinen Ersteller).
@@ -775,6 +815,7 @@ function sortiereOfferten(liste){
 }
 
 function renderOffertenTable(){
+  renderKundeChip();
   document.querySelectorAll('#offertenBody').forEach(() => {}); // no-op, Platzhalter fuer Symmetrie
   document.querySelectorAll('table th[data-sort]').forEach(th => {
     if(!th.closest('.card')) return; // nur Haupttabelle, nicht das Kunden-Wahl-Fenster
@@ -812,7 +853,7 @@ function renderOffertenTable(){
         ${window.KG && KG.darfBei && KG.darfBei('offerten', 'offerten', 'loeschen', o.erstellt_von) === false ? '' : `<button type="button" class="icobtn danger offerte-loeschen-btn" data-id="${o.id}" data-titel="${o.titel.replace(/"/g,'&quot;')}" title="Offerte löschen" style="margin-left:3px;">${ICON.trash}</button>`}
       </td>
     </tr>`;
-  }).join('') || '<tr><td colspan="9" style="padding:14px;color:var(--muted);">Keine Offerten gefunden.</td></tr>';
+  }).join('') || `<tr><td colspan="9" style="padding:14px;color:var(--muted);">${kpanelFilterId && !$('offSearchInput').value.trim() ? 'Noch keine Offerten für diesen Kunden – oben rechts mit «+ Offerte neu» eine erstellen.' : 'Keine Offerten gefunden.'}</td></tr>`;
 
   $('offertenBody').querySelectorAll('.offerte-kopieren-btn').forEach(btn => {
     btn.addEventListener('click', () => starteOfferteKopieren(btn.dataset.id));
@@ -862,6 +903,11 @@ $('offSearchInput').addEventListener('input', async () => {
   }
 });
 let ladeAlleLaeuft = false;
+$('kundeChipX').addEventListener('click', () => {
+  kpanelFilterId = null;
+  if(URL_KUNDE) history.replaceState(null, '', location.pathname);
+  renderOffertenTable();
+});
 $('offVonInput').addEventListener('change', renderOffertenTable);
 $('offBisInput').addEventListener('change', renderOffertenTable);
 
@@ -956,10 +1002,8 @@ $('offerteNeuBtn').addEventListener('click', async () => {
     const { data: kunde, error } = await sb.from('kunde').select('id,name,firma,nachname,vorname,strasse,plz,ort').eq('id', kpanelFilterId).maybeSingle();
     if(!error && kunde){ await oeffneOffertentypWahl(kunde); return; }
   }
-  $('kwOvlMsg').textContent = 'Neue Offerte - zuerst einen Kunden auswählen';
-  $('kwSearchInput').value = ''; kwSuchtext = '';
-  $('kundeWahlOvl').classList.add('show');
-  await ladeKwKunden();
+  // Kein Kunde gewählt: EIN Fenster mit Kundensuche oben und Offertentyp darunter
+  await oeffneOffertentypWahl(null);
 });
 
 async function starteOfferteKopieren(offerteId){
@@ -1139,9 +1183,44 @@ async function ladeOffertentypenFuerAuswahl(){
   return data;
 }
 
+const escHtml = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' })[c]);
+let otwKunde = null;
+// Kundeninfo im Fenster; ohne Kunde: Suchfeld zeigen und Typ-Knöpfe sperren, bis ein Kunde gewählt ist
+function otwKundeSetzen(kunde, mitSuche){
+  otwKunde = kunde;
+  const adresse = kunde ? [kunde.strasse, [kunde.plz, kunde.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ') : '';
+  $('otwKundeInfo').innerHTML = kunde
+    ? escHtml([anzeigename(kunde), adresse].filter(Boolean).join(' – ')) + (mitSuche ? ' <button type="button" class="btnlink" id="otwKundeAendern" style="font-size:12px;margin-left:6px;">ändern</button>' : '')
+    : 'Zuerst den Kunden suchen, dann den Offertentyp wählen.';
+  $('otwKundeSuche').hidden = !!kunde || !mitSuche;
+  $('otwButtons').classList.toggle('gesperrt', !kunde);
+  const ae = $('otwKundeAendern');
+  if(ae) ae.addEventListener('click', () => { otwKundeSetzen(null, true); $('otwKundeInput').value = ''; otwKundeListe(''); $('otwKundeInput').focus(); });
+}
+let otwAkt = 0, otwTreffer = [];
+function otwKundeListe(q){
+  q = q.trim();
+  otwTreffer = q ? KW_KUNDEN.map(k => ({ k, s: bestScore([anzeigename(k), k.vorname, k.firma, k.strasse, k.plz, k.ort], q) })).filter(x => x.s < Infinity).sort((a, b) => a.s - b.s).slice(0, 7).map(x => x.k) : [];
+  otwAkt = 0;
+  $('otwKundeListe').innerHTML = otwTreffer.map((k, i) => `<button type="button" class="otwk${i === 0 ? ' akt' : ''}" data-i="${i}"><span>${escHtml(anzeigename(k))}</span><span>${escHtml([k.strasse, [k.plz, k.ort].filter(Boolean).join(' ')].filter(Boolean).join(', '))}</span></button>`).join('')
+    || (q ? '<div style="padding:7px 9px;font-size:12px;color:var(--muted);">Kein Kunde gefunden.</div>' : '');
+}
+$('otwKundeInput').addEventListener('input', e => otwKundeListe(e.target.value));
+$('otwKundeInput').addEventListener('keydown', e => {
+  const bs = [...$('otwKundeListe').querySelectorAll('.otwk')];
+  if(e.key === 'ArrowDown' || e.key === 'ArrowUp'){ e.preventDefault(); if(!bs.length) return; otwAkt = (otwAkt + (e.key === 'ArrowDown' ? 1 : -1) + bs.length) % bs.length; bs.forEach((b, i) => b.classList.toggle('akt', i === otwAkt)); }
+  if(e.key === 'Enter' && otwTreffer[otwAkt]){ e.preventDefault(); otwKundeSetzen(otwTreffer[otwAkt], true); }
+});
+$('otwKundeListe').addEventListener('click', e => { const b = e.target.closest('.otwk'); if(b) otwKundeSetzen(otwTreffer[+b.dataset.i], true); });
+$('otwKundeNeu').addEventListener('click', () => { $('offertentypWahlOvl').classList.remove('show'); kwModus = 'neu'; $('kwNeuBtn').click(); });
+
 async function oeffneOffertentypWahl(kunde){
-  const adresse = [kunde.strasse, [kunde.plz, kunde.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ');
-  $('otwKundeInfo').textContent = [anzeigename(kunde), adresse].filter(Boolean).join(' – ');
+  if(kunde) otwKundeSetzen(kunde, false);
+  else {
+    otwKundeSetzen(null, true);
+    $('otwKundeInput').value = ''; otwKundeListe('');
+    if(!KW_KUNDEN.length) await ladeKwKunden();
+  }
   const typenGeladen = await ladeOffertentypenFuerAuswahl();
   // Tagessatz-Typen (z.B. "Allgemein") zuoberst und hellblau, Artikel-Typen
   // grau - andere Rechenlogik als Formel-Typen. Formel/Tagessatz starten die
@@ -1163,11 +1242,13 @@ async function oeffneOffertentypWahl(kunde){
   $('otwButtons').querySelectorAll('button').forEach(btn => {
     btn.addEventListener('click', () => {
       const ziel = btn.dataset.modell === 'artikel' ? 'tool-a3-artikel-live-v1.html' : 'tool-a-live-v1.html';
-      location.href = `${ziel}?neukunde=${kunde.id}&offertentyp=${btn.dataset.ot}`;
+      if(!otwKunde) return;
+      location.href = `${ziel}?neukunde=${otwKunde.id}&offertentyp=${btn.dataset.ot}`;
     });
   });
   $('kundeWahlOvl').classList.remove('show');
   $('offertentypWahlOvl').classList.add('show');
+  if(!kunde) setTimeout(() => $('otwKundeInput').focus(), 50);
 }
 $('otwCancel').addEventListener('click', () => $('offertentypWahlOvl').classList.remove('show'));
 

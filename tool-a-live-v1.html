@@ -879,6 +879,19 @@ html.doklaedt #emptystate{display:none !important}
   .layout.konfzu .dokstreifen{display:flex;flex-direction:column;align-items:center;gap:12px;width:100%;height:100%;border:0;background:#f3f5f8;color:var(--muted);cursor:pointer;padding:14px 0 0;font:inherit}
   .layout.konfzu .dokstreifen:hover{background:#e9edf2;color:var(--ink)}
 }
+/* Kunde ändern per Klick auf den Namen */
+.dkkundeklick{cursor:pointer;border-bottom:1px dashed transparent}
+.dkkundeklick:hover{border-bottom-color:var(--muted)}
+.dkkpop{position:fixed;z-index:800;width:370px;max-width:calc(100vw - 16px);background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 28px rgba(50,62,78,.2);padding:8px}
+.dkkpop[hidden]{display:none}
+.dkkpop .dkkq{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:6px;height:32px;padding:0 9px;font:inherit;font-size:12.5px}
+.dkkpop .dkkq:focus{outline:none;border-color:var(--primary)}
+.dkkpop .dkkl{margin-top:4px;max-height:280px;overflow:auto}
+.dkkpop .dkk{display:flex;justify-content:space-between;gap:12px;width:100%;text-align:left;border:0;background:none;padding:7px 8px;border-radius:5px;cursor:pointer;font:inherit;font-size:12.5px}
+.dkkpop .dkk:hover,.dkkpop .dkk.akt{background:var(--soft)}
+.dkkpop .dkk span:last-child{color:var(--muted);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dkkpop .dkkleer{padding:7px 8px;font-size:12px;color:var(--muted)}
+.dkkpop .dkkh{font-size:11px;color:var(--muted);padding:6px 4px 2px}
 </style>
 </head>
 <body>
@@ -7296,6 +7309,59 @@ $('supportChatInput').addEventListener('keydown', (e) => {
     }
   });
   document.addEventListener('click', e => { if(!e.target.closest('.dokleiste')) menu.hidden = true; });
+})();
+</script>
+<script>
+/* ===== Neue Ansicht: Kunde ändern per Klick auf den Namen im Blatt (wie «Kontakt ändern» in Easybill) ===== */
+(function(){
+  const kn = document.getElementById('dkKunde');
+  if(!kn) return;
+  kn.classList.add('dkkundeklick');
+  kn.title = 'Kunde ändern';
+  kn.setAttribute('role', 'button'); kn.tabIndex = 0;
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' })[c]);
+  const pop = document.createElement('div');
+  pop.className = 'dkkpop'; pop.hidden = true;
+  pop.innerHTML = '<input type="text" class="dkkq" placeholder="Anderen Kunden suchen: Name, Ort, Strasse …" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" aria-label="Kunde suchen"><div class="dkkl"></div><div class="dkkh">Die Offerte rechnet danach mit der Adresse des neuen Kunden (Fahrzeit, Werke).</div>';
+  document.body.appendChild(pop);
+  const q = pop.querySelector('.dkkq'), liste = pop.querySelector('.dkkl');
+  let treffer = [], akt = 0;
+  const adr = k => [k.strasse, [k.plz, k.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  const suchen = () => {
+    const s = q.value.trim().toLowerCase();
+    const alle = (typeof alleKunden !== 'undefined' ? alleKunden : []);
+    treffer = s ? alle.filter(k => `${k.name} ${k.strasse || ''} ${k.plz || ''} ${k.ort || ''}`.toLowerCase().includes(s)).slice(0, 8) : [];
+    akt = 0;
+    liste.innerHTML = treffer.map((k, i) => `<button type="button" class="dkk${i === 0 ? ' akt' : ''}" data-i="${i}"><span>${esc(k.name)}</span><span>${esc(adr(k))}</span></button>`).join('') || (s ? '<div class="dkkleer">Kein Kunde gefunden.</div>' : '');
+  };
+  const zu = () => { pop.hidden = true; };
+  const auf = () => {
+    const r = kn.getBoundingClientRect();
+    pop.style.left = Math.max(8, Math.min(r.left, innerWidth - 380)) + 'px'; pop.style.top = (r.bottom + 6) + 'px';
+    pop.hidden = false; q.value = ''; suchen(); q.focus();
+  };
+  const waehlen = async k => {
+    zu();
+    if(!k || typeof currentOfferteId === 'undefined' || !currentOfferteId || k.id === currentKundeId) return;
+    const { error } = await sb.from('offerte').update({ kunde_id: k.id }).eq('id', currentOfferteId);
+    if(error){ alert('Kunde konnte nicht geändert werden: ' + (error.message || error)); return; }
+    currentKundeId = k.id; currentKundeName = k.name;
+    if(typeof $kundeSuche !== 'undefined') $kundeSuche.value = k.name;
+    const plz = document.getElementById('kundePlz'); if(plz) plz.value = k.plz || '';
+    if(typeof zeigeKundeAdresse === 'function') zeigeKundeAdresse(k);
+    recalc(); planAutosave();
+  };
+  kn.addEventListener('click', e => { e.stopPropagation(); pop.hidden ? auf() : zu(); });
+  kn.addEventListener('keydown', e => { if(e.key === 'Enter' || e.key === ' '){ e.preventDefault(); auf(); } });
+  q.addEventListener('input', suchen);
+  q.addEventListener('keydown', e => {
+    const bs = [...liste.querySelectorAll('.dkk')];
+    if(e.key === 'ArrowDown' || e.key === 'ArrowUp'){ e.preventDefault(); if(!bs.length) return; akt = (akt + (e.key === 'ArrowDown' ? 1 : -1) + bs.length) % bs.length; bs.forEach((b, i) => b.classList.toggle('akt', i === akt)); }
+    if(e.key === 'Enter' && treffer[akt]){ e.preventDefault(); waehlen(treffer[akt]); }
+    if(e.key === 'Escape') zu();
+  });
+  liste.addEventListener('click', e => { const b = e.target.closest('.dkk'); if(b) waehlen(treffer[+b.dataset.i]); });
+  document.addEventListener('click', e => { if(!pop.hidden && !e.target.closest('.dkkpop') && e.target !== kn) zu(); });
 })();
 </script>
 </body>
