@@ -509,7 +509,9 @@ function friendlyError(e){
   return KG.kundeFehlertext(e);
 }
 function anzeigename(k){
-  return k.nachname || k.firma || k.name || '(unbenannt)';
+  // Nachname + Vorname (z.B. «Oberholzer Fabian»), sonst Firma bzw. Name
+  if(k.nachname) return k.vorname ? k.nachname + ' ' + k.vorname : k.nachname;
+  return k.firma || k.name || '(unbenannt)';
 }
 
 // ---------------------------------------------------------------------------
@@ -620,7 +622,7 @@ async function ladeKundenPanel(){
   const kundeIds = Object.keys(letzteProKunde);
   if(!kundeIds.length){ KUNDEN_MIT_OFFERTEN = []; renderKundenPanel(); return; }
 
-  const { data: kunden, error: kErr } = await sb.from('kunde').select('id,name,firma,nachname,ort').in('id', kundeIds);
+  const { data: kunden, error: kErr } = await sb.from('kunde').select('id,name,firma,nachname,vorname,ort').in('id', kundeIds);
   if(kErr){ $('kpanelStatus').textContent = 'Fehler: ' + kErr.message; $('kpanelStatus').className = 'status err'; return; }
 
   kunden.forEach(k => { k._letzte = letzteProKunde[k.id]; });
@@ -695,7 +697,7 @@ async function ladeOffertenSeite(anhaengen){
 
   const neueKundeIds = [...new Set(data.map(o => o.kunde_id).filter(id => id && !offertenKundenMap[id]))];
   if(neueKundeIds.length){
-    const { data: kunden, error: kErr } = await sb.from('kunde').select('id,name,firma,nachname').in('id', neueKundeIds);
+    const { data: kunden, error: kErr } = await sb.from('kunde').select('id,name,firma,nachname,vorname').in('id', neueKundeIds);
     if(kErr){ $('offertenStatus').textContent = 'Fehler beim Laden: ' + kErr.message; $('offertenStatus').className = 'status err'; return; }
     kunden.forEach(k => { offertenKundenMap[k.id] = k; });
   }
@@ -850,7 +852,16 @@ document.querySelectorAll('#appMain table th[data-sort]').forEach(th => {
     renderOffertenTable();
   });
 });
-$('offSearchInput').addEventListener('input', renderOffertenTable);
+// Suche gilt immer über alle Offerten: ein links gewählter Kunde wird aufgehoben, noch nicht geladene Offerten werden nachgeladen
+$('offSearchInput').addEventListener('input', async () => {
+  if(kpanelFilterId && $('offSearchInput').value.trim()){ kpanelFilterId = null; renderKundenPanel(); }
+  renderOffertenTable();
+  if($('offSearchInput').value.trim() && offertenGesamtAnzahl > ALLE_OFFERTEN.length && !ladeAlleLaeuft){
+    ladeAlleLaeuft = true;
+    try{ while(offertenGesamtAnzahl - ALLE_OFFERTEN.length > 0) await ladeWeitereOfferten(); } finally { ladeAlleLaeuft = false; }
+  }
+});
+let ladeAlleLaeuft = false;
 $('offVonInput').addEventListener('change', renderOffertenTable);
 $('offBisInput').addEventListener('change', renderOffertenTable);
 
