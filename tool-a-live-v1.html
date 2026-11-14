@@ -846,6 +846,16 @@ main.wrap#appMain{max-width:none;padding-left:16px;padding-right:16px}
 .dokmenu .dmk{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);padding:5px 9px 3px}
 .dokmenu button{display:block;width:100%;text-align:left;border:0;background:none;padding:7px 9px;border-radius:4px;font:inherit;font-size:12.5px;cursor:pointer}
 .dokmenu button:hover{background:var(--soft)}
+/* Optional: steht in der Offerte, zählt nicht zum Total */
+#costbody tr.dopt .cbetrag-val{text-decoration:line-through;color:#a3a8ae}
+#costbody tr.dopt td:first-child::after{content:"Optional";display:inline-block;margin-left:8px;font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:1px 5px;border-radius:3px;background:#eef1f4;color:#6b727b;vertical-align:1px}
+#costbody tr.dopt td:first-child{white-space:nowrap}
+#costbody tr.dopt td:first-child .ez-bez{width:calc(100% - 80px)}
+#costbody tr.dopt .zeile-opt,#costbody tr.dopt .ez-opt{opacity:1;color:var(--ink)}
+/* Zwischensumme */
+#costbody tr.ezzw td{background:#eef1f4;font-weight:600}
+#costbody tr.ezzw .dzwwert{font-weight:700}
+.dokmenu button small{color:var(--muted);font-weight:400}
 </style>
 </head>
 <body>
@@ -5506,6 +5516,7 @@ let zeilenKorrekturen = {}; // { [zeilen_schluessel]: {menge_korrektur, preis_ko
 const DOK_GROSS_PROZ = 20, DOK_GROSS_CHF = 500;
 let dokKonflikteNeu = [], dokGerendertNeu = new Set(), dokNamen = {};
 const DOK_ICON_UNDO = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>';
+const DOK_ICON_OPT = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="12" cy="12" r="8" stroke-dasharray="3 3"/></svg>';
 const DOK_ICON_AUGE = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
 const DOK_ICON_AUGE_ZU = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3l18 18"/><path d="M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4.2M6.6 6.6A17 17 0 0 0 2 12s3.5 7 10 7a9.6 9.6 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>';
 
@@ -5514,7 +5525,7 @@ async function ladeZeilenKorrekturen(offerteId){
   if(error) throw error;
   zeilenKorrekturen = {};
   (data || []).forEach(r => {
-    zeilenKorrekturen[r.zeilen_schluessel] = { menge_korrektur: r.menge_korrektur, preis_korrektur: r.preis_korrektur, geloescht: r.geloescht, basis_menge: r.basis_menge, basis_preis: r.basis_preis, einheit_korrektur: r.einheit_korrektur };
+    zeilenKorrekturen[r.zeilen_schluessel] = { menge_korrektur: r.menge_korrektur, preis_korrektur: r.preis_korrektur, geloescht: r.geloescht, basis_menge: r.basis_menge, basis_preis: r.basis_preis, einheit_korrektur: r.einheit_korrektur, optional: !!r.optional };
   });
 }
 
@@ -5522,8 +5533,8 @@ async function speichereZeilenKorrekturen(offerteId){
   const { error: delErr } = await sb.from('offerte_zeilen_korrektur').delete().eq('offerte_id', offerteId);
   if(delErr) throw delErr;
   const rows = Object.entries(zeilenKorrekturen)
-    .filter(([, k]) => k.menge_korrektur != null || k.preis_korrektur != null || k.geloescht || k.einheit_korrektur)
-    .map(([schluessel, k]) => ({ offerte_id: offerteId, zeilen_schluessel: schluessel, menge_korrektur: k.menge_korrektur, preis_korrektur: k.preis_korrektur, geloescht: !!k.geloescht, basis_menge: k.basis_menge ?? null, basis_preis: k.basis_preis ?? null, einheit_korrektur: k.einheit_korrektur || null }));
+    .filter(([, k]) => k.menge_korrektur != null || k.preis_korrektur != null || k.geloescht || k.einheit_korrektur || k.optional)
+    .map(([schluessel, k]) => ({ offerte_id: offerteId, zeilen_schluessel: schluessel, menge_korrektur: k.menge_korrektur, preis_korrektur: k.preis_korrektur, geloescht: !!k.geloescht, basis_menge: k.basis_menge ?? null, basis_preis: k.basis_preis ?? null, einheit_korrektur: k.einheit_korrektur || null, optional: !!k.optional }));
   if(rows.length){
     const { error: insErr } = await sb.from('offerte_zeilen_korrektur').insert(rows);
     if(insErr) throw insErr;
@@ -5553,9 +5564,22 @@ function renderEigeneZeilenFuerKategorie(kat, container){
       });
       return;
     }
+    // Neue Ansicht: Zwischensumme (fortlaufend bis hier, wird nach dem Zeichnen ausgerechnet; zählt nicht, nicht im Export)
+    if(z.typ === 'zw'){
+      const trZ = document.createElement('tr');
+      trZ.className = 'crow ezrow ezzw';
+      trZ.dataset.sk = z.schluessel;
+      trZ.innerHTML = `<td colspan="4">Zwischensumme</td><td class="cbetrag"><span class="cbetrag-val dzwwert"></span><span class="cbetrag-icons"><button type="button" class="icobtn ez-del" title="Zwischensumme löschen">${ICON.trash}</button></span></td>`;
+      container.appendChild(trZ);
+      trZ.querySelector('.ez-del').addEventListener('click', () => {
+        eigeneZeilen = eigeneZeilen.filter(x => x.clientKey !== z.clientKey);
+        recalc(); planAutosave();
+      });
+      return;
+    }
     const betrag = rundeCHF((z.menge || 0) * (z.preis || 0));
-    summe += betrag;
-    snapshotZeile(KAT_LABEL[kat], { bezeichnung: z.bezeichnung, menge: z.menge || 0, einheit: z.einheit || '', preis: z.preis || 0, betrag, geloescht: false });
+    if(!z.optional) summe += betrag;
+    snapshotZeile(KAT_LABEL[kat], { bezeichnung: z.bezeichnung, menge: z.menge || 0, einheit: z.einheit || '', preis: z.preis || 0, betrag, geloescht: !!z.optional, optional: !!z.optional });
     // Speichern-Warnung bleibt spezifisch fuer Freitext-Positionen ohne Menge
     // ODER Preis (weder Vorschlag noch bereits eingetragen) - die optische
     // Markierung (betragnull) unten ist dagegen generisch: jede Zeile mit
@@ -5565,18 +5589,21 @@ function renderEigeneZeilenFuerKategorie(kat, container){
     const tr = document.createElement('tr');
     tr.className = 'crow ezrow' + (betrag === 0 ? ' betragnull' : '');
     tr.dataset.sk = z.schluessel;
+    tr.dataset.betrag = z.optional ? 0 : betrag;
+    if(z.optional) tr.classList.add('dopt');
     tr.title = istUnvollstaendig ? 'Menge oder Preis noch nicht erfasst' : '';
     tr.innerHTML = `<td><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="ez-bez" value="${z.bezeichnung}"></td>
       <td style="text-align:right"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="ez-menge" type="number" step="0.01" value="${z.menge}"></td>
       <td><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="ez-einheit" value="${z.einheit}"></td>
       <td style="text-align:right"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="ez-preis" type="number" step="0.01" value="${(z.preis || 0).toFixed(2)}"></td>
-      <td class="cbetrag"><span class="cbetrag-val">${fmtCHF(betrag)}</span><span class="cbetrag-icons"><button type="button" class="icobtn ez-rechner" title="Preis aus mehreren Fremdleistungs-Posten zusammenrechnen">${ICON.summe}</button><button type="button" class="icobtn ez-del" title="Zeile löschen">${ICON.trash}</button></span></td>`;
+      <td class="cbetrag"><span class="cbetrag-val">${fmtCHF(betrag)}</span><span class="cbetrag-icons"><button type="button" class="icobtn ez-opt" title="${z.optional ? 'Wieder mitrechnen' : 'Optional: steht in der Offerte, zählt nicht zum Total'}">${DOK_ICON_OPT}</button><button type="button" class="icobtn ez-rechner" title="Preis aus mehreren Fremdleistungs-Posten zusammenrechnen">${ICON.summe}</button><button type="button" class="icobtn ez-del" title="Zeile löschen">${ICON.trash}</button></span></td>`;
     container.appendChild(tr);
     tr.querySelector('.ez-bez').addEventListener('change', e => { z.bezeichnung = e.target.value; recalc(); });
     tr.querySelector('.ez-menge').addEventListener('change', e => { z.menge = parseFloat(e.target.value) || 0; recalc(); });
     tr.querySelector('.ez-einheit').addEventListener('change', e => { z.einheit = e.target.value; recalc(); });
     tr.querySelector('.ez-preis').addEventListener('change', e => { z.preis = parseFloat(e.target.value) || 0; e.target.value = z.preis.toFixed(2); recalc(); });
     tr.querySelector('.ez-rechner').addEventListener('click', () => oeffneEzRechner(z.clientKey));
+    tr.querySelector('.ez-opt').addEventListener('click', () => { z.optional = !z.optional; recalc(); planAutosave(); });
     tr.querySelector('.ez-del').addEventListener('click', () => {
       // Freitext-Position aus einer Vorlage: nur als geloescht markieren,
       // sonst legt seedeFreitextZeilen() sie beim naechsten recalc() sofort
@@ -5623,7 +5650,7 @@ async function ladeEigeneZeilen(offerteId){
     return {
       clientKey: 'ez' + eigeneZeileCounter, dbId: r.id, kategorie: r.kategorie, bezeichnung: r.bezeichnung, menge: r.menge, einheit: r.einheit, preis: r.preis,
       freitextVorlageId: r.freitext_vorlage_id, foto1Url: r.foto1_url || null, foto2Url: r.foto2_url || null, foto3Url: r.foto3_url || null,
-      geloescht: !!r.geloescht, schluessel: r.schluessel || ('ez-' + crypto.randomUUID()), typ: r.typ || null
+      geloescht: !!r.geloescht, schluessel: r.schluessel || ('ez-' + crypto.randomUUID()), typ: r.typ || null, optional: !!r.optional
     };
   });
 }
@@ -5633,7 +5660,7 @@ async function speichereEigeneZeilen(offerteId){
   if(delErr) throw delErr;
   const echte = eigeneZeilen.filter(z => z.bezeichnung.trim());
   if(echte.length){
-    const rows = echte.map((z, i) => ({ offerte_id: offerteId, kategorie: z.kategorie, bezeichnung: z.bezeichnung.trim(), menge: z.menge || 0, einheit: z.einheit || '', preis: z.preis || 0, reihenfolge: i, freitext_vorlage_id: z.freitextVorlageId ?? null, foto1_url: z.foto1Url ?? null, foto2_url: z.foto2Url ?? null, foto3_url: z.foto3Url ?? null, geloescht: !!z.geloescht, schluessel: z.schluessel || null, typ: z.typ || null })); // immer mitsenden: bei gemischten Zeilen setzt PostgREST fehlende Schluessel sonst auf NULL (Not-null-Fehler)
+    const rows = echte.map((z, i) => ({ offerte_id: offerteId, kategorie: z.kategorie, bezeichnung: z.bezeichnung.trim(), menge: z.menge || 0, einheit: z.einheit || '', preis: z.preis || 0, reihenfolge: i, freitext_vorlage_id: z.freitextVorlageId ?? null, foto1_url: z.foto1Url ?? null, foto2_url: z.foto2Url ?? null, foto3_url: z.foto3Url ?? null, geloescht: !!z.geloescht, schluessel: z.schluessel || null, typ: z.typ || null, optional: !!z.optional })); // immer mitsenden: bei gemischten Zeilen setzt PostgREST fehlende Schluessel sonst auf NULL (Not-null-Fehler)
     const { error: insErr } = await sb.from('offerte_eigene_zeile').insert(rows);
     if(insErr) throw insErr;
   }
@@ -5774,7 +5801,7 @@ async function recalcJetzt(){
         const effPreis = rundungPreisFn(k.preis_korrektur != null ? k.preis_korrektur : preis);
         const effEinheit = k.einheit_korrektur || einheit;
         const effBetrag = rundeCHF(effMenge * effPreis);
-        const geloescht = !!k.geloescht;
+        const geloescht = !!k.geloescht, optional = !!k.optional;
         const mengeAbweicht = k.menge_korrektur != null && rundungMengeFn(k.menge_korrektur) !== toolMenge;
         const preisAbweicht = k.preis_korrektur != null && rundungPreisFn(k.preis_korrektur) !== toolPreis;
         const einheitAbweicht = !!k.einheit_korrektur && k.einheit_korrektur !== einheit;
@@ -5791,11 +5818,13 @@ async function recalcJetzt(){
         const toolBetrag = rundeCHF(toolMenge * toolPreis), diff = effBetrag - toolBetrag;
         const diffProz = toolBetrag ? diff / toolBetrag * 100 : 0;
         const gross = Math.abs(diff) >= DOK_GROSS_CHF || Math.abs(diffProz) >= DOK_GROSS_PROZ;
-        if(!geloescht) blockTotal += effBetrag;
-        snapshotZeile(KAT_LABEL[schluessel.split(':')[0]] || schluessel, { bezeichnung, menge: effMenge, einheit: effEinheit, preis: effPreis, betrag: effBetrag, geloescht });
+        if(!geloescht && !optional) blockTotal += effBetrag;
+        snapshotZeile(KAT_LABEL[schluessel.split(':')[0]] || schluessel, { bezeichnung, menge: effMenge, einheit: effEinheit, preis: effPreis, betrag: effBetrag, geloescht: geloescht || optional, optional });
         const tr = document.createElement('tr');
         tr.className = 'crow' + (geloescht ? ' zgeloescht' : (effBetrag === 0 ? ' betragnull' : ''));
         tr.dataset.sk = schluessel;
+        if(optional) tr.classList.add('dopt');
+        tr.dataset.betrag = (geloescht || optional) ? 0 : effBetrag;
         const rechnungswegSimple = `${toolMenge} ${einheit} × ${fmtCHF(toolPreis)} = ${fmtCHF(toolBetrag)}`;
         tr.addEventListener('mouseenter', e => { if(!e.target.closest || !e.target.closest('input,select,button')) zeigeRechnungsweg(tr, rechnungsweg, rechnungswegSimple); });
         tr.addEventListener('mouseleave', versteckeRechnungsweg);
@@ -5806,7 +5835,7 @@ async function recalcJetzt(){
           <td class="dz-m${hand(mengeAbweicht)}" style="text-align:right">${feldHtml('menge', effMenge, mengeAbweicht)}</td>
           <td class="dz-e${einheitAbweicht ? ' hand' : ''}"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="dein" value="${escHtml(effEinheit || '')}" ${geloescht ? 'disabled' : ''}${einheitAbweicht ? ` data-dtip="Tool: ${escHtml(einheit || '')}"` : ''} aria-label="Einheit"></td>
           <td class="dz-p${hand(preisAbweicht)}" style="text-align:right">${feldHtml('preis', effPreis.toFixed(2), preisAbweicht)}</td>
-          <td class="cbetrag"><span class="cbetrag-val">${geloescht ? '' : fmtCHF(effBetrag)}</span><span class="cbetrag-icons"><button type="button" class="icobtn zeile-del" title="${geloescht ? 'Wieder einblenden' : 'Ausblenden: zählt nicht, nicht in der Offerte'}">${geloescht ? DOK_ICON_AUGE_ZU : DOK_ICON_AUGE}</button></span></td>`;
+          <td class="cbetrag"><span class="cbetrag-val">${geloescht ? '' : fmtCHF(effBetrag)}</span><span class="cbetrag-icons"><button type="button" class="icobtn zeile-opt" title="${optional ? 'Wieder mitrechnen' : 'Optional: steht in der Offerte, zählt nicht zum Total'}">${DOK_ICON_OPT}</button><button type="button" class="icobtn zeile-del" title="${geloescht ? 'Wieder einblenden' : 'Ausblenden: zählt nicht, nicht in der Offerte'}">${geloescht ? DOK_ICON_AUGE_ZU : DOK_ICON_AUGE}</button></span></td>`;
         container.appendChild(tr);
         const korr = () => zeilenKorrekturen[schluessel] || (zeilenKorrekturen[schluessel] = { menge_korrektur:null, preis_korrektur:null, geloescht:false });
         tr.querySelectorAll('.korrektur-feld').forEach(inp => {
@@ -5829,6 +5858,7 @@ async function recalcJetzt(){
           kk.einheit_korrektur = (!v || v === einheit) ? null : v;
           recalc(); planAutosave();
         });
+        tr.querySelector('.zeile-opt').addEventListener('click', () => { const kk = korr(); kk.optional = !kk.optional; recalc(); planAutosave(); });
         tr.querySelector('.zeile-del').addEventListener('click', () => {
           const kk = korr(); kk.geloescht = !kk.geloescht;
           recalc(); planAutosave();
@@ -7129,7 +7159,15 @@ $('supportChatInput').addEventListener('keydown', (e) => {
     const { error } = await sb.from('offerte').update({ zeilen_reihenfolge: reihenfolge }).eq('id', currentOfferteId);
     if(error) console.error('Reihenfolge speichern:', error);
   };
-  new MutationObserver(() => { sortieren(); griffe(); }).observe(body, { childList: true });
+  // Zwischensumme = fortlaufende Summe aller gezählten Zeilen darüber (ohne optionale/ausgeblendete)
+  const zwRechnen = () => {
+    let s = 0;
+    [...body.children].forEach(tr => {
+      if(tr.classList.contains('ezzw')){ const w = tr.querySelector('.dzwwert'); if(w) w.textContent = fmtCHF(s); }
+      else if(tr.dataset.betrag) s += parseFloat(tr.dataset.betrag) || 0;
+    });
+  };
+  new MutationObserver(() => { sortieren(); griffe(); zwRechnen(); }).observe(body, { childList: true });
 
   // Ziehen: nur innerhalb derselben Gruppe
   let zieh = null;
@@ -7154,7 +7192,7 @@ $('supportChatInput').addEventListener('keydown', (e) => {
     if(!tr || tr === zieh || gruppeVon(tr) !== gruppeVon(zieh)) return;
     e.preventDefault();
     body.insertBefore(zieh, tr);
-    speichern();
+    speichern(); zwRechnen();
   });
   document.addEventListener('dragend', () => { if(zieh) zieh.classList.remove('dzieh'); zieh = null; body.querySelectorAll('.dziel').forEach(x => x.classList.remove('dziel')); });
 
@@ -7182,7 +7220,7 @@ $('supportChatInput').addEventListener('keydown', (e) => {
   const leiste = document.createElement('div');
   leiste.className = 'dokleiste';
   const PLUS = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>';
-  leiste.innerHTML = `<button type="button" data-neu="artikel">${PLUS}Artikel</button><button type="button" data-neu="leer">${PLUS}Leere Zeile</button><button type="button" data-neu="text">${PLUS}Textzeile</button><div class="dokmenu" hidden></div>`;
+  leiste.innerHTML = `<button type="button" data-neu="artikel">${PLUS}Artikel</button><button type="button" data-neu="leer">${PLUS}Leere Zeile</button><button type="button" data-neu="text">${PLUS}Textzeile</button><button type="button" data-mehr>${PLUS}Mehr</button><div class="dokmenu" hidden></div>`;
   const tab = cw.querySelector('table.cost');
   if(tab) tab.after(leiste);
   const menu = leiste.querySelector('.dokmenu');
@@ -7195,6 +7233,10 @@ $('supportChatInput').addEventListener('keydown', (e) => {
   };
   leiste.addEventListener('click', async e => {
     const b = e.target.closest('button'); if(!b) return;
+    if(b.hasAttribute('data-mehr')){
+      menu.innerHTML = '<button type="button" data-neu="optional">Optionale Position<small> – steht in der Offerte, zählt nicht zum Total</small></button><button type="button" data-neu="zw">Zwischensumme<small> – Summe aller Zeilen darüber</small></button>';
+      menu.style.left = b.offsetLeft + 'px'; menu.hidden = false; return;
+    }
     if(b.dataset.neu){
       const art = b.dataset.neu;
       menu.innerHTML = `<div class="dmk">In welche Gruppe?</div>` + KATS.map(([k, l]) => `<button type="button" data-kat="${k}" data-art="${art}">${l}</button>`).join('');
@@ -7204,6 +7246,8 @@ $('supportChatInput').addEventListener('keydown', (e) => {
       menu.hidden = true;
       const kat = b.dataset.kat, art = b.dataset.art;
       if(art === 'leer') return neueEigene(kat, { bezeichnung: 'Neue Position' });
+      if(art === 'optional') return neueEigene(kat, { bezeichnung: 'Optionale Position', optional: true });
+      if(art === 'zw') return neueEigene(kat, { typ: 'zw', bezeichnung: 'Zwischensumme', menge: 0, einheit: '', preis: 0 });
       if(art === 'text') return neueEigene(kat, { typ: 'text', bezeichnung: 'Text', menge: 0, einheit: '', preis: 0 });
       if(art === 'artikel') await openArtikelstammPicker(kat, a => neueEigene(kat, { bezeichnung: a.bezeichnung, einheit: a.einheit, preis: a.vp_knecht ?? 0 }));
     }
