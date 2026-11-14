@@ -670,6 +670,8 @@ async function ladeAlles(){
     S.board = MA ? eigen : S.boards.find(b => b.id === gid) || eigen; S.ofMeine = !MA && gm === 'm';
     if(MA) S.boards = [eigen];
     await ladeBoard();
+    // aus dem Offertentool: Offerte zugesagt → ?zusage=<offerte_id>
+    { const zid = new URLSearchParams(location.search).get('zusage'); if(zid){ history.replaceState(null, '', location.pathname + location.hash); await zusageAusOffertentool(zid); } }
     // aus Einstellungen › Pendenzen («Meine Einstellungen»): Fenster gleich offen
     if(location.hash === '#einstellungen'){ S.set = true; zeichneOver(); history.replaceState(null, '', location.pathname + location.search); }
   } catch(e){ fehler(e, 'Laden'); }
@@ -1310,6 +1312,23 @@ async function zusagen(p){
   zeichne();
   toast('Zugesagt – liegt jetzt auch im Büro-Board unter «Planung»', async () => { if(await upd('pendenz', p.id, alt)){ Object.assign(p, alt); if(!S.pz.includes(p)) S.pz.push(p); zeichne(); } });
   vorratPopup(p);
+}
+// Offertentool: Offerte auf «Zugesagt» gesetzt → Offerten-Board öffnen, Karte des Kunden zusagen (fehlt sie: anlegen), Offerte im Vorrat-Fenster schon angehakt
+async function zusageAusOffertentool(offId){
+  const ob = ofBoard(); if(!ob || MA) return toast('Offerten-Board nicht gefunden – bitte von Hand zusagen.', null, true);
+  const { data: off, error: eo } = await sb.from('offerte').select('id,titel,kunde_id,erstellt_von').eq('id', offId).maybeSingle();
+  if(eo) return fehler(eo, 'Offerte'); if(!off) return toast('Offerte nicht gefunden.', null, true);
+  if(S.board?.id !== ob.id || S.ofMeine){ S.board = ob; S.ofMeine = false; await ladeBoard(); }
+  const vorher = S.pz.find(p => p.offerte_status === 'zugesagt' && (p.vorrat_offerte_ids || []).includes(off.id));
+  if(vorher){ toast('Diese Offerte ist schon zugesagt.'); return vorratPopup(vorher); }
+  const offen = S.pz.filter(p => p.kunde_id && p.kunde_id === off.kunde_id && p.offerte_status !== 'zugesagt' && OF(listeById(p.liste_id)?.art_id))
+    .sort((a, b) => String(b.liste_seit || '').localeCompare(String(a.liste_seit || '')));
+  let p = offen[0];
+  if(!p){ const li = S.listen.find(l => l.art_id === 'of_zugestellt'); if(!li) return toast('Liste «Zugestellt» nicht gefunden.', null, true);
+    const { data, error } = await sb.from('pendenz').insert({ liste_id: li.id, titel: off.titel || 'Offerte', kunde_id: off.kunde_id, zeit: 0, sortierung: Date.now() / 1000, erstellt_von: ME, offerte_von: off.erstellt_von || ME }).select().single();
+    if(error) return fehler(error, 'Pendenz'); p = data; S.pz.push(p); }
+  p.vorrat_offerte_ids = [...new Set([...(p.vorrat_offerte_ids || []), off.id])]; // im Vorrat-Fenster angehakt
+  await zusagen(p);
 }
 const isoTag = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const naechsterWerktag = () => { const d = new Date(); d.setDate(d.getDate() + 1); while(d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1); return isoTag(d); };
