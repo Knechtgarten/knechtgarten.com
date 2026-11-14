@@ -3948,8 +3948,18 @@ function renderBereich(){
           menu.style.top = (rect.bottom + 3) + 'px';
           menu.style.margin = '0';
           menu.classList.add('show');
+          // reicht der Platz nach unten nicht: über dem Knopf öffnen
+          const mh = menu.offsetHeight;
+          if(rect.bottom + 3 + mh > innerHeight - 8 && rect.top - 3 - mh > 8) menu.style.top = (rect.top - 3 - mh) + 'px';
         }
       };
+      // Mouse-over-Hinweise auch im Gruppen-Dropdown
+      menu.querySelectorAll('button[data-opt]').forEach(b => {
+        const m = af.optionen.find(o => o.id === b.dataset.opt);
+        if(m?.hinweistext || m?.hinweisbildUrl){ b.addEventListener('mouseenter', () => zeigeOptionHinweis(b, m)); b.addEventListener('mouseleave', versteckeOptionHinweis); }
+      });
+      { const m = aktivesM; const haupt = gw.querySelector('.optg-main');
+        if(m?.hinweistext || m?.hinweisbildUrl){ haupt.addEventListener('mouseenter', () => zeigeOptionHinweis(haupt, m)); haupt.addEventListener('mouseleave', versteckeOptionHinweis); } }
       gw.querySelector('.optg-arrow').addEventListener('click', oeffneMenu);
       gw.querySelector('.optg-main').addEventListener('click', e => { if(aktivesM) klickOption(aktivesM.id); else oeffneMenu(e); });
       menu.querySelectorAll('button[data-opt]').forEach(b => b.addEventListener('click', e => {
@@ -7055,7 +7065,7 @@ $('supportChatInput').addEventListener('keydown', (e) => {
   konf.setAttribute('aria-label', 'Konfigurator');
   const IC_LL = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M11 17l-5-5 5-5M18 17l-5-5 5-5"/></svg>';
   const IC_RR = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13 17l5-5-5-5M6 17l5-5-5-5"/></svg>';
-  konf.innerHTML = `<button type="button" class="dokstreifen" id="dokKonfAuf" title="Konfigurator aufklappen" aria-label="Konfigurator aufklappen" aria-expanded="true">${IC_RR}<span>${IC_SL}</span></button><div class="dokkonfhd">${IC_SL}Konfigurator <small id="dokKonfTyp"></small><span class="sp"></span><button type="button" id="dokKonfZu" title="Zuklappen" aria-label="Konfigurator zuklappen">${IC_LL}</button></div>`;
+  konf.innerHTML = `<button type="button" class="dokstreifen" id="dokKonfAuf" title="Konfigurator aufklappen" aria-label="Konfigurator aufklappen" aria-expanded="true">${IC_RR}<span>${IC_SL}</span></button><div class="dokkonfhd">${IC_SL}<small id="dokKonfTyp" hidden></small><span class="sp"></span><button type="button" id="dokKonfZu" title="Zuklappen" aria-label="Konfigurator zuklappen">${IC_LL}</button></div>`;
   wrap.insertBefore(konf, wrap.firstChild);
   ['formelInhalt', 'tagessatzInhalt'].forEach(id => { const el = $$(id); if(el) konf.appendChild(el); });
   // 2) Nr., Easybill, Notizen und Status stehen in der weissen Leiste (data-kg-seite), Kopieren/Löschen gibt es in der Offertenliste
@@ -7603,6 +7613,41 @@ function dokNotizKnopf(offen){
   });
 
   render();
+})();
+</script>
+<style id="dokEinheitStil">
+/* Einheit in jeder Zeile wählbar (Liste) oder frei tippen */
+#costbody .dein{padding-right:16px !important;cursor:pointer;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%238B9097' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") !important;background-repeat:no-repeat !important;background-position:right 4px center !important}
+.deinmenu{position:fixed;z-index:200;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(50,62,78,.16);padding:4px;min-width:110px;max-height:260px;overflow:auto}
+.deinmenu button{display:block;width:100%;text-align:left;border:0;background:none;padding:5px 9px;border-radius:5px;font:inherit;font-size:12.5px;cursor:pointer;color:var(--primary)}
+.deinmenu button:hover,.deinmenu button.cur{background:var(--soft)}
+</style>
+<script>
+/* ===== Einheit: Klick öffnet eine Liste, Tippen bleibt möglich ===== */
+(function(){
+  const EINHEITEN = ['Std.', 'Tag', 'Stk.', 'Pauschale', 'm', 'm²', 'm³', 'km', 'kg', 't', 'l', 'Fuhre'];
+  let menu = null, feld = null;
+  const zu = () => { if(menu){ menu.remove(); menu = null; feld = null; } };
+  document.addEventListener('focusin', e => {
+    const f = e.target.closest && e.target.closest('#costbody .dein');
+    if(!f || f.disabled || f.readOnly){ if(!e.target.closest?.('.deinmenu')) zu(); return; }
+    if(feld === f) return; zu(); feld = f;
+    menu = document.createElement('div'); menu.className = 'deinmenu';
+    const akt = (f.value || '').trim();
+    const liste = EINHEITEN.includes(akt) || !akt ? EINHEITEN : [akt, ...EINHEITEN];
+    menu.innerHTML = liste.map(u => `<button type="button" data-u="${u.replace(/"/g, '&quot;')}" class="${u === akt ? 'cur' : ''}">${u}</button>`).join('');
+    document.body.appendChild(menu);
+    const r = f.getBoundingClientRect(), mh = menu.offsetHeight;
+    menu.style.left = r.left + 'px';
+    menu.style.top = (r.bottom + 3 + mh > innerHeight - 8 ? Math.max(8, r.top - 3 - mh) : r.bottom + 3) + 'px';
+    menu.addEventListener('mousedown', ev => ev.preventDefault()); // Fokus bleibt im Feld
+    menu.addEventListener('click', ev => { const b = ev.target.closest('[data-u]'); if(!b || !feld) return;
+      const ziel = feld; ziel.value = b.dataset.u; zu(); ziel.dispatchEvent(new Event('change', { bubbles: true })); ziel.blur(); });
+  });
+  document.addEventListener('input', e => { if(menu && e.target === feld) zu(); }); // Tippen = eigene Einheit
+  document.addEventListener('focusout', e => { if(e.target === feld) setTimeout(() => { if(document.activeElement !== feld) zu(); }, 150); });
+  document.addEventListener('keydown', e => { if(e.key === 'Escape') zu(); });
+  window.addEventListener('scroll', e => { if(menu && e.target !== menu) zu(); }, true);
 })();
 </script>
 </body>
