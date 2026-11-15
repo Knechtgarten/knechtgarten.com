@@ -29,7 +29,8 @@
 .kgb .kgb-t{border:1px solid var(--line,#E1E5E9);background:#fff;font:inherit;font-size:11.5px;border-radius:6px;padding:3px 8px;cursor:pointer;color:var(--primary,#323E4E)}
 .kgb .kgb-t.rot{color:#B4655F;border-color:#e7c3bf}
 .kgb .kgb-frage{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--primary,#323E4E);background:#F5F7F9;border-radius:8px;padding:6px 8px;width:100%}
-.kgb-badge{width:22px;height:22px;border-radius:50%;background:#DCE2E8;color:#323E4E;font-weight:600;font-size:11.5px;display:inline-flex;align-items:center;justify-content:center;cursor:help}
+.kgb-badge{width:24px;height:24px;box-sizing:border-box;border-radius:50%;border:1px solid var(--line,#E1E5E9);background:#fff;color:var(--muted,#8B9097);font-weight:600;font-size:11.5px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer}
+.kgb-badge:hover{border-color:var(--primary,#323E4E);color:var(--primary,#323E4E)}
 .kgb-badge.aus{opacity:.5}
 .kgb-badge.klein{width:18px;height:18px;font-size:10.5px}`;
   const st = document.createElement('style'); st.id = 'kg-bereiche-stil'; st.textContent = css;
