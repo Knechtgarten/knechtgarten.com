@@ -63,6 +63,10 @@ Deno.serve(async () => {
       if (!kk) { const c = await gcal('calendars', { method: 'POST', body: JSON.stringify({ summary: 'Pendenzen', description: 'Aus dem Knechtgarten-Pendenzentool – erledigt wird im Tool.', timeZone: TZ }) });
         await admin.from('pendenz_kalender_konto').insert({ benutzer_id: v.benutzer_id, calendar_id: c.id }); kk = { calendar_id: c.id }; r.kalenderNeu = true; }
       const cal = encodeURIComponent(kk!.calendar_id);
+      // in der Kalenderliste der Person eingeblendet halten (sonst ist er da, aber links unter «Meine Kalender» nicht sichtbar)
+      const li = await gcal('users/me/calendarList/' + cal);
+      if (li._weg) await gcal('users/me/calendarList', { method: 'POST', body: JSON.stringify({ id: kk!.calendar_id, selected: true, hidden: false, colorId: '15' }) });
+      else if (li.hidden || li.selected === false) { await gcal('users/me/calendarList/' + cal, { method: 'PATCH', body: JSON.stringify({ selected: true, hidden: false }) }); r.eingeblendet = true; }
 
       // 2) Sammeltermine pro Tag
       const proTag = new Map<string, any[]>();
