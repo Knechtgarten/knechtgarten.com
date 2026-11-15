@@ -8,6 +8,35 @@
 // ============================================================================
 import Anthropic from 'npm:@anthropic-ai/sdk';
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import * as XLSX from 'npm:xlsx@0.18.5';
+
+// Zusatzquelle Google Drive: über die Google-Verbindung des Firmenkontos (wie fotos/doku-google),
+// nur in der geteilten Ablage «01_Kundendaten / Projekte» (keine Personal-/Buchhaltungsordner).
+const GOOGLE_CLIENT_ID = '689526517764-f2727pi1nglt5lkbttec3ssjqkgl47k5.apps.googleusercontent.com';
+const FIRMENKONTO = 'mail@knechtgarten.ch';
+const DRIVE_KUNDEN = '0AEZm9ALFx3sgUk9PVA';
+function zuBase64(bytes: Uint8Array): string {
+  let s = ''; const n = 0x8000;
+  for (let i = 0; i < bytes.length; i += n) s += String.fromCharCode(...bytes.subarray(i, i + n));
+  return btoa(s);
+}
+const DRIVE_TOOLS: any[] = [
+  {
+    name: 'drive_suchen',
+    description: 'Sucht Dateien in der Google-Drive-Ablage «Kundendaten / Projekte» von Knechtgarten (Volltext in Dateinamen und Inhalt: Pläne, Notizen, Lieferantenofferten, Preislisten, Ausmasse). Liefert id, Name, Typ, Datum, Ordner-Link. Danach mit drive_datei_lesen den Inhalt holen.',
+    input_schema: { type: 'object', properties: { suchbegriff: { type: 'string', description: 'kurz, z. B. Kundenname, «Preisliste Däpp», «Ausmass Mauer»' } }, required: ['suchbegriff'], additionalProperties: false },
+  },
+  {
+    name: 'kundenordner_dateien',
+    description: 'Listet die Dateien im Drive-Ordner des aktuellen Kunden (alle Jahre, bis 3 Ebenen tief): Notizen, Pläne, Fotos, frühere Offerten. Danach mit drive_datei_lesen den Inhalt holen.',
+    input_schema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'drive_datei_lesen',
+    description: 'Liest den Inhalt einer Drive-Datei (Google Docs/Tabellen, PDF, Excel, Text, Bilder).',
+    input_schema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'], additionalProperties: false },
+  },
+];
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -140,10 +169,83 @@ Deno.serve(async (req) => {
   const quellen: string[] = Array.isArray(body?.quellen) ? body.quellen.map(String) : [];
   const mitInternet = quellen.includes('internet');
   // Zusatzquelle Internet: Websuche von Anthropic (läuft serverseitig), nur wenn der Schalter an ist
-  const tools: any[] = mitInternet ? [...TOOLS, { type: 'web_search_20260209', name: 'web_search', max_uses: 5, user_location: { type: 'approximate', country: 'CH', region: 'Bern' } }] : TOOLS;
-  const system = SYSTEM + (mitInternet ? '\n- Zusatzquelle Internet ist eingeschaltet: Findest du in unseren Quellen nichts Passendes (z. B. Pflanze, Spezialmaterial), suche mit web_search nach Schweizer Listenpreisen (z. B. Baumschulen, Händler). Solche Preise sind Einkaufs-/Listenpreise: quelle "geschaetzt", quelle_info = Händler + Preis, und nenne die Seite in der Antwort als normalen Link [Händler](https://…).' : '');
+  const mitDrive = quellen.includes('drive');
+  const tools: any[] = [...TOOLS, ...(mitDrive ? DRIVE_TOOLS : []), ...(mitInternet ? [{ type: 'web_search_20260209', name: 'web_search', max_uses: 5, user_location: { type: 'approximate', country: 'CH', region: 'Bern' } }] : [])];
+  const system = SYSTEM
+    + (mitDrive ? '\n- Zusatzquelle Drive ist eingeschaltet: Schau mit kundenordner_dateien, was im Ordner dieses Kunden liegt (Notizen, Pläne, Ausmasse von der Besichtigung), und lies Relevantes mit drive_datei_lesen. Mit drive_suchen findest du z. B. Lieferantenofferten oder Preislisten. Erwähnst du eine Datei, schreibe sie als Link [Dateiname](https://drive.google.com/…). Drive-Preise: quelle "vorgabe" wenn es eine Lieferantenofferte für dieses Projekt ist, sonst "geschaetzt", quelle_info = Datei.' : '')
+    + (mitInternet ? '\n- Zusatzquelle Internet ist eingeschaltet: Findest du in unseren Quellen nichts Passendes (z. B. Pflanze, Spezialmaterial), suche mit web_search nach Schweizer Listenpreisen (z. B. Baumschulen, Händler). Solche Preise sind Einkaufs-/Listenpreise: quelle "geschaetzt", quelle_info = Händler + Preis, und nenne die Seite in der Antwort als normalen Link [Händler](https://…).' : '');
 
   const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+
+  // Google-Zugang des Firmenkontos (einmal pro Anfrage)
+  let googleToken = '';
+  async function google(): Promise<string> {
+    if (googleToken) return googleToken;
+    const secret = Deno.env.get('GOOGLE_CLIENT_SECRET'); if (!secret) throw new Error('GOOGLE_CLIENT_SECRET fehlt.');
+    const { data: fb } = await sb.from('benutzer').select('id').ilike('email', FIRMENKONTO).maybeSingle();
+    const { data: gv } = fb ? await sb.from('google_verbindung').select('refresh_token').eq('benutzer_id', fb.id).maybeSingle() : { data: null };
+    if (!gv) throw new Error('Das Firmenkonto ist nicht mit Google verbunden.');
+    const r = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ refresh_token: gv.refresh_token, client_id: GOOGLE_CLIENT_ID, client_secret: secret, grant_type: 'refresh_token' }) });
+    const t = await r.json(); if (!r.ok) throw new Error('Google: ' + (t.error_description || t.error));
+    return googleToken = t.access_token;
+  }
+  async function gdrive(pfad: string): Promise<any> {
+    const r = await fetch('https://www.googleapis.com/drive/v3/' + pfad, { headers: { Authorization: 'Bearer ' + await google() } });
+    if (!r.ok) throw new Error('Drive (' + r.status + '): ' + (await r.text()).slice(0, 200));
+    return r;
+  }
+  const DATEI_FELDER = 'files(id,name,mimeType,modifiedTime,webViewLink,size,parents)';
+  const dateiKurz = (f: any) => ({ id: f.id, name: f.name, typ: f.mimeType, datum: (f.modifiedTime || '').slice(0, 10), link: f.webViewLink });
+
+  async function driveWerkzeug(name: string, input: any): Promise<string | any[]> {
+    if (name === 'drive_suchen') {
+      const b = String(input?.suchbegriff || '').trim().slice(0, 80).replace(/\\/g, '').replace(/'/g, "\\'");
+      if (!b) return 'Kein Suchbegriff.';
+      const p = new URLSearchParams({ q: `fullText contains '${b}' and trashed=false and mimeType != 'application/vnd.google-apps.folder'`, corpora: 'drive', driveId: DRIVE_KUNDEN,
+        includeItemsFromAllDrives: 'true', supportsAllDrives: 'true', fields: DATEI_FELDER, pageSize: '15', orderBy: 'modifiedTime desc' });
+      const d = await (await gdrive('files?' + p)).json();
+      return d.files?.length ? JSON.stringify(d.files.map(dateiKurz)) : 'Keine Dateien gefunden.';
+    }
+    if (name === 'kundenordner_dateien') {
+      if (!kunde?.id) return 'Kein Kunde gewählt.';
+      const { data: ko } = await sb.from('kunde_ordner').select('drive_id, jahr, name').eq('kunde_id', kunde.id);
+      if (!ko?.length) return 'Für diesen Kunden ist kein Drive-Ordner verknüpft.';
+      const liste: any[] = [];
+      const lesen = async (id: string, pfad: string, tiefe: number) => {
+        const p = new URLSearchParams({ q: `'${id}' in parents and trashed=false`, includeItemsFromAllDrives: 'true', supportsAllDrives: 'true', fields: DATEI_FELDER, pageSize: '200' });
+        const d = await (await gdrive('files?' + p)).json();
+        await Promise.all((d.files || []).map(async (f: any) => {
+          if (f.mimeType === 'application/vnd.google-apps.folder') { if (tiefe < 3) await lesen(f.id, pfad + f.name + '/', tiefe + 1); }
+          else if (liste.length < 150) liste.push({ ...dateiKurz(f), ordner: pfad });
+        }));
+      };
+      await Promise.all(ko.map((o: any) => lesen(o.drive_id, (o.name || o.jahr || '') + '/', 1)));
+      liste.sort((a, b) => b.datum.localeCompare(a.datum));
+      return liste.length ? JSON.stringify(liste) : 'Der Kundenordner ist leer.';
+    }
+    if (name === 'drive_datei_lesen') {
+      const id = String(input?.id || '').replace(/[^A-Za-z0-9_-]/g, '');
+      const meta = await (await gdrive(`files/${id}?supportsAllDrives=true&fields=id,name,mimeType,size,driveId`)).json();
+      if (meta.driveId !== DRIVE_KUNDEN) return 'Diese Datei liegt nicht in der Ablage Kundendaten.';
+      const mt = meta.mimeType || '';
+      if (mt === 'application/vnd.google-apps.document' || mt === 'application/vnd.google-apps.presentation')
+        return `Datei «${meta.name}»:\n` + (await (await gdrive(`files/${id}/export?mimeType=text/plain`)).text()).slice(0, 40000);
+      if (mt === 'application/vnd.google-apps.spreadsheet')
+        return `Tabelle «${meta.name}» (erstes Blatt, CSV):\n` + (await (await gdrive(`files/${id}/export?mimeType=text/csv`)).text()).slice(0, 40000);
+      if (Number(meta.size || 0) > 8_000_000) return `Datei «${meta.name}» ist zu gross zum Lesen (über 8 MB).`;
+      const bytes = new Uint8Array(await (await gdrive(`files/${id}?alt=media&supportsAllDrives=true`)).arrayBuffer());
+      if (mt === 'application/pdf') return [{ type: 'text', text: `PDF «${meta.name}»:` }, { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: zuBase64(bytes) } }];
+      if (/^image\/(jpeg|png|gif|webp)$/.test(mt)) return [{ type: 'text', text: `Bild «${meta.name}»:` }, { type: 'image', source: { type: 'base64', media_type: mt, data: zuBase64(bytes) } }];
+      if (/spreadsheetml|ms-excel/.test(mt) || /\.xlsx?$/i.test(meta.name)) {
+        const wb = XLSX.read(bytes, { type: 'array' });
+        return `Excel «${meta.name}»:\n` + wb.SheetNames.slice(0, 5).map((n: string) => `## ${n}\n` + XLSX.utils.sheet_to_csv(wb.Sheets[n])).join('\n').slice(0, 40000);
+      }
+      if (/^text\//.test(mt) || /\.(csv|txt)$/i.test(meta.name)) return `Datei «${meta.name}»:\n` + new TextDecoder().decode(bytes).slice(0, 40000);
+      return `Datei «${meta.name}» (${mt}) kann ich nicht lesen.`;
+    }
+    return 'Unbekanntes Werkzeug.';
+  }
 
   async function werkzeug(name: string, input: any): Promise<string> {
     if (name === 'artikel_suchen') {
@@ -227,13 +329,13 @@ Deno.serve(async (req) => {
       messages.push({ role: 'assistant', content: response.content });
       const ergebnisse: any[] = [];
       for (const t of aufrufe) {
-        let inhalt = '';
+        let inhalt: any = '';
         if (t.name === 'blatt_setzen') {
           const z = t.input?.zeilen;
           if (!Array.isArray(z)) inhalt = 'Fehler: zeilen fehlt.';
           else { gesetzt = { zeilen: z.slice(0, 200), arbeitsbeschrieb: typeof t.input?.arbeitsbeschrieb === 'string' ? t.input.arbeitsbeschrieb : null }; inhalt = `Blatt gesetzt (${z.length} Zeilen).`; }
         } else {
-          inhalt = ++suchen > 25 ? 'Suchlimit erreicht – nimm, was du gefunden hast, oder schätze (quelle "geschaetzt").' : await werkzeug(t.name, t.input);
+          inhalt = ++suchen > 25 ? 'Suchlimit erreicht – nimm, was du gefunden hast, oder schätze (quelle "geschaetzt").' : t.name.startsWith('drive_') || t.name === 'kundenordner_dateien' ? (mitDrive ? await driveWerkzeug(t.name, t.input).catch((e: any) => 'Drive-Fehler: ' + (e?.message || e)) : 'Drive ist nicht eingeschaltet.') : await werkzeug(t.name, t.input);
         }
         ergebnisse.push({ type: 'tool_result', tool_use_id: t.id, content: inhalt });
       }
