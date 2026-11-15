@@ -20,7 +20,7 @@
       let { data: b } = await sb.from('pendenz_board').select('id').eq('typ', 'person').eq('besitzer_id', uid).maybeSingle();
       if(!b){ const r = await sb.from('pendenz_board').insert({ name: 'Mein Board', typ: 'person', besitzer_id: uid }).select('id').single(); if(r.error) throw r.error; b = r.data;
         const rows = [1, 2, 3].map((z, i) => ({ board_id: b.id, zeit: z, titel: ['', 'Heute', 'Diese Woche', 'Dieser Monat'][z], bereich: 'zeit', x: 20, y: 20 + i * 120 }))
-          .concat([['team', 'Team-box', 20], ['sammel', 'Sammelbox', 150], ['notizen', 'Daten / Dauernde Notizen', 280]].map(([a, t, y]) => ({ board_id: b.id, art_id: a, titel: t, bereich: 'team', x: 20, y })));
+          .concat([['team', 'Team-box', 20], ['sammel', 'App-Box', 150], ['notizen', 'Daten / Dauernde Notizen', 280]].map(([a, t, y]) => ({ board_id: b.id, art_id: a, titel: t, bereich: 'team', x: 20, y })));
         const r2 = await sb.from('pendenz_liste').insert(rows); if(r2.error) throw r2.error; }
       const { data: ls } = await sb.from('pendenz_liste').select('id,art_id').eq('board_id', b.id).in('art_id', ['team', 'sammel', 'notizen']);
       const f = a => ((ls || []).find(l => l.art_id === a) || {}).id || null;
