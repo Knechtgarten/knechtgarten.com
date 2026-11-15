@@ -229,6 +229,8 @@ Deno.serve(async (req) => {
       }
     }
     if (offerte.optionen_text_liste?.trim()) {
+      // «Arbeitsbeschrieb» als fetter Zwischentitel wie die Kategorien (Arbeitsleistung, Materialaufwand …)
+      items.push({ type: 'TEXT', description: '<b>Arbeitsbeschrieb</b>' });
       items.push({ type: 'TEXT', description: offerte.optionen_text_liste.trim() });
     }
 
