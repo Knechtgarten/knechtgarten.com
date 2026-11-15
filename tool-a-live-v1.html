@@ -1860,7 +1860,7 @@ const rundeCHF = n => Math.round(n * 10) / 10;
 
 let OFFERTENTYPEN = [];       // [{id,name,berechnungsmodell}]
 
-const OFFERTNUMMER_TYPCODE = { formel:'01', tagessatz:'02', artikel:'03', easy:'04' };
+const OFFERTNUMMER_TYPCODE = { formel:'01', tagessatz:'02', artikel:'03', easy:'04', ki:'05' };
 let currentOffertnummer = null;
 function renderOffertnummerBadge(){
   const wrap = $('offnrWrap');
@@ -1979,7 +1979,7 @@ async function vergibOffertnummer(modell){
 }
 let offertentypId = null;
 let currentBerechnungsmodell = 'formel';
-let istEasy = false, easyVorlagen = []; // Offertentyp «Easy»: läuft intern wie der Tagesrechner, links Vorlagen-Balken statt Arbeitsschritte
+let istEasy = false, easyVorlagen = [], istKi = false; // istKi: Offertentyp «KI» (Chat links, läuft intern wie Easy) // Offertentyp «Easy»: läuft intern wie der Tagesrechner, links Vorlagen-Balken statt Arbeitsschritte
 let eingabefelder = [];       // [{id,name,einheit}]
 let auswahlfelder = [];       // [{id,name,mehrfachauswahl,optionen:[{id,name}]}]
 let ressourcenzeilen = [];    // [{optionId, arbeitsschritt, kategorie, bezeichnung, einheit, preis, menge_ausdruck}]
@@ -3230,8 +3230,98 @@ function renderEasyInhalt(){
   }));
 }
 
+// ---------------------------------------------------------------------------
+// Offertentyp «KI»: links ein Gespräch (graue Kachel = du, hellgelb = KI), rechts füllt sich das Blatt.
+// Supabase-Funktion ki-offerte sucht Artikel/alte Offerten und setzt das ganze Blatt (eigene Zeilen).
+// Verlauf pro Offerte in offerte_ki_verlauf (nur Text).
+// ---------------------------------------------------------------------------
+let kiVerlauf = [], kiVerlaufFuer = undefined, kiLaeuft = false;
+async function kiVerlaufLaden(){
+  const id = typeof currentOfferteId !== 'undefined' ? currentOfferteId : null;
+  if(kiVerlaufFuer === id) return;
+  kiVerlaufFuer = id; kiVerlauf = [];
+  if(!id) return;
+  const { data } = await sb.from('offerte_ki_verlauf').select('rolle, text, erstellt_am').eq('offerte_id', id).order('erstellt_am');
+  kiVerlauf = (data || []).map(r => ({ rolle: r.rolle, text: r.text }));
+}
+function kiBlattFuerKi(){
+  return {
+    zeilen: eigeneZeilen.filter(z => !z.geloescht && z.typ !== 'zw' && z.typ !== 'text' && (z.bezeichnung || '').trim()).map(z => ({
+      kategorie: z.kategorie, bezeichnung: z.bezeichnung, menge: z.fahrt ? (Number(z.mengeBasis) || 0) : (Number(z.menge) || 0), einheit: z.einheit, preis: Number(z.preis) || 0,
+      artikel_id: z.artikelId || null, fahrt: !!z.fahrt, optional: !!z.optional, quelle: z.kiGeschaetzt ? 'geschaetzt' : (z.artikelId ? 'artikel' : 'vorgabe')
+    })),
+    arbeitsbeschrieb: $optionenTextBlock.value || ''
+  };
+}
+function kiBlattUebernehmen(zeilen, arbeitsbeschrieb){
+  // Das Blatt der KI ersetzt die eigenen Zeilen (die KI bekommt das aktuelle Blatt inkl. deiner Änderungen immer mit)
+  eigeneZeilen = []; eigeneZeileCounter = 0;
+  (zeilen || []).forEach(z => {
+    const kat = ['personal', 'maschine', 'logistik', 'material'].includes(z.kategorie) ? z.kategorie : 'material';
+    const fahrt = !!z.fahrt && (kat === 'personal' || /^(lieferwagen|transportaufwand)/i.test(String(z.bezeichnung || '')));
+    easyNeueZeile({ kategorie: kat, bezeichnung: String(z.bezeichnung || '').replace(/\s*\n\s*/g, ' / '), einheit: String(z.einheit || ''),
+      preis: Number(z.preis) || 0, artikelId: z.artikel_id || null, optional: !!z.optional, kiGeschaetzt: z.quelle === 'geschaetzt',
+      ...(fahrt ? { fahrt: true, mengeBasis: Number(z.menge) > 0 ? Number(z.menge) : null, fahrtManuell: false, menge: Number(z.menge) || 0 } : { menge: Number(z.menge) || 0 }) });
+  });
+  if(typeof arbeitsbeschrieb === 'string'){ $optionenTextBlock.value = arbeitsbeschrieb.trim(); optionenTextManuellBearbeitet = true; }
+}
+function kiVerlaufZeichnen(){
+  const box = document.getElementById('kiVerlauf'); if(!box) return;
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  box.innerHTML = kiVerlauf.length ? kiVerlauf.map(m => `<div class="kimsg ${m.rolle === 'assistant' ? 'ki' : 'du'}">${esc(m.text).replace(/\n/g, '<br>')}</div>`).join('')
+    + (kiLaeuft ? '<div class="kimsg ki kidenkt">Die KI stellt die Offerte zusammen …</div>' : '')
+    : `<div class="kileer">Beschreibe die Arbeiten, z. B.:<br>«4 Arbeitstage, ein Vorarbeiter und ein Gartenarbeiter, 2 Metallreifen Ø 195 cm, Substrat zum Füllen, Kraneinsatz Budget 2000.–»<br><br>Die KI sucht Artikel und frühere Offerten, füllt das Blatt rechts und fragt nach, wenn etwas fehlt.</div>`;
+  box.scrollTop = box.scrollHeight;
+}
+async function kiSenden(){
+  const ta = document.getElementById('kiEingabe'); if(!ta || kiLaeuft) return;
+  const text = ta.value.trim(); if(!text) return;
+  // neue Offerte zuerst speichern, damit der Verlauf dazu gehört
+  if(typeof currentOfferteId === 'undefined' || !currentOfferteId){ await fuehreAutosaveDurch(); kiVerlaufFuer = currentOfferteId || null; }
+  const vorher = kiVerlauf.slice();
+  kiVerlauf.push({ rolle: 'user', text }); ta.value = ''; ta.style.height = '';
+  kiLaeuft = true; kiVerlaufZeichnen();
+  document.getElementById('kiSenden').disabled = true;
+  try{
+    const kunde = { name: (currentKundeName || '').trim(), plz: ($('kundePlz')?.value || '').trim(), adresse: ($('kundeAdresseAnzeige')?.textContent || '').trim() };
+    const { data, error } = await sb.functions.invoke('ki-offerte', { body: { nachricht: text, verlauf: vorher, blatt: kiBlattFuerKi(), kunde } });
+    if(error || data?.error){ throw new Error(data?.error || error?.message || 'Unbekannter Fehler'); }
+    if(Array.isArray(data.zeilen)){ kiBlattUebernehmen(data.zeilen, data.arbeitsbeschrieb); recalc(); planAutosave(); }
+    const antwort = String(data.antwort || '').trim() || 'Erledigt.';
+    kiVerlauf.push({ rolle: 'assistant', text: antwort });
+    if(currentOfferteId) await sb.from('offerte_ki_verlauf').insert([{ offerte_id: currentOfferteId, rolle: 'user', text }, { offerte_id: currentOfferteId, rolle: 'assistant', text: antwort }]);
+  }catch(e){
+    kiVerlauf.push({ rolle: 'assistant', text: 'Das hat nicht geklappt: ' + (e.message || e) + ' Bitte nochmals senden.' });
+  }finally{
+    kiLaeuft = false; kiVerlaufZeichnen();
+    const b = document.getElementById('kiSenden'); if(b) b.disabled = false;
+  }
+}
+async function renderKiInhalt(){
+  $costwrap.classList.add('easyblatt');
+  const th = document.querySelector('table.cost thead th:nth-child(2)');
+  if(th) th.innerHTML = '<span class="ezkopf" title="Menge ohne Fahrzeit">ohne Fahrt</span><span class="ezkopf" title="Fahrzeit, automatisch">Fahrt</span>Menge';
+  if(!document.getElementById('kiPanel')){
+    $tagessatzInhalt.innerHTML = `<div class="kipanel" id="kiPanel">
+      <div class="tbsectionlabel"><span class="t">KI-Offerte</span></div>
+      <div class="kiverlauf" id="kiVerlauf"></div>
+      <div class="kieingabe"><textarea id="kiEingabe" rows="2" placeholder="Was soll in die Offerte? Enter = senden, Shift+Enter = neue Zeile" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-form-type="other"></textarea>
+        <button type="button" class="btn btn-primary" id="kiSenden">Senden</button></div>
+    </div>`;
+    const ta = document.getElementById('kiEingabe');
+    ta.addEventListener('input', () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 220) + 'px'; });
+    ta.addEventListener('keydown', e => { if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); kiSenden(); } });
+    document.getElementById('kiSenden').addEventListener('click', kiSenden);
+  }
+  await kiVerlaufLaden(); kiVerlaufZeichnen();
+}
+
+// Verlauf nachladen, sobald die Offerte (z. B. nach dem ersten Speichern) eine ID hat oder gewechselt wurde
+setInterval(() => { if(istKi && !kiLaeuft && document.getElementById('kiVerlauf') && kiVerlaufFuer !== (typeof currentOfferteId !== 'undefined' ? currentOfferteId : null)) kiVerlaufLaden().then(kiVerlaufZeichnen); }, 800);
+
 const tageText = n => n > 0 ? `${rundeTage(n)} ${n === 1 ? 'Tag' : 'Tage'}` : '';
 function renderTagessatzInhalt(){
+  if(istKi) return renderKiInhalt();
   if(istEasy) return renderEasyInhalt();
   $tagessatzInhalt.innerHTML = `<div class="tbsectionlabel"><span class="t">Arbeitsschritte</span></div>` +
     tagessatzArbeitsschritte.map(as => {
@@ -3717,9 +3807,9 @@ async function ladeDatenFuerOffertentyp(otId){
   formenAktivFuerOffertentyp = !!ot?.formen_aktiv && ot.berechnungsmodell !== 'tagessatz';
   $bauteiltitel.textContent = ot ? ot.name : '';
   $('totalLabel').textContent = 'Total ' + (ot ? ot.name : '');
-  istEasy = ot?.berechnungsmodell === 'easy';
-  if(!istEasy){ $costwrap.classList.remove('easyblatt'); const th2 = document.querySelector('table.cost thead th:nth-child(2)'); if(th2 && th2.querySelector('.ezkopf')) th2.textContent = 'Menge'; }
-  if(ot && (ot.berechnungsmodell === 'tagessatz' || istEasy)){
+  istEasy = ot?.berechnungsmodell === 'easy'; istKi = ot?.berechnungsmodell === 'ki';
+  if(!istEasy && !istKi){ $costwrap.classList.remove('easyblatt'); const th2 = document.querySelector('table.cost thead th:nth-child(2)'); if(th2 && th2.querySelector('.ezkopf')) th2.textContent = 'Menge'; }
+  if(ot && (ot.berechnungsmodell === 'tagessatz' || istEasy || istKi)){
     await ladeTagessatzDaten(otId);
     if(istEasy) await ladeEasyVorlagen(otId);
     setzeInhaltModus('tagessatz');
@@ -5299,7 +5389,7 @@ async function resolveKundeId(){
 
 async function speichereNeueOfferte(titelVal){
   const kundeId = await resolveKundeId();
-  const offertnummer = await vergibOffertnummer(istEasy ? 'easy' : currentBerechnungsmodell);
+  const offertnummer = await vergibOffertnummer(istEasy ? 'easy' : (istKi ? 'ki' : currentBerechnungsmodell));
 
   const { data: offerte, error: oErr } = await sb.from('offerte')
     .insert({
@@ -5871,7 +5961,7 @@ function renderEigeneZeilenFuerKategorie(kat, container){
       return;
     }
     // Easy: Fahrzeit automatisch zur Menge (Menge ohne Fahrzeit + Fahrzeit), ausser die Menge wurde von Hand überschrieben
-    const mitFahrt = istEasy && z.fahrt;
+    const mitFahrt = (istEasy || istKi) && z.fahrt;
     const fz = mitFahrt ? easyFahrzeitFuer(z) : 0;
     if(mitFahrt && !z.fahrtManuell) z.menge = Math.round(((Number(z.mengeBasis) || 0) + fz) * 100) / 100;
     const zMwstArt = z.mwstArt || mwstArtStandard(z.artikelId, z.bezeichnung), zMwstSatz = mwstSatzFuer(zMwstArt);
@@ -5894,13 +5984,13 @@ function renderEigeneZeilenFuerKategorie(kat, container){
       <td style="text-align:right" class="${mitFahrt ? 'ezfahrtzelle' : ''}">${mitFahrt ? `<input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="ez-basis" type="number" step="0.25" value="${z.mengeBasis ?? ''}" placeholder="–" title="Menge ohne Fahrzeit"><span class="ezfz" title="Fahrzeit hin und zurück: ${easyFahrten()} Fahrt(en) × ${easyFahrtStd().toFixed(2)} Std.">+${fz.toFixed(2)}</span>` : ''}<input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="ez-menge${mitFahrt && z.fahrtManuell ? ' hand' : ''}" type="number" step="0.01" value="${z.menge}"${mitFahrt ? ` title="${z.fahrtManuell ? 'Von Hand überschrieben – neue Menge ohne Fahrzeit eintragen, um wieder automatisch zu rechnen' : 'Menge inkl. Fahrzeit (kann überschrieben werden)'}"` : ''}></td>
       <td><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="ez-einheit" value="${z.einheit}"></td>
       <td style="text-align:right"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="ez-preis" type="number" step="0.01" value="${(z.preis || 0).toFixed(2)}"></td>
-      <td class="cbetrag"><button type="button" class="cbetrag-val dbklick" title="Klicken: optional an/aus">${fmtCHF(betrag)}</button>${zeilenInfo(z.rabatt, z.rabattArt || 'prozent', z.einheit, zMwstArt, zMwstSatz)}</td>`;
+      <td class="cbetrag"><button type="button" class="cbetrag-val dbklick" title="Klicken: optional an/aus">${fmtCHF(betrag)}</button>${zeilenInfo(z.rabatt, z.rabattArt || 'prozent', z.einheit, zMwstArt, zMwstSatz)}${z.kiGeschaetzt ? '<span class="dbinfo dbschaetz" title="Preis von der KI geschätzt – bitte prüfen">Preis geschätzt</span>' : ''}</td>`;
     container.appendChild(tr);
     { const bz = tr.querySelector('.ez-bez'); const hoch = () => { bz.style.height = 'auto'; bz.style.height = bz.scrollHeight + 'px'; }; requestAnimationFrame(hoch); bz.addEventListener('input', hoch); bz.addEventListener('keydown', e => { if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); bz.blur(); } }); bz.addEventListener('change', e => { z.bezeichnung = e.target.value.replace(/\s*\n\s*/g, ' / '); recalc(); }); }
     tr.querySelector('.ez-menge').addEventListener('change', e => { z.menge = parseFloat(e.target.value) || 0; if(mitFahrt) z.fahrtManuell = true; recalc(); planAutosave(); });
     tr.querySelector('.ez-basis')?.addEventListener('change', e => { const v = String(e.target.value).trim(); z.mengeBasis = v === '' ? null : (parseFloat(v) || 0); z.fahrtManuell = false; recalc(); planAutosave(); });
     tr.querySelector('.ez-einheit').addEventListener('change', e => { z.einheit = e.target.value; recalc(); });
-    tr.querySelector('.ez-preis').addEventListener('change', e => { z.preis = parseFloat(e.target.value) || 0; e.target.value = z.preis.toFixed(2); recalc(); });
+    tr.querySelector('.ez-preis').addEventListener('change', e => { z.preis = parseFloat(e.target.value) || 0; z.kiGeschaetzt = false; e.target.value = z.preis.toFixed(2); recalc(); });
     const ezLoeschen = () => {
       // Freitext-Position aus einer Vorlage: nur als geloescht markieren,
       // sonst legt seedeFreitextZeilen() sie beim naechsten recalc() sofort
@@ -5956,7 +6046,7 @@ async function ladeEigeneZeilen(offerteId){
     return {
       clientKey: 'ez' + eigeneZeileCounter, dbId: r.id, kategorie: r.kategorie, bezeichnung: r.bezeichnung, menge: r.menge, einheit: r.einheit, preis: r.preis,
       freitextVorlageId: r.freitext_vorlage_id, foto1Url: r.foto1_url || null, foto2Url: r.foto2_url || null, foto3Url: r.foto3_url || null,
-      geloescht: !!r.geloescht, schluessel: r.schluessel || ('ez-' + crypto.randomUUID()), typ: r.typ || null, optional: !!r.optional, mengeBasis: r.menge_basis ?? null, fahrt: !!r.fahrt, fahrtManuell: !!r.fahrt_manuell, rabatt: r.rabatt ?? null, rabattArt: r.rabatt_art || null, mwstArt: r.mwst_art || null, artikelId: r.artikel_id || null
+      geloescht: !!r.geloescht, schluessel: r.schluessel || ('ez-' + crypto.randomUUID()), typ: r.typ || null, optional: !!r.optional, mengeBasis: r.menge_basis ?? null, fahrt: !!r.fahrt, fahrtManuell: !!r.fahrt_manuell, rabatt: r.rabatt ?? null, rabattArt: r.rabatt_art || null, mwstArt: r.mwst_art || null, artikelId: r.artikel_id || null, kiGeschaetzt: !!r.ki_geschaetzt
     };
   });
 }
@@ -5966,7 +6056,7 @@ async function speichereEigeneZeilen(offerteId){
   if(delErr) throw delErr;
   const echte = eigeneZeilen.filter(z => z.bezeichnung.trim());
   if(echte.length){
-    const rows = echte.map((z, i) => ({ offerte_id: offerteId, kategorie: z.kategorie, bezeichnung: z.bezeichnung.trim(), menge: z.menge || 0, einheit: z.einheit || '', preis: z.preis || 0, reihenfolge: i, freitext_vorlage_id: z.freitextVorlageId ?? null, foto1_url: z.foto1Url ?? null, foto2_url: z.foto2Url ?? null, foto3_url: z.foto3Url ?? null, geloescht: !!z.geloescht, schluessel: z.schluessel || null, typ: z.typ || null, optional: !!z.optional, menge_basis: z.mengeBasis ?? null, fahrt: !!z.fahrt, fahrt_manuell: !!z.fahrtManuell, rabatt: Number(z.rabatt) || null, rabatt_art: Number(z.rabatt) ? (z.rabattArt || 'prozent') : null, mwst_art: z.mwstArt || null, artikel_id: z.artikelId || null })); // immer mitsenden: bei gemischten Zeilen setzt PostgREST fehlende Schluessel sonst auf NULL (Not-null-Fehler)
+    const rows = echte.map((z, i) => ({ offerte_id: offerteId, kategorie: z.kategorie, bezeichnung: z.bezeichnung.trim(), menge: z.menge || 0, einheit: z.einheit || '', preis: z.preis || 0, reihenfolge: i, freitext_vorlage_id: z.freitextVorlageId ?? null, foto1_url: z.foto1Url ?? null, foto2_url: z.foto2Url ?? null, foto3_url: z.foto3Url ?? null, geloescht: !!z.geloescht, schluessel: z.schluessel || null, typ: z.typ || null, optional: !!z.optional, menge_basis: z.mengeBasis ?? null, fahrt: !!z.fahrt, fahrt_manuell: !!z.fahrtManuell, rabatt: Number(z.rabatt) || null, rabatt_art: Number(z.rabatt) ? (z.rabattArt || 'prozent') : null, mwst_art: z.mwstArt || null, artikel_id: z.artikelId || null, ki_geschaetzt: !!z.kiGeschaetzt })); // immer mitsenden: bei gemischten Zeilen setzt PostgREST fehlende Schluessel sonst auf NULL (Not-null-Fehler)
     const { error: insErr } = await sb.from('offerte_eigene_zeile').insert(rows);
     if(insErr) throw insErr;
   }
@@ -6842,7 +6932,7 @@ const lwModusToggleHtml = '<span style="display:flex;gap:4px;">' + [['zeit', 'St
       const personalZeilenTagessatz = alleZeilen.filter(r => r.kategorie === 'personal');
       gesamtPersonalStunden = (vorarbeiterArtikelIds.length ? personalZeilenTagessatz.filter(r => vorarbeiterArtikelIds.includes(r.artikelId)) : personalZeilenTagessatz)
         .reduce((s, r) => s + r.menge, 0);
-      const lwZeilen = istEasy ? { personal: [], logistik: [] } : await berechneLieferwagenfahrzeit(gesamtPersonalStunden); // Easy: Fahrweg per Knopf links
+      const lwZeilen = (istEasy || istKi) ? { personal: [], logistik: [] } : await berechneLieferwagenfahrzeit(gesamtPersonalStunden); // Easy: Fahrweg per Knopf links
       if(meineGeneration !== recalcGeneration) return; // inzwischen ueberholt, siehe recalcGeneration oben
       alleZeilen = alleZeilen.concat(lwZeilen.personal, lwZeilen.logistik);
       grandTotal += renderKostenblock(alleZeilen, $costbody);
@@ -7133,7 +7223,7 @@ const lwModusToggleHtml = '<span style="display:flex;gap:4px;">' + [['zeit', 'St
       const personalZeilen = berechnet.filter(r => r.kategorie === 'personal');
       gesamtPersonalStunden = (vorarbeiterArtikelIds.length ? personalZeilen.filter(r => vorarbeiterArtikelIds.includes(r.artikelId)) : personalZeilen)
         .reduce((s, r) => s + r.menge, 0);
-      const lwZeilen = istEasy ? { personal: [], logistik: [] } : await berechneLieferwagenfahrzeit(gesamtPersonalStunden); // Easy: Fahrweg per Knopf links
+      const lwZeilen = (istEasy || istKi) ? { personal: [], logistik: [] } : await berechneLieferwagenfahrzeit(gesamtPersonalStunden); // Easy: Fahrweg per Knopf links
       if(meineGeneration !== recalcGeneration) return; // inzwischen ueberholt, siehe recalcGeneration oben
       const alleZeilenFormel = berechnet.concat(lwZeilen.personal, lwZeilen.logistik, freitextAggregatZeilen());
       grandTotal += renderKostenblock(alleZeilenFormel, $costbody);
@@ -8180,6 +8270,19 @@ table.cost thead th:nth-child(5){width:104px}
 .dbschalter .dbs-k{width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .15s}
 .dbschalter.an{background:var(--primary,#323E4E);color:#fff;border-color:var(--primary,#323E4E);flex-direction:row-reverse;padding:0 12px 0 4px}
 .dbinfo{display:block;font-size:10.5px;font-weight:400;color:var(--muted);margin-top:1px}
+/* KI-Offerte: Gespräch links (graue Kachel = du, hellgelb = KI) */
+.kipanel{display:flex;flex-direction:column;gap:10px}
+.kiverlauf{display:flex;flex-direction:column;gap:8px;max-height:calc(100vh - 300px);min-height:160px;overflow:auto;padding:2px}
+.kimsg{padding:9px 11px;border-radius:8px;font-size:12.5px;line-height:1.45;color:var(--ink);max-width:92%}
+.kimsg.du{background:#eef1f4;align-self:flex-end}
+.kimsg.ki{background:color-mix(in srgb,#FAEBB0 55%,#fff);align-self:flex-start}
+.kimsg.kidenkt{color:var(--muted);font-style:italic}
+.kileer{font-size:12px;color:var(--muted);line-height:1.5;padding:6px 2px}
+.kieingabe{display:flex;flex-direction:column;gap:6px}
+.kieingabe textarea{width:100%;box-sizing:border-box;min-height:52px;max-height:220px;resize:none;font:inherit;font-size:12.5px;line-height:1.4;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink)}
+.kieingabe textarea:focus{outline:none;border-color:var(--primary)}
+.kieingabe .btn{align-self:flex-end}
+.dbschaetz{color:#8A6410}
 </style>
 <script>
 /* Knopfleiste unter den Arbeitsbeschrieb verschieben (wie in Easybill) */
