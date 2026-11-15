@@ -535,10 +535,12 @@ tr.ezlinksrow td{border-bottom:none;padding-top:8px;}
 .tbsectionlabel .t{font-size:13.5px;font-weight:700;color:var(--primary);}
 .tbhead-tage{flex-wrap:nowrap;}
 .tbname-tage{font-size:12.5px;font-weight:700;color:#fff;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.tsrow{padding:10px 0;border-top:1px solid var(--line);}
+.afblock.afzu .tsbody{display:none;}
+.tsas .tsbody{padding:0 2px 4px 7px;}
+.tsrow{padding:5px 0;border-top:1px solid var(--line);}
 .tsrow:first-child{border-top:none;}
-.tsrowtop{display:flex;align-items:center;gap:10px;}
-.tsname{flex:1;font-size:12px;font-weight:600;color:var(--ink);}
+.tsrowtop{display:flex;align-items:center;gap:8px;}
+.tsname{flex:1;min-width:0;font-size:12px;font-weight:500;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:default;}
 .astage{display:flex;align-items:center;gap:5px;flex-shrink:0;}
 .astage input{width:48px;text-align:center;font-weight:700;border:1px solid var(--line);border-radius:6px;
   padding:5px 6px;font:inherit;font-size:12px;color:var(--ink);}
@@ -3054,25 +3056,23 @@ function summeArbeitsschritt(asId){
     .reduce((s, ts) => s + (teilschrittTage[ts.id] || 0), 0);
 }
 
+const tageText = n => n > 0 ? `${rundeTage(n)} ${n === 1 ? 'Tag' : 'Tage'}` : '';
 function renderTagessatzInhalt(){
   $tagessatzInhalt.innerHTML = `<div class="tbsectionlabel"><span class="t">Arbeitsschritte</span></div>` +
     tagessatzArbeitsschritte.map(as => {
       const teilschritteFuerAs = tagessatzTeilschritte.filter(ts => ts.arbeitsschrittId === as.id);
       const offen = tagessatzOffenIds.has(as.id);
+      // gleicher grauer Balken wie im Konfigurator (Formel): Pfeil + Name, Tage-Summe im rechten Drittel
       return `
-      <div class="tbcard ${offen ? '' : 'collapsed'}" data-as="${as.id}">
-        <div class="tbhead tbhead-tage">
-          <span class="tbchev">${ICON.chevronDown}</span>
-          <span class="tbname-tage">${as.name}</span>
-          <div class="astage astage-sum"><span class="astagesum" data-assum="${as.id}">${rundeTage(summeArbeitsschritt(as.id))}</span><span class="unit">Tage</span></div>
-        </div>
-        <div class="tbbody">
+      <div class="afblock tsas ${offen ? '' : 'afzu'}" data-as="${as.id}">
+        <label class="flabel afklapp tshead"><span class="afname"><button type="button" class="afToggle aktiv" tabindex="-1">${ICON.chevronDown}</button>${String(as.name).replace(/,\s*$/, '')}</span><span class="afgew"><span class="astagesum" data-assum="${as.id}">${tageText(summeArbeitsschritt(as.id))}</span></span></label>
+        <div class="tsbody">
           ${teilschritteFuerAs.map(ts => {
             const af = tagessatzAuswahlfelder.find(a => a.teilschrittId === ts.id);
             return `
             <div class="tsrow" data-ts="${ts.id}">
               <div class="tsrowtop">
-                <span class="tsname">${ts.name}</span>
+                <span class="tsname" title="${String(ts.beschreibung || ts.name).replace(/"/g, '&quot;')}">${ts.name}</span>
                 <div class="astage"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="number" step="0.5" min="0" value="${teilschrittTage[ts.id] ?? 0}" data-ts="${ts.id}"><span class="unit">Tage</span></div>
                 <button type="button" class="kg-ibtn tsDetailBtn" data-ts="${ts.id}" title="Was ist drin? Zeilen ansehen und für diese Offerte ändern" aria-label="Was ist drin?">${KG.icon('notiz', 14)}${(tagessatzAnpassungen[ts.id] || []).length ? '<span class="tsDot"></span>' : ''}</button>
               </div>
@@ -3086,11 +3086,13 @@ function renderTagessatzInhalt(){
       </div>`;
     }).join('');
 
-  $tagessatzInhalt.querySelectorAll('.tbhead').forEach(head => {
-    head.addEventListener('click', () => {
-      const asId = head.closest('.tbcard').dataset.as;
-      if(tagessatzOffenIds.has(asId)) tagessatzOffenIds.delete(asId); else tagessatzOffenIds.add(asId);
-      head.closest('.tbcard').classList.toggle('collapsed');
+  // Klick auf den Balken: nur dieser Arbeitsschritt offen (wie im Konfigurator), nochmals = zu
+  $tagessatzInhalt.querySelectorAll('.tshead').forEach(head => {
+    head.addEventListener('click', e => {
+      e.preventDefault();
+      const asId = head.closest('.tsas').dataset.as;
+      tagessatzOffenIds = tagessatzOffenIds.has(asId) ? new Set() : new Set([asId]);
+      $tagessatzInhalt.querySelectorAll('.tsas').forEach(b => b.classList.toggle('afzu', !tagessatzOffenIds.has(b.dataset.as)));
     });
   });
   $tagessatzInhalt.querySelectorAll('.tsrow .astage input').forEach(inp => {
@@ -3099,7 +3101,7 @@ function renderTagessatzInhalt(){
       teilschrittTage[tsId] = parseFloat(inp.value) || 0;
       const ts = tagessatzTeilschritte.find(t => t.id === tsId);
       const sumEl = $tagessatzInhalt.querySelector(`.astagesum[data-assum="${ts.arbeitsschrittId}"]`);
-      if(sumEl) sumEl.textContent = rundeTage(summeArbeitsschritt(ts.arbeitsschrittId));
+      if(sumEl) sumEl.textContent = tageText(summeArbeitsschritt(ts.arbeitsschrittId));
       recalc();
     });
   });
@@ -4837,7 +4839,8 @@ async function ladeBestehendeOfferte(offerteId){
       });
     });
     // Arbeitsschritte mit bereits erfasstem Tagesbedarf gleich aufgeklappt zeigen.
-    tagessatzOffenIds = new Set(tagessatzTeilschritte.filter(ts => teilschrittTage[ts.id] > 0).map(ts => ts.arbeitsschrittId));
+    // Alle Balken zu, wie im Konfigurator (immer nur einer offen)
+    tagessatzOffenIds = new Set();
     renderTagessatzInhalt();
   }else{
     const { data: efWerte, error: efErr } = await sb
