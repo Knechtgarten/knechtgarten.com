@@ -612,7 +612,9 @@ function ofLage(ls, w){ const n = OF_REIHE.length, b = Math.max(180, Math.floor(
   ls.forEach(l => { const i = OF_REIHE.indexOf(l.art_id); if(i < 0) return; l._fx = R + i * (b + R); l._fw = b; l._fy = R; }); }
 // alle Bereiche frei anordnen (Raster 20 px), auch die Mitte: zu breite Listen werden auf die Bereichsbreite gekürzt, was rechts nicht Platz hat, rückt nach links, Überlappungen rutschen nach unten
 function modusFuer(ls, w, zn){ return w <= 60 ? 'schmal' : 'frei'; }
-const sortiert = l => S.pz.filter(p => p.liste_id === l.id).sort((a, b) => a.sortierung - b.sortierung || a.erstellt_am.localeCompare(b.erstellt_am));
+// eigenes Board: terminierte Pendenzen (Tag im Rad, Heute/Woche/Monat) stehen nur links, nicht mehr in ihrer Liste – sie merken sich Liste + Gruppe
+const terminiert = p => S.board?.typ === 'person' && !!(p.zeit || p.datum);
+const sortiert = l => S.pz.filter(p => p.liste_id === l.id && (l.zeit || !terminiert(p))).sort((a, b) => a.sortierung - b.sortierung || a.erstellt_am.localeCompare(b.erstellt_am));
 const zeitIds = z => S.pz.filter(p => p.zeit === z).sort((a, b) => (a.zeit_sortierung ?? 1e12) - (b.zeit_sortierung ?? 1e12) || a.sortierung - b.sortierung);
 const estH = l => 44 + (l.zu ? 0 : ((l.zeit ? zeitIds(l.zeit) : sortiert(l)).length + (l.zeit === 1 ? S.erinn.length : 0)) * 29 + S.gruppen.filter(g => g.liste_id === l.id).length * 30 + 46);
 const avatar = uid => { const b = S.benutzer[uid]; if(!b) return ''; const n = b.anzeigename || b.email || '?'; const k = n.split(/[\s.@]+/).filter(Boolean).slice(0, 2).map(x => x[0].toUpperCase()).join('');
@@ -1297,7 +1299,7 @@ function setzeZeit(p, z){
 }
 // aus Heute/Woche/Monat nehmen: Pendenz liegt dann nur noch in ihrer eigenen Liste (geht nur, wenn sie eine hat)
 function ausZeit(p){
-  const home = listeById(p.liste_id); if(!p.zeit || !home || home.zeit) return zeichne();
+  const home = listeById(p.liste_id); if((!p.zeit && !p.datum) || !home || home.zeit) return zeichne();
   const alt = { zeit: p.zeit, zeit_sortierung: p.zeit_sortierung };
   if(S.sel === p.id) S.sel = null; setzeZeit(p, 0);
   toast(`Zurück in «${home.titel}»`, async () => { if(await upd('pendenz', p.id, alt)){ Object.assign(p, alt); zeichne(); } });
@@ -2014,9 +2016,11 @@ document.addEventListener('drop', async e => {
   // Gruppe = Titel darüber; direkt unter einen zugeklappten Titel gelegt → Gruppe aufklappen, damit die Pendenz sichtbar bleibt
   const gr = gruppeVor(cs, i); if(gr?.zu){ gr.zu = false; upd('pendenz_gruppe', gr.id, { zu: false }); }
   // aus Heute/Woche/Monat in eine Liste der Mitte gezogen: Zeit weg (liegt dann nur noch dort)
-  const zeitWeg = p.zeit && listeById(dcVonZiel)?.zeit && bereichOf(to) === 'mitte' && to.art_id !== 'notizen';
-  p.liste_id = to.id; p.gruppe_id = gr ? gr.id : null; p.sortierung = sNeu; if(zeitWeg){ p.zeit = 0; p.zeit_sortierung = null; }
-  zeichne(); upd('pendenz', p.id, { liste_id: p.liste_id, gruppe_id: p.gruppe_id, sortierung: p.sortierung, ...(zeitWeg ? { zeit: 0, zeit_sortierung: null } : {}) }); });
+  //   (auch aus dem Rad: terminiert = steht in der Mitte nicht, also kommt sie von links) → Zeit und Datum weg
+  const zeitWeg = terminiert(p) && bereichOf(to) !== 'zeit' && to.art_id !== 'notizen';
+  const weg = { zeit: 0, zeit_sortierung: null, datum: null, datum_seit: null };
+  p.liste_id = to.id; p.gruppe_id = gr ? gr.id : null; p.sortierung = sNeu; if(zeitWeg) Object.assign(p, weg);
+  zeichne(); upd('pendenz', p.id, { liste_id: p.liste_id, gruppe_id: p.gruppe_id, sortierung: p.sortierung, ...(zeitWeg ? weg : {}) }); });
 
 pruefeAnmeldung();
 })();
