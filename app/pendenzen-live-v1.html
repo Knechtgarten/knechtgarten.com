@@ -206,6 +206,15 @@ body.ohnelisten [data-set]{display:none;}
 .cards .gh{margin:6px 0 0;cursor:grab;}
 .cards .gh.dragging{opacity:.35;}
 .card.ingr{margin-left:12px;}
+/* Priorität (Rechtsklick auf eine Pendenz): ganze Karte in der hellsten Stufe – hoch rötlich, mittel gelb */
+.card.prio1,.list.zl .card.prio1,.zuliste .card.prio1{background:#F4CDD5;}
+.card.prio2,.list.zl .card.prio2,.zuliste .card.prio2{background:#FAEBB0;}
+.prmenu{position:fixed;z-index:60;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 28px rgba(35,43,53,.18);padding:6px;min-width:180px;font-size:13px;}
+.prmenu .t{font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:4px 8px 6px;}
+.prmenu button{all:unset;display:flex;align-items:center;gap:8px;width:100%;box-sizing:border-box;padding:6px 8px;border-radius:6px;cursor:pointer;}
+.prmenu button:hover{background:#EEF1F4;}
+.prmenu button.on{font-weight:600;}
+.prmenu i{width:16px;height:16px;border-radius:4px;border:1px solid rgba(50,62,78,.2);flex:none;}
 .card.gzu{display:none;}
 .card{background:#fff;border-radius:6px;height:30px;display:flex;align-items:center;gap:6px;padding:0 6px 0 0;cursor:pointer;border:1px solid transparent;overflow:hidden;flex:none;}
 .card .vst{font-size:10.5px;font-weight:600;color:#4C5C70;background:#EEF1F4;border-radius:99px;padding:1px 7px;white-space:nowrap;line-height:16px;}
@@ -758,11 +767,11 @@ function pdHtml(p, opt = {}){
   if(!gemeinsam && p.erstellt_von && p.erstellt_von !== ME) ind.push(kuerzel(p.erstellt_von));
   // Team-box: vorne die Herkunft – rotes Mail-Icon (per Mail), Pfeil (von einem Kollegen im Tool zugeschoben)
   const herkunft = l.art_id === 'team' && p.herkunft ? `<span class="herk ${p.herkunft}" title="${p.herkunft === 'mail' ? 'Per Mail gekommen' : 'Von einem Kollegen zugeschoben'}">${p.herkunft === 'mail' ? A('brief') : K('senden', 14)}</span>` : '';
-  return `<div class="card${S.sel === p.id ? ' sel' : ''}${zuges && p.eingeplant_am ? ' vhell' : ''}${gemeinsam ? ' ohnepr' : ''}${opt.gruppe ? ' ingr' + (opt.gruppe.zu ? ' gzu' : '') : ''}" draggable="true" data-card="${p.id}">
+  return `<div class="card${S.sel === p.id ? ' sel' : ''}${p.prio === 1 || p.prio === 2 ? ' prio' + p.prio : ''}${zuges && p.eingeplant_am ? ' vhell' : ''}${gemeinsam ? ' ohnepr' : ''}${opt.gruppe ? ' ingr' + (opt.gruppe.zu ? ' gzu' : '') : ''}" draggable="true" data-card="${p.id}">
     ${gemeinsam ? (istOfferten() && S.ofMeine ? '' : kuerzel(wer))
       : opt.zeit ? '' // in Wann? kein Zeit-Streifen – die Liste sagt ja schon wann
       : notiz ? '<span class="pr person"></span>' // Notizen haben keine Zeit
-      : `<button class="pr" data-zp="${p.id}" style="${p.zeit ? `background:${ZEIT[p.zeit].c}` : ''}" aria-label="Zeit: ${p.zeit ? ZEIT[p.zeit].t : 'irgendwann'}"></button>`}
+      : `<button class="pr" data-zp="${p.id}" aria-label="Zeit: ${p.zeit ? ZEIT[p.zeit].t : 'irgendwann'}" title="Zeit: ${p.zeit ? ZEIT[p.zeit].t : 'irgendwann'} (klicken zum Ändern)"></button>`}<!-- Zeit-Farbe in den Listen weggelassen (Stefan 15.11.: verwirrt, man sieht es in «Wann?») -->
     ${opt.zeit && a ? `<span class="ty" style="background:${listFarbe(l)}" title="${esc(l.titel)}">${A(a.icon)}</span>` : ''}${herkunft}
     <span class="tx">${esc(p.titel)}${p.kunde_id && KUNDE_CACHE[p.kunde_id] && KUNDE_CACHE[p.kunde_id].name !== p.titel ? `<small class="pkd">${esc(KUNDE_CACHE[p.kunde_id].name)}</small>` : ''}</span><span class="ind">${ind.join('')}</span></div>`;
 }
@@ -1102,6 +1111,19 @@ async function upd(tab, id, patch, key = 'id'){
   if(tab === 'pendenz_liste' && key === 'id' && eigeneLage() && S.listen.some(l => l.id === id)){
     const lage = Object.fromEntries(Object.entries(patch).filter(([k]) => LAGE.includes(k))), rest = Object.fromEntries(Object.entries(patch).filter(([k]) => !LAGE.includes(k)));
     if(Object.keys(lage).length) lageMerken(id, lage); if(!Object.keys(rest).length) return true; patch = rest; } const { error } = await sb.from(tab).update(patch).eq(key, id); if(error){ fehler(error, 'Speichern'); return false; } return true; }
+// Priorität per Rechtsklick auf eine Pendenz: Hoch (rötlich) / Mittel (gelb) / Keine – färbt die ganze Karte hell ein
+document.addEventListener('contextmenu', e => {
+  const c = e.target.closest('[data-card]'); document.querySelector('.prmenu')?.remove(); if(!c) return;
+  const p = S.pz.find(x => x.id === c.dataset.card); if(!p) return; e.preventDefault();
+  const m = document.createElement('div'); m.className = 'prmenu'; m.setAttribute('role', 'menu');
+  m.innerHTML = `<div class="t">Priorität</div>${[[1, 'Hoch', '#F4CDD5'], [2, 'Mittel', '#FAEBB0'], [null, 'Keine', '#FFFFFF']].map(([v, t, f]) => `<button type="button" role="menuitem" data-prio="${v ?? ''}"${(p.prio ?? null) === v ? ' class="on"' : ''}><i style="background:${f}"></i>${t}</button>`).join('')}`;
+  document.body.appendChild(m);
+  m.style.left = Math.min(e.clientX, innerWidth - m.offsetWidth - 8) + 'px'; m.style.top = Math.min(e.clientY, innerHeight - m.offsetHeight - 8) + 'px';
+  m.addEventListener('click', async ev => { const b = ev.target.closest('[data-prio]'); if(!b) return; ev.stopPropagation(); m.remove();
+    const v = b.dataset.prio === '' ? null : Number(b.dataset.prio); p.prio = v; zeichne(); await upd('pendenz', p.id, { prio: v }); });
+});
+document.addEventListener('mousedown', e => { if(!e.target.closest('.prmenu')) document.querySelector('.prmenu')?.remove(); }, true);
+document.addEventListener('keydown', e => { if(e.key === 'Escape') document.querySelector('.prmenu')?.remove(); });
 // höchste Stelle in einer Liste (Pendenzen und Gruppentitel teilen sich die Reihenfolge)
 const letzteSort = lid => Math.max(0, ...S.pz.filter(p => p.liste_id === lid).map(p => p.sortierung), ...S.gruppen.filter(g => g.liste_id === lid).map(g => g.sortierung));
 async function neuePendenz(l, titel, gruppe_id = null, extra = {}){

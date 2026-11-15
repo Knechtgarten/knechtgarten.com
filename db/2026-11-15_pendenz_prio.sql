@@ -1,0 +1,1 @@
+alter table public.pendenz add column if not exists prio smallint; comment on column public.pendenz.prio is 'Priorität: 1 = hoch (rötlich), 2 = mittel (gelb), null = keine'; select count(*) from public.pendenz where prio is not null;
