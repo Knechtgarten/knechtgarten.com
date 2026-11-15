@@ -209,6 +209,9 @@ body.ohnelisten [data-set]{display:none;}
 /* Priorität (Rechtsklick auf eine Pendenz): ganze Karte in der hellsten Stufe – hoch rötlich, mittel gelb */
 .card.prio1,.list.zl .card.prio1,.zuliste .card.prio1{background:#F4CDD5;}
 .card.prio2,.list.zl .card.prio2,.zuliste .card.prio2{background:#FAEBB0;}
+.card .gstern{color:#B88A12;display:inline-flex;}
+.gverb{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--primary);border:1px dashed #8B9097;border-radius:6px;padding:4px 10px;}
+.gverb:hover{border-color:var(--primary);}
 .prmenu{position:fixed;z-index:60;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 28px rgba(35,43,53,.18);padding:6px;min-width:180px;font-size:13px;}
 .prmenu .t{font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);padding:4px 8px 6px;}
 .prmenu button{all:unset;display:flex;align-items:center;gap:8px;width:100%;box-sizing:border-box;padding:6px 8px;border-radius:6px;cursor:pointer;}
@@ -511,6 +514,7 @@ const PFARBEN = ['#579DFF','#FEA362','#F5CD47','#4BCE97','#9F8FEF','#F87168','#6
 const AVF = ['#5F8A6B','#4F7C8A','#B07A4A','#6B5F8A','#9A6B7E','#3F6E8C','#7A8F4E','#8A6F5F'];
 const R = 20, LW = 320;
 
+let ME_MAIL = '', GSTERN = null; const GMAIL_KONTO = 'mail@knechtgarten.ch';
 let ME = null, ROLLE = null, MA = false; // MA = Mitarbeiter-Ansicht (Gruppe: pendenzen_ansicht = 'mitarbeiter'): nur Heute + Notizen + Archivieren
 const S = { vorrat: new Set(), boards:[], mitglieder:[], archiv:null, pick:null, arten:{}, board:null, listen:[], gruppen:[], pz:[], dateien:[], benutzer:{}, ein:{ oeffnen:'fenster', breiten:{}, farben:{}, notizzettel:'' },
   erinn:[], ofMeine:false, sel:null, del:false, delDatei:null, delListe:false, pop:null, zpick:null, neuListe:false, set:false, zettel:false, toast:null, urls:{}, splitOn:null, pwLast:{ zeit:360, team:380 } };
@@ -605,7 +609,9 @@ async function pruefeAnmeldung(){
   if(!session){ zeige('loginwrap'); $('userbar').classList.add('hidden'); return; }
   const { data: b } = await sb.from('benutzer').select('rolle,email,anzeigename').eq('id', session.user.id).maybeSingle();
   if(!b || !b.rolle){ zeige('pendingWrap'); return; }
-  ME = session.user.id; ROLLE = b.rolle;
+  ME = session.user.id; ROLLE = b.rolle; ME_MAIL = (b.email || '').toLowerCase();
+  // Gmail-Stern-Abgleich (nur Konto mail@): darf das Tool den Stern in Gmail wieder entfernen?
+  if(ME_MAIL === GMAIL_KONTO) sb.rpc('gmail_stern_status').then(({ data }) => { GSTERN = data || null; if(S.listen?.length) zeichne(); });
   if(window.KG && KG.ladeRechte) await KG.ladeRechte(); // Gruppen & Rechte: welche Boards sichtbar sind
   // Mitarbeiter: nur Wann? (Heute/Woche/Monat), Sammelbox, Dauernde Notizen und Archivieren – kein Mittelteil, keine anderen Boards
   try { const { data: bg } = await sb.from('benutzer').select('recht_gruppe_id').eq('id', ME).maybeSingle();
@@ -748,7 +754,8 @@ document.addEventListener('visibilitychange', () => { if(!document.hidden && S.b
 // ---------------------------------------------------------------------------
 function pdHtml(p, opt = {}){
   const l = listeById(p.liste_id), a = l.art_id ? art(l.art_id) : null, ind = [], fs = S.dateien.filter(d => d.pendenz_id === p.id);
-  if(fs.some(d => d.art === 'mail')) ind.push(A('brief'));
+  if(p.herkunft === 'stern') ind.push(`<span class="gstern" title="In Gmail markiert – Stern weg = Pendenz archiviert, Pendenz archivieren = Stern weg">${K('stern', 12)}</span>`);
+  else if(fs.some(d => d.art === 'mail')) ind.push(A('brief'));
   if(p.notiz && p.notiz.replace(/<[^>]*>/g, '').trim()) ind.push(K('notiz', 12));
   if(fs.some(d => d.art !== 'mail')) ind.push(K('foto', 12));
   if(p.planer_einsatz_id) ind.push(`<span title="Im Einsatzplaner">${K('kalender', 12)}</span>`);
@@ -805,6 +812,8 @@ function listHtml(l){
         return vor + `<div class="gh${x.g.zu ? ' zu' : ''}" draggable="true" data-ghead="${x.g.id}" data-gtog="${x.g.id}" title="Ziehen = Gruppe verschieben, Klick = auf-/zuklappen"><span class="tog">${K('chev')}</span>${esc(x.g.titel)}${gPlus ? `<button class="kg-ibtn gplus" data-gplus="${x.g.id}" data-gliste="${l.id}" aria-label="Neue ${wort} in ${esc(x.g.titel)}" title="Neue ${wort} in ${esc(x.g.titel)}">${K('plus')}</button>` : ''}</div>`; }
       return pdHtml(x.p, { gruppe: akt }); }).join('')}${gIn && akt && akt.id === gIn ? eingabe : ''}</div>`
       + (l.art_id === 'team' && !ps.length ? '<div class="zhint">Hier landet, was dir Kollegen zuschieben.</div>' : '')
+      // Gmail-Sterne: einmal verbinden, damit Archivieren den Stern in Gmail entfernt (nur Konto mail@, nur im eigenen Board)
+      + (l.art_id === 'mail' && ME_MAIL === GMAIL_KONTO && S.board?.typ === 'person' && GSTERN && !GSTERN.verbunden ? `<div class="zhint"><button type="button" class="gverb" data-gverb>${K('stern', 12)} Gmail-Sterne zweiseitig verbinden</button></div>` : '')
       + (l.art_id === 'mail' && S.board?.mail_kuerzel && !ps.length ? `<div class="zhint">${'Hier landen Mails an '}<b class="pmadr" title="Mails (auch weitergeleitete) von einer @knechtgarten.ch-Adresse an diese Adresse werden hier zur Pendenz – mit dem Mail als PDF und allen Anhängen. Kommt nach 1–2 Minuten.">${esc(S.board.mail_kuerzel)}.pendenzen@knechtgarten.ch</b></div>` : '')
       + (l.art_id === 'sammel' && !ps.length ? '<div class="zhint">Hier landet, was du unterwegs mit der Pendenzen-App erfasst. Von hier in die richtige Liste ziehen.</div>' : '')
       + (l.art_id === 'of_abgesagt' ? '<div class="zhint">Kommt nach 30 Tagen automatisch ins Archiv.</div>' : '')
@@ -1111,6 +1120,19 @@ async function upd(tab, id, patch, key = 'id'){
   if(tab === 'pendenz_liste' && key === 'id' && eigeneLage() && S.listen.some(l => l.id === id)){
     const lage = Object.fromEntries(Object.entries(patch).filter(([k]) => LAGE.includes(k))), rest = Object.fromEntries(Object.entries(patch).filter(([k]) => !LAGE.includes(k)));
     if(Object.keys(lage).length) lageMerken(id, lage); if(!Object.keys(rest).length) return true; patch = rest; } const { error } = await sb.from(tab).update(patch).eq(key, id); if(error){ fehler(error, 'Speichern'); return false; } return true; }
+// Google neu verbinden mit Recht «Gmail ändern» (Stern entfernen); bisherige Rechte (Drive, Gmail lesen) bleiben (include_granted_scopes)
+async function gmailVerbinden(){
+  try {
+    if(!(window.google && google.accounts && google.accounts.oauth2)) await new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'https://accounts.google.com/gsi/client'; s.onload = ok; s.onerror = () => no(new Error('Google-Anmeldung konnte nicht geladen werden.')); document.head.appendChild(s); });
+    const code = await new Promise((ok, no) => google.accounts.oauth2.initCodeClient({ client_id: '689526517764-f2727pi1nglt5lkbttec3ssjqkgl47k5.apps.googleusercontent.com',
+      scope: 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/gmail.modify', include_granted_scopes: true, ux_mode: 'popup', login_hint: GMAIL_KONTO,
+      callback: r => r.error ? no(new Error('Google: ' + r.error)) : ok(r.code), error_callback: () => no(new Error('Google-Fenster geschlossen.')) }).requestCode());
+    const { data, error } = await sb.functions.invoke('doku-google', { body: { aktion: 'tauschen', code } });
+    if(error || data?.error) throw new Error(data?.error || error.message);
+    const { data: st } = await sb.rpc('gmail_stern_status'); GSTERN = st || GSTERN; zeichne();
+    toast(GSTERN?.verbunden ? 'Gmail verbunden – archivierte Stern-Pendenzen verlieren jetzt auch in Gmail den Stern' : 'Verbunden, aber ohne Recht «Gmail ändern» – bitte das Häkchen bei Gmail setzen', null, !GSTERN?.verbunden);
+  } catch(e){ toast(String(e.message || e), null, true); }
+}
 // Priorität per Rechtsklick auf eine Pendenz: Hoch (rötlich) / Mittel (gelb) / Keine – färbt die ganze Karte hell ein
 document.addEventListener('contextmenu', e => {
   const c = e.target.closest('[data-card]'); document.querySelector('.prmenu')?.remove(); if(!c) return;
@@ -1546,6 +1568,7 @@ document.addEventListener('click', async e => {
   if(d.zok){ e.stopPropagation(); return zaddSpeichern(d.zok, true); } // Häkchen im Eingabefeld: speichern und schliessen
   if(d.zg != null){ e.stopPropagation(); S.addG = d.zg; const g = S.gruppen.find(x => x.id === d.zg); if(g?.zu){ g.zu = false; upd('pendenz_gruppe', g.id, { zu: false }); }
     zeichne(); setTimeout(() => $('add-' + S.addOffen)?.focus(), 0); return; }
+  if(d.gverb !== undefined){ e.stopPropagation(); return gmailVerbinden(); }
   if(d.gplus){ e.stopPropagation(); const l = listeById(d.gliste), g = S.gruppen.find(x => x.id === d.gplus);
     const gleich = S.addOffen === l.id && S.addG === g.id; S.addOffen = gleich ? null : l.id; S.addG = gleich ? undefined : g.id;
     if(l.zu){ l.zu = false; upd('pendenz_liste', l.id, { zu: false }); } if(g.zu){ g.zu = false; upd('pendenz_gruppe', g.id, { zu: false }); }

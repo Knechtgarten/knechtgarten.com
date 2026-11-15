@@ -62,32 +62,12 @@ Deno.serve(async () => {
   const gmail = async (pfad: string) => { const r = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/' + pfad, { headers: { Authorization: 'Bearer ' + t.access_token } });
     if (!r.ok) throw new Error('Gmail ' + r.status + ' ' + (await r.text()).slice(0, 200)); return r.json(); };
 
-  // Boards mit Mail-Kürzel → Adresse
-  const { data: boards } = await admin.from('pendenz_board').select('id,besitzer_id,mail_kuerzel').not('mail_kuerzel', 'is', null);
-  const ZIEL = new Map((boards || []).map((b: any) => [b.mail_kuerzel + ENDUNG, b]));
-  if (!ZIEL.size) return json({ neu: 0 });
-  const q = 'newer_than:3d {' + [...ZIEL.keys()].map((a) => `to:${a} cc:${a} bcc:${a}`).join(' ') + '}';
-  const liste = await gmail('messages?maxResults=25&q=' + encodeURIComponent(q));
-  const ids: string[] = (liste.messages || []).map((m: any) => m.id);
-  if (!ids.length) return json({ neu: 0 });
-  const { data: schon } = await admin.from('pendenz_mail').select('gmail_id').in('gmail_id', ids);
-  const offen = ids.filter((id) => !(schon || []).some((s: any) => s.gmail_id === id)).slice(0, 8);
-
-  let neu = 0;
-  for (const id of offen.reverse()) {   // älteste zuerst
-    let von = '', an = '', betreff = '';
-    try {
-      const m = await gmail('messages/' + id + '?format=full');
-      const H = (n: string) => (m.payload.headers || []).filter((h: any) => h.name.toLowerCase() === n.toLowerCase()).map((h: any) => h.value).join(', ');
-      von = H('From'); betreff = H('Subject'); const datum = H('Date');
-      const alle = adressen([H('To'), H('Cc'), H('Delivered-To'), H('X-Original-To'), H('X-Forwarded-To')].join(' '));
-      an = alle.find((a) => ZIEL.has(a)) || '';
-      const absender = adressen(von)[0] || '';
-      if (!an) { await admin.from('pendenz_mail').insert({ gmail_id: id, von, betreff, status: 'abgelehnt', fehler: 'keine Pendenzen-Adresse gefunden' }); continue; }
-      if (!absender.endsWith(DOMAIN)) { await admin.from('pendenz_mail').insert({ gmail_id: id, an, von, betreff, status: 'abgelehnt', fehler: 'fremder Absender' }); continue; }
-      const board: any = ZIEL.get(an);
-
-      // Text: lieber text/plain, sonst aus HTML
+  // Mail → Pendenz in der Liste «Mails» des Boards (Titel = Betreff, Notiz = Text, Dateien = Mail-PDF + Anhänge)
+  async function pendenzAusMail(m: any, board: any, herkunft: string) {
+    const id = m.id;
+    const H = (n: string) => (m.payload.headers || []).filter((h: any) => h.name.toLowerCase() === n.toLowerCase()).map((h: any) => h.value).join(', ');
+    const von = H('From'), betreff = H('Subject'), datum = H('Date');
+    {
       const tl = teile(m.payload);
       const plain = tl.find((p) => p.mimeType === 'text/plain' && p.body?.data && !p.filename), html = tl.find((p) => p.mimeType === 'text/html' && p.body?.data && !p.filename);
       const text = (plain ? textAus(plain.body.data) : html ? htmlZuText(textAus(html.body.data)) : (m.snippet || '')).replace(/\r/g, '').trim();
@@ -100,7 +80,7 @@ Deno.serve(async () => {
       const titel = (betreff || '').replace(/^\s*((fwd?|wg|aw|re|tr)\s*:\s*)+/i, '').trim() || '(ohne Betreff)';
       const notiz = text ? `<p>${esc(text.slice(0, 20000)).replace(/\n\n+/g, '</p><p>').replace(/\n/g, '<br>')}</p>` : null;
       const { data: p, error } = await admin.from('pendenz').insert({ liste_id: l.id, titel: titel.slice(0, 300), notiz, zeit: l.zeit || 0, sortierung: ((mx || [])[0]?.sortierung || 0) + 1,
-        herkunft: 'mail', erstellt_von: board.besitzer_id || null }).select('id').single();
+        herkunft, erstellt_von: board.besitzer_id || null }).select('id').single();
       if (error) throw error;
 
       // Dateien: Mail als PDF, dann jeder Anhang
@@ -117,11 +97,96 @@ Deno.serve(async () => {
         const d = await gmail(`messages/${id}/attachments/${a.body.attachmentId}`);
         await ablegen(a.filename, b64(d.data), a.mimeType, /^image\//.test(a.mimeType) ? 'foto' : 'datei');
       }
-      await admin.from('pendenz_mail').insert({ gmail_id: id, pendenz_id: p.id, an, von, betreff, status: 'ok' });
-      neu++;
-    } catch (e) {
-      await admin.from('pendenz_mail').insert({ gmail_id: id, an, von, betreff, status: 'fehler', fehler: String((e as any)?.message || e).slice(0, 500) });
+      return { pendenz_id: p.id, von, betreff };
     }
   }
-  return json({ neu, geprueft: offen.length });
+
+  // ===== 1) Mails an vorname.pendenzen@knechtgarten.ch =====
+  const { data: boards } = await admin.from('pendenz_board').select('id,besitzer_id,mail_kuerzel').not('mail_kuerzel', 'is', null);
+  const ZIEL = new Map((boards || []).map((b: any) => [b.mail_kuerzel + ENDUNG, b]));
+  let neu = 0, geprueft = 0;
+  if (ZIEL.size) {
+    const q = 'newer_than:3d {' + [...ZIEL.keys()].map((a) => `to:${a} cc:${a} bcc:${a}`).join(' ') + '}';
+    const liste = await gmail('messages?maxResults=25&q=' + encodeURIComponent(q));
+    const ids: string[] = (liste.messages || []).map((m: any) => m.id);
+    const { data: schon } = ids.length ? await admin.from('pendenz_mail').select('gmail_id').in('gmail_id', ids) : { data: [] as any[] };
+    const offen = ids.filter((id) => !(schon || []).some((s: any) => s.gmail_id === id)).slice(0, 8);
+    geprueft = offen.length;
+    for (const id of offen.reverse()) {   // älteste zuerst
+      let von = '', an = '', betreff = '';
+      try {
+        const m = await gmail('messages/' + id + '?format=full');
+        const H = (n: string) => (m.payload.headers || []).filter((h: any) => h.name.toLowerCase() === n.toLowerCase()).map((h: any) => h.value).join(', ');
+        von = H('From'); betreff = H('Subject');
+        an = adressen([H('To'), H('Cc'), H('Delivered-To'), H('X-Original-To'), H('X-Forwarded-To')].join(' ')).find((a) => ZIEL.has(a)) || '';
+        const absender = adressen(von)[0] || '';
+        if (!an) { await admin.from('pendenz_mail').insert({ gmail_id: id, von, betreff, status: 'abgelehnt', fehler: 'keine Pendenzen-Adresse gefunden' }); continue; }
+        if (!absender.endsWith(DOMAIN)) { await admin.from('pendenz_mail').insert({ gmail_id: id, an, von, betreff, status: 'abgelehnt', fehler: 'fremder Absender' }); continue; }
+        const r = await pendenzAusMail(m, ZIEL.get(an), 'mail');
+        await admin.from('pendenz_mail').insert({ gmail_id: id, pendenz_id: r.pendenz_id, an, von, betreff, status: 'ok' });
+        neu++;
+      } catch (e) {
+        await admin.from('pendenz_mail').insert({ gmail_id: id, an, von, betreff, status: 'fehler', fehler: String((e as any)?.message || e).slice(0, 500) });
+      }
+    }
+  }
+
+  // ===== 2) Gmail-Stern ↔ Pendenz (zweiseitig) für das Board des Kontos mail@ =====
+  // Stern gesetzt → Pendenz in «Mails» (Stern-Icon); Stern weg → Pendenz archiviert; Pendenz archiviert/gelöscht → Stern weg (braucht gmail.modify).
+  // Beim allerersten Lauf werden alle schon markierten Mails nur vermerkt (stern_alt), damit nicht alte Sterne auf einmal kommen.
+  const stern: any = { neu: 0, archiviert: 0, entsternt: 0 };
+  const sternBoard: any = (boards || []).find((b: any) => b.besitzer_id === u!.id);
+  if (sternBoard) {
+    try {
+      const markiert: string[] = []; let tok = '';
+      do { const r = await gmail('messages?maxResults=500&labelIds=STARRED' + (tok ? '&pageToken=' + tok : '')); (r.messages || []).forEach((m: any) => markiert.push(m.id)); tok = r.nextPageToken || ''; } while (tok && markiert.length < 30000);   // alle Sterne (sonst falsch als «weg» bzw. «neu» erkannt)
+      const setM = new Set(markiert);
+      // alle bekannten Mails seitenweise (eine in()-Abfrage mit tausenden IDs wäre zu lang)
+      const BEK = new Map<string, string>();
+      for (let von = 0; ; von += 1000) { const { data: s } = await admin.from('pendenz_mail').select('gmail_id,status').range(von, von + 999); (s || []).forEach((x: any) => BEK.set(x.gmail_id, x.status)); if (!s || s.length < 1000) break; }
+      const bekannt = [...BEK.values()].some((s) => s.startsWith('stern'));
+      if (!bekannt) {
+        // Start: vorhandene Sterne nur vermerken (Mails, die schon als Alias-Pendenz da sind, bleiben unberührt)
+        const rows: any[] = markiert.filter((id) => !BEK.has(id)).map((id) => ({ gmail_id: id, status: 'stern_alt' }));
+        rows.push({ gmail_id: 'stern-start-' + Date.now(), status: 'stern_alt' });   // Marker, falls gerade nichts markiert ist
+        for (let i = 0; i < rows.length; i += 200) await admin.from('pendenz_mail').insert(rows.slice(i, i + 200));
+        stern.start = rows.length - 1;
+      } else {
+        // a) neu markiert
+        // wieder markiert, nachdem die Pendenz schon erledigt war → als neue Pendenz behandeln
+        const wieder = markiert.filter((id) => BEK.get(id) === 'stern_weg');
+        if (wieder.length) await admin.from('pendenz_mail').delete().in('gmail_id', wieder.slice(0, 50));
+        const frisch = markiert.filter((id) => wieder.includes(id) || !BEK.has(id)).slice(0, 8);
+        for (const id of frisch.reverse()) {
+          try {
+            const m = await gmail('messages/' + id + '?format=full');
+            const r = await pendenzAusMail(m, sternBoard, 'stern');
+            await admin.from('pendenz_mail').insert({ gmail_id: id, pendenz_id: r.pendenz_id, an: KONTO, von: r.von, betreff: r.betreff, status: 'stern' });
+            stern.neu++;
+          } catch (e) { await admin.from('pendenz_mail').insert({ gmail_id: id, an: KONTO, status: 'fehler', fehler: 'Stern: ' + String((e as any)?.message || e).slice(0, 480) }); }
+        }
+        // b) aktive Stern-Pendenzen abgleichen
+        const { data: aktiv } = await admin.from('pendenz_mail').select('gmail_id,pendenz_id').eq('status', 'stern');
+        const pids = (aktiv || []).map((x: any) => x.pendenz_id).filter(Boolean);
+        const { data: pz } = pids.length ? await admin.from('pendenz').select('id,erledigt').in('id', pids) : { data: [] as any[] };
+        const darfAendern = /gmail\.modify/.test(v.scope || '');
+        for (const a of (aktiv || []) as any[]) {
+          const p: any = (pz || []).find((x: any) => x.id === a.pendenz_id), offenP = !!p && !p.erledigt;
+          if (offenP && !setM.has(a.gmail_id)) {          // Stern in Gmail entfernt → Pendenz archivieren
+            await admin.from('pendenz').update({ erledigt: true, erledigt_am: new Date().toISOString() }).eq('id', p.id);
+            await admin.from('pendenz_mail').update({ status: 'stern_weg' }).eq('gmail_id', a.gmail_id); stern.archiviert++;
+          } else if (!offenP && setM.has(a.gmail_id)) {   // Pendenz archiviert/gelöscht → Stern in Gmail entfernen
+            if (!darfAendern) { stern.ohneRecht = true; continue; }
+            const r = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${a.gmail_id}/modify`, { method: 'POST',
+              headers: { Authorization: 'Bearer ' + t.access_token, 'Content-Type': 'application/json' }, body: JSON.stringify({ removeLabelIds: ['STARRED'] }) });
+            if (r.ok) { await admin.from('pendenz_mail').update({ status: 'stern_weg' }).eq('gmail_id', a.gmail_id); stern.entsternt++; }
+            else stern.fehler = 'Stern entfernen: ' + r.status;
+          } else if (!offenP && !setM.has(a.gmail_id)) {  // beides erledigt
+            await admin.from('pendenz_mail').update({ status: 'stern_weg' }).eq('gmail_id', a.gmail_id);
+          }
+        }
+      }
+    } catch (e) { stern.fehler = String((e as any)?.message || e).slice(0, 300); }
+  }
+  return json({ neu, geprueft, stern });
 });
