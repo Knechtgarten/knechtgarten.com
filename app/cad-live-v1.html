@@ -596,8 +596,9 @@ function bb(p){ return { minX: Math.min(...p.map(q => q[0])), maxX: Math.max(...
 // 4 Haus: aussen nur Gesamtmasse; Zwischenmasse (Rücksprünge) auf eigener Kette im Haus
 // 5 Eigene Masslinien und von Hand gelöschte Teilmasse bleiben; «Vermassen» setzt nur die automatischen neu
 const istRechteck = p => p && p.length === 4 && p.every((q, i) => { const r = p[(i + 1) % 4]; return Math.abs(q[0] - r[0]) < 0.03 || Math.abs(q[1] - r[1]) < 0.03; });
-function autoVermassen(still){
-  merken();
+function autoVermassen(still, vonSelbst){
+  if(!vonSelbst) merken(); // automatisch nach einer Änderung: kein eigener Rückgängig-Schritt
+  const selVorher = vonSelbst ? sel : null;
   objs = objs.filter(o => !o.auto);
   const add = o => objs.push({ id: nextId++, auto: true, kurz: false, ...o });
   const g = bb(parzelle), hb = bb(haus), mx = (g.minX + g.maxX) / 2, my = (g.minY + g.maxY) / 2;
@@ -667,8 +668,15 @@ function autoVermassen(still){
     const nx = -(g2.bis[1] - g2.von[1]) / g2.d, ny = (g2.bis[0] - g2.von[0]) / g2.d, poly = o.typ === 'pflanze' ? [o.c] : (o.pts || refPunkte(o.id));
     const platzBei = s => { const m = [(g2.von[0] + g2.bis[0]) / 2 + nx * 0.8 * s, (g2.von[1] + g2.bis[1]) / 2 + ny * 0.8 * s, ]; return Math.min(...poly.map((q, i) => poly.length > 1 ? segDist(m, q, poly[(i + 1) % poly.length]) : dist(m, q))); };
     a.off = (platzBei(1) >= platzBei(-1) ? 1 : -1) * 0.8; add(a); });
-  sel = null; alles();
+  sel = selVorher && objs.some(o => o.id === selVorher) ? selVorher : null; letzteGeo = geoStand(); alles();
   if(!still) toast('Vermassung neu gesetzt – eigene Masslinien bleiben');
+}
+// automatisch neu vermassen, sobald sich etwas Eigenes (nicht die Auto-Masse) geändert hat – kurz nach der letzten Änderung, nie mitten im Ziehen
+let letzteGeo = '', vermassT = null;
+const geoStand = () => JSON.stringify(objs.filter(o => !o.auto));
+function vermassenBald(){
+  if(!haus.length || !parzelle.length) return; const g = geoStand(); if(g === letzteGeo) return;
+  clearTimeout(vermassT); vermassT = setTimeout(function los(){ if(schieben || temp.length){ vermassT = setTimeout(los, 300); return; } if(geoStand() !== letzteGeo) autoVermassen(true, true); }, 350);
 }
 // Abstand Objekt → Haus bzw. Grenze (kürzeste Verbindung, zur Grenze immer rechtwinklig); wandert mit dem Objekt
 function abstandGeo(a){
@@ -1047,7 +1055,7 @@ document.querySelectorAll('#ebenen .chip').forEach(c => c.addEventListener('clic
 $('#mst').addEventListener('change', e => { const z = { '1:50': 44, '1:100': 22, '1:200': 11, '1:500': 4.5 }[e.target.value]; const r = plan.getBoundingClientRect(), mx = r.width / 2, my = r.height / 2, w = zuWelt(mx, my); ansicht.s = z; ansicht.ox = mx - w[0] * z; ansicht.oy = my - w[1] * z; zeichnen(); });
 document.querySelectorAll('[data-toast]').forEach(b => b.addEventListener('click', () => toast(b.dataset.toast)));
 let tt; function toast(t){ const e = $('#toast'); e.textContent = t; e.classList.add('an'); clearTimeout(tt); tt = setTimeout(() => e.classList.remove('an'), 3200); }
-function alles(){ zeichnen(); eigenschaften(); mengen(); hinweis(); planGeaendert(); }
+function alles(){ zeichnen(); eigenschaften(); mengen(); hinweis(); planGeaendert(); vermassenBald(); }
 // Ansicht auf die Parzelle (bzw. alles Gezeichnete) einpassen, mit Rand für die Aussenmasse
 function einpassen(){
   const r = plan.getBoundingClientRect(); if(!r.width) return;
@@ -1205,6 +1213,8 @@ async function oeffnePlan(id){
   $('#planTitel').innerHTML = `${esc(kname(p.kunde))}<small>${esc(p.name)}${p.variante ? ' · Variante ' + esc(p.variante) : ''}</small>`;
   const u = new URL(location.href); u.searchParams.set('plan', id); history.replaceState(null, '', u);
   letzterStand = stand(); $('#speicher').textContent = '';
+  // beim Öffnen: noch keine Auto-Masse → gleich vermassen; sonst erst nach der nächsten Änderung
+  letzteGeo = objs.some(o => o.auto) ? geoStand() : ''; setTimeout(vermassenBald, 600);
   ansichtWechseln('zeichnen');
   if(!grundlage) grundlageLaden(); else hoehenLaden();
 }
