@@ -15,9 +15,9 @@ update public.teilschritt set name = v.neu from (values
  ('4e9324bf-ed3a-488d-83b5-67ba131bf368','Humus mit LKW'),
  ('a6b870ee-d586-45cf-8061-7401f6078a46','Kies Fundation mit Lieferwagen')
 ) v(id, neu) where teilschritt.id = v.id;
--- leere Beschreibung: alter langer Name als Mouse-over
-update public.teilschritt set beschreibung = 'Maschinenaushub erstellen mit Lieferwagen abtransportieren und entsorgen'
- where id = '040aed5e-1f4e-4140-a5d7-91f7eef21b45' and coalesce(beschreibung,'') = '';
+-- (Beschreibung NICHT ergänzen: erscheint als Kundentext in «Hinweise» – wieder auf null gesetzt)
+-- update public.teilschritt set beschreibung = ...
+--  (entfernt)
 -- Arbeitsschritt-Namen
 update public.arbeitsschritt set name = 'Fundation, Hartflächen' where name = 'Fundation, Hartflächen,';
 update public.arbeitsschritt set name = 'Eigene Arbeitsschritte' where name = 'Eigene Arbeitschritte';
