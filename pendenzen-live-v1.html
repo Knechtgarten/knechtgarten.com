@@ -217,7 +217,7 @@ body.ohnelisten [data-set]{display:none;}
 .drkopf .drheute{background:#fff;}
 .drkopf .drheute{all:unset;cursor:pointer;margin-left:auto;font-size:11px;font-weight:600;color:#4C5C70;border:1px solid #DCE2E8;border-radius:99px;padding:0 8px;line-height:18px;}
 .drkopf .drheute:hover{border-color:var(--primary);color:var(--primary);}
-.drrad{display:flex;flex-direction:column;user-select:none;}
+.drrad{display:flex;flex-direction:column;user-select:none;touch-action:none;} /* Finger: wischen dreht das Rad (statt die Seite zu scrollen) */
 .drtag{display:flex;align-items:center;justify-content:space-between;height:20px;padding:0 12px;font-size:11.5px;color:#6E7F93;border-top:1px solid #F1F3F6;cursor:pointer;}
 .drtag:first-child{border-top:0;}
 .drtag.d1{height:24px;font-size:12.5px;color:#4C5C70;}
@@ -1242,7 +1242,18 @@ document.addEventListener('mouseout', e => { const d = e.target.closest('#drehra
   clearTimeout(drRueckT); if(S.drTag !== heuteStr() || !S.drOffen) drRueckT = setTimeout(() => { if(!dc && !S.drNeu && !document.querySelector('#drehrad:hover')) drZurueck(); }, 5000); });
 document.addEventListener('wheel', e => { const r = e.target.closest('#drRad'); if(!r) return; e.preventDefault();
   const h = heuteStr(), neu = tagPlus(S.drTag, e.deltaY > 0 ? 1 : -1); if(neu < h) return; S.drTag = neu; S.drOffen = false; drehradNeu(); }, { passive: false });
-document.addEventListener('click', e => { if(e.target.closest('[data-drheute]')) return drZurueck();
+// Touchscreen: mit dem Finger hoch/runter wischen dreht das Rad (hoch = spätere Tage, wie Mausrad nach unten), alle 32 px ein Tag
+let drWisch = null, drWischEnde = 0;
+const drSchritt = n => { const h = heuteStr(); let neu = tagPlus(S.drTag, n); if(neu < h) neu = h; if(neu === S.drTag) return; S.drTag = neu; S.drOffen = false; drehradNeu(); };
+document.addEventListener('pointerdown', e => { if(e.pointerType === 'mouse' || !e.target.closest('#drRad') || e.target.closest('input,button')) return;
+  clearTimeout(drRueckT); drWisch = { id: e.pointerId, y: e.clientY, weg: false }; });
+document.addEventListener('pointermove', e => { if(!drWisch || e.pointerId !== drWisch.id) return;
+  const n = Math.trunc((drWisch.y - e.clientY) / 32); if(!n) return; drWisch.y -= n * 32; drWisch.weg = true; drSchritt(n); });
+const drWischAus = e => { if(!drWisch || e.pointerId !== drWisch.id) return; if(drWisch.weg) drWischEnde = Date.now(); drWisch = null;
+  clearTimeout(drRueckT); drRueckT = setTimeout(() => { if(!dc && !S.drNeu) drZurueck(); }, 8000); }; // ohne Maus kein «Verlassen»: nach 8 s zurück auf heute
+document.addEventListener('pointerup', drWischAus); document.addEventListener('pointercancel', drWischAus);
+document.addEventListener('click', e => { if(e.target.closest('#drRad') && Date.now() - drWischEnde < 400) return; // Wischen ist kein Antippen
+  if(e.target.closest('[data-drheute]')) return drZurueck();
   if(e.target.closest('[data-drplus]')){ e.stopPropagation(); clearTimeout(drRueckT); S.drNeu = true; S.drOffen = true; return drehradNeu(); }
   if(e.target.closest('[data-drauf]')){ S.drOffen = true; return drehradNeu(); }
   const t = e.target.closest('.drtag[data-drtag]'); if(t && !e.target.closest('[data-card]') && t.dataset.drtag !== S.drTag){ S.drTag = t.dataset.drtag; S.drOffen = false; drehradNeu(); }
