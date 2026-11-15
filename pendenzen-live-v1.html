@@ -1120,7 +1120,20 @@ document.addEventListener('contextmenu', e => {
   document.body.appendChild(m);
   m.style.left = Math.min(e.clientX, innerWidth - m.offsetWidth - 8) + 'px'; m.style.top = Math.min(e.clientY, innerHeight - m.offsetHeight - 8) + 'px';
   m.addEventListener('click', async ev => { const b = ev.target.closest('[data-prio]'); if(!b) return; ev.stopPropagation(); m.remove();
-    const v = b.dataset.prio === '' ? null : Number(b.dataset.prio); p.prio = v; zeichne(); await upd('pendenz', p.id, { prio: v }); });
+    const v = b.dataset.prio === '' ? null : Number(b.dataset.prio); p.prio = v;
+    // nach oben in der eigenen Gruppe: Hoch vor Mittel vor ohne; ohne Priorität = direkt unter die priorisierten
+    const rang = x => x.prio === 1 ? 1 : x.prio === 2 ? 2 : 3, r = rang(p);
+    const gs = S.gruppen.filter(g => g.liste_id === p.liste_id).map(g => g.sortierung);
+    const von = Math.max(-Infinity, ...gs.filter(s => s < p.sortierung)), bis = Math.min(Infinity, ...gs.filter(s => s > p.sortierung));
+    const im = S.pz.filter(x => x.liste_id === p.liste_id && x !== p && x.sortierung > von && x.sortierung < bis).sort((a, c) => a.sortierung - c.sortierung);
+    // Ziel-Index: mit Priorität vor das erste Element mit tieferem Rang; ohne Priorität direkt hinter das letzte priorisierte (gibt es keins: bleibt, wo es ist)
+    let i = r < 3 ? im.findIndex(x => rang(x) > r) : im.map(rang).lastIndexOf(2) >= 0 || im.map(rang).lastIndexOf(1) >= 0 ? Math.max(im.map(rang).lastIndexOf(1), im.map(rang).lastIndexOf(2)) + 1 : -2;
+    if(i === -1) i = im.length;
+    const neu = { prio: v };
+    if(i >= 0){ const unten = i > 0 ? im[i - 1].sortierung : (von === -Infinity ? (im[0] ? im[0].sortierung - 2 : p.sortierung - 1) : von);
+      const oben = im[i] ? im[i].sortierung : (bis === Infinity ? unten + 2 : bis);
+      p.sortierung = (unten + oben) / 2; neu.sortierung = p.sortierung; }
+    zeichne(); await upd('pendenz', p.id, neu); });
 });
 document.addEventListener('mousedown', e => { if(!e.target.closest('.prmenu')) document.querySelector('.prmenu')?.remove(); }, true);
 document.addEventListener('keydown', e => { if(e.key === 'Escape') document.querySelector('.prmenu')?.remove(); });
