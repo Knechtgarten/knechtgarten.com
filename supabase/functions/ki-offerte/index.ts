@@ -22,10 +22,15 @@ Du sprichst mit dem Projektleiter (Du-Form, Schweizer Rechtschreibung mit ss, ku
 
 So arbeitest du:
 - Das Blatt hat vier Kategorien: personal (Arbeitsleistung), maschine (Maschinenaufwand), logistik (Logistik, Transporte, Lieferwagen, Kran, Mulden), material (Materialaufwand, auch Pflanzen).
-- Preise: Suche zuerst mit artikel_suchen im Artikelstamm und nimm dessen Preis (vp_knecht) und Einheit; trage dann artikel_id ein und quelle "artikel".
-  Gibt es keinen Artikel, suche mit easybill_suchen in früheren Easybill-Angeboten (dort stehen v. a. Pflanzen und Spezialpositionen mit unseren Preisen) und mit offerten_suchen in Offerten aus dem Offertentool; nimm den neusten passenden Preis (quelle "easybill" bzw. "offerte").
-  Nur wenn beides nichts ergibt oder der Projektleiter einen Betrag nennt: Preis vom Projektleiter übernehmen (quelle "vorgabe") oder vernünftig schätzen (quelle "geschaetzt"). Erfinde keine Artikelnummern.
-- Herkunft pro Zeile: Trage bei jeder Zeile quelle_nr (Artikelnummer, Offertnummer bzw. Easybill-Angebotsnummer), quelle_datum (Datum der alten Offerte / des Angebots, JJJJ-MM-TT) und quelle_info (Kunde der Quelle, kurz) ein, soweit bekannt. Das Blatt zeigt das als Icon mit Jahr – zähle die Quellen in der Antwort darum nicht einzeln auf. Ist ein übernommener Preis älter als 2 Jahre, sag das in der Antwort kurz (z. B. «Carpinus-Preis von 2019, evtl. anpassen»).
+- Preise – Reihenfolge pro Zeile:
+  1. Nennt der Projektleiter einen Preis, gilt dieser (quelle "vorgabe"), ohne Suche.
+  2. Zeilen mit quelle "hand" im aktuellen Blatt hat der Projektleiter von Hand geändert: Preis, Menge und Einheit NIE ändern, quelle "hand" so zurückgeben (ausser er verlangt es ausdrücklich).
+  3. artikel_suchen im Artikelstamm: passender Artikel → dessen Preis (vp_knecht) und Einheit, artikel_id, quelle "artikel", quelle_nr = Artikelnummer.
+  4. Sonst easybill_suchen (Easybill-Angebote, v. a. Pflanzen und Spezialpositionen) und offerten_suchen (Offertentool): neusten passenden Preis nehmen, Preise aus den letzten 3 Jahren bevorzugen; ältere nur, wenn es nichts Neueres gibt. quelle "easybill" bzw. "offerte", quelle_id = die gelieferte quelle_id, quelle_nr = Angebots-/Offertnummer, quelle_datum, quelle_info = Kunde.
+     Liegen die passenden Preise stark auseinander (über 30 %), nimm den neusten und nenne die Spanne in der Antwort (z. B. «CHF 280–420, 380 genommen»).
+  5. Erst wenn alles nichts ergibt: vernünftig schätzen (quelle "geschaetzt").
+  Höchstens 3 Suchen pro Position (z. B. «Carpinus Hochstamm», dann «Carpinus», dann «Hainbuche»), dann weiter. Erfinde keine Artikelnummern.
+- Quellen in der Antwort: Wenn du eine Quelle erwähnst (alter oder geschätzter Preis, Spanne), schreibe sie als Link: [Angebot 17-11034](easybill:QUELLE_ID "Kunde · TT.MM.JJJJ") bzw. [Offerte 2026-010003](offerte:QUELLE_ID "Kunde · TT.MM.JJJJ"). Preise aus dem Artikelstamm nicht erwähnen. Ist ein übernommener Preis älter als 2 Jahre, sag das kurz.
 - Personal: übliche Artikel sind «Polier / Vorarbeiter» und «Gartenarbeiter» (Std.). Arbeitstage × 9 Std. = Stunden, falls nichts anderes gesagt wird.
 - Fahrzeit: Bei Personal-Zeilen (Polier, Gartenarbeiter, Servicetechniker) und beim Lieferwagen setzt du fahrt=true und gibst die Menge OHNE Fahrzeit an. Das Blatt rechnet die Fahrzeit zur Kundenadresse automatisch dazu. Beim Lieferwagen ohne eigene Einsatzstunden ist die Menge 0.
 - Arbeitet Personal vor Ort, gehört IMMER eine Zeile «Lieferwagen» (Artikel suchen, Kategorie logistik, Std., fahrt=true) dazu – ausser der Projektleiter sagt ausdrücklich etwas anderes.
@@ -88,7 +93,8 @@ const TOOLS: Anthropic.Tool[] = [
               einheit: { type: 'string' },
               preis: { type: 'number', description: 'CHF pro Einheit, exkl. MwSt' },
               artikel_id: { type: ['string', 'null'] },
-              quelle: { type: 'string', enum: ['artikel', 'easybill', 'offerte', 'vorgabe', 'geschaetzt'] },
+              quelle: { type: 'string', enum: ['artikel', 'easybill', 'offerte', 'vorgabe', 'geschaetzt', 'hand'] },
+              quelle_id: { type: ['string', 'null'], description: 'quelle_id aus easybill_suchen bzw. offerten_suchen (für den Link)' },
               quelle_nr: { type: ['string', 'null'], description: 'Artikelnummer, Offertnummer oder Easybill-Angebotsnummer' },
               quelle_datum: { type: ['string', 'null'], description: 'Datum der Quelle JJJJ-MM-TT (alte Offerte, Easybill-Angebot)' },
               quelle_info: { type: ['string', 'null'], description: 'kurz: Kunde der Quelle' },
@@ -116,6 +122,18 @@ Deno.serve(async (req) => {
   try { body = await req.json(); } catch { return json({ error: 'Ungültige Anfrage.' }, 400); }
   const nachricht = String(body?.nachricht || '').trim().slice(0, 6000);
   if (!nachricht) return json({ error: 'Nachricht fehlt.' }, 400);
+  // Diktat nach dem Stopp kurz korrigieren (schnelles Modell, nur Rechtschreibung/Fachbegriffe)
+  if (body?.modus === 'korrigieren') {
+    try {
+      const r: any = await new Anthropic().messages.create({
+        model: 'claude-haiku-5-5', max_tokens: 2000,
+        system: 'Du korrigierst diktierten Text (Spracherkennung, Schweizerdeutsch gesprochen) für ein Gartenbau-Offertentool. Korrigiere nur Erkennungsfehler, Rechtschreibung (Schweiz, ss statt ß), Satzzeichen und Fachbegriffe aus Gartenbau, Pflanzen (botanische Namen), Poolbau. Inhalt, Zahlen und Reihenfolge nicht ändern, nichts ergänzen. Gib NUR den korrigierten Text zurück.',
+        messages: [{ role: 'user', content: nachricht }],
+      } as any);
+      const text = (r.content || []).filter((b: any) => b.type === 'text').map((b: any) => b.text).join('').trim();
+      return json({ text: text || nachricht });
+    } catch (e: any) { return json({ text: nachricht, fehler: String(e?.message || e) }); }
+  }
   const verlauf: { rolle: string; text: string }[] = Array.isArray(body?.verlauf) ? body.verlauf.slice(-30) : [];
   const blatt = body?.blatt || {};
   const kunde = body?.kunde || {};
@@ -171,13 +189,14 @@ Deno.serve(async (req) => {
     else messages.push({ role: rolle, content: text });
   }
   if (messages.length && messages[0].role !== 'user') messages.shift();
-  const kontext = `<kunde>${JSON.stringify(kunde)}</kunde>\n<aktuelles_blatt>${JSON.stringify(blatt).slice(0, 30000)}</aktuelles_blatt>`;
+  const kontext = `<heute>${new Date().toISOString().slice(0, 10)}</heute>
+<kunde>${JSON.stringify(kunde)}</kunde>\n<aktuelles_blatt>${JSON.stringify(blatt).slice(0, 30000)}</aktuelles_blatt>`;
   const neu = `${kontext}\n\n${nachricht}`;
   if (messages.length && messages[messages.length - 1].role === 'user') messages[messages.length - 1].content += '\n\n' + neu;
   else messages.push({ role: 'user', content: neu });
 
   const client = new Anthropic();
-  let gesetzt: any = null, antwort = '', modell = '';
+  let gesetzt: any = null, antwort = '', modell = '', suchen = 0;
   try {
     for (let runde = 0; runde < 10; runde++) {
       const response: any = await client.beta.messages.create({
@@ -209,7 +228,7 @@ Deno.serve(async (req) => {
           if (!Array.isArray(z)) inhalt = 'Fehler: zeilen fehlt.';
           else { gesetzt = { zeilen: z.slice(0, 200), arbeitsbeschrieb: typeof t.input?.arbeitsbeschrieb === 'string' ? t.input.arbeitsbeschrieb : null }; inhalt = `Blatt gesetzt (${z.length} Zeilen).`; }
         } else {
-          inhalt = await werkzeug(t.name, t.input);
+          inhalt = ++suchen > 25 ? 'Suchlimit erreicht – nimm, was du gefunden hast, oder schätze (quelle "geschaetzt").' : await werkzeug(t.name, t.input);
         }
         ergebnisse.push({ type: 'tool_result', tool_use_id: t.id, content: inhalt });
       }
