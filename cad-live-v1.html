@@ -205,7 +205,7 @@ select{border:1px solid var(--line);background:var(--card);border-radius:6px;pad
 
   <div class="zeile2">
     <div class="projekt" id="planTitel"></div><span class="speicher" id="speicher"></span>
-    <button class="btn" id="grundBtn" title="Parzelle und Gebäude neu aus der amtlichen Vermessung laden">Vermessung neu laden</button>
+    <button class="btn" id="grundBtn" title="Parzelle und Gebäude neu aus der amtlichen Vermessung laden">Vermessung</button>
     <div class="chips" id="ebenen">
       <button class="chip on" data-e="bestand"><span class="pkt"></span>Bestand (Vermessung)</button>
       <button class="chip on" data-e="projekt"><span class="pkt"></span>Projekt</button>
@@ -404,7 +404,10 @@ function zeichnen(){
   // Luftbild-Andeutung (im echten Tool: swisstopo-Luftbild mit Deckkraft)
   const luft = Number($('#luft').value) / 100;
   // Luftbild swisstopo (WMS, LV95) unter dem Plan, Deckkraft über den Regler
-  if(luft > 0 && grundlage?.luft){ const L = grundlage.luft, [x, y] = zuPx([L.x0, L.y0]); el('image', { href: L.url, x, y, width: (L.x1 - L.x0) * ansicht.s, height: (L.y1 - L.y0) * ansicht.s, opacity: luft, preserveAspectRatio: 'none' }); }
+  if(luft > 0 && grundlage?.luft){ const L = grundlage.luft, g = grundlage, s = ansicht.s;
+    // Bild liegt in ungedrehten Metern; gleiche Drehung + Verschiebung wie die Vermessung
+    const grp = el('g', { transform: `translate(${ansicht.ox - (g.sx || 0) * s} ${ansicht.oy - (g.sy || 0) * s}) scale(${s}) rotate(${(g.drehung || 0) * 180 / Math.PI})` });
+    el('image', { href: L.url, x: L.x0, y: L.y0, width: L.x1 - L.x0, height: L.y1 - L.y0, opacity: luft, preserveAspectRatio: 'none' }, grp); }
   // Bestand (amtliche Vermessung)
   if(ebenen.bestand){
     nachbarParz.forEach(p => el('path', { d: pfad(p, true), fill: 'none', stroke: css('--muted'), 'stroke-width': 0.8, 'stroke-dasharray': '6 3' }));
@@ -777,7 +780,9 @@ function eigenschaften(){
 }
 // Geländehöhe aus swissALTI3D (wird nach dem Öffnen eines Plans im Hintergrund geladen)
 let HOEHEN = null;
-const geländeHoehe = p => { if(!HOEHEN || !grundlage) return '–'; const h = HOEHEN.hoehe(grundlage.e0 + p[0], grundlage.n0 - p[1]); return isNaN(h) ? '–' : h.toFixed(2); };
+// Planpunkt → LV95 (Plan ist am Haus ausgerichtet: zurückdrehen)
+const zuLv95 = p => { const g = grundlage, t = -(g.drehung || 0), x = p[0] + (g.sx || 0), y = p[1] + (g.sy || 0); return [g.e0 + x * Math.cos(t) - y * Math.sin(t), g.n0 - (x * Math.sin(t) + y * Math.cos(t))]; };
+const geländeHoehe = p => { if(!HOEHEN || !grundlage) return '–'; const [e, n] = zuLv95(p), h = HOEHEN.hoehe(e, n); return isNaN(h) ? '–' : h.toFixed(2); };
 function mengen(){
   const t = $('#mengen'); const z = [];
   const mauern = objs.filter(o => o.typ === 'mauer');
@@ -1111,6 +1116,8 @@ $('#neuBtn').addEventListener('click', () => {
 // ----- Plan öffnen / speichern -----
 function grundlageAnwenden(g){
   grundlage = g || null; parzelle = g?.parzelle || []; haus = g?.haus || []; nebengeb = g?.nebengeb || []; nachbarn = g?.nachbarn || []; nachbarParz = g?.nachbarParz || [];
+  // Nordpfeil dreht mit (Plan ist am Haus ausgerichtet)
+  const k = document.querySelector('.kompass'); if(k) k.style.transform = `rotate(${(g?.drehung || 0) * 180 / Math.PI}deg)`;
 }
 async function oeffnePlan(id){
   const { data: p, error } = await sb.from('cad_plan').select('*, kunde:kunde_id(id,name,vorname,nachname,firma,strasse,plz,ort)').eq('id', id).maybeSingle();
@@ -1158,17 +1165,25 @@ async function grundlageLaden(neu){
     if(!eigen) eigen = RESF.map(f => ({ f, r: ring(f) })).filter(x => x.r).sort((a, b) => { const d = x => { const c = x.r.reduce((s, q) => [s[0] + q[0] / x.r.length, s[1] + q[1] / x.r.length], [0, 0]); return Math.hypot(c[0] - p.e, c[1] - p.n); }; return d(a) - d(b); })[0]?.f;
     if(!eigen) throw new Error('Keine Parzelle gefunden');
     const er = ring(eigen), e0 = Math.min(...er.map(q => q[0])), n0 = Math.max(...er.map(q => q[1]));
-    const lokal = r => { const out = r.map(q => [Math.round((q[0] - e0) * 1000) / 1000, Math.round((n0 - q[1]) * 1000) / 1000]); if(out.length > 1 && dist(out[0], out[out.length - 1]) < 0.001) out.pop(); return out; };
     const geb = LCSF.filter(f => f.properties?.Art === 'Gebaeude').map(ring).filter(Boolean);
     const mitte = r => r.reduce((s, q) => [s[0] + q[0] / r.length, s[1] + q[1] / r.length], [0, 0]);
     const drin = geb.filter(r => { const c = mitte(r); return imRing(c[0], c[1], er); }), draussen = geb.filter(r => !drin.includes(r));
     const flaecheLv = r => Math.abs(r.reduce((a, q, i) => { const s = r[(i + 1) % r.length]; return a + q[0] * s[1] - s[0] * q[1]; }, 0)) / 2;
     drin.sort((a, b) => flaecheLv(b) - flaecheLv(a));
-    const parz = lokal(er), bp = bb(parz), rand = 18;
-    const L = { x0: bp.minX - rand, y0: bp.minY - rand, x1: bp.maxX + rand, y1: bp.maxY + rand };
+    // Plan am Haus ausrichten: längste Hauswand waagrecht (Drehung höchstens ±45°), damit Rechtecke, Fangen und Massketten zum Haus passen
+    const u = q => [q[0] - e0, n0 - q[1]];   // ungedreht, Meter, Y nach unten
+    let th = 0;
+    if(drin[0]){ let best = 0; drin[0].forEach((q, i, r) => { const a = u(q), b = u(r[(i + 1) % r.length]), l = dist(a, b); if(l > best){ best = l; th = -Math.atan2(b[1] - a[1], b[0] - a[0]); } });
+      while(th > Math.PI / 4) th -= Math.PI / 2; while(th < -Math.PI / 4) th += Math.PI / 2; }
+    const rot = (p, t) => [p[0] * Math.cos(t) - p[1] * Math.sin(t), p[0] * Math.sin(t) + p[1] * Math.cos(t)];
+    const pr = er.map(q => rot(u(q), th)), sx = Math.min(...pr.map(q => q[0])), sy = Math.min(...pr.map(q => q[1]));
+    const lokal = r => { const out = r.map(q => { const p = rot(u(q), th); return [Math.round((p[0] - sx) * 1000) / 1000, Math.round((p[1] - sy) * 1000) / 1000]; }); if(out.length > 1 && dist(out[0], out[out.length - 1]) < 0.001) out.pop(); return out; };
+    const parz = lokal(er), rand = 18;
+    // Luftbild: Ausschnitt in ungedrehten Koordinaten (Nord oben), wird beim Zeichnen mitgedreht
+    const ub = bb(er.map(u)), L = { x0: ub.minX - rand, y0: ub.minY - rand, x1: ub.maxX + rand, y1: ub.maxY + rand };
     const pxB = Math.round(Math.min(2400, (L.x1 - L.x0) * 25)), pxH = Math.round(pxB * (L.y1 - L.y0) / (L.x1 - L.x0));
     L.url = `https://wms.geo.admin.ch/?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&LAYERS=ch.swisstopo.swissimage&STYLES=&CRS=EPSG:2056&BBOX=${e0 + L.x0},${n0 - L.y1},${e0 + L.x1},${n0 - L.y0}&WIDTH=${pxB}&HEIGHT=${pxH}&FORMAT=image/jpeg`;
-    const g = { e0, n0, adresse: adr, parzelle_nr: eigen.properties?.Nummer || '', egrid: eigen.properties?.EGRIS_EGRID || '', flaeche: eigen.properties?.Flaeche || null,
+    const g = { e0, n0, drehung: th, sx, sy, lv: { minE: ub.minX + e0, maxE: ub.maxX + e0, minN: n0 - ub.maxY, maxN: n0 - ub.minY }, adresse: adr, parzelle_nr: eigen.properties?.Nummer || '', egrid: eigen.properties?.EGRIS_EGRID || '', flaeche: eigen.properties?.Flaeche || null,
       parzelle: parz, haus: drin[0] ? lokal(drin[0]) : [], nebengeb: drin.slice(1).map(lokal), nachbarn: draussen.map(lokal),
       nachbarParz: RESF.filter(f => f !== eigen).map(ring).filter(Boolean).map(lokal), luft: L, stand: new Date().toISOString().slice(0, 10) };
     const { error } = await sb.from('cad_plan').update({ grundlage: g }).eq('id', PLAN.id); if(error) throw error;
@@ -1178,8 +1193,8 @@ async function grundlageLaden(neu){
   } catch(e){ fehler(e, 'Vermessung'); }
 }
 async function hoehenLaden(){
-  if(!grundlage || HOEHEN) return; const b = bb(grundlage.parzelle), g = grundlage;
-  try { await KGK.laden(); HOEHEN = await KGK.hoehenGitter(g.e0 + b.minX - 5, g.n0 - b.maxY - 5, g.e0 + b.maxX + 5, g.n0 - b.minY + 5); eigenschaften(); } catch(_){ HOEHEN = null; }
+  if(!grundlage?.lv || HOEHEN) return; const v = grundlage.lv;
+  try { await KGK.laden(); HOEHEN = await KGK.hoehenGitter(v.minE - 5, v.minN - 5, v.maxE + 5, v.maxN + 5); eigenschaften(); } catch(_){ HOEHEN = null; }
 }
 
 start();
