@@ -1753,6 +1753,40 @@ let letzterGrandTotal = 0;
 // bewusst den Bruttobetrag inkl. MwSt, der Netto-Grandtotal im
 // kosten_snapshot bleibt unveraendert netto (fuer den Easybill-Export).
 const MWST_SATZ_STANDARD = 8.1;
+// MwSt-Sätze (Verwaltung, Tabelle mwst_satz) mit Gültig-ab; pro Zeile Normal oder Reduziert.
+// Massgebend ist der Satz am Offertdatum. Artikel mit mwst_art «reduziert» (z. B. Baumschule Däpp) sind Standard reduziert.
+let MWST_SAETZE = [{ art: 'normal', satz: 8.1, gueltig_ab: '2000-01-01' }, { art: 'reduziert', satz: 2.6, gueltig_ab: '2000-01-01' }];
+let REDUZIERT_ARTIKEL_IDS = new Set(), REDUZIERT_NAMEN = new Set();
+async function ladeMwstDaten(){
+  const [s, a] = await Promise.all([
+    sb.from('mwst_satz').select('art, satz, gueltig_ab').order('gueltig_ab'),
+    sb.from('artikel').select('id, bezeichnung').eq('mwst_art', 'reduziert')
+  ]);
+  if(!s.error && s.data?.length) MWST_SAETZE = s.data.map(r => ({ ...r, satz: Number(r.satz) }));
+  if(!a.error){ REDUZIERT_ARTIKEL_IDS = new Set(a.data.map(r => r.id)); REDUZIERT_NAMEN = new Set(a.data.map(r => (r.bezeichnung || '').trim())); }
+}
+function mwstSatzFuer(art){
+  const datum = (typeof $offerteDatum !== 'undefined' && $offerteDatum?.value) || new Date().toISOString().slice(0, 10);
+  const passend = MWST_SAETZE.filter(r => r.art === (art || 'normal') && String(r.gueltig_ab) <= datum);
+  return (passend.length ? passend[passend.length - 1] : MWST_SAETZE.find(r => r.art === (art || 'normal')) || { satz: MWST_SATZ_STANDARD }).satz;
+}
+function mwstArtStandard(artikelId, bezeichnung){
+  return (artikelId && REDUZIERT_ARTIKEL_IDS.has(artikelId)) || REDUZIERT_NAMEN.has(String(bezeichnung || '').trim()) ? 'reduziert' : 'normal';
+}
+// Zeilenbetrag nach Rabatt – gleich wie Easybill: Prozent / CHF pro Einheit / CHF pauschal
+function betragNachRabatt(menge, preis, rabatt, art){
+  const roh = (menge || 0) * (preis || 0), r = Number(rabatt) || 0;
+  if(!r) return rundeCHF(roh);
+  if(art === 'prozent') return rundeCHF(roh * (1 - r / 100));
+  if(art === 'einheit') return rundeCHF((menge || 0) * ((preis || 0) - r));
+  return rundeCHF(roh - r); // pauschal
+}
+function rabattText(rabatt, art, einheit){
+  const r = Number(rabatt) || 0; if(!r) return '';
+  if(art === 'prozent') return `−${r} %`;
+  if(art === 'einheit') return `−${fmtCHF(r).replace(' CHF', '')} / ${einheit || 'Einheit'}`;
+  return `−${fmtCHF(r)}`;
+}
 // Hintergrundfarbe-Auswahl (Tool B -> "Option bearbeiten"-Leiste, Farbe-
 // Button) - siehe OFFERTENTYP_FARBEN in tool-b-live-v1.html, hier dupliziert
 // wie das Icon-Set (gleiche Konvention dieses Projekts).
@@ -5572,6 +5606,7 @@ async function init(){
         .eq('ausgeblendet', false).is('papierkorb_am', null).order('reihenfolge'),
       ladeAlleKunden(),
       ladeLieferwagenKonfiguration(),
+      ladeMwstDaten(),
       ladeSystemwertTerms(),
       ladeOffertenPositionEinstellungen(),
       ladeMaschinenSammelpositionen(),
@@ -5784,7 +5819,7 @@ async function ladeZeilenKorrekturen(offerteId){
   if(error) throw error;
   zeilenKorrekturen = {};
   (data || []).forEach(r => {
-    zeilenKorrekturen[r.zeilen_schluessel] = { menge_korrektur: r.menge_korrektur, preis_korrektur: r.preis_korrektur, geloescht: r.geloescht, basis_menge: r.basis_menge, basis_preis: r.basis_preis, einheit_korrektur: r.einheit_korrektur, optional: !!r.optional };
+    zeilenKorrekturen[r.zeilen_schluessel] = { menge_korrektur: r.menge_korrektur, preis_korrektur: r.preis_korrektur, geloescht: r.geloescht, basis_menge: r.basis_menge, basis_preis: r.basis_preis, einheit_korrektur: r.einheit_korrektur, optional: !!r.optional, rabatt: r.rabatt ?? null, rabatt_art: r.rabatt_art || null, mwst_art: r.mwst_art || null };
   });
 }
 
@@ -5792,8 +5827,8 @@ async function speichereZeilenKorrekturen(offerteId){
   const { error: delErr } = await sb.from('offerte_zeilen_korrektur').delete().eq('offerte_id', offerteId);
   if(delErr) throw delErr;
   const rows = Object.entries(zeilenKorrekturen)
-    .filter(([, k]) => k.menge_korrektur != null || k.preis_korrektur != null || k.geloescht || k.einheit_korrektur || k.optional)
-    .map(([schluessel, k]) => ({ offerte_id: offerteId, zeilen_schluessel: schluessel, menge_korrektur: k.menge_korrektur, preis_korrektur: k.preis_korrektur, geloescht: !!k.geloescht, basis_menge: k.basis_menge ?? null, basis_preis: k.basis_preis ?? null, einheit_korrektur: k.einheit_korrektur || null, optional: !!k.optional }));
+    .filter(([, k]) => k.menge_korrektur != null || k.preis_korrektur != null || k.geloescht || k.einheit_korrektur || k.optional || k.rabatt || k.mwst_art)
+    .map(([schluessel, k]) => ({ offerte_id: offerteId, zeilen_schluessel: schluessel, menge_korrektur: k.menge_korrektur, preis_korrektur: k.preis_korrektur, geloescht: !!k.geloescht, basis_menge: k.basis_menge ?? null, basis_preis: k.basis_preis ?? null, einheit_korrektur: k.einheit_korrektur || null, optional: !!k.optional, rabatt: k.rabatt || null, rabatt_art: k.rabatt ? (k.rabatt_art || 'prozent') : null, mwst_art: k.mwst_art || null }));
   if(rows.length){
     const { error: insErr } = await sb.from('offerte_zeilen_korrektur').insert(rows);
     if(insErr) throw insErr;
@@ -5839,9 +5874,10 @@ function renderEigeneZeilenFuerKategorie(kat, container){
     const mitFahrt = istEasy && z.fahrt;
     const fz = mitFahrt ? easyFahrzeitFuer(z) : 0;
     if(mitFahrt && !z.fahrtManuell) z.menge = Math.round(((Number(z.mengeBasis) || 0) + fz) * 100) / 100;
-    const betrag = rundeCHF((z.menge || 0) * (z.preis || 0));
+    const zMwstArt = z.mwstArt || mwstArtStandard(z.artikelId, z.bezeichnung), zMwstSatz = mwstSatzFuer(zMwstArt);
+    const betrag = betragNachRabatt(z.menge, z.preis, z.rabatt, z.rabattArt || 'prozent');
     if(!z.optional) summe += betrag;
-    snapshotZeile(KAT_LABEL[kat], { bezeichnung: z.bezeichnung, menge: z.menge || 0, einheit: z.einheit || '', preis: z.preis || 0, betrag, geloescht: !!z.optional, optional: !!z.optional });
+    snapshotZeile(KAT_LABEL[kat], { bezeichnung: z.bezeichnung, menge: z.menge || 0, einheit: z.einheit || '', preis: z.preis || 0, betrag, rabatt: Number(z.rabatt) || null, rabatt_art: Number(z.rabatt) ? (z.rabattArt || 'prozent') : null, mwst_art: zMwstArt, mwst_satz: zMwstSatz, geloescht: !!z.optional, optional: !!z.optional });
     // Speichern-Warnung bleibt spezifisch fuer Freitext-Positionen ohne Menge
     // ODER Preis (weder Vorschlag noch bereits eingetragen) - die optische
     // Markierung (betragnull) unten ist dagegen generisch: jede Zeile mit
@@ -5858,7 +5894,7 @@ function renderEigeneZeilenFuerKategorie(kat, container){
       <td style="text-align:right" class="${mitFahrt ? 'ezfahrtzelle' : ''}">${mitFahrt ? `<input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="ez-basis" type="number" step="0.25" value="${z.mengeBasis ?? ''}" placeholder="–" title="Menge ohne Fahrzeit"><span class="ezfz" title="Fahrzeit hin und zurück: ${easyFahrten()} Fahrt(en) × ${easyFahrtStd().toFixed(2)} Std.">+${fz.toFixed(2)}</span>` : ''}<input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="ez-menge${mitFahrt && z.fahrtManuell ? ' hand' : ''}" type="number" step="0.01" value="${z.menge}"${mitFahrt ? ` title="${z.fahrtManuell ? 'Von Hand überschrieben – neue Menge ohne Fahrzeit eintragen, um wieder automatisch zu rechnen' : 'Menge inkl. Fahrzeit (kann überschrieben werden)'}"` : ''}></td>
       <td><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="ez-einheit" value="${z.einheit}"></td>
       <td style="text-align:right"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="ez-preis" type="number" step="0.01" value="${(z.preis || 0).toFixed(2)}"></td>
-      <td class="cbetrag"><button type="button" class="cbetrag-val dbklick" title="Klicken: optional an/aus">${fmtCHF(betrag)}</button></td>`;
+      <td class="cbetrag"><button type="button" class="cbetrag-val dbklick" title="Klicken: optional an/aus">${fmtCHF(betrag)}</button>${zeilenInfo(z.rabatt, z.rabattArt || 'prozent', z.einheit, zMwstArt, zMwstSatz)}</td>`;
     container.appendChild(tr);
     { const bz = tr.querySelector('.ez-bez'); const hoch = () => { bz.style.height = 'auto'; bz.style.height = bz.scrollHeight + 'px'; }; requestAnimationFrame(hoch); bz.addEventListener('input', hoch); bz.addEventListener('keydown', e => { if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); bz.blur(); } }); bz.addEventListener('change', e => { z.bezeichnung = e.target.value.replace(/\s*\n\s*/g, ' / '); recalc(); }); }
     tr.querySelector('.ez-menge').addEventListener('change', e => { z.menge = parseFloat(e.target.value) || 0; if(mitFahrt) z.fahrtManuell = true; recalc(); planAutosave(); });
@@ -5874,10 +5910,15 @@ function renderEigeneZeilenFuerKategorie(kat, container){
       recalc();
       planAutosave();
     };
-    // Klick auf den Betrag: nur «Optional» an/aus (Löschen über den Abfalleimer)
-    tr.querySelector('.dbklick').addEventListener('click', e => betragMenu(e.currentTarget, [
-      { t: 'Optional', d: 'steht in der Offerte, zählt nicht zum Total', an: !!z.optional, fn: () => { z.optional = !z.optional; recalc(); planAutosave(); } }
-    ]));
+    // Klick auf den Betrag: Fenster mit Optional (Schalter), Rabatt und MwSt (Löschen über den Abfalleimer)
+    tr.querySelector('.dbklick').addEventListener('click', e => betragFenster(e.currentTarget,
+      { optional: !!z.optional, rabatt: z.rabatt, rabattArt: z.rabattArt || 'prozent', mwstArt: zMwstArt, einheit: z.einheit },
+      w => {
+        if('optional' in w) z.optional = w.optional;
+        if('rabatt' in w){ z.rabatt = w.rabatt || null; z.rabattArt = w.rabattArt; }
+        if('mwstArt' in w) z.mwstArt = w.mwstArt;
+        recalc(); planAutosave();
+      }));
   });
 
   // Zwei Einstiegspunkte, beide nur Links statt einer staendig sichtbaren
@@ -5897,7 +5938,7 @@ function renderEigeneZeilenFuerKategorie(kat, container){
   trLinks.querySelector('[data-art="artikelstamm"]').addEventListener('click', async () => {
     await openArtikelstammPicker(kat, a => {
       eigeneZeileCounter++;
-      eigeneZeilen.push({ clientKey: 'ez' + eigeneZeileCounter, dbId: null, kategorie: kat, bezeichnung: a.bezeichnung, menge: 1, einheit: a.einheit, preis: a.vp_knecht ?? 0 });
+      eigeneZeilen.push({ clientKey: 'ez' + eigeneZeileCounter, dbId: null, kategorie: kat, bezeichnung: a.bezeichnung, menge: 1, einheit: a.einheit, preis: a.vp_knecht ?? 0, artikelId: a.id || null });
       recalc();
       planAutosave();
     });
@@ -5915,7 +5956,7 @@ async function ladeEigeneZeilen(offerteId){
     return {
       clientKey: 'ez' + eigeneZeileCounter, dbId: r.id, kategorie: r.kategorie, bezeichnung: r.bezeichnung, menge: r.menge, einheit: r.einheit, preis: r.preis,
       freitextVorlageId: r.freitext_vorlage_id, foto1Url: r.foto1_url || null, foto2Url: r.foto2_url || null, foto3Url: r.foto3_url || null,
-      geloescht: !!r.geloescht, schluessel: r.schluessel || ('ez-' + crypto.randomUUID()), typ: r.typ || null, optional: !!r.optional, mengeBasis: r.menge_basis ?? null, fahrt: !!r.fahrt, fahrtManuell: !!r.fahrt_manuell
+      geloescht: !!r.geloescht, schluessel: r.schluessel || ('ez-' + crypto.randomUUID()), typ: r.typ || null, optional: !!r.optional, mengeBasis: r.menge_basis ?? null, fahrt: !!r.fahrt, fahrtManuell: !!r.fahrt_manuell, rabatt: r.rabatt ?? null, rabattArt: r.rabatt_art || null, mwstArt: r.mwst_art || null, artikelId: r.artikel_id || null
     };
   });
 }
@@ -5925,7 +5966,7 @@ async function speichereEigeneZeilen(offerteId){
   if(delErr) throw delErr;
   const echte = eigeneZeilen.filter(z => z.bezeichnung.trim());
   if(echte.length){
-    const rows = echte.map((z, i) => ({ offerte_id: offerteId, kategorie: z.kategorie, bezeichnung: z.bezeichnung.trim(), menge: z.menge || 0, einheit: z.einheit || '', preis: z.preis || 0, reihenfolge: i, freitext_vorlage_id: z.freitextVorlageId ?? null, foto1_url: z.foto1Url ?? null, foto2_url: z.foto2Url ?? null, foto3_url: z.foto3Url ?? null, geloescht: !!z.geloescht, schluessel: z.schluessel || null, typ: z.typ || null, optional: !!z.optional, menge_basis: z.mengeBasis ?? null, fahrt: !!z.fahrt, fahrt_manuell: !!z.fahrtManuell })); // immer mitsenden: bei gemischten Zeilen setzt PostgREST fehlende Schluessel sonst auf NULL (Not-null-Fehler)
+    const rows = echte.map((z, i) => ({ offerte_id: offerteId, kategorie: z.kategorie, bezeichnung: z.bezeichnung.trim(), menge: z.menge || 0, einheit: z.einheit || '', preis: z.preis || 0, reihenfolge: i, freitext_vorlage_id: z.freitextVorlageId ?? null, foto1_url: z.foto1Url ?? null, foto2_url: z.foto2Url ?? null, foto3_url: z.foto3Url ?? null, geloescht: !!z.geloescht, schluessel: z.schluessel || null, typ: z.typ || null, optional: !!z.optional, menge_basis: z.mengeBasis ?? null, fahrt: !!z.fahrt, fahrt_manuell: !!z.fahrtManuell, rabatt: Number(z.rabatt) || null, rabatt_art: Number(z.rabatt) ? (z.rabattArt || 'prozent') : null, mwst_art: z.mwstArt || null, artikel_id: z.artikelId || null })); // immer mitsenden: bei gemischten Zeilen setzt PostgREST fehlende Schluessel sonst auf NULL (Not-null-Fehler)
     const { error: insErr } = await sb.from('offerte_eigene_zeile').insert(rows);
     if(insErr) throw insErr;
   }
@@ -5967,6 +6008,44 @@ function betragMenu(anker, punkte){
 document.addEventListener('click', e => { if(betragMenuEl && !betragMenuEl.contains(e.target) && !e.target.closest('.dbklick')) betragMenuZu(); });
 document.addEventListener('keydown', e => { if(e.key === 'Escape') betragMenuZu(); });
 window.addEventListener('scroll', e => { if(betragMenuEl && !betragMenuEl.contains(e.target)) betragMenuZu(); }, true);
+
+// Kleine Zusatzinfo unter dem Zeilenbetrag: Rabatt und reduzierter MwSt-Satz
+function zeilenInfo(rabatt, rabattArt, einheit, mwstArt, mwstSatz){
+  const teile = [];
+  const rt = rabattText(rabatt, rabattArt, einheit); if(rt) teile.push(rt);
+  if(mwstArt === 'reduziert') teile.push(`MwSt ${mwstSatz} %`);
+  return teile.length ? `<span class="dbinfo">${teile.join(' · ')}</span>` : '';
+}
+// Fenster beim Klick auf den Zeilenbetrag: Optional (Schalter), Rabatt (Zahl + Art), MwSt (Normal/Reduziert).
+// werte = {optional, rabatt, rabattArt, mwstArt, einheit}; aendern(teil) bekommt nur das geänderte Feld.
+function betragFenster(anker, werte, aendern){
+  const war = betragMenuEl && betragMenuEl._anker === anker; betragMenuZu(); if(war) return;
+  versteckeRechnungsweg();
+  const n = mwstSatzFuer('normal'), r = mwstSatzFuer('reduziert');
+  const m = document.createElement('div'); m.className = 'dbfenster'; m._anker = anker;
+  m.innerHTML = `
+    <label>Optional</label>
+    <button type="button" class="dbschalter${werte.optional ? ' an' : ''}" role="switch" aria-checked="${!!werte.optional}"><span class="dbs-t">${werte.optional ? 'Optional' : 'Berechnen'}</span><span class="dbs-k"></span></button>
+    <label>Rabatt</label>
+    <div class="dbrabatt"><input type="number" step="0.01" min="0" value="${werte.rabatt || ''}" placeholder="0" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-form-type="other">
+      <select><option value="prozent">%</option><option value="pauschal">CHF pauschal</option><option value="einheit">CHF pro ${escHtml(werte.einheit || 'Einheit')}</option></select></div>
+    <label>MwSt</label>
+    <select class="dbmwst"><option value="normal">Normal ${n} %</option><option value="reduziert">Reduziert ${r} %</option></select>`;
+  m.querySelector('.dbrabatt select').value = werte.rabattArt || 'prozent';
+  m.querySelector('.dbmwst').value = werte.mwstArt || 'normal';
+  document.body.appendChild(m); betragMenuEl = m;
+  const rc = anker.getBoundingClientRect(), w = m.offsetWidth, h = m.offsetHeight;
+  m.style.left = Math.max(8, Math.min(rc.right - w, innerWidth - w - 8)) + 'px';
+  m.style.top = (rc.bottom + 4 + h > innerHeight - 8 ? Math.max(8, rc.top - h - 4) : rc.bottom + 4) + 'px';
+  const sch = m.querySelector('.dbschalter');
+  sch.addEventListener('click', () => { const an = !sch.classList.contains('an'); sch.classList.toggle('an', an); sch.setAttribute('aria-checked', an); sch.querySelector('.dbs-t').textContent = an ? 'Optional' : 'Berechnen'; aendern({ optional: an }); });
+  const ri = m.querySelector('.dbrabatt input'), rs = m.querySelector('.dbrabatt select');
+  const rabattWeg = () => aendern({ rabatt: parseFloat(String(ri.value).replace(',', '.')) || 0, rabattArt: rs.value });
+  ri.addEventListener('change', rabattWeg); rs.addEventListener('change', rabattWeg);
+  ri.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); ri.blur(); betragMenuZu(); } });
+  m.querySelector('.dbmwst').addEventListener('change', e => aendern({ mwstArt: e.target.value }));
+  setTimeout(() => ri.focus(), 0);
+}
 
 function zeigeRechnungsweg(tr, rechnungsweg, simpleText){
   const pop = $('rzwPop');
@@ -6102,13 +6181,17 @@ async function recalcJetzt(){
         const toolBetrag = rundeCHF(toolMenge * toolPreis), diff = effBetrag - toolBetrag;
         const diffProz = toolBetrag ? diff / toolBetrag * 100 : 0;
         const gross = Math.abs(diff) >= DOK_GROSS_CHF || Math.abs(diffProz) >= DOK_GROSS_PROZ;
-        if(!geloescht && !optional) blockTotal += effBetrag;
-        snapshotZeile(KAT_LABEL[schluessel.split(':')[0]] || schluessel, { bezeichnung, menge: effMenge, einheit: effEinheit, preis: effPreis, betrag: effBetrag, geloescht: geloescht || optional, optional: optional && !geloescht });
+        // Rabatt und MwSt pro Zeile (Menü beim Betrag); Standard-MwSt vom Artikel (reduziert z. B. Pflanzen)
+        const rabatt = Number(k.rabatt) || 0, rabattArt = k.rabatt_art || 'prozent';
+        const mwstArt = k.mwst_art || mwstArtStandard(null, bezeichnung), mwstSatz = mwstSatzFuer(mwstArt);
+        const nettoBetrag = betragNachRabatt(effMenge, effPreis, rabatt, rabattArt);
+        if(!geloescht && !optional) blockTotal += nettoBetrag;
+        snapshotZeile(KAT_LABEL[schluessel.split(':')[0]] || schluessel, { bezeichnung, menge: effMenge, einheit: effEinheit, preis: effPreis, betrag: nettoBetrag, rabatt: rabatt || null, rabatt_art: rabatt ? rabattArt : null, mwst_art: mwstArt, mwst_satz: mwstSatz, geloescht: geloescht || optional, optional: optional && !geloescht });
         const tr = document.createElement('tr');
         tr.className = 'crow' + (geloescht ? ' zgeloescht' : (effBetrag === 0 ? ' betragnull' : ''));
         tr.dataset.sk = schluessel;
         if(optional) tr.classList.add('dopt');
-        tr.dataset.betrag = (geloescht || optional) ? 0 : effBetrag;
+        tr.dataset.betrag = (geloescht || optional) ? 0 : nettoBetrag;
         const rechnungswegSimple = `${toolMenge} ${einheit} × ${fmtCHF(toolPreis)} = ${fmtCHF(toolBetrag)}`;
         // Rechnungsweg nur beim Darüberfahren über die Bezeichnung (nicht über den Betrag, der ist zum Klicken)
         tr.addEventListener('mouseover', e => {
@@ -6124,7 +6207,7 @@ async function recalcJetzt(){
           <td class="dz-m${hand(mengeAbweicht)}" style="text-align:right">${feldHtml('menge', effMenge, mengeAbweicht)}</td>
           <td class="dz-e${einheitAbweicht ? ' hand' : ''}"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="dein" data-tool="${escHtml(einheit || '')}" value="${escHtml(effEinheit || '')}" ${geloescht ? 'disabled' : ''}${einheitAbweicht ? ` data-dtip="Tool: ${escHtml(einheit || '')}"` : ''} aria-label="Einheit"></td>
           <td class="dz-p${hand(preisAbweicht)}" style="text-align:right">${feldHtml('preis', effPreis.toFixed(2), preisAbweicht)}</td>
-          <td class="cbetrag"><button type="button" class="cbetrag-val dbklick" title="Klicken: optional an/aus">${fmtCHF(effBetrag)}</button></td>`;
+          <td class="cbetrag"><button type="button" class="cbetrag-val dbklick" title="Klicken: optional an/aus">${fmtCHF(nettoBetrag)}</button>${zeilenInfo(rabatt, rabattArt, effEinheit, mwstArt, mwstSatz)}</td>`;
         container.appendChild(tr);
         const korr = () => zeilenKorrekturen[schluessel] || (zeilenKorrekturen[schluessel] = { menge_korrektur:null, preis_korrektur:null, geloescht:false });
         tr.querySelectorAll('.korrektur-feld').forEach(inp => {
@@ -6147,11 +6230,16 @@ async function recalcJetzt(){
           kk.einheit_korrektur = (!v || v === einheit) ? null : v;
           recalc(); planAutosave();
         });
-        // Klick auf den Betrag: berechnen / optional / ausblenden (statt der zwei Icons rechts)
-        const setzeArt = art => { const kk = korr(); kk.optional = art === 'opt'; kk.geloescht = art === 'aus'; recalc(); planAutosave(); };
-        tr.querySelector('.dbklick').addEventListener('click', e => betragMenu(e.currentTarget, [
-          { t: 'Optional', d: 'steht in der Offerte, zählt nicht zum Total', an: optional && !geloescht, fn: () => setzeArt(optional && !geloescht ? 'ber' : 'opt') }
-        ]));
+        // Klick auf den Betrag: kleines Fenster mit Optional (Schalter), Rabatt und MwSt
+        tr.querySelector('.dbklick').addEventListener('click', e => betragFenster(e.currentTarget,
+          { optional: optional && !geloescht, rabatt, rabattArt, mwstArt, einheit: effEinheit },
+          w => {
+            const kk = korr();
+            if('optional' in w){ kk.optional = w.optional; if(w.optional) kk.geloescht = false; }
+            if('rabatt' in w){ kk.rabatt = w.rabatt || null; kk.rabatt_art = w.rabattArt; }
+            if('mwstArt' in w) kk.mwst_art = w.mwstArt;
+            recalc(); planAutosave();
+          }));
       }
 
       KAT_ORDER.forEach(kat => {
@@ -7079,10 +7167,30 @@ const lwModusToggleHtml = '<span style="display:flex;gap:4px;">' + [['zeit', 'St
     if(!optionenTextManuellBearbeitet) $optionenTextBlock.value = berechneOptionenTextListe();
 
     grandTotal = rundeCHF(grandTotal);
-    const mwstBetrag = rundeCHF(grandTotal * MWST_SATZ_STANDARD / 100);
+    // MwSt pro Satz (wie Easybill): Netto je Satz aus den gezählten Zeilen, Rest (Rundung) zum Normalsatz
+    const nettoJeSatz = {};
+    Object.values(snapshotGruppen).flat().forEach(z => { if(z.geloescht || z.optional) return; const s = z.mwst_satz ?? mwstSatzFuer('normal'); nettoJeSatz[s] = (nettoJeSatz[s] || 0) + (Number(z.betrag) || 0); });
+    const normalSatz = mwstSatzFuer('normal');
+    const rest = rundeCHF(grandTotal - Object.values(nettoJeSatz).reduce((a, b) => a + b, 0));
+    if(Math.abs(rest) >= 0.01) nettoJeSatz[normalSatz] = (nettoJeSatz[normalSatz] || 0) + rest;
+    const saetze = Object.keys(nettoJeSatz).map(Number).filter(s => Math.abs(nettoJeSatz[s]) >= 0.005).sort((a, b) => a - b);
+    if(!saetze.length) saetze.push(normalSatz);
+    const mwstJeSatz = Object.fromEntries(saetze.map(s => [s, rundeCHF((nettoJeSatz[s] || 0) * s / 100)]));
+    const mwstBetrag = rundeCHF(Object.values(mwstJeSatz).reduce((a, b) => a + b, 0));
     const bruttoTotal = rundeCHF(grandTotal + mwstBetrag);
     $('totalNetto').textContent = fmtCHF(grandTotal);
-    $('mwstLabel').textContent = `MwSt ${MWST_SATZ_STANDARD}%`;
+    { // Zusatzzeilen bei mehreren Sätzen: Netto x % … / MwSt x % …
+      const mwstZeile = $('mwstLabel').closest('.ctotalrow-flex');
+      document.querySelectorAll('.mwstzusatz').forEach(x => x.remove());
+      if(saetze.length > 1){
+        mwstZeile.hidden = true;
+        const zeilen = [...saetze.map(s => ['Netto ' + s + ' %', nettoJeSatz[s]]), ...saetze.map(s => ['MwSt ' + s + ' %', mwstJeSatz[s]])];
+        zeilen.reverse().forEach(([t, v]) => { const d = document.createElement('div'); d.className = 'ctotalrow-flex ctotalrow-sub mwstzusatz'; d.innerHTML = `<span>${t}</span><span>${fmtCHF(rundeCHF(v))}</span>`; mwstZeile.after(d); });
+      }else{
+        mwstZeile.hidden = false;
+        $('mwstLabel').textContent = `MwSt ${saetze[0]}%`;
+      }
+    }
     $('totalMwst').textContent = fmtCHF(mwstBetrag);
     $total.textContent = fmtCHF(bruttoTotal);
     letzterGrandTotal = grandTotal;
@@ -8058,6 +8166,19 @@ table.cost thead th:nth-child(3){width:64px}
 table.cost thead th:nth-child(4){width:84px}
 table.cost thead th:nth-child(5){width:104px}
 #costbody td.dz-p .korrektur-feld{width:76px}
+/* Fenster beim Zeilenbetrag: Optional-Schalter, Rabatt, MwSt (Text links, Felder rechts) */
+.dbfenster{position:fixed;z-index:950;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(50,62,78,.18);padding:12px 14px;display:grid;grid-template-columns:auto 190px;gap:8px 14px;align-items:center;font-size:12.5px;color:var(--ink)}
+.dbfenster label{font-weight:600;color:var(--ink)}
+.dbfenster input,.dbfenster select{height:28px;box-sizing:border-box;border:1px solid var(--line);border-radius:5px;background:#fff;font:inherit;font-size:12.5px;padding:0 6px;color:var(--ink)}
+.dbfenster input:focus,.dbfenster select:focus{outline:none;border-color:var(--primary)}
+.dbfenster .dbrabatt{display:flex;gap:6px}
+.dbfenster .dbrabatt input{width:72px;text-align:right}
+.dbfenster .dbrabatt select{flex:1;min-width:0}
+.dbfenster .dbmwst{width:100%}
+.dbschalter{height:28px;width:100%;border:1px solid var(--line);border-radius:999px;background:var(--soft,#F5F7F9);display:flex;align-items:center;justify-content:space-between;padding:0 4px 0 12px;cursor:pointer;font:inherit;font-size:12.5px;color:var(--ink)}
+.dbschalter .dbs-k{width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:transform .15s}
+.dbschalter.an{background:var(--primary,#323E4E);color:#fff;border-color:var(--primary,#323E4E);flex-direction:row-reverse;padding:0 12px 0 4px}
+.dbinfo{display:block;font-size:10.5px;font-weight:400;color:var(--muted);margin-top:1px}
 </style>
 <script>
 /* Knopfleiste unter den Arbeitsbeschrieb verschieben (wie in Easybill) */

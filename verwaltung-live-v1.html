@@ -366,7 +366,7 @@ input[type=checkbox].modulCheck:checked::after{content:'';position:absolute;left
 </div>
 
 <nav class="subnav" id="subnav"><div class="wrap">
-  <a data-seite="gruppen" class="on">Gruppen &amp; Rechte</a><a data-seite="infos">Infos an Mitarbeitende</a><a data-seite="anmeldung">Anmeldung</a><a data-seite="links">Externe Links</a>
+  <a data-seite="gruppen" class="on">Gruppen &amp; Rechte</a><a data-seite="infos">Infos an Mitarbeitende</a><a data-seite="anmeldung">Anmeldung</a><a data-seite="links">Externe Links</a><a data-seite="mwst">MwSt-Sätze</a>
 </div></nav>
 <main class="wrap hidden" id="appMain">
   <!-- Personen und Logins: Kontakte › Mitarbeitende. Hier nur Gruppen, Infos, Anmeldung und externe Links. -->
@@ -401,6 +401,22 @@ input[type=checkbox].modulCheck:checked::after{content:'';position:absolute;left
     </div>
   </section>
 
+  <section class="seite" id="s-mwst" hidden>
+    <div class="pagesub">Mehrwertsteuer für alle Tools. Artikel und Offertenzeilen sind «Normal» oder «Reduziert». Bei einer Änderung neuen Satz mit «Gültig ab» eintragen – ältere Offerten behalten den Satz, der an ihrem Offertdatum galt.</div>
+    <div class="card">
+      <table>
+        <thead><tr><th>Art</th><th>Satz</th><th>Gültig ab</th><th></th></tr></thead>
+        <tbody id="mwstBody"></tbody>
+      </table>
+      <div class="row" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-top:12px">
+        <div class="fld"><label>Art</label><select id="mwstNeuArt"><option value="normal">Normal</option><option value="reduziert">Reduziert</option></select></div>
+        <div class="fld"><label>Satz %</label><input id="mwstNeuSatz" type="number" step="0.1" min="0" style="width:90px" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-form-type="other"></div>
+        <div class="fld"><label>Gültig ab</label><input id="mwstNeuAb" type="date" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-form-type="other"></div>
+        <button class="btn" id="mwstNeuBtn">+ Satz hinzufügen</button>
+      </div>
+      <div class="status" id="mwstStatus"></div>
+    </div>
+  </section>
   <section class="seite" id="s-links" hidden>
     <div class="pagesub">Externe Seiten (Easybill, PEAX …) als Kachel auf der Startseite, pro Rolle sichtbar. Icon, Farbe und Adresse über &#8942;.</div>
     <div class="card">
@@ -807,6 +823,26 @@ async function loadDomains(){
     });
   });
 }
+// MwSt-Sätze (Tabelle mwst_satz): Normal/Reduziert mit Gültig-ab
+async function ladeMwst(){
+  const body = $('mwstBody'); if(!body) return;
+  const { data, error } = await sb.from('mwst_satz').select('id, art, satz, gueltig_ab').order('art').order('gueltig_ab', { ascending: false });
+  if(error){ body.innerHTML = `<tr><td colspan="4" class="hint">${error.message}</td></tr>`; return; }
+  const heute = new Date().toISOString().slice(0, 10), aktiv = {};
+  (data || []).forEach(r => { if(String(r.gueltig_ab) <= heute && !aktiv[r.art]) aktiv[r.art] = r.id; });
+  body.innerHTML = (data || []).map(r => `<tr><td>${r.art === 'reduziert' ? 'Reduziert' : 'Normal'}${aktiv[r.art] === r.id ? ' <span class="hint" style="margin:0">(gilt heute)</span>' : ''}</td><td>${Number(r.satz)} %</td><td>${new Date(r.gueltig_ab).toLocaleDateString('de-CH')}</td>
+    <td class="kg-hover"><button class="icobtn danger" data-mwstdel="${r.id}" title="Satz löschen">${typeof KG !== 'undefined' ? KG.icon('trash', 14) : '×'}</button></td></tr>`).join('') || '<tr><td colspan="4" class="hint">Noch keine Sätze.</td></tr>';
+  body.onclick = async e => { const b = e.target.closest('[data-mwstdel]'); if(!b || !confirm('Diesen MwSt-Satz löschen?')) return;
+    const { error: de } = await sb.from('mwst_satz').delete().eq('id', b.dataset.mwstdel); if(de){ $('mwstStatus').textContent = de.message; return; } ladeMwst(); };
+}
+$('mwstNeuBtn')?.addEventListener('click', async () => {
+  const satz = parseFloat($('mwstNeuSatz').value), ab = $('mwstNeuAb').value;
+  if(isNaN(satz) || !ab){ $('mwstStatus').textContent = 'Bitte Satz und «Gültig ab» eintragen.'; return; }
+  const { error } = await sb.from('mwst_satz').insert({ art: $('mwstNeuArt').value, satz, gueltig_ab: ab });
+  if(error){ $('mwstStatus').textContent = error.message; return; }
+  $('mwstNeuSatz').value = ''; $('mwstNeuAb').value = ''; $('mwstStatus').textContent = 'Gespeichert.'; ladeMwst();
+});
+setTimeout(ladeMwst, 800);
 $('addDomainBtn').addEventListener('click', async () => {
   const domain = $('newDomain').value.trim().toLowerCase().replace(/^@/, '');
   if(!domain){ $('domainStatus').textContent = 'Bitte eine Domain eingeben.'; $('domainStatus').className = 'status err'; return; }
@@ -1114,7 +1150,7 @@ async function pruefeAnmeldung(){
   // Reiter: Gruppen & Rechte | Infos an Mitarbeitende | Anmeldung | Externe Links (Hash merkt den Reiter)
   const zeigeSeite = s => { if(!document.getElementById('s-' + s)) s = 'gruppen';
     document.querySelectorAll('#subnav a[data-seite]').forEach(a => a.classList.toggle('on', a.dataset.seite === s));
-    document.querySelectorAll('#appMain .seite').forEach(x => { x.hidden = x.id !== 's-' + s; }); };
+    document.querySelectorAll('#appMain .seite').forEach(x => { x.hidden = x.id !== 's-' + s; }); if(s === 'mwst' && typeof ladeMwst === 'function') ladeMwst(); };
   document.querySelectorAll('#subnav a[data-seite]').forEach(a => a.addEventListener('click', () => { history.replaceState(null, '', '#' + a.dataset.seite); zeigeSeite(a.dataset.seite); }));
   zeigeSeite(location.hash.slice(1));
   KG.infosBereit.then(inf => { if(!inf) return; $('infoNeuBtn').addEventListener('click', () => inf.neu()); inf.liste($('infoListe'), { alle: true }); });
