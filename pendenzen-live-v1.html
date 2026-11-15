@@ -200,7 +200,9 @@ body.ohnelisten [data-set]{display:none;}
 .cards{display:flex;flex-direction:column;gap:4px;padding:6px 6px 2px;min-height:12px;}
 .gh{display:flex;align-items:center;gap:4px;margin:6px 6px 0;padding:3px 4px;font-size:11.5px;font-weight:700;color:var(--primary);border-radius:6px;cursor:pointer;user-select:none;}
 .gh:hover,.list .cards .gh:hover{background:#DCE2E8;}
-.list .cards .gh{background:#EEF1F4;margin-left:6px;margin-right:6px;padding:4px 6px;} /* Gruppentitel grau hinterlegt, damit sie sich von den Pendenzen abheben */
+.list .cards .gh{background:#EEF1F4;margin-left:6px;margin-right:6px;padding:4px 6px;}
+.gh .gplus{margin-left:auto;width:22px;height:22px;background:transparent;border-color:transparent;} /* Plus im Gruppenbalken (statt im Listenkopf) */
+.gh .gplus:hover{background:#fff;border-color:var(--line);} /* Gruppentitel grau hinterlegt, damit sie sich von den Pendenzen abheben */
 .cards .gh{margin:6px 0 0;cursor:grab;}
 .cards .gh.dragging{opacity:.35;}
 .card.ingr{margin-left:12px;}
@@ -777,7 +779,9 @@ function listHtml(l){
     const ps = zu ? S.pz.filter(p => p.offerte_status === 'zugesagt' && listeById(p.liste_id)?.versteckt) : sortiert(l);
     // Erfassen wie in Wann?: Plus im Kopf öffnet oben ein Feld mit Mikrofon (Team-box und Offerten-Board: kein Erfassen – Offerten kommen nur über «Offerte zugestellt»)
     const erfassbar = !(l.art_id === 'team' || l.art_id === 'mail' || OF(l.art_id)) /* «Mails» nur übers Mail-Postfach */, wort = l.art_id === 'notizen' ? 'Notiz' : 'Pendenz';
-    kopf = `<div class="lh${zu || hellAuf(listFarbe(l)) ? ' hell' : ''}" data-drag="${l.id}" style="background:${listFarbe(l)}"><button class="tog" data-tog="${l.id}" aria-label="Auf-/zuklappen">${K('chev')}</button>${A(a.icon)}<b>${esc(l.titel)}</b>${erfassbar ? `<button class="kg-ibtn lplus" data-plus="${l.id}" aria-label="Neue ${wort} in ${esc(l.titel)}" title="Neue ${wort}">${K('plus')}</button>` : ''}<button class="kg-ibtn" data-set="${l.id}" aria-label="Liste einstellen">${K('gear')}</button></div>`;
+    // Mit Gruppen: Plus sitzt im grauen Gruppenbalken (dann keine Gruppen-Wahl nötig), im Kopf kein Plus mehr
+    const gPlus = erfassbar && gs.length && l.art_id !== 'offerte';
+    kopf = `<div class="lh${zu || hellAuf(listFarbe(l)) ? ' hell' : ''}" data-drag="${l.id}" style="background:${listFarbe(l)}"><button class="tog" data-tog="${l.id}" aria-label="Auf-/zuklappen">${K('chev')}</button>${A(a.icon)}<b>${esc(l.titel)}</b>${erfassbar && !gPlus ? `<button class="kg-ibtn lplus" data-plus="${l.id}" aria-label="Neue ${wort} in ${esc(l.titel)}" title="Neue ${wort}">${K('plus')}</button>` : ''}<button class="kg-ibtn" data-set="${l.id}" aria-label="Liste einstellen">${K('gear')}</button></div>`;
     // Gruppentitel = Trenner: Titel und Pendenzen in einer Reihenfolge, alles unter einem Titel gehört zu dieser Gruppe
     let akt = null;
     const folge = [...ps.map(p => ({ p, s: p.sortierung })), ...gs.map(g => ({ g, s: g.sortierung }))].sort((a, b) => a.s - b.s || (a.g ? -1 : 1));
@@ -789,7 +793,7 @@ function listHtml(l){
       : offen && !gIn ? eingabe : '')
       + `<div class="cards" data-drop="${l.id}">${folge.map(x => { let vor = '';
         if(x.g){ if(gIn && akt && akt.id === gIn) vor = eingabe; akt = x.g;
-        return vor + `<div class="gh${x.g.zu ? ' zu' : ''}" draggable="true" data-ghead="${x.g.id}" data-gtog="${x.g.id}" title="Ziehen = Gruppe verschieben, Klick = auf-/zuklappen"><span class="tog">${K('chev')}</span>${esc(x.g.titel)}</div>`; }
+        return vor + `<div class="gh${x.g.zu ? ' zu' : ''}" draggable="true" data-ghead="${x.g.id}" data-gtog="${x.g.id}" title="Ziehen = Gruppe verschieben, Klick = auf-/zuklappen"><span class="tog">${K('chev')}</span>${esc(x.g.titel)}${gPlus ? `<button class="kg-ibtn gplus" data-gplus="${x.g.id}" data-gliste="${l.id}" aria-label="Neue ${wort} in ${esc(x.g.titel)}" title="Neue ${wort} in ${esc(x.g.titel)}">${K('plus')}</button>` : ''}</div>`; }
       return pdHtml(x.p, { gruppe: akt }); }).join('')}${gIn && akt && akt.id === gIn ? eingabe : ''}</div>`
       + (l.art_id === 'team' && !ps.length ? '<div class="zhint">Hier landet, was dir Kollegen zuschieben.</div>' : '')
       + (l.art_id === 'mail' && S.board?.mail_kuerzel && !ps.length ? `<div class="zhint">${'Hier landen Mails an '}<b class="pmadr" title="Mails (auch weitergeleitete) von einer @knechtgarten.ch-Adresse an diese Adresse werden hier zur Pendenz – mit dem Mail als PDF und allen Anhängen. Kommt nach 1–2 Minuten.">${esc(S.board.mail_kuerzel)}.pendenzen@knechtgarten.ch</b></div>` : '')
@@ -1507,6 +1511,10 @@ document.addEventListener('click', async e => {
   if(d.zok){ e.stopPropagation(); return zaddSpeichern(d.zok, true); } // Häkchen im Eingabefeld: speichern und schliessen
   if(d.zg != null){ e.stopPropagation(); S.addG = d.zg; const g = S.gruppen.find(x => x.id === d.zg); if(g?.zu){ g.zu = false; upd('pendenz_gruppe', g.id, { zu: false }); }
     zeichne(); setTimeout(() => $('add-' + S.addOffen)?.focus(), 0); return; }
+  if(d.gplus){ e.stopPropagation(); const l = listeById(d.gliste), g = S.gruppen.find(x => x.id === d.gplus);
+    const gleich = S.addOffen === l.id && S.addG === g.id; S.addOffen = gleich ? null : l.id; S.addG = gleich ? undefined : g.id;
+    if(l.zu){ l.zu = false; upd('pendenz_liste', l.id, { zu: false }); } if(g.zu){ g.zu = false; upd('pendenz_gruppe', g.id, { zu: false }); }
+    zeichne(); return $('add-' + l.id)?.focus(); }
   if(d.plus){ e.stopPropagation(); const l = listeById(d.plus); S.addOffen = S.addOffen === l.id ? null : l.id; S.addG = undefined; if(l.zu){ l.zu = false; upd('pendenz_liste', l.id, { zu: false }); } zeichne(); return $('add-' + l.id)?.focus(); }
   if(d.bwahl) return wechsleBoard(d.bwahl);
   if(d.archiv){ const p = S.pz.find(x => x.id === d.archiv); if(p) return archivieren(p); return; }
