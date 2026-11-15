@@ -93,6 +93,12 @@
 .kg-ibtn:hover{border-color:var(--primary,#323E4E);color:var(--primary,#323E4E);background:var(--soft,#EEF3F7);}
 .kg-ibtn.danger:hover{border-color:var(--danger,#B4655F);color:var(--danger,#B4655F);background:#FBEFEC;}
 .kg-ibtn[disabled]{opacity:.35;cursor:default;}
+/* Aktions-Knöpfe (Bearbeiten, Kopieren, Löschen …) erst beim Darüberfahren über die Zeile zeigen.
+   Klasse .kg-hover auf den Knopf oder die Zelle; Zeile = tr oder .kg-zeile. Ohne Maus (Handy/Tablet) immer sichtbar. */
+@media (hover:hover) and (pointer:fine){
+.kg-hover{opacity:0;transition:opacity .12s;}
+tr:hover .kg-hover,tr:focus-within .kg-hover,.kg-zeile:hover .kg-hover,.kg-zeile:focus-within .kg-hover{opacity:1;}
+}
 /* Gemeinsame Kacheln (wie die Kacheln beim Kunden in Kontakte): farbiger Kopf mit Icon, Titel, Links rechts; Inhalt scrollt.
    KG.kacheln(html) = Raster, KG.kachel({ titel, farbe, icon, links, inhalt, klick }) = eine Kachel */
 .kg-kacheln{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;align-items:start;}
