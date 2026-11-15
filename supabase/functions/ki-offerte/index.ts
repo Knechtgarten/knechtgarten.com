@@ -23,7 +23,7 @@ Du sprichst mit dem Projektleiter (Du-Form, Schweizer Rechtschreibung mit ss, ku
 So arbeitest du:
 - Das Blatt hat vier Kategorien: personal (Arbeitsleistung), maschine (Maschinenaufwand), logistik (Logistik, Transporte, Lieferwagen, Kran, Mulden), material (Materialaufwand, auch Pflanzen).
 - Preise: Suche zuerst mit artikel_suchen im Artikelstamm und nimm dessen Preis (vp_knecht) und Einheit; trage dann artikel_id ein und quelle "artikel".
-  Gibt es keinen Artikel, suche mit offerten_suchen in alten Offerten nach ähnlichen Zeilen und nimm den dortigen Preis (quelle "offerte").
+  Gibt es keinen Artikel, suche mit easybill_suchen in früheren Easybill-Angeboten (dort stehen v. a. Pflanzen und Spezialpositionen mit unseren Preisen) und mit offerten_suchen in Offerten aus dem Offertentool; nimm den neusten passenden Preis (quelle "offerte") und nenne in der Antwort kurz, woher er stammt (z. B. «Preis aus Angebot 26-18812»).
   Nur wenn beides nichts ergibt oder der Projektleiter einen Betrag nennt: Preis vom Projektleiter übernehmen (quelle "vorgabe") oder vernünftig schätzen (quelle "geschaetzt"). Erfinde keine Artikelnummern.
 - Personal: übliche Artikel sind «Polier / Vorarbeiter» und «Gartenarbeiter» (Std.). Arbeitstage × 9 Std. = Stunden, falls nichts anderes gesagt wird.
 - Fahrzeit: Bei Personal-Zeilen (Polier, Gartenarbeiter, Servicetechniker) und beim Lieferwagen setzt du fahrt=true und gibst die Menge OHNE Fahrzeit an. Das Blatt rechnet die Fahrzeit zur Kundenadresse automatisch dazu. Beim Lieferwagen ohne eigene Einsatzstunden ist die Menge 0.
@@ -55,6 +55,16 @@ const TOOLS: Anthropic.Tool[] = [
     input_schema: {
       type: 'object',
       properties: { suchbegriff: { type: 'string' } },
+      required: ['suchbegriff'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'easybill_suchen',
+    description: 'Sucht Positionen in früheren Easybill-Angeboten von Knechtgarten nach einem Stichwort in der Bezeichnung (z. B. "Carpinus", "Metallreif", "Kranwagen"). Liefert Angebotsnummer, Datum, Kunde, Bezeichnung, Menge, Einheit, Preis, Rabatt, MwSt. Die wichtigste Quelle für Pflanzen und Spezialpositionen ohne Artikel.',
+    input_schema: {
+      type: 'object',
+      properties: { suchbegriff: { type: 'string', description: 'kurzes Stichwort, z. B. Gattung/Art einer Pflanze' } },
       required: ['suchbegriff'],
       additionalProperties: false,
     },
@@ -125,8 +135,26 @@ Deno.serve(async (req) => {
       if (!data?.length) return 'Keine Zeilen in alten Offerten gefunden.';
       return JSON.stringify(data);
     }
+    if (name === 'easybill_suchen') {
+      const { data, error } = await sb.rpc('ki_easybill_zeilen_suche', { begriff: String(input?.suchbegriff || '').slice(0, 80), anzahl: 20 });
+      if (error) return 'Fehler: ' + error.message;
+      if (!data?.length) return 'Keine Positionen in Easybill-Angeboten gefunden.';
+      return JSON.stringify(data);
+    }
     return 'Unbekanntes Werkzeug.';
   }
+
+  // Easybill-Angebote einmal pro Tag im Hintergrund nachführen (ohne auf das Ergebnis zu warten)
+  try {
+    const { data: st } = await sb.from('easybill_sync_status').select('wert').eq('schluessel', 'angebote').maybeSingle();
+    const zuletzt = st?.wert?.letzter_lauf ? new Date(st.wert.letzter_lauf).getTime() : 0;
+    if (Date.now() - zuletzt > 24 * 3600 * 1000) {
+      const lauf = fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/easybill-angebote-sync`, {
+        method: 'POST', headers: { Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' }, body: '{}',
+      }).catch(() => null);
+      (globalThis as any).EdgeRuntime?.waitUntil?.(lauf);
+    }
+  } catch { /* Nachführen ist nicht kritisch */ }
 
   // Verlauf als reiner Text (abwechselnd user/assistant), dann die neue Nachricht mit dem aktuellen Blatt als Kontext
   const messages: any[] = [];
