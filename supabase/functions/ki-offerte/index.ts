@@ -11,10 +11,13 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 import * as XLSX from 'npm:xlsx@0.18.5';
 
 // Zusatzquelle Google Drive: über die Google-Verbindung des Firmenkontos (wie fotos/doku-google),
-// nur in der geteilten Ablage «01_Kundendaten / Projekte» (keine Personal-/Buchhaltungsordner).
+// nur in den geteilten Ablagen «01_Kundendaten / Projekte» und «Preislisten» (keine Personal-/Buchhaltungsordner).
 const GOOGLE_CLIENT_ID = '689526517764-f2727pi1nglt5lkbttec3ssjqkgl47k5.apps.googleusercontent.com';
 const FIRMENKONTO = 'mail@knechtgarten.ch';
-const DRIVE_KUNDEN = '0AEZm9ALFx3sgUk9PVA';
+const DRIVE_KUNDEN = '0AEZm9ALFx3sgUk9PVA', DRIVE_PREISLISTEN = '0AIRbq6f9tx_jUk9PVA';
+const DRIVE_ERLAUBT = new Set([DRIVE_KUNDEN, DRIVE_PREISLISTEN]);
+// Eigene Angebote/Offerten/ABs im Kundenordner sind zweitrangig (stehen schon in Easybill)
+const eigenesAngebot = (name: string) => /angebot|offerte|auftragsbest|\bAB\b|\b\d{2}-\d{4,5}\b/i.test(name || '');
 function zuBase64(bytes: Uint8Array): string {
   let s = ''; const n = 0x8000;
   for (let i = 0; i < bytes.length; i += n) s += String.fromCharCode(...bytes.subarray(i, i + n));
@@ -25,6 +28,11 @@ const DRIVE_TOOLS: any[] = [
     name: 'drive_suchen',
     description: 'Sucht Dateien in der Google-Drive-Ablage «Kundendaten / Projekte» von Knechtgarten (Volltext in Dateinamen und Inhalt: Pläne, Notizen, Lieferantenofferten, Preislisten, Ausmasse). Liefert id, Name, Typ, Datum, Ordner-Link. Danach mit drive_datei_lesen den Inhalt holen.',
     input_schema: { type: 'object', properties: { suchbegriff: { type: 'string', description: 'kurz, z. B. Kundenname, «Preisliste Däpp», «Ausmass Mauer»' } }, required: ['suchbegriff'], additionalProperties: false },
+  },
+  {
+    name: 'preislisten_suchen',
+    description: 'Sucht in der Drive-Ablage «Preislisten» (Preislisten der Lieferanten: Baumschulen, Steine, Technik …) nach Lieferant oder Produkt. Liefert Dateien mit Lieferanten-Ordner und Datum, neuste zuerst. Danach mit drive_datei_lesen die neuste passende Liste lesen.',
+    input_schema: { type: 'object', properties: { suchbegriff: { type: 'string', description: 'Lieferant oder Produkt, z. B. «Däpp», «Carpinus», «Polengranit»' } }, required: ['suchbegriff'], additionalProperties: false },
   },
   {
     name: 'kundenordner_dateien',
@@ -172,7 +180,11 @@ Deno.serve(async (req) => {
   const mitDrive = quellen.includes('drive');
   const tools: any[] = [...TOOLS, ...(mitDrive ? DRIVE_TOOLS : []), ...(mitInternet ? [{ type: 'web_search_20260209', name: 'web_search', max_uses: 5, user_location: { type: 'approximate', country: 'CH', region: 'Bern' } }] : [])];
   const system = SYSTEM
-    + (mitDrive ? '\n- Zusatzquelle Drive ist eingeschaltet: Schau mit kundenordner_dateien, was im Ordner dieses Kunden liegt (Notizen, Pläne, Ausmasse von der Besichtigung), und lies Relevantes mit drive_datei_lesen. Mit drive_suchen findest du z. B. Lieferantenofferten oder Preislisten. Erwähnst du eine Datei, schreibe sie als Link [Dateiname](https://drive.google.com/…). Drive-Preise: quelle "vorgabe" wenn es eine Lieferantenofferte für dieses Projekt ist, sonst "geschaetzt", quelle_info = Datei.' : '')
+    + (mitDrive ? '\n- Zusatzquelle Drive ist eingeschaltet:'
+      + '\n  · Kundenordner (kundenordner_dateien): Wichtig sind Lieferantenrechnungen und -offerten, Notizen, Pläne und Ausmasse – lies sie mit drive_datei_lesen. Unsere eigenen Angebote/Offerten/ABs (eigenes_angebot=true) sind zweitrangig, sie stehen schon in Easybill.'
+      + '\n  · Preislisten (preislisten_suchen): Nimm immer die NEUSTE Preisliste eines Lieferanten. Ältere Listen nur, wenn es keine neuere gibt – dann das Jahr nennen. Preislisten enthalten meist Einkaufspreise (netto, evtl. inkl. MwSt): sag in der Antwort, dass noch der Aufschlag dazukommt, ausser der Projektleiter sagt etwas anderes.'
+      + '\n  · drive_suchen: Volltextsuche in der Ablage Kundendaten (z. B. Lieferantenrechnungen anderer Projekte).'
+      + '\n  · Erwähnst du eine Datei, schreibe sie als Link [Dateiname](https://drive.google.com/…). Drive-Preise: quelle "vorgabe", wenn es eine Lieferantenofferte für dieses Projekt ist, sonst "geschaetzt"; quelle_nr = Dateiname, quelle_datum = Datum der Datei, quelle_info = Lieferant.' : '')
     + (mitInternet ? '\n- Zusatzquelle Internet ist eingeschaltet: Findest du in unseren Quellen nichts Passendes (z. B. Pflanze, Spezialmaterial), suche mit web_search nach Schweizer Listenpreisen (z. B. Baumschulen, Händler). Solche Preise sind Einkaufs-/Listenpreise: quelle "geschaetzt", quelle_info = Händler + Preis, und nenne die Seite in der Antwort als normalen Link [Händler](https://…).' : '');
 
   const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
@@ -205,7 +217,23 @@ Deno.serve(async (req) => {
       const p = new URLSearchParams({ q: `fullText contains '${b}' and trashed=false and mimeType != 'application/vnd.google-apps.folder'`, corpora: 'drive', driveId: DRIVE_KUNDEN,
         includeItemsFromAllDrives: 'true', supportsAllDrives: 'true', fields: DATEI_FELDER, pageSize: '15', orderBy: 'modifiedTime desc' });
       const d = await (await gdrive('files?' + p)).json();
-      return d.files?.length ? JSON.stringify(d.files.map(dateiKurz)) : 'Keine Dateien gefunden.';
+      const fs = (d.files || []).map((f: any) => ({ ...dateiKurz(f), eigenes_angebot: eigenesAngebot(f.name) || undefined }));
+      fs.sort((a: any, b: any) => Number(!!a.eigenes_angebot) - Number(!!b.eigenes_angebot));
+      return fs.length ? JSON.stringify(fs) : 'Keine Dateien gefunden.';
+    }
+    if (name === 'preislisten_suchen') {
+      const b = String(input?.suchbegriff || '').trim().slice(0, 80).replace(/\\/g, '').replace(/'/g, "\\'");
+      if (!b) return 'Kein Suchbegriff.';
+      const p = new URLSearchParams({ q: `(name contains '${b}' or fullText contains '${b}') and trashed=false and mimeType != 'application/vnd.google-apps.folder'`, corpora: 'drive', driveId: DRIVE_PREISLISTEN,
+        includeItemsFromAllDrives: 'true', supportsAllDrives: 'true', fields: DATEI_FELDER, pageSize: '25', orderBy: 'modifiedTime desc' });
+      const d = await (await gdrive('files?' + p)).json();
+      const files = d.files || [];
+      if (!files.length) return 'Keine Preislisten gefunden.';
+      // Lieferanten-Ordner (direkter Elternordner) dazuschreiben
+      const ids = [...new Set(files.map((f: any) => f.parents?.[0]).filter((x: any) => x && x !== DRIVE_PREISLISTEN))] as string[];
+      const namen: Record<string, string> = {};
+      await Promise.all(ids.map(async (id) => { try { const m = await (await gdrive(`files/${id}?supportsAllDrives=true&fields=name`)).json(); namen[id] = m.name; } catch { /* egal */ } }));
+      return JSON.stringify(files.map((f: any) => ({ ...dateiKurz(f), ordner: namen[f.parents?.[0]] || '' })));
     }
     if (name === 'kundenordner_dateien') {
       if (!kunde?.id) return 'Kein Kunde gewählt.';
@@ -217,17 +245,17 @@ Deno.serve(async (req) => {
         const d = await (await gdrive('files?' + p)).json();
         await Promise.all((d.files || []).map(async (f: any) => {
           if (f.mimeType === 'application/vnd.google-apps.folder') { if (tiefe < 3) await lesen(f.id, pfad + f.name + '/', tiefe + 1); }
-          else if (liste.length < 150) liste.push({ ...dateiKurz(f), ordner: pfad });
+          else if (liste.length < 200) liste.push({ ...dateiKurz(f), ordner: pfad, eigenes_angebot: eigenesAngebot(f.name) || undefined });
         }));
       };
       await Promise.all(ko.map((o: any) => lesen(o.drive_id, (o.name || o.jahr || '') + '/', 1)));
-      liste.sort((a, b) => b.datum.localeCompare(a.datum));
+      liste.sort((a, b) => Number(!!a.eigenes_angebot) - Number(!!b.eigenes_angebot) || b.datum.localeCompare(a.datum));
       return liste.length ? JSON.stringify(liste) : 'Der Kundenordner ist leer.';
     }
     if (name === 'drive_datei_lesen') {
       const id = String(input?.id || '').replace(/[^A-Za-z0-9_-]/g, '');
       const meta = await (await gdrive(`files/${id}?supportsAllDrives=true&fields=id,name,mimeType,size,driveId`)).json();
-      if (meta.driveId !== DRIVE_KUNDEN) return 'Diese Datei liegt nicht in der Ablage Kundendaten.';
+      if (!DRIVE_ERLAUBT.has(meta.driveId)) return 'Diese Datei liegt nicht in einer freigegebenen Ablage (Kundendaten, Preislisten).';
       const mt = meta.mimeType || '';
       if (mt === 'application/vnd.google-apps.document' || mt === 'application/vnd.google-apps.presentation')
         return `Datei «${meta.name}»:\n` + (await (await gdrive(`files/${id}/export?mimeType=text/plain`)).text()).slice(0, 40000);
@@ -335,7 +363,7 @@ Deno.serve(async (req) => {
           if (!Array.isArray(z)) inhalt = 'Fehler: zeilen fehlt.';
           else { gesetzt = { zeilen: z.slice(0, 200), arbeitsbeschrieb: typeof t.input?.arbeitsbeschrieb === 'string' ? t.input.arbeitsbeschrieb : null }; inhalt = `Blatt gesetzt (${z.length} Zeilen).`; }
         } else {
-          inhalt = ++suchen > 25 ? 'Suchlimit erreicht – nimm, was du gefunden hast, oder schätze (quelle "geschaetzt").' : t.name.startsWith('drive_') || t.name === 'kundenordner_dateien' ? (mitDrive ? await driveWerkzeug(t.name, t.input).catch((e: any) => 'Drive-Fehler: ' + (e?.message || e)) : 'Drive ist nicht eingeschaltet.') : await werkzeug(t.name, t.input);
+          inhalt = ++suchen > 25 ? 'Suchlimit erreicht – nimm, was du gefunden hast, oder schätze (quelle "geschaetzt").' : t.name.startsWith('drive_') || t.name === 'kundenordner_dateien' || t.name === 'preislisten_suchen' ? (mitDrive ? await driveWerkzeug(t.name, t.input).catch((e: any) => 'Drive-Fehler: ' + (e?.message || e)) : 'Drive ist nicht eingeschaltet.') : await werkzeug(t.name, t.input);
         }
         ergebnisse.push({ type: 'tool_result', tool_use_id: t.id, content: inhalt });
       }
