@@ -210,14 +210,16 @@ Deno.serve(async (req) => {
       items.push({ type: 'TEXT', description: offerte.beschreibung_block.trim() });
     }
     for (const gruppe of snapshot.gruppen) {
-      const zeilen = (gruppe.zeilen || []).filter((z: any) => !z.geloescht);
+      // Optionale Zeilen stehen im Snapshot als geloescht:true + optional:true -
+      // sie gehen mit, aber als "Nicht berechnen" (POSITION_NOCALC, zaehlt nicht zum Total).
+      const zeilen = (gruppe.zeilen || []).filter((z: any) => !z.geloescht || z.optional);
       if (!zeilen.length) continue;
       // Fett dargestellt, wie es Easybills eigener PDF-Renderer bei <b>...</b>
       // in der description auch fuer manuell erfasste Zwischentitel tut.
       items.push({ type: 'TEXT', description: `<b>${gruppe.label}</b>` });
       for (const z of zeilen) {
         items.push({
-          type: 'PRODUCT',
+          type: z.optional ? 'POSITION_NOCALC' : 'PRODUCT',
           description: z.bezeichnung,
           quantity: z.menge,
           unit: z.einheit || undefined,
