@@ -242,7 +242,11 @@ body.ohnelisten [data-set]{display:none;}
 .drplatz{height:28px;flex:none;border-top:1px solid rgba(50,62,78,.05);}
 .drdat{position:relative;}
 .drdat.mehr{padding-bottom:28px;}
-.drmehr{all:unset;cursor:pointer;position:absolute;left:12px;bottom:0;height:28px;line-height:28px;font-size:13px;font-weight:600;color:#6E7F93;}
+.drunten{position:absolute;left:12px;bottom:0;height:28px;display:flex;align-items:center;gap:7px;}
+.drmehr{all:unset;cursor:pointer;line-height:28px;font-size:13px;font-weight:600;color:#6E7F93;}
+.drneu{height:28px;flex:none;display:flex;align-items:center;padding:0 8px 0 4px;}
+.drneu input{width:100%;box-sizing:border-box;height:24px;border:1px solid #C9CFD5;border-radius:5px;padding:0 7px;font:inherit;font-size:13px;outline:none;}
+.drneu input:focus{border-color:var(--primary);}
 .drmehr:hover{color:var(--primary);text-decoration:underline;}
 .drleer{display:flex;align-items:center;font-size:11.5px;color:#8B9097;height:28px;flex:none;}
 /* die anderen Tage leicht grau */
@@ -570,7 +574,8 @@ const listeById = id => S.listen.find(l => l.id === id);
 const OF = id => !!id && id.startsWith('of_'); // Listen des Offerten-Boards (Zugestellt … Abgesagt)
 const istOfferten = () => S.board?.typ === 'offerten';
 const ofBoard = () => S.boards.find(b => b.typ === 'offerten');
-const fixListe = l => l.art_id === 'team' || l.art_id === 'notizen' || l.art_id === 'sammel' || OF(l.art_id); // Eingangs-Listen: fester Name, nicht löschbar
+const fixListe = l => l.art_id === 'team' || l.art_id === 'notizen' || l.art_id === 'sammel' || l.art_id === 'unsortiert' || OF(l.art_id);
+const unsortiertListe = () => S.listen.find(l => l.art_id === 'unsortiert'); // Eingangs-Listen: fester Name, nicht löschbar
 const CHANCE = ['offen', 'tief', 'mittel', 'hoch'];
 // Offerte fällig: 14 Tage in Zugestellt / Nachgefasst, oder «wieder anschauen am» erreicht (Meldet sich wieder ohne Datum: 14 Tage)
 function faellig(p, l){ if(!l) return false; const tage = (Date.now() - new Date(p.liste_seit || p.erstellt_am)) / 864e5;
@@ -737,6 +742,9 @@ async function ladeAlles(){
 }
 async function ladeBoard(){
   const { data: ls, error } = await sb.from('pendenz_liste').select('*').eq('board_id', S.board.id); if(error) return fehler(error, 'Listen');
+  // eigenes Board: Kachel «Unsortiert» automatisch (Rad-Erfassung, Zurückziehen ohne eigenen Platz); leer = ausgeblendet
+  if(S.board.typ === 'person' && S.board.besitzer_id === ME && S.arten.unsortiert && !ls.some(l => l.art_id === 'unsortiert')){
+    const { data: u } = await sb.from('pendenz_liste').insert({ board_id: S.board.id, art_id: 'unsortiert', titel: 'Unsortiert', bereich: 'mitte', x: R, y: R }).select().single(); if(u) ls.push(u); }
   S.listen = ls; const ids = ls.map(l => l.id);
   if(eigeneLage()){ const L = (S.ein.breiten._lage || {})[S.board.id] || {}; ls.forEach(l => { if(L[l.id]) Object.assign(l, L[l.id]); }); }
   const [rg, rp] = await Promise.all([
@@ -988,7 +996,7 @@ function zeichne(){
     // darunter nur eine ruhige Liste der zugesagten Offerten (abgelegt wird oben auf «Zugesagt»)
     + (zlist ? (() => { const zp = S.pz.filter(p => p.offerte_status === 'zugesagt' && listeById(p.liste_id)?.versteckt);
       return `<div class="ablzu"><div class="ptitle" style="padding:0"><span>Zugesagte Offerten</span></div><div class="zuliste">${zp.map(p => pdHtml(p)).join('') || '<div class="zhint">Noch keine.</div>'}</div><div class="zhint">Liegt auch im Büro-Board unter «Planung».</div></div>`; })() : '');
-  $('main').innerHTML = `<div class="zones">${reihe().map((zn, i) => { const ls = S.listen.filter(l => bereichOf(l) === zn && l !== zlist && !(MA && (l.art_id === 'team' || l.art_id === 'sammel' || (l.zeit && l.zeit !== 1)))), w = bw[zn];
+  $('main').innerHTML = `<div class="zones">${reihe().map((zn, i) => { const ls = S.listen.filter(l => bereichOf(l) === zn && l !== zlist && !(MA && (l.art_id === 'team' || l.art_id === 'sammel' || (l.zeit && l.zeit !== 1))) && !(l.art_id === 'unsortiert' && !sortiert(l).length)), w = bw[zn];
     // mit Google-Kalender verbunden: «Heute» steckt im Rad (Mitte = heute) → eigene Liste «Heute» weg (ausser im schmalen Bereich ohne Rad)
     if(zn === 'zeit' && ohneHeute() && modusFuer(ls, w, zn) !== 'schmal'){ const hl = ls.find(l => l.zeit === 1); if(hl){ S.heuteAnker = { x: lX(hl), b: lBreite(hl) }; ls.splice(ls.indexOf(hl), 1); } }
     const modus = modusFuer(ls, w, zn); KAPPE = w - 2 * R; if(istOfferten()) ofLage(ls, w);
@@ -1196,24 +1204,42 @@ function drehradInnen(){
     <div class="drrad" id="drRad" title="Mausrad = Tag wählen · Pendenz auf einen Tag ziehen">
       ${[-3, -2, -1].map(zeile).join('')}
       <div class="drtag mitte${we ? ' we' : ''}" data-drtag="${S.drTag}">
-        <div class="drdat${rest ? ' mehr' : ''}"><span>${esc(label(S.drTag))}</span><b>${esc(datumK(S.drTag))}</b>${rest ? `<button type="button" class="drmehr" data-drauf title="Alle Pendenzen dieses Tages zeigen">+ ${rest}</button>` : ''}</div>
-        <div class="drps${S.drOffen ? '' : ' fix'}">${zeig.join('')}${!ps.length ? '<div class="drleer">Pendenz hierher ziehen</div>' : ''}${S.drOffen ? '' : '<div class="drplatz"></div>'.repeat(Math.max(0, 3 - Math.max(zeig.length, ps.length ? 0 : 1)))}</div>
+        <div class="drdat mehr"><span>${esc(label(S.drTag))}</span><b>${esc(datumK(S.drTag))}</b><div class="drunten">${unsortiertListe() ? `<button type="button" class="kg-ibtn drplus" data-drplus title="Neue Pendenz für ${esc(label(S.drTag))}" aria-label="Neue Pendenz für diesen Tag">${K('plus')}</button>` : ''}${rest ? `<button type="button" class="drmehr" data-drauf title="Alle Pendenzen dieses Tages zeigen">+ ${rest}</button>` : ''}</div></div>
+        <div class="drps${S.drOffen ? '' : ' fix'}">${S.drNeu ? `<div class="drneu"><input type="text" id="drneu" placeholder="Neue Pendenz …" aria-label="Neue Pendenz" value="${esc(S.drNeuText || '')}" autocomplete="off"></div>` : ''}${zeig.join('')}${!ps.length && !S.drNeu ? '<div class="drleer">Pendenz hierher ziehen</div>' : ''}${S.drOffen ? '' : '<div class="drplatz"></div>'.repeat(Math.max(0, 3 - Math.max(zeig.length, ps.length ? 0 : 1)))}</div>
       </div>
       ${[1, 2, 3].map(zeile).join('')}
     </div>${kalKnopf ? `<div class="drfuss">${kalKnopf}</div>` : ''}`;
 }
 // Google-Kalender verbunden (eigenes Board): «Heute» = Mitte vom Rad, keine eigene Liste «Heute»
 function ohneHeute(){ return !MA && S.board?.typ === 'person' && !!GSTERN?.kalender; }
-function drehradNeu(){ const el = document.getElementById('drehrad'); if(el) el.innerHTML = drehradInnen(); }
+function drehradNeu(){ const el = document.getElementById('drehrad'); if(el) el.innerHTML = drehradInnen(); drFokus(); }
+const drFokus = () => { const i = S.drNeu && document.getElementById('drneu'); if(i){ i.focus(); i.setSelectionRange(i.value.length, i.value.length); } };
+// Plus im Mittelfeld: neue Pendenz direkt auf den Tag in der Mitte; wohnt in «Unsortiert» (steht dort erst, wenn das Datum wegkommt)
+async function drNeuSpeichern(){
+  const t = (document.getElementById('drneu')?.value || '').trim(), u = unsortiertListe();
+  if(!t){ S.drNeu = false; S.drNeuText = ''; return drehradNeu(); }
+  if(!u) return toast('Liste «Unsortiert» fehlt – bitte Seite neu laden.', null, true);
+  const tag = S.drTag; S.drNeuText = '';
+  await neuePendenz(u, t, '', { datum: tag, zeit: tag === heuteStr() ? 1 : 0 });
+  drFokus(); // bleibt offen für die nächste
+}
+document.addEventListener('input', e => { if(e.target.id === 'drneu') S.drNeuText = e.target.value; });
+// leer verlassen = Eingabe zu
+document.addEventListener('focusout', e => { if(e.target.id !== 'drneu') return; setTimeout(() => { const i = document.getElementById('drneu');
+  if(S.drNeu && !(i && (i === document.activeElement || i.value.trim()))){ S.drNeu = false; S.drNeuText = ''; drehradNeu(); } }, 200); });
+document.addEventListener('keydown', e => { if(e.target.id !== 'drneu') return;
+  if(e.key === 'Enter'){ e.preventDefault(); drNeuSpeichern(); }
+  else if(e.key === 'Escape'){ S.drNeu = false; S.drNeuText = ''; drehradNeu(); } });
 // Zurück auf heute (aufgeklappt): 5 s nachdem die Maus das Rad verlassen hat (nicht während man darin liest oder etwas hinzieht)
 S.drOffen = true; let drRueckT = null;
 const drZurueck = () => { clearTimeout(drRueckT); S.drTag = heuteStr(); S.drOffen = true; drehradNeu(); };
 document.addEventListener('mouseover', e => { if(e.target.closest('#drehrad')) clearTimeout(drRueckT); });
 document.addEventListener('mouseout', e => { const d = e.target.closest('#drehrad'); if(!d || d.contains(e.relatedTarget)) return;
-  clearTimeout(drRueckT); if(S.drTag !== heuteStr() || !S.drOffen) drRueckT = setTimeout(() => { if(!dc && !document.querySelector('#drehrad:hover')) drZurueck(); }, 5000); });
+  clearTimeout(drRueckT); if(S.drTag !== heuteStr() || !S.drOffen) drRueckT = setTimeout(() => { if(!dc && !S.drNeu && !document.querySelector('#drehrad:hover')) drZurueck(); }, 5000); });
 document.addEventListener('wheel', e => { const r = e.target.closest('#drRad'); if(!r) return; e.preventDefault();
   const h = heuteStr(), neu = tagPlus(S.drTag, e.deltaY > 0 ? 1 : -1); if(neu < h) return; S.drTag = neu; S.drOffen = false; drehradNeu(); }, { passive: false });
 document.addEventListener('click', e => { if(e.target.closest('[data-drheute]')) return drZurueck();
+  if(e.target.closest('[data-drplus]')){ e.stopPropagation(); clearTimeout(drRueckT); S.drNeu = true; S.drOffen = true; return drehradNeu(); }
   if(e.target.closest('[data-drauf]')){ S.drOffen = true; return drehradNeu(); }
   const t = e.target.closest('.drtag[data-drtag]'); if(t && !e.target.closest('[data-card]') && t.dataset.drtag !== S.drTag){ S.drTag = t.dataset.drtag; S.drOffen = false; drehradNeu(); }
   if(e.target.closest('[data-kalverb]')) kalenderVerbinden(); });
@@ -1221,7 +1247,9 @@ async function aufTag(p, tag){
   const h = heuteStr(), alt = { datum: p.datum || null, zeit: p.zeit, zeit_sortierung: p.zeit_sortierung, datum_seit: p.datum_seit || null };
   const patch = { datum: tag, datum_seit: null };
   if(tag === h){ patch.zeit = 1; patch.zeit_sortierung = null; } else if(p.zeit === 1){ patch.zeit = 0; patch.zeit_sortierung = null; }
-  const home = listeById(p.liste_id); if(home?.zeit && tag !== h){ zeichne(); return toast('Erst in eine Pendenzen-Liste ziehen – sonst hätte sie keinen Platz mehr.'); }
+  // ohne eigenen Platz (in «Heute» erfasst) auf einen anderen Tag: wohnt ab jetzt in «Unsortiert»
+  const home = listeById(p.liste_id), u = unsortiertListe(); if(home?.zeit && tag !== h){ if(!u){ zeichne(); return toast('Erst in eine Pendenzen-Liste ziehen – sonst hätte sie keinen Platz mehr.'); }
+    Object.assign(alt, { liste_id: p.liste_id, gruppe_id: p.gruppe_id || null, sortierung: p.sortierung }); patch.liste_id = u.id; patch.gruppe_id = null; patch.sortierung = letzteSort(u.id) + 1; }
   Object.assign(p, patch); S.drTag = tag; zeichne();
   if(await upd('pendenz', p.id, patch)) toast(`Auf ${tagLabel(tag)} gelegt${GSTERN?.kalender ? ' – erscheint gleich im Kalender' : ''}`, async () => { if(await upd('pendenz', p.id, alt)){ Object.assign(p, alt); zeichne(); } });
 }
@@ -1293,14 +1321,18 @@ async function neuePendenz(l, titel, gruppe_id = null, extra = {}){
 function setzeZeit(p, z){
   // «Heute» = Datum heute (kommt in den Sammeltermin im Kalender); Woche/Monat/irgendwann = ohne Datum
   const home = listeById(p.liste_id), patch = { zeit: z, zeit_sortierung: null, datum: z === 1 ? heuteStr() : null, datum_seit: z === 1 ? (p.datum_seit || null) : null };
-  if(home?.zeit){ if(!z){ zeichne(); return toast('Erst in eine Pendenzen-Liste ziehen – sonst hätte sie keinen Platz mehr.'); }
+  if(home?.zeit){ if(!z){ const u = unsortiertListe(); if(!u){ zeichne(); return toast('Erst in eine Pendenzen-Liste ziehen – sonst hätte sie keinen Platz mehr.'); }
+      Object.assign(patch, { liste_id: u.id, gruppe_id: null, sortierung: letzteSort(u.id) + 1 }); Object.assign(p, patch); zeichne(); return upd('pendenz', p.id, patch); }
     const ziel = S.listen.find(l => l.zeit === z); if(ziel) patch.liste_id = ziel.id; }
   Object.assign(p, patch); zeichne(); return upd('pendenz', p.id, patch);
 }
 // aus Heute/Woche/Monat nehmen: Pendenz liegt dann nur noch in ihrer eigenen Liste (geht nur, wenn sie eine hat)
 function ausZeit(p){
-  const home = listeById(p.liste_id); if((!p.zeit && !p.datum) || !home || home.zeit) return zeichne();
-  const alt = { zeit: p.zeit, zeit_sortierung: p.zeit_sortierung };
+  const home = listeById(p.liste_id); if((!p.zeit && !p.datum) || !home) return zeichne();
+  // ohne eigenen Platz (früher direkt in «Heute» erfasst): kommt nach «Unsortiert»
+  if(home.zeit){ const u = unsortiertListe(); if(!u) return zeichne(); const patch = { liste_id: u.id, gruppe_id: null, sortierung: letzteSort(u.id) + 1, zeit: 0, zeit_sortierung: null, datum: null, datum_seit: null };
+    Object.assign(p, patch); if(S.sel === p.id) S.sel = null; zeichne(); upd('pendenz', p.id, patch); return toast('In «Unsortiert» gelegt'); }
+  const alt = { zeit: p.zeit, zeit_sortierung: p.zeit_sortierung, datum: p.datum || null, datum_seit: p.datum_seit || null };
   if(S.sel === p.id) S.sel = null; setzeZeit(p, 0);
   toast(`Zurück in «${home.titel}»`, async () => { if(await upd('pendenz', p.id, alt)){ Object.assign(p, alt); zeichne(); } });
 }
