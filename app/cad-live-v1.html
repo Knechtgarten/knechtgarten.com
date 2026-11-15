@@ -1,0 +1,1188 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<script src="/kg-pw-schutz.js?v=5"></script>
+<script src="/kg-stil.js?v=82"></script>
+<script src="/kg-karte.js?v=4"></script>
+<title>Knecht-Tool · CAD</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+/* CAD (Etappe 1, 15.11.2026): Pläne pro Kunde; Zeichnen = links Werkzeuge, Mitte Plan, rechts Eigenschaften + Mengen, unten Eingabezeile.
+   Grundlage (Parzelle, Gebäude) aus der amtlichen Vermessung (geodienste.ch), Luftbild swisstopo, Höhen swissALTI3D (kg-karte.js). */
+:root{
+  --primary:#323E4E; --bg:#F5F7F9; --grau:#8B9097; --hellblau:#D6E7F4; --gruen:#D1DB5F; --erde:#E3D2C0;
+  --card:#FFFFFF; --ink:#323E4E; --muted:#8B9097; --line:#E1E5E9; --soft:#EEF3F7; --papier:#FFFFFF; --raster:#EDF1F5; --raster2:#DDE3EA;
+  --bestand:#323E4E; --sel:#2F6FB5; --danger:#B4655F; --font:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+}
+html,body{background:var(--bg)}
+body{color:var(--ink);font-family:var(--font);font-size:13px;line-height:1.45;margin:0}
+*{box-sizing:border-box}
+button,input,select{font:inherit;color:inherit}
+.hidden{display:none!important}
+header.app{background:var(--primary);color:#fff}
+header.app .wrap{display:flex;align-items:center;gap:20px;padding:0 16px}
+header.app .brand{padding:11px 0}
+header.app .brand h1{font-size:15px;font-weight:600;color:#fff;margin:0}
+header.app .userbar{display:flex;align-items:center;gap:10px;margin-left:auto;font-size:12px}
+header.app .userbar button{background:transparent;border:1px solid rgba(255,255,255,.4);color:#fff;border-radius:6px;padding:4px 10px;cursor:pointer}
+.wrap{max-width:1100px;margin:0 auto;padding:0 16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px}
+.loginwrap{display:flex;justify-content:center;padding:60px 0}
+.logincard{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:24px;width:340px;display:flex;flex-direction:column;gap:10px}
+.logincard h2{margin:0 0 4px;font-size:16px}
+.fld{display:flex;flex-direction:column;gap:4px}
+.fld label{font-size:12px;color:var(--muted)}
+.fld input,.fld select{border:1px solid var(--line);border-radius:6px;padding:7px 9px;background:#fff}
+.status{font-size:12px;color:var(--muted)}
+.status.err{color:var(--danger)}
+.btn-primary{background:var(--primary);border:1px solid var(--primary);color:#fff;border-radius:6px;padding:6px 14px;font-weight:600;cursor:pointer}
+.btn-ghost{background:#fff;border:1px solid var(--line);color:var(--ink);border-radius:6px;padding:6px 14px;font-weight:600;cursor:pointer}
+/* Pläne-Liste */
+.lbar{background:var(--card);border-bottom:1px solid var(--line)}
+.lbar .wrap{display:flex;align-items:center;gap:10px;padding:8px 16px}
+.lsuche{display:flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:6px;padding:5px 9px;background:#fff;color:var(--muted);min-width:260px}
+.lsuche input{border:0;outline:0;flex:1;min-width:0;background:transparent;color:var(--ink)}
+.ltab{width:100%;border-collapse:collapse}
+.ltab th{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);text-align:left;padding:10px 8px;border-bottom:1px solid var(--line)}
+.ltab td{padding:10px 8px;border-bottom:1px solid var(--soft);vertical-align:middle}
+.ltab tbody tr{cursor:pointer}
+.ltab tbody tr:hover{background:var(--soft)}
+.ltab td.akt{text-align:right;white-space:nowrap}
+.leerliste{color:var(--muted);padding:30px 8px;text-align:center}
+.ovl{position:fixed;inset:0;background:rgba(35,43,53,.35);display:flex;align-items:flex-start;justify-content:center;padding-top:10vh;z-index:50}
+.dlg{background:#fff;border-radius:10px;width:min(460px,calc(100vw - 32px));padding:18px;display:flex;flex-direction:column;gap:12px;box-shadow:0 10px 40px rgba(35,43,53,.25)}
+.dlg h3{margin:0;font-size:15px}
+.dlg .knoepfe{display:flex;justify-content:flex-end;gap:8px}
+.ktreffer{border:1px solid var(--line);border-radius:6px;max-height:220px;overflow:auto}
+.ktreffer div{padding:7px 9px;cursor:pointer;border-bottom:1px solid var(--soft)}
+.ktreffer div:hover,.ktreffer div.on{background:var(--soft)}
+.ktreffer small{color:var(--muted)}
+.speicher{font-size:11.5px;color:var(--muted);margin-left:4px}
+/* Editor füllt die Höhe unter der Leiste (Höhe setzt das Skript) */
+.app{height:calc(100vh - 46px);display:grid;grid-template-rows:auto 1fr auto}
+body.imEditor{overflow:hidden}
+/* dunkle Leiste */
+.kopf{background:#323E4E;color:#fff;display:flex;align-items:center;gap:6px;padding-block:6px;padding-left:max(12px,env(safe-area-inset-left,0px));padding-right:max(12px,env(safe-area-inset-right,0px));min-width:0}
+.tool{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.08);border-radius:6px;padding:5px 10px;font-weight:600;white-space:nowrap}
+.tool i{width:22px;height:22px;border-radius:5px;background:#C9D3DF;display:grid;place-items:center;color:#323E4E}
+.reiter{display:flex;gap:2px;margin-left:10px;overflow-x:auto}
+.reiter a{color:#C9D3DF;text-decoration:none;padding:8px 12px;font-weight:500;border-bottom:2px solid transparent;white-space:nowrap}
+.reiter a.on{color:#fff;border-bottom-color:#D6E7F4}
+.kopf .sp{flex:1}
+.person{width:28px;height:28px;border-radius:50%;background:#fff;color:#323E4E;display:grid;place-items:center;font-weight:700;font-size:12px;flex:none}
+/* weisse Werkzeugzeile */
+.zeile2{background:var(--card);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding-block:7px;padding-left:max(12px,env(safe-area-inset-left,0px));padding-right:max(12px,env(safe-area-inset-right,0px))}
+.projekt{font-weight:700;font-size:14px}
+.projekt small{font-weight:500;color:var(--muted);margin-left:6px}
+.chips{display:flex;gap:4px;flex-wrap:wrap}
+.chip{border:1px solid var(--line);background:var(--card);border-radius:99px;padding:3px 10px;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:5px}
+.chip .pkt{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.chip.on{background:var(--primary);border-color:var(--primary);color:#fff}
+.chip.on .pkt{background:#fff}
+.feld{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:12px}
+.feld select,.feld input[type=range]{accent-color:var(--primary)}
+select{border:1px solid var(--line);background:var(--card);border-radius:6px;padding:4px 6px}
+.btn{border:1px solid var(--line);background:var(--card);border-radius:6px;padding:5px 12px;font-weight:600;cursor:pointer;white-space:nowrap}
+.btn:hover{border-color:var(--muted)}
+.btn.primary{background:var(--primary);border-color:var(--primary);color:#fff}
+.zeile2 .sp{flex:1}
+/* Hauptbereich */
+.haupt{display:grid;grid-template-columns:188px minmax(0,1fr) 270px;min-height:0}
+.links{background:var(--card);border-right:1px solid var(--line);overflow:auto;padding:10px 10px 14px;display:flex;flex-direction:column;gap:12px}
+.gruppe h3{margin:0 0 6px;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.wz{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}
+.wzb{border:1px solid var(--line);background:var(--card);border-radius:6px;padding:6px 2px 4px;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;font-size:10.5px;color:var(--ink);min-width:0}
+.wzb svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.wzb:hover{border-color:var(--muted)}
+.wzb.on{background:var(--primary);border-color:var(--primary);color:#fff}
+.wzb .tast{font-size:9px;color:var(--muted)}
+.wzb.on .tast{color:#C9D3DF}
+.bt{display:flex;flex-direction:column;gap:4px}
+.btz{display:flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--card);border-radius:6px;padding:6px 8px;cursor:pointer;text-align:left}
+.btz .farb{width:22px;height:14px;border-radius:3px;border:1px solid rgba(50,62,78,.25);flex:none}
+.btz:hover{border-color:var(--muted)}
+.btz.on{border-color:var(--primary);box-shadow:inset 0 0 0 1px var(--primary)}
+.btz span{flex:1;min-width:0}
+.btz small{color:var(--muted)}
+/* Plan */
+.mitte{position:relative;min-width:0;min-height:0;background:var(--papier)}
+#plan{width:100%;height:100%;display:block;touch-action:none;cursor:crosshair;user-select:none}
+#plan.auswahl{cursor:default}
+.kompass{position:absolute;top:10px;right:12px;width:34px;height:34px;color:var(--muted)}
+.massstab{position:absolute;left:12px;bottom:10px;font-size:11px;color:var(--muted);display:flex;flex-direction:column;gap:2px}
+.massstab .bar{height:6px;border:1px solid var(--muted);border-top:0}
+.hinweisbox{position:absolute;left:12px;top:10px;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:12px;max-width:min(420px,calc(100% - 70px));box-shadow:0 2px 8px rgba(50,62,78,.08)}
+.hinweisbox b{font-weight:600}
+/* rechts */
+.rechts{background:var(--card);border-left:1px solid var(--line);overflow:auto;display:flex;flex-direction:column}
+.abschnitt{padding:12px;border-bottom:1px solid var(--line)}
+.abschnitt h3{margin:0 0 8px;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600;display:flex;align-items:center;gap:6px}
+.abschnitt h3 .sp{flex:1}
+.leer{color:var(--muted);font-size:12px;line-height:1.45}
+.eig{display:grid;grid-template-columns:auto 1fr;gap:6px 10px;align-items:center}
+.eig label{color:var(--muted);font-size:12px}
+.eig input,.eig select{width:100%;border:1px solid var(--line);background:var(--card);border-radius:6px;padding:4px 6px;text-align:right}
+.eig select{text-align:left}
+.eig .wert{text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
+.typzeile{display:flex;align-items:center;gap:8px;margin-bottom:10px;font-weight:600;font-size:14px}
+.typzeile .farb{width:22px;height:14px;border-radius:3px;border:1px solid rgba(50,62,78,.25)}
+.typzeile .sp{flex:1}
+.ibtn{width:24px;height:24px;border-radius:50%;border:1px solid var(--line);background:var(--card);color:var(--muted);display:grid;place-items:center;cursor:pointer;padding:0}
+.ibtn svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.ibtn.danger:hover{color:#B4655F;border-color:#B4655F}
+.mengen{width:100%;border-collapse:collapse;font-size:12px}
+.mengen td{padding:4px 0;border-bottom:1px solid var(--soft)}
+.mengen td:last-child{text-align:right;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
+.mengen tr.grp td{color:var(--muted);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;padding-top:9px;border-bottom:0}
+.ki{display:flex;flex-direction:column;gap:6px}
+.ki textarea{width:100%;min-height:54px;resize:none;border:1px dashed var(--line);border-radius:8px;padding:7px 9px;background:var(--soft);color:var(--muted)}
+.etappe{font-size:10px;font-weight:600;background:var(--hellblau);color:#323E4E;border-radius:99px;padding:1px 7px;letter-spacing:0;text-transform:none}
+/* Eingabezeile unten */
+.unten{background:var(--card);border-top:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-block:6px;padding-left:max(12px,env(safe-area-inset-left,0px));padding-right:max(12px,env(safe-area-inset-right,0px))}
+.eingabe{display:flex;align-items:center;gap:6px}
+.eingabe label{font-weight:600}
+.eingabe input{width:120px;border:1px solid var(--primary);border-radius:6px;padding:5px 8px;text-align:right;font-variant-numeric:tabular-nums}
+.eingabe input:focus{outline:2px solid var(--hellblau)}
+.koord{color:var(--muted);font-variant-numeric:tabular-nums;font-size:12px;min-width:150px}
+.unten .sp{flex:1}
+.schalt{display:inline-flex;align-items:center;gap:5px;font-size:12px;cursor:pointer;color:var(--muted)}
+.schalt input{accent-color:var(--primary)}
+.toast{position:fixed;left:50%;bottom:calc(60px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:#323E4E;color:#fff;padding:8px 14px;border-radius:8px;font-size:12.5px;opacity:0;pointer-events:none;transition:opacity .2s}
+.toast.an{opacity:1}
+.pop{position:absolute;z-index:5;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 24px rgba(50,62,78,.16);padding:6px;width:250px}
+.pop .pz{display:flex;align-items:center;gap:8px;padding:6px;border-radius:6px;cursor:pointer}
+.pop .pz:hover{background:var(--soft)}
+.pop .pz i{width:26px;height:26px;border-radius:50%;flex:none;border:1px solid rgba(50,62,78,.3)}
+.pop .pz div{min-width:0}
+.pop .pz b{display:block;font-weight:600;font-style:italic}
+.pop .pz small{color:var(--muted)}
+.pop .pk{font-size:11px;color:var(--muted);padding:4px 6px 2px}
+:focus-visible{outline:2px solid var(--sel);outline-offset:1px}
+@media (max-width:900px){
+  body{overflow:auto}
+  .app{height:auto;min-height:100%}
+  .haupt{grid-template-columns:1fr;grid-template-rows:auto 62vh auto}
+  .links{border-right:0;border-bottom:1px solid var(--line);flex-direction:row;overflow-x:auto;gap:14px}
+  .links .gruppe{flex:none}
+  .wz{grid-template-columns:repeat(9,52px)}
+  .bt{flex-direction:row}
+  .btz{white-space:nowrap}
+  .rechts{border-left:0;border-top:1px solid var(--line)}
+  .reiter{display:none}
+}
+@media (prefers-reduced-motion:reduce){.toast{transition:none}}
+</style>
+</head>
+<body>
+
+<header class="app"><div class="wrap">
+  <div class="brand"><h1>CAD</h1></div>
+  <span class="userbar hidden" id="userbar"><span id="userbarText"></span><button id="logoutBtn">Abmelden</button></span>
+</div></header>
+<nav class="subnav" id="subnav"><a href="#" data-r="plaene" class="active">Pläne</a><a href="#" data-r="zeichnen">Zeichnen</a></nav>
+
+<div class="wrap hidden" id="loginwrap"><div class="loginwrap"><div class="logincard">
+  <h2>Anmelden</h2>
+  <div class="fld"><label for="loginEmail">E-Mail</label><input autocomplete="username" id="loginEmail" type="email"></div>
+  <div class="fld"><label for="loginPassword">Passwort</label><input autocomplete="current-password" id="loginPassword" type="password"></div>
+  <button class="btn-primary" id="loginBtn">Anmelden</button>
+  <div class="status" id="loginStatus"></div>
+</div></div></div>
+<div class="wrap hidden" id="keinZugriff"><div class="card" style="margin-top:20px">CAD ist nur für Büro-Team und Admin.</div></div>
+
+<!-- Pläne-Liste -->
+<div class="lbar hidden" id="lbar"><div class="wrap">
+  <label class="lsuche"><span id="icSuche"></span><input type="text" id="lQ" placeholder="Kunde oder Plan suchen" aria-label="Suchen" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other"></label>
+  <span style="flex:1"></span>
+  <button type="button" class="btn-primary" id="neuBtn">Neuer Plan</button>
+</div></div>
+<main class="wrap hidden" id="liste" style="padding-top:16px;padding-bottom:30px">
+  <div class="card" style="padding:0;overflow-x:auto"><table class="ltab"><thead><tr><th style="padding-left:16px">Kunde</th><th>Plan</th><th>Variante</th><th>Parzelle</th><th>Geändert</th><th></th></tr></thead><tbody id="lBody"></tbody></table></div>
+</main>
+
+<div class="app hidden" id="editor">
+
+  <div class="zeile2">
+    <div class="projekt" id="planTitel"></div><span class="speicher" id="speicher"></span>
+    <button class="btn" id="grundBtn" title="Parzelle und Gebäude neu aus der amtlichen Vermessung laden">Vermessung neu laden</button>
+    <div class="chips" id="ebenen">
+      <button class="chip on" data-e="bestand"><span class="pkt"></span>Bestand (Vermessung)</button>
+      <button class="chip on" data-e="projekt"><span class="pkt"></span>Projekt</button>
+      <button class="chip on" data-e="pflanzen"><span class="pkt"></span>Bepflanzung</button>
+      <button class="chip on" data-e="mbew" title="Grenz- und Hausabstände, Länge × Breite der bewilligungsrelevanten Objekte"><span class="pkt"></span>Masse Bewilligung</button>
+      <button class="chip on" data-e="maus" title="Massketten, Platzmasse, eigene Masslinien"><span class="pkt"></span>Masse Ausführung</button>
+      <button class="chip on" data-e="koten"><span class="pkt"></span>Koten</button>
+    </div>
+    <label class="feld">Luftbild <input type="range" id="luft" min="0" max="40" value="12" aria-label="Deckkraft Luftbild"></label>
+    <span class="sp"></span>
+    <label class="feld">Massstab <select id="mst"><option>1:50</option><option selected>1:100</option><option>1:200</option><option>1:500</option></select></label>
+    <button class="btn" id="vermassen" title="Massketten und Grenzabstände automatisch setzen">Vermassen</button>
+    <button class="btn" data-toast="Schnitt: Linie ziehen, Gelände (swisstopo) + Mauern + Koten werden gerechnet – kommt in Etappe 3">Schnitt</button>
+    <button class="btn primary" data-toast="PDF im Massstab mit Knechtgarten-Plankopf – im Mockup nicht aktiv">PDF</button>
+  </div>
+
+  <div class="haupt">
+    <aside class="links">
+      <div class="gruppe"><h3>Zeichnen</h3>
+        <div class="wz" id="werkzeuge"></div>
+      </div>
+      <div class="gruppe"><h3>Bauteile</h3>
+        <div class="bt" id="bauteile"></div>
+      </div>
+      <div class="gruppe"><h3>Bibliothek</h3>
+        <div class="bt">
+          <button class="btz" id="bibPflanzen"><span class="farb" style="background:#D1DB5F;border-radius:50%"></span><span>Pflanzen<br><small>aus dem Pflanzentool</small></span></button>
+          <button class="btz" id="bibObjekte"><span class="farb" style="background:var(--soft)"></span><span>Objekte<br><small>Grill, Bank, Schirm …</small></span></button>
+        </div>
+      </div>
+    </aside>
+
+    <main class="mitte" id="mitte">
+      <svg id="plan" aria-label="Gartenplan"></svg>
+      <div class="hinweisbox" id="hinweis"></div>
+      <svg class="kompass" viewBox="0 0 34 34" aria-hidden="true"><circle cx="17" cy="17" r="15" fill="none" stroke="currentColor" stroke-width="1"/><path d="M17 4l4 13h-8z" fill="currentColor"/><text x="17" y="30" text-anchor="middle" font-size="7" fill="currentColor" font-family="Segoe UI,Arial,sans-serif">N</text></svg>
+      <div class="massstab"><span id="mstText">0 — 5 m</span><div class="bar" id="mstBar" style="width:100px"></div></div>
+    </main>
+
+    <aside class="rechts">
+      <section class="abschnitt" id="eigenschaften"></section>
+      <section class="abschnitt"><h3>Mengen <span class="sp"></span><button class="btn" style="font-size:11px;padding:3px 9px" data-toast="Mengen gehen als Positionen in die Offerte (Mauer m / m², Belag m², Pflanzen Stk.) – Etappe 2">→ Offerte</button></h3>
+        <table class="mengen" id="mengen"></table>
+      </section>
+      <section class="abschnitt ki"><h3>Beschreiben statt zeichnen <span class="etappe">Etappe 5</span></h3>
+        <textarea disabled aria-label="KI-Assistent (später)">«Natursteinmauer 8 m entlang der Nordgrenze, 80 cm hoch, mit Treppe in der Mitte»</textarea>
+      </section>
+    </aside>
+  </div>
+
+  <footer class="unten">
+    <div class="eingabe"><label for="wert" id="wertLabel">Länge</label><input id="wert" autocomplete="off" placeholder="z. B. 4.50"><span style="color:var(--muted)" id="wertEinheit">m ↵</span></div>
+    <span class="koord" id="koord">X — · Y —</span>
+    <span class="sp"></span>
+    <label class="schalt"><input type="checkbox" id="fang" checked> Fangen</label>
+    <label class="schalt"><input type="checkbox" id="ortho" checked> Rechtwinklig</label>
+    <label class="schalt"><input type="checkbox" id="raster" checked> Raster</label>
+    <button class="btn" id="undo" title="Rückgängig (Ctrl+Z)">↶ Rückgängig</button>
+  </footer>
+</div>
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+// ===== CAD: kleines Garten-CAD. Welt in Metern, lokal: X nach rechts (Ost), Y nach unten (Süd); Ursprung = Ecke der Parzelle (siehe grundlage.e0/n0). =====
+const $ = s => document.querySelector(s);
+const svgNS = 'http://www.w3.org/2000/svg';
+const I = { // Linien-Icons 24x24
+  auswahl:'<path d="M5 3l14 8-6 1.5L10 19z"/>', linie:'<path d="M4 20L20 4"/><circle cx="4" cy="20" r="1.5"/><circle cx="20" cy="4" r="1.5"/>',
+  rechteck:'<rect x="4" y="6" width="16" height="12" rx="1"/>', kreis:'<circle cx="12" cy="12" r="8"/>',
+  bogen:'<path d="M4 18A10 10 0 0 1 20 18"/>', flaeche:'<path d="M4 8l7-4 9 5-3 11H6z"/>',
+  mass:'<path d="M4 12h16M4 8v8M20 8v8M7 10l-3 2 3 2M17 10l3 2-3 2"/>', kote:'<path d="M12 14l-4 6h8z"/><path d="M6 10h12"/>', text:'<path d="M5 6h14M12 6v13"/>'
+};
+const WERKZEUGE = [
+  ['auswahl','Auswahl','V'],['linie','Linie','L'],['rechteck','Rechteck','R'],['kreis','Kreis','K'],['bogen','Bogen','B'],['flaeche','Fläche','F'],['mass','Masslinie','M'],['kote','Höhenkote','H'],['text','Text','T']
+];
+// Bauteile: Typ, Name, Farbe/Muster, Art (fläche / linie / kreis)
+const BAUTEILE = {
+  mauer:{ n:'Mauer', farbe:'#A9AEB5', art:'linie', mats:['Naturstein Granit','Polengranit geschichtet','Beton Sichtbeton','Gabione'] },
+  belag:{ n:'Belag', farbe:'url(#mBelag)', muster:'#C7CCD2', art:'flaeche', mats:['Natursteinplatten','Verbundsteine','Holzdeck','Chaussierung'] },
+  rasen:{ n:'Rasen', farbe:'#E3EBA0', art:'flaeche', mats:['Rasen Saat','Rollrasen','Blumenwiese'] },
+  beet:{ n:'Beet', farbe:'#E3D2C0', art:'flaeche', mats:['Staudenbeet','Gehölzrabatte','Gemüsebeet'] },
+  kies:{ n:'Kies', farbe:'url(#mKies)', muster:'#DDE1E6', art:'flaeche', mats:['Rundkies 8/16','Splitt 4/8','Mergel'] },
+  teich:{ n:'Teich', farbe:'#D6E7F4', art:'flaeche', mats:['Naturteich','Schwimmteich'] },
+  pool:{ n:'Pool', farbe:'#C4E4DF', art:'flaeche', mats:['Pool Beton (Innenmass)','Pool Folie (Innenmass)','Edelstahl (Innenmass)'] }
+};
+const PFLANZEN = [
+  { n:"Carpinus betulus", d:'Hainbuche · Hochstamm 16/18', dm:3.0, f:'#C9D35E' },
+  { n:"Acer palmatum 'Bloodgood'", d:'Fächerahorn · 125/150', dm:2.0, f:'#C98A7E' },
+  { n:"Miscanthus sinensis 'Gracillimus'", d:'Chinaschilf · C5', dm:1.0, f:'#D9DCA0' },
+  { n:"Lavandula angustifolia 'Hidcote'", d:'Lavendel · P11', dm:0.4, f:'#B9A9D9' },
+  { n:"Buxus sempervirens", d:'Buchs Kugel · Ø 40', dm:0.4, f:'#9DB86E' }
+];
+const OBJEKTE = [ { n:'Gerätehaus', b:2.4, t:2.0 }, { n:'Grill', b:1.2, t:0.6 }, { n:'Sitzbank', b:1.8, t:0.5 }, { n:'Tisch rund Ø 1.2', r:0.6 }, { n:'Sonnenschirm Ø 3', r:1.5 } ];
+
+// ===== Plan-Daten (aus Supabase cad_plan) =====
+// Bestand aus der Vermessung: parzelle (eigene), haus (grösstes Gebäude auf der Parzelle), nebengeb (weitere Gebäude darauf),
+// nachbarn (Gebäude rundherum), nachbarParz (Grenzen der Nachbarparzellen) – alles in lokalen Metern
+let parzelle = [], haus = [], nebengeb = [], nachbarn = [], nachbarParz = [], grundlage = null, PLAN = null;
+let objs = [];
+let nextId = 100, sel = null, werkzeug = 'auswahl', bauteil = null, temp = [], maus = null, ebenen = { bestand:true, projekt:true, pflanzen:true, mbew:true, maus:true, koten:true };
+// Bewilligungsrelevant: Standard nach Art, von Hand überschreibbar (o.bew = true/false)
+const istBew = o => o.bew !== undefined ? o.bew : (o.typ === 'pool' || (o.typ === 'teich' && o.mat === 'Schwimmteich') || (o.typ === 'mauer' && o.h >= 1) || (o.typ === 'objekt' && /Gerätehaus/.test(o.n || '')));
+const ebeneAn = e => e === 'bew' ? ebenen.mbew : ebenen.maus;
+let ansicht = { s: 22, ox: 40, oy: 40 }; // px pro m, Verschiebung
+const undoStack = [];
+const merken = () => { undoStack.push(JSON.stringify(objs)); if(undoStack.length > 60) undoStack.shift(); };
+
+// ===== Geometrie =====
+const fl = p => Math.abs(p.reduce((a, q, i) => { const r = p[(i + 1) % p.length]; return a + q[0] * r[1] - r[0] * q[1]; }, 0)) / 2;
+const dist = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1]);
+const laenge = (p, zu) => p.reduce((a, q, i) => i ? a + dist(p[i - 1], q) : 0, 0) + (zu && p.length > 2 ? dist(p[p.length - 1], p[0]) : 0);
+const f2 = n => n.toLocaleString('de-CH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const f1 = n => n.toLocaleString('de-CH', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+function inPoly(pt, p){ let c = false; for(let i = 0, j = p.length - 1; i < p.length; j = i++){ const [xi, yi] = p[i], [xj, yj] = p[j]; if(((yi > pt[1]) !== (yj > pt[1])) && pt[0] < (xj - xi) * (pt[1] - yi) / (yj - yi) + xi) c = !c; } return c; }
+function segDist(p, a, b){ const dx = b[0] - a[0], dy = b[1] - a[1], l = dx * dx + dy * dy; let t = l ? ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l : 0; t = Math.max(0, Math.min(1, t)); return dist(p, [a[0] + t * dx, a[1] + t * dy]); }
+const bogenPts = (a, b, c) => { // Kreisbogen durch 3 Punkte → Polylinie
+  const d = 2 * (a[0] * (b[1] - c[1]) + b[0] * (c[1] - a[1]) + c[0] * (a[1] - b[1])); if(Math.abs(d) < 1e-9) return [a, c];
+  const ux = ((a[0] ** 2 + a[1] ** 2) * (b[1] - c[1]) + (b[0] ** 2 + b[1] ** 2) * (c[1] - a[1]) + (c[0] ** 2 + c[1] ** 2) * (a[1] - b[1])) / d;
+  const uy = ((a[0] ** 2 + a[1] ** 2) * (c[0] - b[0]) + (b[0] ** 2 + b[1] ** 2) * (a[0] - c[0]) + (c[0] ** 2 + c[1] ** 2) * (b[0] - a[0])) / d;
+  const r = dist([ux, uy], a); let t1 = Math.atan2(a[1] - uy, a[0] - ux), t2 = Math.atan2(b[1] - uy, b[0] - ux), t3 = Math.atan2(c[1] - uy, c[0] - ux);
+  const norm = t => (t + 4 * Math.PI) % (2 * Math.PI); const ccw = norm(t2 - t1) < norm(t3 - t1); let span = ccw ? norm(t3 - t1) : -norm(t1 - t3);
+  const n = 24, out = []; for(let i = 0; i <= n; i++){ const t = t1 + span * i / n; out.push([ux + r * Math.cos(t), uy + r * Math.sin(t)]); } return out;
+};
+const kreisPts = (c, r) => Array.from({ length: 48 }, (_, i) => [c[0] + r * Math.cos(i / 48 * 2 * Math.PI), c[1] + r * Math.sin(i / 48 * 2 * Math.PI)]);
+
+// ===== Umrechnung Bildschirm ↔ Welt =====
+const zuPx = p => [p[0] * ansicht.s + ansicht.ox, p[1] * ansicht.s + ansicht.oy];
+const zuWelt = (x, y) => [(x - ansicht.ox) / ansicht.s, (y - ansicht.oy) / ansicht.s];
+// Fangpunkte mit Anker (welches Objekt, welche Ecke) – damit Masslinien mit dem Objekt mitwandern
+function allePunkte(ausser){
+  const out = [];
+  parzelle.forEach((p, i) => out.push({ p, a: { ref: 'grenze', i } })); haus.forEach((p, i) => out.push({ p, a: { ref: 'haus', i } })); [...nebengeb, ...nachbarn].forEach(g => g.forEach(p => out.push({ p })));
+  objs.forEach(o => { if(o === ausser || ['mass','kette','abstand'].includes(o.typ)) return;
+    if(o.pts) o.pts.forEach((p, i) => out.push({ p, a: { ref: o.id, i } }));
+    if(o.c){ out.push({ p: o.c, a: { ref: o.id, i: 'c' } }); if(o.b) refPunkte(o.id).forEach((p, i) => out.push({ p, a: { ref: o.id, i } })); } });
+  return out;
+}
+let fangAnker = null, klickAnker = null, massAnker0 = null;
+// Kanten zum Fangen: Grenze, Häuser, Bauteile (Flächen geschlossen, Mauern/Linien offen)
+function alleKanten(ausser){
+  const out = [], zu = p => p.forEach((q, i) => out.push([q, p[(i + 1) % p.length]])), offen = p => p.forEach((q, i) => { if(i) out.push([p[i - 1], q]); });
+  if(parzelle.length) zu(parzelle); if(haus.length) zu(haus); [...nebengeb, ...nachbarn].forEach(zu);
+  objs.forEach(o => { if(o === ausser || !o.pts || o.typ === 'mass') return; (BAUTEILE[o.typ]?.art === 'flaeche' || o.typ === 'rechteck') ? zu(o.pts) : offen(o.pts); });
+  return out;
+}
+const fussPunkt = (p, a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], l = dx * dx + dy * dy; const t = l ? ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l : 0; return { t, q: [a[0] + t * dx, a[1] + t * dy] }; };
+function fangen(w, ev, ausser){
+  let p = w, art = ''; fangAnker = null;
+  const tol = 10 / ansicht.s;
+  if($('#fang').checked){
+    let best = tol, anker = null; allePunkte(ausser).forEach(q => { const d = dist(q.p, w); if(d < best){ best = d; p = q.p; art = 'Ecke'; anker = q.a || null; } });
+    fangAnker = anker;
+    // Lot: kürzester Abstand vom letzten Punkt auf eine Kante (z. B. Haus → Grenze)
+    if(!art && temp.length){ const a = temp[temp.length - 1]; let b2 = tol; alleKanten(ausser).forEach(([k1, k2]) => { const f = fussPunkt(a, k1, k2); if(f.t > 0 && f.t < 1){ const d = dist(f.q, w); if(d < b2){ b2 = d; p = f.q; art = 'Lot'; } } }); }
+    if(!art){ let b3 = tol * 0.8; alleKanten(ausser).forEach(([k1, k2]) => { const f = fussPunkt(w, k1, k2); if(f.t >= 0 && f.t <= 1){ const d = dist(f.q, w); if(d < b3){ b3 = d; p = f.q; art = 'Kante'; } } }); }
+  }
+  if(!art && temp.length && $('#ortho').checked && !(ev && ev.altKey)){ // auf 15°-Schritte
+    const a = temp[temp.length - 1], ang = Math.atan2(w[1] - a[1], w[0] - a[0]), st = Math.PI / 12, r = dist(a, w), na = Math.round(ang / st) * st;
+    p = [a[0] + r * Math.cos(na), a[1] + r * Math.sin(na)];
+  }
+  if(!art && $('#raster').checked){ p = [Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10]; }
+  return { p, art, anker: fangAnker };
+}
+
+// ===== Zeichnen (SVG) =====
+const plan = $('#plan');
+function el(tag, at, eltern){ const e = document.createElementNS(svgNS, tag); for(const k in at) e.setAttribute(k, at[k]); (eltern || plan).appendChild(e); return e; }
+const pfad = (p, zu) => p.map((q, i) => (i ? 'L' : 'M') + zuPx(q).map(v => v.toFixed(1)).join(' ')).join(' ') + (zu ? 'Z' : '');
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function textAt(p, s, opt = {}){ const [x, y] = zuPx(p); const t = el('text', { x, y, 'font-size': opt.fs || 11, 'text-anchor': opt.anchor || 'middle', fill: opt.fill || css('--ink'), 'font-family': 'Segoe UI,Arial,sans-serif', 'font-weight': opt.fw || 500, 'paint-order': 'stroke', stroke: css('--papier'), 'stroke-width': 3, transform: opt.rot ? `rotate(${opt.rot} ${x} ${y})` : '' }); t.textContent = s; return t; }
+function masslinie(a, b, off, farbe){
+  const dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy); if(l < 0.05) return;
+  const nx = -dy / l * off, ny = dx / l * off, a2 = [a[0] + nx, a[1] + ny], b2 = [b[0] + nx, b[1] + ny], c = farbe || css('--muted');
+  el('path', { d: pfad([a, a2]) + pfad([b, b2]) + pfad([a2, b2]), stroke: c, 'stroke-width': 0.8, fill: 'none' });
+  [a2, b2].forEach(q => { const [x, y] = zuPx(q); el('path', { d: `M${x - 4} ${y + 4}L${x + 4} ${y - 4}`, stroke: c, 'stroke-width': 1.2 }); });
+  let rot = Math.atan2(dy, dx) * 180 / Math.PI; if(rot > 90 || rot < -90) rot += 180;
+  const m = [(a2[0] + b2[0]) / 2 + nx * 0.35, (a2[1] + b2[1]) / 2 + ny * 0.35];
+  textAt(m, f2(l), { fs: 10.5, fill: c, rot });
+}
+function zeichnen(){
+  plan.innerHTML = '';
+  const W = plan.clientWidth, H = plan.clientHeight;
+  const defs = el('defs', {});
+  defs.innerHTML = `<pattern id="mBelag" width="${0.6 * ansicht.s}" height="${0.4 * ansicht.s}" patternUnits="userSpaceOnUse" x="${ansicht.ox}" y="${ansicht.oy}"><rect width="100%" height="100%" fill="#E6E9ED"/><path d="M0 0H${0.6 * ansicht.s}M0 0V${0.4 * ansicht.s}" stroke="#B9C0C8" stroke-width="0.8"/></pattern>
+    <pattern id="mKies" width="9" height="9" patternUnits="userSpaceOnUse"><rect width="9" height="9" fill="#EEF0F2"/><circle cx="2" cy="2" r="1" fill="#A9AEB5"/><circle cx="6.5" cy="6" r="0.8" fill="#A9AEB5"/></pattern>
+    <pattern id="mHaus" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="7" height="7" fill="${css('--soft')}"/><path d="M0 0V7" stroke="${css('--raster2')}" stroke-width="1.4"/></pattern>`;
+  // Raster 1 m (fein) / 5 m
+  if($('#raster').checked){
+    const [x0, y0] = zuWelt(0, 0), [x1, y1] = zuWelt(W, H); let d = '', d5 = '';
+    for(let x = Math.floor(x0); x <= x1; x++){ const px = zuPx([x, 0])[0].toFixed(1); (x % 5 ? (s => d += s) : (s => d5 += s))(`M${px} 0V${H}`); }
+    for(let y = Math.floor(y0); y <= y1; y++){ const py = zuPx([0, y])[1].toFixed(1); (y % 5 ? (s => d += s) : (s => d5 += s))(`M0 ${py}H${W}`); }
+    if(ansicht.s > 8) el('path', { d, stroke: css('--raster'), 'stroke-width': 1 });
+    el('path', { d: d5, stroke: css('--raster2'), 'stroke-width': 1 });
+  }
+  // Luftbild-Andeutung (im echten Tool: swisstopo-Luftbild mit Deckkraft)
+  const luft = Number($('#luft').value) / 100;
+  // Luftbild swisstopo (WMS, LV95) unter dem Plan, Deckkraft über den Regler
+  if(luft > 0 && grundlage?.luft){ const L = grundlage.luft, [x, y] = zuPx([L.x0, L.y0]); el('image', { href: L.url, x, y, width: (L.x1 - L.x0) * ansicht.s, height: (L.y1 - L.y0) * ansicht.s, opacity: luft, preserveAspectRatio: 'none' }); }
+  // Bestand (amtliche Vermessung)
+  if(ebenen.bestand){
+    nachbarParz.forEach(p => el('path', { d: pfad(p, true), fill: 'none', stroke: css('--muted'), 'stroke-width': 0.8, 'stroke-dasharray': '6 3' }));
+    nachbarn.forEach(p => el('path', { d: pfad(p, true), fill: 'url(#mHaus)', stroke: css('--muted'), 'stroke-width': 1 }));
+    if(parzelle.length){ el('path', { d: pfad(parzelle, true), fill: 'none', stroke: css('--bestand'), 'stroke-width': 1.6, 'stroke-dasharray': '10 3 2 3' });
+      const b = bb(parzelle); textAt([(b.minX + b.maxX) / 2, b.minY + 1.2], `Parzelle ${grundlage?.parzelle_nr || ''} · ${Math.round(grundlage?.flaeche || fl(parzelle))} m²`, { fs: 11, fill: css('--muted') }); }
+    nebengeb.forEach(p => el('path', { d: pfad(p, true), fill: 'url(#mHaus)', stroke: css('--bestand'), 'stroke-width': 1.2 }));
+    if(haus.length){ el('path', { d: pfad(haus, true), fill: 'url(#mHaus)', stroke: css('--bestand'), 'stroke-width': 1.6 }); textAt(schwer(haus), 'Wohnhaus', { fs: 12, fw: 600 }); }
+  }
+  // Projekt-Flächen
+  if(ebenen.projekt){
+    objs.filter(o => BAUTEILE[o.typ]?.art === 'flaeche').forEach(o => {
+      el('path', { d: pfad(o.pts, true), fill: BAUTEILE[o.typ].farbe, stroke: '#6B737D', 'stroke-width': 1, 'data-id': o.id });
+      { const c = schwer(o.pts); textAt(c, `${BAUTEILE[o.typ].n} ${f2(fl(o.pts))} m²`, { fs: 11, fw: 600 }); }
+    });
+    objs.filter(o => o.typ === 'mauer').forEach(o => {
+      el('path', { d: pfad(o.pts), fill: 'none', stroke: '#6B737D', 'stroke-width': o.d * ansicht.s + 2, 'stroke-linejoin': 'miter' });
+      el('path', { d: pfad(o.pts), fill: 'none', stroke: BAUTEILE.mauer.farbe, 'stroke-width': o.d * ansicht.s, 'stroke-linejoin': 'miter' });
+      if(ebeneAn(istBew(o) ? 'bew' : 'aus')) mauerMasse(o);
+    });
+    objs.filter(o => ['linie','bogen'].includes(o.typ)).forEach(o => el('path', { d: pfad(o.pts), fill: 'none', stroke: css('--ink'), 'stroke-width': 1.4 }));
+    objs.filter(o => o.typ === 'rechteck').forEach(o => el('path', { d: pfad(o.pts, true), fill: 'none', stroke: css('--ink'), 'stroke-width': 1.4 }));
+    objs.filter(o => o.typ === 'kreis').forEach(o => el('path', { d: pfad(kreisPts(o.c, o.r), true), fill: 'none', stroke: css('--ink'), 'stroke-width': 1.4 }));
+    objs.filter(o => o.typ === 'objekt').forEach(o => {
+      const p = o.r ? kreisPts(o.c, o.r) : [[o.c[0] - o.b / 2, o.c[1] - o.t / 2], [o.c[0] + o.b / 2, o.c[1] - o.t / 2], [o.c[0] + o.b / 2, o.c[1] + o.t / 2], [o.c[0] - o.b / 2, o.c[1] + o.t / 2]];
+      el('path', { d: pfad(p, true), fill: css('--card'), stroke: css('--ink'), 'stroke-width': 1.2 });
+      textAt([o.c[0], o.c[1] + (o.r || o.t / 2) + 0.55], o.n, { fs: 10, fill: css('--muted') });
+    });
+    objs.filter(o => o.typ === 'text').forEach(o => textAt(o.c, o.txt, { fs: 12, fw: 600 }));
+  }
+  // Bepflanzung
+  if(ebenen.pflanzen) objs.filter(o => o.typ === 'pflanze').forEach(o => {
+    const [x, y] = zuPx(o.c), r = o.r * ansicht.s;
+    el('circle', { cx: x, cy: y, r, fill: o.f, 'fill-opacity': .75, stroke: '#5E6A4A', 'stroke-width': 1 });
+    if(r > 10){ const n = Math.max(6, Math.round(r / 4)); let d = ''; for(let i = 0; i < n; i++){ const a = i / n * 2 * Math.PI; d += `M${x} ${y}L${x + Math.cos(a) * r * .8} ${y + Math.sin(a) * r * .8}`; } el('path', { d, stroke: '#5E6A4A', 'stroke-width': .6, opacity: .6 }); }
+    el('circle', { cx: x, cy: y, r: 1.6, fill: '#5E6A4A' });
+  });
+  // Masse & Koten
+  massLabels = [];
+  tickHits = [];
+  if(ebenen.maus) objs.filter(o => o.typ === 'mass').forEach(o => { const p = massPts(o); masslinie(p[0], p[1], 0, sel === o.id ? css('--sel') : css('--ink')); });
+  objs.filter(o => o.typ === 'kette' && ebeneAn(o.ebene || 'aus')).forEach(k => ketteZeichnen(k));
+  objs.filter(o => o.typ === 'abstand' && ebeneAn(o.ebene)).forEach(a => abstandZeichnen(a));
+  if(ebenen.koten){
+    objs.filter(o => o.typ === 'kote').forEach(o => {
+      const [x, y] = zuPx(o.c); el('path', { d: `M${x} ${y}l-5 -8h10z`, fill: 'none', stroke: css('--ink'), 'stroke-width': 1.2 }); el('path', { d: `M${x - 9} ${y}h18`, stroke: css('--ink'), 'stroke-width': 1 });
+      const t = textAt([o.c[0] + 0.35, o.c[1] - 0.45], o.wert, { fs: 11, anchor: 'start', fw: 600 });
+      if(o.txt) textAt([o.c[0] + 0.35, o.c[1] + 0.55], o.txt, { fs: 9.5, anchor: 'start', fill: css('--muted') });
+    });
+  }
+  // Auswahl hervorheben
+  if(sel){ const o = objs.find(q => q.id === sel); if(o){
+    const c = css('--sel');
+    if(o.pts && o.typ !== 'mass'){ el('path', { d: pfad(o.pts, BAUTEILE[o.typ]?.art === 'flaeche' || o.typ === 'rechteck'), fill: 'none', stroke: c, 'stroke-width': 2, 'stroke-dasharray': '5 3' });
+      o.pts.forEach(q => { const [x, y] = zuPx(q); el('rect', { x: x - 4, y: y - 4, width: 8, height: 8, fill: css('--card'), stroke: c, 'stroke-width': 1.5 }); });
+      if(BAUTEILE[o.typ]?.art === 'flaeche' || o.typ === 'rechteck') o.pts.forEach((q, i) => masslinie(q, o.pts[(i + 1) % o.pts.length], 0.7, c));
+    }
+    if(o.c){ const [x, y] = zuPx(o.c), r = (o.r || 0.6) * ansicht.s + 4; el('circle', { cx: x, cy: y, r, fill: 'none', stroke: c, 'stroke-width': 2, 'stroke-dasharray': '5 3' }); }
+  } }
+  // Vorschau beim Zeichnen
+  if(temp.length && maus){
+    const c = css('--sel'), p = [...temp, maus];
+    if(werkzeug === 'rechteck'){ const [a] = temp, r = rechteckPts(a, maus); el('path', { d: pfad(r, true), fill: 'none', stroke: c, 'stroke-width': 1.5, 'stroke-dasharray': '6 3' }); masslinie(r[0], r[1], -0.7, c); masslinie(r[1], r[2], -0.7, c); }
+    else if(werkzeug === 'kreis'){ el('path', { d: pfad(kreisPts(temp[0], dist(temp[0], maus)), true), fill: 'none', stroke: c, 'stroke-width': 1.5, 'stroke-dasharray': '6 3' }); masslinie(temp[0], maus, 0, c); }
+    else if(werkzeug === 'bogen' && temp.length === 2){ el('path', { d: pfad(bogenPts(temp[0], maus, temp[1])), fill: 'none', stroke: c, 'stroke-width': 1.5, 'stroke-dasharray': '6 3' }); }
+    else { el('path', { d: pfad(p, werkzeug === 'flaeche' || BAUTEILE[bauteil]?.art === 'flaeche'), fill: BAUTEILE[bauteil]?.art === 'flaeche' ? 'rgba(47,111,181,.08)' : 'none', stroke: c, 'stroke-width': 1.5, 'stroke-dasharray': '6 3' }); masslinie(temp[temp.length - 1], maus, -0.7, c); }
+  }
+  if(maus){ const [x, y] = zuPx(maus); el('path', { d: `M${x - 7} ${y}h14M${x} ${y - 7}v14`, stroke: css('--sel'), 'stroke-width': 1 }); if(fangArt){ el('rect', { x: x - 5, y: y - 5, width: 10, height: 10, fill: 'none', stroke: css('--sel'), 'stroke-width': 1.5 }); const t = el('text', { x: x + 9, y: y - 8, 'font-size': 10.5, fill: css('--sel'), 'font-family': 'Segoe UI,Arial,sans-serif', 'font-weight': 600, 'paint-order': 'stroke', stroke: css('--papier'), 'stroke-width': 3 }); t.textContent = fangArt; } }
+  // Grenzabstand des gewählten Objekts (kürzester Abstand zur Parzellengrenze)
+  if(sel && ebenen.mbew){ const o = objs.find(q => q.id === sel); if(o && !['mass','kote','kette','abstand'].includes(o.typ) && !objs.some(a => a.typ === 'abstand' && a.ref === o.id && a.ziel === 'grenze')){
+    const kanten = parzelle.map((q, i) => [q, parzelle[(i + 1) % parzelle.length]]); let best = null;
+    const pruefe = (pt, rand) => kanten.forEach(([a, b]) => { const f = fussPunkt(pt, a, b); if(f.t < 0 || f.t > 1) return; const d = dist(pt, f.q) - rand; if(!best || d < best.d) best = { d, von: rand ? [pt[0] + (f.q[0] - pt[0]) * rand / dist(pt, f.q), pt[1] + (f.q[1] - pt[1]) * rand / dist(pt, f.q)] : pt, bis: f.q }; });
+    if(o.pts) o.pts.forEach(pt => pruefe(pt, o.typ === 'mauer' ? (o.d || 0) / 2 : 0)); else if(o.c) pruefe(o.c, o.r || (o.b ? Math.max(o.b, o.t) / 2 : 0));
+    if(best){ const c = '#8A6410'; el('path', { d: pfad([best.von, best.bis]), stroke: c, 'stroke-width': 1.2, 'stroke-dasharray': '4 3' });
+      const m = [(best.von[0] + best.bis[0]) / 2, (best.von[1] + best.bis[1]) / 2]; textAt([m[0], m[1] - 0.3], `Grenzabstand ${f2(Math.max(0, best.d))} m`, { fs: 10.5, fill: c, fw: 600 }); }
+  } }
+  // Massstabsbalken (5 m)
+  const m5 = 5 * ansicht.s; $('#mstBar').style.width = m5 + 'px'; $('#mstText').textContent = '0 — 5 m';
+}
+// ===== Massketten (verknüpft): jeder Teilstrich zeigt auf eine Objektkante und wandert mit dem Objekt =====
+let massLabels = [], tickHits = []; // Trefferflächen der Zahlen bzw. der ×-Knöpfe an den Teilstrichen (px)
+const BESTAND = new Set(['haus', 'grenze']);
+const bewegbar = ref => typeof ref === 'number' && objs.some(o => o.id === ref);
+function refPunkte(ref){
+  if(ref === 'haus') return haus.length ? haus : null; if(ref === 'grenze') return parzelle.length ? parzelle : null;
+  const o = objs.find(q => q.id === ref); if(!o) return null; if(o.pts) return o.pts;
+  if(o.c && o.b && !o.r){ const b = o.b / 2, t = o.t / 2; return [[o.c[0] - b, o.c[1] - t], [o.c[0] + b, o.c[1] - t], [o.c[0] + b, o.c[1] + t], [o.c[0] - b, o.c[1] + t]]; }
+  if(o.c){ const r = o.r || 0.3; return [[o.c[0] - r, o.c[1]], [o.c[0] + r, o.c[1]], [o.c[0], o.c[1] - r], [o.c[0], o.c[1] + r]]; }
+  return null;
+}
+// Teilstriche einer Kette: Wert auf der Achse + Zielpunkt der Hilfslinie (Objektpunkt nahe der Kette)
+function ketteTicks(k){
+  const i = k.achse === 'h' ? 0 : 1, j = 1 - i, out = [];
+  k.refs.forEach(t => {
+    const p = refPunkte(t.ref); if(!p) return;
+    const o = typeof t.ref === 'number' ? objs.find(q => q.id === t.ref) : null;
+    const v = t.kante === 'p' ? (p[t.i] || p[0])[i] : t.kante === 'c' && o?.c ? o.c[i] : t.kante === 'min' ? Math.min(...p.map(q => q[i])) : Math.max(...p.map(q => q[i]));
+    const kand = t.kante === 'p' ? [p[t.i] || p[0]] : p.filter(q => Math.abs(q[i] - v) < 0.03); if(!kand.length) kand.push(o?.c || p[0]);
+    const ziel = kand.reduce((b, q) => Math.abs(q[j] - k.pos) < Math.abs(b - k.pos) ? q[j] : b, kand[0][j]);
+    out.push({ t, v, ziel });
+  });
+  out.sort((a, b) => a.v - b.v);
+  return out.filter((x, n) => !n || Math.abs(x.v - out[n - 1].v) > 0.02);
+}
+// Ende der Hilfslinie (Regel 16/17): hört vor dem Objekt auf – mit viel Platz grössere Lücke (0.6 m), eng kleinere (0.3 m);
+// «kurz» = nur ein Stück ab der Masslinie (k.kurzL, Standard 1 m), z. B. damit sie nicht in ein anderes Mass läuft
+function hilfsEnde(k, x, s){
+  if(x.t.ende != null) return x.t.ende;
+  const weg = Math.abs(x.ziel - k.pos);
+  if(k.kurz) return k.pos + s * Math.max(0.2, Math.min(k.kurzL ?? 1, weg - 0.3));
+  return x.ziel - s * (weg > 2 ? 0.6 : 0.3);
+}
+const kp = (k, v, w) => k.achse === 'h' ? [v, w] : [w, v]; // (Achswert, Querwert) → Weltpunkt
+function ketteZeichnen(k){
+  const ticks = ketteTicks(k); if(ticks.length < 2) return;
+  const istSel = sel === k.id, c = istSel ? css('--sel') : css('--ink'), mut = istSel ? css('--sel') : css('--muted');
+  const a = kp(k, ticks[0].v, k.pos), b = kp(k, ticks[ticks.length - 1].v, k.pos);
+  el('path', { d: pfad([a, b]), stroke: c, 'stroke-width': istSel ? 1.6 : 1, fill: 'none' });
+  ticks.forEach(x => {
+    const s = Math.sign(x.ziel - k.pos) || 1;
+    const ende = hilfsEnde(k, x, s);
+    el('path', { d: pfad([kp(k, x.v, k.pos - s * 0.25), kp(k, x.v, ende)]), stroke: mut, 'stroke-width': 0.8 });
+    const [px, py] = zuPx(kp(k, x.v, k.pos)); el('path', { d: `M${px - 4} ${py + 4}L${px + 4} ${py - 4}`, stroke: c, 'stroke-width': 1.3 });
+    if(istSel){ const [hx, hy] = zuPx(kp(k, x.v, ende)); el('circle', { cx: hx, cy: hy, r: 4.5, fill: css('--card'), stroke: c, 'stroke-width': 1.5 });
+      // × = diesen Teilstrich aus der Kette entfernen
+      const [tx, ty] = zuPx(kp(k, x.v, k.pos + 0.6)); el('circle', { cx: tx, cy: ty, r: 6.5, fill: css('--card'), stroke: '#B4655F', 'stroke-width': 1.2 });
+      el('path', { d: `M${tx - 2.8} ${ty - 2.8}L${tx + 2.8} ${ty + 2.8}M${tx + 2.8} ${ty - 2.8}L${tx - 2.8} ${ty + 2.8}`, stroke: '#B4655F', 'stroke-width': 1.3 });
+      tickHits.push({ k, t: x.t, x: tx, y: ty }); }
+  });
+  ticks.forEach((x, n) => { if(!n) return;
+    const v1 = ticks[n - 1].v, v2 = x.v, txt = f2(v2 - v1);
+    // Zu eng für die Zahl (Regel 19): daneben schreiben, auf die Seite mit dem längeren Nachbarstück
+    let mitteV = (v1 + v2) / 2;
+    if((v2 - v1) * ansicht.s < 26){ const vor = n > 1 ? v1 - ticks[n - 2].v : 0, nach = n < ticks.length - 1 ? ticks[n + 1].v - v2 : 0, breit = (txt.length * 6 + 6) / ansicht.s;
+      mitteV = nach >= vor ? v2 + breit / 2 + 0.15 : v1 - breit / 2 - 0.15; }
+    const m = kp(k, mitteV, k.pos - 0.35), [mx, my] = zuPx(m);
+    textAt(m, txt, { fs: 10.5, fill: c, fw: 600, rot: k.achse === 'v' ? -90 : 0 });
+    const w = txt.length * 6 + 8; massLabels.push({ k, n, x: mx, y: my - (k.achse === 'h' ? 4 : 0), w: k.achse === 'h' ? w : 16, h: k.achse === 'h' ? 16 : w });
+  });
+}
+function bb(p){ return { minX: Math.min(...p.map(q => q[0])), maxX: Math.max(...p.map(q => q[0])), minY: Math.min(...p.map(q => q[1])), maxY: Math.max(...p.map(q => q[1])) }; }
+// Automatisch: vier Ketten rund um die Parzelle; jedes Objekt kommt auf die Kette der Seite, auf der es liegt
+// Vermassungsregeln V1 (Stefan, 15.11.2026):
+// 1 Bewilligungsrelevante Objekte (Pool, Gerätehaus, Mauer ab 1 m, Schwimmteich, von Hand z. B. grosser Baum): L × B, Grenzabstand rechtwinklig zur Grenze, Abstand zum Haus
+// 2 Rechteckige Plätze (Belag, rechteckiges Beet) und Teich/Pool: Gesamtlänge/-breite auf eigener kurzer Kette nahe am Objekt + Abstand zum Haus
+// 3 Unförmige Flächen (Rasen, freie Beete) und Pflanzen: keine Masse (Pflanzen nur wenn relevant, dann Zentrum)
+// 4 Haus: aussen nur Gesamtmasse; Zwischenmasse (Rücksprünge) auf eigener Kette im Haus
+// 5 Eigene Masslinien und von Hand gelöschte Teilmasse bleiben; «Vermassen» setzt nur die automatischen neu
+const istRechteck = p => p && p.length === 4 && p.every((q, i) => { const r = p[(i + 1) % 4]; return Math.abs(q[0] - r[0]) < 0.03 || Math.abs(q[1] - r[1]) < 0.03; });
+function autoVermassen(still){
+  merken();
+  objs = objs.filter(o => !o.auto);
+  const add = o => objs.push({ id: nextId++, auto: true, kurz: false, ...o });
+  const g = bb(parzelle), hb = bb(haus), mx = (g.minX + g.maxX) / 2, my = (g.minY + g.maxY) / 2;
+  const mitte = ref => { const b = bb(refPunkte(ref)); return [(b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2]; };
+  // Regeln V2 (Stefan, 15.11.2026): aussen vor innen · innen nur wenn etwas im Weg ist, dann auf der freien Seite (Hausflucht) ·
+  // keine Doppelmasse · keine Masse in Objekten (Rücksprung: nur das nicht ableitbare, nahe der Kante) · jedes Objekt mit Hausbezug ·
+  // kleine Objekte (Gerätehaus) direkt am Objekt · Grenzabstände abgesetzt mit Hilfslinien
+  const ref2 = r => [{ ref: r, kante: 'min' }, { ref: r, kante: 'max' }];
+  const isPlatz = o => ((o.typ === 'belag' || o.typ === 'kies' || o.typ === 'beet') && istRechteck(o.pts)) || o.typ === 'pool' || o.typ === 'teich';
+  // Vorsprung über die Hausecke (Regel 15): Hausecken auf der berührenden Kante kommen als Teilstrich auf dieselbe Kette
+  const hausVorsprung = (b, achse) => haus.map((p, n) => ({ p, n })).filter(({ p }) => achse === 'v'
+    ? (Math.abs(p[0] - b.minX) < 0.03 || Math.abs(p[0] - b.maxX) < 0.03) && p[1] > b.minY + 0.05 && p[1] < b.maxY - 0.05
+    : (Math.abs(p[1] - b.minY) < 0.03 || Math.abs(p[1] - b.maxY) < 0.03) && p[0] > b.minX + 0.05 && p[0] < b.maxX - 0.05).map(({ n }) => ({ ref: 'haus', kante: 'p', i: n }));
+  const plaetze = objs.filter(o => !o.auto && isPlatz(o));
+  const klein = objs.filter(o => !o.auto && o.typ === 'objekt' && istBew(o));
+  // Hindernisse für den Weg zum Rand: Haus, Plätze, kleine Bauten (Rasen, Kies, Mauern, Pflanzen zählen nicht)
+  const hind = [{ id: 'haus', b: hb }, ...plaetze.map(o => ({ id: o.id, b: bb(o.pts) })), ...klein.map(o => ({ id: o.id, b: bb(refPunkte(o.id)) }))];
+  const frei = (o, seite) => { const b = bb(refPunkte(o.id)); return !hind.some(h => { if(h.id === o.id) return false; const x = h.b.minX < b.maxX - 0.05 && h.b.maxX > b.minX + 0.05, y = h.b.minY < b.maxY - 0.05 && h.b.maxY > b.minY + 0.05;
+    return seite === 'oben' ? x && h.b.maxY <= b.minY + 0.05 : seite === 'unten' ? x && h.b.minY >= b.maxY - 0.05 : seite === 'links' ? y && h.b.maxX <= b.minX + 0.05 : y && h.b.minX >= b.maxX - 0.05; }); };
+  const ketten = { oben: ref2('haus'), unten: [], links: ref2('haus'), rechts: ref2('haus') };
+  const lokal = [];
+  plaetze.forEach(o => { const b = bb(o.pts);
+    const ou = ['oben', 'unten'].filter(s => frei(o, s)).sort((s1, s2) => (s1 === 'oben' ? b.minY - g.minY : g.maxY - b.maxY) - (s2 === 'oben' ? b.minY - g.minY : g.maxY - b.maxY));
+    const lr = ['links', 'rechts'].filter(s => frei(o, s)).sort((s1, s2) => (s1 === 'links' ? b.minX - g.minX : g.maxX - b.maxX) - (s2 === 'links' ? b.minX - g.minX : g.maxX - b.maxX));
+    if(ou.length) ketten[ou[0]].push(...ref2(o.id)); else lokal.push({ o, achse: 'h' });
+    if(lr.length) ketten[lr[0]].push(...ref2(o.id)); else lokal.push({ o, achse: 'v' });
+  });
+  const posAussen = { oben: g.minY - 1.4, unten: g.maxY + 1.4, links: g.minX - 1.6, rechts: g.maxX + 1.6 };
+  // oben + links tragen immer das Haus (Gesamtmasse); rechts nur, wenn dort Objekte sind; unten ohne Haus (sonst Doppelmasse)
+  for(const s in ketten){ const n = ketten[s].length; if(n < 2 || (s === 'rechts' && n === 2)) continue;
+    add({ typ: 'kette', achse: s === 'oben' || s === 'unten' ? 'h' : 'v', pos: posAussen[s], refs: ketten[s], ebene: 'aus' }); }
+  // Lokale Masse auf der freien Seite; liegt dort eine Hausflucht, auf diese Linie
+  const hx = [...new Set(haus.map(p => p[0]))], hy = [...new Set(haus.map(p => p[1]))];
+  // Regel 20: grenzt direkt eine grosse Fläche an (Teich, Pool > 20 m²), die Masslinie weiter in diese Fläche legen
+  const grossDaneben = (o, b, achse) => hind.some(h => { if(h.id === o.id || typeof h.id !== 'number') return false; const q = objs.find(x => x.id === h.id); if(!q?.pts || fl(q.pts) < 20) return false;
+    return achse === 'v' ? h.b.minY < b.maxY && h.b.maxY > b.minY && h.b.minX >= b.maxX - 0.05 && h.b.minX - b.maxX < 0.5 : h.b.minX < b.maxX && h.b.maxX > b.minX && h.b.minY >= b.maxY - 0.05 && h.b.minY - b.maxY < 0.5; });
+  lokal.forEach(({ o, achse }) => { const b = bb(o.pts);
+    if(achse === 'v'){ const nachbar = hind.filter(h => h.id !== o.id && h.b.minY < b.maxY && h.b.maxY > b.minY && h.b.minX >= b.maxX).map(h => h.b.minX); const grenze = Math.min(g.maxX, ...nachbar);
+      const flucht = hx.find(x => x > b.maxX + 0.5 && x < grenze - 0.5), vs = hausVorsprung(b, 'v'), pos = flucht ?? b.maxX + (grossDaneben(o, b, 'v') ? 1.8 : 0.8);
+      add({ typ: 'kette', achse: 'v', pos, refs: [...ref2(o.id), ...vs], ebene: istBew(o) ? 'bew' : 'aus' });
+      if(vs.length) add({ typ: 'kette', achse: 'v', pos: pos + 0.8, refs: ref2(o.id), ebene: istBew(o) ? 'bew' : 'aus' }); } // Gesamtmass gleich daneben, gleiche Seite
+    else { const nachbar = hind.filter(h => h.id !== o.id && h.b.minX < b.maxX && h.b.maxX > b.minX && h.b.minY >= b.maxY).map(h => h.b.minY); const grenze = Math.min(g.maxY, ...nachbar);
+      const flucht = hy.find(y => y > b.maxY + 0.5 && y < grenze - 0.5), vs = hausVorsprung(b, 'h'), pos = flucht ?? b.maxY + (grossDaneben(o, b, 'h') ? 1.8 : 0.8);
+      add({ typ: 'kette', achse: 'h', pos, refs: [...ref2(o.id), ...vs], ebene: istBew(o) ? 'bew' : 'aus' });
+      if(vs.length) add({ typ: 'kette', achse: 'h', pos: pos + 0.8, refs: ref2(o.id), ebene: istBew(o) ? 'bew' : 'aus' }); }
+  });
+  // Haus-Rücksprung: nur das Mass, das sich nicht aus dem Gesamtmass ausrechnen lässt, knapp innen an der Rücksprung-Kante
+  const hausZwischen = (achse) => { const i = achse === 'h' ? 0 : 1, j = 1 - i; const werte = [...new Set(haus.map(p => +p[i].toFixed(2)))].sort((a, b) => a - b); if(werte.length !== 3) return;
+    const kurz = werte[1] - werte[0] < werte[2] - werte[1] ? [werte[0], werte[1]] : [werte[1], werte[2]];
+    const kante = haus.map((p, n) => [p, haus[(n + 1) % haus.length]]).find(([a, c]) => Math.abs(a[j] - c[j]) < 0.01 && [a[i], c[i]].map(v => +v.toFixed(2)).sort((x, y) => x - y).join() === kurz.join()); if(!kante) return;
+    const mitteH = (hb.minX + hb.maxX) / 2, mitteV = (hb.minY + hb.maxY) / 2, innen = (achse === 'h' ? mitteV : mitteH) > kante[0][j] ? 1 : -1;
+    const idx = kurz.map(v => haus.findIndex(p => Math.abs(p[i] - v) < 0.01 && Math.abs(p[j] - kante[0][j]) < 0.01));
+    add({ typ: 'kette', achse, pos: kante[0][j] + innen * 0.9, refs: idx.map(n => ({ ref: 'haus', kante: 'p', i: n })), ebene: 'aus' }); };
+  hausZwischen('h'); hausZwischen('v');
+  // Kleine Bauten: L × B direkt am Objekt, Hausabstand; alle Relevanten: Grenzabstand
+  klein.forEach(o => { const b = bb(refPunkte(o.id));
+    // Liegt das Haus seitlich daneben: Breite + Hausabstand auf EINER Linie (Regel 10), etwas weiter weg vom Objekt (Platz für den Grenzabstand)
+    const hausDaneben = hb.minY < b.maxY && hb.maxY > b.minY;
+    const refsH = ref2(o.id); if(hausDaneben) refsH.push({ ref: 'haus', kante: b.maxX <= hb.minX ? 'min' : 'max' });
+    // weiter weg vom Gerätehaus; Hilfslinien kurz, damit sie vor dem Grenzabstand aufhören (Regel 18)
+    add({ typ: 'kette', achse: 'h', pos: b.minY - 1.9, refs: refsH, ebene: 'bew', kurz: true, kurzL: 0.7 });
+    add({ typ: 'kette', achse: 'v', pos: b.maxX + 0.6, refs: ref2(o.id), ebene: 'bew' });
+    if(!hausDaneben){ const a = { typ: 'abstand', ref: o.id, ziel: 'haus', ebene: 'bew' }; const gg = abstandGeo(a); if(gg && gg.d > 0.05) add(a); } });
+  // Grenzabstand: Masslinie auf die Seite mit mehr Platz zum Objekt (weg vom spitzen Winkel, Regel 12), gut abgesetzt (Regel 8)
+  objs.filter(o => !o.auto && istBew(o) && (o.pts || o.c)).forEach(o => {
+    const a = { typ: 'abstand', ref: o.id, ziel: 'grenze', ebene: 'bew' }, g2 = abstandGeo(a); if(!g2 || g2.d < 0.01) return;
+    const nx = -(g2.bis[1] - g2.von[1]) / g2.d, ny = (g2.bis[0] - g2.von[0]) / g2.d, poly = o.typ === 'pflanze' ? [o.c] : (o.pts || refPunkte(o.id));
+    const platzBei = s => { const m = [(g2.von[0] + g2.bis[0]) / 2 + nx * 0.8 * s, (g2.von[1] + g2.bis[1]) / 2 + ny * 0.8 * s, ]; return Math.min(...poly.map((q, i) => poly.length > 1 ? segDist(m, q, poly[(i + 1) % poly.length]) : dist(m, q))); };
+    a.off = (platzBei(1) >= platzBei(-1) ? 1 : -1) * 0.8; add(a); });
+  sel = null; alles();
+  if(!still) toast('Vermassung neu gesetzt – eigene Masslinien bleiben');
+}
+// Abstand Objekt → Haus bzw. Grenze (kürzeste Verbindung, zur Grenze immer rechtwinklig); wandert mit dem Objekt
+function abstandGeo(a){
+  const o = objs.find(q => q.id === a.ref); if(!o) return null;
+  const punkte = o.typ === 'pflanze' ? [o.c] : (o.pts || refPunkte(o.id)); if(!punkte) return null;
+  const ziel = a.ziel === 'haus' ? haus : parzelle, kanten = ziel.map((q, i) => [q, ziel[(i + 1) % ziel.length]]);
+  const okanten = o.pts && o.pts.length > 1 ? o.pts.map((q, i) => [q, o.pts[(i + 1) % o.pts.length]]) : (o.b ? refPunkte(o.id).map((q, i, r) => [q, r[(i + 1) % 4]]) : []);
+  let best = null;
+  punkte.forEach(pt => kanten.forEach(([k1, k2]) => { const f = fussPunkt(pt, k1, k2); if(f.t < 0 || f.t > 1) return; const d = dist(pt, f.q); if(!best || d < best.d) best = { d, von: pt, bis: f.q }; }));
+  if(a.ziel === 'haus') ziel.forEach(hp => okanten.forEach(([k1, k2]) => { const f = fussPunkt(hp, k1, k2); if(f.t < 0 || f.t > 1) return; const d = dist(hp, f.q); if(!best || d < best.d) best = { d, von: f.q, bis: hp }; }));
+  return best;
+}
+function abstandZeichnen(a){
+  const g = abstandGeo(a); if(!g || g.d < 0.01) return;
+  const istSel = sel === a.id, c = istSel ? css('--sel') : (a.ziel === 'grenze' ? '#8A6410' : css('--ink'));
+  // Masslinie leicht abgesetzt (0.5 m), kurze Hilfslinien mit kleinem Abstand zum Objekt bzw. zur Grenze
+  const dx = g.bis[0] - g.von[0], dy = g.bis[1] - g.von[1], nx = -dy / g.d, ny = dx / g.d, off = a.off ?? 0.5;
+  const v2 = [g.von[0] + nx * off, g.von[1] + ny * off], b2 = [g.bis[0] + nx * off, g.bis[1] + ny * off];
+  const hl = (p, q) => pfad([[p[0] + nx * 0.12 * Math.sign(off), p[1] + ny * 0.12 * Math.sign(off)], [q[0] + nx * 0.2 * Math.sign(off), q[1] + ny * 0.2 * Math.sign(off)]]);
+  el('path', { d: hl(g.von, v2) + hl(g.bis, b2), stroke: c, 'stroke-width': 0.8, fill: 'none' });
+  el('path', { d: pfad([v2, b2]), stroke: c, 'stroke-width': istSel ? 1.6 : 1, fill: 'none' });
+  [v2, b2].forEach(q => { const [x, y] = zuPx(q); el('path', { d: `M${x - 4} ${y + 4}L${x + 4} ${y - 4}`, stroke: c, 'stroke-width': 1.3 }); });
+  let rot = Math.atan2(dy, dx) * 180 / Math.PI; if(rot > 90 || rot < -90) rot += 180;
+  const m = [(v2[0] + b2[0]) / 2 + nx * 0.3, (v2[1] + b2[1]) / 2 + ny * 0.3], txt = f2(g.d);
+  if(g.d * ansicht.s < 16) return;
+  textAt(m, txt, { fs: 10.5, fill: c, fw: 600, rot });
+  const [mx, my] = zuPx(m); massLabels.push({ abst: a, x: mx, y: my - 4, w: Math.abs(Math.cos(rot * Math.PI / 180)) > 0.5 ? txt.length * 6 + 8 : 16, h: Math.abs(Math.cos(rot * Math.PI / 180)) > 0.5 ? 16 : txt.length * 6 + 8 });
+}
+function abstandTreffer(w){ const tol = 6 / ansicht.s; return objs.filter(o => o.typ === 'abstand' && ebeneAn(o.ebene)).find(a => { const g = abstandGeo(a); if(!g || g.d < 0.01) return false;
+  const nx = -(g.bis[1] - g.von[1]) / g.d, ny = (g.bis[0] - g.von[0]) / g.d, off = a.off ?? 0.5; return segDist(w, [g.von[0] + nx * off, g.von[1] + ny * off], [g.bis[0] + nx * off, g.bis[1] + ny * off]) < tol; }); }
+// Masslinie: Endpunkte können an Objektecken verankert sein
+function massPts(o){ return o.pts.map((q, i) => { const a = o.anker?.[i]; if(!a) return q; if(a.i === 'c'){ const r = objs.find(x => x.id === a.ref); return r?.c || q; } const p = refPunkte(a.ref); return p && p[a.i] ? p[a.i] : q; }); }
+// Mass ändern: Bestand bleibt fix; sonst rückt das nächste bewegliche Objekt (bzw. das Objekt selbst wird länger)
+function verschiebeObjekt(ref, achse, d){ const o = objs.find(q => q.id === ref); if(!o) return; const i = achse === 'h' ? 0 : 1;
+  if(o.pts) o.pts = o.pts.map(q => { const r = q.slice(); r[i] += d; return r; }); if(o.c){ o.c = o.c.slice(); o.c[i] += d; } }
+function massAendern(k, n, neuWert){
+  const ticks = ketteTicks(k), t1 = ticks[n - 1], t2 = ticks[n], alt = t2.v - t1.v, d = neuWert - alt, i = k.achse === 'h' ? 0 : 1;
+  if(!(neuWert > 0) || Math.abs(d) < 0.001) return;
+  if(t1.t.ref === t2.t.ref){ // eigenes Mass eines Objekts → Objekt strecken
+    if(!bewegbar(t1.t.ref)){ toast('Haus und Grenze sind Bestand und bleiben fix'); return; }
+    merken(); const o = objs.find(q => q.id === t1.t.ref);
+    if(o.pts) o.pts = o.pts.map(q => { const r = q.slice(); if(r[i] > t2.v - 0.03) r[i] += d; return r; });
+    else if(o.c && o.r){ o.r = Math.max(0.1, o.r + d / 2); }
+  } else if(bewegbar(t2.t.ref)){ merken(); verschiebeObjekt(t2.t.ref, k.achse, d); }
+  else if(bewegbar(t1.t.ref)){ merken(); verschiebeObjekt(t1.t.ref, k.achse, -d); }
+  else { toast('Zwischen Haus und Grenze gibt es nichts zu verschieben'); return; }
+  alles();
+}
+function massEingabe(lab){
+  document.getElementById('massEdit')?.remove();
+  const ticks = ketteTicks(lab.k), alt = ticks[lab.n].v - ticks[lab.n - 1].v;
+  const inp = document.createElement('input'); inp.id = 'massEdit'; inp.value = alt.toFixed(2); inp.setAttribute('aria-label', 'Mass ändern');
+  Object.assign(inp.style, { position: 'absolute', left: (lab.x - 34) + 'px', top: (lab.y - 13) + 'px', width: '68px', zIndex: 6, textAlign: 'center', border: '1.5px solid var(--sel)', borderRadius: '6px', padding: '3px 4px', background: 'var(--card)', fontWeight: 600 });
+  $('#mitte').appendChild(inp); inp.select();
+  const fertigE = ok => { if(ok) massAendern(lab.k, lab.n, Number(inp.value.replace(',', '.'))); inp.remove(); };
+  inp.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); fertigE(true); } if(e.key === 'Escape') fertigE(false); });
+  inp.addEventListener('blur', () => fertigE(true));
+}
+// Abstand ändern: Objekt rückt entlang der Abstandslinie (Haus und Grenze bleiben fix)
+function abstandEingabe(a){
+  document.getElementById('massEdit')?.remove();
+  const lab = massLabels.find(l => l.abst === a); const g = abstandGeo(a); if(!lab || !g) return;
+  const inp = document.createElement('input'); inp.id = 'massEdit'; inp.value = g.d.toFixed(2); inp.setAttribute('aria-label', 'Abstand ändern');
+  Object.assign(inp.style, { position: 'absolute', left: (lab.x - 34) + 'px', top: (lab.y - 13) + 'px', width: '68px', zIndex: 6, textAlign: 'center', border: '1.5px solid var(--sel)', borderRadius: '6px', padding: '3px 4px', background: 'var(--card)', fontWeight: 600 });
+  $('#mitte').appendChild(inp); inp.select();
+  const fertigE = ok => { if(!inp.isConnected) return; inp.remove(); if(!ok) return; const neuW = Number(inp.value.replace(',', '.')); if(!(neuW >= 0) || Math.abs(neuW - g.d) < 0.001) return;
+    const ux = (g.von[0] - g.bis[0]) / g.d, uy = (g.von[1] - g.bis[1]) / g.d, d = neuW - g.d; merken();
+    verschiebeObjekt(a.ref, 'h', ux * d); verschiebeObjekt(a.ref, 'v', uy * d); alles(); };
+  inp.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); fertigE(true); } if(e.key === 'Escape') fertigE(false); });
+  inp.addEventListener('blur', () => fertigE(true));
+}
+function ketteTreffer(w){
+  const tol = 7 / ansicht.s;
+  return objs.filter(o => o.typ === 'kette' && ebeneAn(o.ebene || 'aus')).find(k => { const t = ketteTicks(k); if(t.length < 2) return false; const i = k.achse === 'h' ? 0 : 1, j = 1 - i;
+    return Math.abs(w[j] - k.pos) < tol && w[i] >= t[0].v - tol && w[i] <= t[t.length - 1].v + tol; });
+}
+function griffBei(w){ const k = objs.find(q => q.id === sel && q.typ === 'kette'); if(!k) return null; const tol = 7 / ansicht.s;
+  for(const x of ketteTicks(k)){ const s = Math.sign(x.ziel - k.pos) || 1, ende = hilfsEnde(k, x, s);
+    if(dist(w, kp(k, x.v, ende)) < tol) return x.t; } return null; }
+// Mauer: nie in der Mitte vermassen. Aussenmass an der Aussenkante (bei Ecken die konvexe Seite, mit Gehrung),
+// gerade Mauer: Seite weg von der Gartenmitte. Mauerdicke klein auf der Innenseite.
+function mauerMasse(o){
+  const p = o.pts, d = o.d || 0.3, n = p.map((q, i) => i ? (() => { const a = p[i - 1], l = dist(a, q) || 1; return [-(q[1] - a[1]) / l, (q[0] - a[0]) / l]; })() : null);
+  // Seite bestimmen: bei mehreren Schenkeln die konvexe Seite (weg von den anderen Punkten), sonst weg von der Gartenmitte
+  let s;
+  if(p.length > 2){ const a = p[0], b = p[1], m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], und = p.slice(2).reduce((t, q) => t + n[1][0] * (q[0] - m[0]) + n[1][1] * (q[1] - m[1]), 0); s = und > 0 ? -1 : 1; }
+  else { const c0 = schwer(parzelle), m = [(p[0][0] + p[1][0]) / 2, (p[0][1] + p[1][1]) / 2]; s = n[1][0] * (m[0] - c0[0]) + n[1][1] * (m[1] - c0[1]) > 0 ? 1 : -1; }
+  // Aussenkante als versetzte Linie mit Gehrung an den Ecken
+  const h = s * d / 2, kante = p.map((q, i) => {
+    if(i === 0) return [q[0] + n[1][0] * h, q[1] + n[1][1] * h];
+    if(i === p.length - 1) return [q[0] + n[i][0] * h, q[1] + n[i][1] * h];
+    const n1 = n[i], n2 = n[i + 1], mx = n1[0] + n2[0], my = n1[1] + n2[1], ml = Math.hypot(mx, my) || 1, ux = mx / ml, uy = my / ml, k = h / (ux * n1[0] + uy * n1[1] || 1);
+    return [q[0] + ux * k, q[1] + uy * k];
+  });
+  kante.forEach((q, i) => { if(i) masslinie(kante[i - 1], q, s * 0.8, css('--ink')); });
+  // Mauerdicke klein auf der Innenseite des längsten Schenkels
+  let li = 1; p.forEach((q, i) => { if(i && dist(p[i - 1], q) > dist(p[li - 1], p[li])) li = i; });
+  const a = p[li - 1], b = p[li], m = [a[0] + (b[0] - a[0]) * 0.2 - n[li][0] * s * (d / 2 + 0.35), a[1] + (b[1] - a[1]) * 0.2 - n[li][1] * s * (d / 2 + 0.35)]; // nicht in der Mitte (dort steht meist die Kote)
+  let rot = Math.atan2(b[1] - a[1], b[0] - a[0]) * 180 / Math.PI; if(rot > 90 || rot < -90) rot += 180;
+  textAt(m, `Mauer ${Math.round(d * 100)} cm`, { fs: 9.5, fill: css('--muted'), rot });
+}
+const schwer = p => { const s = p.reduce((a, q) => [a[0] + q[0], a[1] + q[1]], [0, 0]); return [s[0] / p.length, s[1] / p.length]; };
+function rechteckPts(a, b){ return [[a[0], a[1]], [b[0], a[1]], [b[0], b[1]], [a[0], b[1]]]; }
+
+// ===== Eigenschaften + Mengen =====
+const IC_TRASH = '<svg viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>';
+function eigenschaften(){
+  const box = $('#eigenschaften'), o = objs.find(q => q.id === sel);
+  if(!o){ box.innerHTML = `<h3>Eigenschaften</h3><p class="leer">Klick ein Element im Plan an. Zum Zeichnen links ein Werkzeug oder Bauteil wählen, Punkte klicken und Masse unten eintippen (z. B. 4.50 ↵).</p>`; return; }
+  const bt = BAUTEILE[o.typ]; let html = '', name = bt?.n || { pflanze:'Pflanze', kote:'Höhenkote', mass:'Masslinie', kette: o.achse === 'h' ? 'Masskette waagrecht' : 'Masskette senkrecht', abstand: o.ziel === 'haus' ? 'Abstand zum Haus' : 'Grenzabstand', objekt:o.n, linie:'Linie', rechteck:'Rechteck', kreis:'Kreis', bogen:'Bogen', text:'Text' }[o.typ];
+  const farbe = bt ? (bt.muster || bt.farbe) : (o.f || 'transparent');
+  html += `<div class="typzeile"><span class="farb" style="background:${farbe}"></span>${name}<span class="sp"></span><button class="ibtn danger" id="loeschen" title="Löschen" aria-label="Löschen">${IC_TRASH}</button></div><div class="eig">`;
+  if(bt) html += `<label for="eMat">Material</label><select id="eMat">${bt.mats.map(m => `<option${m === o.mat ? ' selected' : ''}>${m}</option>`).join('')}</select>`;
+  if(o.typ === 'mauer'){
+    const L = laenge(o.pts); html += `<label for="eH">Höhe (m)</label><input id="eH" type="number" step="0.05" value="${o.h}"><label for="eD">Dicke (m)</label><input id="eD" type="number" step="0.05" value="${o.d}">
+      <label>Länge</label><span class="wert">${f2(L)} m</span><label>Ansichtsfläche</label><span class="wert">${f2(L * o.h)} m²</span><label>Volumen</label><span class="wert">${f2(L * o.h * o.d)} m³</span>`;
+  } else if(bt?.art === 'flaeche'){
+    const A = fl(o.pts), U = laenge(o.pts, true);
+    if(o.typ === 'teich') html += `<label for="eT">Tiefe (m)</label><input id="eT" type="number" step="0.1" value="${o.tiefe || 1}">`;
+    html += `<label>Fläche</label><span class="wert">${f2(A)} m²</span><label>Umfang / Rand</label><span class="wert">${f2(U)} m</span>`;
+    if(o.typ === 'teich') html += `<label>Volumen ca.</label><span class="wert">${f1(A * (o.tiefe || 1) * 0.6)} m³</span>`;
+    if(o.typ === 'belag') html += `<label>Aushub 30 cm</label><span class="wert">${f1(A * 0.3)} m³</span>`;
+  } else if(o.typ === 'pflanze'){
+    html += `<label>Art</label><span class="wert" style="font-style:italic;font-weight:500">${o.n}</span><label>Breite</label><span class="wert">Ø ${f1(o.r * 2)} m</span><label>Daten</label><span class="wert" style="font-weight:500;color:var(--muted)">aus Pflanzentool</span>`;
+  } else if(o.typ === 'kote'){
+    html += `<label for="eK">Höhe m ü. M.</label><input id="eK" value="${o.wert}"><label for="eKt">Bezeichnung</label><input id="eKt" value="${o.txt || ''}" style="text-align:left"><label>Gelände hier</label><span class="wert">${geländeHoehe(o.c)} m</span>`;
+  } else if(o.typ === 'abstand'){
+    const g = abstandGeo(o), z = objs.find(q => q.id === o.ref);
+    html += `<label>Von</label><span class="wert">${z ? (BAUTEILE[z.typ]?.n || z.n || 'Objekt') : '–'}</span><label>Abstand</label><span class="wert">${g ? f2(g.d) : '–'} m</span><label>Ebene</label><span class="wert">${o.ebene === 'bew' ? 'Bewilligung' : 'Ausführung'}</span>
+      </div><p class="leer" style="margin:10px 0 0">${o.ziel === 'grenze' ? 'Immer rechtwinklig zur Grenze gemessen. ' : ''}Zahl anklicken = Objekt auf diesen Abstand schieben.</p><div>`;
+  } else if(o.typ === 'mass'){
+    const m = massPts(o); html += `<label>Länge</label><span class="wert">${f2(dist(m[0], m[1]))} m</span></div><p class="leer" style="margin:10px 0 0">${o.anker?.some(Boolean) ? 'An Objektecken verankert – wandert mit, wenn du ein Objekt verschiebst.' : 'Frei gesetzt.'}</p><div>`;
+  } else if(o.typ === 'kette'){
+    const t = ketteTicks(o);
+    html += `<label>Teilmasse</label><span class="wert">${Math.max(0, t.length - 1)}</span><label>Gesamt</label><span class="wert">${t.length > 1 ? f2(t[t.length - 1].v - t[0].v) : '–'} m</span>
+      <label for="eKurz">Hilfslinien</label><select id="eKurz"><option value="lang"${o.kurz ? '' : ' selected'}>bis zum Objekt</option><option value="kurz"${o.kurz ? ' selected' : ''}>kurz (1 m)</option></select>
+      </div><p class="leer" style="margin:10px 0 6px">Linie ziehen = verschieben · Zahl anklicken = Mass ändern (Objekt rückt nach) · Punkt am Ende einer Hilfslinie ziehen = kürzen.</p>
+      <button class="btn" id="eHilfZurueck" style="font-size:12px">Hilfslinien zurücksetzen</button><div>`;
+  } else if(o.pts){ html += `<label>Länge</label><span class="wert">${f2(laenge(o.pts, o.typ === 'rechteck'))} m</span>`; if(o.typ === 'rechteck') html += `<label>Fläche</label><span class="wert">${f2(fl(o.pts))} m²</span>`; }
+  else if(o.typ === 'kreis'){ html += `<label>Radius</label><span class="wert">${f2(o.r)} m</span><label>Fläche</label><span class="wert">${f2(Math.PI * o.r * o.r)} m²</span>`; }
+  if(bt || ['pflanze','objekt'].includes(o.typ)) html += `<label for="eBew">Baubewilligung</label><label class="schalt" style="justify-content:flex-end;color:var(--ink)"><input type="checkbox" id="eBew"${istBew(o) ? ' checked' : ''}> relevant</label>`;
+  html += '</div>'; box.innerHTML = `<h3>Eigenschaften</h3>` + html;
+  document.getElementById('eBew')?.addEventListener('change', e => { o.bew = e.target.checked; const id = o.id; autoVermassen(true); sel = id; alles(); toast(e.target.checked ? 'Bewilligungsrelevant: L × B, Grenz- und Hausabstand gesetzt' : 'Nicht mehr bewilligungsrelevant'); });
+  const auf = (id, fn) => { const e = document.getElementById(id); if(e) e.addEventListener('change', ev => { merken(); fn(ev.target.value); alles(); }); };
+  auf('eMat', v => o.mat = v); auf('eH', v => o.h = Number(v) || 0); auf('eD', v => o.d = Number(v) || 0.1); auf('eT', v => o.tiefe = Number(v) || 0); auf('eK', v => o.wert = v); auf('eKt', v => o.txt = v); auf('eKurz', v => { o.kurz = v === 'kurz'; o.refs.forEach(t => delete t.ende); });
+  document.getElementById('eHilfZurueck')?.addEventListener('click', () => { merken(); o.refs.forEach(t => delete t.ende); alles(); });
+  $('#loeschen').addEventListener('click', () => { merken(); objs = objs.filter(q => q.id !== o.id); sel = null; alles(); toast('Gelöscht – Rückgängig mit Ctrl+Z'); });
+}
+// Geländehöhe aus swissALTI3D (wird nach dem Öffnen eines Plans im Hintergrund geladen)
+let HOEHEN = null;
+const geländeHoehe = p => { if(!HOEHEN || !grundlage) return '–'; const h = HOEHEN.hoehe(grundlage.e0 + p[0], grundlage.n0 - p[1]); return isNaN(h) ? '–' : h.toFixed(2); };
+function mengen(){
+  const t = $('#mengen'); const z = [];
+  const mauern = objs.filter(o => o.typ === 'mauer');
+  if(mauern.length){ z.push(['Mauern']); const g = {}; mauern.forEach(o => { const k = o.mat; g[k] = g[k] || { l:0, a:0 }; g[k].l += laenge(o.pts); g[k].a += laenge(o.pts) * o.h; }); for(const k in g) z.push([k, `${f2(g[k].l)} m · ${f2(g[k].a)} m²`]); }
+  ['belag','rasen','beet','kies','teich','pool'].forEach(ty => { const os = objs.filter(o => o.typ === ty); if(!os.length) return; z.push([BAUTEILE[ty].n]); const g = {}; os.forEach(o => g[o.mat] = (g[o.mat] || 0) + fl(o.pts)); for(const k in g) z.push([k, `${f2(g[k])} m²`]); });
+  const pf = {}; objs.filter(o => o.typ === 'pflanze').forEach(o => pf[o.n] = (pf[o.n] || 0) + 1);
+  if(Object.keys(pf).length){ z.push(['Pflanzen']); Object.keys(pf).sort().forEach(k => z.push([`<i>${k}</i>`, `${pf[k]} Stk.`])); }
+  t.innerHTML = z.map(r => r.length === 1 ? `<tr class="grp"><td colspan="2">${r[0]}</td></tr>` : `<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('');
+}
+
+// ===== Hinweis + Eingabezeile je nach Werkzeug =====
+function hinweis(){
+  const h = $('#hinweis'), n = temp.length; let t = '', lab = 'Länge', einh = 'm ↵';
+  const name = bauteil ? BAUTEILE[bauteil].n : (WERKZEUGE.find(w => w[0] === werkzeug) || [])[1];
+  if(werkzeug === 'auswahl' && !bauteil) t = sel ? '<b>Auswahl:</b> Element ziehen = verschieben, Quadrat an einer Ecke ziehen = Form ändern. Entf = löschen.' : '<b>Auswahl:</b> Element anklicken. Plan verschieben: ins Leere klicken und ziehen. Zoomen: Mausrad.';
+  else if(werkzeug === 'mass') t = n ? '<b>Masslinie:</b> Endpunkt klicken – fängt an <b>Ecken</b>, <b>Kanten</b> und <b>Lot</b> (kürzester Abstand, z. B. Haus → Grenze).' : '<b>Masslinie:</b> Anfangspunkt klicken, z. B. eine Hausecke.';
+  else if(werkzeug === 'rechteck'){ t = n ? `<b>${name}:</b> zweite Ecke klicken oder Masse tippen, z. B. <b>6 x 4</b> ↵` : `<b>${name}:</b> erste Ecke klicken.`; lab = 'B × T'; einh = 'm ↵'; }
+  else if(werkzeug === 'kreis'){ t = n ? `<b>Kreis:</b> Radius klicken oder tippen.` : `<b>Kreis:</b> Mittelpunkt klicken.`; lab = 'Radius'; }
+  else if(werkzeug === 'bogen'){ t = n === 0 ? '<b>Bogen:</b> Anfang klicken.' : n === 1 ? '<b>Bogen:</b> Ende klicken.' : '<b>Bogen:</b> Wölbung ziehen und klicken.'; }
+  else if(werkzeug === 'kote'){ t = '<b>Höhenkote:</b> Punkt klicken – die Geländehöhe kommt von swisstopo, überschreiben möglich.'; lab = 'Höhe'; einh = 'm ü. M.'; }
+  else if(werkzeug === 'text'){ t = '<b>Text:</b> Text unten eintippen, dann Punkt klicken.'; lab = 'Text'; einh = ''; }
+  else if(bauteil === 'mauer' || werkzeug === 'linie') t = n ? `<b>${name}:</b> nächster Punkt oder Länge tippen (z. B. <b>4.50</b> ↵). Beenden: Doppelklick, Rechtsklick oder ↵.` : `<b>${name}:</b> Startpunkt klicken.`;
+  else t = n ? `<b>${name}:</b> nächste Ecke oder Länge tippen. Beenden: Doppelklick, Rechtsklick oder ↵ (schliesst die Fläche).` : `<b>${name}:</b> erste Ecke klicken.`;
+  const knopf = (werkzeug === 'linie' && n > 1) || (werkzeug === 'flaeche' && n > 2);
+  h.innerHTML = t + (knopf ? ' <button class="btn primary" id="fertigBtn" style="margin-left:6px;padding:3px 10px">Fertig ✓</button>' : '') + (n ? ' <button class="btn" id="abbrBtn" style="margin-left:4px;padding:3px 10px">Abbrechen</button>' : '');
+  document.getElementById('fertigBtn')?.addEventListener('click', () => fertig());
+  document.getElementById('abbrBtn')?.addEventListener('click', () => { temp = []; alles(); }); $('#wertLabel').textContent = lab; $('#wertEinheit').textContent = einh;
+  $('#wert').placeholder = lab === 'B × T' ? '6 x 4' : lab === 'Text' ? 'Sitzplatz' : lab === 'Höhe' ? '543.20' : 'z. B. 4.50';
+}
+
+// ===== Werkzeugleiste =====
+$('#werkzeuge').innerHTML = WERKZEUGE.map(([k, n, t]) => `<button class="wzb${k === 'auswahl' ? ' on' : ''}" data-w="${k}" title="${n} (${t})"><svg viewBox="0 0 24 24">${I[k]}</svg>${n}<span class="tast">${t}</span></button>`).join('');
+$('#bauteile').innerHTML = Object.entries(BAUTEILE).map(([k, b]) => `<button class="btz" data-b="${k}"><span class="farb" style="background:${b.muster || b.farbe}"></span><span>${b.n}<br><small>${b.art === 'linie' ? 'Linie mit Dicke + Höhe' : 'Fläche'}</small></span></button>`).join('');
+function waehle(w, b){
+  werkzeug = w; bauteil = b || null; temp = []; if(w !== 'auswahl') sel = null;
+  document.querySelectorAll('.wzb').forEach(x => x.classList.toggle('on', !bauteil && x.dataset.w === w));
+  document.querySelectorAll('.btz[data-b]').forEach(x => x.classList.toggle('on', x.dataset.b === bauteil));
+  plan.classList.toggle('auswahl', w === 'auswahl' && !bauteil); schliessePop(); alles();
+  if(w !== 'auswahl') setTimeout(() => $('#wert').focus({ preventScroll: true }), 0);
+}
+document.querySelectorAll('.wzb').forEach(b => b.addEventListener('click', () => waehle(b.dataset.w)));
+document.querySelectorAll('.btz[data-b]').forEach(b => b.addEventListener('click', () => { const k = b.dataset.b; waehle(BAUTEILE[k].art === 'linie' ? 'linie' : 'flaeche', k); }));
+
+// ===== Bibliothek (Popover) =====
+let pop = null, platzieren = null;
+function schliessePop(){ if(pop){ pop.remove(); pop = null; } }
+function oeffnePop(knopf, liste, art){
+  schliessePop(); pop = document.createElement('div'); pop.className = 'pop';
+  pop.innerHTML = (art === 'pflanze' ? '<div class="pk">Pflanzen kommen später aus dem Pflanzentool (Name, Breite, Farbe)</div>' : '<div class="pk">Objekte</div>') +
+    liste.map((x, i) => `<div class="pz" data-i="${i}"><i style="background:${x.f || 'var(--soft)'}"></i><div><b style="${art === 'objekt' ? 'font-style:normal' : ''}">${x.n}</b><small>${x.d || (x.r ? 'Ø ' + f1(x.r * 2) + ' m' : f1(x.b) + ' × ' + f1(x.t) + ' m')}${x.dm ? ' · Ø ' + f1(x.dm) + ' m' : ''}</small></div></div>`).join('');
+  const r = knopf.getBoundingClientRect(), m = $('#mitte').getBoundingClientRect();
+  pop.style.left = Math.max(8, Math.min(r.right + 6 - m.left, m.width - 260)) + 'px'; pop.style.top = Math.max(8, r.top - m.top) + 'px';
+  $('#mitte').appendChild(pop);
+  pop.querySelectorAll('.pz').forEach(z => z.addEventListener('click', () => { platzieren = { art, x: liste[Number(z.dataset.i)] }; schliessePop(); werkzeug = 'platz'; bauteil = null; document.querySelectorAll('.wzb,.btz').forEach(b => b.classList.remove('on')); $('#hinweis').innerHTML = `<b>${platzieren.x.n}:</b> in den Plan klicken (mehrmals für mehrere). Fertig: Esc.`; }));
+}
+$('#bibPflanzen').addEventListener('click', e => oeffnePop(e.currentTarget, PFLANZEN, 'pflanze'));
+$('#bibObjekte').addEventListener('click', e => oeffnePop(e.currentTarget, OBJEKTE, 'objekt'));
+
+// ===== Maus / Stift =====
+let fangArt = '', ziehen = null;
+function punktVon(ev){ const r = plan.getBoundingClientRect(); return zuWelt(ev.clientX - r.left, ev.clientY - r.top); }
+// schieben = Objekt oder Ecke wird verschoben (nur im Auswahl-Werkzeug)
+let schieben = null, letzterKlick = null;
+const istAuswahl = () => werkzeug === 'auswahl' && !bauteil;
+plan.addEventListener('pointermove', ev => {
+  if(ziehen){ ansicht.ox = ziehen.ox + ev.clientX - ziehen.x; ansicht.oy = ziehen.oy + ev.clientY - ziehen.y; zeichnen(); return; }
+  const w = punktVon(ev);
+  if(schieben){
+    if(!schieben.bewegt && Math.hypot(ev.clientX - schieben.x, ev.clientY - schieben.y) < 4) return;
+    if(!schieben.bewegt){ merken(); schieben.bewegt = true; }
+    const o = schieben.o, orig = schieben.orig;
+    if(schieben.kette || schieben.griff){
+      const j = o.achse === 'h' ? 1 : 0, wert = Math.round(w[j] * 20) / 20;
+      if(schieben.kette) o.pos = Math.round((orig.pos + (w[j] - schieben.start[j])) * 20) / 20;
+      else schieben.griff.ende = wert;
+      zeichnen(); return;
+    }
+    if(schieben.ecke != null){ const f = fangen(w, ev, o); o.pts[schieben.ecke] = f.p; fangArt = f.art; maus = f.p; }
+    else {
+      // ganzes Objekt: Verschiebung; fängt mit dem gegriffenen Punkt an Ecken/Kanten, sonst 5-cm-Raster
+      const f = fangen([schieben.start[0] + (w[0] - schieben.start[0]), schieben.start[1] + (w[1] - schieben.start[1])], ev, o);
+      let dx = f.p[0] - schieben.start[0], dy = f.p[1] - schieben.start[1];
+      if(!f.art){ dx = Math.round(dx * 20) / 20; dy = Math.round(dy * 20) / 20; }
+      if(orig.pts) o.pts = orig.pts.map(q => [q[0] + dx, q[1] + dy]); if(orig.c) o.c = [orig.c[0] + dx, orig.c[1] + dy];
+      fangArt = f.art; maus = f.p;
+    }
+    $('#koord').textContent = `verschieben · X ${f2(maus[0])} · Y ${f2(maus[1])}`;
+    zeichnen(); return;
+  }
+  const f = istAuswahl() ? { p: w, art: '' } : fangen(w, ev); maus = f.p; fangArt = f.art;
+  $('#koord').textContent = `X ${f2(maus[0])} · Y ${f2(maus[1])}` + (temp.length ? ` · ${f2(dist(temp[temp.length - 1], maus))} m` : '');
+  plan.style.cursor = istAuswahl() ? (eckeBei(w) != null ? 'move' : treffer(w) ? 'grab' : 'default') : '';
+  zeichnen();
+});
+function eckeBei(w){ const o = objs.find(q => q.id === sel); if(!o || !o.pts || o.typ === 'mass') return null; const tol = 7 / ansicht.s; const i = o.pts.findIndex(q => dist(q, w) < tol); return i < 0 ? null : i; }
+plan.addEventListener('pointerleave', () => { if(!schieben && !ziehen){ maus = null; zeichnen(); } });
+plan.addEventListener('contextmenu', ev => { ev.preventDefault(); if(temp.length) fertig(); });
+plan.addEventListener('pointerdown', ev => {
+  if(ev.button === 2) return;
+  const w = punktVon(ev);
+  if(ev.button === 1){ ziehen = { x: ev.clientX, y: ev.clientY, ox: ansicht.ox, oy: ansicht.oy }; plan.setPointerCapture(ev.pointerId); return; }
+  if(istAuswahl()){
+    // Zahl einer Masskette anklicken → Mass ändern
+    const r = plan.getBoundingClientRect(), mx = ev.clientX - r.left, my = ev.clientY - r.top;
+    const th = tickHits.find(h => Math.hypot(mx - h.x, my - h.y) <= 8);
+    if(th){ merken(); th.k.refs = th.k.refs.filter(r => r !== th.t); if(th.k.refs.length < 2) { objs = objs.filter(o => o !== th.k); sel = null; } alles(); toast('Teilmass entfernt – Rückgängig mit Ctrl+Z'); return; }
+    const lab = massLabels.find(l => Math.abs(mx - l.x) <= l.w / 2 && Math.abs(my - l.y) <= l.h / 2);
+    if(lab && lab.abst){ ev.preventDefault(); sel = lab.abst.id; alles(); setTimeout(() => abstandEingabe(lab.abst), 0); return; }
+    if(lab){ ev.preventDefault(); sel = lab.k.id; alles(); setTimeout(() => massEingabe(massLabels.find(l => l.k === lab.k && l.n === lab.n) || lab), 0); return; }
+    // Griff am Ende einer Hilfslinie → Länge ändern
+    const griff = griffBei(w);
+    if(griff){ const k = objs.find(q => q.id === sel); schieben = { o: k, griff, start: w, orig: JSON.parse(JSON.stringify(k)), x: ev.clientX, y: ev.clientY, bewegt: false }; plan.setPointerCapture(ev.pointerId); return; }
+    // Masskette anfassen → parallel verschieben
+    const kt = ketteTreffer(w);
+    if(kt){ sel = kt.id; schieben = { o: kt, kette: true, start: w, orig: JSON.parse(JSON.stringify(kt)), x: ev.clientX, y: ev.clientY, bewegt: false }; plan.setPointerCapture(ev.pointerId); alles(); return; }
+    const at = abstandTreffer(w);
+    if(at){ sel = at.id; alles(); return; }
+    const ecke = eckeBei(w), o = ecke != null ? objs.find(q => q.id === sel) : treffer(w);
+    if(o){ sel = o.id; schieben = { o, ecke, start: ecke != null ? o.pts[ecke] : (o.c || w), orig: JSON.parse(JSON.stringify(o)), x: ev.clientX, y: ev.clientY, bewegt: false }; plan.setPointerCapture(ev.pointerId); alles(); return; }
+    ziehen = { x: ev.clientX, y: ev.clientY, ox: ansicht.ox, oy: ansicht.oy }; plan.setPointerCapture(ev.pointerId); return;
+  }
+});
+plan.addEventListener('pointerup', ev => {
+  if(ev.button === 2) return;
+  if(schieben){ const s = schieben; schieben = null; fangArt = ''; if(s.bewegt){ alles(); return; } return; }
+  if(ziehen){ const bewegt = Math.hypot(ev.clientX - ziehen.x, ev.clientY - ziehen.y) > 3; ziehen = null; if(bewegt) return; if(istAuswahl()){ sel = null; alles(); return; } }
+  const w = punktVon(ev), fk = istAuswahl() ? { p: w, anker: null } : fangen(w, ev), p = fk.p; klickAnker = fk.anker || null;
+  // Doppelklick (zweiter Klick kurz danach an fast gleicher Stelle) beendet Mauer, Linie, Fläche
+  const jetzt = performance.now();
+  if(temp.length && letzterKlick && jetzt - letzterKlick.t < 450 && Math.hypot(ev.clientX - letzterKlick.x, ev.clientY - letzterKlick.y) < 8){ letzterKlick = null; fertig(); return; }
+  letzterKlick = { t: jetzt, x: ev.clientX, y: ev.clientY };
+  klick(p, ev);
+});
+plan.addEventListener('wheel', ev => { ev.preventDefault(); const r = plan.getBoundingClientRect(), mx = ev.clientX - r.left, my = ev.clientY - r.top, w = zuWelt(mx, my), f = ev.deltaY < 0 ? 1.15 : 1 / 1.15;
+  ansicht.s = Math.max(4, Math.min(120, ansicht.s * f)); ansicht.ox = mx - w[0] * ansicht.s; ansicht.oy = my - w[1] * ansicht.s; zeichnen(); }, { passive: false });
+
+function treffer(p){
+  const tol = 6 / ansicht.s; const rev = [...objs].reverse();
+  return rev.find(o => o.c && dist(o.c, p) <= (o.r || 0.5) + tol)
+    || rev.find(o => o.typ === 'mass' && ebenen.maus && (() => { const m = massPts(o); return segDist(p, m[0], m[1]) < tol; })())
+    || rev.find(o => o.pts && (o.typ === 'mauer' || o.typ === 'linie' || o.typ === 'bogen') && o.pts.some((q, i) => i && segDist(p, o.pts[i - 1], q) < (o.d || 0) / 2 + tol))
+    || rev.find(o => o.pts && (BAUTEILE[o.typ]?.art === 'flaeche' || o.typ === 'rechteck') && inPoly(p, o.pts));
+}
+// Nach jedem fertigen Element zurück auf «Auswahl» (neues Element bleibt gewählt) – ausser beim Platzieren aus der Bibliothek
+function zurueckAufAuswahl(){
+  werkzeug = 'auswahl'; bauteil = null; temp = [];
+  document.querySelectorAll('.wzb').forEach(x => x.classList.toggle('on', x.dataset.w === 'auswahl'));
+  document.querySelectorAll('.btz[data-b]').forEach(x => x.classList.remove('on'));
+  plan.classList.add('auswahl');
+}
+function neu(o){ merken(); o.id = nextId++; objs.push(o); sel = o.id; if(werkzeug !== 'platz') zurueckAufAuswahl(); return o; }
+function klick(p){
+  if(werkzeug === 'platz' && platzieren){ const x = platzieren.x;
+    if(platzieren.art === 'pflanze') neu({ typ: 'pflanze', c: p, r: x.dm / 2, n: x.n, f: x.f }); else neu({ typ: 'objekt', c: p, n: x.n, b: x.b, t: x.t, r: x.r });
+    sel = null; alles(); return; }
+  if(werkzeug === 'auswahl' && !bauteil){ const o = treffer(p); sel = o ? o.id : null; alles(); return; }
+  if(werkzeug === 'kote'){ const v = $('#wert').value.trim(); neu({ typ: 'kote', c: p, wert: v || geländeHoehe(p), txt: v ? '' : 'Terrain' }); $('#wert').value = ''; alles(); return; }
+  if(werkzeug === 'text'){ const v = $('#wert').value.trim() || 'Text'; neu({ typ: 'text', c: p, txt: v }); $('#wert').value = ''; alles(); return; }
+  if(werkzeug === 'rechteck'){ if(!temp.length){ temp = [p]; } else { abschliessenRechteck(temp[0], p); } alles(); return; }
+  if(werkzeug === 'kreis'){ if(!temp.length) temp = [p]; else { neu({ typ: 'kreis', c: temp[0], r: dist(temp[0], p) }); temp = []; } alles(); return; }
+  if(werkzeug === 'mass'){ if(!temp.length){ temp = [p]; massAnker0 = klickAnker; } else { neu({ typ: 'mass', pts: [temp[0], p], anker: [massAnker0, klickAnker] }); temp = []; } alles(); return; }
+  if(werkzeug === 'bogen'){ temp.push(p); if(temp.length === 3){ neu({ typ: bauteil === 'mauer' ? 'mauer' : 'bogen', pts: bogenPts(temp[0], temp[2], temp[1]), d: 0.3, h: 0.8, mat: 'Naturstein Granit' }); temp = []; } alles(); return; }
+  // Linie / Mauer / Fläche: Punkte sammeln
+  const istFl = werkzeug === 'flaeche';
+  if(istFl && temp.length > 2 && dist(p, temp[0]) < 8 / ansicht.s){ fertig(); return; }
+  temp.push(p); alles();
+}
+function abschliessenRechteck(a, b){
+  const pts = rechteckPts(a, b);
+  if(bauteil && BAUTEILE[bauteil].art === 'flaeche') neu({ typ: bauteil, pts, mat: BAUTEILE[bauteil].mats[0], tiefe: 1.5 }); else neu({ typ: 'rechteck', pts });
+  temp = [];
+}
+function fertig(){
+  // doppelte Endpunkte (vom Doppelklick) entfernen
+  const p = temp.filter((q, i) => !i || dist(q, temp[i - 1]) > 0.02);
+  if(werkzeug === 'flaeche'){
+    if(p.length > 2){ const ty = bauteil || 'belag'; neu({ typ: ty, pts: p, mat: BAUTEILE[ty].mats[0], tiefe: 1.5 }); }
+    else if(p.length) toast('Eine Fläche braucht mindestens 3 Ecken');
+  }
+  else if(werkzeug === 'linie' && p.length > 1){ if(bauteil === 'mauer') neu({ typ: 'mauer', pts: p, d: 0.3, h: 0.8, mat: BAUTEILE.mauer.mats[0] }); else neu({ typ: 'linie', pts: p }); }
+  temp = []; alles();
+}
+
+// ===== Eingabezeile: Masse tippen =====
+$('#wert').addEventListener('keydown', ev => {
+  if(ev.key !== 'Enter') return; ev.preventDefault();
+  const roh = ev.target.value.trim().replace(',', '.'); ev.target.value = '';
+  if(werkzeug === 'kote' || werkzeug === 'text'){ ev.target.value = roh; toast('Jetzt den Punkt im Plan klicken'); return; }
+  if(!roh){ fertig(); return; }
+  if(!temp.length){ toast('Zuerst den Startpunkt im Plan klicken'); return; }
+  const a = temp[temp.length - 1], ziel = maus || [a[0] + 1, a[1]];
+  if(werkzeug === 'rechteck'){ const m = roh.match(/^([\d.]+)\s*[x×*\/]\s*([\d.]+)$/i); if(!m){ toast('Masse als «Breite x Tiefe», z. B. 6 x 4'); return; }
+    const sx = ziel[0] >= a[0] ? 1 : -1, sy = ziel[1] >= a[1] ? 1 : -1; abschliessenRechteck(a, [a[0] + sx * Number(m[1]), a[1] + sy * Number(m[2])]); alles(); return; }
+  const L = Number(roh); if(!(L > 0)){ toast('Bitte eine Zahl in Metern, z. B. 4.50'); return; }
+  if(werkzeug === 'kreis'){ neu({ typ: 'kreis', c: a, r: L }); temp = []; alles(); return; }
+  let ang = Math.atan2(ziel[1] - a[1], ziel[0] - a[0]); if($('#ortho').checked){ const st = Math.PI / 12; ang = Math.round(ang / st) * st; }
+  const p = [a[0] + L * Math.cos(ang), a[1] + L * Math.sin(ang)];
+  if(werkzeug === 'mass'){ neu({ typ: 'mass', pts: [a, p] }); temp = []; } else temp.push(p);
+  alles();
+});
+document.addEventListener('keydown', ev => {
+  const imFeld = ['INPUT','SELECT','TEXTAREA'].includes(document.activeElement?.tagName);
+  if(ev.key === 'Escape'){ temp = []; platzieren = null; if(werkzeug === 'platz') waehle('auswahl'); else { sel = null; alles(); } schliessePop(); return; }
+  if((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z'){ ev.preventDefault(); rueck(); return; }
+  if(imFeld) return;
+  if(ev.key === 'Enter' && temp.length){ ev.preventDefault(); fertig(); return; }
+  if((ev.key === 'Delete' || ev.key === 'Backspace') && sel){ merken(); objs = objs.filter(q => q.id !== sel); sel = null; alles(); return; }
+  if(/^[0-9.]$/.test(ev.key) && werkzeug !== 'auswahl'){ $('#wert').focus(); return; }
+  const w = WERKZEUGE.find(x => x[2].toLowerCase() === ev.key.toLowerCase()); if(w) waehle(w[0]);
+});
+function rueck(){ const s = undoStack.pop(); if(!s){ toast('Nichts mehr rückgängig zu machen'); return; } objs = JSON.parse(s); sel = null; temp = []; alles(); }
+$('#undo').addEventListener('click', rueck);
+
+// ===== Ebenen, Optionen, Diverses =====
+document.querySelectorAll('#ebenen .chip').forEach(c => c.addEventListener('click', () => { ebenen[c.dataset.e] = !ebenen[c.dataset.e]; c.classList.toggle('on', ebenen[c.dataset.e]); zeichnen(); }));
+['#luft', '#raster'].forEach(s => $(s).addEventListener('input', zeichnen));
+$('#mst').addEventListener('change', e => { const z = { '1:50': 44, '1:100': 22, '1:200': 11, '1:500': 4.5 }[e.target.value]; const r = plan.getBoundingClientRect(), mx = r.width / 2, my = r.height / 2, w = zuWelt(mx, my); ansicht.s = z; ansicht.ox = mx - w[0] * z; ansicht.oy = my - w[1] * z; zeichnen(); });
+document.querySelectorAll('[data-toast]').forEach(b => b.addEventListener('click', () => toast(b.dataset.toast)));
+let tt; function toast(t){ const e = $('#toast'); e.textContent = t; e.classList.add('an'); clearTimeout(tt); tt = setTimeout(() => e.classList.remove('an'), 3200); }
+function alles(){ zeichnen(); eigenschaften(); mengen(); hinweis(); planGeaendert(); }
+// Ansicht auf die Parzelle (bzw. alles Gezeichnete) einpassen, mit Rand für die Aussenmasse
+function einpassen(){
+  const r = plan.getBoundingClientRect(); if(!r.width) return;
+  const pts = [...parzelle, ...haus, ...objs.flatMap(o => o.pts || (o.c ? [o.c] : []))];
+  const b = pts.length ? bb(pts) : { minX: 0, minY: 0, maxX: 30, maxY: 20 }, w = b.maxX - b.minX + 8, h = b.maxY - b.minY + 8;
+  ansicht.s = Math.max(4, Math.min(80, Math.min((r.width - 30) / w, (r.height - 30) / h)));
+  ansicht.ox = (r.width - (b.maxX - b.minX) * ansicht.s) / 2 - b.minX * ansicht.s; ansicht.oy = (r.height - (b.maxY - b.minY) * ansicht.s) / 2 - b.minY * ansicht.s;
+}
+$('#vermassen').addEventListener('click', () => { if(!haus.length || !parzelle.length){ toast('Für «Vermassen» braucht es Parzelle und Haus aus der Vermessung'); return; } autoVermassen(); });
+window.addEventListener('resize', () => { hoeheSetzen(); zeichnen(); });
+
+// =====================================================================================
+// App: Anmeldung, Pläne-Liste, Plan öffnen/speichern, Grundlage aus der Vermessung
+// =====================================================================================
+const sb = window.supabase.createClient('https://oalapdxinqlnzwxhyuzy.supabase.co', 'sb_publishable_DoeD4uEnwemmnFu4AxE9uw_5lmQYc5P');
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const ROLLE_LABEL = { admin: 'Admin', buero_team: 'Büro-Team', mitarbeitende: 'Mitarbeitende', service_team: 'Service-Team' };
+const kname = k => !k ? '' : (k.firma || k.name || [k.nachname, k.vorname].filter(Boolean).join(' ') || '');
+const kadresse = k => !k ? '' : [k.strasse, [k.plz, k.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+const fehler = (e, wo) => toast((wo ? wo + ': ' : '') + (e?.message || e));
+let PLAENE = [];
+document.getElementById('icSuche').innerHTML = KG.icon('suche', 15);
+
+function hoeheSetzen(){ const ed = $('#editor'); if(ed.classList.contains('hidden')) return; ed.style.height = Math.max(420, innerHeight - ed.getBoundingClientRect().top) + 'px'; }
+function ansichtWechseln(r){
+  if(r === 'zeichnen' && !PLAN){ toast('Zuerst in der Liste einen Plan öffnen oder einen neuen anlegen'); r = 'plaene'; }
+  document.querySelectorAll('#subnav a').forEach(a => a.classList.toggle('active', a.dataset.r === r));
+  const ed = r === 'zeichnen';
+  $('#lbar').classList.toggle('hidden', ed); $('#liste').classList.toggle('hidden', ed); $('#editor').classList.toggle('hidden', !ed);
+  document.body.classList.toggle('imEditor', ed);
+  if(ed){ hoeheSetzen(); requestAnimationFrame(() => { hoeheSetzen(); einpassen(); alles(); }); }
+  else { const u = new URL(location.href); u.searchParams.delete('plan'); history.replaceState(null, '', u); ladeListe(); }
+}
+document.addEventListener('click', e => { const a = e.target.closest('#subnav a'); if(!a) return; e.preventDefault(); ansichtWechseln(a.dataset.r); });
+
+async function start(){
+  const { data: { session } } = await sb.auth.getSession();
+  if(!session){ $('#loginwrap').classList.remove('hidden'); return; }
+  const { data: b } = await sb.from('benutzer').select('id,rolle,email').eq('id', session.user.id).maybeSingle();
+  if(!b?.rolle){ $('#loginwrap').classList.remove('hidden'); return; }
+  $('#userbar').classList.remove('hidden'); $('#userbarText').textContent = `${b.email} (${ROLLE_LABEL[b.rolle] || b.rolle})`;
+  if(b.rolle !== 'admin' && b.rolle !== 'buero_team'){ $('#keinZugriff').classList.remove('hidden'); return; }
+  const id = new URLSearchParams(location.search).get('plan');
+  if(id) await oeffnePlan(id); else ansichtWechseln('plaene');
+}
+$('#loginBtn').addEventListener('click', async () => {
+  const { error } = await KG.anmelden(sb, { email: $('#loginEmail').value.trim(), password: $('#loginPassword').value });
+  if(error){ $('#loginStatus').textContent = 'Login fehlgeschlagen: ' + error.message; $('#loginStatus').className = 'status err'; return; }
+  location.reload();
+});
+$('#logoutBtn').addEventListener('click', async () => { await sb.auth.signOut(); location.reload(); });
+
+// ----- Pläne-Liste -----
+async function ladeListe(){
+  $('#lbar').classList.remove('hidden'); $('#liste').classList.remove('hidden');
+  const { data, error } = await sb.from('cad_plan').select('id,name,variante,grundlage,geaendert_am,kunde:kunde_id(id,name,vorname,nachname,firma,strasse,plz,ort)').order('geaendert_am', { ascending: false });
+  if(error) return fehler(error, 'Laden');
+  PLAENE = data || []; listeZeichnen();
+}
+function listeZeichnen(){
+  const q = $('#lQ').value.trim().toLowerCase();
+  const rows = PLAENE.filter(p => !q || [kname(p.kunde), p.kunde?.ort, p.name, p.variante].join(' ').toLowerCase().includes(q));
+  $('#lBody').innerHTML = rows.length ? rows.map(p => `<tr data-id="${p.id}">
+      <td style="padding-left:16px"><b>${esc(kname(p.kunde) || '–')}</b><br><span style="color:var(--muted);font-size:12px">${esc(p.kunde?.ort || '')}</span></td>
+      <td>${esc(p.name)}</td><td>${esc(p.variante || '')}</td><td>${esc(p.grundlage?.parzelle_nr ? 'Parz. ' + p.grundlage.parzelle_nr : '–')}</td>
+      <td>${new Date(p.geaendert_am).toLocaleDateString('de-CH')}</td>
+      <td class="akt"><button type="button" class="kg-ibtn kg-hover" data-kopie title="Als neue Variante kopieren" aria-label="Kopieren">${KG.icon('copy', 14)}</button>
+        <button type="button" class="kg-ibtn danger kg-hover" data-weg title="Plan löschen" aria-label="Löschen">${KG.icon('trash', 14)}</button></td></tr>`).join('')
+    : `<tr><td colspan="6" class="leerliste">${PLAENE.length ? 'Nichts gefunden.' : 'Noch keine Pläne. Mit «Neuer Plan» einen Kunden wählen – Parzelle und Gebäude kommen automatisch aus der Vermessung.'}</td></tr>`;
+}
+$('#lQ').addEventListener('input', listeZeichnen);
+$('#lBody').addEventListener('click', async e => {
+  const tr = e.target.closest('tr[data-id]'); if(!tr) return; const p = PLAENE.find(x => x.id === tr.dataset.id);
+  if(e.target.closest('[data-weg]')){ if(!confirm(`Plan «${p.name}${p.variante ? ' ' + p.variante : ''}» von ${kname(p.kunde)} löschen?`)) return;
+    const { error } = await sb.from('cad_plan').delete().eq('id', p.id); if(error) return fehler(error, 'Löschen'); toast('Plan gelöscht'); return ladeListe(); }
+  if(e.target.closest('[data-kopie]')){ const { data: voll } = await sb.from('cad_plan').select('*').eq('id', p.id).single();
+    const varianten = PLAENE.filter(x => x.kunde?.id === p.kunde?.id && x.name === p.name).map(x => x.variante || '');
+    let v = 'B'; for(const c of 'BCDEFGHIJ'){ if(!varianten.includes(c)){ v = c; break; } }
+    const { data: neu, error } = await sb.from('cad_plan').insert({ kunde_id: voll.kunde_id, projekt_id: voll.projekt_id, name: voll.name, variante: v, grundlage: voll.grundlage, objekte: voll.objekte, einstellungen: voll.einstellungen }).select('id').single();
+    if(error) return fehler(error, 'Kopieren'); toast(`Variante ${v} angelegt`); return ladeListe(); }
+  oeffnePlan(p.id);
+});
+
+// ----- Neuer Plan: Kunde wählen -----
+$('#neuBtn').addEventListener('click', () => {
+  const o = document.createElement('div'); o.className = 'ovl';
+  o.innerHTML = `<div class="dlg" role="dialog" aria-label="Neuer Plan"><h3>Neuer Plan</h3>
+    <div class="fld"><label for="nKunde">Kunde</label><input id="nKunde" placeholder="Name oder Ort tippen" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other"></div>
+    <div class="ktreffer" id="nTreffer"></div>
+    <div style="display:flex;gap:8px"><div class="fld" style="flex:2"><label for="nName">Plan</label><input id="nName" value="Gartenplan" autocomplete="off" data-lpignore="true" data-form-type="other"></div>
+      <div class="fld" style="flex:1"><label for="nVar">Variante</label><input id="nVar" value="A" autocomplete="off" data-lpignore="true" data-form-type="other"></div></div>
+    <div class="knoepfe"><button class="btn-ghost" data-ab>Abbrechen</button><button class="btn-primary" data-ok disabled>Anlegen</button></div></div>`;
+  document.body.appendChild(o);
+  let gewaehlt = null, t = null;
+  const suche = async () => { const q = o.querySelector('#nKunde').value.trim(); if(q.length < 2){ o.querySelector('#nTreffer').innerHTML = ''; return; }
+    const w = `%${q.replace(/[%_,()]/g, '')}%`;
+    const { data } = await sb.from('kunde').select('id,name,vorname,nachname,firma,strasse,plz,ort').or(`name.ilike.${w},nachname.ilike.${w},firma.ilike.${w},ort.ilike.${w}`).limit(25);
+    o.querySelector('#nTreffer').innerHTML = (data || []).map(k => `<div data-k='${esc(JSON.stringify(k))}'>${esc(kname(k))} <small>${esc(kadresse(k))}</small></div>`).join('') || '<div style="cursor:default;color:var(--muted)">Kein Kunde gefunden</div>'; };
+  o.querySelector('#nKunde').addEventListener('input', () => { clearTimeout(t); t = setTimeout(suche, 250); });
+  o.querySelector('#nTreffer').addEventListener('click', e => { const d = e.target.closest('[data-k]'); if(!d) return; gewaehlt = JSON.parse(d.dataset.k);
+    o.querySelectorAll('#nTreffer div').forEach(x => x.classList.toggle('on', x === d)); o.querySelector('#nKunde').value = kname(gewaehlt); o.querySelector('[data-ok]').disabled = false; });
+  o.querySelector('[data-ab]').addEventListener('click', () => o.remove());
+  o.addEventListener('mousedown', e => { if(e.target === o) o.remove(); });
+  o.querySelector('[data-ok]').addEventListener('click', async () => {
+    const { data, error } = await sb.from('cad_plan').insert({ kunde_id: gewaehlt.id, name: o.querySelector('#nName').value.trim() || 'Gartenplan', variante: o.querySelector('#nVar').value.trim() || null, einstellungen: { ebenen, luft: 25 } }).select('id').single();
+    if(error) return fehler(error, 'Anlegen'); o.remove(); await oeffnePlan(data.id);
+  });
+  setTimeout(() => o.querySelector('#nKunde').focus(), 0);
+});
+
+// ----- Plan öffnen / speichern -----
+function grundlageAnwenden(g){
+  grundlage = g || null; parzelle = g?.parzelle || []; haus = g?.haus || []; nebengeb = g?.nebengeb || []; nachbarn = g?.nachbarn || []; nachbarParz = g?.nachbarParz || [];
+}
+async function oeffnePlan(id){
+  const { data: p, error } = await sb.from('cad_plan').select('*, kunde:kunde_id(id,name,vorname,nachname,firma,strasse,plz,ort)').eq('id', id).maybeSingle();
+  if(error || !p){ fehler(error || 'Plan nicht gefunden', 'Öffnen'); return ansichtWechseln('plaene'); }
+  PLAN = p; objs = Array.isArray(p.objekte) ? p.objekte : []; grundlageAnwenden(p.grundlage);
+  nextId = Math.max(100, ...objs.map(o => Number(o.id) || 0)) + 1; undoStack.length = 0; sel = null; temp = []; werkzeug = 'auswahl'; bauteil = null; HOEHEN = null;
+  const e = p.einstellungen || {}; if(e.ebenen) Object.assign(ebenen, e.ebenen);
+  document.querySelectorAll('#ebenen .chip').forEach(c => c.classList.toggle('on', !!ebenen[c.dataset.e]));
+  $('#luft').value = e.luft ?? 25;
+  $('#planTitel').innerHTML = `${esc(kname(p.kunde))}<small>${esc(p.name)}${p.variante ? ' · Variante ' + esc(p.variante) : ''}</small>`;
+  const u = new URL(location.href); u.searchParams.set('plan', id); history.replaceState(null, '', u);
+  letzterStand = stand(); $('#speicher').textContent = '';
+  ansichtWechseln('zeichnen');
+  if(!grundlage) grundlageLaden(); else hoehenLaden();
+}
+let letzterStand = '', speicherT = null;
+const stand = () => JSON.stringify({ o: objs, e: ebenen, l: $('#luft').value });
+function planGeaendert(){
+  if(!PLAN) return; const s = stand(); if(s === letzterStand) return;
+  $('#speicher').textContent = 'Wird gespeichert …'; clearTimeout(speicherT); speicherT = setTimeout(speichern, 1200);
+}
+async function speichern(){
+  if(!PLAN) return; const s = stand();
+  const { error } = await sb.from('cad_plan').update({ objekte: objs, einstellungen: { ...(PLAN.einstellungen || {}), ebenen, luft: Number($('#luft').value) }, geaendert_am: new Date().toISOString() }).eq('id', PLAN.id);
+  if(error){ $('#speicher').textContent = 'Nicht gespeichert!'; return fehler(error, 'Speichern'); }
+  letzterStand = s; $('#speicher').textContent = '✓ gespeichert';
+}
+window.addEventListener('beforeunload', e => { if(PLAN && stand() !== letzterStand){ speichern(); e.preventDefault(); e.returnValue = ''; } });
+document.querySelectorAll('#ebenen .chip').forEach(c => c.addEventListener('click', planGeaendert));
+$('#luft').addEventListener('change', planGeaendert);
+$('#grundBtn').addEventListener('click', () => { if(confirm('Parzelle und Gebäude neu aus der amtlichen Vermessung laden? Deine Zeichnung bleibt.')) grundlageLaden(true); });
+
+// ----- Grundlage aus der amtlichen Vermessung (geodienste.ch WFS) + Luftbild + Höhen -----
+async function grundlageLaden(neu){
+  const k = PLAN?.kunde, adr = kadresse(k);
+  if(!adr){ toast('Beim Kunden fehlt die Adresse – Grundlage kann nicht geladen werden'); return; }
+  toast('Parzelle und Gebäude werden aus der Vermessung geladen …');
+  try {
+    const p = await KGK.koordinaten(adr); if(!p) throw new Error('Adresse «' + adr + '» nicht gefunden');
+    const R = 70, wfs = async t => (await (await fetch(`https://geodienste.ch/db/av_0/deu?SERVICE=WFS&VERSION=2.0.0&REQUEST=GetFeature&TYPENAMES=ms:${t}&BBOX=${p.e - R},${p.n - R},${p.e + R},${p.n + R},urn:ogc:def:crs:EPSG::2056&OUTPUTFORMAT=geojson&SRSNAME=urn:ogc:def:crs:EPSG::2056`)).json()).features || [];
+    const [RESF, LCSF] = await Promise.all([wfs('RESF'), wfs('LCSF')]);
+    const ring = f => f.geometry?.type === 'Polygon' ? f.geometry.coordinates[0] : f.geometry?.type === 'MultiPolygon' ? f.geometry.coordinates[0][0] : null;
+    const imRing = (x, y, r) => { let c = false; for(let i = 0, j = r.length - 1; i < r.length; j = i++){ const [xi, yi] = r[i], [xj, yj] = r[j]; if(((yi > y) !== (yj > y)) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c; } return c; };
+    let eigen = RESF.find(f => { const r = ring(f); return r && imRing(p.e, p.n, r); });
+    if(!eigen) eigen = RESF.map(f => ({ f, r: ring(f) })).filter(x => x.r).sort((a, b) => { const d = x => { const c = x.r.reduce((s, q) => [s[0] + q[0] / x.r.length, s[1] + q[1] / x.r.length], [0, 0]); return Math.hypot(c[0] - p.e, c[1] - p.n); }; return d(a) - d(b); })[0]?.f;
+    if(!eigen) throw new Error('Keine Parzelle gefunden');
+    const er = ring(eigen), e0 = Math.min(...er.map(q => q[0])), n0 = Math.max(...er.map(q => q[1]));
+    const lokal = r => { const out = r.map(q => [Math.round((q[0] - e0) * 1000) / 1000, Math.round((n0 - q[1]) * 1000) / 1000]); if(out.length > 1 && dist(out[0], out[out.length - 1]) < 0.001) out.pop(); return out; };
+    const geb = LCSF.filter(f => f.properties?.Art === 'Gebaeude').map(ring).filter(Boolean);
+    const mitte = r => r.reduce((s, q) => [s[0] + q[0] / r.length, s[1] + q[1] / r.length], [0, 0]);
+    const drin = geb.filter(r => { const c = mitte(r); return imRing(c[0], c[1], er); }), draussen = geb.filter(r => !drin.includes(r));
+    const flaecheLv = r => Math.abs(r.reduce((a, q, i) => { const s = r[(i + 1) % r.length]; return a + q[0] * s[1] - s[0] * q[1]; }, 0)) / 2;
+    drin.sort((a, b) => flaecheLv(b) - flaecheLv(a));
+    const parz = lokal(er), bp = bb(parz), rand = 18;
+    const L = { x0: bp.minX - rand, y0: bp.minY - rand, x1: bp.maxX + rand, y1: bp.maxY + rand };
+    const pxB = Math.round(Math.min(2400, (L.x1 - L.x0) * 25)), pxH = Math.round(pxB * (L.y1 - L.y0) / (L.x1 - L.x0));
+    L.url = `https://wms.geo.admin.ch/?SERVICE=WMS&REQUEST=GetMap&VERSION=1.3.0&LAYERS=ch.swisstopo.swissimage&STYLES=&CRS=EPSG:2056&BBOX=${e0 + L.x0},${n0 - L.y1},${e0 + L.x1},${n0 - L.y0}&WIDTH=${pxB}&HEIGHT=${pxH}&FORMAT=image/jpeg`;
+    const g = { e0, n0, adresse: adr, parzelle_nr: eigen.properties?.Nummer || '', egrid: eigen.properties?.EGRIS_EGRID || '', flaeche: eigen.properties?.Flaeche || null,
+      parzelle: parz, haus: drin[0] ? lokal(drin[0]) : [], nebengeb: drin.slice(1).map(lokal), nachbarn: draussen.map(lokal),
+      nachbarParz: RESF.filter(f => f !== eigen).map(ring).filter(Boolean).map(lokal), luft: L, stand: new Date().toISOString().slice(0, 10) };
+    const { error } = await sb.from('cad_plan').update({ grundlage: g }).eq('id', PLAN.id); if(error) throw error;
+    PLAN.grundlage = g; grundlageAnwenden(g); einpassen(); alles();
+    toast(`Parzelle ${g.parzelle_nr} geladen${g.haus.length ? ' mit Wohnhaus' : ' (kein Gebäude gefunden)'}`);
+    hoehenLaden();
+  } catch(e){ fehler(e, 'Vermessung'); }
+}
+async function hoehenLaden(){
+  if(!grundlage || HOEHEN) return; const b = bb(grundlage.parzelle), g = grundlage;
+  try { await KGK.laden(); HOEHEN = await KGK.hoehenGitter(g.e0 + b.minX - 5, g.n0 - b.maxY - 5, g.e0 + b.maxX + 5, g.n0 - b.minY + 5); eigenschaften(); } catch(_){ HOEHEN = null; }
+}
+
+start();
+</script>
+</body>
+</html>
