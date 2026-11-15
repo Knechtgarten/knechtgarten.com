@@ -137,6 +137,11 @@ Deno.serve(async (req) => {
   const verlauf: { rolle: string; text: string }[] = Array.isArray(body?.verlauf) ? body.verlauf.slice(-30) : [];
   const blatt = body?.blatt || {};
   const kunde = body?.kunde || {};
+  const quellen: string[] = Array.isArray(body?.quellen) ? body.quellen.map(String) : [];
+  const mitInternet = quellen.includes('internet');
+  // Zusatzquelle Internet: Websuche von Anthropic (läuft serverseitig), nur wenn der Schalter an ist
+  const tools: any[] = mitInternet ? [...TOOLS, { type: 'web_search_20260209', name: 'web_search', max_uses: 5, user_location: { type: 'approximate', country: 'CH', region: 'Bern' } }] : TOOLS;
+  const system = SYSTEM + (mitInternet ? '\n- Zusatzquelle Internet ist eingeschaltet: Findest du in unseren Quellen nichts Passendes (z. B. Pflanze, Spezialmaterial), suche mit web_search nach Schweizer Listenpreisen (z. B. Baumschulen, Händler). Solche Preise sind Einkaufs-/Listenpreise: quelle "geschaetzt", quelle_info = Händler + Preis, und nenne die Seite in der Antwort als normalen Link [Händler](https://…).' : '');
 
   const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
@@ -202,8 +207,8 @@ Deno.serve(async (req) => {
       const response: any = await client.beta.messages.create({
         model: 'claude-opus-5-5',
         max_tokens: 16000,
-        system: SYSTEM,
-        tools: TOOLS,
+        system,
+        tools,
         messages,
         thinking: { type: 'adaptive' },
         output_config: { effort: 'medium' },
@@ -214,7 +219,7 @@ Deno.serve(async (req) => {
       if (response.stop_reason === 'refusal') {
         return json({ antwort: 'Dazu kann ich leider nichts erstellen. Formuliere die Anfrage bitte anders.', zeilen: null, modell });
       }
-      const texte = response.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('\n').trim();
+      const texte = response.content.filter((b: any) => b.type === 'text').map((b: any) => b.text).join('').trim(); // ohne Zeilenumbruch: mit Websuche (Zitate) kommt ein Satz in mehreren Blöcken
       if (texte) antwort = texte;
       if (response.stop_reason === 'pause_turn') { messages.push({ role: 'assistant', content: response.content }); continue; }
       const aufrufe = response.content.filter((b: any) => b.type === 'tool_use');
