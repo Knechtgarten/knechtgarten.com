@@ -7310,14 +7310,65 @@ $('supportChatInput').addEventListener('keydown', (e) => {
       soll.forEach(tr => body.insertBefore(tr, anker));
     });
   };
+  const TRASH = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M10 11v6M14 11v6M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>';
+  const DOTS = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>';
   const griffe = () => {
     body.querySelectorAll('tr[data-sk]').forEach(tr => {
       if(tr.querySelector('.dgrip')) return;
       tr.draggable = true;
       const g = document.createElement('span'); g.className = 'dgrip'; g.title = 'Ziehen zum Verschieben'; g.innerHTML = GRIP;
       tr.cells[0].prepend(g);
+      // rechts beim Darüberfahren: Abfalleimer + ⋮ (wie Easybill)
+      const r = document.createElement('span'); r.className = 'drechts';
+      r.innerHTML = `<button type="button" class="drweg" title="${istEigene(tr) ? 'Zeile löschen' : 'Ausblenden (zählt nicht, nur hier sichtbar)'}" aria-label="Löschen">${TRASH}</button><button type="button" class="drmehr" title="Weitere Aktionen" aria-label="Weitere Aktionen">${DOTS}</button>`;
+      tr.cells[tr.cells.length - 1].appendChild(r);
     });
   };
+  const istEigene = tr => String(tr.dataset.sk || '').startsWith('ez-');
+  const eigeneVon = tr => (typeof eigeneZeilen !== 'undefined' ? eigeneZeilen : []).find(z => z.schluessel === tr.dataset.sk);
+  // Zeile löschen (eigene) bzw. ausblenden/einblenden (berechnete, sonst käme sie beim nächsten Rechnen wieder)
+  const zeileWeg = tr => {
+    if(istEigene(tr)){
+      const z = eigeneVon(tr); if(!z || !confirm('Zeile löschen?')) return;
+      if(z.freitextVorlageId) z.geloescht = true; else eigeneZeilen = eigeneZeilen.filter(x => x !== z);
+    }else{
+      const k = zeilenKorrekturen[tr.dataset.sk] || (zeilenKorrekturen[tr.dataset.sk] = { menge_korrektur: null, preis_korrektur: null, geloescht: false });
+      k.geloescht = !k.geloescht; if(k.geloescht) k.optional = false;
+    }
+    recalc(); planAutosave();
+  };
+  // Zeile duplizieren: Kopie als eigene Zeile direkt darunter (gleiche Gruppe)
+  const zeileKopie = tr => {
+    const kopf = gruppeVon(tr), kat = kopf ? katVonKopf(kopf) : 'material';
+    let felder;
+    const z = istEigene(tr) ? eigeneVon(tr) : null;
+    if(z){ const { clientKey, dbId, schluessel, freitextVorlageId, ...rest } = z; felder = { ...rest }; }
+    else {
+      const zahl = s => parseFloat(String(s || '').replace(/['’\s]/g, '').replace(',', '.')) || 0;
+      const bez = (tr.cells[0].getAttribute('title') || tr.cells[0].textContent || '').trim();
+      felder = { bezeichnung: bez, menge: zahl(tr.querySelector('.korrektur-feld[data-feld="menge"]')?.value), einheit: tr.querySelector('.dein')?.value || 'Stk.', preis: zahl(tr.querySelector('.korrektur-feld[data-feld="preis"]')?.value) };
+    }
+    eigeneZeileCounter++;
+    const neu = { menge: 1, einheit: 'Stk.', preis: 0, ...felder, clientKey: 'ez' + eigeneZeileCounter, dbId: null, kategorie: kat, schluessel: 'ez-' + crypto.randomUUID() };
+    eigeneZeilen.push(neu);
+    // Platz direkt unter dem Original merken
+    reihenfolge = [...body.querySelectorAll('tr[data-sk]')].map(x => x.dataset.sk);
+    reihenfolge.splice(reihenfolge.indexOf(tr.dataset.sk) + 1, 0, neu.schluessel);
+    gruppeVonSk[neu.schluessel] = kat;
+    recalc(); planAutosave();
+    setTimeout(speichern, 600);
+  };
+  body.addEventListener('click', e => {
+    const b = e.target.closest('.drweg, .drmehr'); if(!b) return;
+    const tr = b.closest('tr[data-sk]'); if(!tr) return;
+    e.stopPropagation();
+    if(b.classList.contains('drweg')) return zeileWeg(tr);
+    const ausgeblendet = !istEigene(tr) && zeilenKorrekturen[tr.dataset.sk]?.geloescht;
+    betragMenu(b, [
+      { t: 'Duplizieren', d: 'Kopie als eigene Zeile darunter', fn: () => zeileKopie(tr) },
+      istEigene(tr) ? { t: 'Zeile löschen', rot: true, fn: () => zeileWeg(tr) } : { t: ausgeblendet ? 'Wieder einblenden' : 'Ausblenden', d: ausgeblendet ? '' : 'zählt nicht, nur hier sichtbar', fn: () => zeileWeg(tr) }
+    ]);
+  });
   const speichern = async () => {
     reihenfolge = [...body.querySelectorAll('tr[data-sk]')].map(tr => tr.dataset.sk);
     if(typeof currentOfferteId === 'undefined' || !currentOfferteId) return;
@@ -7785,6 +7836,37 @@ function dokNotizKnopf(offen){
 #saveStatus:not(.err){display:none!important}
 #saveStatus.err{justify-self:center;width:100%;max-width:980px}
 </style>
+<style id="dokZeilenGriffStil">
+/* Zeilen-Werkzeuge beim Darüberfahren: Griff links (ziehen), Abfalleimer + ⋮ rechts – ausserhalb der Tabelle im weissen Rand */
+#costwrap{padding-left:46px!important;padding-right:56px!important}
+#costbody tr[data-sk]{position:relative}
+#costbody tr[data-sk] td:first-child{position:static}
+#costbody .dgrip{left:-24px}
+#costbody .drechts{position:absolute;right:-50px;top:50%;transform:translateY(-50%);display:flex;gap:2px;opacity:0;transition:opacity .12s;font-weight:400}
+#costbody tr[data-sk]:hover .drechts,#costbody .drechts:focus-within{opacity:1}
+#costbody .drechts button{width:22px;height:22px;border:0;border-radius:5px;background:none;color:var(--muted);display:grid;place-items:center;cursor:pointer;padding:0}
+#costbody .drechts button:hover{background:var(--soft);color:var(--ink)}
+#costbody .drechts .drweg:hover{color:#B4655F;background:#FBEFEC}
+@media (hover:none){#costbody .dgrip,#costbody .drechts{opacity:1}}
+</style>
+<style id="dokPapierStil">
+/* Blatt wie Papier (A4-Verhältnis), wächst nach unten mit */
+@media (min-width:1101px){#costwrap{aspect-ratio:1/1.414}}
+/* Texte unten wie in Easybill: einfach Text auf Weiss, wachsen mit (kein Scrollen); Rahmen nur beim Darüberfahren/Tippen */
+#costwrap .descblock{background:transparent!important;border:1px solid transparent!important;resize:none;overflow:hidden;padding:4px 6px;margin-left:-7px;width:calc(100% + 14px);font-size:12px;color:var(--ink)}
+#costwrap .descblock:hover{border-color:var(--line)!important}
+#costwrap .descblock:focus{border-color:var(--primary)!important;background:#fff!important}
+</style>
+<script>
+/* Textfelder unten wachsen mit dem Inhalt (auch wenn der Text automatisch gesetzt wird) */
+(function(){
+  const passe = el => { if(!el) return; el.style.height = 'auto'; el.style.height = (el.scrollHeight + 2) + 'px'; };
+  const felder = () => ['beschreibungBlock', 'optionenTextBlock'].map(id => document.getElementById(id));
+  document.addEventListener('input', e => { if(e.target.classList?.contains('descblock')) passe(e.target); });
+  let letzte = '';
+  setInterval(() => { const f = felder(), s = f.map(x => x ? x.value + '|' + x.clientWidth : '').join('#'); if(s !== letzte){ letzte = s; f.forEach(passe); } }, 500);
+})();
+</script>
 <style id="dokKlappStil">
 /* Konfigurator: Balken klappen auf/zu, Gewähltes rechts untereinander (rechtes Drittel) */
 .afblock.afzu .zugwrap,.afblock.afzu .dokwerk{display:none}
