@@ -1,0 +1,1 @@
+update pendenz_art set titel = 'App-Box' where id = 'sammel'; update pendenz_liste set titel = 'App-Box' where art_id = 'sammel'; select id, titel from pendenz_art where id='sammel'; select count(*) from pendenz_liste where art_id='sammel' and titel='App-Box';
