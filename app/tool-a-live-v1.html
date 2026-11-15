@@ -3270,7 +3270,7 @@ function kiVerlaufZeichnen(){
   const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
   box.innerHTML = kiVerlauf.length ? kiVerlauf.map(m => `<div class="kimsg ${m.rolle === 'assistant' ? 'ki' : 'du'}">${esc(m.text).replace(/\n/g, '<br>')}</div>`).join('')
     + (kiLaeuft ? '<div class="kimsg ki kidenkt">Die KI stellt die Offerte zusammen …</div>' : '')
-    : `<div class="kileer">Beschreibe die Arbeiten, z. B.:<br>«4 Arbeitstage, ein Vorarbeiter und ein Gartenarbeiter, 2 Metallreifen Ø 195 cm, Substrat zum Füllen, Kraneinsatz Budget 2000.–»<br><br>Die KI sucht Artikel und frühere Offerten, füllt das Blatt rechts und fragt nach, wenn etwas fehlt.</div>`;
+    : '';
   box.scrollTop = box.scrollHeight;
 }
 async function kiSenden(){
@@ -3297,18 +3297,37 @@ async function kiSenden(){
     const b = document.getElementById('kiSenden'); if(b) b.disabled = false;
   }
 }
+// Spracheingabe (Chrome/Edge, wie bei den Pendenzen): läuft, bis du nochmals klickst; Text kommt ins Feld, dann «Senden»
+let kiRec = null;
+function kiSprechen(){
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const knopf = document.getElementById('kiMic'), ta = document.getElementById('kiEingabe');
+  if(!SR){ alert('Spracheingabe geht in diesem Browser nicht. Bitte Chrome oder Edge verwenden.'); return; }
+  if(kiRec){ kiRec.stop(); return; }
+  const vorher = ta.value.trim(); let fertig = '';
+  const r = new SR(); kiRec = r; r.lang = 'de-CH'; r.interimResults = true; r.continuous = true;
+  knopf.classList.add('an');
+  r.onresult = ev => { let zw = '';
+    for(let i = ev.resultIndex; i < ev.results.length; i++){ const t = ev.results[i][0].transcript; if(ev.results[i].isFinal) fertig += t + ' '; else zw += t; }
+    ta.value = [vorher, (fertig + zw).trim()].filter(Boolean).join(' ');
+    ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 220) + 'px'; };
+  r.onerror = ev => { if(ev.error === 'not-allowed') alert('Mikrofon ist blockiert. Im Browser oben links beim Schloss erlauben.'); };
+  r.onend = () => { knopf.classList.remove('an'); if(kiRec === r) kiRec = null; ta.focus(); };
+  r.start();
+}
 async function renderKiInhalt(){
   $costwrap.classList.add('easyblatt');
   const th = document.querySelector('table.cost thead th:nth-child(2)');
   if(th) th.innerHTML = '<span class="ezkopf" title="Menge ohne Fahrzeit">ohne Fahrt</span><span class="ezkopf" title="Fahrzeit, automatisch">Fahrt</span>Menge';
   if(!document.getElementById('kiPanel')){
     $tagessatzInhalt.innerHTML = `<div class="kipanel" id="kiPanel">
-      <div class="tbsectionlabel"><span class="t">KI-Offerte</span></div>
       <div class="kiverlauf" id="kiVerlauf"></div>
-      <div class="kieingabe"><textarea id="kiEingabe" rows="2" placeholder="Was soll in die Offerte? Enter = senden, Shift+Enter = neue Zeile" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-form-type="other"></textarea>
-        <button type="button" class="btn btn-primary" id="kiSenden">Senden</button></div>
+      <div class="kieingabe"><textarea id="kiEingabe" rows="2" placeholder="Was soll in die Offerte? Sprechen mit dem Mikrofon oder tippen" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-form-type="other"></textarea>
+        <div class="kiknoepfe"><button type="button" class="kimic" id="kiMic" title="Sprechen (nochmals klicken = stopp)" aria-label="Sprechen">${KG.icon('mikrofon', 18)}</button>
+        <button type="button" class="btn btn-primary" id="kiSenden">Senden</button></div></div>
     </div>`;
     const ta = document.getElementById('kiEingabe');
+    document.getElementById('kiMic').addEventListener('click', kiSprechen);
     ta.addEventListener('input', () => { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 220) + 'px'; });
     ta.addEventListener('keydown', e => { if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); kiSenden(); } });
     document.getElementById('kiSenden').addEventListener('click', kiSenden);
@@ -8282,6 +8301,11 @@ table.cost thead th:nth-child(5){width:104px}
 .kieingabe textarea{width:100%;box-sizing:border-box;min-height:52px;max-height:220px;resize:none;font:inherit;font-size:12.5px;line-height:1.4;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink)}
 .kieingabe textarea:focus{outline:none;border-color:var(--primary)}
 .kieingabe .btn{align-self:flex-end}
+.kiknoepfe{display:flex;justify-content:flex-end;align-items:center;gap:8px}
+.kimic{width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:#fff;color:var(--primary,#323E4E);display:grid;place-items:center;cursor:pointer}
+.kimic:hover{border-color:var(--primary,#323E4E)}
+.kimic.an{background:#B4655F;border-color:#B4655F;color:#fff;animation:kipuls 1.2s infinite}
+@keyframes kipuls{50%{box-shadow:0 0 0 6px rgba(180,101,95,.18)}}
 #kiSenden{border:0;border-radius:8px;background:var(--primary,#323E4E);color:#fff;font:inherit;font-size:12.5px;font-weight:600;padding:7px 16px;cursor:pointer}
 #kiSenden:hover{filter:brightness(1.15)}
 #kiSenden:disabled{opacity:.5;cursor:default}
