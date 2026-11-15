@@ -1826,7 +1826,7 @@ const rundeCHF = n => Math.round(n * 10) / 10;
 
 let OFFERTENTYPEN = [];       // [{id,name,berechnungsmodell}]
 
-const OFFERTNUMMER_TYPCODE = { formel:'01', tagessatz:'02', artikel:'03' };
+const OFFERTNUMMER_TYPCODE = { formel:'01', tagessatz:'02', artikel:'03', easy:'04' };
 let currentOffertnummer = null;
 function renderOffertnummerBadge(){
   const wrap = $('offnrWrap');
@@ -1945,6 +1945,7 @@ async function vergibOffertnummer(modell){
 }
 let offertentypId = null;
 let currentBerechnungsmodell = 'formel';
+let istEasy = false, easyVorlagen = []; // Offertentyp «Easy»: läuft intern wie der Tagesrechner, links Vorlagen-Balken statt Arbeitsschritte
 let eingabefelder = [];       // [{id,name,einheit}]
 let auswahlfelder = [];       // [{id,name,mehrfachauswahl,optionen:[{id,name}]}]
 let ressourcenzeilen = [];    // [{optionId, arbeitsschritt, kategorie, bezeichnung, einheit, preis, menge_ausdruck}]
@@ -3067,8 +3068,120 @@ function summeArbeitsschritt(asId){
     .reduce((s, ts) => s + (teilschrittTage[ts.id] || 0), 0);
 }
 
+// ---------------------------------------------------------------------------
+// Offertentyp «Easy»: fertige Vorlagen (Tabellen easy_vorlage / easy_vorlage_zeile).
+// kurze Meldung unten rechts (Tool A hat sonst keine Toast-Funktion)
+function easyMeldung(text, fehler){ const m = document.createElement('div'); m.className = 'easymeldung' + (fehler ? ' err' : ''); m.textContent = text; document.body.appendChild(m); setTimeout(() => m.remove(), fehler ? 6000 : 2600); }
+// Links stehen die Vorlagen als graue Balken, ein Klick fügt deren Zeilen als
+// eigene Zeilen ins Blatt ein (nichts wird berechnet). Zuoberst der Fahrweg zum
+// Kunden mit Knopf «zum Lieferwagen dazurechnen».
+// ---------------------------------------------------------------------------
+async function ladeEasyVorlagen(otId){
+  const { data, error } = await sb.from('easy_vorlage')
+    .select('id, name, reihenfolge, hinweis_text, quelle, easy_vorlage_zeile(id, reihenfolge, typ, kategorie, artikel_id, bezeichnung, menge, einheit, preis, optional, artikel(vp_knecht, einheit))')
+    .eq('offertentyp_id', otId).eq('ausgeblendet', false).order('reihenfolge');
+  if(error){ console.error(error); easyVorlagen = []; return; }
+  easyVorlagen = (data || []).map(v => ({ ...v, zeilen: (v.easy_vorlage_zeile || []).sort((a, b) => a.reihenfolge - b.reihenfolge) }));
+}
+function easyNeueZeile(f){
+  eigeneZeileCounter++;
+  const z = { clientKey: 'ez' + eigeneZeileCounter, dbId: null, kategorie: 'material', bezeichnung: '', menge: 0, einheit: '', preis: 0, schluessel: 'ez-' + crypto.randomUUID(), ...f };
+  eigeneZeilen.push(z);
+  return z;
+}
+function easyEinfuegen(v){
+  v.zeilen.forEach(z => easyNeueZeile({
+    kategorie: z.kategorie || 'material', bezeichnung: z.bezeichnung || '', menge: Number(z.menge) || 0,
+    einheit: z.einheit || z.artikel?.einheit || '',
+    // mit Artikel: aktueller Preis aus dem Artikelstamm, sonst der Preis der Vorlage
+    preis: z.artikel?.vp_knecht != null ? Number(z.artikel.vp_knecht) : (Number(z.preis) || 0),
+    optional: !!z.optional, ...(z.typ === 'text' ? { typ: 'text' } : {})
+  }));
+  const hin = (v.hinweis_text || '').trim();
+  if(hin){
+    const alt = $optionenTextBlock.value.trim();
+    if(!alt.includes(hin)) $optionenTextBlock.value = alt ? alt + '\n' + hin : hin;
+    optionenTextManuellBearbeitet = true;
+  }
+  recalc(); planAutosave();
+  easyMeldung(`Vorlage «${v.name}» eingefügt.`);
+}
+async function easyAlsVorlageSpeichern(vorlage){
+  const zeilen = eigeneZeilen.filter(z => !z.geloescht && z.typ !== 'zw' && (z.bezeichnung || '').trim() && z.bezeichnung !== 'Text');
+  if(!zeilen.length){ easyMeldung('Im Blatt stehen noch keine eigenen Zeilen.', true); return; }
+  let id = vorlage?.id;
+  if(!vorlage){
+    const name = (prompt('Name der neuen Vorlage:') || '').trim(); if(!name) return;
+    const { data, error } = await sb.from('easy_vorlage').insert({ offertentyp_id: offertentypId, name, reihenfolge: easyVorlagen.length + 1, hinweis_text: $optionenTextBlock.value.trim() || null }).select('id').single();
+    if(error){ easyMeldung((error.message || error), true); return; }
+    id = data.id;
+  }else{
+    if(!confirm(`Vorlage «${vorlage.name}» mit den Zeilen aus diesem Blatt überschreiben?`)) return;
+    const { error: e1 } = await sb.from('easy_vorlage_zeile').delete().eq('vorlage_id', id);
+    if(e1){ easyMeldung((e1.message || e1), true); return; }
+    await sb.from('easy_vorlage').update({ hinweis_text: $optionenTextBlock.value.trim() || null, geaendert_am: new Date().toISOString() }).eq('id', id);
+  }
+  // Reihenfolge wie im Blatt (inkl. gezogener Zeilen)
+  const pos = new Map([...document.querySelectorAll('#costbody tr[data-sk]')].map((tr, i) => [tr.dataset.sk, i]));
+  const rows = zeilen.slice().sort((a, b) => (pos.get(a.schluessel) ?? 1e6) - (pos.get(b.schluessel) ?? 1e6)).map((z, i) => ({
+    vorlage_id: id, reihenfolge: i + 1, typ: z.typ === 'text' ? 'text' : 'position', kategorie: z.kategorie || 'material',
+    bezeichnung: z.bezeichnung.trim(), menge: z.menge || 0, einheit: z.einheit || '', preis: z.preis || 0, optional: !!z.optional
+  }));
+  const { error } = await sb.from('easy_vorlage_zeile').insert(rows);
+  if(error){ easyMeldung((error.message || error), true); return; }
+  await ladeEasyVorlagen(offertentypId); renderTagessatzInhalt();
+  easyMeldung(vorlage ? 'Vorlage überschrieben.' : 'Vorlage gespeichert.');
+}
+let easyFahrt = null, easyFahrtPlz = null;
+async function easyFahrtAnzeigen(){
+  const el = document.getElementById('easyFahrt'); if(!el) return;
+  const plz = ($('kundePlz')?.value || '').trim();
+  if(!plz || !lieferwagenKonfig?.herkunft_adresse){ el.innerHTML = '<span class="efmut">Fahrweg: keine Kundenadresse.</span>'; return; }
+  if(plz !== easyFahrtPlz){ easyFahrtPlz = plz; easyFahrt = null; el.innerHTML = '<span class="efmut">Fahrweg wird berechnet …</span>'; }
+  const d = easyFahrt || await holeLieferwagenDistanz(plz);
+  if(!d){ el.innerHTML = '<span class="efmut">Fahrweg nicht ermittelbar.</span>'; return; }
+  easyFahrt = d;
+  const std = Math.round(Math.max(d.stdHinRueck, 0.25) * 4) / 4, km = Math.round(d.kmHinRueck), preis = lieferwagenKonfig.stundenpreis || 0;
+  el.innerHTML = `<div class="efkopf">Fahrweg zum Kunden</div>
+    <div class="efwerte">${km} km · ${std.toFixed(2)} Std. hin und zurück · ${fmtCHF(std * preis)} pro Fahrt</div>
+    <div class="efzeile"><label>Fahrten <input type="number" min="1" step="1" value="1" id="easyFahrten" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-form-type="other"></label>
+    <button type="button" class="btn btn-ghost" id="easyFahrtPlus">Zum Lieferwagen dazurechnen</button></div>`;
+  el.querySelector('#easyFahrtPlus').addEventListener('click', () => {
+    const n = Math.max(1, parseInt(el.querySelector('#easyFahrten').value, 10) || 1), dazu = Math.round(std * n * 100) / 100;
+    // bestehende Lieferwagen-Zeile (Std.) erhöhen – keine zweite Zeile
+    const lw = eigeneZeilen.find(z => !z.geloescht && /^(lieferwagen|transportaufwand)/i.test((z.bezeichnung || '').trim()) && /^std/i.test(z.einheit || ''));
+    if(lw) lw.menge = Math.round(((Number(lw.menge) || 0) + dazu) * 100) / 100;
+    else easyNeueZeile({ kategorie: 'logistik', bezeichnung: lieferwagenKonfig.stdArtikelBezeichnung || 'Lieferwagen', menge: dazu, einheit: 'Std.', preis });
+    recalc(); planAutosave();
+    easyMeldung(`${dazu.toFixed(2)} Std. Fahrzeit zum Lieferwagen dazugerechnet.`);
+  });
+}
+function renderEasyInhalt(){
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  $tagessatzInhalt.innerHTML = `<div class="easyfahrt" id="easyFahrt"><span class="efmut">Fahrweg wird berechnet …</span></div>
+    <div class="tbsectionlabel"><span class="t">Vorlagen</span></div>
+    ${easyVorlagen.map(v => `<div class="afblock easyblk"><label class="flabel afklapp easybar kg-zeile" data-easy="${v.id}" title="Klicken: Zeilen dieser Vorlage ins Blatt einfügen${v.quelle ? ' (' + esc(v.quelle) + ')' : ''}"><span class="afname"><span class="easyplus">${KG.icon('plus', 12)}</span>${esc(v.name)}</span><span class="afgew easyrechts"><span>${v.zeilen.length} Zeilen</span><button type="button" class="kg-ibtn kg-hover easymehr" data-easymehr="${v.id}" title="Vorlage bearbeiten" aria-label="Vorlage bearbeiten">${KG.icon('edit', 12)}</button></span></label></div>`).join('') || '<div class="efmut" style="padding:8px 2px">Noch keine Vorlagen.</div>'}
+    <button type="button" class="btnlink easyneu" id="easyNeu">+ Blatt als neue Vorlage speichern</button>`;
+  $tagessatzInhalt.querySelectorAll('.easybar').forEach(b => b.addEventListener('click', e => {
+    e.preventDefault();
+    const v = easyVorlagen.find(x => x.id === b.dataset.easy); if(!v) return;
+    const m = e.target.closest('[data-easymehr]');
+    if(m){ e.stopPropagation(); return betragMenu(m, [
+      { t: 'Umbenennen …', fn: async () => { const n = (prompt('Neuer Name:', v.name) || '').trim(); if(!n || n === v.name) return; await sb.from('easy_vorlage').update({ name: n }).eq('id', v.id); await ladeEasyVorlagen(offertentypId); renderTagessatzInhalt(); } },
+      { t: 'Mit diesem Blatt überschreiben', d: 'Zeilen und Hinweise aus dem aktuellen Blatt übernehmen', fn: () => easyAlsVorlageSpeichern(v) },
+      { t: 'Vorlage löschen', rot: true, fn: async () => { if(!confirm(`Vorlage «${v.name}» löschen?`)) return; await sb.from('easy_vorlage').delete().eq('id', v.id); await ladeEasyVorlagen(offertentypId); renderTagessatzInhalt(); } }
+    ]); }
+    easyEinfuegen(v);
+  }));
+  $tagessatzInhalt.querySelector('#easyNeu').addEventListener('click', () => easyAlsVorlageSpeichern(null));
+  easyFahrtAnzeigen();
+}
+// Kundenadresse kann später kommen oder ändern: Fahrweg nachführen
+setInterval(() => { if(istEasy && document.getElementById('easyFahrt') && ($('kundePlz')?.value || '').trim() !== easyFahrtPlz) easyFahrtAnzeigen(); }, 1000);
+
 const tageText = n => n > 0 ? `${rundeTage(n)} ${n === 1 ? 'Tag' : 'Tage'}` : '';
 function renderTagessatzInhalt(){
+  if(istEasy) return renderEasyInhalt();
   $tagessatzInhalt.innerHTML = `<div class="tbsectionlabel"><span class="t">Arbeitsschritte</span></div>` +
     tagessatzArbeitsschritte.map(as => {
       const teilschritteFuerAs = tagessatzTeilschritte.filter(ts => ts.arbeitsschrittId === as.id);
@@ -3553,8 +3666,10 @@ async function ladeDatenFuerOffertentyp(otId){
   formenAktivFuerOffertentyp = !!ot?.formen_aktiv && ot.berechnungsmodell !== 'tagessatz';
   $bauteiltitel.textContent = ot ? ot.name : '';
   $('totalLabel').textContent = 'Total ' + (ot ? ot.name : '');
-  if(ot && ot.berechnungsmodell === 'tagessatz'){
+  istEasy = ot?.berechnungsmodell === 'easy';
+  if(ot && (ot.berechnungsmodell === 'tagessatz' || istEasy)){
     await ladeTagessatzDaten(otId);
+    if(istEasy) await ladeEasyVorlagen(otId);
     setzeInhaltModus('tagessatz');
   }else{
     await ladeFormelDaten(otId);
@@ -5132,7 +5247,7 @@ async function resolveKundeId(){
 
 async function speichereNeueOfferte(titelVal){
   const kundeId = await resolveKundeId();
-  const offertnummer = await vergibOffertnummer(currentBerechnungsmodell);
+  const offertnummer = await vergibOffertnummer(istEasy ? 'easy' : currentBerechnungsmodell);
 
   const { data: offerte, error: oErr } = await sb.from('offerte')
     .insert({
@@ -6620,7 +6735,7 @@ const lwModusToggleHtml = '<span style="display:flex;gap:4px;">' + [['zeit', 'St
       const personalZeilenTagessatz = alleZeilen.filter(r => r.kategorie === 'personal');
       gesamtPersonalStunden = (vorarbeiterArtikelIds.length ? personalZeilenTagessatz.filter(r => vorarbeiterArtikelIds.includes(r.artikelId)) : personalZeilenTagessatz)
         .reduce((s, r) => s + r.menge, 0);
-      const lwZeilen = await berechneLieferwagenfahrzeit(gesamtPersonalStunden);
+      const lwZeilen = istEasy ? { personal: [], logistik: [] } : await berechneLieferwagenfahrzeit(gesamtPersonalStunden); // Easy: Fahrweg per Knopf links
       if(meineGeneration !== recalcGeneration) return; // inzwischen ueberholt, siehe recalcGeneration oben
       alleZeilen = alleZeilen.concat(lwZeilen.personal, lwZeilen.logistik);
       grandTotal += renderKostenblock(alleZeilen, $costbody);
@@ -6911,7 +7026,7 @@ const lwModusToggleHtml = '<span style="display:flex;gap:4px;">' + [['zeit', 'St
       const personalZeilen = berechnet.filter(r => r.kategorie === 'personal');
       gesamtPersonalStunden = (vorarbeiterArtikelIds.length ? personalZeilen.filter(r => vorarbeiterArtikelIds.includes(r.artikelId)) : personalZeilen)
         .reduce((s, r) => s + r.menge, 0);
-      const lwZeilen = await berechneLieferwagenfahrzeit(gesamtPersonalStunden);
+      const lwZeilen = istEasy ? { personal: [], logistik: [] } : await berechneLieferwagenfahrzeit(gesamtPersonalStunden); // Easy: Fahrweg per Knopf links
       if(meineGeneration !== recalcGeneration) return; // inzwischen ueberholt, siehe recalcGeneration oben
       const alleZeilenFormel = berechnet.concat(lwZeilen.personal, lwZeilen.logistik, freitextAggregatZeilen());
       grandTotal += renderKostenblock(alleZeilenFormel, $costbody);
@@ -7870,6 +7985,26 @@ function dokNotizKnopf(offen){
   setInterval(() => { const f = felder(), s = f.map(x => x ? x.value + '|' + x.clientWidth : '').join('#'); if(s !== letzte){ letzte = s; f.forEach(passe); } }, 500);
 })();
 </script>
+<style id="dokEasyStil">
+/* Offertentyp «Easy»: Fahrweg-Box + Vorlagen-Balken (wie Konfigurator-Balken) */
+.easyfahrt{background:#f3f5f8;border-radius:4px;padding:8px 10px;margin:4px 0 12px;font-size:11.5px;color:var(--ink)}
+.easyfahrt .efkopf{font-weight:700;margin-bottom:2px}
+.easyfahrt .efwerte{color:var(--ink)}
+.easyfahrt .efmut,.efmut{color:var(--muted);font-size:11.5px}
+.easyfahrt .efzeile{display:flex;align-items:center;gap:10px;margin-top:7px;flex-wrap:wrap}
+.easyfahrt .efzeile label{display:flex;align-items:center;gap:6px;color:var(--muted)}
+.easyfahrt .efzeile input{width:48px;border:1px solid var(--line);border-radius:4px;padding:3px 5px;font:inherit;font-size:12px;text-align:right;background:#fff}
+.easyfahrt .btn{font-size:11.5px;padding:4px 10px}
+.afblock.easyblk{margin-top:6px;padding-top:0;border-top:0}
+.afblock.easyblk label.flabel.easybar{margin-bottom:0;align-items:center}
+.easybar .easyplus{display:inline-flex;width:18px;height:18px;border:1px solid var(--line);border-radius:5px;background:#fff;color:var(--muted);align-items:center;justify-content:center;flex:none}
+.easybar:hover .easyplus{color:var(--primary);border-color:var(--primary)}
+.easybar .easyrechts{flex-direction:row!important;align-items:center;justify-content:space-between;color:var(--muted)!important;font-weight:400}
+.easybar .easymehr{width:20px;height:20px}
+.easyneu{display:inline-block;margin-top:12px;font-size:12px}
+.easymeldung{position:fixed;right:20px;bottom:20px;z-index:2000;background:var(--primary,#323E4E);color:#fff;padding:9px 14px;border-radius:8px;font-size:12.5px;box-shadow:0 8px 24px rgba(0,0,0,.2)}
+.easymeldung.err{background:#B4655F}
+</style>
 <style id="dokKlappStil">
 /* Konfigurator: Balken klappen auf/zu, Gewähltes rechts untereinander (rechtes Drittel) */
 .afblock.afzu .zugwrap,.afblock.afzu .dokwerk{display:none}
