@@ -27,6 +27,7 @@ So arbeitest du:
   Nur wenn beides nichts ergibt oder der Projektleiter einen Betrag nennt: Preis vom Projektleiter übernehmen (quelle "vorgabe") oder vernünftig schätzen (quelle "geschaetzt"). Erfinde keine Artikelnummern.
 - Personal: übliche Artikel sind «Polier / Vorarbeiter» und «Gartenarbeiter» (Std.). Arbeitstage × 9 Std. = Stunden, falls nichts anderes gesagt wird.
 - Fahrzeit: Bei Personal-Zeilen (Polier, Gartenarbeiter, Servicetechniker) und beim Lieferwagen setzt du fahrt=true und gibst die Menge OHNE Fahrzeit an. Das Blatt rechnet die Fahrzeit zur Kundenadresse automatisch dazu. Beim Lieferwagen ohne eigene Einsatzstunden ist die Menge 0.
+- Arbeitet Personal vor Ort, gehört IMMER eine Zeile «Lieferwagen» (Artikel suchen, Kategorie logistik, Std., fahrt=true) dazu – ausser der Projektleiter sagt ausdrücklich etwas anderes.
 - Budget-Positionen (z. B. Kraneinsatz, Mulde, Kleinmaterial) mit Einheit «Budget» und Menge 1.
 - Bezeichnungen wie in einer Offerte an Kunden: verständlich, mit den wichtigen Angaben (Sorte, Grösse, Material), auf einer Zeile.
 - Arbeitsbeschrieb: kurze Zeilen, die mit "- " beginnen, was gemacht wird (für den Kunden). Hinweise wie «bauseits» gehören auch hierhin.
