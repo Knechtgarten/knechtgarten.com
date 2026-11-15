@@ -1130,9 +1130,13 @@ function zeichneOver(){
           ${noch ? `<button class="kg-ibtn" data-plzur="${p.eintrag_id}" aria-label="Zurückholen" title="Zurückholen">${K('undo')}</button>` : ''}</div>`; }).join('') : ''}</div></div>`; }
   if(S.pick){ const pk = S.pick, p = S.pz.find(x => x.id === pk.id), q = pk.q.trim().toLowerCase();
     let body = '<div class="muted small">Lade …</div>';
-    if(pk.daten && pk.art === 'planer'){ const { personen, gruppen } = pk.daten, treffer = personen.filter(x => !q || x.name.toLowerCase().includes(q));
-      body = `<div class="row"><label class="small muted" for="pdatum">Tag</label><input type="date" id="pdatum" value="${esc(pk.datum)}"><input type="text" id="pq" placeholder="Person suchen …" value="${esc(pk.q)}" style="flex:1;min-width:0" aria-label="Person suchen"></div>`
-        + [...gruppen, { id:null, name:'Ohne Gruppe' }].map(g => { const ps = treffer.filter(x => (x.gruppe_id || null) === g.id); return ps.length ? `<div class="sec">${esc(g.name)}</div>${ps.map(x => `<button class="opt" data-pperson="${x.id}">${K('kalender', 14)}${esc(x.name)}</button>`).join('')}` : ''; }).join('')
+    if(pk.daten && pk.art === 'planer'){ const { personen } = pk.daten, treffer = personen.filter(x => !q || x.name.toLowerCase().includes(q));
+      // Planungshilfe (Ablagen) und Allgemein (Ferien, Service, Infos) sind keine Personen für Aufträge
+      const gruppen = pk.daten.gruppen.filter(g => !/planungshilfe|^allgemein$/i.test(g.name)), raus = new Set(pk.daten.gruppen.filter(g => !gruppen.includes(g)).map(g => g.id));
+      const vor = pk.daten.gruppen.filter(g => g.vorrat_bereich);
+      body = (vor.length && !q ? `<div class="sec">In den Vorrat</div>${vor.map(g => `<button class="opt" data-pvorrat="${esc(g.vorrat_bereich)}">${A('ebenen', 14)}Vorrat ${esc(VBER[g.vorrat_bereich] || g.name)}</button>`).join('')}` : '')
+        + `<div class="sec">Offener Auftrag bei …</div><div class="row"><label class="small muted" for="pdatum">Tag</label><input type="date" id="pdatum" value="${esc(pk.datum)}"><input type="text" id="pq" placeholder="Person suchen …" value="${esc(pk.q)}" style="flex:1;min-width:0" aria-label="Person suchen"></div>`
+        + [...gruppen, { id:null, name:'Ohne Gruppe' }].filter(g => !raus.has(g.id)).map(g => { const ps = treffer.filter(x => (x.gruppe_id || null) === g.id); return ps.length ? `<div class="sec">${esc(g.name)}</div>${ps.map(x => `<button class="opt" data-pperson="${x.id}">${K('kalender', 14)}${esc(x.name)}</button>`).join('')}` : ''; }).join('')
         + (treffer.length ? '' : '<div class="muted small">Keine Person gefunden.</div>');
     } else if(pk.daten){ const { boards, buero, spalten } = pk.daten, sel = pk.sel;
       const haken = (key, inhalt, punkt) => `<label class="hk"><input type="checkbox" data-pk="${key}"${sel.has(key) ? ' checked' : ''}>${punkt ? `<i style="background:${punkt}"></i>` : ''}<span>${inhalt}</span></label>`;
@@ -1548,7 +1552,7 @@ const datumCH = s => { const d = new Date(s); return isNaN(d) ? '' : d.toLocaleD
 async function oeffnePick(artZiel, p){
   S.pick = { art: artZiel, id: p.id, q: '', daten: null, ziel: null, datum: naechsterWerktag() }; zeichneOver();
   if(artZiel === 'planer'){
-    const [rp, rg] = await Promise.all([sb.from('planer_person').select('id,name,gruppe_id').eq('aktiv', true).eq('ist_ablage', false).order('name'), sb.from('planer_gruppe').select('id,name,sortierung').order('sortierung')]);
+    const [rp, rg] = await Promise.all([sb.from('planer_person').select('id,name,gruppe_id').eq('aktiv', true).eq('ist_ablage', false).order('name'), sb.from('planer_gruppe').select('id,name,sortierung,vorrat_bereich').order('sortierung')]);
     if(rp.error) return fehler(rp.error, 'Planer'); if(S.pick) S.pick.daten = { personen: rp.data, gruppen: rg.data || [] };
   } else {
     // drei Teile: gemeinsame Boards · Büro-Team (Team-box) · Mitarbeitende (Pendenzen im Einsatzplaner), wie «Mithilfe» im Planer geordnet
@@ -1613,6 +1617,15 @@ async function verschiebeInListe(p, listeId, label){
   toast(`Verschoben nach ${label}`, async () => { if(await upd('pendenz', p.id, alt)){ Object.assign(p, alt); S.pz.push(p); zeichne(); } });
 }
 // Pendenz -> offener (nicht abgemachter) Auftrag im Einsatzplaner, ganzer Tag 06–18 Uhr; Pendenz bleibt mit Planer-Zeichen
+// in den allgemeinen Vorrat eines Bereichs (Gartenbau / Pflege / Pool) – im Planer unter der Gruppe als «Vorrat», 1 Tag geschätzt
+const VBER = { bau: 'Gartenbau', pflege: 'Pflege', pool: 'Pool' };
+async function inVorrat(p, bereich){
+  const { data: pl } = await sb.from('planer_person').select('id').eq('benutzer_id', ME).eq('ist_projektleiter', true).maybeSingle();
+  const { data, error } = await sb.from('planer_vorrat').insert({ kunde_id: p.kunde_id || null, titel: p.titel, notiz: notizText(p.notiz) || null, tage: 1, bereich, geschaetzt: true, projektleiter_id: pl ? pl.id : null, pendenz_id: p.id, erstellt_von: ME }).select('id').single();
+  if(error) return fehler(error, 'Vorrat');
+  S.pick = null; zeichne();
+  toast(`In den Vorrat ${VBER[bereich] || bereich} gelegt`, async () => { const { error: e2 } = await sb.from('planer_vorrat').delete().eq('id', data.id); if(e2) return fehler(e2); zeichne(); });
+}
 async function inPlaner(p, person){
   const tag = S.pick.datum || naechsterWerktag(), b = new Date(tag + 'T06:00:00'), en = new Date(tag + 'T18:00:00');
   const { data, error } = await sb.from('planer_einsatz').insert({ person_id: person.id, art: 'baustelle', beginn: b.toISOString(), ende: en.toISOString(), titel: p.titel, notiz: notizText(p.notiz) || null, abgemacht: false, erstellt_von: ME }).select('id').single();
@@ -1753,6 +1766,7 @@ document.addEventListener('click', async e => {
   if('pickx' in d || d.bg === 'pick'){ S.pick = null; return zeichneOver(); }
   if('psenden' in d){ return sendePick(); }
   if(d.pperson){ const p = S.pz.find(x => x.id === S.pick.id), pe = S.pick.daten.personen.find(x => x.id === d.pperson); return inPlaner(p, pe); }
+  if(d.pvorrat){ const p = S.pz.find(x => x.id === S.pick.id); return inVorrat(p, d.pvorrat); }
   if('ordnen' in d){ e.stopPropagation(); return ordnen(); }
   if(d.tog){ e.stopPropagation(); const l = listeById(d.tog); l.zu = !l.zu; zeichne(); return upd('pendenz_liste', l.id, { zu: l.zu }); }
   if(d.gtog){ const g = S.gruppen.find(x => x.id === d.gtog); g.zu = !g.zu; zeichne(); return upd('pendenz_gruppe', g.id, { zu: g.zu }); }
