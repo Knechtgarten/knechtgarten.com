@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script src="/kg-pw-schutz.js?v=5"></script>
-<script src="/kg-stil.js?v=80"></script>
+<script src="/kg-stil.js?v=81"></script>
 <script src="/kg-bereiche.js?v=3"></script>
 <script>if(/[?&]offerte=/.test(location.search)) document.documentElement.classList.add('doklaedt');</script>
 <title>Tool A (live) – Offerten-Eingabe</title>
@@ -3235,14 +3235,38 @@ function renderEasyInhalt(){
 // Supabase-Funktion ki-offerte sucht Artikel/alte Offerten und setzt das ganze Blatt (eigene Zeilen).
 // Verlauf pro Offerte in offerte_ki_verlauf (nur Text).
 // ---------------------------------------------------------------------------
-let kiVerlauf = [], kiVerlaufFuer = undefined, kiLaeuft = false;
+let kiVerlauf = [], kiVerlaufFuer = undefined, kiLaeuft = false, kiQuellen = [];
+// Zusatzquellen pro Offerte (oben im KI-Bereich ein-/ausschalten; gilt für alle weiteren Nachrichten dieser Offerte)
+const KI_ZUSATZ = [
+  { k: 'internet', name: 'Internet', icon: 'globus', bereit: true, tip: 'Im Internet suchen (z. B. Listenpreise, technische Daten)' },
+  { k: 'drive', name: 'Drive', icon: 'ordner', bereit: false, tip: 'Google Drive – kommt noch' },
+  { k: 'peax', name: 'PEAX', icon: 'dokument', bereit: false, tip: 'PEAX (Rechnungen, Einkaufspreise) – kommt noch' },
+  { k: 'mails', name: 'Mails', icon: 'mail', bereit: false, tip: 'Mails (Lieferantenofferten) – kommt noch' },
+];
+function kiQuellenZeichnen(){
+  const box = document.getElementById('kiQuellen'); if(!box) return;
+  box.innerHTML = KI_ZUSATZ.map(q => `<button type="button" class="kiq-btn${kiQuellen.includes(q.k) ? ' an' : ''}" data-k="${q.k}"${q.bereit ? '' : ' disabled'} title="${q.tip}" aria-pressed="${kiQuellen.includes(q.k)}">${KG.icon(q.icon, 14)}<span>${q.name}</span></button>`).join('');
+  box.querySelectorAll('.kiq-btn:not([disabled])').forEach(b => b.addEventListener('click', () => {
+    const k = b.dataset.k; kiQuellen = kiQuellen.includes(k) ? kiQuellen.filter(x => x !== k) : [...kiQuellen, k];
+    kiQuellenZeichnen(); kiQuellenSpeichern();
+  }));
+}
+async function kiQuellenSpeichern(){
+  const id = typeof currentOfferteId !== 'undefined' ? currentOfferteId : null;
+  if(id) await sb.from('offerte').update({ ki_quellen: kiQuellen }).eq('id', id);
+}
 async function kiVerlaufLaden(){
   const id = typeof currentOfferteId !== 'undefined' ? currentOfferteId : null;
   if(kiVerlaufFuer === id) return;
-  kiVerlaufFuer = id; kiVerlauf = [];
-  if(!id) return;
-  const { data } = await sb.from('offerte_ki_verlauf').select('rolle, text, erstellt_am').eq('offerte_id', id).order('erstellt_am');
+  kiVerlaufFuer = id; kiVerlauf = []; kiQuellen = [];
+  if(!id){ kiQuellenZeichnen(); return; }
+  const [{ data }, { data: off }] = await Promise.all([
+    sb.from('offerte_ki_verlauf').select('rolle, text, erstellt_am').eq('offerte_id', id).order('erstellt_am'),
+    sb.from('offerte').select('ki_quellen').eq('id', id).maybeSingle()
+  ]);
   kiVerlauf = (data || []).map(r => ({ rolle: r.rolle, text: r.text }));
+  kiQuellen = Array.isArray(off?.ki_quellen) ? off.ki_quellen.filter(k => KI_ZUSATZ.some(q => q.k === k && q.bereit)) : [];
+  kiQuellenZeichnen();
 }
 function kiBlattFuerKi(){
   return {
@@ -3296,6 +3320,7 @@ function kiVerlaufZeichnen(){
       const url = kiQuelleLink({ art, id });
       return url ? `<a class="kilink" href="${url}" target="_blank" rel="noopener" title="${tip ? tip + ' – ' : ''}Quelle öffnen">${txt}</a>` : txt;
     })
+    .replace(/\[([^\]\n]{1,80})\]\((https:\/\/[^\s)]{1,400})\)/g, (m, txt, url) => `<a class="kilink" href="${url}" target="_blank" rel="noopener" title="Seite öffnen">${txt}</a>`)
     .replace(/\n/g, '<br>');
   box.innerHTML = kiVerlauf.length ? kiVerlauf.map(m => `<div class="kimsg ${m.rolle === 'assistant' ? 'ki' : 'du'}">${m.rolle === 'assistant' ? kiText(m.text) : esc(m.text).replace(/\n/g, '<br>')}</div>`).join('')
     + (kiLaeuft ? '<div class="kimsg ki kidenkt">Die KI stellt die Offerte zusammen …</div>' : '')
@@ -3306,14 +3331,14 @@ async function kiSenden(){
   const ta = document.getElementById('kiEingabe'); if(!ta || kiLaeuft || ta.readOnly) return;
   const text = ta.value.trim(); if(!text) return;
   // neue Offerte zuerst speichern, damit der Verlauf dazu gehört
-  if(typeof currentOfferteId === 'undefined' || !currentOfferteId){ await fuehreAutosaveDurch(); kiVerlaufFuer = currentOfferteId || null; }
+  if(typeof currentOfferteId === 'undefined' || !currentOfferteId){ await fuehreAutosaveDurch(); kiVerlaufFuer = currentOfferteId || null; if(kiQuellen.length) kiQuellenSpeichern(); }
   const vorher = kiVerlauf.slice();
   kiVerlauf.push({ rolle: 'user', text }); ta.value = ''; ta.style.height = '';
   kiLaeuft = true; kiVerlaufZeichnen();
   document.getElementById('kiSenden').disabled = true;
   try{
     const kunde = { name: (currentKundeName || '').trim(), plz: ($('kundePlz')?.value || '').trim(), adresse: ($('kundeAdresseAnzeige')?.textContent || '').trim() };
-    const { data, error } = await sb.functions.invoke('ki-offerte', { body: { nachricht: text, verlauf: vorher, blatt: kiBlattFuerKi(), kunde } });
+    const { data, error } = await sb.functions.invoke('ki-offerte', { body: { nachricht: text, verlauf: vorher, blatt: kiBlattFuerKi(), kunde, quellen: kiQuellen } });
     if(error || data?.error){ throw new Error(data?.error || error?.message || 'Unbekannter Fehler'); }
     if(Array.isArray(data.zeilen)){ kiBlattUebernehmen(data.zeilen, data.arbeitsbeschrieb); recalc(); planAutosave(); }
     const antwort = String(data.antwort || '').trim() || 'Erledigt.';
@@ -3364,6 +3389,7 @@ async function renderKiInhalt(){
   if(th) th.innerHTML = '<span class="ezkopf" title="Menge ohne Fahrzeit">ohne Fahrt</span><span class="ezkopf" title="Fahrzeit, automatisch">Fahrt</span>Menge';
   if(!document.getElementById('kiPanel')){
     $tagessatzInhalt.innerHTML = `<div class="kipanel" id="kiPanel">
+      <div class="kiquellen" id="kiQuellen"></div>
       <div class="kiverlauf" id="kiVerlauf"></div>
       <div class="kieingabe"><div class="kifeld"><textarea id="kiEingabe" rows="2" placeholder="Was soll in die Offerte? Sprechen mit dem Mikrofon oder tippen" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-form-type="other"></textarea>
         <button type="button" class="kimic" id="kiMic" title="Sprechen (nochmals klicken = stopp)" aria-label="Sprechen">${KG.icon('mikrofon', 16)}</button></div>
@@ -3376,7 +3402,7 @@ async function renderKiInhalt(){
     ta.addEventListener('keydown', e => { if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); kiSenden(); } });
     document.getElementById('kiSenden').addEventListener('click', kiSenden);
   }
-  await kiVerlaufLaden(); kiVerlaufZeichnen();
+  await kiVerlaufLaden(); kiVerlaufZeichnen(); kiQuellenZeichnen();
 }
 
 // Verlauf nachladen, sobald die Offerte (z. B. nach dem ersten Speichern) eine ID hat oder gewechselt wurde
@@ -8206,7 +8232,7 @@ function dokNotizKnopf(offen){
 <style id="dokRuhigStil">
 /* Blatt schmaler (mehr grauer Rand, wirkt wie ein Blatt) */
 @media (min-width:1101px){.layout{grid-template-columns:460px minmax(0,980px);justify-content:center}
-.layout.konfzu{grid-template-columns:0 minmax(0,980px)}}
+.layout.konfzu{grid-template-columns:34px minmax(0,980px)}}
 /* Betrag-Zelle wieder normale Tabellenzelle (flex hat die Linien unterbrochen) */
 #costbody td.cbetrag{display:table-cell;vertical-align:middle}
 /* Zahlen ohne Rahmen wie in Easybill: Rahmen nur beim Darüberfahren und beim Tippen */
@@ -8230,7 +8256,7 @@ function dokNotizKnopf(offen){
 /* (row-gap 0: 25 leere Raster-Zeilen mit je 20px Abstand gaben unnötig einen Scrollbalken; nur am Bildschirm, Handy-Ansicht bleibt einspaltig) */
 @media (min-width:1101px){
 .layout{grid-template-columns:460px minmax(0,1fr);justify-content:stretch;row-gap:0}
-.layout.konfzu{grid-template-columns:0 minmax(0,1fr)}
+.layout.konfzu{grid-template-columns:34px minmax(0,1fr)}
 }
 #costwrap{justify-self:center;width:100%;max-width:980px;box-sizing:border-box}
 /* Technische Statuszeilen und «Alte Ansicht» weg; Fehler beim Speichern bleiben sichtbar */
@@ -8349,6 +8375,13 @@ table.cost thead th:nth-child(5){width:104px}
 .kimsg.ki{background:color-mix(in srgb,#FAEBB0 55%,#fff);align-self:flex-start}
 .kimsg.kidenkt{color:var(--muted);font-style:italic}
 .kifeld textarea.kikorr{color:var(--muted);background:#f7f8fa}
+.kiquellen{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.kiq-btn{display:flex;align-items:center;justify-content:center;gap:6px;padding:7px 6px;border:1px solid var(--line);border-radius:6px;background:#fff;color:var(--ink);font:inherit;font-size:12px;font-weight:600;cursor:pointer}
+.kiq-btn svg{color:var(--muted);flex:none}
+.kiq-btn:hover:not([disabled]){border-color:var(--muted)}
+.kiq-btn.an{background:var(--primary,#323E4E);border-color:var(--primary,#323E4E);color:#fff}
+.kiq-btn.an svg{color:#fff}
+.kiq-btn[disabled]{opacity:.45;cursor:default}
 .kimsg .kilink{color:var(--primary,#323E4E);text-decoration:underline;text-underline-offset:2px}
 .kileer{font-size:12px;color:var(--muted);line-height:1.5;padding:6px 2px}
 .kieingabe{display:flex;flex-direction:column;gap:6px}
