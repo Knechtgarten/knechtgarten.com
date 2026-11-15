@@ -296,7 +296,7 @@ input[type=number]{-moz-appearance:textfield;}
           <input id="amWechselkurs" type="text" readonly placeholder="—">
         </div>
         <div style="display:flex;gap:8px;">
-          <div class="fld" style="margin:0;flex:1;"><label>MwSt-Satz %</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" id="amMwst" type="number" step="0.01"></div>
+          <div class="fld" style="margin:0;flex:1;"><label>MwSt</label><select id="amMwst"><option value="normal">Normal</option><option value="reduziert">Reduziert (z. B. Pflanzen)</option></select></div>
         </div>
         <div style="display:flex;gap:8px;">
           <div class="fld" style="margin:0;flex:1;"><label id="amEpLiefLabel">EP Lieferant</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" id="amEpLief" type="number" step="0.01"></div>
@@ -853,7 +853,7 @@ $('exportExcelBtn').addEventListener('click', exportArtikelAlsExcel);
 function baueArtikelFilterQuery(){
   let query = sb.from('artikel')
     .select(`id, artikelnummer_lieferant, artikelnummer_knecht, bezeichnung, einheit, kategorie,
-      ep_lieferant, vp_lieferant, waehrung, wechselkurs, vp_knecht, preis_gesperrt, mwst_satz_pct,
+      ep_lieferant, vp_lieferant, waehrung, wechselkurs, vp_knecht, preis_gesperrt, mwst_satz_pct, mwst_art,
       anmerkung, foto_url, zusatzfoto1_url, zusatzfoto2_url, zusatzfoto3_url, zusatzwert, zusatzeinheit, sync_offertentool, sync_webtool, sync_easybill, haendischer_abgleich,
       notiz, referenzpreise, zusammenzaehl_tool,
       lieferant_id, artikelgruppe_id, lieferant(name,kuerzel,archiviert_am), artikelgruppe(name)`, { count: 'exact' });
@@ -1094,7 +1094,7 @@ function openArtikelModalAdd(){
   $('amNeueGruppeWrap').classList.add('hidden'); $('amNeueGruppeName').value = '';
   $('amEpLief').value = ''; $('amVpLief').value = '';
   amWaehrungAusLieferantSetzen();
-  $('amVpKnecht').value = ''; $('amMwst').value = '';
+  $('amVpKnecht').value = ''; $('amMwst').value = 'normal'; delete $('amMwst').dataset.fest;
   $('amMargeKnecht').value = '';
   $('amFoto').value = ''; $('amZf1').value = ''; $('amZf2').value = ''; $('amZf3').value = ''; $('amAnmerkung').value = '';
   $('amZusatzwert').value = ''; $('amZusatzeinheit').innerHTML = einheitOptionsHtml('', true);
@@ -1126,7 +1126,7 @@ function openArtikelModalEdit(id){
   amWaehrungAusLieferantSetzen();
   $('amVpKnecht').value = a.vp_knecht ?? '';
   $('amMargeKnecht').value = '';
-  $('amMwst').value = a.mwst_satz_pct ?? '';
+  $('amMwst').value = a.mwst_art || 'normal'; $('amMwst').dataset.fest = '1'; // bestehender Artikel: Lieferanten-Vorgabe nicht übernehmen
   amMwstVorschlagFuellen();
   $('amFoto').value = a.foto_url || '';
   $('amZf1').value = a.zusatzfoto1_url || '';
@@ -1298,9 +1298,9 @@ function amAktualisiereMargen(){
 // MwSt-Satz-Vorschlag: nur befuellen, wenn das Feld leer ist - ein bereits
 // eingetragener (auch bewusst geleerter) Wert wird nie ueberschrieben.
 function amMwstVorschlagFuellen(){
-  if($('amMwst').value.trim() !== '') return;
+  if($('amMwst').dataset.fest === '1') return;
   const mwst = LIEFERANTEN.find(l => l.id === $('amLieferant').value)?.lieferant_datenabgleich?.mwst_satz;
-  if(mwst != null) $('amMwst').value = mwst;
+  if(mwst != null) $('amMwst').value = Number(mwst) < 5 ? 'reduziert' : 'normal'; // Lieferanten-Vorgabe (z. B. 2.6) → Reduziert
 }
 // Waehrung ist nicht pro Artikel eingebbar, sondern kommt immer vom aktuell
 // gewaehlten Lieferant (Einstellungen -> Lieferanten/Import) - analog zum
@@ -1324,7 +1324,8 @@ $('amVpKnecht').addEventListener('input', () => {
   if(!amGesperrt){ amGesperrt = true; amAktualisiereGesperrtButton(); }
   amAktualisiereMargen();
 });
-$('amLieferant').addEventListener('change', () => { amWaehrungAusLieferantSetzen(); amAktualisiereMargen(); amMwstVorschlagFuellen(); });
+$('amLieferant').addEventListener('change', () => { amWaehrungAusLieferantSetzen(); amAktualisiereMargen(); delete $('amMwst').dataset.fest; amMwstVorschlagFuellen(); });
+$('amMwst').addEventListener('change', () => { $('amMwst').dataset.fest = '1'; });
 $('amMargeKnecht').addEventListener('input', () => {
   // Wirkt erst, wenn der Preis gesperrt ist - bei entsperrtem Preis wird nur
   // der Text im Feld gespeichert, ohne VP Knecht zu beeinflussen (der folgt
@@ -1399,7 +1400,8 @@ $('amSave').addEventListener('click', async () => {
     waehrung: $('amWaehrung').value.trim() || 'CHF',
     wechselkurs: aktuellerWechselkurs($('amWaehrung').value.trim().toUpperCase() || 'CHF'),
     vp_knecht, preis_gesperrt,
-    mwst_satz_pct: parseFloat($('amMwst').value) || null,
+    mwst_art: $('amMwst').value || 'normal',
+    mwst_satz_pct: $('amMwst').value === 'reduziert' ? 2.6 : 8.1, // für ältere Abfragen; massgebend ist mwst_art + Verwaltung › MwSt-Sätze
     foto_url: $('amFoto').value.trim() || null,
     zusatzfoto1_url: $('amZf1').value.trim() || null,
     zusatzfoto2_url: $('amZf2').value.trim() || null,
@@ -1736,7 +1738,7 @@ async function duplizierArtikel(id){
     wechselkurs: a.wechselkurs,
     vp_knecht: a.vp_knecht,
     preis_gesperrt: a.preis_gesperrt,
-    mwst_satz_pct: a.mwst_satz_pct,
+    mwst_satz_pct: a.mwst_satz_pct, mwst_art: a.mwst_art || 'normal',
     anmerkung: a.anmerkung,
     foto_url: a.foto_url,
     zusatzfoto1_url: a.zusatzfoto1_url,

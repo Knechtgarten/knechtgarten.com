@@ -218,13 +218,22 @@ Deno.serve(async (req) => {
       // in der description auch fuer manuell erfasste Zwischentitel tut.
       items.push({ type: 'TEXT', description: `<b>${gruppe.label}</b>` });
       for (const z of zeilen) {
+        // Rabatt pro Zeile im Easybill-Format (geprüft an echten Angeboten):
+        // Prozent = PERCENT (Wert 10 = 10 %), CHF pro Einheit = QUANTITY (Rappen), CHF pauschal = AMOUNT (Rappen)
+        const rabatt = Number(z.rabatt) || 0;
+        const rabattFelder = !rabatt ? {} :
+          z.rabatt_art === 'einheit' ? { discount: chfZuRappen(rabatt), discount_type: 'QUANTITY' } :
+          z.rabatt_art === 'pauschal' ? { discount: chfZuRappen(rabatt), discount_type: 'AMOUNT' } :
+          { discount: rabatt, discount_type: 'PERCENT' };
         items.push({
           type: z.optional ? 'POSITION_NOCALC' : 'PRODUCT',
           description: z.bezeichnung,
           quantity: z.menge,
           unit: z.einheit || undefined,
           single_price_net: chfZuRappen(z.preis),
-          vat_percent: EASYBILL_MWST_SATZ,
+          // MwSt pro Zeile (Normal/Reduziert, Satz am Offertdatum) – ältere Snapshots ohne Satz: Normalsatz
+          vat_percent: z.mwst_satz != null ? Number(z.mwst_satz) : EASYBILL_MWST_SATZ,
+          ...rabattFelder,
         });
       }
     }
