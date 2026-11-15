@@ -25,7 +25,7 @@
     check2: '<path d="M3 12.5l4 4L13 9"/><path d="M11 15.5l1 1L21 7"/>',   // zwei Häkchen (Offerte zugesagt)
     frage: '<circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.4a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2-2.4 3.7M12 16.8v.2"/>',   // In Abklärung
     blase: '<path d="M4.5 6h15v10H10.5L6.5 19.5V16h-2z"/><path d="M8.6 11h.01M12 11h.01M15.4 11h.01" stroke-width="2"/>',   // Notiz «In Abklärung» (Sprechblase)
-    nullbetrag: '<text x="12" y="15.6" text-anchor="middle" font-size="10.5" font-weight="700" letter-spacing="-.4" fill="currentColor" stroke="none" font-family="system-ui,Segoe UI,sans-serif">0.00</text>',   // Offerte unvollständig (Zeilen mit 0)
+    nullbetrag: '<text x="12" y="15.2" text-anchor="middle" font-size="9" font-weight="700" letter-spacing="-.3" fill="currentColor" stroke="none" font-family="system-ui,Segoe UI,sans-serif">0.00</text>',   // Offerte unvollständig (Zeilen mit 0)
     halbkreis: '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17a8.5 8.5 0 0 0 0-17z" fill="currentColor"/>',   // noch nicht fertig (Offerte: noch offen)
     upload: '<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>',
     undo: '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>',
