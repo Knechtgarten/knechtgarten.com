@@ -1650,10 +1650,23 @@ document.addEventListener('paste', e => { // Fotos direkt ins offene Pendenz-Fen
 async function gruppeAusFeld(){
   const f = $('gname'), v = f?.value.trim(); if(!v || !S.pop) return;
   f.value = '';
+  // Erste Gruppe in einer Liste mit Pendenzen: die bisherigen kommen automatisch in eine Gruppe «Allgemein» ganz oben,
+  // damit jede Pendenz eine Gruppe hat und überall das Plus im Gruppenbalken funktioniert
+  if(!S.gruppen.some(g => g.liste_id === S.pop)){
+    const bisher = S.pz.filter(p => p.liste_id === S.pop && !p.erledigt);
+    if(bisher.length){
+      const minS = Math.min(...bisher.map(p => Number(p.sortierung) || 0));
+      const { data: ga, error: ea } = await sb.from('pendenz_gruppe').insert({ liste_id: S.pop, titel: 'Allgemein', sortierung: minS - 1 }).select().single();
+      if(ea) return fehler(ea, 'Gruppe');
+      S.gruppen.push(ga);
+      const ids = bisher.map(p => p.id); bisher.forEach(p => p.gruppe_id = ga.id);
+      const { error: eu } = await sb.from('pendenz').update({ gruppe_id: ga.id }).in('id', ids); if(eu) fehler(eu, 'Gruppe');
+    }
+  }
   // neuer Gruppentitel kommt unten an die Liste; von dort an die gewünschte Stelle ziehen
   const { data, error } = await sb.from('pendenz_gruppe').insert({ liste_id: S.pop, titel: v, sortierung: letzteSort(S.pop) + 1 }).select().single();
   if(error) return fehler(error, 'Gruppe');
-  S.gruppen.push(data); zeichne(); toast(`Gruppe «${v}» hinzugefügt`);
+  S.gruppen.push(data); zeichne(); toast(S.gruppen.some(g => g.liste_id === S.pop && g.titel === 'Allgemein' && g.id !== data.id) && S.gruppen.filter(g => g.liste_id === S.pop).length === 2 ? `Gruppe «${v}» hinzugefügt – die bisherigen Pendenzen stehen in «Allgemein»` : `Gruppe «${v}» hinzugefügt`);
 }
 // Wann?-Listen drucken: schlichte A4-Seite (Titel, Datum, Pendenzen mit Kästchen zum Abhaken auf Papier)
 function drucken(wahl){
