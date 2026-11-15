@@ -2,14 +2,14 @@
 // Alle 2 Minuten per pg_cron:
 //  1) Mitwandern: offene Pendenzen mit vergangenem Datum bekommen das heutige (Sa/So: den Montag), «seit» merkt das erste Datum.
 //     Pendenzen in «Heute» ohne Datum bekommen heute, Pendenzen mit Datum heute kommen nach «Heute».
-//  2) Pro Tag mit offenen Pendenzen ein Sammeltermin 05:00–15:00: Titel «N Pendenzen • kurz • kurz …», Beschreibung = saubere Liste.
+//  2) Pro Tag mit offenen Pendenzen ein Sammeltermin 05:00–10:00: Titel «N Pendenzen ••• kurz ••• kurz …», Beschreibung = saubere Liste.
 //     In Google verschoben/verlängert → Zeit bleibt so. Im Kalender gelöscht → Pendenzen verlieren das Datum (bleiben im Tool).
 //     Keine offenen Pendenzen mehr an dem Tag → Termin weg.
 // Nur für Personen, deren Google-Verbindung das Recht «calendar» hat. Google zeigt nur an – erledigt wird im Pendenzentool.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const CLIENT_ID = '689526517764-f2727pi1nglt5lkbttec3ssjqkgl47k5.apps.googleusercontent.com';
-const TZ = 'Europe/Zurich', START = '05:00:00', ENDE = '15:00:00', TOOL = 'https://knechtgarten.com/pendenzen-live-v1.html';
+const TZ = 'Europe/Zurich', START = '05:00:00', ENDE = '10:00:00', TRENN = '  •••  ', TOOL = 'https://knechtgarten.com/pendenzen-live-v1.html';
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { 'Content-Type': 'application/json' } });
 
 // Datum in Zürich als JJJJ-MM-TT
@@ -79,7 +79,7 @@ Deno.serve(async () => {
         const row: any = T.get(tag);
         if (!liste.length) { if (row) { await gcal(`calendars/${cal}/events/${row.event_id}`, { method: 'DELETE' }); await admin.from('pendenz_kalender_tag').delete().eq('benutzer_id', v.benutzer_id).eq('tag', tag); r.weg++; } continue; }
         const n = liste.length;
-        const titel = `${n} ${n === 1 ? 'Pendenz' : 'Pendenzen'} • ` + liste.map((p) => kuerzen(p.titel, 38)).join(' • ');
+        const titel = `${n} ${n === 1 ? 'Pendenz' : 'Pendenzen'}${TRENN}` + liste.map((p) => kuerzen(p.titel, 38)).join(TRENN);
         const beschreibung = liste.map((p) => `☐ ${p.titel}${p.datum_seit && p.datum_seit < tag ? ` (seit ${kurzDatum(p.datum_seit)})` : ''}`).join('\n') + `\n\nErledigen im Pendenzentool: ${TOOL}`;
         const h = await hash(titel + '|' + beschreibung);
         const zeit = { start: { dateTime: `${tag}T${START}`, timeZone: TZ }, end: { dateTime: `${tag}T${ENDE}`, timeZone: TZ } };
@@ -94,9 +94,12 @@ Deno.serve(async () => {
           await admin.from('pendenz_kalender_tag').delete().eq('benutzer_id', v.benutzer_id).eq('tag', tag); r.geloeschtInGoogle = (r.geloeschtInGoogle || 0) + 1; continue;
         }
         const manuell = row.manuell || (row.start_ts && (e.start?.dateTime !== row.start_ts || e.end?.dateTime !== row.ende_ts));
-        if (h !== row.inhalt_hash || manuell !== row.manuell) {
-          if (h !== row.inhalt_hash) await gcal(`calendars/${cal}/events/${row.event_id}`, { method: 'PATCH', body: JSON.stringify({ summary: titel, description: beschreibung }) });
-          await admin.from('pendenz_kalender_tag').update({ inhalt_hash: h, manuell, start_ts: e.start?.dateTime, ende_ts: e.end?.dateTime, geaendert_am: new Date().toISOString() }).eq('benutzer_id', v.benutzer_id).eq('tag', tag); r.geaendert++;
+        // Standardzeit geändert (z. B. Ende 15:00 → 10:00): nicht von Hand verschobene Termine nachziehen
+        const zeitAlt = !manuell && !(String(e.start?.dateTime || '').startsWith(`${tag}T${START.slice(0, 5)}`) && String(e.end?.dateTime || '').startsWith(`${tag}T${ENDE.slice(0, 5)}`));
+        if (h !== row.inhalt_hash || manuell !== row.manuell || zeitAlt) {
+          let neu: any = e;
+          if (h !== row.inhalt_hash || zeitAlt) neu = await gcal(`calendars/${cal}/events/${row.event_id}`, { method: 'PATCH', body: JSON.stringify({ summary: titel, description: beschreibung, ...(zeitAlt ? zeit : {}) }) });
+          await admin.from('pendenz_kalender_tag').update({ inhalt_hash: h, manuell, start_ts: neu.start?.dateTime || e.start?.dateTime, ende_ts: neu.end?.dateTime || e.end?.dateTime, geaendert_am: new Date().toISOString() }).eq('benutzer_id', v.benutzer_id).eq('tag', tag); r.geaendert++;
         }
       }
       // vergangene Tage: die offenen Pendenzen sind weitergewandert → alter Sammeltermin weg (im Kalender steht nur, was noch offen ist)
