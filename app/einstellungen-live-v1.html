@@ -495,7 +495,17 @@ input[type=number]{-moz-appearance:textfield;}
           <div class="status" id="otNeuStatusTagessatz"></div>
           <button class="btnlink admin-only" id="addOtTagessatzBtn" style="margin-top:12px;">+ Offerten-Vorlage hinzufügen</button>
         </div>
-        <div class="card">
+        <div class="card" id="easyCard">
+          <div class="cardlabel">Offerten Easy</div>
+          <div class="hint" style="margin:-2px 0 8px">Fertige Vorlagen ohne Berechnung. Klick auf eine Vorlage öffnet sie als Blatt zum Bearbeiten.</div>
+          <table style="table-layout:fixed;">
+            <colgroup><col><col style="width:110px;"><col style="width:180px;"><col style="width:120px;"></colgroup>
+            <thead><tr><th>Name</th><th>Zeilen</th><th>Herkunft</th><th></th></tr></thead>
+            <tbody id="easyBody"><tr><td colspan="4" class="hint">Lade …</td></tr></tbody>
+          </table>
+          <button class="btnlink admin-only" id="addEasyBtn" style="margin-top:12px;">+ Easy-Vorlage hinzufügen</button>
+        </div>
+        <div class="card hidden"><!-- «Offerten laut Artikeln» ausgeblendet (15.11.2026), ersetzt durch Easy -->
           <div class="cardlabel">Offerten laut Artikeln</div>
           <table style="table-layout:fixed;">
             <colgroup><col style="width:28px;"><col><col style="width:180px;"><col style="width:120px;"><col style="width:150px;"></colgroup>
@@ -1255,7 +1265,56 @@ function renderFormelKategorienSidebar(){
   });
 }
 const OT_MODELL_LABEL = { formel: 'Mengenberechnung', tagessatz: 'Tagesberechnung', artikel: 'Artikelbasiert', easy: 'Easy-Vorlagen (im Offerten-Blatt pflegen)' };
+// ---------------------------------------------------------------------------
+// Offerten Easy: fertige Vorlagen (easy_vorlage). Bearbeiten = Blatt im Offerten-Tool (tool-a?easyvorlage=…)
+// ---------------------------------------------------------------------------
+async function ladeEasyListe(){
+  const body = $('easyBody'); if(!body) return;
+  const easyOt = OFFERTENTYPEN.find(o => o.berechnungsmodell === 'easy');
+  if(!easyOt){ body.innerHTML = '<tr><td colspan="4" class="hint">Offertentyp «Easy» fehlt.</td></tr>'; return; }
+  const { data, error } = await sb.from('easy_vorlage').select('id, name, quelle, reihenfolge, easy_vorlage_zeile(count)').eq('offertentyp_id', easyOt.id).order('reihenfolge');
+  if(error){ body.innerHTML = `<tr><td colspan="4" class="hint">${error.message}</td></tr>`; return; }
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  const oeffne = id => { location.href = 'tool-a-live-v1.html?easyvorlage=' + id; };
+  body.innerHTML = (data || []).map(v => `<tr data-easy="${v.id}" style="cursor:pointer">
+      <td><b>${esc(v.name)}</b></td>
+      <td>${v.easy_vorlage_zeile?.[0]?.count ?? 0}</td>
+      <td class="hint" style="margin:0">${esc(v.quelle || '')}</td>
+      <td class="kg-hover" style="white-space:nowrap">
+        <button class="icobtn admin-only" data-easyedit="${v.id}" title="Als Blatt bearbeiten">${ICON.edit}</button>
+        <button class="icobtn admin-only" data-easycopy="${v.id}" title="Kopieren">${ICON.copy}</button>
+        <button class="icobtn danger admin-only" data-easydel="${v.id}" title="Löschen">${ICON.trash}</button>
+      </td></tr>`).join('') || '<tr><td colspan="4" class="hint">Noch keine Easy-Vorlagen.</td></tr>';
+  body.onclick = async e => {
+    const tr = e.target.closest('tr[data-easy]'); if(!tr) return;
+    const v = (data || []).find(x => x.id === tr.dataset.easy); if(!v) return;
+    if(e.target.closest('[data-easydel]')){
+      if(!confirm(`Easy-Vorlage «${v.name}» löschen?`)) return;
+      const { error: de } = await sb.from('easy_vorlage').delete().eq('id', v.id);
+      if(de){ alert(de.message); return; } return ladeEasyListe();
+    }
+    if(e.target.closest('[data-easycopy]')){
+      const { data: neu, error: ce } = await sb.from('easy_vorlage').insert({ offertentyp_id: easyOt.id, name: v.name + ' (Kopie)', reihenfolge: (data || []).length + 1 }).select('id').single();
+      if(ce){ alert(ce.message); return; }
+      const { data: zs } = await sb.from('easy_vorlage_zeile').select('reihenfolge, typ, kategorie, artikel_id, bezeichnung, menge, einheit, preis, optional, fahrt').eq('vorlage_id', v.id);
+      if(zs && zs.length) await sb.from('easy_vorlage_zeile').insert(zs.map(z => ({ ...z, vorlage_id: neu.id })));
+      const { data: alt } = await sb.from('easy_vorlage').select('hinweis_text').eq('id', v.id).single();
+      if(alt?.hinweis_text) await sb.from('easy_vorlage').update({ hinweis_text: alt.hinweis_text }).eq('id', neu.id);
+      return ladeEasyListe();
+    }
+    oeffne(v.id);
+  };
+  const add = $('addEasyBtn');
+  if(add && !add.dataset.an){ add.dataset.an = '1'; add.addEventListener('click', async () => {
+    const name = (prompt('Name der neuen Easy-Vorlage:') || '').trim(); if(!name) return;
+    const { data: neu, error: ae } = await sb.from('easy_vorlage').insert({ offertentyp_id: easyOt.id, name, reihenfolge: 999 }).select('id').single();
+    if(ae){ alert(ae.message); return; }
+    oeffne(neu.id);
+  }); }
+}
+
 function renderOffertentypen(){
+  setTimeout(ladeEasyListe, 0);
   const aktive = OFFERTENTYPEN.filter(ot => !ot.papierkorb_am);
   const zeile = ot => `
     <tr data-ot="${ot.id}">
@@ -1271,7 +1330,7 @@ function renderOffertentypen(){
       </td>
     </tr>`;
   const formelTypen = aktive.filter(ot => ot.berechnungsmodell === 'formel');
-  const tagessatzTypen = aktive.filter(ot => ot.berechnungsmodell === 'tagessatz' || ot.berechnungsmodell === 'easy');
+  const tagessatzTypen = aktive.filter(ot => ot.berechnungsmodell === 'tagessatz');
   const artikelTypen = aktive.filter(ot => ot.berechnungsmodell === 'artikel');
   $('otBodyFormel').innerHTML = formelTypen.map(zeile).join('') || '<tr><td colspan="5" class="hint">Noch keine Offerten-Vorlagen.</td></tr>';
   $('otBodyTagessatz').innerHTML = tagessatzTypen.map(zeile).join('') || '<tr><td colspan="5" class="hint">Noch keine Offerten-Vorlagen.</td></tr>';

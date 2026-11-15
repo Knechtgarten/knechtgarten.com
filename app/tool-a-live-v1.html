@@ -3095,7 +3095,9 @@ function easyEinfuegen(v){
     einheit: z.einheit || z.artikel?.einheit || '',
     // mit Artikel: aktueller Preis aus dem Artikelstamm, sonst der Preis der Vorlage
     preis: z.artikel?.vp_knecht != null ? Number(z.artikel.vp_knecht) : (Number(z.preis) || 0),
-    optional: !!z.optional, ...(z.typ === 'text' ? { typ: 'text' } : {})
+    optional: !!z.optional, artikelId: z.artikel_id || null, ...(z.typ === 'text' ? { typ: 'text' } : {}),
+    // Personal/Fahrzeug: Menge der Vorlage = Menge ohne Fahrzeit, die Fahrzeit kommt automatisch dazu
+    ...(z.fahrt ? { fahrt: true, mengeBasis: Number(z.menge) > 0 ? Number(z.menge) : null, fahrtManuell: false } : {})
   }));
   const hin = (v.hinweis_text || '').trim();
   if(hin){
@@ -3106,78 +3108,93 @@ function easyEinfuegen(v){
   recalc(); planAutosave();
   easyMeldung(`Vorlage «${v.name}» eingefügt.`);
 }
-async function easyAlsVorlageSpeichern(vorlage){
-  const zeilen = eigeneZeilen.filter(z => !z.geloescht && z.typ !== 'zw' && (z.bezeichnung || '').trim() && z.bezeichnung !== 'Text');
-  if(!zeilen.length){ easyMeldung('Im Blatt stehen noch keine eigenen Zeilen.', true); return; }
-  let id = vorlage?.id;
-  if(!vorlage){
-    const name = (prompt('Name der neuen Vorlage:') || '').trim(); if(!name) return;
-    const { data, error } = await sb.from('easy_vorlage').insert({ offertentyp_id: offertentypId, name, reihenfolge: easyVorlagen.length + 1, hinweis_text: $optionenTextBlock.value.trim() || null }).select('id').single();
-    if(error){ easyMeldung((error.message || error), true); return; }
-    id = data.id;
-  }else{
-    if(!confirm(`Vorlage «${vorlage.name}» mit den Zeilen aus diesem Blatt überschreiben?`)) return;
-    const { error: e1 } = await sb.from('easy_vorlage_zeile').delete().eq('vorlage_id', id);
-    if(e1){ easyMeldung((e1.message || e1), true); return; }
-    await sb.from('easy_vorlage').update({ hinweis_text: $optionenTextBlock.value.trim() || null, geaendert_am: new Date().toISOString() }).eq('id', id);
-  }
-  // Reihenfolge wie im Blatt (inkl. gezogener Zeilen)
-  const pos = new Map([...document.querySelectorAll('#costbody tr[data-sk]')].map((tr, i) => [tr.dataset.sk, i]));
-  const rows = zeilen.slice().sort((a, b) => (pos.get(a.schluessel) ?? 1e6) - (pos.get(b.schluessel) ?? 1e6)).map((z, i) => ({
-    vorlage_id: id, reihenfolge: i + 1, typ: z.typ === 'text' ? 'text' : 'position', kategorie: z.kategorie || 'material',
-    bezeichnung: z.bezeichnung.trim(), menge: z.menge || 0, einheit: z.einheit || '', preis: z.preis || 0, optional: !!z.optional
-  }));
-  const { error } = await sb.from('easy_vorlage_zeile').insert(rows);
-  if(error){ easyMeldung((error.message || error), true); return; }
-  await ladeEasyVorlagen(offertentypId); renderTagessatzInhalt();
-  easyMeldung(vorlage ? 'Vorlage überschrieben.' : 'Vorlage gespeichert.');
-}
-let easyFahrt = null, easyFahrtPlz = null;
-async function easyFahrtAnzeigen(){
-  const el = document.getElementById('easyFahrt'); if(!el) return;
+// Fahrzeit pro Fahrt (hin und zurück, Viertelstunden, mind. 15 Min) zur Kunden-PLZ; lädt einmal und rechnet dann neu
+let easyFahrtCache = { plz: null, std: 0, laedt: null };
+function easyFahrtStd(){
   const plz = ($('kundePlz')?.value || '').trim();
-  if(!plz || !lieferwagenKonfig?.herkunft_adresse){ el.innerHTML = '<span class="efmut">Fahrweg: keine Kundenadresse.</span>'; return; }
-  if(plz !== easyFahrtPlz){ easyFahrtPlz = plz; easyFahrt = null; el.innerHTML = '<span class="efmut">Fahrweg wird berechnet …</span>'; }
-  const d = easyFahrt || await holeLieferwagenDistanz(plz);
-  if(!d){ el.innerHTML = '<span class="efmut">Fahrweg nicht ermittelbar.</span>'; return; }
-  easyFahrt = d;
-  const std = Math.round(Math.max(d.stdHinRueck, 0.25) * 4) / 4, km = Math.round(d.kmHinRueck), preis = lieferwagenKonfig.stundenpreis || 0;
-  el.innerHTML = `<div class="efkopf">Fahrweg zum Kunden</div>
-    <div class="efwerte">${km} km · ${std.toFixed(2)} Std. hin und zurück · ${fmtCHF(std * preis)} pro Fahrt</div>
-    <div class="efzeile"><label>Fahrten <input type="number" min="1" step="1" value="1" id="easyFahrten" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-form-type="other"></label>
-    <button type="button" class="btn btn-ghost" id="easyFahrtPlus">Zum Lieferwagen dazurechnen</button></div>`;
-  el.querySelector('#easyFahrtPlus').addEventListener('click', () => {
-    const n = Math.max(1, parseInt(el.querySelector('#easyFahrten').value, 10) || 1), dazu = Math.round(std * n * 100) / 100;
-    // bestehende Lieferwagen-Zeile (Std.) erhöhen – keine zweite Zeile
-    const lw = eigeneZeilen.find(z => !z.geloescht && /^(lieferwagen|transportaufwand)/i.test((z.bezeichnung || '').trim()) && /^std/i.test(z.einheit || ''));
-    if(lw) lw.menge = Math.round(((Number(lw.menge) || 0) + dazu) * 100) / 100;
-    else easyNeueZeile({ kategorie: 'logistik', bezeichnung: lieferwagenKonfig.stdArtikelBezeichnung || 'Lieferwagen', menge: dazu, einheit: 'Std.', preis });
-    recalc(); planAutosave();
-    easyMeldung(`${dazu.toFixed(2)} Std. Fahrzeit zum Lieferwagen dazugerechnet.`);
-  });
+  if(!plz || !lieferwagenKonfig?.herkunft_adresse) return 0;
+  if(easyFahrtCache.plz === plz) return easyFahrtCache.std || 0;
+  if(easyFahrtCache.laedt !== plz){
+    easyFahrtCache.laedt = plz;
+    holeLieferwagenDistanz(plz).then(d => {
+      easyFahrtCache = { plz, std: d ? Math.round(Math.max(d.stdHinRueck, 0.25) * 4) / 4 : 0, laedt: null };
+      recalc();
+    });
+  }
+  return 0;
+}
+// Anzahl Fahrten = Arbeitstage aus den Personal-Stunden ohne Fahrzeit (das Team fährt zusammen), mindestens 1
+function easyFahrten(){
+  const proTag = Number(lieferwagenKonfig?.stundenProArbeitstag) || 8;
+  const pers = eigeneZeilen.filter(z => !z.geloescht && z.fahrt && z.kategorie === 'personal').map(z => Number(z.mengeBasis) || 0);
+  return Math.max(1, Math.ceil((pers.length ? Math.max(...pers) : 0) / proTag));
+}
+// Personal ohne eigene Stunden bekommt keine Fahrzeit; das Fahrzeug immer (leer = nur Fahrzeit)
+function easyFahrzeitFuer(z){
+  if(z.kategorie === 'personal' && !(Number(z.mengeBasis) > 0)) return 0;
+  return Math.round(easyFahrtStd() * easyFahrten() * 100) / 100;
+}
+// Vorlage als Blatt bearbeiten (tool-a?easyvorlage=…): gleiche Ansicht wie eine Offerte, gespeichert wird in die Vorlage
+let easyVorlageModus = null;
+async function oeffneEasyVorlageBearbeiten(vid){
+  const ot = OFFERTENTYPEN.find(o => o.berechnungsmodell === 'easy'); if(!ot) return;
+  document.body.classList.add('easyvorlagemodus');
+  currentKundeName = 'Easy-Vorlage'; currentKundeId = null;
+  $kundeSuche.value = 'Easy-Vorlage'; $kundeSuche.readOnly = true; $('kundePlz').value = '';
+  zeigeBauteilCard(); setMode('new');
+  await ladeDatenFuerOffertentyp(ot.id);
+  const v = easyVorlagen.find(x => x.id === vid) || (await (async () => {
+    const { data } = await sb.from('easy_vorlage').select('id, name, hinweis_text, quelle, easy_vorlage_zeile(*)').eq('id', vid).single();
+    return data ? { ...data, zeilen: (data.easy_vorlage_zeile || []).sort((a, b) => a.reihenfolge - b.reihenfolge) } : null;
+  })());
+  if(!v){ $saveStatus.textContent = 'Vorlage nicht gefunden.'; $saveStatus.className = 'status err'; return; }
+  easyVorlageModus = v;
+  eigeneZeilen = []; eigeneZeileCounter = 0; zeilenKorrekturen = {};
+  // hier ohne aktuelle Artikelpreise: die Vorlage zeigt ihre eigenen Werte
+  v.zeilen.forEach(z => easyNeueZeile({ kategorie: z.kategorie || 'material', bezeichnung: z.bezeichnung || '', menge: Number(z.menge) || 0, mengeBasis: z.fahrt ? (Number(z.menge) || null) : undefined,
+    einheit: z.einheit || '', preis: Number(z.preis) || 0, optional: !!z.optional, fahrt: !!z.fahrt, artikelId: z.artikel_id || null, ...(z.typ === 'text' ? { typ: 'text' } : {}) }));
+  $offerteTitel.value = v.name;
+  $optionenTextBlock.value = v.hinweis_text || ''; optionenTextManuellBearbeitet = true;
+  $beschreibungBlock.value = '';
+  renderTagessatzInhalt();
+  await recalc();
+  $saveStatus.textContent = '';
+}
+async function speichereEasyVorlageAusBlatt(){
+  const v = easyVorlageModus; if(!v) return;
+  const name = $offerteTitel.value.trim() || v.name;
+  const pos = new Map([...document.querySelectorAll('#costbody tr[data-sk]')].map((tr, i) => [tr.dataset.sk, i]));
+  const zeilen = eigeneZeilen.filter(z => !z.geloescht && z.typ !== 'zw' && (z.bezeichnung || '').trim() && z.bezeichnung !== 'Text')
+    .sort((a, b) => (pos.get(a.schluessel) ?? 1e6) - (pos.get(b.schluessel) ?? 1e6));
+  const rows = zeilen.map((z, i) => ({ vorlage_id: v.id, reihenfolge: i + 1, typ: z.typ === 'text' ? 'text' : 'position', kategorie: z.kategorie || 'material',
+    artikel_id: z.artikelId || null, bezeichnung: z.bezeichnung.trim(), menge: z.fahrt ? (Number(z.mengeBasis) || 0) : (z.menge || 0), einheit: z.einheit || '', preis: z.preis || 0, optional: !!z.optional, fahrt: !!z.fahrt }));
+  $saveStatus.textContent = 'Speichere Vorlage …'; $saveStatus.className = 'status';
+  const { error: e1 } = await sb.from('easy_vorlage').update({ name, hinweis_text: $optionenTextBlock.value.trim() || null, geaendert_am: new Date().toISOString() }).eq('id', v.id);
+  const { error: e2 } = e1 ? { error: null } : await sb.from('easy_vorlage_zeile').delete().eq('vorlage_id', v.id);
+  const { error: e3 } = (e1 || e2 || !rows.length) ? { error: null } : await sb.from('easy_vorlage_zeile').insert(rows);
+  const err = e1 || e2 || e3;
+  if(err){ $saveStatus.textContent = 'Fehler beim Speichern der Vorlage: ' + (err.message || err); $saveStatus.className = 'status err'; return; }
+  v.name = name; $saveStatus.textContent = 'Vorlage gespeichert.'; $saveStatus.className = 'status ok';
+  spiegleSaveStatusOben();
 }
 function renderEasyInhalt(){
   const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
-  $tagessatzInhalt.innerHTML = `<div class="easyfahrt" id="easyFahrt"><span class="efmut">Fahrweg wird berechnet …</span></div>
-    <div class="tbsectionlabel"><span class="t">Vorlagen</span></div>
-    ${easyVorlagen.map(v => `<div class="afblock easyblk"><label class="flabel afklapp easybar kg-zeile" data-easy="${v.id}" title="Klicken: Zeilen dieser Vorlage ins Blatt einfügen${v.quelle ? ' (' + esc(v.quelle) + ')' : ''}"><span class="afname"><span class="easyplus">${KG.icon('plus', 12)}</span>${esc(v.name)}</span><span class="afgew easyrechts"><span>${v.zeilen.length} Zeilen</span><button type="button" class="kg-ibtn kg-hover easymehr" data-easymehr="${v.id}" title="Vorlage bearbeiten" aria-label="Vorlage bearbeiten">${KG.icon('edit', 12)}</button></span></label></div>`).join('') || '<div class="efmut" style="padding:8px 2px">Noch keine Vorlagen.</div>'}
-    <button type="button" class="btnlink easyneu" id="easyNeu">+ Blatt als neue Vorlage speichern</button>`;
+  $costwrap.classList.add('easyblatt');
+  const th = document.querySelector('table.cost thead th:nth-child(2)');
+  if(th) th.innerHTML = '<span class="ezkopf" title="Menge ohne Fahrzeit">ohne Fahrt</span><span class="ezkopf" title="Fahrzeit, automatisch">Fahrt</span>Menge';
+  if(easyVorlageModus){
+    $tagessatzInhalt.innerHTML = `<div class="tbsectionlabel"><span class="t">Easy-Vorlage bearbeiten</span></div>
+      <div class="efmut" style="line-height:1.5">Änderungen im Blatt werden direkt in der Vorlage gespeichert. Der Name oben ist der Name der Vorlage.<br>Bei Personal und Fahrzeug die Menge <b>ohne Fahrzeit</b> eintragen – die Fahrzeit rechnet die Offerte später zum Kunden dazu.</div>
+      <a class="btnlink" href="einstellungen-live-v1.html?abschnitt=offertentyp" style="display:inline-block;margin-top:12px">‹ Zurück zu den Vorlagen</a>`;
+    return;
+  }
+  $tagessatzInhalt.innerHTML = `<div class="tbsectionlabel"><span class="t">Vorlagen</span></div>
+    ${easyVorlagen.map(v => `<div class="afblock easyblk"><label class="flabel afklapp easybar" data-easy="${v.id}" title="Klicken: Zeilen dieser Vorlage ins Blatt einfügen${v.quelle ? ' (' + esc(v.quelle) + ')' : ''}"><span class="afname">${esc(v.name)}</span><span class="afgew easyrechts"><span>${v.zeilen.length} Zeilen</span></span></label></div>`).join('') || '<div class="efmut" style="padding:8px 2px">Noch keine Vorlagen – anlegen unter Vorlagen &amp; Berechnung.</div>'}`;
   $tagessatzInhalt.querySelectorAll('.easybar').forEach(b => b.addEventListener('click', e => {
     e.preventDefault();
-    const v = easyVorlagen.find(x => x.id === b.dataset.easy); if(!v) return;
-    const m = e.target.closest('[data-easymehr]');
-    if(m){ e.stopPropagation(); return betragMenu(m, [
-      { t: 'Umbenennen …', fn: async () => { const n = (prompt('Neuer Name:', v.name) || '').trim(); if(!n || n === v.name) return; await sb.from('easy_vorlage').update({ name: n }).eq('id', v.id); await ladeEasyVorlagen(offertentypId); renderTagessatzInhalt(); } },
-      { t: 'Mit diesem Blatt überschreiben', d: 'Zeilen und Hinweise aus dem aktuellen Blatt übernehmen', fn: () => easyAlsVorlageSpeichern(v) },
-      { t: 'Vorlage löschen', rot: true, fn: async () => { if(!confirm(`Vorlage «${v.name}» löschen?`)) return; await sb.from('easy_vorlage').delete().eq('id', v.id); await ladeEasyVorlagen(offertentypId); renderTagessatzInhalt(); } }
-    ]); }
-    easyEinfuegen(v);
+    const v = easyVorlagen.find(x => x.id === b.dataset.easy); if(v) easyEinfuegen(v);
   }));
-  $tagessatzInhalt.querySelector('#easyNeu').addEventListener('click', () => easyAlsVorlageSpeichern(null));
-  easyFahrtAnzeigen();
 }
-// Kundenadresse kann später kommen oder ändern: Fahrweg nachführen
-setInterval(() => { if(istEasy && document.getElementById('easyFahrt') && ($('kundePlz')?.value || '').trim() !== easyFahrtPlz) easyFahrtAnzeigen(); }, 1000);
 
 const tageText = n => n > 0 ? `${rundeTage(n)} ${n === 1 ? 'Tag' : 'Tage'}` : '';
 function renderTagessatzInhalt(){
@@ -3667,6 +3684,7 @@ async function ladeDatenFuerOffertentyp(otId){
   $bauteiltitel.textContent = ot ? ot.name : '';
   $('totalLabel').textContent = 'Total ' + (ot ? ot.name : '');
   istEasy = ot?.berechnungsmodell === 'easy';
+  if(!istEasy){ $costwrap.classList.remove('easyblatt'); const th2 = document.querySelector('table.cost thead th:nth-child(2)'); if(th2 && th2.querySelector('.ezkopf')) th2.textContent = 'Menge'; }
   if(ot && (ot.berechnungsmodell === 'tagessatz' || istEasy)){
     await ladeTagessatzDaten(otId);
     if(istEasy) await ladeEasyVorlagen(otId);
@@ -5454,6 +5472,7 @@ function fuehreAutosaveDurch(){
   return autosaveLaufend;
 }
 async function autosaveEinmal(){
+  if(easyVorlageModus){ await recalc(); return speichereEasyVorlageAusBlatt(); } // Easy-Vorlage bearbeiten: keine Offerte
   currentKundeName = $kundeSuche.value.trim();
   const titelVal = $offerteTitel.value.trim();
   if(!currentKundeName || !titelVal) return;
@@ -5568,7 +5587,8 @@ async function init(){
     const deeplinkOfferteId = params.get('offerte');
     const deeplinkNeukundeId = params.get('neukunde');
     const deeplinkOffertentypId = params.get('offertentyp');
-    if(deeplinkOfferteId){ await oeffneOfferteViaDeeplink(deeplinkOfferteId); }
+    if(params.get('easyvorlage')){ await oeffneEasyVorlageBearbeiten(params.get('easyvorlage')); }
+    else if(deeplinkOfferteId){ await oeffneOfferteViaDeeplink(deeplinkOfferteId); }
     else if(deeplinkNeukundeId && deeplinkOffertentypId){ await waehleKundeUndStarteOfferte(deeplinkNeukundeId, deeplinkOffertentypId); }
     else if(deeplinkNeukundeId){ await waehleKundeUndOeffnePicker(deeplinkNeukundeId); }
     else{ zeigeLeerenZustand(); }
@@ -5815,6 +5835,10 @@ function renderEigeneZeilenFuerKategorie(kat, container){
       ]));
       return;
     }
+    // Easy: Fahrzeit automatisch zur Menge (Menge ohne Fahrzeit + Fahrzeit), ausser die Menge wurde von Hand überschrieben
+    const mitFahrt = istEasy && z.fahrt;
+    const fz = mitFahrt ? easyFahrzeitFuer(z) : 0;
+    if(mitFahrt && !z.fahrtManuell) z.menge = Math.round(((Number(z.mengeBasis) || 0) + fz) * 100) / 100;
     const betrag = rundeCHF((z.menge || 0) * (z.preis || 0));
     if(!z.optional) summe += betrag;
     snapshotZeile(KAT_LABEL[kat], { bezeichnung: z.bezeichnung, menge: z.menge || 0, einheit: z.einheit || '', preis: z.preis || 0, betrag, geloescht: !!z.optional, optional: !!z.optional });
@@ -5831,13 +5855,14 @@ function renderEigeneZeilenFuerKategorie(kat, container){
     if(z.optional) tr.classList.add('dopt');
     tr.title = istUnvollstaendig ? 'Menge oder Preis noch nicht erfasst' : '';
     tr.innerHTML = `<td><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="ez-bez" value="${z.bezeichnung}"></td>
-      <td style="text-align:right"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="ez-menge" type="number" step="0.01" value="${z.menge}"></td>
+      <td style="text-align:right" class="${mitFahrt ? 'ezfahrtzelle' : ''}">${mitFahrt ? `<input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="ez-basis" type="number" step="0.25" value="${z.mengeBasis ?? ''}" placeholder="–" title="Menge ohne Fahrzeit"><span class="ezfz" title="Fahrzeit hin und zurück: ${easyFahrten()} Fahrt(en) × ${easyFahrtStd().toFixed(2)} Std.">+${fz.toFixed(2)}</span>` : ''}<input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="ez-menge${mitFahrt && z.fahrtManuell ? ' hand' : ''}" type="number" step="0.01" value="${z.menge}"${mitFahrt ? ` title="${z.fahrtManuell ? 'Von Hand überschrieben – neue Menge ohne Fahrzeit eintragen, um wieder automatisch zu rechnen' : 'Menge inkl. Fahrzeit (kann überschrieben werden)'}"` : ''}></td>
       <td><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="ez-einheit" value="${z.einheit}"></td>
       <td style="text-align:right"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="ez-preis" type="number" step="0.01" value="${(z.preis || 0).toFixed(2)}"></td>
       <td class="cbetrag"><button type="button" class="cbetrag-val dbklick" title="Klicken: berechnen, optional, löschen …">${fmtCHF(betrag)}</button></td>`;
     container.appendChild(tr);
     tr.querySelector('.ez-bez').addEventListener('change', e => { z.bezeichnung = e.target.value; recalc(); });
-    tr.querySelector('.ez-menge').addEventListener('change', e => { z.menge = parseFloat(e.target.value) || 0; recalc(); });
+    tr.querySelector('.ez-menge').addEventListener('change', e => { z.menge = parseFloat(e.target.value) || 0; if(mitFahrt) z.fahrtManuell = true; recalc(); planAutosave(); });
+    tr.querySelector('.ez-basis')?.addEventListener('change', e => { const v = String(e.target.value).trim(); z.mengeBasis = v === '' ? null : (parseFloat(v) || 0); z.fahrtManuell = false; recalc(); planAutosave(); });
     tr.querySelector('.ez-einheit').addEventListener('change', e => { z.einheit = e.target.value; recalc(); });
     tr.querySelector('.ez-preis').addEventListener('change', e => { z.preis = parseFloat(e.target.value) || 0; e.target.value = z.preis.toFixed(2); recalc(); });
     const ezLoeschen = () => {
@@ -5894,7 +5919,7 @@ async function ladeEigeneZeilen(offerteId){
     return {
       clientKey: 'ez' + eigeneZeileCounter, dbId: r.id, kategorie: r.kategorie, bezeichnung: r.bezeichnung, menge: r.menge, einheit: r.einheit, preis: r.preis,
       freitextVorlageId: r.freitext_vorlage_id, foto1Url: r.foto1_url || null, foto2Url: r.foto2_url || null, foto3Url: r.foto3_url || null,
-      geloescht: !!r.geloescht, schluessel: r.schluessel || ('ez-' + crypto.randomUUID()), typ: r.typ || null, optional: !!r.optional
+      geloescht: !!r.geloescht, schluessel: r.schluessel || ('ez-' + crypto.randomUUID()), typ: r.typ || null, optional: !!r.optional, mengeBasis: r.menge_basis ?? null, fahrt: !!r.fahrt, fahrtManuell: !!r.fahrt_manuell
     };
   });
 }
@@ -5904,7 +5929,7 @@ async function speichereEigeneZeilen(offerteId){
   if(delErr) throw delErr;
   const echte = eigeneZeilen.filter(z => z.bezeichnung.trim());
   if(echte.length){
-    const rows = echte.map((z, i) => ({ offerte_id: offerteId, kategorie: z.kategorie, bezeichnung: z.bezeichnung.trim(), menge: z.menge || 0, einheit: z.einheit || '', preis: z.preis || 0, reihenfolge: i, freitext_vorlage_id: z.freitextVorlageId ?? null, foto1_url: z.foto1Url ?? null, foto2_url: z.foto2Url ?? null, foto3_url: z.foto3Url ?? null, geloescht: !!z.geloescht, schluessel: z.schluessel || null, typ: z.typ || null, optional: !!z.optional })); // immer mitsenden: bei gemischten Zeilen setzt PostgREST fehlende Schluessel sonst auf NULL (Not-null-Fehler)
+    const rows = echte.map((z, i) => ({ offerte_id: offerteId, kategorie: z.kategorie, bezeichnung: z.bezeichnung.trim(), menge: z.menge || 0, einheit: z.einheit || '', preis: z.preis || 0, reihenfolge: i, freitext_vorlage_id: z.freitextVorlageId ?? null, foto1_url: z.foto1Url ?? null, foto2_url: z.foto2Url ?? null, foto3_url: z.foto3Url ?? null, geloescht: !!z.geloescht, schluessel: z.schluessel || null, typ: z.typ || null, optional: !!z.optional, menge_basis: z.mengeBasis ?? null, fahrt: !!z.fahrt, fahrt_manuell: !!z.fahrtManuell })); // immer mitsenden: bei gemischten Zeilen setzt PostgREST fehlende Schluessel sonst auf NULL (Not-null-Fehler)
     const { error: insErr } = await sb.from('offerte_eigene_zeile').insert(rows);
     if(insErr) throw insErr;
   }
@@ -8009,6 +8034,20 @@ function dokNotizKnopf(offen){
 #costbody tr.ezrow input:hover{border-color:var(--line)!important}
 #costbody tr.ezrow input:focus{border-color:var(--primary)!important;background:#fff!important;outline:none}
 #costbody tr.ezrow .ez-menge,#costbody tr.ezrow .ez-preis{text-align:right}
+/* Easy: Menge-Spalte mit «ohne Fahrt» + Fahrzeit + Menge */
+#costwrap.easyblatt table.cost thead th:nth-child(2){width:200px;white-space:nowrap}
+#costwrap.easyblatt table.cost thead th:nth-child(2) .ezkopf{display:inline-block;width:56px;text-align:right;margin-right:8px;font-weight:600;color:var(--muted)}
+#costbody .ezfahrtzelle{white-space:nowrap}
+#costbody .ez-basis{width:56px;text-align:right;font:inherit;font-size:inherit;padding:2px 4px;border:1px solid transparent;border-radius:4px;background:transparent;color:var(--ink)}
+#costbody .ez-basis:hover{border-color:var(--line)}
+#costbody .ez-basis:focus{outline:none;border-color:var(--primary);background:#fff}
+#costbody .ez-basis::placeholder{color:#c3c8ce}
+#costbody .ezfz{display:inline-block;width:52px;text-align:right;margin-right:8px;color:var(--muted);font-size:11px;cursor:help}
+#costbody .ezfahrtzelle .ez-menge{width:56px}
+#costbody .ez-menge.hand{color:#B4655F!important}
+/* Easy-Vorlage bearbeiten: keine Kunden-/Offerten-Funktionen */
+body.easyvorlagemodus .dokakt,body.easyvorlagemodus #dkAdr,body.easyvorlagemodus #dkNr,body.easyvorlagemodus #dkDat,body.easyvorlagemodus .dkberwrap,body.easyvorlagemodus #offerteListe,body.easyvorlagemodus .dokleiste [data-neu="zw"]{display:none!important}
+body.easyvorlagemodus .dokkopf .kname{color:var(--muted);font-weight:600}
 </style>
 <style id="dokKlappStil">
 /* Konfigurator: Balken klappen auf/zu, Gewähltes rechts untereinander (rechtes Drittel) */
