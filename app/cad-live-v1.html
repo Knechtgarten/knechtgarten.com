@@ -54,6 +54,33 @@ header.app .userbar button{background:transparent;border:1px solid rgba(255,255,
 .dlg{background:#fff;border-radius:10px;width:min(460px,calc(100vw - 32px));padding:18px;display:flex;flex-direction:column;gap:12px;box-shadow:0 10px 40px rgba(35,43,53,.25)}
 .dlg h3{margin:0;font-size:15px}
 .dlg .knoepfe{display:flex;justify-content:flex-end;gap:8px}
+/* «Neuer Plan» wie «Neue Offerte» im Offertentool */
+.ovl:has(.npbox){padding-top:5vh}
+.npbox{width:min(1040px,94vw);max-height:92vh;overflow:auto;position:relative;padding:22px 24px}
+.npbox h3{font-size:17px}
+.npzu{position:absolute;top:14px;right:14px}
+.npinfo{font-size:12.5px;color:var(--muted);margin-top:-6px}
+.npsuch{position:relative}
+.npsuch svg{position:absolute;left:11px;top:50%;transform:translateY(-50%);width:15px;height:15px;color:var(--muted);pointer-events:none}
+.npsuch input{width:100%;box-sizing:border-box;padding:10px 12px 10px 34px;border:1px solid var(--line,#E1E5E9);border-radius:7px;font:inherit;font-size:13px;background:#D6E7F4}
+.npsuch input:focus{outline:none;border-color:var(--primary,#323E4E);background:#fff}
+.npabc{display:flex;flex-wrap:wrap;gap:2px;margin:8px 0 6px}
+.npabc button{min-width:24px;height:24px;border:0;background:none;border-radius:5px;font:inherit;font-size:12px;color:var(--primary,#323E4E);cursor:pointer;padding:0 5px}
+.npabc button:hover{background:#F5F7F9}
+.npabc button.on{background:var(--primary,#323E4E);color:#fff}
+.npabc button:disabled{color:#c3c8ce;cursor:default;background:none}
+.nptab{max-height:300px;overflow:auto;border:1px solid var(--line,#E1E5E9);border-radius:8px}
+.nptab table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:12.5px}
+.nptab th{position:sticky;top:0;background:#fff;text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding:7px 10px;border-bottom:1px solid var(--line,#E1E5E9);z-index:1}
+.nptab td{padding:6px 10px;border-bottom:1px solid #F0F2F4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+.nptab td:first-child{font-weight:600}
+.nptab tr:hover td,.nptab tr.akt td{background:#F5F7F9}
+.nptab .leer td{color:var(--muted);font-weight:400;cursor:default}
+.nplink{all:unset;cursor:pointer;display:inline-block;margin-top:6px;font-size:12px;font-weight:600;color:var(--primary,#323E4E)}
+.nplink:hover{text-decoration:underline}
+.npinfo .nplink{margin:0 0 0 6px}
+.npfelder{display:flex;gap:8px;padding-top:12px;border-top:1px solid var(--line,#E1E5E9)}
+.npfelder[hidden]{display:none}
 .ktreffer{border:1px solid var(--line);border-radius:6px;max-height:220px;overflow:auto}
 .ktreffer div{padding:7px 9px;cursor:pointer;border-bottom:1px solid var(--soft)}
 .ktreffer div:hover,.ktreffer div.on{background:var(--soft)}
@@ -1087,30 +1114,60 @@ $('#lBody').addEventListener('click', async e => {
 });
 
 // ----- Neuer Plan: Kunde wählen -----
-$('#neuBtn').addEventListener('click', () => {
+// gleich wie «Neue Offerte» im Offertentool: Suchfeld, A–Z, Kundentabelle; nach der Wahl Plan + Variante
+let NP_KUNDEN = null;
+const npName = k => k.nachname || k.firma || k.name || '(unbenannt)';
+const npErster = k => { const c = (npName(k).trim()[0] || '#').toUpperCase(); return /[A-ZÄÖÜ]/.test(c) ? c.replace('Ä', 'A').replace('Ö', 'O').replace('Ü', 'U') : '#'; };
+const npLev = (a, b) => { const d = Array.from({ length: a.length + 1 }, (_, i) => [i]); for(let j = 1; j <= b.length; j++) d[0][j] = j;
+  for(let i = 1; i <= a.length; i++) for(let j = 1; j <= b.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); return d[a.length][b.length]; };
+const npScore = (felder, s) => Math.min(...felder.map(feld => { if(!feld) return Infinity; const f = String(feld).toLowerCase(); s = s.toLowerCase();
+  if(f === s) return 0; if(f.startsWith(s)) return 1; if(f.includes(s)) return 2; let m = Infinity; f.split(/\s+/).forEach(w => { const d = npLev(w, s); if(d < m) m = d; }); return m <= 2 ? 3 + m : Infinity; }));
+async function npLaden(){ const { data, error } = await sb.from('kunde').select('id,name,firma,nachname,vorname,strasse,plz,ort').order('name').range(0, 9999); if(error){ fehler(error, 'Kunden'); return []; } return data || []; }
+$('#neuBtn').addEventListener('click', async () => {
   const o = document.createElement('div'); o.className = 'ovl';
-  o.innerHTML = `<div class="dlg" role="dialog" aria-label="Neuer Plan"><h3>Neuer Plan</h3>
-    <div class="fld"><label for="nKunde">Kunde</label><input id="nKunde" placeholder="Name oder Ort tippen" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other"></div>
-    <div class="ktreffer" id="nTreffer"></div>
-    <div style="display:flex;gap:8px"><div class="fld" style="flex:2"><label for="nName">Plan</label><input id="nName" value="Gartenplan" autocomplete="off" data-lpignore="true" data-form-type="other"></div>
+  o.innerHTML = `<div class="dlg npbox" role="dialog" aria-label="Neuer Plan"><button type="button" class="kg-ibtn npzu" data-ab aria-label="Schliessen" title="Schliessen">${KG.icon('x', 14)}</button>
+    <h3>Neuer Plan</h3><div class="npinfo" id="npInfo">Zuerst den Kunden suchen, dann Plan und Variante.</div>
+    <div id="npSuche"><div class="npsuch">${KG.icon('suche', 15)}<input type="text" id="npInput" placeholder="Kunde suchen: Name, Vorname, Strasse, Ort …" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other"></div>
+      <div class="npabc" id="npAbc"></div>
+      <div class="nptab"><table><thead><tr><th style="width:26%">Name / Firma</th><th style="width:22%">Vorname</th><th style="width:28%">Strasse</th><th style="width:8%">PLZ</th><th>Ort</th></tr></thead><tbody id="npListe"><tr class="leer"><td colspan="5">Lade Kunden …</td></tr></tbody></table></div>
+      <a class="nplink" href="tool-d-kunden-live-v1.html" target="_blank" rel="noopener">Kunde nicht gefunden? In Kontakte erfassen</a></div>
+    <div class="npfelder" id="npFelder" hidden><div class="fld" style="flex:2"><label for="nName">Plan</label><input id="nName" value="Gartenplan" autocomplete="off" data-lpignore="true" data-form-type="other"></div>
       <div class="fld" style="flex:1"><label for="nVar">Variante</label><input id="nVar" value="A" autocomplete="off" data-lpignore="true" data-form-type="other"></div></div>
-    <div class="knoepfe"><button class="btn-ghost" data-ab>Abbrechen</button><button class="btn-primary" data-ok disabled>Anlegen</button></div></div>`;
+    <div class="knoepfe"><button class="btn-ghost" data-ab>Abbrechen</button><button class="btn-primary" data-ok style="display:none">Plan anlegen</button></div></div>`;
   document.body.appendChild(o);
-  let gewaehlt = null, t = null;
-  const suche = async () => { const q = o.querySelector('#nKunde').value.trim(); if(q.length < 2){ o.querySelector('#nTreffer').innerHTML = ''; return; }
-    const w = `%${q.replace(/[%_,()]/g, '')}%`;
-    const { data } = await sb.from('kunde').select('id,name,vorname,nachname,firma,strasse,plz,ort').or(`name.ilike.${w},nachname.ilike.${w},firma.ilike.${w},ort.ilike.${w}`).limit(25);
-    o.querySelector('#nTreffer').innerHTML = (data || []).map(k => `<div data-k='${esc(JSON.stringify(k))}'>${esc(kname(k))} <small>${esc(kadresse(k))}</small></div>`).join('') || '<div style="cursor:default;color:var(--muted)">Kein Kunde gefunden</div>'; };
-  o.querySelector('#nKunde').addEventListener('input', () => { clearTimeout(t); t = setTimeout(suche, 250); });
-  o.querySelector('#nTreffer').addEventListener('click', e => { const d = e.target.closest('[data-k]'); if(!d) return; gewaehlt = JSON.parse(d.dataset.k);
-    o.querySelectorAll('#nTreffer div').forEach(x => x.classList.toggle('on', x === d)); o.querySelector('#nKunde').value = kname(gewaehlt); o.querySelector('[data-ok]').disabled = false; });
-  o.querySelector('[data-ab]').addEventListener('click', () => o.remove());
+  let gewaehlt = null, treffer = [], akt = 0, buchst = '';
+  const $o = s => o.querySelector(s);
+  const liste = q => { q = q.trim(); if(q) buchst = ''; const K = NP_KUNDEN || [];
+    const l = q ? K.map(k => ({ k, s: Math.min(npScore([npName(k), kname(k), k.vorname, k.firma], q), npScore([k.strasse, k.plz, k.ort], q) + 0.5) })).filter(x => x.s < Infinity).sort((a, b) => a.s - b.s).map(x => x.k)
+      : K.filter(k => !buchst || npErster(k) === buchst).sort((a, b) => npName(a).localeCompare(npName(b), 'de') || String(a.vorname || '').localeCompare(String(b.vorname || ''), 'de'));
+    treffer = l.slice(0, 400); akt = 0;
+    $o('#npListe').innerHTML = treffer.map((k, i) => `<tr class="${i === 0 && q ? 'akt' : ''}" data-i="${i}"><td title="${esc(npName(k))}">${esc(npName(k))}</td><td>${esc(k.vorname || '')}</td><td>${esc(k.strasse || '')}</td><td>${esc(k.plz || '')}</td><td>${esc(k.ort || '')}</td></tr>`).join('')
+      || `<tr class="leer"><td colspan="5">${q ? 'Kein Kunde gefunden.' : 'Keine Kunden mit diesem Buchstaben.'}</td></tr>`;
+    const da = new Set(K.map(npErster));
+    $o('#npAbc').innerHTML = ['', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''), '#'].map(b => `<button type="button" data-b="${b}" class="${buchst === b && !q ? 'on' : ''}"${b && !da.has(b) ? ' disabled' : ''}>${b || 'Alle'}</button>`).join(''); };
+  const setzen = k => { gewaehlt = k;
+    $o('#npInfo').innerHTML = k ? `${esc([kname(k), kadresse(k)].filter(Boolean).join(' – '))} <button type="button" class="nplink" id="npAendern">ändern</button>` : 'Zuerst den Kunden suchen, dann Plan und Variante.';
+    $o('#npSuche').hidden = !!k; $o('#npFelder').hidden = !k; $o('[data-ok]').style.display = k ? '' : 'none';
+    if(k) setTimeout(() => $o('#nName').select(), 0); else setTimeout(() => $o('#npInput').focus(), 0); };
+  o.addEventListener('click', e => { if(e.target.closest('#npAendern')){ setzen(null); $o('#npInput').value = ''; liste(''); }
+    const b = e.target.closest('#npAbc button[data-b]'); if(b && !b.disabled){ buchst = b.dataset.b; $o('#npInput').value = ''; liste(''); }
+    const r = e.target.closest('#npListe tr[data-i]'); if(r) setzen(treffer[+r.dataset.i]); });
+  $o('#npInput').addEventListener('input', e => liste(e.target.value));
+  $o('#npInput').addEventListener('keydown', e => { const rs = [...o.querySelectorAll('#npListe tr[data-i]')];
+    if(e.key === 'ArrowDown' || e.key === 'ArrowUp'){ e.preventDefault(); if(!rs.length) return; akt = (akt + (e.key === 'ArrowDown' ? 1 : -1) + rs.length) % rs.length; rs.forEach((x, i) => x.classList.toggle('akt', i === akt)); rs[akt].scrollIntoView({ block: 'nearest' }); }
+    if(e.key === 'Enter' && treffer[akt]){ e.preventDefault(); setzen(treffer[akt]); }
+    if(e.key === 'Escape') o.remove(); });
+  o.querySelectorAll('[data-ab]').forEach(b => b.addEventListener('click', () => o.remove()));
   o.addEventListener('mousedown', e => { if(e.target === o) o.remove(); });
+  // in Kontakte neu erfasst und zurück: Liste frisch laden
+  const frisch = async () => { if(!document.body.contains(o)) return window.removeEventListener('focus', frisch); NP_KUNDEN = await npLaden(); if(!gewaehlt) liste($o('#npInput').value); };
+  window.addEventListener('focus', frisch);
+  setTimeout(() => $o('#npInput').focus(), 0);
+  if(!NP_KUNDEN) NP_KUNDEN = await npLaden(); liste('');
   o.querySelector('[data-ok]').addEventListener('click', async () => {
     const { data, error } = await sb.from('cad_plan').insert({ kunde_id: gewaehlt.id, name: o.querySelector('#nName').value.trim() || 'Gartenplan', variante: o.querySelector('#nVar').value.trim() || null, einstellungen: { ebenen, luft: 25 } }).select('id').single();
     if(error) return fehler(error, 'Anlegen'); o.remove(); await oeffnePlan(data.id);
   });
-  setTimeout(() => o.querySelector('#nKunde').focus(), 0);
 });
 
 // ----- Plan öffnen / speichern -----
