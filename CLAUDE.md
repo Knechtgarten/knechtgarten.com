@@ -24,6 +24,8 @@ Jedes neue Tool übernimmt diesen Stil – nichts neu erfinden.
 ## Knöpfe
 - Runder Icon-Knopf: Klasse `kg-ibtn` (24px, Rand `--line`, weiss, Icon grau). Löschen: `kg-ibtn danger` (Hover rot).
   Mehrere Knöpfe einer Zeile rechts nebeneinander, Löschen immer mit Abfalleimer und Sicherheitsfrage.
+- In Listen: reine Aktions-Knöpfe (Bearbeiten, Kopieren, Löschen …) bekommen `kg-hover` → erscheinen erst beim Darüberfahren über die Zeile (`tr` oder `.kg-zeile`), ohne Maus immer sichtbar.
+  Zustands-Anzeigen (Status, EB, Foto vorhanden …) bleiben immer sichtbar. Öffnen = Klick auf die ganze Zeile statt Stift.
 - Text-Knöpfe wie im Offerten-Tool: `btn btn-primary` (dunkelblau), `btn btn-ghost` (weiss mit Rand).
 
 ## Gemeinsame Leiste & Tool-Icons
