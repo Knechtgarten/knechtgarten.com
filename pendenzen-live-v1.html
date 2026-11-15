@@ -210,6 +210,22 @@ body.ohnelisten [data-set]{display:none;}
 .card.prio1,.list.zl .card.prio1,.zuliste .card.prio1{background:#F4CDD5;}
 .card.prio2,.list.zl .card.prio2,.zuliste .card.prio2{background:#FAEBB0;}
 .card .gstern{color:#B88A12;display:inline-flex;}
+.card .seit{font-size:10.5px;font-weight:600;color:#A63A52;white-space:nowrap;}
+/* Drehrad in «Wann?»: Mausrad dreht den Tag, Pendenz auf eine Zeile ziehen */
+.drehrad{margin:0 8px 10px;background:#fff;border-radius:8px;box-shadow:0 1px 2px rgba(50,62,78,.08);overflow:hidden;}
+.drkopf{display:flex;align-items:center;gap:6px;padding:7px 10px;font-weight:700;font-size:12.5px;color:var(--primary);border-bottom:1px solid #EEF1F4;}
+.drrad{position:relative;user-select:none;}
+.drtag{display:flex;align-items:center;justify-content:space-between;height:24px;padding:0 12px;font-size:12px;color:#A3B0BE;cursor:pointer;}
+.drtag:nth-child(2),.drtag:nth-child(4){color:#6E7F93;font-size:12.5px;}
+.drtag.mitte{height:30px;font-size:14px;font-weight:700;color:var(--primary);background:#EEF1F4;border-top:1px solid #DCE2E8;border-bottom:1px solid #DCE2E8;}
+.drtag b{font-size:10.5px;font-weight:700;color:#fff;background:#6E7F93;border-radius:99px;padding:0 6px;line-height:16px;}
+.drtag.mitte b{background:var(--primary);}
+.drtag.vorbei{cursor:default;}
+.drtag.hot{background:#D6E7F4;color:var(--primary);}
+.drliste{display:flex;flex-direction:column;border-top:1px solid #EEF1F4;}
+.drliste .card{border-radius:0;border:0;border-top:1px solid rgba(50,62,78,.07);height:28px;padding:0 8px 0 10px;background:transparent;}
+.drliste .card:first-child{border-top:0;}
+.drfuss{padding:6px 10px 8px;border-top:1px solid #EEF1F4;}
 .gverb{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--primary);border:1px dashed #8B9097;border-radius:6px;padding:4px 10px;}
 .gverb:hover{border-color:var(--primary);}
 .prmenu{position:fixed;z-index:60;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 28px rgba(35,43,53,.18);padding:6px;min-width:180px;font-size:13px;}
@@ -611,7 +627,7 @@ async function pruefeAnmeldung(){
   if(!b || !b.rolle){ zeige('pendingWrap'); return; }
   ME = session.user.id; ROLLE = b.rolle; ME_MAIL = (b.email || '').toLowerCase();
   // Gmail-Stern-Abgleich (nur Konto mail@): darf das Tool den Stern in Gmail wieder entfernen?
-  if(ME_MAIL === GMAIL_KONTO) sb.rpc('gmail_stern_status').then(({ data }) => { GSTERN = data || null; if(S.listen?.length) zeichne(); });
+  sb.rpc('gmail_stern_status').then(({ data }) => { GSTERN = data || null; if(S.listen?.length) zeichne(); }); // Gmail-Stern (nur mail@) + Google-Kalender (alle)
   if(window.KG && KG.ladeRechte) await KG.ladeRechte(); // Gruppen & Rechte: welche Boards sichtbar sind
   // Mitarbeiter: nur Wann? (Heute/Woche/Monat), Sammelbox, Dauernde Notizen und Archivieren – kein Mittelteil, keine anderen Boards
   try { const { data: bg } = await sb.from('benutzer').select('recht_gruppe_id').eq('id', ME).maybeSingle();
@@ -756,6 +772,9 @@ function pdHtml(p, opt = {}){
   const l = listeById(p.liste_id), a = l.art_id ? art(l.art_id) : null, ind = [], fs = S.dateien.filter(d => d.pendenz_id === p.id);
   if(p.herkunft === 'stern') ind.push(`<span class="gstern" title="In Gmail markiert – Stern weg = Pendenz archiviert, Pendenz archivieren = Stern weg">${K('stern', 12)}</span>`);
   else if(fs.some(d => d.art === 'mail')) ind.push(A('brief'));
+  // Datum: späterer Tag als kleines Datum, liegengebliebene mit «seit …»
+  if(p.datum && p.datum > heuteStr() && !opt.zeit) ind.push(`<span class="wdat" title="Auf diesen Tag gelegt">${esc(tagKurz(p.datum))}</span>`);
+  if(p.datum_seit && p.datum && p.datum_seit < p.datum) ind.push(`<span class="seit" title="Liegt schon seit ${esc(tagKurz(p.datum_seit))} – wandert jeden Tag mit">seit ${esc(tagKurz(p.datum_seit))}</span>`);
   if(p.notiz && p.notiz.replace(/<[^>]*>/g, '').trim()) ind.push(K('notiz', 12));
   if(fs.some(d => d.art !== 'mail')) ind.push(K('foto', 12));
   if(p.planer_einsatz_id) ind.push(`<span title="Im Einsatzplaner">${K('kalender', 12)}</span>`);
@@ -959,7 +978,7 @@ function zeichne(){
     // Linie zwischen zwei festen Bereichen: der eine wird breiter, der andere gleich viel schmaler – nur diese Linie bewegt sich.
     const vor = reihe()[i - 1], paar = vor !== 'mitte' && zn !== 'mitte', fest = vor === 'mitte' ? zn : vor, links = fest === vor;
     return (i ? `<div class="split${S.splitOn === (paar ? vor + '|' + zn : fest) ? ' on' : ''}" ${paar ? `data-paar="${vor}|${zn}"` : `data-split="${fest}" data-links="${links ? 1 : 0}"`} role="separator" aria-label="Breite ändern"><span class="grip"></span></div>` : '')
-      + `<div class="pane ${zn === 'mitte' ? 'flex' : 'seite'}${modus === 'schmal' ? ' schmal' : ''}" data-pane="${zn}"${zn !== 'mitte' ? ` style="width:${w}px"` : ''}>${zn === 'team' ? ablage : ''}<div class="ptitle">${istOfferten() ? `${A('dok', 13)}<span>Offerten${S.ofMeine ? ' – meine' : ' – alle'}</span>` : `${reihe().length > 1 ? `<span class="pgriff" data-pgriff="${zn}" title="Bereich verschieben: ziehen und auf einen anderen Bereich fallen lassen">${KG.icon('griff', 14)}</span>` : ''}${A(BEREICHE[zn][1], 13)}<span>${BEREICHE[zn][0]}</span>${zn === 'mitte' && ls.length > 1 ? `<button type="button" class="kg-ibtn pordnen" data-ordnen title="Ordnen: alle Listen zugeklappt nebeneinander und untereinander" aria-label="Listen ordnen">${KG.icon('raster', 13)}</button>` : ''}`}</div>${inhalt}</div>`; }).join('')}`
+      + `<div class="pane ${zn === 'mitte' ? 'flex' : 'seite'}${modus === 'schmal' ? ' schmal' : ''}" data-pane="${zn}"${zn !== 'mitte' ? ` style="width:${w}px"` : ''}>${zn === 'team' ? ablage : ''}<div class="ptitle">${istOfferten() ? `${A('dok', 13)}<span>Offerten${S.ofMeine ? ' – meine' : ' – alle'}</span>` : `${reihe().length > 1 ? `<span class="pgriff" data-pgriff="${zn}" title="Bereich verschieben: ziehen und auf einen anderen Bereich fallen lassen">${KG.icon('griff', 14)}</span>` : ''}${A(BEREICHE[zn][1], 13)}<span>${BEREICHE[zn][0]}</span>${zn === 'mitte' && ls.length > 1 ? `<button type="button" class="kg-ibtn pordnen" data-ordnen title="Ordnen: alle Listen zugeklappt nebeneinander und untereinander" aria-label="Listen ordnen">${KG.icon('raster', 13)}</button>` : ''}`}</div>${zn === 'zeit' && S.board?.typ === 'person' && modus !== 'schmal' ? `<div class="drehrad" id="drehrad">${drehradInnen()}</div>` : ''}${inhalt}</div>`; }).join('')}`
     + (ablSpalte() ? `<div class="pane seite ablspalte${zlist ? ' breit' : ''}"><div style="height:12px"></div>${ablage}</div>` : '') + '</div>';
   KAPPE = Infinity;
   document.documentElement.style.setProperty('--oben', Math.round($('main').getBoundingClientRect().top) + 'px'); // Kopf + weisse Leiste
@@ -1120,6 +1139,47 @@ async function upd(tab, id, patch, key = 'id'){
   if(tab === 'pendenz_liste' && key === 'id' && eigeneLage() && S.listen.some(l => l.id === id)){
     const lage = Object.fromEntries(Object.entries(patch).filter(([k]) => LAGE.includes(k))), rest = Object.fromEntries(Object.entries(patch).filter(([k]) => !LAGE.includes(k)));
     if(Object.keys(lage).length) lageMerken(id, lage); if(!Object.keys(rest).length) return true; patch = rest; } const { error } = await sb.from(tab).update(patch).eq(key, id); if(error){ fehler(error, 'Speichern'); return false; } return true; }
+// ===== Drehrad: Pendenz auf einen bestimmten Tag legen (Mausrad dreht den Tag, Pendenz auf eine Zeile ziehen) =====
+const heuteStr = () => new Date().toLocaleDateString('sv-SE');
+const tagPlus = (t, n) => { const d = new Date(t + 'T12:00:00'); d.setDate(d.getDate() + n); return d.toLocaleDateString('sv-SE'); };
+const WTK = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+const tagKurz = t => { const d = new Date(t + 'T12:00:00'); return `${WTK[d.getDay()]} ${d.getDate()}.${d.getMonth() + 1}.`; };
+const tagLabel = t => t === heuteStr() ? 'Heute' : t === tagPlus(heuteStr(), 1) ? 'Morgen' : tagKurz(t);
+function drehradInnen(){
+  const h = heuteStr(); if(!S.drTag || S.drTag < h) S.drTag = tagPlus(h, 1);
+  const zeilen = [-2, -1, 0, 1, 2].map(n => tagPlus(S.drTag, n));
+  const anz = t => S.pz.filter(p => p.datum === t && !p.erledigt).length;
+  const amTag = S.pz.filter(p => p.datum === S.drTag && !p.erledigt);
+  const kalKnopf = GSTERN && !GSTERN.kalender ? `<button type="button" class="gverb" data-kalverb title="Termine in deinen Google-Kalender «Pendenzen» (05:00–15:00, ein Sammeltermin pro Tag)">${K('kalender', 12)} Google-Kalender verbinden</button>` : '';
+  return `<div class="drkopf">${K('kalender', 13)}<span>Auf einen Tag legen</span></div>
+    <div class="drrad" id="drRad" title="Mausrad = Tag wählen · Pendenz auf eine Zeile ziehen">${zeilen.map((t, i) => `<div class="drtag${i === 2 ? ' mitte' : ''}${t < h ? ' vorbei' : ''}"${t >= h ? ` data-drtag="${t}"` : ''}><span>${t < h ? '' : esc(tagLabel(t))}</span>${t >= h && anz(t) ? `<b>${anz(t)}</b>` : ''}</div>`).join('')}</div>
+    ${amTag.length ? `<div class="drliste">${amTag.map(p => pdHtml(p, { zeit: true })).join('')}</div>` : ''}${kalKnopf ? `<div class="drfuss">${kalKnopf}</div>` : ''}`;
+}
+function drehradNeu(){ const el = document.getElementById('drehrad'); if(el) el.innerHTML = drehradInnen(); }
+document.addEventListener('wheel', e => { const r = e.target.closest('#drRad'); if(!r) return; e.preventDefault();
+  const h = heuteStr(), neu = tagPlus(S.drTag, e.deltaY > 0 ? 1 : -1); if(neu < h) return; S.drTag = neu; drehradNeu(); }, { passive: false });
+document.addEventListener('click', e => { const t = e.target.closest('.drtag[data-drtag]'); if(t && !e.target.closest('[data-card]')){ S.drTag = t.dataset.drtag; drehradNeu(); }
+  if(e.target.closest('[data-kalverb]')) kalenderVerbinden(); });
+async function aufTag(p, tag){
+  const h = heuteStr(), alt = { datum: p.datum || null, zeit: p.zeit, zeit_sortierung: p.zeit_sortierung, datum_seit: p.datum_seit || null };
+  const patch = { datum: tag, datum_seit: null };
+  if(tag === h){ patch.zeit = 1; patch.zeit_sortierung = null; } else if(p.zeit === 1){ patch.zeit = 0; patch.zeit_sortierung = null; }
+  const home = listeById(p.liste_id); if(home?.zeit && tag !== h){ zeichne(); return toast('Erst in eine Pendenzen-Liste ziehen – sonst hätte sie keinen Platz mehr.'); }
+  Object.assign(p, patch); S.drTag = tag; zeichne();
+  if(await upd('pendenz', p.id, patch)) toast(`Auf ${tagLabel(tag)} gelegt${GSTERN?.kalender ? ' – erscheint gleich im Kalender' : ''}`, async () => { if(await upd('pendenz', p.id, alt)){ Object.assign(p, alt); zeichne(); } });
+}
+async function kalenderVerbinden(){
+  try {
+    if(!(window.google && google.accounts && google.accounts.oauth2)) await new Promise((ok, no) => { const s = document.createElement('script'); s.src = 'https://accounts.google.com/gsi/client'; s.onload = ok; s.onerror = () => no(new Error('Google-Anmeldung konnte nicht geladen werden.')); document.head.appendChild(s); });
+    const code = await new Promise((ok, no) => google.accounts.oauth2.initCodeClient({ client_id: '689526517764-f2727pi1nglt5lkbttec3ssjqkgl47k5.apps.googleusercontent.com',
+      scope: 'https://www.googleapis.com/auth/calendar', include_granted_scopes: true, ux_mode: 'popup', login_hint: ME_MAIL,
+      callback: r => r.error ? no(new Error('Google: ' + r.error)) : ok(r.code), error_callback: () => no(new Error('Google-Fenster geschlossen.')) }).requestCode());
+    const { data, error } = await sb.functions.invoke('doku-google', { body: { aktion: 'tauschen', code } });
+    if(error || data?.error) throw new Error(data?.error || error.message);
+    const { data: st } = await sb.rpc('gmail_stern_status'); GSTERN = st || GSTERN; zeichne();
+    toast(GSTERN?.kalender ? 'Google-Kalender verbunden – der Kalender «Pendenzen» erscheint in 1–2 Minuten' : 'Verbunden, aber ohne Kalender-Recht – bitte das Häkchen beim Kalender setzen', null, !GSTERN?.kalender);
+  } catch(e){ toast(String(e.message || e), null, true); }
+}
 // Google neu verbinden mit Recht «Gmail ändern» (Stern entfernen); bisherige Rechte (Drive, Gmail lesen) bleiben (include_granted_scopes)
 async function gmailVerbinden(){
   try {
@@ -1174,7 +1234,8 @@ async function neuePendenz(l, titel, gruppe_id = null, extra = {}){
 }
 // Zeit setzen; gehört die Pendenz direkt zu einer Zeitliste, wandert sie in die passende (ohne Liste geht «Irgendwann» nicht)
 function setzeZeit(p, z){
-  const home = listeById(p.liste_id), patch = { zeit: z, zeit_sortierung: null };
+  // «Heute» = Datum heute (kommt in den Sammeltermin im Kalender); Woche/Monat/irgendwann = ohne Datum
+  const home = listeById(p.liste_id), patch = { zeit: z, zeit_sortierung: null, datum: z === 1 ? heuteStr() : null, datum_seit: z === 1 ? (p.datum_seit || null) : null };
   if(home?.zeit){ if(!z){ zeichne(); return toast('Erst in eine Pendenzen-Liste ziehen – sonst hätte sie keinen Platz mehr.'); }
     const ziel = S.listen.find(l => l.zeit === z); if(ziel) patch.liste_id = ziel.id; }
   Object.assign(p, patch); zeichne(); return upd('pendenz', p.id, patch);
@@ -1822,7 +1883,7 @@ document.addEventListener('dragstart', e => {
   // Gruppentitel ziehen: nur innerhalb seiner Liste verschieben
   const gh = e.target.closest('[data-ghead]'); if(gh){ dg = S.gruppen.find(g => g.id === gh.dataset.ghead); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dg.id); setTimeout(() => gh.classList.add('dragging')); return; }
   const c = e.target.closest('[data-card]'); if(!c) return; dc = c.dataset.card; dcVon = c.closest('[data-drop]')?.dataset.drop || null; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', dc); document.body.classList.add('zieht-pendenz'); setTimeout(() => c.classList.add('dragging')); });
-document.addEventListener('dragend', () => { dc = null; dArt = null; dg = null; document.body.classList.remove('zieht-pendenz'); document.querySelectorAll('.dz.hot').forEach(z => z.classList.remove('hot')); document.querySelectorAll('.ph').forEach(p => p.remove()); document.querySelectorAll('.ziehen').forEach(c => c.classList.remove('ziehen')); document.querySelectorAll('.dragging').forEach(c => c.classList.remove('dragging')); });
+document.addEventListener('dragend', () => { document.querySelectorAll('.drtag.hot').forEach(z => z.classList.remove('hot')); dc = null; dArt = null; dg = null; document.body.classList.remove('zieht-pendenz'); document.querySelectorAll('.dz.hot').forEach(z => z.classList.remove('hot')); document.querySelectorAll('.ph').forEach(p => p.remove()); document.querySelectorAll('.ziehen').forEach(c => c.classList.remove('ziehen')); document.querySelectorAll('.dragging').forEach(c => c.classList.remove('dragging')); });
 // Ablageziel: die ganze Liste zählt (auch Kopf und leere Listen), nicht nur der Bereich mit den Pendenzen
 // leere Fläche im Mittelteil (Pendenzen-Listen) des eigenen Boards, und die gezogene Pendenz hat eine Zeit + eigene Liste
 const mitteLeer = el => { if(S.board?.typ !== 'person' || !el.closest?.('[data-cv="mitte"]')) return false;
@@ -1848,6 +1909,8 @@ document.addEventListener('dragover', e => {
     document.querySelectorAll('.ph').forEach(p => p.remove()); const { cs, i } = dropIdx(z, e.clientY); const ph = document.createElement('div'); ph.className = 'ph';
     if(cs[i]) z.insertBefore(ph, cs[i]); else z.appendChild(ph); return; }
   if(!dc) return;
+  const dt = e.target.closest('[data-drtag]'); document.querySelectorAll('.drtag.hot').forEach(x => { if(x !== dt) x.classList.remove('hot'); });
+  if(dt){ e.preventDefault(); dt.classList.add('hot'); return; }
   const dz = e.target.closest('[data-dzone]'); // Ablageflächen oben: Archivieren, anderes Board, Planer
   document.querySelectorAll('.dz.hot').forEach(x => { if(x !== dz) x.classList.remove('hot'); });
   if(dz){ e.preventDefault(); dz.classList.add('hot'); return; }
@@ -1863,6 +1926,9 @@ document.addEventListener('drop', async e => {
     const { cs, i } = dropIdx(z, e.clientY); g.sortierung = zwischen(sortVon(cs[i - 1]), sortVon(cs[i]));
     gruppenNeu(g.liste_id); zeichne(); return upd('pendenz_gruppe', g.id, { sortierung: g.sortierung }); }
   if(!dc) return;
+  // Drehrad: auf einen Tag gelegt → Datum (heute = auch «Heute»), erscheint im Sammeltermin des Kalenders
+  const dt = e.target.closest('[data-drtag]');
+  if(dt){ e.preventDefault(); const p = S.pz.find(x => x.id === dc); dc = null; if(!p) return; return aufTag(p, dt.dataset.drtag); }
   const dz = e.target.closest('[data-dzone]');
   if(dz){ e.preventDefault(); const p = S.pz.find(x => x.id === dc); dc = null; dz.classList.remove('hot'); if(!p) return;
     // Privat bleibt privat: nicht in andere Boards und nicht in den Planer
@@ -1881,7 +1947,9 @@ document.addEventListener('drop', async e => {
   if(to.zeit && von?.art_id === 'notizen'){ zeichne(); return toast('Notizen haben keine Zeit – sie bleiben in «Dauernde Notizen».'); }
   if(to.zeit){ p.zeit = to.zeit; p.zeit_sortierung = zwischen(vor?.zeit_sortierung ?? (vor ? i - 1 : null), nach?.zeit_sortierung ?? (nach ? i + 1 : null));
     if(von?.zeit) p.liste_id = to.id; // direkt in einer Zeitliste erfasst: wandert mit
-    zeichne(); return upd('pendenz', p.id, { zeit: p.zeit, zeit_sortierung: p.zeit_sortierung, liste_id: p.liste_id }); }
+    // Heute = Datum heute (Sammeltermin im Kalender), Woche/Monat = ohne Datum
+    p.datum = to.zeit === 1 ? heuteStr() : null; if(to.zeit !== 1) p.datum_seit = null;
+    zeichne(); return upd('pendenz', p.id, { zeit: p.zeit, zeit_sortierung: p.zeit_sortierung, liste_id: p.liste_id, datum: p.datum, datum_seit: p.datum_seit || null }); }
   // Offerten: in «Zugesagt» = zugesagt (wandert nach Büro-Board «Planung»); aus «Zugesagt» zurück = Status weg
   if(to.art_id === 'of_zugesagt'){ if(p.offerte_status === 'zugesagt') return zeichne(); return zusagen(p); }
   const sNeu = zwischen(sortVon(cs[i - 1]), sortVon(cs[i]));
