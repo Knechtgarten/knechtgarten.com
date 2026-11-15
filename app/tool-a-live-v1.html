@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script src="/kg-pw-schutz.js?v=5"></script>
-<script src="/kg-stil.js?v=79"></script>
+<script src="/kg-stil.js?v=80"></script>
 <script src="/kg-bereiche.js?v=3"></script>
 <script>if(/[?&]offerte=/.test(location.search)) document.documentElement.classList.add('doklaedt');</script>
 <title>Tool A (live) – Offerten-Eingabe</title>
@@ -3248,10 +3248,27 @@ function kiBlattFuerKi(){
   return {
     zeilen: eigeneZeilen.filter(z => !z.geloescht && z.typ !== 'zw' && z.typ !== 'text' && (z.bezeichnung || '').trim()).map(z => ({
       kategorie: z.kategorie, bezeichnung: z.bezeichnung, menge: z.fahrt ? (Number(z.mengeBasis) || 0) : (Number(z.menge) || 0), einheit: z.einheit, preis: Number(z.preis) || 0,
-      artikel_id: z.artikelId || null, fahrt: !!z.fahrt, optional: !!z.optional, quelle: z.kiGeschaetzt ? 'geschaetzt' : (z.artikelId ? 'artikel' : 'vorgabe')
+      artikel_id: z.artikelId || null, fahrt: !!z.fahrt, optional: !!z.optional, quelle: z.kiQuelle?.art || (z.kiGeschaetzt ? 'geschaetzt' : (z.artikelId ? 'artikel' : 'vorgabe')),
+      quelle_nr: z.kiQuelle?.nr || null, quelle_datum: z.kiQuelle?.datum || null, quelle_info: z.kiQuelle?.info || null
     })),
     arbeitsbeschrieb: $optionenTextBlock.value || ''
   };
+}
+// Herkunft des Preises einer KI-Zeile: { art, nr, datum, info } – im Blatt als kleines Icon (+ Jahr) unter dem Betrag
+const KI_QUELLEN = { artikel: ['barcode', 'Artikelstamm'], easybill: ['easybill', 'Easybill-Angebot'], offerte: ['dokument', 'Offerte'], vorgabe: ['blase', 'Vorgabe Projektleiter'], geschaetzt: ['frage', 'Von der KI geschätzt – bitte prüfen'] };
+function kiQuelleAus(art, nr, datum, info){
+  if(!art || !KI_QUELLEN[art]) return null;
+  const d = /^\d{4}-\d{2}-\d{2}/.test(String(datum || '')) ? String(datum).slice(0, 10) : null;
+  return { art, nr: nr ? String(nr).slice(0, 60) : null, datum: d, info: info ? String(info).slice(0, 120) : null };
+}
+function kiQuelleHtml(q){
+  if(!q || !KI_QUELLEN[q.art]) return '';
+  const [ic, name] = KI_QUELLEN[q.art];
+  const jahr = q.datum ? Number(q.datum.slice(0, 4)) : null, jetzt = new Date().getFullYear();
+  const alt = jahr && jetzt - jahr >= 2;
+  const tip = [name, q.nr, q.datum ? q.datum.split('-').reverse().join('.') : '', q.info].filter(Boolean).join(' · ') + (alt ? ' – älterer Preis, evtl. anpassen' : '');
+  const txt = q.art === 'geschaetzt' ? 'geschätzt' : (jahr && jahr < jetzt ? String(jahr) : '');
+  return `<span class="dbinfo kiquelle${q.art === 'geschaetzt' || alt ? ' dbschaetz' : ''}" title="${escHtml(tip)}">${KG.icon(ic, 12)}${txt}</span>`;
 }
 function kiBlattUebernehmen(zeilen, arbeitsbeschrieb){
   // Das Blatt der KI ersetzt die eigenen Zeilen (die KI bekommt das aktuelle Blatt inkl. deiner Änderungen immer mit)
@@ -3260,7 +3277,7 @@ function kiBlattUebernehmen(zeilen, arbeitsbeschrieb){
     const kat = ['personal', 'maschine', 'logistik', 'material'].includes(z.kategorie) ? z.kategorie : 'material';
     const fahrt = !!z.fahrt && (kat === 'personal' || /^(lieferwagen|transportaufwand)/i.test(String(z.bezeichnung || '')));
     easyNeueZeile({ kategorie: kat, bezeichnung: String(z.bezeichnung || '').replace(/\s*\n\s*/g, ' / '), einheit: String(z.einheit || ''),
-      preis: Number(z.preis) || 0, artikelId: z.artikel_id || null, optional: !!z.optional, kiGeschaetzt: z.quelle === 'geschaetzt',
+      preis: Number(z.preis) || 0, artikelId: z.artikel_id || null, optional: !!z.optional, kiGeschaetzt: z.quelle === 'geschaetzt', kiQuelle: kiQuelleAus(z.quelle, z.quelle_nr, z.quelle_datum, z.quelle_info),
       ...(fahrt ? { fahrt: true, mengeBasis: Number(z.menge) > 0 ? Number(z.menge) : null, fahrtManuell: false, menge: Number(z.menge) || 0 } : { menge: Number(z.menge) || 0 }) });
   });
   if(typeof arbeitsbeschrieb === 'string'){ $optionenTextBlock.value = arbeitsbeschrieb.trim(); optionenTextManuellBearbeitet = true; }
@@ -6003,13 +6020,13 @@ function renderEigeneZeilenFuerKategorie(kat, container){
       <td style="text-align:right" class="${mitFahrt ? 'ezfahrtzelle' : ''}">${mitFahrt ? `<input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="ez-basis" type="number" step="0.25" value="${z.mengeBasis ?? ''}" placeholder="–" title="Menge ohne Fahrzeit"><span class="ezfz" title="Fahrzeit hin und zurück: ${easyFahrten()} Fahrt(en) × ${easyFahrtStd().toFixed(2)} Std.">+${fz.toFixed(2)}</span>` : ''}<input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="ez-menge${mitFahrt && z.fahrtManuell ? ' hand' : ''}" type="number" step="0.01" value="${z.menge}"${mitFahrt ? ` title="${z.fahrtManuell ? 'Von Hand überschrieben – neue Menge ohne Fahrzeit eintragen, um wieder automatisch zu rechnen' : 'Menge inkl. Fahrzeit (kann überschrieben werden)'}"` : ''}></td>
       <td><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="ez-einheit" value="${z.einheit}"></td>
       <td style="text-align:right"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="ez-preis" type="number" step="0.01" value="${(z.preis || 0).toFixed(2)}"></td>
-      <td class="cbetrag"><button type="button" class="cbetrag-val dbklick" title="Klicken: optional an/aus">${fmtCHF(betrag)}</button>${zeilenInfo(z.rabatt, z.rabattArt || 'prozent', z.einheit, zMwstArt, zMwstSatz)}${z.kiGeschaetzt ? '<span class="dbinfo dbschaetz" title="Preis von der KI geschätzt – bitte prüfen">Preis geschätzt</span>' : ''}</td>`;
+      <td class="cbetrag"><button type="button" class="cbetrag-val dbklick" title="Klicken: optional an/aus">${fmtCHF(betrag)}</button>${zeilenInfo(z.rabatt, z.rabattArt || 'prozent', z.einheit, zMwstArt, zMwstSatz)}${z.kiQuelle ? kiQuelleHtml(z.kiQuelle) : (z.kiGeschaetzt ? '<span class="dbinfo dbschaetz" title="Preis von der KI geschätzt – bitte prüfen">Preis geschätzt</span>' : '')}</td>`;
     container.appendChild(tr);
     { const bz = tr.querySelector('.ez-bez'); const hoch = () => { bz.style.height = 'auto'; bz.style.height = bz.scrollHeight + 'px'; }; requestAnimationFrame(hoch); bz.addEventListener('input', hoch); bz.addEventListener('keydown', e => { if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); bz.blur(); } }); bz.addEventListener('change', e => { z.bezeichnung = e.target.value.replace(/\s*\n\s*/g, ' / '); recalc(); }); }
     tr.querySelector('.ez-menge').addEventListener('change', e => { z.menge = parseFloat(e.target.value) || 0; if(mitFahrt) z.fahrtManuell = true; recalc(); planAutosave(); });
     tr.querySelector('.ez-basis')?.addEventListener('change', e => { const v = String(e.target.value).trim(); z.mengeBasis = v === '' ? null : (parseFloat(v) || 0); z.fahrtManuell = false; recalc(); planAutosave(); });
     tr.querySelector('.ez-einheit').addEventListener('change', e => { z.einheit = e.target.value; recalc(); });
-    tr.querySelector('.ez-preis').addEventListener('change', e => { z.preis = parseFloat(e.target.value) || 0; z.kiGeschaetzt = false; e.target.value = z.preis.toFixed(2); recalc(); });
+    tr.querySelector('.ez-preis').addEventListener('change', e => { z.preis = parseFloat(e.target.value) || 0; z.kiGeschaetzt = false; z.kiQuelle = null; e.target.value = z.preis.toFixed(2); recalc(); });
     const ezLoeschen = () => {
       // Freitext-Position aus einer Vorlage: nur als geloescht markieren,
       // sonst legt seedeFreitextZeilen() sie beim naechsten recalc() sofort
@@ -6065,7 +6082,7 @@ async function ladeEigeneZeilen(offerteId){
     return {
       clientKey: 'ez' + eigeneZeileCounter, dbId: r.id, kategorie: r.kategorie, bezeichnung: r.bezeichnung, menge: r.menge, einheit: r.einheit, preis: r.preis,
       freitextVorlageId: r.freitext_vorlage_id, foto1Url: r.foto1_url || null, foto2Url: r.foto2_url || null, foto3Url: r.foto3_url || null,
-      geloescht: !!r.geloescht, schluessel: r.schluessel || ('ez-' + crypto.randomUUID()), typ: r.typ || null, optional: !!r.optional, mengeBasis: r.menge_basis ?? null, fahrt: !!r.fahrt, fahrtManuell: !!r.fahrt_manuell, rabatt: r.rabatt ?? null, rabattArt: r.rabatt_art || null, mwstArt: r.mwst_art || null, artikelId: r.artikel_id || null, kiGeschaetzt: !!r.ki_geschaetzt
+      geloescht: !!r.geloescht, schluessel: r.schluessel || ('ez-' + crypto.randomUUID()), typ: r.typ || null, optional: !!r.optional, mengeBasis: r.menge_basis ?? null, fahrt: !!r.fahrt, fahrtManuell: !!r.fahrt_manuell, rabatt: r.rabatt ?? null, rabattArt: r.rabatt_art || null, mwstArt: r.mwst_art || null, artikelId: r.artikel_id || null, kiGeschaetzt: !!r.ki_geschaetzt, kiQuelle: kiQuelleAus(r.ki_quelle, r.ki_quelle_nr, r.ki_quelle_datum, r.ki_quelle_info)
     };
   });
 }
@@ -6075,7 +6092,7 @@ async function speichereEigeneZeilen(offerteId){
   if(delErr) throw delErr;
   const echte = eigeneZeilen.filter(z => z.bezeichnung.trim());
   if(echte.length){
-    const rows = echte.map((z, i) => ({ offerte_id: offerteId, kategorie: z.kategorie, bezeichnung: z.bezeichnung.trim(), menge: z.menge || 0, einheit: z.einheit || '', preis: z.preis || 0, reihenfolge: i, freitext_vorlage_id: z.freitextVorlageId ?? null, foto1_url: z.foto1Url ?? null, foto2_url: z.foto2Url ?? null, foto3_url: z.foto3Url ?? null, geloescht: !!z.geloescht, schluessel: z.schluessel || null, typ: z.typ || null, optional: !!z.optional, menge_basis: z.mengeBasis ?? null, fahrt: !!z.fahrt, fahrt_manuell: !!z.fahrtManuell, rabatt: Number(z.rabatt) || null, rabatt_art: Number(z.rabatt) ? (z.rabattArt || 'prozent') : null, mwst_art: z.mwstArt || null, artikel_id: z.artikelId || null, ki_geschaetzt: !!z.kiGeschaetzt })); // immer mitsenden: bei gemischten Zeilen setzt PostgREST fehlende Schluessel sonst auf NULL (Not-null-Fehler)
+    const rows = echte.map((z, i) => ({ offerte_id: offerteId, kategorie: z.kategorie, bezeichnung: z.bezeichnung.trim(), menge: z.menge || 0, einheit: z.einheit || '', preis: z.preis || 0, reihenfolge: i, freitext_vorlage_id: z.freitextVorlageId ?? null, foto1_url: z.foto1Url ?? null, foto2_url: z.foto2Url ?? null, foto3_url: z.foto3Url ?? null, geloescht: !!z.geloescht, schluessel: z.schluessel || null, typ: z.typ || null, optional: !!z.optional, menge_basis: z.mengeBasis ?? null, fahrt: !!z.fahrt, fahrt_manuell: !!z.fahrtManuell, rabatt: Number(z.rabatt) || null, rabatt_art: Number(z.rabatt) ? (z.rabattArt || 'prozent') : null, mwst_art: z.mwstArt || null, artikel_id: z.artikelId || null, ki_geschaetzt: !!z.kiGeschaetzt, ki_quelle: z.kiQuelle?.art || null, ki_quelle_nr: z.kiQuelle?.nr || null, ki_quelle_datum: z.kiQuelle?.datum || null, ki_quelle_info: z.kiQuelle?.info || null })); // immer mitsenden: bei gemischten Zeilen setzt PostgREST fehlende Schluessel sonst auf NULL (Not-null-Fehler)
     const { error: insErr } = await sb.from('offerte_eigene_zeile').insert(rows);
     if(insErr) throw insErr;
   }
@@ -8310,6 +8327,8 @@ table.cost thead th:nth-child(5){width:104px}
 #kiSenden:hover{filter:brightness(1.15)}
 #kiSenden:disabled{opacity:.5;cursor:default}
 .dbschaetz{color:#8A6410}
+.kiquelle{display:inline-flex;align-items:center;gap:3px;cursor:help}
+.kiquelle svg{flex:none}
 </style>
 <script>
 /* Knopfleiste unter den Arbeitsbeschrieb verschieben (wie in Easybill) */

@@ -23,8 +23,9 @@ Du sprichst mit dem Projektleiter (Du-Form, Schweizer Rechtschreibung mit ss, ku
 So arbeitest du:
 - Das Blatt hat vier Kategorien: personal (Arbeitsleistung), maschine (Maschinenaufwand), logistik (Logistik, Transporte, Lieferwagen, Kran, Mulden), material (Materialaufwand, auch Pflanzen).
 - Preise: Suche zuerst mit artikel_suchen im Artikelstamm und nimm dessen Preis (vp_knecht) und Einheit; trage dann artikel_id ein und quelle "artikel".
-  Gibt es keinen Artikel, suche mit easybill_suchen in früheren Easybill-Angeboten (dort stehen v. a. Pflanzen und Spezialpositionen mit unseren Preisen) und mit offerten_suchen in Offerten aus dem Offertentool; nimm den neusten passenden Preis (quelle "offerte") und nenne in der Antwort kurz, woher er stammt (z. B. «Preis aus Angebot 26-18812»).
+  Gibt es keinen Artikel, suche mit easybill_suchen in früheren Easybill-Angeboten (dort stehen v. a. Pflanzen und Spezialpositionen mit unseren Preisen) und mit offerten_suchen in Offerten aus dem Offertentool; nimm den neusten passenden Preis (quelle "easybill" bzw. "offerte").
   Nur wenn beides nichts ergibt oder der Projektleiter einen Betrag nennt: Preis vom Projektleiter übernehmen (quelle "vorgabe") oder vernünftig schätzen (quelle "geschaetzt"). Erfinde keine Artikelnummern.
+- Herkunft pro Zeile: Trage bei jeder Zeile quelle_nr (Artikelnummer, Offertnummer bzw. Easybill-Angebotsnummer), quelle_datum (Datum der alten Offerte / des Angebots, JJJJ-MM-TT) und quelle_info (Kunde der Quelle, kurz) ein, soweit bekannt. Das Blatt zeigt das als Icon mit Jahr – zähle die Quellen in der Antwort darum nicht einzeln auf. Ist ein übernommener Preis älter als 2 Jahre, sag das in der Antwort kurz (z. B. «Carpinus-Preis von 2019, evtl. anpassen»).
 - Personal: übliche Artikel sind «Polier / Vorarbeiter» und «Gartenarbeiter» (Std.). Arbeitstage × 9 Std. = Stunden, falls nichts anderes gesagt wird.
 - Fahrzeit: Bei Personal-Zeilen (Polier, Gartenarbeiter, Servicetechniker) und beim Lieferwagen setzt du fahrt=true und gibst die Menge OHNE Fahrzeit an. Das Blatt rechnet die Fahrzeit zur Kundenadresse automatisch dazu. Beim Lieferwagen ohne eigene Einsatzstunden ist die Menge 0.
 - Arbeitet Personal vor Ort, gehört IMMER eine Zeile «Lieferwagen» (Artikel suchen, Kategorie logistik, Std., fahrt=true) dazu – ausser der Projektleiter sagt ausdrücklich etwas anderes.
@@ -34,7 +35,7 @@ So arbeitest du:
 - Arbeitsbeschrieb: kurze Zeilen, die mit "- " beginnen, was gemacht wird (für den Kunden). Hinweise wie «bauseits» gehören auch hierhin.
 - Wenn etwas Wichtiges fehlt (z. B. Menge, Grösse, Anzahl Tage), frag kurz nach, statt zu raten. Kleine Annahmen darfst du treffen und nennen.
 - Sobald du etwas am Blatt änderst, rufe blatt_setzen mit dem VOLLSTÄNDIGEN neuen Blatt auf (alle Zeilen, auch unveränderte) und dem ganzen Arbeitsbeschrieb.
-- Deine Antwort an den Projektleiter: 1-4 kurze Sätze, was du gemacht hast, welche Preise geschätzt sind und was noch offen ist. Keine Tabellen, keine Wiederholung aller Zeilen.`;
+- Deine Antwort an den Projektleiter: 1-4 kurze Sätze, was du gemacht hast, welche Preise geschätzt oder alt sind und was noch offen ist. Keine Tabellen, keine Wiederholung aller Zeilen.`;
 
 const TOOLS: Anthropic.Tool[] = [
   {
@@ -87,7 +88,10 @@ const TOOLS: Anthropic.Tool[] = [
               einheit: { type: 'string' },
               preis: { type: 'number', description: 'CHF pro Einheit, exkl. MwSt' },
               artikel_id: { type: ['string', 'null'] },
-              quelle: { type: 'string', enum: ['artikel', 'offerte', 'vorgabe', 'geschaetzt'] },
+              quelle: { type: 'string', enum: ['artikel', 'easybill', 'offerte', 'vorgabe', 'geschaetzt'] },
+              quelle_nr: { type: ['string', 'null'], description: 'Artikelnummer, Offertnummer oder Easybill-Angebotsnummer' },
+              quelle_datum: { type: ['string', 'null'], description: 'Datum der Quelle JJJJ-MM-TT (alte Offerte, Easybill-Angebot)' },
+              quelle_info: { type: ['string', 'null'], description: 'kurz: Kunde der Quelle' },
               fahrt: { type: 'boolean', description: 'Personal/Lieferwagen: Menge ohne Fahrzeit, Fahrzeit rechnet das Blatt dazu' },
               optional: { type: 'boolean' },
             },
