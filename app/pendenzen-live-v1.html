@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script src="/kg-pw-schutz.js?v=5"></script>
-<script src="/kg-stil.js?v=82"></script>
+<script src="/kg-stil.js?v=84"></script>
 <script src="/kg-doku.js?v=9"></script>
 <script src="/kg-kundenordner.js?v=6"></script>
 <title>Pendenzen – Knechtgarten</title>
@@ -213,6 +213,27 @@ body.ohnelisten [data-set]{display:none;}
 .card .seit{font-size:10.5px;font-weight:600;color:#A63A52;white-space:nowrap;}
 /* Drehrad in «Wann?»: Mausrad dreht den Tag, Pendenz auf eine Zeile ziehen */
 .drehrad{margin:0 8px 10px;background:#fff;border-radius:8px;box-shadow:0 1px 2px rgba(50,62,78,.08);overflow:hidden;}
+/* Suche in der weissen Leiste (wie Offerten/Kontakte): Chip + Feld + Vorschläge */
+.pzsuche{display:flex;align-items:center;gap:6px;flex:1;min-width:220px;max-width:460px}
+.pzsfeld{position:relative;flex:1;min-width:0}
+.pzsfeld>svg{position:absolute;left:10px;top:50%;transform:translateY(-50%);width:14px;height:14px;color:var(--muted);pointer-events:none}
+.pzsfeld input{width:100%;box-sizing:border-box;height:32px;border:1px solid #D5DBE1;border-radius:8px;padding:0 28px 0 30px;font:inherit;font-size:13px;background:#fff;color:var(--primary)}
+.pzsfeld input:focus{outline:none;border-color:var(--primary)}
+.pzsx{all:unset;cursor:pointer;position:absolute;right:7px;top:50%;transform:translateY(-50%);width:20px;height:20px;border-radius:50%;text-align:center;line-height:20px;color:var(--muted)}
+.pzsx:hover{background:#F5F7F9;color:var(--primary)}
+.pzschip{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 4px 0 10px;border-radius:999px;background:var(--accent-blue,#D6E7F4);color:var(--primary);font-size:12.5px;font-weight:600;white-space:nowrap}
+.pzschip[hidden]{display:none}
+.pzschip svg{width:13px;height:13px}
+.pzschip button{width:20px;height:20px;border-radius:50%;border:0;background:rgba(255,255,255,.7);color:inherit;cursor:pointer;font-size:14px;line-height:1;padding:0}
+.offvorschlag{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:80;background:#fff;border:1px solid #E1E5E9;border-radius:8px;box-shadow:0 8px 24px rgba(35,43,53,.14);padding:4px;max-height:380px;overflow:auto;min-width:340px}
+.offvorschlag[hidden]{display:none}
+.offvorschlag .ovk{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding:6px 8px 3px}
+.offvorschlag .ovz{display:flex;align-items:center;gap:8px;width:100%;border:0;background:none;border-radius:6px;padding:6px 8px;font:inherit;font-size:13px;color:var(--primary);cursor:pointer;text-align:left}
+.offvorschlag .ovz:hover,.offvorschlag .ovz.akt{background:#F5F7F9}
+.offvorschlag .ovz svg{flex:none;color:var(--muted);width:14px;height:14px}
+.offvorschlag .ovn{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60%}
+.offvorschlag .ova{flex:1;min-width:0;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.offvorschlag .ovc{flex:none;color:var(--muted);font-size:11.5px}
 .drkopf{display:flex;align-items:center;gap:6px;padding:7px 10px;font-weight:700;font-size:12.5px;color:var(--primary);background:var(--z1);}
 .drkopf .drheute{background:#fff;}
 .drkopf .drheute{all:unset;cursor:pointer;margin-left:auto;font-size:11px;font-weight:600;color:#4C5C70;border:1px solid #DCE2E8;border-radius:99px;padding:0 8px;line-height:18px;}
@@ -619,8 +640,14 @@ function ofLage(ls, w){ const n = OF_REIHE.length, b = Math.max(180, Math.floor(
 function modusFuer(ls, w, zn){ return w <= 60 ? 'schmal' : 'frei'; }
 // eigenes Board: terminierte Pendenzen (Tag im Rad, Heute/Woche/Monat) stehen nur links, nicht mehr in ihrer Liste – sie merken sich Liste + Gruppe
 const terminiert = p => S.board?.typ === 'person' && !!(p.zeit || p.datum);
-const sortiert = l => S.pz.filter(p => p.liste_id === l.id && (l.zeit || !terminiert(p))).sort((a, b) => a.sortierung - b.sortierung || a.erstellt_am.localeCompare(b.erstellt_am));
-const zeitIds = z => S.pz.filter(p => p.zeit === z).sort((a, b) => (a.zeit_sortierung ?? 1e12) - (b.zeit_sortierung ?? 1e12) || a.sortierung - b.sortierung);
+// Suche (Feld in der weissen Leiste): Text in Titel/Notiz/Kunde und/oder Kunden-Chip → nur passende Pendenzen zeigen
+const SUCH = { text: '', kunde: null };
+const notizRein = h => String(h || '').replace(/<[^>]*>/g, ' ');
+const suchPasst = p => { if(SUCH.kunde && p.kunde_id !== SUCH.kunde.id) return false; const s = SUCH.text.toLowerCase(); if(!s) return true;
+  return [p.titel, notizRein(p.notiz), p.kunde_id && KUNDE_CACHE[p.kunde_id]?.name].some(x => String(x || '').toLowerCase().includes(s)); };
+const sichtbar = p => (!SUCH.text && !SUCH.kunde) || suchPasst(p);
+const sortiert = l => S.pz.filter(p => p.liste_id === l.id && (l.zeit || !terminiert(p)) && sichtbar(p)).sort((a, b) => a.sortierung - b.sortierung || a.erstellt_am.localeCompare(b.erstellt_am));
+const zeitIds = z => S.pz.filter(p => p.zeit === z && sichtbar(p)).sort((a, b) => (a.zeit_sortierung ?? 1e12) - (b.zeit_sortierung ?? 1e12) || a.sortierung - b.sortierung);
 const estH = l => 44 + (l.zu ? 0 : ((l.zeit ? zeitIds(l.zeit) : sortiert(l)).length + (l.zeit === 1 ? S.erinn.length : 0)) * 29 + S.gruppen.filter(g => g.liste_id === l.id).length * 30 + 46);
 const avatar = uid => { const b = S.benutzer[uid]; if(!b) return ''; const n = b.anzeigename || b.email || '?'; const k = n.split(/[\s.@]+/).filter(Boolean).slice(0, 2).map(x => x[0].toUpperCase()).join('');
   let h = 0; for(const c of uid) h = (h * 31 + c.charCodeAt(0)) >>> 0; const pf = S.pfarbe?.[uid]; // Personenfarbe, sonst feste Ersatzfarbe
@@ -986,7 +1013,9 @@ function zeichne(){
     + (eigeneLage() && Object.keys((S.ein.breiten._lage || {})[S.board.id] || {}).length ? `<button class="kg-neben" data-lagestd title="Eigene Anordnung verwerfen, wieder die Standard-Anordnung zeigen">Anordnung zurücksetzen</button>` : '')
     + (istOfferten() || MA || !listenRecht() ? '' : `<button class="kg-haupt" data-neuliste>${K('plus')}Liste</button>`);
   document.body.classList.toggle('ohnelisten', !listenRecht());
-  $('pzSeite').innerHTML = `<div class="kg-l">${seg}${seg2}</div>${rechts ? `<div class="kg-r">${rechts}</div>` : ''}`;
+  // Leiste nur neu aufbauen, wenn sie sich geändert hat – sonst verliert das Suchfeld beim Tippen den Fokus
+  const seiteHtml = `<div class="kg-l">${seg}${seg2}</div><div class="kg-m" id="pzSucheSlot"></div>${rechts ? `<div class="kg-r">${rechts}</div>` : ''}`;
+  if(seiteHtml !== S._seiteHtml){ $('pzSeite').innerHTML = seiteHtml; S._seiteHtml = seiteHtml; $('pzSucheSlot').appendChild(pzSucheEl()); }
   // Ablagefelder: Offerten-Board nur Archivieren (Zugesagt ist dort eine Liste); «In anderes Board» braucht es dort nicht
   document.body.classList.toggle('offest', istOfferten());
   const dzs = (MA ? [['archiv', 'archiv', 'Archivieren']] : istOfferten() ? [['archiv', 'archiv', 'Archivieren'], ['zusage', 'check', 'Zugesagt']] : [['archiv', 'archiv', 'Archivieren'], ['board', 'senden', 'In anderes Board'], ['planer', 'kalender', 'In den Planer'], ...(S.board.typ === 'person' && ofBoard() ? [['offerte', 'check', 'Offerte zugestellt']] : [])]).map(([z, ic, t]) => `<div class="dz${S.treffer === z ? ' treffer' : ''}" data-dzone="${z}" title="${t}">${K(ic, 15)}<span>${t}</span></div>`).join('');
@@ -1192,7 +1221,7 @@ const kwVon = t => { const d = new Date(t + 'T12:00:00'); d.setDate(d.getDate() 
 // Rad: aktiver Tag immer in der Mitte (fixe Höhe, links Datum gross, rechts seine Pendenzen 2-/3-spaltig), je 3 Tage davor/danach schmal
 function drehradInnen(){
   const h = heuteStr(); if(!S.drTag || S.drTag < h) S.drTag = h;
-  const amTag = t => S.pz.filter(p => p.datum === t && !p.erledigt);
+  const amTag = t => S.pz.filter(p => p.datum === t && !p.erledigt && sichtbar(p));
   const label = t => t === h ? 'Heute' : t === tagPlus(h, 1) ? 'Morgen' : WTK[new Date(t + 'T12:00:00').getDay()];
   const datumK = t => { const d = new Date(t + 'T12:00:00'); return `${d.getDate()}.${d.getMonth() + 1}.`; };
   const zeile = n => { const t = tagPlus(S.drTag, n), vorbei = t < h, we = [0, 6].includes(new Date(t + 'T12:00:00').getDay()), anz = vorbei ? 0 : amTag(t).length;
@@ -2078,6 +2107,57 @@ document.addEventListener('drop', async e => {
   const weg = { zeit: 0, zeit_sortierung: null, datum: null, datum_seit: null };
   p.liste_id = to.id; p.gruppe_id = gr ? gr.id : null; p.sortierung = sNeu; if(zeitWeg) Object.assign(p, weg);
   zeichne(); upd('pendenz', p.id, { liste_id: p.liste_id, gruppe_id: p.gruppe_id, sortierung: p.sortierung, ...(zeitWeg ? weg : {}) }); });
+
+// ===== Suche (wie Offerten/Kontakte): Vorschläge «In diesem Board» · Kunden (→ Chip) · Pendenzen in anderen Boards =====
+let PZS_EL = null, pzsAkt = -1, pzsListe = [], pzsT = null, pzsAndere = { q: '', liste: [] };
+function pzSucheEl(){
+  if(PZS_EL) return PZS_EL;
+  const w = document.createElement('div'); w.className = 'pzsuche';
+  w.innerHTML = `<span class="pzschip" id="pzsChip" hidden></span><div class="pzsfeld">${K('suche', 14)}<input type="text" id="pzSuche" placeholder="Pendenz oder Kunde suchen …" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" aria-label="Pendenzen suchen" role="combobox"><button type="button" class="pzsx" id="pzsLeer" hidden aria-label="Suche leeren">×</button><div class="offvorschlag" id="pzsBox" hidden></div></div>`;
+  PZS_EL = w;
+  const inp = w.querySelector('#pzSuche'), box = w.querySelector('#pzsBox');
+  const anwenden = () => { SUCH.text = inp.value.trim(); w.querySelector('#pzsLeer').hidden = !SUCH.text; zeichne(); };
+  const chipZeigen = () => { const c = w.querySelector('#pzsChip'); c.hidden = !SUCH.kunde; c.innerHTML = SUCH.kunde ? `${K('person', 13)}${esc(SUCH.kunde.name)}<button type="button" data-pzsx aria-label="Kunden-Filter aufheben">×</button>` : ''; };
+  const zeige = () => {
+    const q = inp.value.trim(), s = q.toLowerCase(); if(q.length < 2){ box.hidden = true; return; }
+    const hier = S.pz.filter(p => !p.erledigt && suchPasst(p)).length;
+    // Kunden aus den Pendenzen dieses Boards
+    const ku = new Map(); S.pz.forEach(p => { const k = p.kunde_id && KUNDE_CACHE[p.kunde_id]; if(k && String(k.name || '').toLowerCase().includes(s)) ku.set(k.id, { k, n: (ku.get(k.id)?.n || 0) + 1 }); });
+    const kunden = [...ku.values()].sort((a, b) => b.n - a.n).slice(0, 5);
+    const andere = pzsAndere.q === s ? pzsAndere.liste : [];
+    pzsListe = [{ art: 'hier' }, ...kunden.map(x => ({ art: 'kunde', k: x.k, n: x.n })), ...andere.map(p => ({ art: 'p', p }))];
+    let i = -1; const z = () => { i++; return i === pzsAkt ? ' akt' : ''; };
+    box.innerHTML = `<div class="ovk">In diesem Board</div><button type="button" class="ovz${z()}" data-pzi="${i}">${K('suche', 14)}<span class="ovn">«${esc(q)}»</span><span class="ova">Titel, Notizen, Kunde</span><span class="ovc">${hier} Pendenz${hier === 1 ? '' : 'en'}</span></button>`
+      + (kunden.length ? '<div class="ovk">Kunden</div>' + kunden.map(x => `<button type="button" class="ovz${z()}" data-pzi="${i}">${K('person', 14)}<span class="ovn">${esc(x.k.name)}</span><span class="ova">${esc([x.k.strasse, [x.k.plz, x.k.ort].filter(Boolean).join(' ')].filter(Boolean).join(', '))}</span><span class="ovc">${x.n}</span></button>`).join('') : '')
+      + (andere.length ? '<div class="ovk">In anderen Boards</div>' + andere.map(p => { const b = S.boards.find(x => x.id === p.pendenz_liste?.board_id);
+        return `<button type="button" class="ovz${z()}" data-pzi="${i}">${K('senden', 14)}<span class="ovn">${esc(p.titel)}</span><span class="ova">${esc((b ? (b.typ === 'person' ? 'Mein Board' : b.name) : '') + (p.pendenz_liste?.titel ? ' › ' + p.pendenz_liste.titel : ''))}</span></button>`; }).join('') : '');
+    box.hidden = false;
+  };
+  // Pendenzen in anderen Boards: aus der Datenbank (nur offene, nur was man sehen darf)
+  const andereLaden = q => { clearTimeout(pzsT); const s = q.trim().toLowerCase(); if(s.length < 2){ pzsAndere = { q: '', liste: [] }; return; }
+    pzsT = setTimeout(async () => { const { data } = await sb.from('pendenz').select('id, titel, liste_id, pendenz_liste(board_id, titel)').eq('erledigt', false).ilike('titel', '%' + s.replace(/[%_\\]/g, m => '\\' + m) + '%').limit(30);
+      if(inp.value.trim().toLowerCase() !== s) return;
+      pzsAndere = { q: s, liste: (data || []).filter(p => p.pendenz_liste && p.pendenz_liste.board_id !== S.board?.id && S.boards.some(b => b.id === p.pendenz_liste.board_id)).slice(0, 6) };
+      if(document.activeElement === inp) zeige(); }, 250); };
+  const waehle = async x => { box.hidden = true; pzsAkt = -1; if(!x || x.art === 'hier') return;
+    if(x.art === 'kunde'){ SUCH.kunde = { id: x.k.id, name: x.k.name }; inp.value = ''; chipZeigen(); anwenden(); return; }
+    if(x.art === 'p'){ inp.value = ''; SUCH.text = ''; SUCH.kunde = null; chipZeigen(); w.querySelector('#pzsLeer').hidden = true;
+      await wechsleBoard(x.p.pendenz_liste.board_id); S.sel = S.pz.some(p => p.id === x.p.id) ? x.p.id : null; zeichne();
+      setTimeout(() => document.querySelector(`[data-card="${x.p.id}"]`)?.scrollIntoView({ block: 'center' }), 100); } };
+  inp.addEventListener('input', () => { pzsAkt = -1; anwenden(); zeige(); andereLaden(inp.value); });
+  inp.addEventListener('focus', zeige);
+  inp.addEventListener('blur', () => setTimeout(() => { box.hidden = true; pzsAkt = -1; }, 150));
+  box.addEventListener('mousedown', e => e.preventDefault());
+  box.addEventListener('click', e => { const b = e.target.closest('[data-pzi]'); if(b) waehle(pzsListe[+b.dataset.pzi]); });
+  inp.addEventListener('keydown', e => { const n = pzsListe.length; if(box.hidden && e.key !== 'ArrowDown') return;
+    if(e.key === 'ArrowDown'){ e.preventDefault(); pzsAkt = (pzsAkt + 1) % n; zeige(); }
+    else if(e.key === 'ArrowUp'){ e.preventDefault(); pzsAkt = (pzsAkt - 1 + n) % n; zeige(); }
+    else if(e.key === 'Enter'){ e.preventDefault(); waehle(pzsAkt >= 0 ? pzsListe[pzsAkt] : null); }
+    else if(e.key === 'Escape'){ box.hidden = true; pzsAkt = -1; } });
+  w.querySelector('#pzsLeer').addEventListener('click', () => { inp.value = ''; anwenden(); inp.focus(); });
+  w.addEventListener('click', e => { if(e.target.closest('[data-pzsx]')){ SUCH.kunde = null; chipZeigen(); zeichne(); } });
+  return w;
+}
 
 pruefeAnmeldung();
 })();
