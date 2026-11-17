@@ -1277,6 +1277,9 @@ function ausdruckPreview(node){
   // "AUFRUNDEN(Breite ÷ 0.6) × 0.36" aus wie "Breite ÷ 0.6 × 0.36".
   const RUNDUNG = { ceil: 'AUFRUNDEN', floor: 'ABRUNDEN', round: 'RUNDEN' };
   if(RUNDUNG[node.op] && Array.isArray(node.args)) return `${RUNDUNG[node.op]}(${ausdruckPreview(node.args[0])})`;
+  if(node.op === 'wenn' && Array.isArray(node.args)) return `WENN(${ausdruckPreview(node.args[0])}; ${ausdruckPreview(node.args[1])}; ${ausdruckPreview(node.args[2])})`;
+  const VGL = { '<': '<', '<=': '≤', '>': '>', '>=': '≥', '=': '=', '<>': '≠' };
+  if(VGL[node.op] && Array.isArray(node.args)) return `${ausdruckPreview(node.args[0])} ${VGL[node.op]} ${ausdruckPreview(node.args[1])}`;
   if(node.op && Array.isArray(node.args)){
     return node.args.map(a => ausdruckPreview(a)).join(` ${OP_SYMBOL[node.op] || node.op} `);
   }
@@ -3897,6 +3900,8 @@ function astToFormelText(node){
   if(node.lit !== undefined) return String(node.lit);
   if(node.ref) return refToken(node.ref, node.id, refLabel(node.ref, node.id));
   if(node.op === '*' && node._umrechnung && Array.isArray(node.args)) return astToFormelText(node.args[0]);
+  if(node.op === 'wenn') return `WENN(${astToFormelText(node.args[0])}; ${astToFormelText(node.args[1])}; ${astToFormelText(node.args[2])})`;
+  if(['<','<=','>','>=','=','<>'].includes(node.op)) return `${astToFormelText(node.args[0])} ${node.op} ${astToFormelText(node.args[1])}`;
   if(node.op === 'ceil') return `AUFRUNDEN(${astToFormelText(node.args[0])})`;
   if(node.op === 'floor') return `ABRUNDEN(${astToFormelText(node.args[0])})`;
   if(node.op === 'round') return `RUNDEN(${astToFormelText(node.args[0])})`;
@@ -3966,9 +3971,27 @@ function parseFormelText(text){
       return knotenMitUmrechnung({ ref: art, id }, verweisEinheit(art, id));
     }
     const funcMatch = /^[A-Za-zÄÖÜäöü]+/.exec(s.slice(i));
+    // WENN(Bedingung; Dann; Sonst) – Bedingung mit < <= > >= = <> (auch «,» als Trenner)
+    if(funcMatch && funcMatch[0].toUpperCase() === 'WENN'){
+      i += funcMatch[0].length; skipWs();
+      if(s[i] !== '(') fail('Nach WENN wird eine Klammer "(" erwartet');
+      i++;
+      const links = parseExpression(); skipWs();
+      const vgl = /^(<=|>=|<>|<|>|=)/.exec(s.slice(i));
+      if(!vgl) fail('In WENN fehlt ein Vergleich: <, <=, >, >=, = oder <>');
+      i += vgl[0].length;
+      const bedingung = { op: vgl[0], args: [links, parseExpression()] };
+      const trenner = () => { skipWs(); if(s[i] !== ';' && s[i] !== ',') fail('In WENN Bedingung, Dann-Wert und Sonst-Wert mit ";" trennen'); i++; };
+      trenner(); const dann = parseExpression();
+      trenner(); const sonst = parseExpression();
+      skipWs();
+      if(s[i] !== ')') fail('Schliessende Klammer ")" nach WENN erwartet');
+      i++;
+      return { op: 'wenn', args: [bedingung, dann, sonst] };
+    }
     if(funcMatch){
       const name = funcMatch[0].toUpperCase();
-      if(!FUNCS[name]) fail(`Unbekannte Funktion "${funcMatch[0]}" - erlaubt sind AUFRUNDEN, ABRUNDEN, RUNDEN`);
+      if(!FUNCS[name]) fail(`Unbekannte Funktion "${funcMatch[0]}" - erlaubt sind WENN, AUFRUNDEN, ABRUNDEN, RUNDEN`);
       i += funcMatch[0].length;
       skipWs();
       if(s[i] !== '(') fail(`Nach ${name} wird eine Klammer "(" erwartet`);
@@ -4102,9 +4125,9 @@ function renderFormelFeld(containerId, state, renderGliedFn){
     </div>
     <div id="${containerId}_bau" class="${baukastenAktiv ? '' : 'hidden'}"></div>
     <div id="${containerId}_text" class="${baukastenAktiv ? 'hidden' : ''}">
-      <div id="${containerId}_textinput" class="formeltextfeld" contenteditable="true" data-placeholder="z.B. AUFRUNDEN(4.8 / 2) * 0.2 - Werte ueber den Button unten einfuegen"></div>
+      <div id="${containerId}_textinput" class="formeltextfeld" contenteditable="true" data-placeholder="z.B. AUFRUNDEN(4.8 / 2) * 0.2 oder WENN(Höhe > 1; 0.5; 0.3) - Werte ueber den Button unten einfuegen"></div>
       <div style="margin-top:6px;">
-        <button type="button" class="btnlink" id="${containerId}_textref" title="Rechnet mit Zahlen, +, -, *, /, Klammern und AUFRUNDEN/ABRUNDEN/RUNDEN. Verweise auf Felder/Formeln nie von Hand eintippen - immer hier holen, sie erscheinen dann als Chip.">+ Wert einfügen</button>
+        <button type="button" class="btnlink" id="${containerId}_textref" title="Rechnet mit Zahlen, +, -, *, /, Klammern, AUFRUNDEN/ABRUNDEN/RUNDEN und WENN(Bedingung; Dann; Sonst) mit <, <=, >, >=, =, <>. Verweise auf Felder/Formeln nie von Hand eintippen - immer hier holen, sie erscheinen dann als Chip.">+ Wert einfügen</button>
       </div>
       <div class="status err hidden" id="${containerId}_texterr"></div>
     </div>
