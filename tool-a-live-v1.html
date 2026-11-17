@@ -8119,9 +8119,9 @@ function dokNotizKnopf(offen){
     const aktiv = voll || !box.hidden; // Knopf = «In Abklärung» (selbst notiert); Zeilen mit 0 CHF sind in der Liste «Unvollständig»
     nb.style.background = aktiv ? NO.bg : ''; nb.style.color = aktiv ? NO.fg : ''; nb.style.borderColor = aktiv ? NO.bg : '';
     nb.title = voll ? NO.t + ': ein-/ausblenden' : 'Notieren, was noch abzuklären ist'; void nul;
+    // Leuchtstift neben den Zeilen entfernt (Stefan 17.11.2026: braucht es nicht, lag über dem Zieh-Griff) – keine Knöpfe, keine Markierung
+    layer.innerHTML = ''; document.querySelectorAll('#costbody tr.dmark').forEach(tr => tr.classList.remove('dmark')); return;
     const rows = [...document.querySelectorAll('#costbody tr[data-sk]')].filter(tr => tr.offsetParent);
-    rows.forEach(tr => tr.classList.toggle('dmark', voll && offerteMarkiert.has(tr.dataset.sk)));
-    if(!voll || !cw){ layer.innerHTML = ''; return; }
     const c = cw.getBoundingClientRect();
     layer.innerHTML = rows.map(tr => { const r = tr.getBoundingClientRect(), an = offerteMarkiert.has(tr.dataset.sk);
       return `<button type="button" class="dleucht${an ? ' an' : ''}" data-sk="${esc(tr.dataset.sk)}" style="left:${Math.round(r.left - c.left - 30)}px;top:${Math.round(r.top - c.top + (r.height - 22) / 2)}px" title="${an ? 'Markierung entfernen' : 'Zeile markieren (in Abklärung)'}" aria-pressed="${an}">${KG.icon('leuchtstift', 13)}</button>`; }).join('');
@@ -8521,6 +8521,83 @@ document.addEventListener('click', e => {
   const tb = document.getElementById('teilbereiche');
   if(tb) new MutationObserver(ms => { if(ms.every(m => w.contains(m.target))) return; zeichne(); }).observe(tb, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
   zeichne();
+})();
+</script>
+<style id="dokBlaetterStil">
+/* Grauer Balken über dem Blatt: durch die Offerten desselben Kunden blättern (‹ ›), Liste aller seiner Offerten */
+.dokblaetter{display:flex;align-items:center;justify-content:center;gap:8px;margin:0 0 10px;padding:5px 8px;background:#E9ECF0;border-radius:6px;position:relative;font-size:12.5px;color:var(--muted)}
+.dokblaetter[hidden]{display:none}
+.dokblaetter .dbl-pfeil{width:30px;height:30px;border-radius:50%;border:1px solid var(--line);background:#fff;color:var(--primary);display:grid;place-items:center;cursor:pointer;padding:0}
+.dokblaetter .dbl-pfeil:hover:not(:disabled){border-color:var(--primary)}
+.dokblaetter .dbl-pfeil:disabled{opacity:.35;cursor:default}
+.dokblaetter .dbl-pfeil svg{width:16px;height:16px}
+.dokblaetter .dbl-zur svg{transform:rotate(90deg)}
+.dokblaetter .dbl-vor svg{transform:rotate(-90deg)}
+.dokblaetter .dbl-liste{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:#fff;color:var(--primary);font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
+.dokblaetter .dbl-liste:hover{border-color:var(--primary)}
+.dokblaetter .dbl-liste small{font-weight:400;color:var(--muted)}
+.dbl-karte{position:absolute;top:calc(100% + 6px);z-index:30;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(35,43,53,.14);padding:8px 12px;font-size:12.5px;color:var(--primary);white-space:nowrap;pointer-events:none}
+.dbl-karte small{display:block;color:var(--muted);margin-top:2px}
+.dbl-karte[hidden],.dbl-pop[hidden]{display:none}
+.dbl-pop{position:absolute;top:calc(100% + 6px);left:50%;transform:translateX(-50%);z-index:30;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(35,43,53,.14);padding:4px;width:min(620px,92vw);max-height:420px;overflow:auto}
+.dbl-pop button{display:grid;grid-template-columns:96px 1fr 84px 96px;gap:10px;align-items:center;width:100%;border:0;background:none;border-radius:6px;padding:7px 10px;font:inherit;font-size:12.5px;color:var(--primary);text-align:left;cursor:pointer}
+.dbl-pop button:hover{background:#F5F7F9}
+.dbl-pop button.akt{background:var(--accent-blue,#D6E7F4);font-weight:600}
+.dbl-pop .nr,.dbl-pop .dt{color:var(--muted)}
+.dbl-pop .tt{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dbl-pop .bt{text-align:right;font-variant-numeric:tabular-nums}
+</style>
+<script>
+(function(){
+  const cw = document.getElementById('costwrap'); if(!cw) return;
+  const ic = (n, s) => (window.KG ? KG.icon(n, s) : '');
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' })[c]);
+  const chf = n => (Number(n) || 0).toLocaleString('de-CH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).replace(/’/g, "'");
+  const datum = d => d ? d.split('-').reverse().join('.') : '';
+  const bar = document.createElement('div'); bar.className = 'dokblaetter'; bar.hidden = true;
+  bar.innerHTML = `<button type="button" class="dbl-pfeil dbl-zur" aria-label="Vorherige Offerte dieses Kunden">${ic('chev', 16)}</button>
+    <button type="button" class="dbl-liste" aria-haspopup="listbox">${ic('dokument', 14)}<span class="dbl-pos"></span></button>
+    <button type="button" class="dbl-pfeil dbl-vor" aria-label="Nächste Offerte dieses Kunden">${ic('chev', 16)}</button>
+    <div class="dbl-karte" hidden></div><div class="dbl-pop" role="listbox" hidden></div>`;
+  cw.parentNode.insertBefore(bar, cw);
+  const karte = bar.querySelector('.dbl-karte'), pop = bar.querySelector('.dbl-pop');
+  let liste = [], idx = -1, fuer = '';
+  const ziel = o => (o.offertentyp?.berechnungsmodell === 'artikel' ? 'tool-a3-artikel-live-v1.html' : 'tool-a-live-v1.html') + '?offerte=' + o.id;
+  const gehe = async o => { if(!o || o.id === currentOfferteId) return;
+    try{ if(typeof flushAutosave === 'function') await flushAutosave(); if(typeof autosaveLaufend !== 'undefined' && autosaveLaufend) await autosaveLaufend; }catch(e){}
+    location.href = ziel(o); };
+  const render = () => {
+    bar.hidden = liste.length < 2;
+    if(bar.hidden) return;
+    bar.querySelector('.dbl-pos').innerHTML = `Offerten dieses Kunden <small>${idx + 1} von ${liste.length}</small>`;
+    bar.querySelector('.dbl-zur').disabled = idx <= 0;
+    bar.querySelector('.dbl-vor').disabled = idx < 0 || idx >= liste.length - 1;
+    pop.innerHTML = liste.map((o, i) => `<button type="button" class="${i === idx ? 'akt' : ''}" data-i="${i}"><span class="nr">${esc(o.offertnummer || '–')}</span><span class="tt" title="${esc(o.titel)}">${esc(o.titel || '(ohne Titel)')}</span><span class="dt">${datum(o.datum)}</span><span class="bt">${chf(o.betrag_total)}</span></button>`).join('');
+  };
+  // Liste neu laden, sobald eine (andere) Offerte bzw. ein anderer Kunde offen ist
+  const laden = async () => {
+    const id = typeof currentOfferteId !== 'undefined' ? currentOfferteId : null, kid = typeof currentKundeId !== 'undefined' ? currentKundeId : null;
+    const neuBtn = document.getElementById('dokNeuBtn'); if(neuBtn) neuBtn.href = 'tool-start-live-v1.html?neu=1' + (kid ? '&vorwahl=' + kid : '');
+    const schl = (id || '') + '|' + (kid || ''); if(schl === fuer) return; fuer = schl;
+    if(!id || !kid){ liste = []; idx = -1; render(); return; }
+    const { data } = await sb.from('offerte').select('id, offertnummer, titel, datum, betrag_total, offertentyp(berechnungsmodell)').eq('kunde_id', kid).order('datum', { ascending: false }).order('erstellt_am', { ascending: false });
+    if(fuer !== schl) return;
+    liste = data || []; idx = liste.findIndex(o => o.id === id); render();
+  };
+  setInterval(laden, 700); laden();
+  // ‹ = neuere (weiter oben in der Liste), › = ältere
+  const nachbar = d => liste[idx + d];
+  const zeigeKarte = (btn, o) => { if(!o){ karte.hidden = true; return; }
+    karte.innerHTML = `<b>${esc(o.offertnummer || '')}</b> · ${esc(o.titel || '(ohne Titel)')}<small>${datum(o.datum)} · ${chf(o.betrag_total)} CHF</small>`;
+    karte.hidden = false; const b = bar.getBoundingClientRect(), r = btn.getBoundingClientRect();
+    karte.style.left = Math.max(0, Math.min(b.width - karte.offsetWidth, r.left - b.left + r.width / 2 - karte.offsetWidth / 2)) + 'px'; };
+  [['.dbl-zur', -1], ['.dbl-vor', 1]].forEach(([sel, d]) => { const b = bar.querySelector(sel);
+    b.addEventListener('mouseenter', () => zeigeKarte(b, nachbar(d))); b.addEventListener('mouseleave', () => { karte.hidden = true; });
+    b.addEventListener('click', () => gehe(nachbar(d))); });
+  bar.querySelector('.dbl-liste').addEventListener('click', e => { e.stopPropagation(); pop.hidden = !pop.hidden; karte.hidden = true; });
+  pop.addEventListener('click', e => { const b = e.target.closest('[data-i]'); if(b) gehe(liste[+b.dataset.i]); });
+  document.addEventListener('click', e => { if(!e.target.closest('.dokblaetter')) pop.hidden = true; });
+  // (keine Tastenkürzel: Alt + ← / → ist im Browser «Zurück/Vorwärts»)
 })();
 </script>
 </body>
