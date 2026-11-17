@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script src="/kg-pw-schutz.js?v=5"></script>
-<script src="/kg-stil.js?v=82"></script>
+<script src="/kg-stil.js?v=84"></script>
 <script>/* Handy: eigene Kontakte-Ansicht (ausser mit ?voll=1 oder einem anderen Modus) */ if((matchMedia("(max-width:760px)").matches || screen.width <= 760) && !/[?&](voll|modus)=/.test(location.search)) location.replace("kontakte-handy-live-v1.html");</script>
 <script src="/kg-doku.js?v=9"></script>
 <script src="/kg-kundenordner.js?v=6"></script>
@@ -305,6 +305,22 @@ tr.offertenrow .det section:not(.kk) h4{color:var(--muted);}
 #kundenSearchInput{width:100%;padding:9px 12px 9px 34px;border:1px solid var(--line);border-radius:7px;
   font:inherit;font-size:13px;color:var(--ink);background:var(--accent-blue);}
 #kundenSearchInput::placeholder{color:var(--muted);}
+/* Vorschläge unter dem Suchfeld + Chips (gleich wie in der Offertenliste) */
+.offvorschlag{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:60;background:#fff;border:1px solid var(--line,#E1E5E9);border-radius:8px;box-shadow:0 8px 24px rgba(35,43,53,.14);padding:4px;max-height:380px;overflow:auto}
+.offvorschlag[hidden]{display:none}
+.offvorschlag .ovk{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding:6px 8px 3px}
+.offvorschlag .ovz{display:flex;align-items:center;gap:8px;width:100%;border:0;background:none;border-radius:6px;padding:6px 8px;font:inherit;font-size:13px;color:var(--primary,#323E4E);cursor:pointer;text-align:left}
+.offvorschlag .ovz:hover,.offvorschlag .ovz.akt{background:#F5F7F9}
+.offvorschlag .ovz svg{flex:none;color:var(--muted);position:static;transform:none;width:14px;height:14px}
+.offvorschlag .ovn{font-weight:600;white-space:nowrap}
+.offvorschlag .ova{flex:1;min-width:0;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.offvorschlag .ovc{flex:none;color:var(--muted);font-size:11.5px}
+.kschips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px}
+.kschips:empty{display:none}
+.kschip{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 4px 0 10px;border-radius:999px;background:var(--accent-blue,#D6E7F4);color:var(--primary,#323E4E);font-size:12.5px;font-weight:600}
+.kschip svg{width:13px;height:13px}
+.kschip button{width:20px;height:20px;border-radius:50%;border:0;background:rgba(255,255,255,.7);color:inherit;cursor:pointer;font-size:14px;line-height:1;padding:0}
+.kschip button:hover{background:#fff}
 .kundensearch-wrap{position:relative;} .ksleer{all:unset;cursor:pointer;position:absolute;right:8px;top:50%;transform:translateY(-50%);width:22px;height:22px;border-radius:50%;text-align:center;line-height:21px;font-size:15px;color:#6B7079;}
 .ksleer:hover{background:#EEF1F4;color:#232B35;}
 .kmebchk{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;color:#232B35;margin-right:auto;cursor:pointer;} .kmebchk input{width:15px;height:15px;margin:0;accent-color:#323E4E;}
@@ -422,7 +438,9 @@ tr.offertenrow .det section:not(.kk) h4{color:var(--muted);}
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.2" y2="16.2"/></svg>
       <input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="text" id="kundenSearchInput" placeholder="Name, Strasse, Ort, Telefon, Mail …" aria-label="Kontakte suchen">
       <button type="button" class="ksleer" id="sLeer" title="Suche leeren" aria-label="Suche leeren" hidden>×</button>
+      <div class="offvorschlag" id="ksVorschlag" role="listbox" hidden></div>
     </div>
+    <div class="kschips" id="ksChips"></div>
     <div id="pjWrap" hidden></div>
     <div id="maWrap" hidden></div>
     <div class="kfilter" id="kfilter"></div>
@@ -889,6 +907,9 @@ function gefilterteKunden(){
   basis = basis.filter(k => (modus === 'pf' ? pfPasst(k)
       : (k.art === 'lief' || ((!schnell.has('ab') || AB_SET.has(k.id)) && (!schnell.has('offerte') || OFFEN_SET.has(k.id))
         && (!schnell.has('temp') || !k.easybill_id))) && (k.art !== 'lief' || !schnell.size)));
+  // Chips aus den Vorschlägen: genau ein Kontakt bzw. genau ein Ort (PLZ + Ort)
+  if(chipKontakt) basis = basis.filter(k => k.id === chipKontakt.id);
+  if(chipOrt) basis = basis.filter(k => [k.plz, k.ort].filter(Boolean).join(' ') === chipOrt);
   if(!suchtext) return basis;
   // Relevanz: exakte/Anfangs-/Teil-Treffer zuoberst, sonst Tippfehler-tolerant
   return basis
@@ -1561,11 +1582,55 @@ document.querySelectorAll('th[data-sort]').forEach(th => {
   });
 });
 
+// ===== Suche wie in der Offertenliste: Vorschläge (Kontakte · Orte · Überall suchen), Auswahl wird zum Chip =====
+var chipKontakt = null, chipOrt = null, ksAkt = -1, ksListe = []; // var: wird schon in gefilterteKunden() gebraucht
+function ksChips(){
+  const el = $('ksChips'); if(!el) return;
+  el.innerHTML = (chipKontakt ? `<span class="kschip">${KG.icon('person', 13)}${escHtml(chipKontakt.name)}<button type="button" data-ksx="k" aria-label="Kontakt-Filter aufheben">×</button></span>` : '')
+    + (chipOrt ? `<span class="kschip">${KG.icon('karte', 13)}${escHtml(chipOrt)}<button type="button" data-ksx="o" aria-label="Ort-Filter aufheben">×</button></span>` : '');
+}
+function ksVorschlaege(){
+  const box = $('ksVorschlag'), q = $('kundenSearchInput').value.trim(), s = q.toLowerCase();
+  if(q.length < 2 || modus === 'pj' || modus === 'ma'){ box.hidden = true; return; }
+  const alle = (bereich === 'lief' ? LIEF : bereich === 'alle' ? KUNDEN.concat(LIEF) : KUNDEN);
+  const nameVon = k => k.art === 'lief' ? k.name : anzeigename(k);
+  // Kontakte: nur echte Treffer im Namen (kein Tippfehler-Raten), ganze Wörter zuerst
+  const rang = k => { const n = String(nameVon(k) || '').toLowerCase(); return n.startsWith(s) ? 0 : n.split(/[\s,.\-\/]+/).some(w => w.startsWith(s)) ? 1 : n.includes(s) ? 2 : 9; };
+  const kontakte = alle.map(k => ({ k, r: rang(k) })).filter(x => x.r < 9).sort((a, b) => a.r - b.r || String(nameVon(a.k)).localeCompare(String(nameVon(b.k)), 'de')).slice(0, 6).map(x => x.k);
+  // Orte: PLZ oder Ort beginnt mit dem Suchtext, mit Anzahl
+  const orte = new Map(); alle.forEach(k => { const o = [k.plz, k.ort].filter(Boolean).join(' '); if(!o) return; if(String(k.ort || '').toLowerCase().startsWith(s) || String(k.plz || '').startsWith(s)) orte.set(o, (orte.get(o) || 0) + 1); });
+  const ortListe = [...orte.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4);
+  ksListe = [...kontakte.map(k => ({ art: 'k', k })), ...ortListe.map(([o, n]) => ({ art: 'o', o, n })), { art: 'alle' }];
+  let i = -1; const z = x => { i++; return i === ksAkt ? ' akt' : ''; };
+  box.innerHTML = (kontakte.length ? '<div class="ovk">Kontakte</div>' : '') + ksListe.filter(x => x.art === 'k').map(x => `<button type="button" class="ovz${z()}" data-ksi="${i}">${KG.icon('person', 14)}<span class="ovn">${escHtml(nameVon(x.k))}</span><span class="ova">${escHtml([x.k.strasse, [x.k.plz, x.k.ort].filter(Boolean).join(' ')].filter(Boolean).join(', '))}</span></button>`).join('')
+    + (ortListe.length ? '<div class="ovk">Orte</div>' : '') + ksListe.filter(x => x.art === 'o').map(x => `<button type="button" class="ovz${z()}" data-ksi="${i}">${KG.icon('karte', 14)}<span class="ovn">${escHtml(x.o)}</span><span class="ova"></span><span class="ovc">${x.n} Kontakt${x.n === 1 ? '' : 'e'}</span></button>`).join('')
+    + `<div class="ovk">Überall suchen</div><button type="button" class="ovz${z()}" data-ksi="${i}">${KG.icon('suche', 14)}<span class="ovn">«${escHtml(q)}»</span><span class="ova">Name, Strasse, Ort, Telefon, Mail, Nummer</span></button>`;
+  box.hidden = false;
+}
+function ksWaehlen(x){
+  const inp = $('kundenSearchInput'); $('ksVorschlag').hidden = true; ksAkt = -1;
+  if(!x || x.art === 'alle') return; // Text bleibt stehen → Volltext wie bisher
+  if(x.art === 'k'){ chipKontakt = { id: x.k.id, name: x.k.art === 'lief' ? x.k.name : anzeigename(x.k) }; geoeffneterKunde = x.k.id; springeZu = x.k.id;
+    if(x.k.art === 'lief' && bereich === 'kunden') bereich = 'lief'; if(!OFFERTEN_PRO_KUNDE[x.k.id] && x.k.art !== 'lief') ladeOffertenFuerKunde(x.k.id).then(() => renderKundenTable()); }
+  if(x.art === 'o') chipOrt = x.o;
+  inp.value = ''; suchtext = ''; $('sLeer').hidden = true; buchstabe = null; seite = 0; ksChips(); renderKundenTable(); inp.focus();
+}
+$('ksVorschlag').addEventListener('mousedown', e => e.preventDefault());
+$('ksVorschlag').addEventListener('click', e => { const b = e.target.closest('[data-ksi]'); if(b) ksWaehlen(ksListe[+b.dataset.ksi]); });
+$('ksChips').addEventListener('click', e => { const b = e.target.closest('[data-ksx]'); if(!b) return; if(b.dataset.ksx === 'k'){ chipKontakt = null; geoeffneterKunde = null; } else chipOrt = null; seite = 0; ksChips(); renderKundenTable(); });
+$('kundenSearchInput').addEventListener('keydown', e => { const box = $('ksVorschlag'); if(box.hidden && e.key !== 'ArrowDown') return; const n = ksListe.length;
+  if(e.key === 'ArrowDown'){ e.preventDefault(); ksAkt = (ksAkt + 1) % n; ksVorschlaege(); }
+  else if(e.key === 'ArrowUp'){ e.preventDefault(); ksAkt = (ksAkt - 1 + n) % n; ksVorschlaege(); }
+  else if(e.key === 'Enter'){ e.preventDefault(); ksWaehlen(ksAkt >= 0 ? ksListe[ksAkt] : null); }
+  else if(e.key === 'Escape'){ box.hidden = true; ksAkt = -1; } });
+$('kundenSearchInput').addEventListener('focus', ksVorschlaege);
+$('kundenSearchInput').addEventListener('blur', () => setTimeout(() => { $('ksVorschlag').hidden = true; ksAkt = -1; }, 150));
 $('kundenSearchInput').addEventListener('input', () => {
   suchtext = $('kundenSearchInput').value.trim(); seite = 0; $('sLeer').hidden = !suchtext;
+  ksAkt = -1; ksVorschlaege();
   renderKundenTable();
 });
-$('sLeer').addEventListener('click', () => { $('kundenSearchInput').value = ''; $('sLeer').hidden = true; $('kundenSearchInput').focus(); suchtext = ''; schnell.clear(); buchstabe = null; seite = 0; renderKundenTable(); });
+$('sLeer').addEventListener('click', () => { $('kundenSearchInput').value = ''; $('sLeer').hidden = true; $('kundenSearchInput').focus(); suchtext = ''; schnell.clear(); buchstabe = null; seite = 0; chipKontakt = null; chipOrt = null; ksChips(); renderKundenTable(); });
 document.querySelectorAll('#modusSeg [data-m]').forEach(b => b.addEventListener('click', () => {
   modus = b.dataset.m; buchstabe = null; seite = 0; geoeffneterKunde = null; schnell.clear(); filterAuf = false;
   pff.reg.clear(); pff.kat = pff.abo = pff.wer = pff.tag = ''; pff.meine = false; renderKundenTable();
