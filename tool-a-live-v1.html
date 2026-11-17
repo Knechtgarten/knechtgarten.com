@@ -8525,7 +8525,12 @@ document.addEventListener('click', e => {
 </script>
 <style id="dokBlaetterStil">
 /* Grauer Balken über dem Blatt: durch die Offerten desselben Kunden blättern (‹ ›), Liste aller seiner Offerten */
-.dokblaetter{display:flex;align-items:center;justify-content:center;gap:8px;margin:0 auto 10px;box-sizing:border-box;padding:5px 8px;background:#E9ECF0;border-radius:6px;position:relative;font-size:12.5px;color:var(--muted)}
+.dokblaetter{display:flex;align-items:center;justify-content:center;gap:8px;box-sizing:border-box;padding:5px 8px;background:#E9ECF0;border-radius:6px;position:absolute;left:0;right:0;bottom:calc(100% + 8px);font-size:12.5px;color:var(--muted)}
+#costwrap.mitbl{margin-top:58px!important}
+/* beim Blättern: Blatt kurz blass, Nummer + Titel der neuen Offerte sofort sichtbar */
+#costwrap.dbl-wechsel>*:not(.dokblaetter):not(.dbl-lade){opacity:.25;transition:opacity .1s}
+.dbl-lade{position:absolute;left:50%;top:70px;transform:translateX(-50%);z-index:20;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(35,43,53,.14);padding:12px 18px;font-size:14px;color:var(--primary);text-align:center;white-space:nowrap}
+.dbl-lade small{display:block;font-size:12px;color:var(--muted);margin-top:3px}
 .dokblaetter[hidden]{display:none}
 .dokblaetter .dbl-pfeil{width:30px;height:30px;border-radius:50%;border:1px solid var(--line);background:#fff;color:var(--primary);display:grid;place-items:center;cursor:pointer;padding:0}
 .dokblaetter .dbl-pfeil:hover:not(:disabled){border-color:var(--primary)}
@@ -8559,17 +8564,27 @@ document.addEventListener('click', e => {
     <button type="button" class="dbl-liste" aria-haspopup="listbox">${ic('dokument', 14)}<span class="dbl-pos"></span></button>
     <button type="button" class="dbl-pfeil dbl-vor" aria-label="Nächste Offerte dieses Kunden">${ic('chev', 16)}</button>
     <div class="dbl-karte" hidden></div><div class="dbl-pop" role="listbox" hidden></div>`;
-  cw.parentNode.insertBefore(bar, cw);
+  cw.appendChild(bar); // hängt direkt über dem Blatt (absolut), gleich breit und zentriert
   const karte = bar.querySelector('.dbl-karte'), pop = bar.querySelector('.dbl-pop');
   let liste = [], idx = -1, fuer = '';
   const ziel = o => (o.offertentyp?.berechnungsmodell === 'artikel' ? 'tool-a3-artikel-live-v1.html' : 'tool-a-live-v1.html') + '?offerte=' + o.id;
-  const gehe = async o => { if(!o || o.id === currentOfferteId) return;
+  // Wechsel ohne Neuladen der Seite (wie früher die Offertenliste): Nummer + Titel sofort, Inhalt kommt nach;
+  // Artikel-Offerten haben eine eigene Seite → dort normal öffnen
+  let wechselt = false;
+  const gehe = async o => { if(!o || o.id === currentOfferteId || wechselt) return;
     try{ if(typeof flushAutosave === 'function') await flushAutosave(); if(typeof autosaveLaufend !== 'undefined' && autosaveLaufend) await autosaveLaufend; }catch(e){}
-    location.href = ziel(o); };
+    if(o.offertentyp?.berechnungsmodell === 'artikel' || typeof ladeBestehendeOfferte !== 'function'){ location.href = ziel(o); return; }
+    wechselt = true; pop.hidden = true; karte.hidden = true;
+    idx = liste.indexOf(o); render(); // Balken zeigt sofort die neue Position
+    const lade = document.createElement('div'); lade.className = 'dbl-lade'; lade.innerHTML = `<b>${esc(o.offertnummer || '')}</b> ${esc(o.titel || '')}<small>wird geladen …</small>`;
+    cw.appendChild(lade); cw.classList.add('dbl-wechsel');
+    try{ await ladeBestehendeOfferte(o.id); history.replaceState(null, '', ziel(o)); }
+    catch(e){ location.href = ziel(o); return; }
+    finally{ lade.remove(); cw.classList.remove('dbl-wechsel'); wechselt = false; }
+    fuer = ''; laden(); };
   const render = () => {
-    bar.hidden = liste.length < 2;
+    bar.hidden = liste.length < 2; cw.classList.toggle('mitbl', !bar.hidden);
     if(bar.hidden) return;
-    bar.style.maxWidth = cw.offsetWidth + 'px'; // gleich breit wie das Blatt
     bar.querySelector('.dbl-pos').innerHTML = `Offerten dieses Kunden <small>${idx + 1} von ${liste.length}</small>`;
     bar.querySelector('.dbl-zur').disabled = idx <= 0;
     bar.querySelector('.dbl-vor').disabled = idx < 0 || idx >= liste.length - 1;
@@ -8586,7 +8601,6 @@ document.addEventListener('click', e => {
     liste = data || []; idx = liste.findIndex(o => o.id === id); render();
   };
   setInterval(laden, 700); laden();
-  window.addEventListener('resize', () => { if(!bar.hidden) bar.style.maxWidth = cw.offsetWidth + 'px'; });
   // ‹ = neuere (weiter oben in der Liste), › = ältere
   const nachbar = d => liste[idx + d];
   const zeigeKarte = (btn, o) => { if(!o){ karte.hidden = true; return; }
