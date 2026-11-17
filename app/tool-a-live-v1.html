@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script src="/kg-pw-schutz.js?v=5"></script>
-<script src="/kg-stil.js?v=82"></script>
+<script src="/kg-stil.js?v=84"></script>
 <script src="/kg-bereiche.js?v=3"></script>
 <script>if(/[?&]offerte=/.test(location.search)) document.documentElement.classList.add('doklaedt');</script>
 <title>Tool A (live) – Offerten-Eingabe</title>
@@ -8024,9 +8024,32 @@ function dokNotizKnopf(offen){
   });
   if(menu) menu.addEventListener('click', e => { const b = e.target.closest('[data-pl]'); if(!b) return; location.href = 'tool-start-live-v1.html' + (b.dataset.pl === 'mein' ? '' : '?pl=' + encodeURIComponent(b.dataset.pl)); });
   document.addEventListener('click', e => { if(menu && !e.target.closest('#dokPlWahl')) menu.hidden = true; });
-  // Suche: Enter führt in die Liste mit diesem Suchtext
+  // Suche wie in der Offertenliste: Vorschläge Kunden (→ Liste nur mit diesem Kunden) und «Überall suchen» (→ Volltext in der Liste)
   const q = $$('dokSuche');
-  if(q) q.addEventListener('keydown', e => { if(e.key === 'Enter' && q.value.trim()) location.href = 'tool-start-live-v1.html?q=' + encodeURIComponent(q.value.trim()); });
+  if(q){
+    q.placeholder = 'Kunde wählen oder in allen Offerten suchen …';
+    const box = document.createElement('div'); box.className = 'offvorschlag'; box.hidden = true; q.parentNode.appendChild(box);
+    let akt = -1, kunden = [];
+    const escV = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' })[c]);
+    const zeige = () => { const t = q.value.trim(), s = t.toLowerCase(); if(t.length < 2){ box.hidden = true; return; }
+      const alle = typeof alleKunden !== 'undefined' ? alleKunden : [];
+      kunden = alle.filter(k => String(k.name || '').toLowerCase().includes(s)).sort((a, b) => (String(a.name).toLowerCase().startsWith(s) ? 0 : 1) - (String(b.name).toLowerCase().startsWith(s) ? 0 : 1) || String(a.name).localeCompare(String(b.name), 'de')).slice(0, 8);
+      box.innerHTML = (kunden.length ? '<div class="ovk">Kunden</div>' + kunden.map((k, i) => `<button type="button" class="ovz${i === akt ? ' akt' : ''}" data-ovkunde="${k.id}">${KG.icon('person', 14)}<span class="ovn">${escV(k.name)}</span><span class="ova">${escV([k.strasse, [k.plz, k.ort].filter(Boolean).join(' ')].filter(Boolean).join(', '))}</span></button>`).join('') : '')
+        + `<div class="ovk">Überall suchen</div><button type="button" class="ovz${akt === kunden.length ? ' akt' : ''}" data-ovalle>${KG.icon('suche', 14)}<span class="ovn">«${escV(t)}» in allen Offerten</span><span class="ova">Titel, Positionen, Artikel, Texte</span></button>`;
+      box.hidden = false; };
+    const kundeGehe = id => { location.href = 'tool-start-live-v1.html?kunde=' + encodeURIComponent(id); };
+    const alleGehe = () => { if(q.value.trim()) location.href = 'tool-start-live-v1.html?q=' + encodeURIComponent(q.value.trim()); };
+    q.addEventListener('input', () => { akt = -1; zeige(); });
+    q.addEventListener('focus', zeige);
+    q.addEventListener('blur', () => setTimeout(() => { box.hidden = true; akt = -1; }, 150));
+    box.addEventListener('mousedown', e => e.preventDefault());
+    box.addEventListener('click', e => { const k = e.target.closest('[data-ovkunde]'); if(k) return kundeGehe(k.dataset.ovkunde); if(e.target.closest('[data-ovalle]')) alleGehe(); });
+    q.addEventListener('keydown', e => { const n = kunden.length + 1;
+      if(e.key === 'ArrowDown'){ e.preventDefault(); akt = (akt + 1) % n; zeige(); }
+      else if(e.key === 'ArrowUp'){ e.preventDefault(); akt = (akt - 1 + n) % n; zeige(); }
+      else if(e.key === 'Enter'){ e.preventDefault(); if(akt >= 0 && akt < kunden.length) kundeGehe(kunden[akt].id); else alleGehe(); }
+      else if(e.key === 'Escape'){ box.hidden = true; akt = -1; } });
+  }
   // Knopf «Kunden» in der Farbe von Kontakte
   const kt = window.KG && KG.tools ? KG.tools.find(t => t.k === 'kunden') : null;
   if(kt && $$('dokKundenBtn')) $$('dokKundenBtn').style.background = kt.farbe;
@@ -8550,6 +8573,18 @@ document.addEventListener('click', e => {
   zeichne();
 })();
 </script>
+<style id="dokSucheStil">
+/* Vorschläge unter dem Suchfeld (gleich wie in der Offertenliste) */
+.kundensearch-wrap{position:relative}
+.offvorschlag{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:60;background:#fff;border:1px solid var(--line,#E1E5E9);border-radius:8px;box-shadow:0 8px 24px rgba(35,43,53,.14);padding:4px;max-height:360px;overflow:auto;min-width:360px}
+.offvorschlag[hidden]{display:none}
+.offvorschlag .ovk{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding:6px 8px 3px}
+.offvorschlag .ovz{display:flex;align-items:center;gap:8px;width:100%;border:0;background:none;border-radius:6px;padding:6px 8px;font:inherit;font-size:13px;color:var(--primary,#323E4E);cursor:pointer;text-align:left}
+.offvorschlag .ovz:hover,.offvorschlag .ovz.akt{background:#F5F7F9}
+.offvorschlag .ovz svg{flex:none;color:var(--muted);position:static;transform:none;width:14px;height:14px}
+.offvorschlag .ovn{font-weight:600;white-space:nowrap}
+.offvorschlag .ova{flex:1;min-width:0;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+</style>
 <style id="dokBlaetterStil">
 /* Grauer Balken über dem Blatt: durch die Offerten desselben Kunden blättern (‹ ›), Liste aller seiner Offerten */
 .dokblaetter{display:flex;align-items:center;justify-content:center;gap:8px;box-sizing:border-box;padding:5px 8px;background:#E9ECF0;border-radius:6px;position:absolute;left:0;right:0;bottom:calc(100% + 8px);font-size:12.5px;color:var(--muted)}
@@ -8572,7 +8607,10 @@ document.addEventListener('click', e => {
 .dbl-karte small{display:block;color:var(--muted);margin-top:2px}
 .dbl-karte[hidden],.dbl-pop[hidden]{display:none}
 .dbl-pop{position:absolute;top:calc(100% + 6px);left:50%;transform:translateX(-50%);z-index:30;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(35,43,53,.14);padding:4px;width:min(620px,92vw);max-height:420px;overflow:auto}
-.dbl-pop button{display:grid;grid-template-columns:96px 1fr 84px 96px;gap:10px;align-items:center;width:100%;border:0;background:none;border-radius:6px;padding:7px 10px;font:inherit;font-size:12.5px;color:var(--primary);text-align:left;cursor:pointer}
+.dbl-pop .st{display:inline-flex;gap:3px}
+.dbl-st{width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-style:normal;flex:none}
+.dbl-st.leer{background:none}
+.dbl-pop button{display:grid;grid-template-columns:50px 96px 1fr 84px 96px;gap:10px;align-items:center;width:100%;border:0;background:none;border-radius:6px;padding:7px 10px;font:inherit;font-size:12.5px;color:var(--primary);text-align:left;cursor:pointer}
 .dbl-pop button:hover{background:#F5F7F9}
 .dbl-pop button.akt{background:var(--accent-blue,#D6E7F4);font-weight:600}
 .dbl-pop .nr,.dbl-pop .dt{color:var(--muted)}
@@ -8615,7 +8653,12 @@ document.addEventListener('click', e => {
     bar.querySelector('.dbl-pos').innerHTML = `Offerten dieses Kunden <small>${idx + 1} von ${liste.length}</small>`;
     bar.querySelector('.dbl-zur').disabled = idx <= 0;
     bar.querySelector('.dbl-vor').disabled = idx < 0 || idx >= liste.length - 1;
-    pop.innerHTML = liste.map((o, i) => `<button type="button" class="${i === idx ? 'akt' : ''}" data-i="${i}"><span class="nr">${esc(o.offertnummer || '–')}</span><span class="tt" title="${esc(o.titel)}">${esc(o.titel || '(ohne Titel)')}</span><span class="dt">${datum(o.datum)}</span><span class="bt">${chf(o.betrag_total)}</span></button>`).join('');
+    // Status-Zeichen wie in der ersten Spalte der Offertenliste (nur anzeigen): Status, In Abklärung / Unvollständig (Zeilen mit 0 CHF)
+    const kreis = (d, tip, gr) => `<i class="dbl-st" style="background:${d.bg};color:${d.fg}${d.rand ? `;box-shadow:inset 0 0 0 1px ${d.rand}` : ''}" title="${esc(tip)}">${ic(d.icon, gr || 12)}</i>`;
+    const zeichen = o => { const s = (window.KG && KG.offStatus || []).find(x => x.k === o.status), n = (o.noch_offen || '').trim();
+      const nz = ((o.kosten_snapshot && o.kosten_snapshot.gruppen) || []).flatMap(g => g.zeilen || []).filter(z => !z.geloescht && Number(z.betrag || 0) === 0 && z.bezeichnung);
+      return (s ? kreis(s, s.t) : '<i class="dbl-st leer"></i>') + (n && KG.offNochOffen ? kreis(KG.offNochOffen, KG.offNochOffen.t + ': ' + n) : nz.length && KG.offUnvollst ? kreis(KG.offUnvollst, KG.offUnvollst.t + ': ' + nz.length + ' Zeile(n) mit 0 CHF', 18) : '<i class="dbl-st leer"></i>'); };
+    pop.innerHTML = liste.map((o, i) => `<button type="button" class="${i === idx ? 'akt' : ''}" data-i="${i}"><span class="st">${zeichen(o)}</span><span class="nr">${esc(o.offertnummer || '–')}</span><span class="tt" title="${esc(o.titel)}">${esc(o.titel || '(ohne Titel)')}</span><span class="dt">${datum(o.datum)}</span><span class="bt">${chf(o.betrag_total)}</span></button>`).join('');
   };
   // Liste neu laden, sobald eine (andere) Offerte bzw. ein anderer Kunde offen ist
   const laden = async () => {
@@ -8623,7 +8666,7 @@ document.addEventListener('click', e => {
     const neuBtn = document.getElementById('dokNeuBtn'); if(neuBtn) neuBtn.href = 'tool-start-live-v1.html?neu=1' + (kid ? '&vorwahl=' + kid : '');
     const schl = (id || '') + '|' + (kid || ''); if(schl === fuer) return; fuer = schl;
     if(!id || !kid){ liste = []; idx = -1; render(); return; }
-    const { data } = await sb.from('offerte').select('id, offertnummer, titel, datum, betrag_total, offertentyp_id, offertentyp(berechnungsmodell)').eq('kunde_id', kid).order('datum', { ascending: false }).order('erstellt_am', { ascending: false });
+    const { data } = await sb.from('offerte').select('id, offertnummer, titel, datum, betrag_total, status, noch_offen, kosten_snapshot, offertentyp_id, offertentyp(berechnungsmodell)').eq('kunde_id', kid).order('datum', { ascending: false }).order('erstellt_am', { ascending: false });
     if(fuer !== schl) return;
     liste = data || []; idx = liste.findIndex(o => o.id === id); render();
     // Vorlagen der beiden Nachbarn im Hintergrund vorladen → Blättern geht auch beim ersten Mal schnell
