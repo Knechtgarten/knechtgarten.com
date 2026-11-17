@@ -224,6 +224,7 @@ tr.typ-artikel td:first-child{border-left:2px solid #6666ff;}
 .otwtab td{padding:6px 10px;border-bottom:1px solid #F0F2F4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
 .otwtab td:first-child{font-weight:600}
 .otwtab tr:hover td,.otwtab tr.akt td{background:var(--soft,#F5F7F9)}
+.otwtab tr.vorwahl td,.otwtab tr.vorwahl:hover td{background:var(--accent-blue,#D6E7F4);border-bottom:6px solid #fff} /* Kunde der offenen Offerte, etwas abgesetzt */
 .otwtab .leer td{color:var(--muted);font-weight:400;cursor:default}
 .otwfelder{display:flex;flex-direction:column;gap:12px;padding:14px 20px 0;margin:12px 0 4px;border-top:1px solid var(--line,#E1E5E9)}
 .otwfelder[hidden]{display:none}
@@ -1545,15 +1546,19 @@ let otwAkt = 0, otwTreffer = [], otwBuchstabe = '';
 const otwName = k => k.nachname || k.firma || k.name || '(unbenannt)';
 const otwErster = k => { const c = (otwName(k).trim()[0] || '#').toUpperCase(); return /[A-ZÄÖÜ]/.test(c) ? c.replace('Ä', 'A').replace('Ö', 'O').replace('Ü', 'U') : '#'; };
 // Kundentabelle wie in Kontakte: Suche über Name/Vorname/Adresse (Namen zuerst) oder Buchstabe, scrollbar
+let OTW_VORWAHL = null; // Kunde der Offerte, aus der «+ Offerte neu» kam (?vorwahl=)
 function otwKundeListe(q){
   q = q.trim();
   if(q) otwBuchstabe = '';
   let liste;
   if(q) liste = KW_KUNDEN.map(k => ({ k, s: Math.min(bestScore([otwName(k), anzeigename(k), k.vorname, k.firma], q), bestScore([k.strasse, k.plz, k.ort], q) + 0.5) })).filter(x => x.s < Infinity).sort((a, b) => a.s - b.s).map(x => x.k);
   else liste = KW_KUNDEN.filter(k => !otwBuchstabe || otwErster(k) === otwBuchstabe).sort((a, b) => otwName(a).localeCompare(otwName(b), 'de') || String(a.vorname || '').localeCompare(String(b.vorname || ''), 'de'));
+  // aus einer offenen Offerte gekommen: deren Kunde zuoberst, hellblau vorgewählt (Enter oder Klick genügt)
+  const vk = !q && !otwBuchstabe && OTW_VORWAHL ? KW_KUNDEN.find(k => k.id === OTW_VORWAHL) : null;
+  if(vk) liste = [vk, ...liste.filter(k => k !== vk)];
   otwTreffer = liste.slice(0, 400);
   otwAkt = 0;
-  $('otwKundeListe').innerHTML = otwTreffer.map((k, i) => `<tr class="${i === 0 && q ? 'akt' : ''}" data-i="${i}"><td title="${escHtml(otwName(k))}">${escHtml(otwName(k))}</td><td>${escHtml(k.vorname || '')}</td><td>${escHtml(k.strasse || '')}</td><td>${escHtml(k.plz || '')}</td><td>${escHtml(k.ort || '')}</td></tr>`).join('')
+  $('otwKundeListe').innerHTML = otwTreffer.map((k, i) => `<tr class="${(i === 0 && q) || (i === 0 && vk) ? 'akt' : ''}${i === 0 && vk ? ' vorwahl' : ''}" data-i="${i}"${i === 0 && vk ? ' title="Kunde der offenen Offerte"' : ''}><td title="${escHtml(otwName(k))}">${escHtml(otwName(k))}</td><td>${escHtml(k.vorname || '')}</td><td>${escHtml(k.strasse || '')}</td><td>${escHtml(k.plz || '')}</td><td>${escHtml(k.ort || '')}</td></tr>`).join('')
     || `<tr class="leer"><td colspan="5">${q ? 'Kein Kunde gefunden.' : 'Keine Kunden mit diesem Buchstaben.'}</td></tr>`;
   const vorhanden = new Set(KW_KUNDEN.map(otwErster));
   $('otwAbc').innerHTML = ['', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split(''), '#'].map(b => `<button type="button" data-b="${b}" class="${otwBuchstabe === b && !q ? 'on' : ''}"${b && !vorhanden.has(b) ? ' disabled' : ''}>${b || 'Alle'}</button>`).join('');
@@ -1741,7 +1746,7 @@ async function init(){
   if(pInit.get('q')){ $('offSearchInput').value = pInit.get('q'); plFilter = 'alle'; zeigeWahlschalter(); }
   await Promise.all([ladeKundenPanel(), ladeOfferten()]);
   if(pInit.get('q')) $('offSearchInput').dispatchEvent(new Event('input'));
-  if(pInit.get('neu') === '1') $('offerteNeuBtn').click();
+  if(pInit.get('neu') === '1'){ OTW_VORWAHL = pInit.get('vorwahl') || null; $('offerteNeuBtn').click(); }
   // "Kopie erstellen" direkt aus Tool A heraus (siehe easybillWrap-Zeile dort):
   // verlinkt hierher mit ?kopieren=<offerteId> und oeffnet automatisch den
   // bestehenden Kopier-Ablauf (Zielkunde waehlen), statt die ganze, recht
