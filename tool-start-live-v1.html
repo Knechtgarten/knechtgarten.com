@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script src="/kg-pw-schutz.js?v=5"></script>
-<script src="/kg-stil.js?v=82"></script>
+<script src="/kg-stil.js?v=84"></script>
 <script src="/kg-bereiche.js?v=3"></script>
 <title>Tool Start (live) – Übersicht</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -137,6 +137,16 @@ tr.typ-artikel td:first-child{border-left:2px solid #6666ff;}
 .dashleft .card{display:none !important}
 .kundechip{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 4px 0 11px;border-radius:999px;background:var(--accent-blue,#D6E7F4);color:var(--primary,#323E4E);font-size:12.5px;font-weight:600;white-space:nowrap}
 .kundechip[hidden]{display:none}
+/* Vorschläge unter dem Offerten-Suchfeld: Kunden + «Überall suchen» */
+.offvorschlag{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:40;background:#fff;border:1px solid var(--line,#E1E5E9);border-radius:8px;box-shadow:0 8px 24px rgba(35,43,53,.14);padding:4px;max-height:360px;overflow:auto}
+.offvorschlag[hidden]{display:none}
+.offvorschlag .ovk{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding:6px 8px 3px}
+.offvorschlag .ovz{display:flex;align-items:center;gap:8px;width:100%;border:0;background:none;border-radius:6px;padding:6px 8px;font:inherit;font-size:13px;color:var(--primary,#323E4E);cursor:pointer;text-align:left}
+.offvorschlag .ovz:hover,.offvorschlag .ovz.akt{background:#F5F7F9}
+.offvorschlag .ovz svg{flex:none;color:var(--muted)}
+.offvorschlag .ovn{font-weight:600;white-space:nowrap}
+.offvorschlag .ova{flex:1;min-width:0;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.offvorschlag .ovc{flex:none;color:var(--muted);font-size:11.5px}
 .kundechip button{width:22px;height:22px;border-radius:50%;border:0;background:rgba(255,255,255,.7);color:inherit;cursor:pointer;font-size:15px;line-height:1;padding:0}
 .kundechip button:hover{background:#fff}
 #otwKundeListe .otwk{display:flex;justify-content:space-between;gap:12px;width:100%;text-align:left;border:0;background:none;padding:7px 9px;border-radius:6px;cursor:pointer;font:inherit;font-size:12.5px}
@@ -368,7 +378,8 @@ tr.typ-artikel td:first-child{border-left:2px solid #6666ff;}
       <div class="filterbar" data-kg-seite="mitte">
         <div class="kundensearch-wrap">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.2" y2="16.2"/></svg>
-          <input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="text" id="offSearchInput" placeholder="Suchen nach Titel oder Kunde…">
+          <input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="text" id="offSearchInput" placeholder="Kunde wählen oder in allen Offerten suchen …" role="combobox" aria-controls="offVorschlag">
+          <div class="offvorschlag" id="offVorschlag" role="listbox" hidden></div>
         </div>
         <span class="kundechip" id="kundeChip" hidden><span id="kundeChipName"></span><button type="button" id="kundeChipX" title="Alle Kunden zeigen" aria-label="Kundenfilter aufheben">×</button></span>
         <span class="stchips" id="stChips" role="group" aria-label="Status-Filter"></span>
@@ -1055,11 +1066,11 @@ function gefilterteOfferten(ohneBereich){
 
   const such = $('offSearchInput').value.trim();
   if(such){
-    liste = liste
-      .map(o => ({ o, score: bestScore([o.titel, o._kunde_name], such) }))
-      .filter(x => x.score < Infinity)
-      .sort((a,b) => a.score - b.score)
-      .map(x => x.o);
+    // Treffer im Titel/Kunden zuerst (genau, nicht unscharf – sonst kommen «Hecht» & Co.), danach alles aus dem Inhalt (Positionen, Texte – Datenbank-Suchtext)
+    const s = such.toLowerCase(), imText = VOLLTEXT.q === s ? VOLLTEXT.ids : new Set();
+    const score = o => { const t = String(o.titel || '').toLowerCase(), k = String(o._kunde_name || '').toLowerCase(), nr = String(o.offertnummer || '').toLowerCase();
+      if(k.startsWith(s) || t.startsWith(s) || nr.startsWith(s)) return 1; if(k.includes(s) || t.includes(s) || nr.includes(s)) return 2; return imText.has(o.id) ? 3 : Infinity; };
+    liste = liste.map(o => ({ o, score: score(o) })).filter(x => x.score < Infinity).sort((a,b) => a.score - b.score).map(x => x.o);
   }
   return liste;
 }
@@ -1154,9 +1165,52 @@ document.querySelectorAll('#appMain table th[data-sort]').forEach(th => {
     renderOffertenTable();
   });
 });
-// Suche gilt immer über alle Offerten: ein links gewählter Kunde wird aufgehoben, noch nicht geladene Offerten werden nachgeladen
+// Volltext: Offerten-IDs, deren Inhalt (Positionen, Arbeitsbeschrieb, Notiz …) den Suchtext enthält – aus der Datenbank (offerte.suchtext)
+const VOLLTEXT = { q: '', ids: new Set() };
+let volltextT = null;
+function volltextSuchen(q){
+  clearTimeout(volltextT); const s = q.trim().toLowerCase();
+  if(s.length < 2){ VOLLTEXT.q = ''; VOLLTEXT.ids = new Set(); return; }
+  volltextT = setTimeout(async () => {
+    const { data, error } = await sb.from('offerte').select('id').ilike('suchtext', '%' + s.replace(/[%_\\]/g, m => '\\' + m) + '%').limit(5000);
+    if(error || $('offSearchInput').value.trim().toLowerCase() !== s) return;
+    VOLLTEXT.q = s; VOLLTEXT.ids = new Set((data || []).map(r => r.id)); renderOffertenTable();
+  }, 250);
+}
+// Vorschläge unter dem Suchfeld: Kunden (Klick = nur dieser Kunde, Chip) und «Überall suchen» (Volltext)
+let vorschlagAkt = -1, vorschlagKunden = [];
+function vorschlaegeZeigen(){
+  const box = $('offVorschlag'), q = $('offSearchInput').value.trim();
+  if(!box) return;
+  if(q.length < 2){ box.hidden = true; return; }
+  const s = q.toLowerCase(), gesehen = new Map();
+  ALLE_OFFERTEN.forEach(o => { if(o.kunde_id && !gesehen.has(o.kunde_id) && String(o._kunde_name || '').toLowerCase().includes(s)) gesehen.set(o.kunde_id, o); });
+  vorschlagKunden = [...gesehen.values()].sort((a, b) => (String(a._kunde_name).toLowerCase().startsWith(s) ? 0 : 1) - (String(b._kunde_name).toLowerCase().startsWith(s) ? 0 : 1) || String(a._kunde_name).localeCompare(String(b._kunde_name), 'de')).slice(0, 8);
+  const anz = id => ALLE_OFFERTEN.filter(o => o.kunde_id === id).length;
+  const adr = o => { const k = (typeof offertenKundenMap !== 'undefined' && offertenKundenMap[o.kunde_id]) || null; return k ? [k.strasse, [k.plz, k.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ') : ''; };
+  box.innerHTML = (vorschlagKunden.length ? `<div class="ovk">Kunden</div>` + vorschlagKunden.map((o, i) => `<button type="button" class="ovz${i === vorschlagAkt ? ' akt' : ''}" data-ovkunde="${o.kunde_id}">${KG.icon('person', 14)}<span class="ovn">${escO(o._kunde_name)}</span><span class="ova">${escO(adr(o))}</span><span class="ovc">${anz(o.kunde_id)} Offerte${anz(o.kunde_id) === 1 ? '' : 'n'}</span></button>`).join('') : '')
+    + `<div class="ovk">Überall suchen</div><button type="button" class="ovz${vorschlagAkt === vorschlagKunden.length ? ' akt' : ''}" data-ovalle>${KG.icon('suche', 14)}<span class="ovn">«${escO(q)}» in allen Offerten</span><span class="ova">Titel, Positionen, Artikel, Texte</span></button>`;
+  box.hidden = false;
+}
+function kundeWaehlen(id){
+  kpanelFilterId = id; $('offSearchInput').value = ''; VOLLTEXT.q = ''; VOLLTEXT.ids = new Set(); vorschlagAkt = -1;
+  $('offVorschlag').hidden = true; renderKundenPanel(); renderOffertenTable(); $('offSearchInput').focus();
+}
+$('offVorschlag').addEventListener('mousedown', e => e.preventDefault()); // Fokus im Suchfeld lassen
+$('offVorschlag').addEventListener('click', e => { const k = e.target.closest('[data-ovkunde]'); if(k) return kundeWaehlen(k.dataset.ovkunde);
+  if(e.target.closest('[data-ovalle]')){ $('offVorschlag').hidden = true; } });
+$('offSearchInput').addEventListener('keydown', e => {
+  const box = $('offVorschlag'); if(box.hidden && e.key !== 'ArrowDown') return; const n = vorschlagKunden.length + 1;
+  if(e.key === 'ArrowDown'){ e.preventDefault(); vorschlagAkt = (vorschlagAkt + 1) % n; vorschlaegeZeigen(); }
+  else if(e.key === 'ArrowUp'){ e.preventDefault(); vorschlagAkt = (vorschlagAkt - 1 + n) % n; vorschlaegeZeigen(); }
+  else if(e.key === 'Enter'){ e.preventDefault(); if(vorschlagAkt >= 0 && vorschlagAkt < vorschlagKunden.length) return kundeWaehlen(vorschlagKunden[vorschlagAkt].kunde_id); box.hidden = true; vorschlagAkt = -1; }
+  else if(e.key === 'Escape'){ box.hidden = true; vorschlagAkt = -1; }
+});
+$('offSearchInput').addEventListener('focus', vorschlaegeZeigen);
+$('offSearchInput').addEventListener('blur', () => setTimeout(() => { $('offVorschlag').hidden = true; vorschlagAkt = -1; }, 150));
+// Suche: mit Kunden-Chip nur in dessen Offerten (kombinierbar), sonst über alle; noch nicht geladene Offerten werden nachgeladen
 $('offSearchInput').addEventListener('input', async () => {
-  if(kpanelFilterId && $('offSearchInput').value.trim()){ kpanelFilterId = null; renderKundenPanel(); }
+  vorschlagAkt = -1; vorschlaegeZeigen(); volltextSuchen($('offSearchInput').value);
   // Suche gilt über alle Projektleiter
   if($('offSearchInput').value.trim() && plFilter !== 'alle'){ plFilter = 'alle'; zeigeWahlschalter(); await ladeOfferten(); }
   renderOffertenTable();
@@ -1164,6 +1218,7 @@ $('offSearchInput').addEventListener('input', async () => {
     ladeAlleLaeuft = true;
     try{ while(offertenGesamtAnzahl - ALLE_OFFERTEN.length > 0) await ladeWeitereOfferten(); } finally { ladeAlleLaeuft = false; }
   }
+  if(document.activeElement === $('offSearchInput')) vorschlaegeZeigen(); // jetzt mit allen Kunden
 });
 let ladeAlleLaeuft = false;
 $('kundeChipX').addEventListener('click', () => {
