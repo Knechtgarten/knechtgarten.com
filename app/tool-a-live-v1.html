@@ -3647,8 +3647,19 @@ function setzeInhaltModus(modell){
   $tagessatzInhalt.classList.toggle('hidden', modell !== 'tagessatz');
 }
 
+// Vorlagen-Abfragen (Eingabefelder, Spalten, Arbeitsschritte, Vorauswahlen) pro Offertentyp 5 Minuten merken:
+// Blättern zwischen Offerten derselben Vorlage lädt sie nicht jedes Mal neu (war ~1.2 s). Immer eine frische Kopie
+// zurückgeben, weil die Verarbeitung die Objekte verändert. Fehler werden nicht gemerkt.
+const VORLAGE_CACHE = new Map();
+async function vorlageHolen(key, abfrage){
+  let e = VORLAGE_CACHE.get(key);
+  if(!e || Date.now() - e.t > 300000){ e = { t: Date.now(), p: Promise.resolve(abfrage()) }; VORLAGE_CACHE.set(key, e); }
+  const r = await e.p;
+  if(r.error){ VORLAGE_CACHE.delete(key); return { data: null, error: r.error }; }
+  return { data: structuredClone(r.data), error: null };
+}
 async function ladeFormelDaten(otId){
-  const { data: efs, error: efErr } = await sb.from('eingabefeld').select('id,name,einheit,typ,fixer_wert,mindestwert,beschriftung,erklaerung,ausgeblendet,reihenfolge,ist_titel,ist_tabelle,zusatztext_moeglich,flaechenformel_moeglich').eq('offertentyp_id', otId).order('reihenfolge');
+  const { data: efs, error: efErr } = await vorlageHolen('ef:' + otId, () => sb.from('eingabefeld').select('id,name,einheit,typ,fixer_wert,mindestwert,beschriftung,erklaerung,ausgeblendet,reihenfolge,ist_titel,ist_tabelle,zusatztext_moeglich,flaechenformel_moeglich').eq('offertentyp_id', otId).order('reihenfolge'));
   if(efErr) throw efErr;
   eingabefelder = efs;
 
@@ -3658,14 +3669,14 @@ async function ladeFormelDaten(otId){
   const tabellenIds = eingabefelder.filter(ef => ef.ist_tabelle).map(ef => ef.id);
   TABELLEN_SPALTEN = {};
   if(tabellenIds.length){
-    const { data: spalten, error: spErr } = await sb.from('eingabefeld_tabelle_spalte')
+    const { data: spalten, error: spErr } = await vorlageHolen('sp:' + otId, () => sb.from('eingabefeld_tabelle_spalte')
       .select('id,eingabefeld_id,name,einheit,reihenfolge,ist_berechnung,ausdruck,zusatztext_moeglich,flaechenformel_moeglich,vorschlagswert,ausgeblendet,auswahl_werte')
-      .in('eingabefeld_id', tabellenIds).order('reihenfolge');
+      .in('eingabefeld_id', tabellenIds).order('reihenfolge'));
     if(spErr) throw spErr;
     (spalten || []).forEach(s => { (TABELLEN_SPALTEN[s.eingabefeld_id] ||= []).push(s); });
   }
 
-  const { data: arbeitsschritte, error: asErr } = await sb
+  const { data: arbeitsschritte, error: asErr } = await vorlageHolen('as:' + otId, () => sb
     .from('arbeitsschritt')
     .select(`id, name, reihenfolge, ausgeblendet, titel_offerte,
       teilschritt ( id, name, beschreibung, ausgeblendet, reihenfolge,
@@ -3688,7 +3699,7 @@ async function ladeFormelDaten(otId){
               auswahlgruppe ( name, titel, auswahlgruppe_option ( id, label, artikel_id, artikel ( bezeichnung, einheit, vp_knecht, zusatzwert, zusatzeinheit ) ) ),
               sonderposition_typ ( kategorie, name, titel, einheit, mwst_satz_pct, lieferwagen_std_artikel_id, lieferwagen_km_artikel_id, lieferwagen_transport_ort, lieferwagen_std_artikel:artikel!lieferwagen_std_artikel_id ( vp_knecht, bezeichnung ), lieferwagen_km_artikel:artikel!lieferwagen_km_artikel_id ( vp_knecht, bezeichnung ) ) ),
             option_freitext_vorlage ( id, kategorie, bezeichnung, einheit, notiz, menge_vorschlag, preis_vorschlag, margen_vorschlag_prozent, ist_eigene_offertenposition ) ) ) )`)
-    .eq('offertentyp_id', otId).eq('ausgeblendet', false).order('reihenfolge');
+    .eq('offertentyp_id', otId).eq('ausgeblendet', false).order('reihenfolge'));
   if(asErr) throw asErr;
 
   ressourcenzeilen = [];
@@ -3827,9 +3838,9 @@ async function ladeFormelDaten(otId){
 // die wird in initBereich() automatisch uebernommen.
 let VORAUSWAHLEN = [];
 async function ladeVorauswahlen(otId){
-  const { data, error } = await sb.from('vorauswahl')
+  const { data, error } = await vorlageHolen('va:' + otId, () => sb.from('vorauswahl')
     .select('id,name,vorauswahl_option(option_id,menge)')
-    .eq('offertentyp_id', otId).order('name');
+    .eq('offertentyp_id', otId).order('name'));
   if(error){ console.error(error); VORAUSWAHLEN = []; return; }
   VORAUSWAHLEN = (data || []).map(v => ({ id: v.id, name: v.name, optionIds: (v.vorauswahl_option || []).map(o => o.option_id), mengen: Object.fromEntries((v.vorauswahl_option || []).filter(o => o.menge != null).map(o => [o.option_id, o.menge])) }));
 }
@@ -3839,7 +3850,7 @@ async function ladeTagessatzDaten(otId){
   // damit keine Eintraege einer zuvor im selben Tab geladenen Formel-Offerte
   // haengen bleiben.
   OPTION_INFO = {};
-  const { data: arbeitsschritte, error } = await sb
+  const { data: arbeitsschritte, error } = await vorlageHolen('ts:' + otId, () => sb
     .from('arbeitsschritt')
     .select(`id, name, reihenfolge,
       teilschritt ( id, name, beschreibung, ausgeblendet, reihenfolge,
@@ -3849,7 +3860,7 @@ async function ladeTagessatzDaten(otId){
           auswahloption ( id, name, beschreibung, reihenfolge, mehrfachauswahl,
             ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, tagesleistung_menge, artikel_id,
               artikel ( bezeichnung, einheit, vp_knecht ) ) ) ) )`)
-    .eq('offertentyp_id', otId).eq('ausgeblendet', false).order('reihenfolge');
+    .eq('offertentyp_id', otId).eq('ausgeblendet', false).order('reihenfolge'));
   if(error) throw error;
 
   tagessatzArbeitsschritte = arbeitsschritte.map(as => ({ id: as.id, name: as.name, reihenfolge: as.reihenfolge }));
@@ -5200,17 +5211,20 @@ async function ladeBestehendeOfferte(offerteId){
     tagessatzOffenIds = new Set();
     renderTagessatzInhalt();
   }else{
-    const { data: efWerte, error: efErr } = await sb
-      .from('offerte_eingabefeld_wert').select('eingabefeld_id, wert').eq('offerte_id', offerteId);
+    // die vier Abfragen gleichzeitig statt nacheinander (beim Blättern spürbar schneller)
+    const [rEf, rAw, rNo, rTz] = await Promise.all([
+      sb.from('offerte_eingabefeld_wert').select('eingabefeld_id, wert').eq('offerte_id', offerteId),
+      sb.from('offerte_auswahl').select('option_id, anzahl, auswahlgruppe_option_id').eq('offerte_id', offerteId),
+      sb.from('offerte_eingabefeld_notiz').select('eingabefeld_id, notiz').eq('offerte_id', offerteId),
+      sb.from('offerte_tabelle_zeile').select('id, eingabefeld_id, name, reihenfolge, option_id, option_ids').eq('offerte_id', offerteId).order('reihenfolge')
+    ]);
+    const { data: efWerte, error: efErr } = rEf;
     if(efErr){ console.error(efErr); $saveStatus.textContent = 'Fehler beim Laden: ' + efErr.message; $saveStatus.className='status err'; return; }
-    const { data: auswahlRows, error: auswahlErr2 } = await sb
-      .from('offerte_auswahl').select('option_id, anzahl, auswahlgruppe_option_id').eq('offerte_id', offerteId);
+    const { data: auswahlRows, error: auswahlErr2 } = rAw;
     if(auswahlErr2){ console.error(auswahlErr2); $saveStatus.textContent = 'Fehler beim Laden: ' + auswahlErr2.message; $saveStatus.className='status err'; return; }
-    const { data: efNotizen, error: notizErr } = await sb
-      .from('offerte_eingabefeld_notiz').select('eingabefeld_id, notiz').eq('offerte_id', offerteId);
+    const { data: efNotizen, error: notizErr } = rNo;
     if(notizErr){ console.error(notizErr); $saveStatus.textContent = 'Fehler beim Laden: ' + notizErr.message; $saveStatus.className='status err'; return; }
-    const { data: tabZeilen, error: tabZeilenErr } = await sb
-      .from('offerte_tabelle_zeile').select('id, eingabefeld_id, name, reihenfolge, option_id, option_ids').eq('offerte_id', offerteId).order('reihenfolge');
+    const { data: tabZeilen, error: tabZeilenErr } = rTz;
     if(tabZeilenErr){ console.error(tabZeilenErr); $saveStatus.textContent = 'Fehler beim Laden: ' + tabZeilenErr.message; $saveStatus.className='status err'; return; }
     let tabWerte = [];
     if(tabZeilen && tabZeilen.length){
@@ -5250,9 +5264,7 @@ async function ladeBestehendeOfferte(offerteId){
     renderBereich();
   }
 
-  await ladeEigeneZeilen(offerteId);
-  await ladeZeilenKorrekturen(offerteId);
-  await ladeGeometrieElemente(offerteId);
+  await Promise.all([ladeEigeneZeilen(offerteId), ladeZeilenKorrekturen(offerteId), ladeGeometrieElemente(offerteId)]); // unabhängig voneinander → gleichzeitig
 
   beschreibungManuellBearbeitet = offerte.beschreibung_manuell || false;
   $beschreibungBlock.value = offerte.beschreibung_block || '';
