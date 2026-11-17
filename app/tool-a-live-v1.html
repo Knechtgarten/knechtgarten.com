@@ -3650,16 +3650,31 @@ function setzeInhaltModus(modell){
 // Vorlagen-Abfragen (Eingabefelder, Spalten, Arbeitsschritte, Vorauswahlen) pro Offertentyp 5 Minuten merken:
 // Blättern zwischen Offerten derselben Vorlage lädt sie nicht jedes Mal neu (war ~1.2 s). Immer eine frische Kopie
 // zurückgeben, weil die Verarbeitung die Objekte verändert. Fehler werden nicht gemerkt.
-const VORLAGE_CACHE = new Map();
-async function vorlageHolen(key, abfrage){
+const VORLAGE_CACHE = new Map(), VORLAGE_BAUER = {};
+async function vorlageHolen(art, otId, bauer, extra){
+  VORLAGE_BAUER[art] = bauer; // merken, damit die Vorlage anderer Offerten im Hintergrund vorgeladen werden kann
+  const key = art + ':' + otId + (extra ? ':' + extra.join(',') : '');
   let e = VORLAGE_CACHE.get(key);
-  if(!e || Date.now() - e.t > 300000){ e = { t: Date.now(), p: Promise.resolve(abfrage()) }; VORLAGE_CACHE.set(key, e); }
+  if(!e || Date.now() - e.t > 300000){ e = { t: Date.now(), p: Promise.resolve(bauer(otId, extra)) }; VORLAGE_CACHE.set(key, e); }
   const r = await e.p;
   if(r.error){ VORLAGE_CACHE.delete(key); return { data: null, error: r.error }; }
   return { data: structuredClone(r.data), error: null };
 }
+// Vorlage einer anderen Offerte im Hintergrund vorladen (Nachbarn beim Blättern) – nur, wenn die Abfragen schon einmal gelaufen sind
+async function vorlageVorladen(otId){
+  try{
+    const ot = (typeof OFFERTENTYPEN !== 'undefined' ? OFFERTENTYPEN : []).find(o => o.id === otId); if(!ot) return;
+    if(ot.berechnungsmodell === 'artikel') return;
+    if(!['tagessatz', 'easy', 'ki'].includes(ot.berechnungsmodell)){ // wie ladeDatenFuerOffertentyp: alles andere rechnet mit Formeln
+      if(!VORLAGE_BAUER.ef || !VORLAGE_BAUER.as) return;
+      const ef = await vorlageHolen('ef', otId, VORLAGE_BAUER.ef);
+      const ids = (ef.data || []).filter(x => x.ist_tabelle).map(x => x.id);
+      await Promise.all([ids.length && VORLAGE_BAUER.sp ? vorlageHolen('sp', otId, VORLAGE_BAUER.sp, ids) : null, vorlageHolen('as', otId, VORLAGE_BAUER.as), VORLAGE_BAUER.va ? vorlageHolen('va', otId, VORLAGE_BAUER.va) : null]);
+    }else if(VORLAGE_BAUER.ts) await vorlageHolen('ts', otId, VORLAGE_BAUER.ts);
+  }catch(e){ /* nur Vorladen – Fehler egal */ }
+}
 async function ladeFormelDaten(otId){
-  const { data: efs, error: efErr } = await vorlageHolen('ef:' + otId, () => sb.from('eingabefeld').select('id,name,einheit,typ,fixer_wert,mindestwert,beschriftung,erklaerung,ausgeblendet,reihenfolge,ist_titel,ist_tabelle,zusatztext_moeglich,flaechenformel_moeglich').eq('offertentyp_id', otId).order('reihenfolge'));
+  const { data: efs, error: efErr } = await vorlageHolen('ef', otId, id => sb.from('eingabefeld').select('id,name,einheit,typ,fixer_wert,mindestwert,beschriftung,erklaerung,ausgeblendet,reihenfolge,ist_titel,ist_tabelle,zusatztext_moeglich,flaechenformel_moeglich').eq('offertentyp_id', id).order('reihenfolge'));
   if(efErr) throw efErr;
   eingabefelder = efs;
 
@@ -3669,14 +3684,14 @@ async function ladeFormelDaten(otId){
   const tabellenIds = eingabefelder.filter(ef => ef.ist_tabelle).map(ef => ef.id);
   TABELLEN_SPALTEN = {};
   if(tabellenIds.length){
-    const { data: spalten, error: spErr } = await vorlageHolen('sp:' + otId, () => sb.from('eingabefeld_tabelle_spalte')
+    const { data: spalten, error: spErr } = await vorlageHolen('sp', otId, (id, ids) => sb.from('eingabefeld_tabelle_spalte')
       .select('id,eingabefeld_id,name,einheit,reihenfolge,ist_berechnung,ausdruck,zusatztext_moeglich,flaechenformel_moeglich,vorschlagswert,ausgeblendet,auswahl_werte')
-      .in('eingabefeld_id', tabellenIds).order('reihenfolge'));
+      .in('eingabefeld_id', ids).order('reihenfolge'), tabellenIds);
     if(spErr) throw spErr;
     (spalten || []).forEach(s => { (TABELLEN_SPALTEN[s.eingabefeld_id] ||= []).push(s); });
   }
 
-  const { data: arbeitsschritte, error: asErr } = await vorlageHolen('as:' + otId, () => sb
+  const { data: arbeitsschritte, error: asErr } = await vorlageHolen('as', otId, id => sb
     .from('arbeitsschritt')
     .select(`id, name, reihenfolge, ausgeblendet, titel_offerte,
       teilschritt ( id, name, beschreibung, ausgeblendet, reihenfolge,
@@ -3699,7 +3714,7 @@ async function ladeFormelDaten(otId){
               auswahlgruppe ( name, titel, auswahlgruppe_option ( id, label, artikel_id, artikel ( bezeichnung, einheit, vp_knecht, zusatzwert, zusatzeinheit ) ) ),
               sonderposition_typ ( kategorie, name, titel, einheit, mwst_satz_pct, lieferwagen_std_artikel_id, lieferwagen_km_artikel_id, lieferwagen_transport_ort, lieferwagen_std_artikel:artikel!lieferwagen_std_artikel_id ( vp_knecht, bezeichnung ), lieferwagen_km_artikel:artikel!lieferwagen_km_artikel_id ( vp_knecht, bezeichnung ) ) ),
             option_freitext_vorlage ( id, kategorie, bezeichnung, einheit, notiz, menge_vorschlag, preis_vorschlag, margen_vorschlag_prozent, ist_eigene_offertenposition ) ) ) )`)
-    .eq('offertentyp_id', otId).eq('ausgeblendet', false).order('reihenfolge'));
+    .eq('offertentyp_id', id).eq('ausgeblendet', false).order('reihenfolge'));
   if(asErr) throw asErr;
 
   ressourcenzeilen = [];
@@ -3838,9 +3853,9 @@ async function ladeFormelDaten(otId){
 // die wird in initBereich() automatisch uebernommen.
 let VORAUSWAHLEN = [];
 async function ladeVorauswahlen(otId){
-  const { data, error } = await vorlageHolen('va:' + otId, () => sb.from('vorauswahl')
+  const { data, error } = await vorlageHolen('va', otId, id => sb.from('vorauswahl')
     .select('id,name,vorauswahl_option(option_id,menge)')
-    .eq('offertentyp_id', otId).order('name'));
+    .eq('offertentyp_id', id).order('name'));
   if(error){ console.error(error); VORAUSWAHLEN = []; return; }
   VORAUSWAHLEN = (data || []).map(v => ({ id: v.id, name: v.name, optionIds: (v.vorauswahl_option || []).map(o => o.option_id), mengen: Object.fromEntries((v.vorauswahl_option || []).filter(o => o.menge != null).map(o => [o.option_id, o.menge])) }));
 }
@@ -3850,7 +3865,7 @@ async function ladeTagessatzDaten(otId){
   // damit keine Eintraege einer zuvor im selben Tab geladenen Formel-Offerte
   // haengen bleiben.
   OPTION_INFO = {};
-  const { data: arbeitsschritte, error } = await vorlageHolen('ts:' + otId, () => sb
+  const { data: arbeitsschritte, error } = await vorlageHolen('ts', otId, id => sb
     .from('arbeitsschritt')
     .select(`id, name, reihenfolge,
       teilschritt ( id, name, beschreibung, ausgeblendet, reihenfolge,
@@ -3860,7 +3875,7 @@ async function ladeTagessatzDaten(otId){
           auswahloption ( id, name, beschreibung, reihenfolge, mehrfachauswahl,
             ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, tagesleistung_menge, artikel_id,
               artikel ( bezeichnung, einheit, vp_knecht ) ) ) ) )`)
-    .eq('offertentyp_id', otId).eq('ausgeblendet', false).order('reihenfolge'));
+    .eq('offertentyp_id', id).eq('ausgeblendet', false).order('reihenfolge'));
   if(error) throw error;
 
   tagessatzArbeitsschritte = arbeitsschritte.map(as => ({ id: as.id, name: as.name, reihenfolge: as.reihenfolge }));
@@ -8608,9 +8623,11 @@ document.addEventListener('click', e => {
     const neuBtn = document.getElementById('dokNeuBtn'); if(neuBtn) neuBtn.href = 'tool-start-live-v1.html?neu=1' + (kid ? '&vorwahl=' + kid : '');
     const schl = (id || '') + '|' + (kid || ''); if(schl === fuer) return; fuer = schl;
     if(!id || !kid){ liste = []; idx = -1; render(); return; }
-    const { data } = await sb.from('offerte').select('id, offertnummer, titel, datum, betrag_total, offertentyp(berechnungsmodell)').eq('kunde_id', kid).order('datum', { ascending: false }).order('erstellt_am', { ascending: false });
+    const { data } = await sb.from('offerte').select('id, offertnummer, titel, datum, betrag_total, offertentyp_id, offertentyp(berechnungsmodell)').eq('kunde_id', kid).order('datum', { ascending: false }).order('erstellt_am', { ascending: false });
     if(fuer !== schl) return;
     liste = data || []; idx = liste.findIndex(o => o.id === id); render();
+    // Vorlagen der beiden Nachbarn im Hintergrund vorladen → Blättern geht auch beim ersten Mal schnell
+    if(typeof vorlageVorladen === 'function') setTimeout(() => [liste[idx - 1], liste[idx + 1]].forEach(n => { if(n && n.offertentyp_id) vorlageVorladen(n.offertentyp_id); }), 1500);
   };
   setInterval(laden, 700); laden();
   // ‹ = neuere (weiter oben in der Liste), › = ältere
