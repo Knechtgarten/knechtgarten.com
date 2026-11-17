@@ -5998,7 +5998,7 @@ async function ladeZeilenKorrekturen(offerteId){
   if(error) throw error;
   zeilenKorrekturen = {};
   (data || []).forEach(r => {
-    zeilenKorrekturen[r.zeilen_schluessel] = { menge_korrektur: r.menge_korrektur, preis_korrektur: r.preis_korrektur, geloescht: r.geloescht, basis_menge: r.basis_menge, basis_preis: r.basis_preis, einheit_korrektur: r.einheit_korrektur, optional: !!r.optional, rabatt: r.rabatt ?? null, rabatt_art: r.rabatt_art || null, mwst_art: r.mwst_art || null };
+    zeilenKorrekturen[r.zeilen_schluessel] = { menge_korrektur: r.menge_korrektur, preis_korrektur: r.preis_korrektur, geloescht: r.geloescht, basis_menge: r.basis_menge, basis_preis: r.basis_preis, einheit_korrektur: r.einheit_korrektur, optional: !!r.optional, rabatt: r.rabatt ?? null, rabatt_art: r.rabatt_art || null, mwst_art: r.mwst_art || null, bezeichnung_korrektur: r.bezeichnung_korrektur || null };
   });
 }
 
@@ -6006,8 +6006,8 @@ async function speichereZeilenKorrekturen(offerteId){
   const { error: delErr } = await sb.from('offerte_zeilen_korrektur').delete().eq('offerte_id', offerteId);
   if(delErr) throw delErr;
   const rows = Object.entries(zeilenKorrekturen)
-    .filter(([, k]) => k.menge_korrektur != null || k.preis_korrektur != null || k.geloescht || k.einheit_korrektur || k.optional || k.rabatt || k.mwst_art)
-    .map(([schluessel, k]) => ({ offerte_id: offerteId, zeilen_schluessel: schluessel, menge_korrektur: k.menge_korrektur, preis_korrektur: k.preis_korrektur, geloescht: !!k.geloescht, basis_menge: k.basis_menge ?? null, basis_preis: k.basis_preis ?? null, einheit_korrektur: k.einheit_korrektur || null, optional: !!k.optional, rabatt: k.rabatt || null, rabatt_art: k.rabatt ? (k.rabatt_art || 'prozent') : null, mwst_art: k.mwst_art || null }));
+    .filter(([, k]) => k.menge_korrektur != null || k.preis_korrektur != null || k.geloescht || k.einheit_korrektur || k.optional || k.rabatt || k.mwst_art || k.bezeichnung_korrektur)
+    .map(([schluessel, k]) => ({ offerte_id: offerteId, zeilen_schluessel: schluessel, menge_korrektur: k.menge_korrektur, preis_korrektur: k.preis_korrektur, geloescht: !!k.geloescht, basis_menge: k.basis_menge ?? null, basis_preis: k.basis_preis ?? null, einheit_korrektur: k.einheit_korrektur || null, optional: !!k.optional, rabatt: k.rabatt || null, rabatt_art: k.rabatt ? (k.rabatt_art || 'prozent') : null, mwst_art: k.mwst_art || null, bezeichnung_korrektur: k.bezeichnung_korrektur || null }));
   if(rows.length){
     const { error: insErr } = await sb.from('offerte_zeilen_korrektur').insert(rows);
     if(insErr) throw insErr;
@@ -6345,6 +6345,8 @@ async function recalcJetzt(){
         const effMenge = rundungMengeFn(k.menge_korrektur != null ? k.menge_korrektur : menge);
         const effPreis = rundungPreisFn(k.preis_korrektur != null ? k.preis_korrektur : preis);
         const effEinheit = k.einheit_korrektur || einheit;
+        // Bezeichnung von Hand geändert (Feld in der ersten Spalte); der Tool-Name bleibt im title (Vorarbeiter-/Lieferwagen-Erkennung, Duplizieren)
+        const toolBez = bezeichnung, effBez = k.bezeichnung_korrektur || bezeichnung;
         const effBetrag = rundeCHF(effMenge * effPreis);
         const geloescht = !!k.geloescht, optional = !!k.optional;
         const mengeAbweicht = k.menge_korrektur != null && rundungMengeFn(k.menge_korrektur) !== toolMenge;
@@ -6368,7 +6370,7 @@ async function recalcJetzt(){
         const mwstArt = k.mwst_art || mwstArtStandard(null, bezeichnung), mwstSatz = mwstSatzFuer(mwstArt);
         const nettoBetrag = betragNachRabatt(effMenge, effPreis, rabatt, rabattArt);
         if(!geloescht && !optional) blockTotal += nettoBetrag;
-        snapshotZeile(KAT_LABEL[schluessel.split(':')[0]] || schluessel, { bezeichnung, menge: effMenge, einheit: effEinheit, preis: effPreis, betrag: nettoBetrag, rabatt: rabatt || null, rabatt_art: rabatt ? rabattArt : null, mwst_art: mwstArt, mwst_satz: mwstSatz, geloescht: geloescht || optional, optional: optional && !geloescht });
+        snapshotZeile(KAT_LABEL[schluessel.split(':')[0]] || schluessel, { bezeichnung: effBez, menge: effMenge, einheit: effEinheit, preis: effPreis, betrag: nettoBetrag, rabatt: rabatt || null, rabatt_art: rabatt ? rabattArt : null, mwst_art: mwstArt, mwst_satz: mwstSatz, geloescht: geloescht || optional, optional: optional && !geloescht });
         const tr = document.createElement('tr');
         tr.className = 'crow' + (geloescht ? ' zgeloescht' : (effBetrag === 0 ? ' betragnull' : ''));
         tr.dataset.sk = schluessel;
@@ -6377,7 +6379,8 @@ async function recalcJetzt(){
         const rechnungswegSimple = `${toolMenge} ${einheit} × ${fmtCHF(toolPreis)} = ${fmtCHF(toolBetrag)}`;
         // Rechnungsweg nur beim Darüberfahren über die Bezeichnung (nicht über den Betrag, der ist zum Klicken)
         tr.addEventListener('mouseover', e => {
-          const auf = e.target.closest('td') === tr.firstElementChild;
+          // beim Tippen in der Bezeichnung kein Rechnungsweg (sonst flackert es)
+          const auf = e.target.closest('td') === tr.firstElementChild && !tr.firstElementChild.contains(document.activeElement);
           if(auf && !tr._rzw){ tr._rzw = true; zeigeRechnungsweg(tr, rechnungsweg, rechnungswegSimple); }
           else if(!auf && tr._rzw){ tr._rzw = false; versteckeRechnungsweg(); }
         });
@@ -6385,13 +6388,19 @@ async function recalcJetzt(){
         const tip = feld => ` data-dtip="Tool: ${feld === 'menge' ? toolMenge : fmtCHF(toolPreis)}"`; // nur der Wert laut Tool
         const hand = (an) => an ? ` hand${gross ? ' gross' : ''}` : '';
         const feldHtml = (feld, wert, an) => `<div class="dcw"><button type="button" class="drs" data-feld="${feld}" title="Zurück auf den Tool-Wert" aria-label="Tool-Wert">${DOK_ICON_UNDO}</button><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="korrektur-feld" data-feld="${feld}" value="${wert}" ${geloescht ? 'disabled' : ''}${an ? tip(feld) : ''} aria-label="${feld === 'menge' ? 'Menge' : 'Preis'}"></div>`;
-        tr.innerHTML = `<td title="${String(bezeichnung).replace(/"/g, '&quot;')}">${bezeichnung}</td>
+        tr.innerHTML = `<td title="${String(toolBez).replace(/"/g, '&quot;')}"><textarea class="dbez${effBez !== toolBez ? ' hand' : ''}" rows="1" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" aria-label="Bezeichnung"${effBez !== toolBez ? ` data-dtip="Tool: ${escHtml(toolBez)}"` : ''}${geloescht ? ' disabled' : ''}>${escHtml(effBez)}</textarea></td>
           <td class="dz-m${hand(mengeAbweicht)}" style="text-align:right">${feldHtml('menge', effMenge, mengeAbweicht)}</td>
           <td class="dz-e${einheitAbweicht ? ' hand' : ''}"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" class="dein" data-tool="${escHtml(einheit || '')}" value="${escHtml(effEinheit || '')}" ${geloescht ? 'disabled' : ''}${einheitAbweicht ? ` data-dtip="Tool: ${escHtml(einheit || '')}"` : ''} aria-label="Einheit"></td>
           <td class="dz-p${hand(preisAbweicht)}" style="text-align:right">${feldHtml('preis', effPreis.toFixed(2), preisAbweicht)}</td>
           <td class="cbetrag"><button type="button" class="cbetrag-val dbklick" title="Klicken: optional an/aus">${fmtCHF(nettoBetrag)}</button>${zeilenInfo(rabatt, rabattArt, effEinheit, mwstArt, mwstSatz)}</td>`;
         container.appendChild(tr);
         const korr = () => zeilenKorrekturen[schluessel] || (zeilenKorrekturen[schluessel] = { menge_korrektur:null, preis_korrektur:null, geloescht:false });
+        // Bezeichnung: wächst mit, gespeichert erst beim Verlassen/Enter (nicht bei jedem Buchstaben → kein Neurechnen beim Tippen); leer = zurück auf den Tool-Namen
+        { const bz = tr.querySelector('.dbez'); const hoch = () => { bz.style.height = 'auto'; bz.style.height = bz.scrollHeight + 'px'; };
+          requestAnimationFrame(hoch); bz.addEventListener('input', hoch);
+          bz.addEventListener('focus', () => { tr._rzw = false; versteckeRechnungsweg(); });
+          bz.addEventListener('keydown', e => { if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); bz.blur(); } if(e.key === 'Escape'){ bz.value = effBez; bz.blur(); } });
+          bz.addEventListener('change', () => { const v = bz.value.replace(/\s*\n\s*/g, ' ').trim(); const kk = korr(); kk.bezeichnung_korrektur = (!v || v === toolBez) ? null : v; recalc(); planAutosave(); }); }
         tr.querySelectorAll('.korrektur-feld').forEach(inp => {
           inp.addEventListener('change', e => {
             const v = String(e.target.value).replace(/['’\s]/g, '').replace(',', '.');
@@ -7885,6 +7894,9 @@ $('supportChatInput').addEventListener('keydown', (e) => {
     }
     if(b.dataset.neu){
       const art = b.dataset.neu;
+      // Artikel: direkt in die Artikelauswahl (dort Kategorie wählbar); die Gruppe ergibt sich aus der Kategorie des Artikels
+      if(art === 'artikel'){ menu.hidden = true;
+        return openArtikelstammPicker(null, a => { const kat = KATS.some(([k]) => k === a.kategorie) ? a.kategorie : 'material'; neueEigene(kat, { bezeichnung: a.bezeichnung, einheit: a.einheit, preis: a.vp_knecht ?? 0 }); }); }
       menu.innerHTML = `<div class="dmk">In welche Gruppe?</div>` + KATS.map(([k, l]) => `<button type="button" data-kat="${k}" data-art="${art}">${l}</button>`).join('');
       menu.style.left = b.offsetLeft + 'px'; menu.hidden = false; return;
     }
@@ -8340,6 +8352,12 @@ tr.crow:not(.ezrow) td:first-child{max-width:none!important;white-space:normal!i
 #costbody tr.ezrow textarea.ez-bez{width:100%;min-width:80px;resize:none;overflow:hidden;font:inherit;font-size:inherit;line-height:1.35;padding:2px 4px;border:1px solid transparent;border-radius:4px;background:transparent;color:var(--ink);display:block;box-sizing:border-box}
 #costbody tr.ezrow textarea.ez-bez:hover{border-color:var(--line)}
 #costbody tr.ezrow textarea.ez-bez:focus{outline:none;border-color:var(--primary);background:#fff}
+/* Bezeichnung berechneter Zeilen: direkt im Blatt änderbar, sieht aus wie Text (Rahmen nur beim Darüberfahren/Tippen); von Hand geändert = rötlich wie Menge/Preis */
+#costbody tr.crow textarea.dbez{width:100%;min-width:80px;resize:none;overflow:hidden;font:inherit;font-size:inherit;line-height:1.35;padding:2px 4px;margin-left:-5px;border:1px solid transparent;border-radius:4px;background:transparent;color:var(--ink);display:block;box-sizing:border-box}
+#costbody tr.crow textarea.dbez:hover{border-color:var(--line)}
+#costbody tr.crow textarea.dbez:focus{outline:none;border-color:var(--primary);background:#fff}
+#costbody tr.crow textarea.dbez.hand{color:#B4655F}
+#costbody tr.crow textarea.dbez:disabled{color:inherit}
 #costbody tr.dopt td:first-child{white-space:normal!important}
 #costbody tr.dopt td:first-child .ez-bez{width:calc(100% - 80px);display:inline-block;vertical-align:middle}
 table.cost thead th:nth-child(3){width:64px}
