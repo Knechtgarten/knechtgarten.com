@@ -244,6 +244,11 @@
       el.querySelectorAll('[data-oed]').forEach(b => b.onclick = () => form(liste.find(x => x.id === b.dataset.oed)));
       el.querySelectorAll('[data-oweg]').forEach(b => b.onclick = async () => {
         const o = liste.find(x => x.id === b.dataset.oweg);
+        // Pflegedaten hängen am Objekt (Kategorien, Fotos, Dokumente) – die löscht man bewusst im Pflegetool
+        const [{ count: nKat }, { count: nFoto }] = await Promise.all([
+          sb.from('pflege_kunde_kategorie').select('id', { count: 'exact', head: true }).eq('objekt_id', o.id),
+          sb.from('pflege_foto').select('id', { count: 'exact', head: true }).eq('objekt_id', o.id)]);
+        if(nKat || nFoto){ alert(`An diesem Objekt hängen Pflegedaten (${nKat || 0} Kategorien, ${nFoto || 0} Fotos). Bitte im Pflegetool entfernen.`); return; }
         if(!confirm(`Objekt «${o.name || adrText(o)}» löschen?`)) return;
         const { error } = await sb.from('kunde_objekt').delete().eq('id', o.id);
         if(error){ alert(error.code === '23503' ? 'Kann nicht gelöscht werden – an diesem Objekt hängen noch Offerten.' : error.message); return; }
