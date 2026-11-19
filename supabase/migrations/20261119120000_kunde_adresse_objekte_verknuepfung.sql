@@ -192,9 +192,11 @@ begin
       insert into pendenz (liste_id, titel, notiz, kunde_id, herkunft, erstellt_von, sortierung)
       values (box,
         was || ' von ' || coalesce(new.name, 'Kunde') || ' in Easybill geändert',
-        'Neu: ' || concat_ws(', ', new.strasse, concat_ws(' ', new.plz, new.ort)) || E'\nBisher: ' || concat_ws(', ', old.strasse, concat_ws(' ', old.plz, old.ort))
-          || E'\n' || n_offen || ' offene Offerte(n) haben die neue ' || was || ', ' || n_fix || ' abgeschlossene behalten die bisherige.'
-          || case when was = 'Adresse' then E'\nUmgezogen und die alte Adresse bleibt? In Kontakte beim Kunden unter Objekte «Bisherige Adresse» erfassen.' else '' end,
+        -- Notiz ist HTML (Editor im Pendenzen-Tool)
+        '<p>Neu: ' || replace(replace(concat_ws(', ', new.strasse, concat_ws(' ', new.plz, new.ort)), '<', '&lt;'), '>', '&gt;')
+          || '<br>Bisher: ' || replace(replace(concat_ws(', ', old.strasse, concat_ws(' ', old.plz, old.ort)), '<', '&lt;'), '>', '&gt;')
+          || '<br>' || n_offen || ' offene Offerte(n) haben die neue ' || was || ', ' || n_fix || ' abgeschlossene behalten die bisherige.'
+          || case when was = 'Adresse' then '<br>Umgezogen und die alte Adresse bleibt? In Kontakte beim Kunden unter Objekte «Bisherige Adresse» erfassen.' else '' end || '</p>',
         new.id, 'board', wer, extract(epoch from now()));
     end if;
   end if;
