@@ -5,6 +5,7 @@
 <script src="/kg-pw-schutz.js?v=5"></script>
 <script src="/kg-stil.js?v=84"></script>
 <script src="/kg-bereiche.js?v=3"></script>
+<script src="/kg-kunde.js?v=1"></script>
 <script>if(/[?&]offerte=/.test(location.search)) document.documentElement.classList.add('doklaedt');</script>
 <title>Tool A (live) – Offerten-Eingabe</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -902,6 +903,8 @@ html.doklaedt #emptystate{display:none !important}
 .dkkundeklick:hover{border-bottom-color:var(--muted)}
 .dkkpop{position:fixed;z-index:800;width:370px;max-width:calc(100vw - 16px);background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 28px rgba(50,62,78,.2);padding:8px}
 .dkkpop[hidden]{display:none}
+.dkkpop .dkkadr{display:flex;align-items:center;gap:7px;width:100%;border:0;border-bottom:1px solid var(--line);background:#fff;padding:4px 4px 9px;margin-bottom:8px;font:inherit;font-size:12.5px;font-weight:600;color:var(--primary);cursor:pointer;text-align:left}
+.dkkpop .dkkadr:hover span{text-decoration:underline}
 .dkkpop .dkkq{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:6px;height:32px;padding:0 9px;font:inherit;font-size:12.5px}
 .dkkpop .dkkq:focus{outline:none;border-color:var(--primary)}
 .dkkpop .dkkl{margin-top:4px;max-height:280px;overflow:auto}
@@ -1376,6 +1379,7 @@ html.doklaedt #emptystate{display:none !important}
 const SUPABASE_URL = 'https://oalapdxinqlnzwxhyuzy.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_DoeD4uEnwemmnFu4AxE9uw_5lmQYc5P';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+KGKunde.setze(sb);
 const ROLLE_LABEL = { admin: 'Admin', buero_team: 'Büro-Team', mitarbeitende: 'Mitarbeitende', service_team: 'Service-Team' };
 
 const $ = id => document.getElementById(id);
@@ -2350,7 +2354,7 @@ let letzteTransportInfo = null;
 async function berechneTransportInfo(plz){
   const werke = TRANSPORT_WERKE.filter(w => (w.adresse || '').trim());
   const kms = await Promise.all(werke.map(w => plz ? holeKieswerkDistanzKm(w.adresse, plz) : Promise.resolve(null)));
-  const kundeOrt = alleKunden.find(k => k.id === currentKundeId)?.ort;
+  const kundeOrt = ARBEITSORT && ARBEITSORT.offerteId === currentOfferteId ? ARBEITSORT.ort : alleKunden.find(k => k.id === currentKundeId)?.ort;
   const orteNorm = new Set([...(await holeOrteZurPlz(plz)), kundeOrt].filter(Boolean).map(normOrt));
   const info = { werke: [], gewaehlt: { kies: null, beton: null }, guenstigster: { kies: null, beton: null } };
   werke.forEach((w, i) => {
@@ -2961,7 +2965,7 @@ async function ladeAlleKunden(){
   // Explizite .range() - vorsorglich, analog zum Artikelstamm-Fix (siehe
   // tool-c-live-v1.html): waechst die Kundenliste ueber 1000, wuerde
   // Supabase/PostgREST sonst unbemerkt kappen.
-  const { data, error } = await sb.from('kunde').select('id,name,plz,strasse,ort,easybill_id').order('name').range(0, 9999);
+  const { data, error } = await sb.from('kunde').select('id,name,plz,strasse,ort,easybill_id,inaktiv').order('name').range(0, 9999);
   if(error){ console.error(error); return; }
   alleKunden = data;
 }
@@ -2971,6 +2975,21 @@ async function ladeAlleKunden(){
 function zeigeKundeAdresse(kunde){
   const teile = [kunde?.strasse, [kunde?.plz, kunde?.ort].filter(Boolean).join(' ')].filter(Boolean);
   $('kundeAdresseAnzeige').textContent = teile.join(', ');
+}
+
+// Arbeitsort der Offerte (kg-kunde.js): Objekt des Kunden > eingefrorene frühere Adresse > Kundenadresse.
+// Fahrzeit (kundePlz) und Werke (Ort) rechnen damit.
+let ARBEITSORT = null; // { offerteId, strasse, plz, ort, quelle: 'objekt' | 'fix', objektName }
+async function arbeitsortAnwenden(offerteId){
+  ARBEITSORT = null;
+  if(!offerteId || !window.KGKunde) return;
+  const kunde = alleKunden.find(k => k.id === currentKundeId);
+  const a = await KGKunde.arbeitsort(offerteId, kunde).catch(() => null);
+  if(!a || a.quelle === 'kunde') return;
+  ARBEITSORT = { ...a, offerteId };
+  $('kundePlz').value = a.plz || '';
+  const txt = [a.strasse, [a.plz, a.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  $('kundeAdresseAnzeige').textContent = a.quelle === 'objekt' ? `Objekt ${a.objektName || ''}: ${txt}` : `${txt} (frühere Adresse)`;
 }
 
 function findeKundeByName(name){
@@ -3076,7 +3095,7 @@ $kundeSuche.addEventListener('input', () => {
   clearTimeout(kundeVorschlaegeTimer);
   if(!text){ $kundeVorschlaege.classList.remove('show'); return; }
 
-  const lokale = alleKunden.filter(k => k.name.toLowerCase().includes(text.toLowerCase())).slice(0, 8);
+  const lokale = alleKunden.filter(k => !k.inaktiv && k.name.toLowerCase().includes(text.toLowerCase())).slice(0, 8);
   renderKundeVorschlaege(lokale, []);
 
   if(text.length >= 3){
@@ -5200,6 +5219,7 @@ async function ladeBestehendeOfferte(offerteId){
     .from('offerte').select('id, titel, datum, status, notiz, offertentyp_id, lieferwagen_modus, lieferwagen_budget, lieferwagen_frequenz, vorarbeiter_frequenz, vorarbeiter_typ, gartenarbeiter_frequenz, zugaenglichkeit_stufe, beschreibung_block, beschreibung_manuell, optionen_text_liste, optionen_text_manuell, kosten_snapshot, offertnummer, easybill_document_id, easybill_document_number, vorauswahl_id, transport_werk_kies_id, transport_werk_beton_id, formen_daten, bereich_id, noch_offen, markierte_zeilen').eq('id', offerteId).single();
   if(oErr){ console.error(oErr); $saveStatus.textContent = 'Fehler beim Laden: ' + oErr.message; $saveStatus.className='status err'; return; }
   if(window.KG && KG.pruefeOfferteBearbeiten) KG.pruefeOfferteBearbeiten(offerteId); // Gruppen & Rechte: «Nur ansehen», wenn man diese Offerte nicht bearbeiten darf
+  await arbeitsortAnwenden(offerteId); // Objekt / frühere Adresse vor dem Rechnen setzen
 
   lieferwagenModus = offerte.lieferwagen_modus || 'zeit';
   lieferwagenBudget = Number(offerte.lieferwagen_budget) || 0;
@@ -7969,14 +7989,28 @@ $('supportChatInput').addEventListener('keydown', (e) => {
   const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' })[c]);
   const pop = document.createElement('div');
   pop.className = 'dkkpop'; pop.hidden = true;
-  pop.innerHTML = '<input type="text" class="dkkq" placeholder="Anderen Kunden suchen: Name, Ort, Strasse …" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" aria-label="Kunde suchen"><div class="dkkl"></div><div class="dkkh">Die Offerte rechnet danach mit der Adresse des neuen Kunden (Fahrzeit, Werke).</div>';
+  pop.innerHTML = '<button type="button" class="dkkadr">' + (window.KG && KG.icon ? KG.icon('edit', 13) : '') + '<span>Adresse bearbeiten · Arbeitsort (Objekt)</span></button>'
+    + '<input type="text" class="dkkq" placeholder="Anderen Kunden suchen: Name, Ort, Strasse …" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" aria-label="Kunde suchen"><div class="dkkl"></div><div class="dkkh">Die Offerte rechnet danach mit der Adresse des neuen Kunden (Fahrzeit, Werke).</div>';
+  // Adresse dieses Kunden ändern bzw. Arbeitsort der Offerte wählen (kg-kunde.js)
+  pop.querySelector('.dkkadr').addEventListener('click', () => {
+    zu();
+    if(!currentKundeId || !window.KGKunde) return;
+    KGKunde.fenster(currentKundeId, { offerteId: typeof currentOfferteId !== 'undefined' ? currentOfferteId : null, onSaved: async msg => {
+      await ladeAlleKunden();
+      const k = alleKunden.find(x => x.id === currentKundeId);
+      if(k){ currentKundeName = k.name; if(typeof $kundeSuche !== 'undefined') $kundeSuche.value = k.name; const plz = document.getElementById('kundePlz'); if(plz) plz.value = k.plz || ''; zeigeKundeAdresse(k); }
+      if(currentOfferteId) await arbeitsortAnwenden(currentOfferteId);
+      recalc(); planAutosave();
+      if(msg && typeof $saveStatus !== 'undefined'){ $saveStatus.textContent = msg; $saveStatus.className = 'status'; }
+    } });
+  });
   document.body.appendChild(pop);
   const q = pop.querySelector('.dkkq'), liste = pop.querySelector('.dkkl');
   let treffer = [], akt = 0;
   const adr = k => [k.strasse, [k.plz, k.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ');
   const suchen = () => {
     const s = q.value.trim().toLowerCase();
-    const alle = (typeof alleKunden !== 'undefined' ? alleKunden : []);
+    const alle = (typeof alleKunden !== 'undefined' ? alleKunden : []).filter(k => !k.inaktiv);
     treffer = s ? alle.filter(k => `${k.name} ${k.strasse || ''} ${k.plz || ''} ${k.ort || ''}`.toLowerCase().includes(s)).slice(0, 8) : [];
     akt = 0;
     liste.innerHTML = treffer.map((k, i) => `<button type="button" class="dkk${i === 0 ? ' akt' : ''}" data-i="${i}"><span>${esc(k.name)}</span><span>${esc(adr(k))}</span></button>`).join('') || (s ? '<div class="dkkleer">Kein Kunde gefunden.</div>' : '');
@@ -7990,8 +8024,10 @@ $('supportChatInput').addEventListener('keydown', (e) => {
   const waehlen = async k => {
     zu();
     if(!k || typeof currentOfferteId === 'undefined' || !currentOfferteId || k.id === currentKundeId) return;
-    const { error } = await sb.from('offerte').update({ kunde_id: k.id }).eq('id', currentOfferteId);
+    // anderer Kunde: Objekt und frühere Adresse des bisherigen Kunden gelten nicht mehr
+    const { error } = await sb.from('offerte').update({ kunde_id: k.id, objekt_id: null, adresse_fix: null }).eq('id', currentOfferteId);
     if(error){ alert('Kunde konnte nicht geändert werden: ' + (error.message || error)); return; }
+    ARBEITSORT = null;
     currentKundeId = k.id; currentKundeName = k.name;
     if(typeof $kundeSuche !== 'undefined') $kundeSuche.value = k.name;
     const plz = document.getElementById('kundePlz'); if(plz) plz.value = k.plz || '';
@@ -8050,7 +8086,7 @@ function dokNotizKnopf(offen){
     let akt = -1, kunden = [];
     const escV = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' })[c]);
     const zeige = () => { const t = q.value.trim(), s = t.toLowerCase(); if(t.length < 2){ box.hidden = true; return; }
-      const alle = typeof alleKunden !== 'undefined' ? alleKunden : [];
+      const alle = (typeof alleKunden !== 'undefined' ? alleKunden : []).filter(k => !k.inaktiv);
       // Reihenfolge: Name beginnt damit · ein ganzes Wort beginnt damit (Stefan und Monika Knecht) · nur Wortteil (Frischknecht)
       const rang = k => { const n = String(k.name || '').toLowerCase(); return n.startsWith(s) ? 0 : n.split(/[\s,.\-\/]+/).some(w => w.startsWith(s)) ? 1 : 2; };
       kunden = alle.filter(k => String(k.name || '').toLowerCase().includes(s)).sort((a, b) => rang(a) - rang(b) || String(a.name).localeCompare(String(b.name), 'de')).slice(0, 10);
