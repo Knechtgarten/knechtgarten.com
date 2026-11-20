@@ -198,6 +198,7 @@ button.kg-kachel-kopf,a.kg-kachel-kopf{cursor:pointer;} button.kg-kachel-kopf:ho
     plan: '<path d="M3 4v16h18"/><rect x="6" y="6" width="8" height="3" rx="1"/><rect x="10" y="11" width="9" height="3" rx="1"/><rect x="7" y="15.5" width="6" height="2.5" rx="1"/>',
     pflege: '<path d="M5 19c0-8 5-13 14-14 0 9-5 14-13 14z"/><path d="M5 19l8-8"/>',
     wissen: '<path d="M3 5.5C5.5 4.5 9 4.5 12 6.5c3-2 6.5-2 9-1v13c-2.5-1-6-1-9 1-3-2-6.5-2-9-1z"/><path d="M12 6.5v13"/>',
+    masch: '<rect x="2.5" y="16" width="12" height="4" rx="2"/><path d="M4.5 16v-3.5h5.5l1 3.5"/><path d="M6 12.5V10h3.5"/><path d="M10 12l4.5-6 4.5 3.5"/><path d="M19 9.5l1.5 4.5h-3.5z"/>',   // Maschinen & Fahrzeuge: Bagger
     rechner: '<rect x="5" y="3" width="14" height="18" rx="2"/><rect x="8" y="6" width="8" height="3" rx=".5"/><path d="M8 13h1M11.5 13h1M15 13h1M8 17h1M11.5 17h1M15 17h1"/>',
     projekte: '<path d="M12 3.5A8.5 8.5 0 0 1 16.88 18.96" stroke-width="2" stroke-dasharray="0.1 3.6"/><path d="M16.88 18.96A8.5 8.5 0 1 1 12 3.5"/>',   // Projekte: Rand, Anfang gepunktet (läuft noch)
     verw: P.gear,
@@ -225,6 +226,8 @@ button.kg-kachel-kopf,a.kg-kachel-kopf{cursor:pointer;} button.kg-kachel-kopf:ho
     { k: 'pend', n: 'Pendenzen', url: 'pendenzen-live-v1.html', farbe: PAL.orange[1], akzent: PAL.orange[3], modul: 'pendenzen', seiten: ['pendenzen-live-v1'] },
     { k: 'plan', n: 'Einsatzplaner', url: 'einsatzplaner-live-v1.html', farbe: PAL.petrol[1], akzent: PAL.petrol[3], modul: 'einsatzplaner', seiten: ['einsatzplaner-live-v1', 'bauprogramm-live-v1', 'reservieren-live-v1'] },
     { k: 'wissen', n: 'Nachschlagewerk', url: 'wissen-live-v1.html', farbe: PAL.violett[1], akzent: PAL.violett[3], modul: 'wissen', seiten: ['wissen-live-v1'] },
+    // Maschinen & Fahrzeuge: gleiche Daten wie das Nachschlagewerk (Kategorien mit art 'geraet'), eigene Seite (.htaccess → wissen-live-v1.html)
+    { k: 'masch', n: 'Maschinen', url: 'maschinen-live-v1.html', farbe: PAL.petrol[2], akzent: PAL.petrol[4], modul: 'wissen', seiten: ['maschinen-live-v1'] },
     { k: 'werkzeuge', n: 'Werkzeuge', url: 'werkzeuge-live-v1.html', farbe: PAL.grau[1], akzent: PAL.grau[3],
       seiten: ['werkzeuge-live-v1', 'werkzeug-pool-chlor-live-v1', 'werkzeug-pool-salz-live-v1', 'werkzeug-pool-alk-live-v1', 'werkzeug-pool-afm-live-v1',
         'werkzeug-pool-volumen-live-v1', 'werkzeug-bau-diagonale-live-v1', 'werkzeug-bau-kies-live-v1', 'werkzeug-bau-stahl-live-v1', 'werkzeug-bau-schalit-live-v1', 'werkzeug-pflege-spritz-live-v1', 'werkzeug-allg-gefaelle-live-v1'] },
@@ -460,7 +463,7 @@ html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!import
     'tool-d-kunden-live-v1': [['offerten', 'kunden'], ['pflege', 'kunden']], 'kontakte-handy-live-v1': [['offerten', 'kunden'], ['pflege', 'kunden']], // Adressen oder Pflege genügt
     'pendenzen-live-v1': ['pend', '_tool'], 'einsatzplaner-live-v1': ['plan', '_tool'], 'reservieren-live-v1': ['plan', '_tool'], 'bauprogramm-live-v1': ['plan', '_tool'],
     'pflege-kunden-live-v1': ['pflege', 'kunden'], 'pflege-kategorien-live-v1': ['pflege', 'kategorien'], 'projekt-einstellungen-live-v1': ['offerten', 'kunden'],
-    'pflege-handy-live-v1': ['pflege', 'jahresplan'], 'wissen-live-v1': ['wissen', '_tool'],
+    'pflege-handy-live-v1': ['pflege', 'jahresplan'], 'wissen-live-v1': ['wissen', '_tool'], 'maschinen-live-v1': ['wissen', '_tool'],
     'mailassistent-verwaltung-live-v1': ['mail', '_tool'],
     'werkzeuge-live-v1': ['werkzeuge', '_tool'], 'werkzeug-pool-chlor-live-v1': ['werkzeuge', 'pool_chlor'],
     'werkzeug-pool-salz-live-v1': ['werkzeuge', 'pool_salz'], 'werkzeug-pool-alk-live-v1': ['werkzeuge', 'pool_alk'],
@@ -469,7 +472,7 @@ html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!import
     'doku-live-v1': ['doku', '_tool'], 'doku-dokument-live-v1': ['doku', '_tool'], 'doku-datei-live-v1': ['doku', '_tool'], 'doku-personen-live-v1': ['doku', 'personen']
   };
   const TOOLRECHT = { offerten: ['offerten', 'offerten'], artikel: ['offerten', 'artikel'], kunden: [['offerten', 'kunden'], ['pflege', 'kunden']], projekte: ['offerten', 'kunden'],
-    pend: ['pend', '_tool'], plan: ['plan', '_tool'], pflege: ['pflege', '_tool'], wissen: ['wissen', '_tool'],
+    pend: ['pend', '_tool'], plan: ['plan', '_tool'], pflege: ['pflege', '_tool'], wissen: ['wissen', '_tool'], masch: ['wissen', '_tool'],
     werkzeuge: ['werkzeuge', '_tool'], doku: ['doku', '_tool'] };
   const erlaubt = ziel => { // ziel = [tool, bereich] oder Liste davon (eine genügt); true/false, null = ohne Gruppe
     if(!ziel || !sicht || !sicht.rechte) return null;
