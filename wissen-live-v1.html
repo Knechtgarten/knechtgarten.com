@@ -628,6 +628,17 @@ body.qr nav.subnav{display:none;}
 .wneukat .t{display:flex;align-items:center;gap:6px;color:var(--muted,#8B9097);} .wneukat svg{width:13px;height:13px;}
 .wtitel .wneu{margin-left:10px;vertical-align:middle;font-size:12px;padding:3px 10px;display:inline-flex;align-items:center;gap:4px;} .wtitel .wneu svg{width:13px;height:13px;}
 .kg-kachel-kopf[role=button]{cursor:pointer;}
+/* Service-Liste (Maschinen) */
+.svl{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1.6fr) 60px minmax(0,.8fr) auto;gap:10px;align-items:center;padding:7px 12px;border-bottom:1px solid var(--line,#E1E5E9);font-size:13px;}
+.svl:last-child{border-bottom:0;} .svl.rot .svlk{color:#B4655F;font-weight:700;}
+.svlm{all:unset;cursor:pointer;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;} .svlm:hover b{text-decoration:underline;}
+.svla{min-width:0;} .svlk{font-variant-numeric:tabular-nums;white-space:nowrap;} .svlf{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+@media (max-width:700px){ .svl{grid-template-columns:1fr auto;} .svla{grid-column:1;} .svlf{display:none;} }
+/* Kategorie bearbeiten: Kopf mit Name, Thema, Löschen */
+.katkopf{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin:4px 0 14px;} .katkopf .fld{margin:0;min-width:220px;} .katkopf .btn{display:inline-flex;align-items:center;gap:5px;}
+.katkopf .btn svg{width:14px;height:14px;}
+/* Neuer Eintrag: Art Eintrag / Kurzeintrag */
+.nart{display:inline-flex;margin:4px 0;} .nart label{cursor:pointer;}
 </style>
 </head>
 <body>
@@ -679,11 +690,15 @@ const QR_BASIS = 'https://knechtgarten.com/g/';
 const LOGO = '/logo-gruen-blau.png';
 const ROLLE_LABEL = { admin: 'Admin', buero_team: 'Büro-Team', mitarbeitende: 'Mitarbeitende', service_team: 'Service-Team' };
 const TYP = { geraet: 'Gerät', produkt: 'Produkt', wissen: 'Wissen' };
+// Zwei Tools auf einer Seite: maschinen-live-v1.html (Kategorien mit art 'geraet') und wissen-live-v1.html (Nachschlagewerk nach Themen)
+const MASCH = /maschinen-live/.test(location.pathname);
+const SEITE_MASCH = '/maschinen-live-v1.html', SEITE_WISSEN = '/wissen-live-v1.html';
+const istMaschKat = k => (k?.art || 'geraet') === 'geraet';
 // Art (Gerät / Produkt / Wissen) kommt aus der Kategorie (Einstellungen)
-const artVon = katId => S.kats.find(k => k.id === katId)?.art || 'geraet';
-// Typ des Eintrags (Datenbank kennt geraet / produkt / wissen): Kurzinfo zählt als wissen
-const typVon = katId => artVon(katId) === 'kurz' ? 'wissen' : artVon(katId);
-const istKurz = e => katVon(e)?.art === 'kurz';
+const artVon = katId => S.kats.find(k => k.id === katId)?.art || (MASCH ? 'geraet' : 'produkt');
+// Typ des Eintrags: geraet / produkt / wissen; 'kurz' = Kurzeintrag (eine Zeile, pro Eintrag wählbar)
+const typVon = katId => artVon(katId);
+const istKurz = e => e.typ === 'kurz' || katVon(e)?.art === 'kurz';
 const alleStichwoerter = () => unik(S.eintraege.flatMap(e => e.tags || [])).sort((a, b) => a.localeCompare(b, 'de'));
 const RTYP = { maschine: 'Maschine', fahrzeug: 'Fahrzeug', anhaenger: 'Anhänger' };
 
@@ -835,6 +850,11 @@ async function ladeAlles(){
   ]);
   const err = r.find(x => x.error); if(err) return fehler(err.error, 'Laden');
   [S.kats, S.bereiche, S.eintraege, S.service, S.exemplare, S.erledigt, S.lieferanten, S.planer, S.personen] = r.map(x => x.data || []);
+  // Maschinen oder Nachschlagewerk: nur die eigenen Kategorien und Einträge (alle bleiben für QR/Links in S.alle*)
+  S.alleKats = S.kats; S.alleE = S.eintraege;
+  S.kats = S.alleKats.filter(k => istMaschKat(k) === MASCH);
+  { const ids = new Set(S.kats.map(k => k.id)); S.eintraege = S.alleE.filter(e => e.kategorie_id ? ids.has(e.kategorie_id) : (e.typ === 'geraet') === MASCH); }
+  { const t = await sb.from('wissen_thema').select('*').order('sortierung'); S.themen = t.data || []; }
   { const [fe, li] = await Promise.all([sb.from('wissen_feld').select('*').order('name'), sb.from('wissen_liste').select('*').order('sortierung')]); S.felder = fe.data || []; S.listen = li.data || []; felderAbleiten(); }
   S.eintraege.sort((a,b) => a.titel.localeCompare(b.titel, 'de', {numeric:true}));
   S.exemplare.sort((a,b) => a.sortierung - b.sortierung || String(a.nummer || '').localeCompare(String(b.nummer || ''), 'de', {numeric:true}));
@@ -896,15 +916,22 @@ function naechster(x){
 function starteAusUrl(){
   const p = new URLSearchParams(location.search);
   if(p.get('q')) S.q = p.get('q'); // Suche von der Startseite (Widget «Nachschlagewerk»)
+  // Eintrag gehört ins andere Tool (Maschine im Nachschlagewerk bzw. umgekehrt): dorthin weiter
+  const anderes = id => { const e = S.alleE.find(z => z.id === id); if(!e || byId(id)) return false;
+    location.replace((MASCH ? SEITE_WISSEN : SEITE_MASCH) + location.search + location.hash); return true; };
   if(p.get('qr')){
     // QR-Etikette gehoert zum Exemplar (eigene Nummer); Produkte/Wissen haben die Nummer am Eintrag
     const x = S.exemplare.find(z => String(z.qr_nr) === p.get('qr'));
+    const e0 = x ? x.eintrag_id : S.alleE.find(z => String(z.qr_nr) === p.get('qr'))?.id;
+    if(e0 && anderes(e0)) return;
     const e = x ? byId(x.eintrag_id) : S.eintraege.find(z => String(z.qr_nr) === p.get('qr'));
     if(e){ S.qr = true; document.body.classList.add('qr'); zeige('appMain'); return oeffne(e.id, 'anw', true, x?.id); }
     toast('Diesen Eintrag gibt es nicht (mehr).', true);
   }
   const h = location.hash.match(/^#e-([0-9a-f-]{36})(?:\.([0-9a-f-]{36}))?$/);
+  if(h && anderes(h[1])) return;
   if(h && byId(h[1])) return oeffne(h[1], null, false, h[2]);
+  if(location.hash === '#service' && MASCH) S.view = 'service';
   if(location.hash === '#listen' || location.hash === '#tabelle') S.view = 'listen';
   if(location.hash === '#etiketten') S.view = 'etiketten';
   if(location.hash === '#einstellungen' && istBuero()) S.view = 'einstellungen';
@@ -914,15 +941,17 @@ window.addEventListener('popstate', () => {
   if(S.qr) return;
   const h = location.hash.match(/^#e-([0-9a-f-]{36})(?:\.([0-9a-f-]{36}))?$/);
   if(h && byId(h[1])){ if(S.eid !== h[1]) oeffne(h[1], null, true, h[2]); else if(h[2] && h[2] !== S.xid){ S.xid = h[2]; S.kvNeu = null; S.ask = null; render(); } return; }
-  S.view = location.hash === '#listen' || location.hash === '#tabelle' ? 'listen' : location.hash === '#etiketten' ? 'etiketten' : location.hash === '#einstellungen' && istBuero() ? 'einstellungen' : 'suche';
+  S.view = location.hash === '#listen' || location.hash === '#tabelle' ? 'listen' : location.hash === '#etiketten' ? 'etiketten' : location.hash === '#service' && MASCH ? 'service' : location.hash === '#einstellungen' && istBuero() ? 'einstellungen' : 'suche';
+  S.bearb = false;
   S.eid = null; render();
 });
 function geheZu(view){
-  S.view = view; S.eid = null; S.edit = null; S.katDetail = null; S.lid = null; S.alleNotizen = null; S.notizenLaden = false;
+  S.view = view; S.eid = null; S.edit = null; S.katDetail = null; S.lid = null; S.alleNotizen = null; S.notizenLaden = false; S.bearb = false;
   history.pushState(null, '', location.pathname + (view === 'suche' ? '' : '#' + view));
   render(); window.scrollTo(0, 0);
 }
 async function oeffne(id, sec, ohneHistory, xid){
+  if(S.eid !== id) S.bearb = false;   // jeder Eintrag öffnet ruhig; Bearbeiten mit dem Stift im Kopf
   S.view = 'eintrag'; S.eid = id; S.edit = null; S.kvNeu = null; S.ask = null; S.svE = false; S.svf = null; S.det = null; S.anl = new Set();
   if(!S.qr) merke('zuletzt', [id, ...zuletzt().filter(x => x !== id)].slice(0, 10));
   const e = byId(id);
@@ -941,22 +970,19 @@ async function oeffne(id, sec, ohneHistory, xid){
 function render(){
   document.body.classList.toggle('bearb', darfEdit());   // beim Bearbeiten wachsen die Kacheln mit dem Inhalt
   if(!S.qr){
-    const nav = [['suche','grid','Übersicht'],['listen','table','Listen'],['etiketten','label','Etiketten']];
+    // Maschinen: Übersicht · Service · Listen · Etiketten; Nachschlagewerk: nur Übersicht (Themen)
+    const nav = MASCH ? [['suche','grid','Übersicht'],['service','wrench','Service'],['listen','table','Listen'],['etiketten','label','Etiketten']] : [['suche','grid','Übersicht']];
     $('subnavInner').innerHTML = nav.map(([k,i,n]) =>
-      `<button data-act="nav" data-v="${k}" class="${S.view===k||(k==='suche'&&S.view==='eintrag')?'on':''}">${ic(i)}${n}</button>`).join('')
-      + (istBuero() && S.view === 'einstellungen' ? `<button data-act="nav" data-v="einstellungen" class="${S.view === 'einstellungen' ? 'on' : ''}">${ic('gear')}Einstellungen</button>` : '')
+      `<button data-act="nav" data-v="${k}" class="${S.view===k||(k==='suche'&&(S.view==='eintrag'||S.view==='einstellungen'))?'on':''}">${ic(i)}${n}</button>`).join('')
       + `<span class="navsp"></span><button class="navic" data-act="handy" title="So sieht es auf dem Handy aus (bei einem Gerät: wie nach dem QR-Scan)" aria-label="Handy-Ansicht">${ic('phone')}</button>`;
-    // Weisse Leiste (Gesamt-Tool): links Modus Anzeigen / Bearbeiten (Büro), in der Übersicht Mitte Suche + Kategorie,
-    // rechts Ansicht Fotos/Liste und «Neuer Eintrag» (Büro)
+    // Weisse Leiste: in der Übersicht Suche und Ansicht Fotos/Liste (Bearbeiten: Stift direkt am Eintrag bzw. an der Kategorie)
     const ueb = S.view === 'suche';
-    $('wsSeite').innerHTML = (istBuero() ? `<div class="kg-l"><span class="kg-seg"><button class="${S.bearb ? '' : 'on'}" data-act="modus" data-v="0" title="Anzeigen">${ic('eye')}Anzeigen</button><button class="${S.bearb ? 'on' : ''}" data-act="modus" data-v="1" title="Bearbeiten">${ic('edit')}Bearbeiten</button></span></div>` : '')
-      + (ueb ? `<div class="kg-m">${sucheLeiste()}</div><div class="kg-r"><span class="kg-seg" role="group" aria-label="Ansicht"><button class="${S.mode==='foto'?'on':''}" data-act="mode" data-v="foto" title="Fotos">${ic('grid')}</button><button class="${S.mode==='liste'?'on':''}" data-act="mode" data-v="liste" title="Liste">${ic('rows')}</button></span>`
-        + '</div>' : '');
+    $('wsSeite').innerHTML = ueb ? `<div class="kg-m">${sucheLeiste()}</div><div class="kg-r"><span class="kg-seg" role="group" aria-label="Ansicht"><button class="${S.mode==='foto'?'on':''}" data-act="mode" data-v="foto" title="Fotos">${ic('grid')}</button><button class="${S.mode==='liste'?'on':''}" data-act="mode" data-v="liste" title="Liste">${ic('rows')}</button></span></div>` : '';
     $('wsSeite').classList.toggle('hidden', !$('wsSeite').children.length);
   }
   const m = $('appMain');
   m.innerHTML = (S.view === 'eintrag' && darfEdit() ? `<div class="bearbstreifen">${ic('edit')}Bearbeiten – Änderungen werden sofort gespeichert</div>` : '')
-    + (S.view === 'eintrag' ? vEintrag() : S.view === 'listen' ? vListen() : S.view === 'etiketten' ? vEtiketten() : S.view === 'einstellungen' ? vEinstellungen() : vSuche());
+    + (S.view === 'eintrag' ? vEintrag() : S.view === 'service' ? vService() : S.view === 'listen' ? vListen() : S.view === 'etiketten' ? vEtiketten() : S.view === 'einstellungen' ? vEinstellungen() : vSuche());
   medienLaden(m);
   if(S.planOvl && $('planInhalt') && S.eid) $('planInhalt').innerHTML = serviceBody(byId(S.eid));
 }
@@ -1091,22 +1117,35 @@ function gruppiert(l){
   if(g.size < 2) return eintraegeHTML(l);
   return [...g.entries()].sort((a, b) => (a[0] ? 0 : 1) - (b[0] ? 0 : 1) || a[0].localeCompare(b[0], 'de')).map(([k, es]) => `<h3 class="gruppe">${esc(k || 'Weitere')} <span>${es.length}</span></h3>${eintraegeHTML(es)}`).join('');
 }
+// Thema einer Kategorie (Nachschlagewerk)
+const katThema = id => S.kats.find(k => k.id === id)?.thema_id || null;
+const themaName = id => (S.themen || []).find(t => t.id === id)?.name || '';
+const THEMA_FAM = ['blau', 'gruen', 'erde', 'grau', 'violett', 'petrol', 'gold', 'beere', 'oliv', 'orange'];
+const themaFarbe = id => { const i = Math.max(0, (S.themen || []).findIndex(t => t.id === id)); return KG.palette[THEMA_FAM[i % THEMA_FAM.length]][1]; };
 function vUebersicht(alle){
-  const q = S.q.trim(), rub = S.kat ? katArt(S.kat) : S.rub;
-  const zahl = f => S.eintraege.filter(f).length;
+  const q = S.q.trim(), thema = MASCH ? null : (S.kat ? katThema(S.kat) : S.rub);
   // Büro sieht auch leere Kategorien (zum Befüllen), Mitarbeitende nur solche mit Einträgen
   const bu = istBuero() && !S.qr;
-  const katsVon = r => S.kats.filter(k => (k.art || 'geraet') === r && (bu || S.eintraege.some(e => e.kategorie_id === k.id)));
-  // «+» im Kachelkopf (nur Büro/Admin): neuer Eintrag in Rubrik bzw. Kategorie; «+ Kategorie» unten in der Kachel
+  const mitE = k => S.eintraege.some(e => e.kategorie_id === k.id);
+  const katsVon = t => S.kats.filter(k => (MASCH || (k.thema_id || null) === t) && (bu || mitE(k)));
+  // Stift / «+» im Kachelkopf (nur Büro/Admin)
   const plus = v => bu ? `<button type="button" class="kg-klink wplus" data-act="neu" data-v="${v}" title="Neuer Eintrag" aria-label="Neuer Eintrag">${ic('plus')}</button>` : '';
-  const plusKat = r => bu ? `<button type="button" class="kg-kzeile wneukat" data-act="katNeu" data-v="${r}"><span class="t">${ic('plus')}<b>Kategorie</b></span></button>` : '';
-  const krumen = () => `<nav class="krumen"><button data-act="rub" data-v="">Übersicht</button>${rub ? ` › <button data-act="rub" data-v="${rub}">${RUB_NAME[rub]}</button>` : ''}${S.kat ? ` › <b>${esc(katName(S.kat))}</b>` : ''}</nav>`;
-  // Einträge in einer Kachel: Favoriten, zuletzt angeschaut, dann alphabetisch; Kurzinfos mit Wert und Kopier-Knopf
+  const stift = (act, v, t) => bu ? `<button type="button" class="kg-klink wplus" data-act="${act}" data-v="${v}" title="${t}" aria-label="${t}">${ic('edit')}</button>` : '';
+  const plusKat = t => bu ? `<button type="button" class="kg-kzeile wneukat" data-act="katNeu" data-v="${t || ''}"><span class="t">${ic('plus')}<b>Kategorie</b></span></button>` : '';
+  const krumen = () => `<nav class="krumen"><button data-act="rub" data-v="">Übersicht</button>${thema ? ` › <button data-act="rub" data-v="${thema}">${esc(themaName(thema))}</button>` : ''}${S.kat ? ` › <b>${esc(katName(S.kat))}</b>` : ''}</nav>`;
+  // Einträge in einer Kachel: Favoriten, zuletzt angeschaut, dann alphabetisch; Kurzeinträge mit Wert und Kopier-Knopf
   const wichtig = l => { const fv = favs(), zl = zuletzt(), p = e => fv.includes(e.id) ? 0 : zl.includes(e.id) ? 1 + zl.indexOf(e.id) / 100 : 2;
     return [...l].sort((a, b) => p(a) - p(b) || a.titel.localeCompare(b.titel, 'de', { numeric: true })); };
   const kz = e => istKurz(e)
-    ? `<div class="kg-kzeile"><span class="t"><b>${esc(e.titel)}</b><small>${esc(e.wert || '')}</small></span>${e.wert ? `<button class="kg-ibtn" data-act="kopieren" data-v="${esc(e.wert)}" title="Kopieren" aria-label="Kopieren">${ic('copy')}</button>` : ''}</div>`
+    ? `<div class="kg-kzeile"><span class="t"><b>${esc(e.titel)}</b><small>${esc(e.wert || '')}</small></span>${e.wert ? `<button class="kg-ibtn" data-act="kopieren" data-v="${esc(e.wert)}" title="Kopieren" aria-label="Kopieren">${ic('copy')}</button>` : ''}${bu ? `<button class="kg-ibtn" data-act="open" data-id="${e.id}" title="Bearbeiten" aria-label="Bearbeiten">${ic('edit')}</button>` : ''}</div>`
     : `<button class="kg-kzeile" data-act="open" data-id="${e.id}"><span class="t"><b>${istFav(e.id) ? `<span class="fstern">${ic('stern')}</span>` : ''}${esc(e.titel)}</b>${e.untertitel ? `<small>${esc(e.untertitel)}</small>` : ''}</span></button>`;
+  const FAM = ['blau', 'petrol', 'gold', 'beere', 'oliv', 'erde', 'violett', 'orange', 'gruen', 'grau'];
+  // Kategorie-Kacheln (in einem Thema bzw. bei den Maschinen auf der Startseite)
+  const katKacheln = (ks, farbeVon) => ks.map((k, i) => { const l = wichtig(S.eintraege.filter(e => e.kategorie_id === k.id));
+    return KG.kachel({ titel: `${esc(k.name)}<small>${l.length}</small>`, farbe: farbeVon(i), icon: ic(MASCH ? 'excav' : icoFuer({ kategorie_id: k.id, typ: k.art })), klick: { act: 'kat', wert: k.id },
+      links: stift('katBearb', k.id, 'Kategorie bearbeiten') + plus(k.id), inhalt: l.map(kz).join('') || '<span class="kg-kleer">Noch keine Einträge.</span>' }); }).join('');
+  const neueKat = t => bu ? KG.kachel({ titel: 'Neue Kategorie', farbe: KG.palette.grau[0], icon: ic('plus'), klick: { act: 'katNeu', wert: t || '' },
+    inhalt: `<span class="kg-kleer">${MASCH ? 'Neue Gruppe für Maschinen, Fahrzeuge oder Geräte.' : `Neue Kategorie in «${esc(themaName(t))}», z. B. «Pooltechnik».`}</span>` }) : '';
   let haupt;
   if(q){
     const kurz = alle.filter(istKurz), res = alle.filter(e => !istKurz(e)), proKat = new Map();
@@ -1116,24 +1155,27 @@ function vUebersicht(alle){
       ${!res.length && !kurz.length ? '<div class="card empty">Nichts gefunden. Anderes Stichwort versuchen.</div>'
         : [...proKat.entries()].map(([k, es]) => `<h3 class="gruppe">${esc(katName(k) || 'Ohne Kategorie')} <span>${es.length}</span></h3>${eintraegeHTML(es)}`).join('')}`;
   } else if(S.kat){
-    const l = S.eintraege.filter(e => e.kategorie_id === S.kat);
-    haupt = `${krumen()}<h2 class="wtitel">${esc(katName(S.kat))}${bu ? ` <button type="button" class="btn btn-ghost wneu" data-act="neu" data-v="${S.kat}">${ic('plus')}Eintrag</button>` : ''}</h2>${katArt(S.kat) === 'kurz' ? `<div class="card lst kurzl">${l.map(kurzZeile).join('')}</div>` : l.length ? gruppiert(l) : '<div class="card empty">Noch keine Einträge.</div>'}`;
-  } else if(rub){
-    // Kategorien des Bereichs als Kacheln (gemeinsames Muster, kg-stil.js): Kopf öffnet die Kategorie, darin die Einträge
-    const FAM = ['blau', 'petrol', 'gold', 'beere', 'oliv', 'erde', 'violett', 'orange', 'gruen', 'grau'];
-    haupt = `${krumen()}<h2 class="wtitel">${RUB_NAME[rub]}</h2>${KG.kacheln(katsVon(rub).map((k, i) => { const l = wichtig(S.eintraege.filter(e => e.kategorie_id === k.id));
-      return KG.kachel({ titel: `${esc(k.name)}<small>${l.length}</small>`, farbe: KG.palette[FAM[i % FAM.length]][1], icon: ic(RUB_IC[rub]), klick: { act: 'kat', wert: k.id }, links: plus(k.id), inhalt: l.map(kz).join('') || '<span class="kg-kleer">Noch keine Einträge.</span>' }); }).join('')
-      + (bu ? KG.kachel({ titel: 'Neue Kategorie', farbe: KG.palette.grau[0], icon: ic('plus'), klick: { act: 'katNeu', wert: rub }, inhalt: `<span class="kg-kleer">Neue Kategorie in «${RUB_NAME[rub]}» anlegen, z. B. «Pool & Wasser».</span>` }) : ''))}`;
+    const l = S.eintraege.filter(e => e.kategorie_id === S.kat), kurz = l.filter(istKurz), rest = l.filter(e => !istKurz(e));
+    haupt = `${krumen()}<h2 class="wtitel">${esc(katName(S.kat))}${bu ? ` <button type="button" class="btn btn-ghost wneu" data-act="neu" data-v="${S.kat}">${ic('plus')}Eintrag</button><button type="button" class="btn btn-ghost wneu" data-act="katBearb" data-v="${S.kat}">${ic('edit')}Kategorie</button>` : ''}</h2>
+      ${kurz.length ? `<div class="card lst kurzl">${kurz.map(kurzZeile).join('')}</div>` : ''}${rest.length ? gruppiert(rest) : kurz.length ? '' : '<div class="card empty">Noch keine Einträge.</div>'}`;
+  } else if(MASCH){
+    // Maschinen: gleich die Kategorien als Kacheln
+    haupt = KG.kacheln(katKacheln(katsVon(null), i => KG.palette[['petrol', 'erde', 'blau', 'oliv', 'grau'][i % 5]][1]) + neueKat(null));
+  } else if(thema){
+    haupt = `${krumen()}<h2 class="wtitel">${esc(themaName(thema))}</h2>${KG.kacheln(katKacheln(katsVon(thema), i => KG.palette[FAM[i % FAM.length]][1]) + neueKat(thema))}`;
   } else {
-    // Start: Favoriten und Zuletzt, dann die Bereiche – alles als Kacheln; im Bereich die Kategorien mit Anzahl
+    // Start: Favoriten und Zuletzt, dann die Themen mit ihren Kategorien
     const fv = favs().map(byId).filter(Boolean), zl = zuletzt().map(byId).filter(e => e && !istKurz(e)).slice(0, 8);
-    const RF = { geraet: KG.palette.petrol[1], produkt: KG.palette.blau[1], wissen: KG.palette.violett[1], kurz: KG.palette.grau[1] };
+    const ohne = S.kats.filter(k => !k.thema_id && (bu || mitE(k)));
     haupt = KG.kacheln([
       KG.kachel({ titel: 'Meine Favoriten', farbe: KG.palette.gold[0], icon: ic('stern'), inhalt: fv.length ? fv.map(kz).join('') : '<span class="kg-kleer">Noch keine. Beim Eintrag den Stern antippen.</span>' }),
       zl.length ? KG.kachel({ titel: 'Zuletzt angeschaut', farbe: KG.palette.grau[2], icon: ic('cal'), inhalt: zl.map(kz).join('') }) : '',
-      ...Object.keys(RUB_NAME).filter(r => bu || katsVon(r).length).map(r => KG.kachel({ titel: `${RUB_NAME[r]}<small>${zahl(e => katArt(e.kategorie_id) === r)}</small>`, farbe: RF[r], icon: ic(RUB_IC[r]), klick: { act: 'rub', wert: r }, links: plus(r),
-        inhalt: (r === 'kurz' ? wichtig(S.eintraege.filter(e => katArt(e.kategorie_id) === 'kurz')).map(kz).join('')
-          : katsVon(r).map(k => `<button class="kg-kzeile" data-act="kat" data-v="${k.id}"><span class="t"><b>${esc(k.name)}</b></span><small class="muted">${zahl(e => e.kategorie_id === k.id)}</small></button>`).join('')) + plusKat(r) }))
+      ...(S.themen || []).filter(t => bu || katsVon(t.id).length).map(t => KG.kachel({ titel: `${esc(t.name)}<small>${S.eintraege.filter(e => katThema(e.kategorie_id) === t.id).length}</small>`,
+        farbe: themaFarbe(t.id), icon: ic('book'), klick: { act: 'rub', wert: t.id }, links: stift('themaBearb', t.id, 'Thema bearbeiten') + plus('t:' + t.id),
+        inhalt: katsVon(t.id).map(k => `<button class="kg-kzeile" data-act="kat" data-v="${k.id}"><span class="t"><b>${esc(k.name)}</b></span><small class="muted">${S.eintraege.filter(e => e.kategorie_id === k.id).length || ''}</small></button>`).join('') + plusKat(t.id) })),
+      ohne.length ? KG.kachel({ titel: 'Ohne Thema', farbe: KG.palette.grau[1], icon: ic('book'),
+        inhalt: ohne.map(k => `<button class="kg-kzeile" data-act="kat" data-v="${k.id}"><span class="t"><b>${esc(k.name)}</b></span></button>`).join('') }) : '',
+      bu ? KG.kachel({ titel: 'Neues Thema', farbe: KG.palette.grau[0], icon: ic('plus'), klick: { act: 'themaNeu', wert: '' }, inhalt: '<span class="kg-kleer">Neues Thema anlegen, z. B. «Teich».</span>' }) : ''
     ].join(''));
   }
   return `<div class="whaupt">${haupt}</div>`;
@@ -1234,7 +1276,10 @@ function vEintrag(){
   const etikette = darfEdit() && x && rubrik !== 'kurz' && !geraet ? `<span class="kopflinks"><button class="btn btn-ghost btn-sm" data-act="qrKopie" data-v="${QR_BASIS + x.qr_nr}" title="Link kopieren">${ic('link')}knechtgarten.com/g/${x.qr_nr}</button><button class="btn btn-ghost btn-sm" data-act="etikette" data-id="${x.id}">${ic('label')}Etikette${geraet && xs.length > 1 ? ' ' + esc(exName(x)) : ''}</button>
       <a class="btn btn-ghost btn-sm" href="?qr=${x.qr_nr}" style="text-decoration:none">${ic('phone')}QR-Ansicht</a></span>` : '';
   // Anzeigen/Bearbeiten steht oben rechts in der Leiste; hier nur der Knopf für Titel & Co. beim Bearbeiten
-  const modus = darfEdit() ? `<button class="btn btn-ghost btn-sm" data-act="edit">${ic('edit')}Titel, Kategorie, Stichwörter</button>` : '';
+  // Büro: Stift «Bearbeiten» (danach Titel & Co. und «Fertig»), Abfalleimer = archivieren
+  const modus = !istBuero() || S.qr ? '' : darfEdit()
+    ? `<button class="btn btn-ghost btn-sm" data-act="edit">${ic('edit')}Titel, Kategorie, Stichwörter</button><button class="btn btn-primary btn-sm" data-act="modus" data-v="0">${ic('check')}Fertig</button>`
+    : `<button class="btn btn-ghost btn-sm" data-act="modus" data-v="1">${ic('edit')}Bearbeiten</button><button class="kg-ibtn danger" data-act="eDel" data-id="${e.id}" title="Löschen (archivieren)" aria-label="Löschen">${ic('trash')}</button>`;
   const acts = S.qr ? '' : `<div class="acts">${modus}</div>${etikette ? `<div class="acts" style="margin-top:8px">${etikette}</div>` : ''}`;
   const titel = `<h2>${esc(e.titel)}${S.qr && x?.nummer ? ' ' + esc(x.nummer) : ''}${S.qr ? '' : ` <button class="sternknopf ${istFav(e.id) ? 'an' : ''}" data-act="fav" data-id="${e.id}" title="${istFav(e.id) ? 'Aus den Favoriten entfernen' : 'Zu meinen Favoriten'}" aria-label="Favorit">${ic('stern')}</button>`}</h2>`;
   const meta = `<div class="meta">${e.kategorie_id ? `<span class="chip">${esc(katName(e.kategorie_id))}</span>` : ''}${e.tags.map(t => `<span class="chip tag">${esc(t)}</span>`).join('')}</div>`;
@@ -2098,10 +2143,13 @@ function vKategorie(){
   const anz = s => (k.felder || []).filter(z => !!z.s === s && S.felder.some(f => f.id === z.f)).length;
   // Knopf «Felder»: klappt die Feldauswahl unter der Zeile auf
   const knopf = (art, an) => `<button class="bk felderknopf ${S.felderAuf === art ? 'on' : ''}" data-act="felderAuf" data-v="${art}" ${an ? '' : 'disabled'}>${ic('list')}Felder (${anz(art === 'stueck')})${ic('chev', 'chev')}</button>`;
-  return `<button class="back" data-act="katZu">${ic('back')}Einstellungen</button>
-    <h2 style="font-size:22px;margin-bottom:6px">${esc(k.name)}</h2>
-    <div class="katart"><span class="small muted">Rubrik:</span><span class="bkreihe">${Object.entries(RUBRIK).map(([v, t]) => `<button class="bk ${(k.art || 'geraet') === v ? 'on' : ''}" data-act="katArt" data-v="${v}">${t}</button>`).join('')}</span>
-      <span class="small muted">bestimmt den Kopf: ${RUBRIK_KOPF[k.art || 'geraet']}</span></div>
+  const n = S.eintraege.filter(e => e.kategorie_id === k.id).length;
+  return `<button class="back" data-act="katZu">${ic('back')}Zurück</button>
+    <div class="katkopf"><label class="fld">Name<input type="text" class="svin" data-stf="kat" data-id="${k.id}" value="${esc(k.name)}"></label>
+      ${MASCH ? '' : `<label class="fld">Thema<select data-katthema="${k.id}">${(S.themen || []).map(t => `<option value="${t.id}" ${t.id === k.thema_id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}<option value="" ${k.thema_id ? '' : 'selected'}>– ohne Thema –</option></select></label>`}
+      <button class="btn btn-ghost" data-act="katDel" data-v="${k.id}" ${n ? `disabled title="Noch ${n} Einträge in dieser Kategorie"` : ''}>${ic('trash')}Kategorie löschen</button>
+      <button class="btn btn-ghost" data-act="felderVerw">${ic('list')}Alle Felder verwalten</button></div>
+    ${MASCH ? '' : `<div class="katart"><span class="small muted">Kopf der Einträge:</span><span class="bkreihe">${[['produkt', 'Mit Bild (Produkt, Technik)'], ['wissen', 'Nur Titel (Wissen, Anleitung)'], ['kurz', 'Kurzeinträge']].map(([v, t]) => `<button class="bk ${(k.art || 'produkt') === v ? 'on' : ''}" data-act="katArt" data-v="${v}">${t}</button>`).join('')}</span></div>`}
     <section class="card einst">
       <div class="exh"><h3>Bausteine</h3></div>
       <div class="small muted">Was bei Einträgen dieser Kategorie erscheint und in welcher Reihenfolge (am Griff ziehen).
@@ -2279,6 +2327,38 @@ function lisFilterText(l){
     l.pro === 'eintrag' ? 'eine Zeile pro Eintrag' : 'eine Zeile pro Gerät'].filter(Boolean).join(' · ');
 }
 // Listen: zuerst alle Listen untereinander (wie die Übersicht), Klick öffnet die Liste
+// --- Service (nur Maschinen): alle geplanten Arbeiten aller Maschinen auf einen Blick ---
+// Überfällig (bis 4 Wochen, Pflichtservice immer) · diese Woche · nächste 8 Wochen; dazu Arbeiten ohne Kalenderwoche.
+// «Erledigt» trägt mit heutigem Datum ins Logbuch des Stücks ein (wie im Eintrag), Klick auf die Maschine öffnet sie.
+function vService(){
+  const bu = istBuero(), zeilen = [], ohneKw = [];
+  S.eintraege.forEach(e => { const svs = servicesVon(e); if(!svs.length) return;
+    exVon(e).forEach(x => svs.forEach(s => {
+      if(!(s.kws || []).length){ if(x === exVon(e)[0]) ohneKw.push({ e, s }); return; }
+      wochen(s).forEach(w => {
+        if(erledigtIn(x, s, w)) return;
+        if(w < NOW_KW - 4 && !istPflicht(s)) return;                 // automatisch übersprungen
+        if(w > NOW_KW + 8) return;
+        zeilen.push({ e, x, s, w, gruppe: w < NOW_KW ? 0 : w === NOW_KW ? 1 : 2 });
+      });
+    }));
+  });
+  zeilen.sort((a, b) => a.w - b.w || a.e.titel.localeCompare(b.e.titel, 'de', { numeric: true }));
+  const fahrer = x => { const r = x.planer_ressource_id && S.planer.find(p => p.id === x.planer_ressource_id), p = r && S.personen.find(q => q.id === r.stamm_person_id); return p ? p.name : (x.zustaendig || ''); };
+  const zeile = z => `<div class="svl kg-zeile${z.gruppe === 0 ? ' rot' : ''}">
+      <button class="svlm" data-act="open" data-id="${z.e.id}" data-x="${z.x.id}"><b>${esc(z.e.titel)}</b>${z.x.nummer ? ` <span class="muted">${esc(z.x.nummer)}</span>` : ''}</button>
+      <span class="svla">${esc(z.s.arbeit)}${istPflicht(z.s) ? ' <span class="stat wichtig">Pflicht</span>' : ''}</span>
+      <span class="svlk">KW ${z.w}</span><span class="svlf muted">${esc(fahrer(z.x))}</span>
+      ${bu ? `<button class="btn btn-ghost btn-sm" data-act="svListeOk" data-k="p|${z.s.id}|${z.w}" data-x="${z.x.id}" title="Heute erledigt (ins Logbuch)">${ic('check')}Erledigt</button>` : ''}</div>`;
+  const gruppe = (g, t) => { const l = zeilen.filter(z => z.gruppe === g); return l.length ? `<h3 class="gruppe">${t} <span>${l.length}</span></h3><div class="card lst">${l.map(zeile).join('')}</div>` : ''; };
+  const leer = !zeilen.length ? '<div class="card empty">Nichts fällig in den nächsten 8 Wochen.</div>' : '';
+  return `<div class="whaupt"><h2 class="wtitel">Service</h2>
+    <div class="small muted" style="margin:-4px 0 12px">Geplante Arbeiten aller Maschinen (KW ${NOW_KW}). Dieselben Arbeiten erscheinen im Einsatzplaner in der Zeile «Maschinenservice».</div>
+    ${gruppe(0, 'Überfällig')}${gruppe(1, 'Diese Woche')}${gruppe(2, 'Nächste Wochen')}${leer}
+    ${ohneKw.length ? `<h3 class="gruppe">Ohne Kalenderwoche <span>${ohneKw.length}</span></h3><div class="small muted" style="margin-bottom:6px">Diese Arbeiten erscheinen nirgends, bis sie eine Kalenderwoche haben: Maschine öffnen › Bearbeiten › Serviceplan.</div>
+      <div class="card lst">${ohneKw.map(({ e, s }) => `<div class="svl kg-zeile"><button class="svlm" data-act="open" data-id="${e.id}"><b>${esc(e.titel)}</b></button><span class="svla">${esc(s.arbeit)}</span><span class="svlk muted">–</span><span class="svlf"></span></div>`).join('')}</div>` : ''}
+  </div>`;
+}
 function vListen(){
   if(S.lEdit) return lisEditor();
   const ls = S.listen, l = ls.find(x => x.id === S.lid);
@@ -2484,12 +2564,15 @@ async function eintragKopieren(e){
 }
 // Neuer Eintrag aus einer Kachel: vor = Kategorie-ID oder Rubrik (dann nur deren Kategorien zur Auswahl)
 function neuDialog(vor){
-  const kat = vor && S.kats.some(k => k.id === vor) ? vor : S.kat, rub = vor && RUBRIK[vor] ? vor : null;
-  const ks = rub ? S.kats.filter(k => (k.art || 'geraet') === rub) : S.kats, gew = kat || ks[0]?.id;
-  ovl(`<h3>Neuer Eintrag${rub ? ` in «${esc(RUB_NAME[rub])}»` : ''}</h3>
-    <label class="fld">Titel<input type="text" id="nTitel" placeholder="z. B. Montagekleber Naturstein auf Metall"></label>
+  // vor = Kategorie-ID oder 't:<Thema-ID>' (dann nur die Kategorien dieses Themas)
+  const kat = vor && S.kats.some(k => k.id === vor) ? vor : S.kat, thema = vor && String(vor).startsWith('t:') ? vor.slice(2) : null;
+  const ks = thema ? S.kats.filter(k => k.thema_id === thema) : S.kats, gew = kat || ks[0]?.id, kurz = artVon(gew) === 'kurz';
+  ovl(`<h3>Neuer Eintrag${thema ? ` in «${esc(themaName(thema))}»` : ''}</h3>
+    ${MASCH ? '' : `<div class="fld">Art<span class="kg-seg nart" role="radiogroup"><label class="${kurz ? '' : 'on'}"><input type="radio" name="nArt" value="eintrag" ${kurz ? '' : 'checked'} hidden>Eintrag</label><label class="${kurz ? 'on' : ''}"><input type="radio" name="nArt" value="kurz" ${kurz ? 'checked' : ''} hidden>Kurzeintrag</label></span>
+      <span class="small muted">Kurzeintrag = eine Zeile mit Wert zum Kopieren (IBAN, Telefon, Code). Eintrag = mit Fotos, Text, Feldern, Dokumenten.</span></div>`}
+    <label class="fld">Titel<input type="text" id="nTitel" placeholder="${MASCH ? 'z. B. Raupenbagger 5 t' : 'z. B. Gegenstromanlage Fitstar Jet Swim'}"></label>
     <label class="fld">Kategorie<select id="nKat">${ks.map(k => `<option value="${k.id}" ${k.id === gew ? 'selected' : ''}>${esc(k.name)}</option>`).join('')}</select></label>
-    <label class="fld" id="nWertFld" ${artVon(gew) === 'kurz' ? '' : 'hidden'}>Wert <span class="small muted">(steht direkt in Liste und Suche)</span><textarea id="nWert" rows="2" placeholder="z. B. CHE-109.466.032"></textarea></label>
+    <label class="fld" id="nWertFld" ${kurz ? '' : 'hidden'}>Wert <span class="small muted">(steht direkt in Liste und Suche)</span><textarea id="nWert" rows="2" placeholder="z. B. CHE-109.466.032"></textarea></label>
     <div class="ovlbtns"><button class="btn btn-ghost" data-act="ovlZu">Abbrechen</button><button class="btn btn-primary" data-act="neuSave">Anlegen</button></div>`);
 }
 // Zusammenlegen: anderer Eintrag (mit allen Exemplaren) kommt in diesen
@@ -2616,7 +2699,9 @@ document.addEventListener('change', ev => {
   if(ev.target.dataset?.stf){ stFeld(ev.target); }
   if(S.lEdit && (ev.target.dataset?.lsp != null || ev.target.id === 'lArt' || ev.target.id === 'lQ')){ lisLesen(); render(); }
   if(ev.target.dataset?.stneu){ stNeu(ev.target); }
-  if(ev.target.id === 'nKat' && $('nWertFld')) $('nWertFld').hidden = artVon(ev.target.value) !== 'kurz';
+  if(ev.target.name === 'nArt'){ document.querySelectorAll('.nart label').forEach(l => l.classList.toggle('on', l.querySelector('input').checked)); if($('nWertFld')) $('nWertFld').hidden = ev.target.value !== 'kurz'; }
+  if(ev.target.dataset?.katthema){ const k = S.kats.find(x => x.id === ev.target.dataset.katthema), t = ev.target.value || null;
+    sb.from('wissen_kategorie').update({ thema_id: t }).eq('id', k.id).then(r => { if(r.error) return fehler(r.error, 'Thema'); k.thema_id = t; if(S.katVon) S.katVon.rub = t; toast('Gespeichert'); }); }
   if(ev.target.dataset?.inf){ infFeld(ev.target); }
   if(ev.target.dataset?.xnotiz) xNotizSpeichern(ev.target);
   if(ev.target.id === 'svfTyp'){ svfMerken(); svForm(); }
@@ -2649,7 +2734,7 @@ document.addEventListener('click', async ev => {
   else if(a === 'zurueck'){ if(history.length > 1) history.back(); else geheZu('suche'); }
   else if(a === 'open') oeffne(d.id, null, false, d.x);
   else if(a === 'mode'){ S.mode = d.v; merke('mode', S.mode); render(); }
-  else if(a === 'ber' || a === 'kat' || a === 'typ'){ S[a] = d.v || null; merke(a, S[a]); if(a === 'kat'){ S.q = ''; S.rub = S.kat ? katArt(S.kat) : S.rub; merke('rub', S.rub); } render(); window.scrollTo(0, 0); }
+  else if(a === 'ber' || a === 'kat' || a === 'typ'){ S[a] = d.v || null; merke(a, S[a]); if(a === 'kat'){ S.q = ''; S.rub = S.kat && !MASCH ? katThema(S.kat) : S.rub; } render(); window.scrollTo(0, 0); }
   else if(a === 'rub'){ S.rub = d.v || null; S.kat = null; S.q = ''; merke('rub', S.rub); merke('kat', null); render(); window.scrollTo(0, 0); }
   else if(a === 'fav'){ const l = favs(), i = l.indexOf(d.id); if(i >= 0) l.splice(i, 1); else l.unshift(d.id); merke('fav', l); toast(i >= 0 ? 'Aus den Favoriten entfernt' : 'Zu den Favoriten hinzugefügt'); render(); }
   else if(a === 'sec'){ S.open.has(d.k) ? S.open.delete(d.k) : S.open.add(d.k); render(); }
@@ -2713,6 +2798,7 @@ document.addEventListener('click', async ev => {
   else if(a === 'lbSave') await lbSpeichern(exAktiv(e), d.k);
   else if(a === 'lbMenu'){ S.lbMenu = S.lbMenu === d.k ? null : d.k; S.lbAuf = null; render(); }
   else if(a === 'lbSet') await lbSetzen(exAktiv(e), d.k, d.v);
+  else if(a === 'svListeOk') await lbSetzen(exById(d.x), d.k, 'ok');
   else if(a === 'lbStat'){ t.parentNode.querySelectorAll('.lbwahl').forEach(b => b.classList.toggle('on', b === t)); }
   else if(a === 'kvAdd') merkmalWahl(d.key);
   else if(a === 'kvWahl'){ const v = d.v || $('kvEigen').value.trim(); if(!v) return; ovlZu(); await merkmalDazu(d.key, v); }
@@ -2829,7 +2915,7 @@ document.addEventListener('click', async ev => {
       Der Eintrag ist danach unwiderruflich weg.${r.service_id ? ' Die Arbeit erscheint wieder als offen.' : ''}` : ''); }
   // Einstellungen
   else if(a === 'katOpen'){ S.katDetail = d.id || ''; render(); window.scrollTo(0, 0); }
-  else if(a === 'felderVerw'){ S.katDetail = '__felder'; S.felderAuf = null; render(); window.scrollTo(0, 0); }
+  else if(a === 'felderVerw'){ S.katVorher = S.katDetail; S.katDetail = '__felder'; S.felderAuf = null; render(); window.scrollTo(0, 0); }
   else if(a === 'fDel') feldLoeschen(d.id);
   else if(a === 'felderAuf'){ S.felderAuf = S.felderAuf === d.v ? null : d.v; render(); }
   else if(a === 'bsSet'){ const k = S.kats.find(x => x.id === S.katDetail), l = bsListe(k); l.find(b => b.k === d.key).m = d.v;
@@ -2839,12 +2925,17 @@ document.addEventListener('click', async ev => {
   else if(a === 'katArt'){ const k = S.kats.find(x => x.id === S.katDetail), es = S.eintraege.filter(x => x.kategorie_id === k.id);
     const setzen = async () => {
       const r = await sb.from('wissen_kategorie').update({ art: d.v }).eq('id', k.id); if(r.error) return fehler(r.error, 'Speichern');
-      if(es.length){ const r2 = await sb.from('wissen_eintrag').update({ typ: d.v === 'kurz' ? 'wissen' : d.v }).eq('kategorie_id', k.id); if(r2.error) return fehler(r2.error, 'Speichern'); es.forEach(x => x.typ = d.v === 'kurz' ? 'wissen' : d.v); }
+      if(es.length){ const r2 = await sb.from('wissen_eintrag').update({ typ: d.v }).eq('kategorie_id', k.id); if(r2.error) return fehler(r2.error, 'Speichern'); es.forEach(x => x.typ = d.v); }
       k.art = d.v; toast('Gespeichert'); render(); };
     if(es.length && (k.art || 'geraet') === 'geraet' && d.v !== 'geraet') bestaetige(`Rubrik auf «${RUBRIK[d.v]}» ändern?`, 'Ändern', setzen,
       `Die ${es.length} Einträge dieser Kategorie zeigen dann keine Exemplare, QR-Etiketten und Service mehr an. Die Daten bleiben gespeichert und erscheinen wieder, wenn du zurück auf «Gerät» stellst.`);
     else await setzen(); }
-  else if(a === 'katZu'){ S.katDetail = null; render(); }
+  // Zurück: von den Feldern zur Kategorie, von der Kategorie zur Übersicht (dort, wo man den Stift gedrückt hat)
+  else if(a === 'katZu'){ if(S.katDetail === '__felder' && S.katVorher){ S.katDetail = S.katVorher; S.katVorher = null; }
+    else { S.katDetail = null; S.view = 'suche'; if(S.katVon){ S.kat = S.katVon.kat; S.rub = S.katVon.rub; S.katVon = null; } } render(); window.scrollTo(0, 0); }
+  else if(a === 'katDel'){ const k = S.kats.find(x => x.id === d.v); if(!k) return;
+    bestaetige(`Kategorie «${k.name}» löschen?`, 'Löschen', async () => { const { error } = await sb.from('wissen_kategorie').delete().eq('id', k.id); if(error) return fehler(error, 'Löschen');
+      S.kats = S.kats.filter(x => x.id !== k.id); S.alleKats = S.alleKats.filter(x => x.id !== k.id); S.katDetail = null; S.view = 'suche'; S.kat = null; toast('Kategorie gelöscht'); render(); }); }
   else if(a === 'handy') handyVorschau();
   else if(a === 'qrKopie'){ try{ await navigator.clipboard.writeText(d.v); toast('Link kopiert'); }catch(err){ toast(d.v); } }
   else if(a === 'stDel'){ const c = STAMM[d.k], z = c.liste().find(x => x.id === d.id);
@@ -2900,29 +2991,52 @@ document.addEventListener('click', async ev => {
   }
   // Neu / Overlay
   else if(a === 'neu'){ ev.stopPropagation(); neuDialog(d.v || null); setTimeout(() => $('nTitel')?.focus(), 0); }
-  else if(a === 'katNeu') ovl(`<h3>Neue Kategorie in «${esc(RUBRIK[d.v])}»</h3>
-    <label class="fld">Name<input type="text" id="kNeuName" placeholder="z. B. Bewässerung"></label>
-    <div class="small muted">Bausteine und Felder stellst du danach in den Einstellungen bei der Kategorie ein.</div>
-    <div class="ovlbtns"><button class="btn btn-ghost" data-act="ovlZu">Abbrechen</button><button class="btn btn-primary" data-act="katNeuSave" data-v="${d.v}">Anlegen</button></div>`);
+  // Neue Kategorie (Maschinen: Gruppe von Geräten; Nachschlagewerk: in einem Thema)
+  else if(a === 'katNeu') ovl(`<h3>Neue Kategorie${!MASCH && d.v ? ` in «${esc(themaName(d.v))}»` : ''}</h3>
+    <label class="fld">Name<input type="text" id="kNeuName" placeholder="${MASCH ? 'z. B. Anhänger' : 'z. B. Pooltechnik'}"></label>
+    ${MASCH ? '' : `<label class="fld">Thema<select id="kNeuThema">${(S.themen || []).map(t => `<option value="${t.id}" ${t.id === d.v ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></label>`}
+    <div class="small muted">Felder (z. B. Leistung, Spannung) stellst du danach mit dem Stift an der Kategorie ein.</div>
+    <div class="ovlbtns"><button class="btn btn-ghost" data-act="ovlZu">Abbrechen</button><button class="btn btn-primary" data-act="katNeuSave">Anlegen</button></div>`);
   else if(a === 'katNeuSave'){ const name = $('kNeuName').value.trim(); if(!name) return toast('Name fehlt');
-    const { data, error } = await sb.from('wissen_kategorie').insert({ name, art: d.v, sortierung: Math.max(0, ...S.kats.map(k => k.sortierung || 0)) + 10 }).select().single();
+    const { data, error } = await sb.from('wissen_kategorie').insert({ name, art: MASCH ? 'geraet' : 'produkt', thema_id: MASCH ? null : $('kNeuThema')?.value || null,
+      bausteine: MASCH ? undefined : [{ k: 'notizen', m: 'offen' }, { k: 'steck', m: 'offen' }, { k: 'anw', m: 'zu' }, { k: 'kontakte', m: 'zu' }, { k: 'docs', m: 'zu' }],
+      sortierung: Math.max(0, ...S.alleKats.map(k => k.sortierung || 0)) + 10 }).select().single();
     if(error) return fehler(error.code === '23505' ? 'Diese Kategorie gibt es schon.' : error, 'Kategorie');
-    S.kats.push(data); ovlZu(); S.kat = data.id; toast('Kategorie angelegt'); render(); }
+    S.kats.push(data); S.alleKats.push(data); ovlZu(); S.kat = data.id; if(!MASCH) S.rub = data.thema_id; toast('Kategorie angelegt'); render(); }
+  // Kategorie bearbeiten (Stift an der Kachel): Name, Thema, Felder, Bausteine – Seite der Kategorie
+  else if(a === 'katBearb'){ S.katVon = { kat: S.kat, rub: S.rub }; S.view = 'einstellungen'; S.katDetail = d.v; S.felderAuf = null; render(); window.scrollTo(0, 0); }
+  // Themen (Nachschlagewerk)
+  else if(a === 'themaNeu' || a === 'themaBearb'){ const t = (S.themen || []).find(x => x.id === d.v);
+    ovl(`<h3>${t ? 'Thema bearbeiten' : 'Neues Thema'}</h3>
+      <label class="fld">Name<input type="text" id="thName" value="${esc(t?.name || '')}" placeholder="z. B. Teich"></label>
+      ${t ? `<div class="small muted">Löschen geht nur, wenn keine Kategorie mehr in diesem Thema ist.</div>` : ''}
+      <div class="ovlbtns">${t ? `<button class="btn btn-ghost" data-act="themaDel" data-v="${t.id}" style="margin-right:auto">${ic('trash')}Löschen</button>` : ''}<button class="btn btn-ghost" data-act="ovlZu">Abbrechen</button><button class="btn btn-primary" data-act="themaSave" data-v="${t?.id || ''}">${t ? 'Speichern' : 'Anlegen'}</button></div>`);
+    setTimeout(() => $('thName')?.focus(), 0); }
+  else if(a === 'themaSave'){ const name = $('thName').value.trim(); if(!name) return toast('Name fehlt');
+    const r = d.v ? await sb.from('wissen_thema').update({ name }).eq('id', d.v).select().single()
+      : await sb.from('wissen_thema').insert({ name, sortierung: Math.max(0, ...(S.themen || []).map(t => t.sortierung || 0)) + 10 }).select().single();
+    if(r.error) return fehler(r.error.code === '23505' ? 'Dieses Thema gibt es schon.' : r.error, 'Thema');
+    S.themen = d.v ? S.themen.map(t => t.id === d.v ? r.data : t) : [...S.themen, r.data]; ovlZu(); render(); }
+  else if(a === 'themaDel'){ if(S.kats.some(k => k.thema_id === d.v)) return toast('In diesem Thema sind noch Kategorien.', true);
+    const { error } = await sb.from('wissen_thema').delete().eq('id', d.v); if(error) return fehler(error, 'Thema');
+    S.themen = S.themen.filter(t => t.id !== d.v); if(S.rub === d.v) S.rub = null; ovlZu(); render(); }
   else if(a === 'eDel'){ const z = byId(d.id); if(!z) return;
     bestaetige(`«${z.titel}» löschen?`, 'Löschen', async () => {
       const { error } = await sb.from('wissen_eintrag').update({ archiviert_am: new Date().toISOString() }).eq('id', z.id);
       if(error) return fehler(error, 'Löschen');
-      S.eintraege = S.eintraege.filter(x => x.id !== z.id); S.exemplare = S.exemplare.filter(x => x.eintrag_id !== z.id); toast('Gelöscht'); render();
+      S.eintraege = S.eintraege.filter(x => x.id !== z.id); S.exemplare = S.exemplare.filter(x => x.eintrag_id !== z.id); toast('Gelöscht'); if(S.eid === z.id) geheZu('suche'); else render();
     }, `${exVon(z).length > 1 ? 'Mit allen ' + exVon(z).length + ' Stück. ' : ''}Er verschwindet aus Übersicht, Listen und Etiketten (archiviert, kann bei Bedarf zurückgeholt werden).`); }
   else if(a === 'eKopie') await eintragKopieren(byId(d.id));
   else if(a === 'neuSave'){
     const titel = $('nTitel').value.trim(); if(!titel) return toast('Titel fehlt.', true);
-    const { data, error } = await sb.from('wissen_eintrag').insert({ titel, typ: typVon($('nKat').value), kategorie_id: $('nKat').value || null, wert: $('nWert')?.value.trim() || null, erstellt_von: S.userId }).select().single();
+    // Art pro Eintrag: Kurzeintrag oder Eintrag (Kopf wie die Kategorie: Gerät / Produkt / Wissen)
+    const art = MASCH ? 'geraet' : document.querySelector('input[name=nArt]:checked')?.value === 'kurz' ? 'kurz' : (a => a === 'kurz' ? 'produkt' : a)(typVon($('nKat').value));
+    const { data, error } = await sb.from('wissen_eintrag').insert({ titel, typ: art, kategorie_id: $('nKat').value || null, wert: art === 'kurz' ? $('nWert')?.value.trim() || null : null, erstellt_von: S.userId }).select().single();
     if(error) return fehler(error, 'Anlegen');
     { const { data: x, error: e2 } = await sb.from('wissen_exemplar').insert({ eintrag_id: data.id, sortierung: 10 }).select().single(); if(e2) fehler(e2, 'Exemplar'); else S.exemplare.push(x); }
     S.eintraege.push(data); ovlZu();
-    if(istKurz(data)){ toast('Kurzinfo angelegt'); render(); return; }
-    await oeffne(data.id); S.edit = JSON.parse(JSON.stringify(data)); render();
+    if(istKurz(data)){ toast('Kurzeintrag angelegt'); render(); return; }
+    await oeffne(data.id); S.bearb = true; S.edit = JSON.parse(JSON.stringify(data)); render();
   }
   else if(a === 'ovlZu'){ const zurueck = S.planOvl && (S.svf || bestaetigenCb); bestaetigenCb = null; ovlZu(); if(zurueck) planFenster(); else S.planOvl = false; }
   else if(a === 'ovlOk'){ const cb = bestaetigenCb; bestaetigenCb = null; ovlZu(); if(cb) await cb(); if(S.planOvl && !$('ovl').classList.contains('show')) planFenster(); }
