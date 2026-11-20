@@ -178,9 +178,11 @@ button.kg-kachel-kopf,a.kg-kachel-kopf{cursor:pointer;} button.kg-kachel-kopf:ho
   KG.kacheln = html => `<div class="kg-kacheln">${html}</div>`;
   KG.kachel = ({ titel, farbe = PAL.grau[1], icon = '', links = '', inhalt = '', klick = null, frei = false, attr = '' }) => {
     const t = KG.textAuf(farbe), ic = icon.startsWith('<') ? icon : KG.icon(icon, 17);
-    const kopf = klick ? `<button type="button" class="kg-kachel-kopf${t === '#FFFFFF' ? '' : ' hell'}" style="background:${farbe};color:${t}" data-act="${klick.act}" data-v="${klick.wert ?? ''}">`
-      : `<div class="kg-kachel-kopf${t === '#FFFFFF' ? '' : ' hell'}" style="background:${farbe};color:${t}">`;
-    return `<section class="kg-kachel${frei ? ' frei' : ''}" ${attr}>${kopf}${ic}<h4>${titel}</h4>${links ? `<span class="kg-kachel-links">${links}</span>` : ''}${klick ? '</button>' : '</div>'}<div class="kg-kachel-inhalt">${inhalt}</div></section>`;
+    // klick + links (z. B. «+» im Kopf): Kopf als klickbares div, damit die Knöpfe nicht in einem Knopf stecken
+    const alsKnopf = klick && !links;
+    const kopf = alsKnopf ? `<button type="button" class="kg-kachel-kopf${t === '#FFFFFF' ? '' : ' hell'}" style="background:${farbe};color:${t}" data-act="${klick.act}" data-v="${klick.wert ?? ''}">`
+      : `<div class="kg-kachel-kopf${t === '#FFFFFF' ? '' : ' hell'}" style="background:${farbe};color:${t}"${klick ? ` role="button" tabindex="0" data-act="${klick.act}" data-v="${klick.wert ?? ''}"` : ''}>`;
+    return `<section class="kg-kachel${frei ? ' frei' : ''}" ${attr}>${kopf}${ic}<h4>${titel}</h4>${links ? `<span class="kg-kachel-links">${links}</span>` : ''}${alsKnopf ? '</button>' : '</div>'}<div class="kg-kachel-inhalt">${inhalt}</div></section>`;
   };
 
   /* ---------------------------------------------------------------------------
