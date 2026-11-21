@@ -1698,7 +1698,7 @@ async function speichereTabellenZeilen(offerteId){
   });
   if(!zeilenListe.length) return;
   const { data: neueZeilen, error: insErr } = await sb.from('offerte_tabelle_zeile')
-    .insert(zeilenListe.map(t => ({ offerte_id: offerteId, eingabefeld_id: t.eingabefeld_id, name: t.zeile.name, reihenfolge: t.reihenfolge, option_id: (t.zeile.optionIds || [])[0] || null, option_ids: t.zeile.optionIds || [] })))
+    .insert(zeilenListe.map(t => ({ offerte_id: offerteId, eingabefeld_id: t.eingabefeld_id, name: t.zeile.name, uid: zeileUid(t.zeile), reihenfolge: t.reihenfolge, option_id: (t.zeile.optionIds || [])[0] || null, option_ids: t.zeile.optionIds || [] })))
     .select();
   if(insErr) throw insErr;
   const werteRows = [];
@@ -3708,7 +3708,7 @@ async function vorlageVorladen(otId){
   }catch(e){ /* nur Vorladen – Fehler egal */ }
 }
 async function ladeFormelDaten(otId){
-  const { data: efs, error: efErr } = await vorlageHolen('ef', otId, id => sb.from('eingabefeld').select('id,name,einheit,typ,fixer_wert,mindestwert,beschriftung,erklaerung,ausgeblendet,reihenfolge,ist_titel,ist_tabelle,zusatztext_moeglich,flaechenformel_moeglich').eq('offertentyp_id', id).order('reihenfolge'));
+  const { data: efs, error: efErr } = await vorlageHolen('ef', otId, id => sb.from('eingabefeld').select('id,name,einheit,typ,fixer_wert,mindestwert,beschriftung,erklaerung,ausgeblendet,reihenfolge,ist_titel,ist_tabelle,zusatztext_moeglich,flaechenformel_moeglich,zeilen_position').eq('offertentyp_id', id).order('reihenfolge'));
   if(efErr) throw efErr;
   eingabefelder = efs;
 
@@ -4900,10 +4900,11 @@ function fuelleVerweisPopup(){
       if(fremd) return `<div class="vp-zeile vp-gesperrt" title="Erst bei «${escHtml(fremd)}» abhaken, dann ist sie hier frei"><span class="vp-name">${escHtml(z.name || 'Zeile')} <span class="vp-bei">– ${escHtml(fremd)}</span></span><span class="vp-wert">${wertTxt}</span></div>`;
       return `<label class="vp-zeile"><input type="checkbox" data-ef="${e.ef.id}" data-zeile="${z._key}" ${meine ? 'checked' : ''}><span class="vp-name">${escHtml(z.name || 'Zeile')}</span><span class="vp-wert">${wertTxt}</span></label>`;
     }).join('');
-    return `<div class="vp-tabelle"><div class="vp-titel">${escHtml(e.ef.name)}</div>${liste || `<div class="vp-hint">Noch keine ${verweisWort(opt).sg} erfasst – bitte oben in der Tabelle eintragen.</div>`}</div>`;
+    return `<div class="vp-tabelle">${eintraege.length > 1 ? `<div class="vp-titel">${escHtml(e.ef.name)}</div>` : ''}${liste || `<div class="vp-hint">Noch keine ${verweisWort(opt).sg} erfasst – bitte oben in der Tabelle eintragen.</div>`}</div>`;
   }).join('');
-  pop.innerHTML = `<div class="vp-kopf">${verweisWort(opt).pl} für «${escHtml(opt.name)}»</div>${teile}
-    <div class="vp-fuss${summe <= 0 ? ' warn' : ''}"><span>Zugeordnet: <b>${verweisFmt(summe)}${einheit ? ' ' + escHtml(einheit) : ''}</b>${offen > 0 ? `<br>noch frei: ${verweisFmt(offen)}${einheit ? ' ' + escHtml(einheit) : ''}` : ''}</span><button type="button" class="vp-fertig">Fertig</button></div>`;
+  // schlank (Stefan 2026-11-21): nur die Zeilen zum Anhaken und «Fertig», ohne Titel und ohne «zugeordnet / noch frei»
+  pop.innerHTML = `${teile}
+    <div class="vp-fuss${summe <= 0 ? ' warn' : ''}"><span></span><button type="button" class="vp-fertig">Fertig</button></div>`;
   pop.querySelector('.vp-fertig').addEventListener('click', versucheVerweisPopupZuSchliessen);
   pop.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.addEventListener('change', () => {
     const z = (bereichTabelleZeilen[cb.dataset.ef] || []).find(x => String(x._key) === cb.dataset.zeile);
@@ -5107,7 +5108,7 @@ function fuelleFormenPopup(pop, opt){
   }).join('');
   const summe = formenSumme(opt.id), frei = b.stuecke.filter(s => !bereichFormenZuordnung[s.id] && formenStueckZaehlt(s, sp)).reduce((a, s) => a + s.laenge, 0);
   pop.innerHTML = `${kopf}<svg viewBox="0 0 300 190" class="vp-formsvg" role="img" aria-label="Form mit Umfangsstücken">${formenSvg(z, stil, true)}</svg>${ohneMasse ? '<div class="vp-hint">Die Masse sind oben noch nicht eingetragen, die Längen sind darum 0.</div>' : ''}${zeilen}
-    <div class="vp-fuss${summe <= 0 ? ' warn' : ''}"><span>Zugeordnet: <b>${formenFmt(summe)} m</b>${frei > 0 ? `<br>noch frei: ${formenFmt(frei)} m` : ''}</span><button type="button" class="vp-fertig">Fertig</button></div>`;
+    <div class="vp-fuss${summe <= 0 ? ' warn' : ''}"><span></span><button type="button" class="vp-fertig">Fertig</button></div>`;
   pop.querySelector('.vp-fertig').addEventListener('click', versucheVerweisPopupZuSchliessen);
   pop.querySelectorAll('[data-stueck]').forEach(el => el.addEventListener(el.tagName === 'INPUT' ? 'change' : 'click', () => formenToggleStueck(opt.id, el.dataset.stueck)));
 }
@@ -5273,7 +5274,7 @@ async function ladeBestehendeOfferte(offerteId){
       sb.from('offerte_eingabefeld_wert').select('eingabefeld_id, wert').eq('offerte_id', offerteId),
       sb.from('offerte_auswahl').select('option_id, anzahl, auswahlgruppe_option_id').eq('offerte_id', offerteId),
       sb.from('offerte_eingabefeld_notiz').select('eingabefeld_id, notiz').eq('offerte_id', offerteId),
-      sb.from('offerte_tabelle_zeile').select('id, eingabefeld_id, name, reihenfolge, option_id, option_ids').eq('offerte_id', offerteId).order('reihenfolge')
+      sb.from('offerte_tabelle_zeile').select('id, eingabefeld_id, name, uid, reihenfolge, option_id, option_ids').eq('offerte_id', offerteId).order('reihenfolge')
     ]);
     const { data: efWerte, error: efErr } = rEf;
     if(efErr){ console.error(efErr); $saveStatus.textContent = 'Fehler beim Laden: ' + efErr.message; $saveStatus.className='status err'; return; }
@@ -5316,7 +5317,7 @@ async function ladeBestehendeOfferte(offerteId){
     (tabZeilen || []).forEach(z => {
       const werte = {};
       tabWerte.filter(w => w.zeile_id === z.id).forEach(w => { werte[w.spalte_id] = { wert: w.wert, notiz: w.notiz || '', text: w.text_wert || null }; });
-      (bereichTabelleZeilen[z.eingabefeld_id] ||= []).push({ _key: ++tabelleZeileCounter, id: z.id, name: z.name, werte, optionIds: (z.option_ids && z.option_ids.length) ? z.option_ids : (z.option_id ? [z.option_id] : []) });
+      (bereichTabelleZeilen[z.eingabefeld_id] ||= []).push({ _key: ++tabelleZeileCounter, id: z.id, uid: z.uid || undefined, name: z.name, werte, optionIds: (z.option_ids && z.option_ids.length) ? z.option_ids : (z.option_id ? [z.option_id] : []) });
     });
     renderBereich();
   }
@@ -5971,6 +5972,11 @@ function berechneOptionenTextListe(){
         if(opt?.beschreibung && opt.beschreibung.trim()) pushOhneDuplikat(opt.beschreibung);
       });
     });
+    // Tabellen mit gelber Position pro Zeile (z. B. Trog, Hochbeet): Text je Material und Befüllung
+    tabellenPositionen().forEach(p => {
+      const t = (p.cfg.texte || {})[p.mat]; if(t) pushOhneDuplikat(t);
+      const tb = (p.cfg.texte_befuellung || {})[p.bef]; if(tb) pushOhneDuplikat(tb);
+    });
   }
   return zeilen.join('\n');
 }
@@ -6034,6 +6040,51 @@ function seedeFreitextZeilen(){
       menge: v.mengeVorschlag ?? 0, einheit: v.einheit || '', preis: v.preisVorschlag ?? 0,
       freitextVorlageId: v.id
     });
+  });
+}
+
+// Tabellen mit «zeilen_position» (eingabefeld.zeilen_position, z. B. Trog, Hochbeet): pro Tabellenzeile mit
+// Menge und Massen eine gelbe Eigene Position (Preis 0, z. B. Gefässpreis von Grütter eintragen).
+// Bezeichnung = Materialtext + Masse, Menge = Spalte Menge. Schlüssel «tz:<uid der Tabellenzeile>» bleibt über
+// das Speichern hinweg gleich, so bleibt ein eingetragener Preis an seinem Trog.
+function zeileUid(z){ return z.uid || (z.uid = crypto.randomUUID()); }
+function istTabellenPosition(z){ return String(z.schluessel || '').startsWith('tz:'); }
+function tabellenPositionen(){
+  const out = [];
+  (eingabefelder || []).forEach(ef => {
+    const cfg = ef.zeilen_position; if(!ef.ist_tabelle || !cfg) return;
+    (bereichTabelleZeilen[ef.id] || []).forEach(z => {
+      const w = id => Number(z.werte[id]?.wert) || 0;
+      const menge = w(cfg.menge), l = w(cfg.laenge), b = w(cfg.breite), h = w(cfg.hoehe);
+      if(menge <= 0 || l <= 0 || b <= 0) return;
+      const mat = String(w(cfg.material) || 1), bef = String(w(cfg.befuellung) || 1);
+      const art = (cfg.bezeichnung || {})[mat] || ef.name;
+      const masse = [l, b, h].filter(n => n > 0).map(n => n.toLocaleString('de-CH')).join(' × ') + ' cm';
+      out.push({ schluessel: 'tz:' + zeileUid(z), bezeichnung: `${art}, ${masse}`, menge, cfg, mat, bef });
+    });
+  });
+  return out;
+}
+function seedeTabellenPositionen(){
+  const soll = new Map(tabellenPositionen().map(p => [p.schluessel, p]));
+  eigeneZeilen = eigeneZeilen.filter(z => {
+    if(!istTabellenPosition(z)) return true;
+    const p = soll.get(z.schluessel);
+    if(p){
+      if(!z.geloescht){
+        // Bezeichnung zieht mit den Massen nach, solange sie nicht von Hand geändert wurde
+        if(z.autoBez === undefined || z.bezeichnung === z.autoBez) z.bezeichnung = p.bezeichnung;
+        z.autoBez = p.bezeichnung; z.menge = p.menge;
+      }
+      return true;
+    }
+    // Tabellenzeile weg oder ohne Masse: nur behalten, wenn schon ein Preis eingetragen ist
+    return !z.geloescht && (z.preis || 0) !== 0;
+  });
+  soll.forEach(p => {
+    if(eigeneZeilen.some(z => z.schluessel === p.schluessel)) return;
+    eigeneZeileCounter++;
+    eigeneZeilen.push({ clientKey: 'ez' + eigeneZeileCounter, dbId: null, kategorie: 'material', bezeichnung: p.bezeichnung, autoBez: p.bezeichnung, menge: p.menge, einheit: 'Stk.', preis: 0, schluessel: p.schluessel });
   });
 }
 
@@ -6130,7 +6181,7 @@ function renderEigeneZeilenFuerKategorie(kat, container){
     // ODER Preis (weder Vorschlag noch bereits eingetragen) - die optische
     // Markierung (betragnull) unten ist dagegen generisch: jede Zeile mit
     // Betrag 0 wird hervorgehoben, egal aus welchem Grund.
-    const istUnvollstaendig = z.freitextVorlageId != null && ((z.menge || 0) === 0 || (z.preis || 0) === 0);
+    const istUnvollstaendig = (z.freitextVorlageId != null || istTabellenPosition(z)) && ((z.menge || 0) === 0 || (z.preis || 0) === 0);
     if(istUnvollstaendig) unvollstaendigeFreitextZeilen.push(z);
     const tr = document.createElement('tr');
     tr.className = 'crow ezrow' + (betrag === 0 ? ' betragnull' : '');
@@ -6153,7 +6204,7 @@ function renderEigeneZeilenFuerKategorie(kat, container){
       // Freitext-Position aus einer Vorlage: nur als geloescht markieren,
       // sonst legt seedeFreitextZeilen() sie beim naechsten recalc() sofort
       // wieder an (war der Grund, warum sie sich nicht loeschen liess).
-      if(z.freitextVorlageId) z.geloescht = true;
+      if(z.freitextVorlageId || istTabellenPosition(z)) z.geloescht = true;
       else eigeneZeilen = eigeneZeilen.filter(x => x.clientKey !== z.clientKey);
       recalc();
       planAutosave();
@@ -7161,6 +7212,7 @@ const lwModusToggleHtml = '<span style="display:flex;gap:4px;">' + [['zeit', 'St
       if(meineGeneration !== recalcGeneration) return; // inzwischen ueberholt
       renderTransportWahl();
       seedeFreitextZeilen();
+      seedeTabellenPositionen();
       const zugFaktor = zi => (zi.zugangsfaktoren?.[(bereichZugaenglichkeitStufe || 2) - 1]) ?? 1;
       // Mengenoption (Tool B, Option bearbeiten): multipliziert die Menge
       // aller Ressourcenzeilen dieser Option mit der vom Mitarbeiter
@@ -7859,7 +7911,7 @@ $('supportChatInput').addEventListener('keydown', (e) => {
   const zeileWeg = tr => {
     if(istEigene(tr)){
       const z = eigeneVon(tr); if(!z || !confirm('Zeile löschen?')) return;
-      if(z.freitextVorlageId) z.geloescht = true; else eigeneZeilen = eigeneZeilen.filter(x => x !== z);
+      if(z.freitextVorlageId || istTabellenPosition(z)) z.geloescht = true; else eigeneZeilen = eigeneZeilen.filter(x => x !== z);
     }else{
       const k = zeilenKorrekturen[tr.dataset.sk] || (zeilenKorrekturen[tr.dataset.sk] = { menge_korrektur: null, preis_korrektur: null, geloescht: false });
       k.geloescht = !k.geloescht; if(k.geloescht) k.optional = false;
