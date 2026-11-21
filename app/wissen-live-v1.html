@@ -395,6 +395,8 @@ table.t tr:last-child td{border-bottom:0;}
 /* ein Block pro Stück: grosse Nummer, Kacheln mit den festen Feldern, Notiz als Kachel, Service darunter */
 .stblock{border:1px solid var(--line);border-radius:11px;padding:8px 10px;display:flex;flex-direction:column;gap:8px;}
 .qrkarte .stblock{border:0;padding:0;}
+.stblock.blass{background:#F3F5F7;opacity:.55;cursor:pointer;transition:opacity .15s;} .stblock.blass:hover{opacity:.85;}
+h2 .titnr{color:var(--muted,#8B9097);font-weight:600;}
 .stkraster, .lbz{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px;}
 .stkicons{display:flex;align-items:center;justify-content:flex-end;gap:4px;grid-column:-2 / -1;} .kg-ibtn.an{background:var(--primary);border-color:var(--primary);color:#fff;} .kg-ibtn.an:hover{background:var(--primary-l);border-color:var(--primary-l);color:#fff;}
 .mehrfeld{display:flex;flex-wrap:wrap;gap:6px;padding:8px;background:var(--bg);border-radius:8px;} .mehrfeld .btn{display:inline-flex;align-items:center;gap:6px;}
@@ -955,7 +957,7 @@ function starteAusUrl(){
 window.addEventListener('popstate', () => {
   if(S.qr) return;
   const h = location.hash.match(/^#e-([0-9a-f-]{36})(?:\.([0-9a-f-]{36}))?$/);
-  if(h && byId(h[1])){ if(S.eid !== h[1]) oeffne(h[1], null, true, h[2]); else if(h[2] && h[2] !== S.xid){ S.xid = h[2]; S.kvNeu = null; S.ask = null; render(); } return; }
+  if(h && byId(h[1])){ if(S.eid !== h[1]) oeffne(h[1], null, true, h[2]); else if(h[2] && h[2] !== S.xid){ S.xid = h[2]; S.xFokus = h[2]; S.kvNeu = null; S.ask = null; render(); } return; }
   S.view = location.hash === '#listen' || location.hash === '#tabelle' ? 'listen' : location.hash === '#etiketten' ? 'etiketten' : location.hash === '#service' && MASCH ? 'service' : location.hash === '#einstellungen' && istBuero() ? 'einstellungen' : 'suche';
   S.bearb = false;
   S.eid = null; render();
@@ -970,6 +972,8 @@ async function oeffne(id, sec, ohneHistory, xid){
   S.view = 'eintrag'; S.eid = id; S.edit = null; S.kvNeu = null; S.ask = null; S.svE = false; S.svf = null; S.det = null; S.anl = new Set();
   if(!S.qr) merke('zuletzt', [id, ...zuletzt().filter(x => x !== id)].slice(0, 10));
   const e = byId(id);
+  // Stück, von dem man kommt (Planer-Klick, Link mit .Stück): Nummer im Titel, die anderen Stück blasser
+  S.xFokus = xid && exById(xid)?.eintrag_id === id && exVon(e).length > 1 ? xid : null;
   S.xid = xid && exById(xid)?.eintrag_id === id ? xid : exVon(e)[0]?.id || null;
   if(!ohneHistory && !S.qr) history.pushState(null, '', location.pathname + '#e-' + id + (xid ? '.' + xid : ''));
   S.open = new Set(sec ? [sec] : offenVon(e));
@@ -1298,7 +1302,7 @@ function vEintrag(){
     ? `<button class="btn btn-ghost btn-sm" data-act="edit">${ic('edit')}Titel, Kategorie, Stichwörter</button><button class="btn btn-primary btn-sm" data-act="modus" data-v="0">${ic('check')}Fertig</button>`
     : `<button class="btn btn-ghost btn-sm" data-act="modus" data-v="1">${ic('edit')}Bearbeiten</button><button class="kg-ibtn danger" data-act="eDel" data-id="${e.id}" title="Löschen (archivieren)" aria-label="Löschen">${ic('trash')}</button>`;
   const acts = S.qr ? '' : `<div class="acts">${modus}</div>${etikette ? `<div class="acts" style="margin-top:8px">${etikette}</div>` : ''}`;
-  const titel = `<h2>${esc(e.titel)}${S.qr && x?.nummer ? ' ' + esc(x.nummer) : ''}${S.qr ? '' : ` <button class="sternknopf ${istFav(e.id) ? 'an' : ''}" data-act="fav" data-id="${e.id}" title="${istFav(e.id) ? 'Aus den Favoriten entfernen' : 'Zu meinen Favoriten'}" aria-label="Favorit">${ic('stern')}</button>`}</h2>`;
+  const titel = `<h2>${esc(e.titel)}${S.qr && x?.nummer ? ' ' + esc(x.nummer) : !S.qr && x?.nummer && S.xFokus === x.id ? `<span class="titnr"> · ${esc(x.nummer)}</span>` : ''}${S.qr ? '' : ` <button class="sternknopf ${istFav(e.id) ? 'an' : ''}" data-act="fav" data-id="${e.id}" title="${istFav(e.id) ? 'Aus den Favoriten entfernen' : 'Zu meinen Favoriten'}" aria-label="Favorit">${ic('stern')}</button>`}</h2>`;
   const meta = `<div class="meta">${e.kategorie_id ? `<span class="chip">${esc(katName(e.kategorie_id))}</span>` : ''}${e.tags.map(t => `<span class="chip tag">${esc(t)}</span>`).join('')}</div>`;
   // Bildfeld: Büro kann immer (auch in «Anzeigen» und nach dem QR-Scan) ein Foto hinzufügen; ersetzen mit Rückfrage
   const foto = istBuero() && !e.titelfoto_pfad ? `<button class="ph phleer" data-act="titelfoto" title="Foto hinzufügen (Kamera oder Galerie)">${ic('camera')}<span>Foto hinzufügen</span></button>`
@@ -1514,7 +1518,8 @@ function stueckBlock(e, x){
       <button class="kg-ibtn" data-act="qrKopie" data-v="${QR_BASIS + x.qr_nr}" title="QR-Link kopieren">${ic('link')}</button>
       <button class="kg-ibtn danger" data-act="exArchiv" data-x="${x.id}" title="Stück archivieren">${ic('archive')}</button></div>` : '';
   const sv = mitService(e) && (logZeilen(e, x).length || bu);
-  return `<div class="stblock" data-x="${x.id}">
+  const blass = S.xFokus && S.xFokus !== x.id;
+  return `<div class="stblock${blass ? ' blass' : ''}" data-x="${x.id}"${blass ? ` data-act="exFokus" title="Zu ${esc(x.nummer || 'diesem Stück')} wechseln"` : ''}>
     <div class="stkraster">${kacheln}${notizKachel}${knoepfe}</div>${notizFeld}
     ${sv ? `<div class="stteil">${exService(e, x)}</div>` : ''}
   </div>`;
@@ -2805,6 +2810,7 @@ document.addEventListener('click', async ev => {
   }
   // Exemplare
   else if(a === 'stkNotiz'){ S.notizAuf = S.notizAuf || new Set(); S.notizAuf.has(d.x) ? S.notizAuf.delete(d.x) : S.notizAuf.add(d.x); render(); if(S.notizAuf.has(d.x)) document.querySelector(`[data-xnotiz="${d.x}"]`)?.focus(); }
+  else if(a === 'exFokus'){ S.xid = S.xFokus = d.x; history.replaceState(null, '', location.pathname + '#e-' + e.id + '.' + d.x); render(); }
   else if(a === 'exTab'){ S.xid = d.id; S.kvNeu = null; S.ask = null; history.replaceState(null, '', location.pathname + '#e-' + e.id + '.' + d.id); render(); }
   else if(a === 'exNeu'){
     const xs = exVon(e);
