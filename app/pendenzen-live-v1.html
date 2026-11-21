@@ -765,6 +765,7 @@ async function ladeAlles(){
     { const zid = new URLSearchParams(location.search).get('zusage'); if(zid){ history.replaceState(null, '', location.pathname + location.hash); await zusageAusOffertentool(zid); } }
     // aus Einstellungen › Pendenzen («Meine Einstellungen»): Fenster gleich offen
     if(location.hash === '#einstellungen'){ S.set = true; zeichneOver(); history.replaceState(null, '', location.pathname + location.search); }
+    pzNavBereit = true; pzNavMerken();
   } catch(e){ fehler(e, 'Laden'); }
 }
 async function ladeBoard(){
@@ -1114,6 +1115,26 @@ function detHtml(){
     <div class="foot">${S.board.typ === 'person' && p.zeit && !l.zeit ? `<button class="btn btn-ghost" data-auszeit="${p.id}" title="Aus «${esc(ZEIT[p.zeit].t)}» nehmen – die Pendenz bleibt in «${esc(l.titel)}»">${K('zurueck', 15)}Zurück in «${esc(l.titel)}»</button>` : ''}<span class="sp"></span>${OF(l.art_id) ? `<button class="btn btn-ghost" data-zusage="${p.id}">${K('check', 15)}Zugesagt → Planung</button>` : ''}<button class="btn btn-ghost" data-archiv="${p.id}">${K('archiv', 15)}Archivieren</button></div>
   </aside>`;
 }
+// Browser «Zurück»: Board-Wechsel und geöffnete Pendenz sind Schritte im Verlauf (Adresse bleibt gleich)
+const pzNavStand = () => ({ b: S.board?.id || null, m: !!S.ofMeine, sel: S.sel || null });
+let pzNavZurueck = false, pzNavBereit = false;
+function pzNavMerken(){
+  if(!pzNavBereit || pzNavZurueck) return;
+  const st = pzNavStand(), alt = history.state?.pz;
+  if(alt && alt.b === st.b && alt.m === st.m && alt.sel === st.sel) return;
+  if(!alt) history.replaceState({ ...(history.state || {}), pz: st }, ''); else history.pushState({ pz: st }, '');
+}
+{ const _zeichne = zeichne; zeichne = function(){ const r = _zeichne.apply(this, arguments); pzNavMerken(); return r; }; }
+window.addEventListener('popstate', async ev => {
+  const st = ev.state?.pz; if(!st) return;
+  pzNavZurueck = true;
+  try{
+    if(st.b !== S.board?.id || st.m !== !!S.ofMeine){ const b = S.boards.find(x => x.id === st.b);
+      if(b){ S.board = b; S.ofMeine = st.m; S.pop = null; S.bmenu = false; try { localStorage.setItem('pz_board', b.id + (st.m ? '|m' : '')); } catch(e){} await ladeBoard(); } }
+    S.sel = st.sel && S.pz.some(p => p.id === st.sel) ? st.sel : null; S.delDatei = null; S.pop = null;
+    zeichne(); if(S.sel) ladeUrls();
+  } finally { pzNavZurueck = false; }
+});
 function zeichneOver(){
   let h = '';
   if(S.sel) h += S.ein.oeffnen === 'fenster' ? `<div class="dbg" data-bg="det">${detHtml()}</div>` : detHtml();
