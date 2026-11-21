@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script src="/kg-pw-schutz.js?v=5"></script>
-<script src="/kg-stil.js?v=84"></script>
+<script src="/kg-stil.js?v=87"></script>
 <script src="/kg-bereiche.js?v=3"></script>
 <script src="/kg-kunde.js?v=2"></script>
 <script>if(/[?&]offerte=/.test(location.search)) document.documentElement.classList.add('doklaedt');</script>
@@ -2514,20 +2514,16 @@ function renderArtikelstammPickerListe(){
   $('apGruppen').querySelectorAll('button').forEach(btn => btn.classList.toggle('on', (btn.dataset.gr || null) === apGruppeId));
   const q = $('apSuche').value.trim().toLowerCase();
   // wie die Suche im Artikelstamm: alle Wörter müssen vorkommen (Bezeichnung, Nummer, Lieferant, Gruppe), Reihenfolge egal
-  const woerter = q.split(/\s+/).filter(Boolean);
-  const treffer = ARTIKEL_ALLE.filter(a => {
-    if(apKategorie && a.kategorie !== apKategorie) return false;
-    if(apGruppeId && a.artikelgruppeId !== apGruppeId) return false;
-    if(apLieferantId && a.lieferantId !== apLieferantId) return false;
-    if(woerter.length){ const t = `${a.bezeichnung} ${a.artikelnummer_knecht || ''} ${a.lieferantName || ''} ${a.artikelgruppeName || ''}`.toLowerCase(); if(!woerter.every(w => t.includes(w))) return false; }
-    return true;
-  });
+  // fehlertolerant (KG.suchFilter): Leerzeichen/Bindestriche/Umlaute egal, bei 0 Treffern auch mit Tippfehler
+  const basis = ARTIKEL_ALLE.filter(a => !(apKategorie && a.kategorie !== apKategorie) && !(apGruppeId && a.artikelgruppeId !== apGruppeId) && !(apLieferantId && a.lieferantId !== apLieferantId));
+  const treffer = KG.suchFilter(basis, q, a => `${a.bezeichnung} ${a.artikelnummer_knecht || ''} ${a.lieferantName || ''} ${a.artikelgruppeName || ''}`);
   apTreffer = treffer;
   // Vorschläge über der Liste: passt der Text zu einem Lieferanten oder einer Gruppe → mit einem Klick als Filter setzen
   const vs = $('apVorschlag'); if(vs){
-    const zaehle = (key, name) => { const m = new Map(); ARTIKEL_ALLE.forEach(a => { if(a[key] && String(a[name] || '').toLowerCase().includes(q)) m.set(a[key], { id: a[key], n: a[name], c: (m.get(a[key])?.c || 0) + 1 }); }); return [...m.values()].sort((x, y) => y.c - x.c).slice(0, 4); };
+    const zaehle = (key, name) => { const m = new Map(); const sammle = unscharf => ARTIKEL_ALLE.forEach(a => { if(a[key] && KG.suchPasst(a[name], q, unscharf)) m.set(a[key], { id: a[key], n: a[name], c: (m.get(a[key])?.c || 0) + 1 }); }); sammle(false); if(!m.size) sammle(true); return [...m.values()].sort((x, y) => y.c - x.c).slice(0, 4); };
     const lf = q.length >= 2 && !apLieferantId ? zaehle('lieferantId', 'lieferantName') : [], gr = q.length >= 2 && !apGruppeId ? zaehle('artikelgruppeId', 'artikelgruppeName') : [];
-    vs.innerHTML = lf.map(x => `<button type="button" class="apvs" data-apl="${x.id}">Lieferant: <b>${escHtml(x.n)}</b> <small>${x.c}</small></button>`).join('') + gr.map(x => `<button type="button" class="apvs" data-apg="${x.id}">Gruppe: <b>${escHtml(x.n)}</b> <small>${x.c}</small></button>`).join('');
+    vs.innerHTML = (treffer.unscharf ? `<span class="apvs" style="cursor:default;">Ähnliche Treffer (Schreibweise abweichend)</span>` : '') +
+      lf.map(x => `<button type="button" class="apvs" data-apl="${x.id}">Lieferant: <b>${escHtml(x.n)}</b> <small>${x.c}</small></button>`).join('') + gr.map(x => `<button type="button" class="apvs" data-apg="${x.id}">Gruppe: <b>${escHtml(x.n)}</b> <small>${x.c}</small></button>`).join('');
     vs.hidden = !vs.innerHTML;
   }
   $('apBody').innerHTML = treffer.map(a => `

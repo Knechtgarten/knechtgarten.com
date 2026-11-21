@@ -174,6 +174,53 @@ button.kg-kachel-kopf,a.kg-kachel-kopf{cursor:pointer;} button.kg-kachel-kopf:ho
     const f = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); };
     return 0.2126 * f(n >> 16) + 0.7152 * f((n >> 8) & 255) + 0.0722 * f(n & 255); };
   KG.textAuf = hex => { const L = lum(hex); return 1.05 / (L + 0.05) >= (L + 0.05) / (lum('#232B35') + 0.05) ? '#FFFFFF' : '#232B35'; };
+
+  // Fehlertolerante Suche (Artikel, Lieferanten …): Gross/klein, Leerzeichen, Bindestriche, Umlaute egal
+  // («koi breeder» = «Koi-Breeder», «badualpha6» = «Badu Alpha 6»). KG.suchPasst(text, q) = alle Wörter kommen vor.
+  // Unscharf (unscharf=true): pro Wort ab 5 Zeichen ein Tippfehler erlaubt, ab 8 Zeichen zwei («Koi-Brieder»).
+  // Muster: erst exakt filtern, bei 0 Treffern nochmals mit unscharf=true (siehe KG.suchFilter).
+  const kompakt = s => String(s ?? '').toLowerCase().replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]/g, '');
+  KG.suchKompakt = kompakt;
+  KG.suchWoerter = q => String(q ?? '').split(/\s+/).map(kompakt).filter(Boolean);
+  const abstandHoechstens = (a, b, max) => { // Levenshtein mit Abbruch, sobald > max
+    if(Math.abs(a.length - b.length) > max) return false;
+    let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+    for(let i = 1; i <= a.length; i++){
+      const cur = [i]; let min = i;
+      for(let j = 1; j <= b.length; j++){ cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); if(cur[j] < min) min = cur[j]; }
+      if(min > max) return false; prev = cur;
+    }
+    return prev[b.length] <= max;
+  };
+  const wortPasstUnscharf = (t, w) => {
+    if(t.includes(w)) return true;
+    const max = w.length >= 8 ? 2 : w.length >= 5 ? 1 : 0;
+    if(!max) return false;
+    // schneller Vorfilter: ein Tippfehler zerstört höchstens 2 Buchstabenpaare
+    let paare = 0; for(let i = 0; i + 2 <= w.length; i++) if(t.includes(w.substr(i, 2))) paare++;
+    if(paare < w.length - 1 - 2 * max) return false;
+    for(let len = w.length - max; len <= w.length + max; len++){
+      if(len < 2) continue;
+      for(let i = 0; i + len <= t.length; i++) if(abstandHoechstens(w, t.substr(i, len), max)) return true;
+    }
+    return false;
+  };
+  KG.suchPasst = (text, q, unscharf = false) => {
+    const ws = Array.isArray(q) ? q : KG.suchWoerter(q);
+    if(!ws.length) return true;
+    const t = kompakt(text);
+    return ws.every(w => unscharf ? wortPasstUnscharf(t, w) : t.includes(w));
+  };
+  // Liste filtern: textVon(eintrag) liefert den Suchtext. Ergebnis hat .unscharf = true, wenn erst die tolerante Suche traf.
+  KG.suchFilter = (liste, q, textVon) => {
+    const ws = KG.suchWoerter(q);
+    if(!ws.length){ const r = liste.slice(); r.unscharf = false; return r; }
+    let r = liste.filter(x => KG.suchPasst(textVon(x), ws));
+    r.unscharf = false;
+    if(!r.length){ r = liste.filter(x => KG.suchPasst(textVon(x), ws, true)); r.unscharf = r.length > 0; }
+    return r;
+  };
   // Gemeinsame Kacheln (CSS oben): icon = Name aus KG.pfade oder fertiges <svg>; klick = { act, wert } macht den Kopf zum Knopf
   KG.kacheln = html => `<div class="kg-kacheln">${html}</div>`;
   KG.kachel = ({ titel, farbe = PAL.grau[1], icon = '', links = '', inhalt = '', klick = null, frei = false, attr = '' }) => {
