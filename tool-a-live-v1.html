@@ -3457,20 +3457,20 @@ function renderTagessatzInhalt(){
       // gleicher grauer Balken wie im Konfigurator (Formel): Pfeil + Name, Tage-Summe im rechten Drittel
       return `
       <div class="afblock tsas ${offen ? '' : 'afzu'}" data-as="${as.id}">
-        <label class="flabel afklapp tshead"><span class="afname"><button type="button" class="afToggle aktiv" tabindex="-1">${ICON.chevronDown}</button>${String(as.name).replace(/,\s*$/, '')}</span><span class="afgew"><span class="astagesum" data-assum="${as.id}">${tageText(summeArbeitsschritt(as.id))}</span></span></label>
+        <label class="flabel afklapp tshead"><span class="afname"><button type="button" class="afToggle aktiv" tabindex="-1">${ICON.chevronDown}</button>${String(as.name).replace(/,\s*$/, '')}</span><span class="afgew">${teilschritteFuerAs.every(t => t.nurFest) ? '' : `<span class="astagesum" data-assum="${as.id}">${tageText(summeArbeitsschritt(as.id))}</span>`}</span></label>
         <div class="tsbody">
           ${teilschritteFuerAs.map(ts => {
             const af = tagessatzAuswahlfelder.find(a => a.teilschrittId === ts.id);
             return `
             <div class="tsrow" data-ts="${ts.id}">
-              <div class="tsrowtop">
+              <div class="tsrowtop"${ts.nurFest && ts.name === as.name ? ' style="display:none"' : ''}>
                 <span class="tsname" title="${String(ts.beschreibung || ts.name).replace(/"/g, '&quot;')}">${ts.name}</span>
-                <div class="astage"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="number" step="0.5" min="0" value="${teilschrittTage[ts.id] ?? 0}" data-ts="${ts.id}"><span class="unit">Tage</span></div>
-                <button type="button" class="kg-ibtn tsDetailBtn" data-ts="${ts.id}" title="Was ist drin? Zeilen ansehen und für diese Offerte ändern" aria-label="Was ist drin?">${KG.icon('notiz', 14)}${(tagessatzAnpassungen[ts.id] || []).length ? '<span class="tsDot"></span>' : ''}</button>
+                ${ts.nurFest ? '' : `<div class="astage"><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="number" step="0.5" min="0" value="${teilschrittTage[ts.id] ?? 0}" data-ts="${ts.id}"><span class="unit">Tage</span></div>
+                <button type="button" class="kg-ibtn tsDetailBtn" data-ts="${ts.id}" title="Was ist drin? Zeilen ansehen und für diese Offerte ändern" aria-label="Was ist drin?">${KG.icon('notiz', 14)}${(tagessatzAnpassungen[ts.id] || []).length ? '<span class="tsDot"></span>' : ''}</button>`}
               </div>
               ${af ? `<div class="afblock">
-                <label class="flabel">${af.name}</label>
-                <div class="optrow">${af.optionen.map(o => `<button type="button" class="opt ${(tagessatzAuswahl[ts.id]||new Set()).has(o.id)?'on':''}" data-af="${af.id}" data-opt="${o.id}">${o.name}</button>`).join('')}</div>
+                ${af.name === ts.name ? '' : `<label class="flabel">${af.name}</label>`}
+                <div class="optrow">${af.optionen.map(o => `<button type="button" class="opt ${(tagessatzAuswahl[ts.id]||new Set()).has(o.id)?'on':''}" data-af="${af.id}" data-opt="${o.id}"${o.hinweistext ? ` title="${escHtml(o.hinweistext)}"` : ''}>${o.name}</button>`).join('')}</div>
               </div>` : ''}
             </div>`;
           }).join('')}
@@ -3907,11 +3907,11 @@ async function ladeTagessatzDaten(otId){
     .from('arbeitsschritt')
     .select(`id, name, reihenfolge,
       teilschritt ( id, name, beschreibung, ausgeblendet, reihenfolge,
-        ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, tagesleistung_menge, artikel_id,
+        ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, tagesleistung_menge, menge_ausdruck, artikel_id,
           artikel ( bezeichnung, einheit, vp_knecht ) ),
         auswahlfeld ( id, name,
-          auswahloption ( id, name, beschreibung, reihenfolge, mehrfachauswahl,
-            ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, tagesleistung_menge, artikel_id,
+          auswahloption ( id, name, beschreibung, hinweistext, reihenfolge, mehrfachauswahl,
+            ressourcenzeile ( id, kategorie, bezeichnung_override, preis_override, tagesleistung_menge, menge_ausdruck, artikel_id,
               artikel ( bezeichnung, einheit, vp_knecht ) ) ) ) )`)
     .eq('offertentyp_id', id).eq('ausgeblendet', false).order('reihenfolge'));
   if(error) throw error;
@@ -3928,7 +3928,9 @@ async function ladeTagessatzDaten(otId){
       bezeichnung: rz.bezeichnung_override || rz.artikel?.bezeichnung || '(unbenannt)',
       einheit: rz.artikel?.einheit || '',
       preis: rz.preis_override ?? rz.artikel?.vp_knecht ?? 0,
-      tagesleistungMenge: rz.tagesleistung_menge ?? 0
+      tagesleistungMenge: rz.tagesleistung_menge ?? 0,
+      // feste Menge (Formel, z. B. Maschinentransport mit Fahrzeit oder «8 Std.» Projektleitung): zählt einmal, nicht x Tage
+      fest: (rz.tagesleistung_menge == null && rz.menge_ausdruck) ? rz.menge_ausdruck : null
     });
   }
   (arbeitsschritte || []).forEach(as => {
@@ -3940,7 +3942,7 @@ async function ladeTagessatzDaten(otId){
         const af = ts.auswahlfeld;
         tagessatzAuswahlfelder.push({
           id: af.id, teilschrittId: ts.id, arbeitsschrittId: as.id, name: af.name,
-          optionen: (af.auswahloption || []).slice().sort((a, b) => (a.reihenfolge || 0) - (b.reihenfolge || 0)).map(o => ({ id: o.id, name: o.name, beschreibung: o.beschreibung, mehrfachauswahl: o.mehrfachauswahl }))
+          optionen: (af.auswahloption || []).slice().sort((a, b) => (a.reihenfolge || 0) - (b.reihenfolge || 0)).map(o => ({ id: o.id, name: o.name, beschreibung: o.beschreibung, mehrfachauswahl: o.mehrfachauswahl, hinweistext: o.hinweistext }))
         });
         (af.auswahloption || []).forEach(opt => {
           (opt.ressourcenzeile || []).forEach(rz => pushRz(rz, opt.id, ts.id, as.id, as.name));
@@ -3950,6 +3952,11 @@ async function ladeTagessatzDaten(otId){
         tagessatzTeilschritte.push({ id: ts.id, arbeitsschrittId: as.id, name: ts.name, beschreibung: ts.beschreibung, optionIds: null });
       }
     });
+  });
+  // Teilschritt nur mit festen Zeilen (Maschinentransport, Projektleitung): kein Tage-Feld, zählt per Knopf
+  tagessatzTeilschritte.forEach(ts => {
+    const z = tagessatzRessourcenzeilen.filter(rz => rz.teilschrittId === ts.id);
+    ts.nurFest = z.length > 0 && z.every(rz => rz.fest);
   });
 }
 
@@ -5895,7 +5902,7 @@ function berechneBeschreibungsBlock(){
     tagessatzTeilschritte.forEach(ts => {
       const tage = teilschrittTage[ts.id] || 0;
       const ausgewaehlt = tagessatzAuswahl[ts.id] || new Set();
-      const aktiv = tage > 0 && (ts.optionIds == null || ts.optionIds.some(oid => ausgewaehlt.has(oid)));
+      const aktiv = (tage > 0 || ts.nurFest) && (ts.optionIds == null || ts.optionIds.some(oid => ausgewaehlt.has(oid)));
       if(aktiv && ts.beschreibung && ts.beschreibung.trim()) teile.push(ts.beschreibung.trim());
     });
   }else{
@@ -5939,7 +5946,7 @@ function berechneOptionenTextListe(){
     const optionInfo = {};
     tagessatzAuswahlfelder.forEach(af => af.optionen.forEach(o => { optionInfo[o.id] = o; }));
     tagessatzTeilschritte.forEach(ts => {
-      if((teilschrittTage[ts.id] || 0) <= 0) return;
+      if((teilschrittTage[ts.id] || 0) <= 0 && !ts.nurFest) return; // feste Teilschritte (Transport, Projektleitung) zählen ohne Tage
       // Teilschritt ohne Auswahlfeld: eigener Text (siehe Tool B, nur bei
       // Tagessatz) statt eines Options-Texts - es gibt hier ja keine Option,
       // an der der Text sonst haengen koennte.
@@ -7064,11 +7071,32 @@ const lwModusToggleHtml = '<span style="display:flex;gap:4px;">' + [['zeit', 'St
       // Kein Teilflaechen-Konzept hier - ein einziger, offertenweiter
       // Kostenblock wie bisher.
       let alleZeilen = [];
+      // Feste Zeilen (Formel statt Tagesleistung, z. B. Maschinentransport mit Fahrzeit,
+      // Projektleitung «8 Std.»): zählen einmal, sobald der Knopf gewählt ist - unabhängig
+      // von den Tagen. Formel wird wie im Konfigurator per eval_ausdruck gerechnet.
+      const festeAktiv = tagessatzRessourcenzeilen.filter(rz => rz.fest && (rz.optionId == null || (tagessatzAuswahl[rz.teilschrittId] || new Set()).has(rz.optionId)));
+      if(festeAktiv.length){
+        const sysMap = await berechneSystemwerteMap();
+        const mengen = await Promise.all(festeAktiv.map(async rz => {
+          if(rz.fest.lit != null && Object.keys(rz.fest).every(k => k === 'lit' || k.startsWith('_'))) return Number(rz.fest.lit) || 0;
+          const { data, error } = await sb.rpc('eval_ausdruck', { node: rz.fest, werte: sysMap });
+          if(error){ console.error(error); return 0; }
+          return Number(data) || 0;
+        }));
+        if(meineGeneration !== recalcGeneration) return;
+        festeAktiv.forEach((rz, i) => {
+          const anp = (tagessatzAnpassungen[rz.teilschrittId] || []).find(a => a.rzId === rz.id);
+          if(anp?.geloescht) return;
+          const menge = Math.round((anp && anp.mengeProTag != null ? anp.mengeProTag : mengen[i]) * 100) / 100;
+          if(menge <= 0) return;
+          alleZeilen.push({ kategorie: rz.kategorie, arbeitsschritt: rz.arbeitsschritt, bezeichnung: rz.bezeichnung, einheit: rz.einheit || 'Std', preis: rz.preis, menge, betrag: menge * rz.preis, artikelId: rz.artikelId, fest: true });
+        });
+      }
       tagessatzTeilschritte.forEach(ts => {
         const tage = teilschrittTage[ts.id] || 0;
         if(tage <= 0) return;
         const ausgewaehlt = tagessatzAuswahl[ts.id] || new Set();
-        const aktive = tagessatzRessourcenzeilen.filter(rz => rz.teilschrittId === ts.id && (rz.optionId == null || ausgewaehlt.has(rz.optionId)));
+        const aktive = tagessatzRessourcenzeilen.filter(rz => !rz.fest && rz.teilschrittId === ts.id && (rz.optionId == null || ausgewaehlt.has(rz.optionId)));
         // Anpassungen nur fuer diese Offerte (Detailfenster "Was ist drin?"): Vorlagenzeile
         // weggelassen oder mit anderer Menge pro Tag, dazu ergaenzte Zeilen
         const anpassungen = tagessatzAnpassungen[ts.id] || [];
@@ -7095,7 +7123,7 @@ const lwModusToggleHtml = '<span style="display:flex;gap:4px;">' + [['zeit', 'St
       // Vorarbeiter-Artikel hinterlegt, auf die Summe aller Personalrollen
       // zurueckfallen statt die Fahrzeit auf 0 einbrechen zu lassen.
       const vorarbeiterArtikelIds = [lieferwagenKonfig?.vorarbeiterArtikelId, lieferwagenKonfig?.vorarbeiterPoolbauArtikelId].filter(Boolean);
-      const personalZeilenTagessatz = alleZeilen.filter(r => r.kategorie === 'personal');
+      const personalZeilenTagessatz = alleZeilen.filter(r => r.kategorie === 'personal' && !r.fest); // feste Zeilen (Transport, Projektleitung) geben keine zusätzlichen Arbeitstage
       gesamtPersonalStunden = (vorarbeiterArtikelIds.length ? personalZeilenTagessatz.filter(r => vorarbeiterArtikelIds.includes(r.artikelId)) : personalZeilenTagessatz)
         .reduce((s, r) => s + r.menge, 0);
       const lwZeilen = (istEasy || istKi) ? { personal: [], logistik: [] } : await berechneLieferwagenfahrzeit(gesamtPersonalStunden); // Easy: Fahrweg per Knopf links
