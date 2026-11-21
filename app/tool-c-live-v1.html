@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script src="/kg-pw-schutz.js?v=5"></script>
-<script src="/kg-stil.js?v=82"></script>
+<script src="/kg-stil.js?v=87"></script>
 <title>Tool C (live) – Artikelstamm-Pflege</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
@@ -932,10 +932,15 @@ function baueArtikelFilterQuery(){
   if(filterKategorie) query = query.eq('kategorie', filterKategorie);
   if(filterGruppeId) query = query.eq('artikelgruppe_id', filterGruppeId);
   if(filterLieferantId) query = query.eq('lieferant_id', filterLieferantId);
-  if(searchQuery){
+  if(searchQuery && artikelUnscharf && artikelUnscharf.q === searchQuery){
+    // keine exakten Treffer → ähnliche Artikel (Tippfehler), siehe artikel_suche_unscharf()
+    query = query.in('id', artikelUnscharf.ids.length ? artikelUnscharf.ids : ['00000000-0000-0000-0000-000000000000']);
+  }else if(searchQuery){
     // Mehrere Wörter = alle müssen vorkommen, egal wo und in welcher Reihenfolge («granit 40»)
+    // such_kompakt: Gross/klein, Leerzeichen, Bindestriche, Umlaute egal, inkl. Lieferant («koi breeder» = «Koi-Breeder»)
     searchQuery.replace(/[%,()*]/g, ' ').split(/\s+/).filter(Boolean).forEach(w => {
-      query = query.or(`bezeichnung.ilike.%${w}%,artikelnummer_knecht.ilike.%${w}%,artikelnummer_lieferant.ilike.%${w}%,anmerkung.ilike.%${w}%`);
+      const k = KG.suchKompakt(w);
+      query = query.or(`bezeichnung.ilike.%${w}%,artikelnummer_knecht.ilike.%${w}%,artikelnummer_lieferant.ilike.%${w}%,anmerkung.ilike.%${w}%` + (k ? `,such_kompakt.ilike.%${k}%` : ''));
     });
   }
   return sortCol === 'lieferant_name'
@@ -944,6 +949,7 @@ function baueArtikelFilterQuery(){
 }
 
 let ARTIKEL_TOTAL = 0;
+let artikelUnscharf = null; // { q, ids } - ähnliche Treffer, wenn die normale Suche nichts findet
 async function loadArtikel(){
   const pageSize = seitenGroesse === Infinity ? 10000 : seitenGroesse;
   const von = (aktuelleSeite-1)*pageSize;
@@ -960,6 +966,11 @@ async function loadArtikel(){
   ARTIKEL = data.map(a => ({ ...a, lieferant_name: a.lieferant?.name || '',
     sync_count: (a.sync_offertentool?1:0) + (a.sync_webtool?1:0) + (a.sync_easybill?1:0) }));
   ARTIKEL_TOTAL = total;
+  if(!total && searchQuery && !(artikelUnscharf && artikelUnscharf.q === searchQuery)){
+    const { data: ids, error: uErr } = await sb.rpc('artikel_suche_unscharf', { q: searchQuery, anzahl: 200 });
+    if(!uErr && ids && ids.length){ artikelUnscharf = { q: searchQuery, ids: ids.map(x => typeof x === 'string' ? x : x.artikel_suche_unscharf) }; return loadArtikel(); }
+    artikelUnscharf = { q: searchQuery, ids: [] };
+  }
   renderArtikelTable();
 }
 
@@ -980,7 +991,8 @@ function renderArtikelTable(){
   const pageSize = seitenGroesse === Infinity ? Math.max(ARTIKEL_TOTAL, 1) : seitenGroesse;
   const maxSeite = Math.max(1, Math.ceil(ARTIKEL_TOTAL / pageSize));
   renderArtikelPagination(ARTIKEL_TOTAL, maxSeite);
-  $('artikelBody').innerHTML = ARTIKEL.map(a => `
+  const unscharfHinweis = (searchQuery && artikelUnscharf && artikelUnscharf.q === searchQuery && artikelUnscharf.ids.length) ? `<tr><td colspan="99" style="color:var(--muted);font-size:12px;">Keine exakten Treffer für «${escAttr(searchQuery)}» - ähnliche Schreibweisen:</td></tr>` : '';
+  $('artikelBody').innerHTML = unscharfHinweis + ARTIKEL.map(a => `
     <tr>
       <td><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="checkbox" class="rowcheck" data-id="${a.id}" ${selected.has(a.id)?'checked':''}></td>
       <td>${a.artikelnummer_knecht || ''}</td>
