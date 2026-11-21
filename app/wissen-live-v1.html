@@ -947,6 +947,7 @@ function starteAusUrl(){
   }
   const h = location.hash.match(/^#e-([0-9a-f-]{36})(?:\.([0-9a-f-]{36}))?$/);
   if(h && anderes(h[1])) return;
+  S.navBereit = true;   // ab hier darf render() den Verlauf führen (Adresse ist gelesen)
   if(h && byId(h[1])) return oeffne(h[1], null, false, h[2]);
   if(location.hash === '#service' && MASCH) S.view = 'service';
   if(location.hash === '#listen' || location.hash === '#tabelle') S.view = 'listen';
@@ -954,8 +955,37 @@ function starteAusUrl(){
   if(location.hash === '#einstellungen' && istBuero()) S.view = 'einstellungen';
   render();
 }
-window.addEventListener('popstate', () => {
+// Browser «Zurück»/«Vorwärts»: jede Ansicht (Übersicht, Thema, Kategorie, Eintrag, Stück, Listen …) ist ein Schritt im Verlauf.
+// render() merkt den Stand in history.state (nur wenn er sich geändert hat), Zurück stellt ihn samt Scroll-Position wieder her.
+const NAV_KEYS = ['view', 'eid', 'xFokus', 'kat', 'rub', 'ber', 'typ', 'katDetail', 'lid'];
+const navStand = () => Object.fromEntries(NAV_KEYS.map(k => [k, S[k] ?? null]));
+const navHash = st => st.view === 'eintrag' && st.eid ? `#e-${st.eid}${st.xFokus ? '.' + st.xFokus : ''}` : st.view && st.view !== 'suche' ? '#' + st.view : '';
+let navZurueck = false;
+function navMerken(){
+  if(S.qr || navZurueck || !S.navBereit) return;
+  const st = navStand(), alt = history.state?.nav, url = location.pathname + location.search.replace(/[?&]q=[^&]*/, '').replace(/^&/, '?') + navHash(st);
+  if(alt && NAV_KEYS.every(k => alt[k] === st[k])) return;
+  if(!alt){ history.replaceState({ nav: st, y: 0 }, '', url); return; }
+  history.replaceState({ ...history.state, y: window.scrollY }, '');   // Scroll-Position der bisherigen Ansicht merken
+  history.pushState({ nav: st, y: 0 }, '', url);
+}
+window.addEventListener('popstate', async ev => {
   if(S.qr) return;
+  const st = ev.state?.nav;
+  if(st){
+    navZurueck = true;
+    try{
+      S.edit = null; S.bearb = false; S.edSec = null; S.kvNeu = null; S.ask = null; S.lEdit = null;
+      if(st.view === 'eintrag' && st.eid && byId(st.eid)){
+        Object.assign(S, { kat: st.kat, rub: st.rub, ber: st.ber, typ: st.typ });
+        if(S.eid !== st.eid) await oeffne(st.eid, null, true, st.xFokus);
+        else { if(st.xFokus) S.xid = st.xFokus; S.xFokus = st.xFokus; render(); }
+      } else { Object.assign(S, st); S.eid = null; render(); }
+    } finally { navZurueck = false; }
+    requestAnimationFrame(() => window.scrollTo(0, ev.state.y || 0));
+    return;
+  }
+  // ältere Verlaufseinträge ohne Stand (nur Adresse)
   const h = location.hash.match(/^#e-([0-9a-f-]{36})(?:\.([0-9a-f-]{36}))?$/);
   if(h && byId(h[1])){ if(S.eid !== h[1]) oeffne(h[1], null, true, h[2]); else if(h[2] && h[2] !== S.xid){ S.xid = h[2]; S.xFokus = h[2]; S.kvNeu = null; S.ask = null; render(); } return; }
   S.view = location.hash === '#listen' || location.hash === '#tabelle' ? 'listen' : location.hash === '#etiketten' ? 'etiketten' : location.hash === '#service' && MASCH ? 'service' : location.hash === '#einstellungen' && istBuero() ? 'einstellungen' : 'suche';
@@ -964,7 +994,7 @@ window.addEventListener('popstate', () => {
 });
 function geheZu(view){
   S.view = view; S.eid = null; S.edit = null; S.katDetail = null; S.lid = null; S.alleNotizen = null; S.notizenLaden = false; S.bearb = false; S.edSec = null;
-  history.pushState(null, '', location.pathname + (view === 'suche' ? '' : '#' + view));
+  // Verlauf: render() → navMerken()
   render(); window.scrollTo(0, 0);
 }
 async function oeffne(id, sec, ohneHistory, xid){
@@ -975,7 +1005,7 @@ async function oeffne(id, sec, ohneHistory, xid){
   // Stück, von dem man kommt (Planer-Klick, Link mit .Stück): Nummer im Titel, die anderen Stück blasser
   S.xFokus = xid && exById(xid)?.eintrag_id === id && exVon(e).length > 1 ? xid : null;
   S.xid = xid && exById(xid)?.eintrag_id === id ? xid : exVon(e)[0]?.id || null;
-  if(!ohneHistory && !S.qr) history.pushState(null, '', location.pathname + '#e-' + id + (xid ? '.' + xid : ''));
+  // Verlauf: render() → navMerken() (ohneHistory bleibt für ältere Aufrufe)
   S.open = new Set(sec ? [sec] : offenVon(e));
   render(); window.scrollTo(0, 0);
   await ladeDetail(id);
@@ -1005,6 +1035,7 @@ function render(){
     + (S.view === 'eintrag' ? vEintrag() : S.view === 'service' ? vService() : S.view === 'listen' ? vListen() : S.view === 'etiketten' ? vEtiketten() : S.view === 'einstellungen' ? vEinstellungen() : vSuche());
   medienLaden(m);
   if(S.planOvl && $('planInhalt') && S.eid) $('planInhalt').innerHTML = serviceBody(byId(S.eid));
+  navMerken();
 }
 function icoFuer(e){
   const ga = (e.geraeteart || '').toLowerCase(), kat = katName(e.kategorie_id);
@@ -2718,7 +2749,7 @@ async function planSetzen(an, typ){
   }
   toast(an ? 'Im Planer' : 'Aus dem Planer genommen'); render();
 }
-async function ladeNeu(eid, xid){ await ladeAlles(); await oeffne(eid, null, true, xid); history.replaceState(null, '', location.pathname + '#e-' + eid + (xid ? '.' + xid : '')); }
+async function ladeNeu(eid, xid){ await ladeAlles(); await oeffne(eid, null, true, xid); }
 
 document.addEventListener('mousedown', ev => {
   const b = ev.target.closest('[data-cmd]'); if(!b) return;
@@ -2810,8 +2841,8 @@ document.addEventListener('click', async ev => {
   }
   // Exemplare
   else if(a === 'stkNotiz'){ S.notizAuf = S.notizAuf || new Set(); S.notizAuf.has(d.x) ? S.notizAuf.delete(d.x) : S.notizAuf.add(d.x); render(); if(S.notizAuf.has(d.x)) document.querySelector(`[data-xnotiz="${d.x}"]`)?.focus(); }
-  else if(a === 'exFokus'){ S.xid = S.xFokus = d.x; history.replaceState(null, '', location.pathname + '#e-' + e.id + '.' + d.x); render(); }
-  else if(a === 'exTab'){ S.xid = d.id; S.kvNeu = null; S.ask = null; history.replaceState(null, '', location.pathname + '#e-' + e.id + '.' + d.id); render(); }
+  else if(a === 'exFokus'){ S.xid = S.xFokus = d.x; render(); }
+  else if(a === 'exTab'){ S.xid = d.id; if(S.xFokus) S.xFokus = d.id; S.kvNeu = null; S.ask = null; render(); }
   else if(a === 'exNeu'){
     const xs = exVon(e);
     const { data, error } = await sb.from('wissen_exemplar').insert({ eintrag_id: e.id, sortierung: (Math.max(0, ...xs.map(x => x.sortierung)) + 10) }).select().single();
