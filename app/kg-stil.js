@@ -271,10 +271,9 @@ button.kg-kachel-kopf,a.kg-kachel-kopf{cursor:pointer;} button.kg-kachel-kopf:ho
     // Projekte: Direktweg zu Kontakte › Projekte (eigene Seite gibt es nicht)
     { k: 'projekte', n: 'Projekte', url: 'tool-d-kunden-live-v1.html?modus=projekte', farbe: PAL.erde[1], akzent: PAL.erde[3], seiten: [] },
     { k: 'pend', n: 'Pendenzen', url: 'pendenzen-live-v1.html', farbe: PAL.orange[1], akzent: PAL.orange[3], modul: 'pendenzen', seiten: ['pendenzen-live-v1'] },
-    { k: 'plan', n: 'Einsatzplaner', url: 'einsatzplaner-live-v1.html', farbe: PAL.petrol[1], akzent: PAL.petrol[3], modul: 'einsatzplaner', seiten: ['einsatzplaner-live-v1', 'bauprogramm-live-v1', 'reservieren-live-v1'] },
+    { k: 'plan', n: 'Einsatzplaner', url: 'einsatzplaner-live-v1.html', farbe: PAL.petrol[1], akzent: PAL.petrol[3], modul: 'einsatzplaner', seiten: ['einsatzplaner-live-v1', 'bauprogramm-live-v1', 'reservieren-live-v1', 'maschinen-live-v1'] },
     { k: 'wissen', n: 'Nachschlagewerk', url: 'wissen-live-v1.html', farbe: PAL.violett[1], akzent: PAL.violett[3], modul: 'wissen', seiten: ['wissen-live-v1'] },
-    // Maschinen & Fahrzeuge: gleiche Daten wie das Nachschlagewerk (Kategorien mit art 'geraet'), eigene Seite (.htaccess → wissen-live-v1.html)
-    { k: 'masch', n: 'Maschinen', url: 'maschinen-live-v1.html', farbe: PAL.petrol[2], akzent: PAL.petrol[4], modul: 'wissen', seiten: ['maschinen-live-v1'] },
+    // Maschinen & Fahrzeuge (2026-11-21): kein eigenes Tool mehr, Reiter «Maschinen» im Einsatzplaner (Seite maschinen-live-v1, .htaccess → wissen-live-v1.html)
     { k: 'werkzeuge', n: 'Werkzeuge', url: 'werkzeuge-live-v1.html', farbe: PAL.grau[1], akzent: PAL.grau[3],
       seiten: ['werkzeuge-live-v1', 'werkzeug-pool-chlor-live-v1', 'werkzeug-pool-salz-live-v1', 'werkzeug-pool-alk-live-v1', 'werkzeug-pool-afm-live-v1',
         'werkzeug-pool-volumen-live-v1', 'werkzeug-bau-diagonale-live-v1', 'werkzeug-bau-kies-live-v1', 'werkzeug-bau-stahl-live-v1', 'werkzeug-bau-schalit-live-v1', 'werkzeug-pflege-spritz-live-v1', 'werkzeug-allg-gefaelle-live-v1'] },
