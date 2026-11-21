@@ -184,7 +184,8 @@ h3.gruppe span{font-weight:400;} h3.gruppe .i{width:15px;height:15px;color:#B88A
 /* Eintrag */
 .back{all:unset;cursor:pointer;display:inline-flex;gap:4px;align-items:center;color:var(--muted);font-size:13px;margin-bottom:12px;}
 .back:hover{color:var(--primary);}
-.ehead{display:grid;grid-template-columns:200px minmax(0,1fr);gap:20px;padding:18px;margin-bottom:12px;}
+.ehead{display:grid;grid-template-columns:200px minmax(0,1fr);gap:20px;padding:18px;margin-bottom:12px;position:relative;}
+.ehead .qrkopf{position:absolute;top:14px;right:14px;display:inline-flex;align-items:center;gap:5px;} @media (max-width:620px){ .ehead .qrkopf{position:static;justify-self:start;} }
 .ehead .ph{aspect-ratio:4/3;border-radius:8px;position:relative;}
 .ehead .ph .i{width:60px;height:60px;stroke-width:1;}
 .ehead .ph .fotobtn{position:absolute;right:6px;bottom:6px;}
@@ -960,14 +961,16 @@ function starteAusUrl(){
 const NAV_KEYS = ['view', 'eid', 'xFokus', 'kat', 'rub', 'ber', 'typ', 'katDetail', 'lid'];
 const navStand = () => Object.fromEntries(NAV_KEYS.map(k => [k, S[k] ?? null]));
 const navHash = st => st.view === 'eintrag' && st.eid ? `#e-${st.eid}${st.xFokus ? '.' + st.xFokus : ''}` : st.view && st.view !== 'suche' ? '#' + st.view : '';
+// was man als eigene Seite sieht: beim Eintrag nur der Eintrag (Stück wechseln, Filter im Hintergrund = gleiche Seite, kein neuer Schritt)
+const navSeite = st => st.view === 'eintrag' ? 'e:' + st.eid : [st.view, st.kat, st.rub, st.ber, st.typ, st.katDetail, st.lid].join('|');
 let navZurueck = false;
 function navMerken(){
   if(S.qr || navZurueck || !S.navBereit) return;
   const st = navStand(), alt = history.state?.nav, url = location.pathname + location.search.replace(/[?&]q=[^&]*/, '').replace(/^&/, '?') + navHash(st);
   if(alt && NAV_KEYS.every(k => alt[k] === st[k])) return;
-  if(!alt){ history.replaceState({ nav: st, y: 0 }, '', url); return; }
+  if(!alt || navSeite(alt) === navSeite(st)){ history.replaceState({ ...(history.state || {}), nav: st, y: history.state?.y || 0 }, '', url); return; }
   history.replaceState({ ...history.state, y: window.scrollY }, '');   // Scroll-Position der bisherigen Ansicht merken
-  history.pushState({ nav: st, y: 0 }, '', url);
+  history.pushState({ nav: st, y: 0, tiefe: (history.state?.tiefe || 0) + 1 }, '', url);
 }
 window.addEventListener('popstate', async ev => {
   if(S.qr) return;
@@ -1340,7 +1343,7 @@ function vEintrag(){
     : `<div class="ph">${bildHTML(e, true)}${istBuero() && e.titelfoto_pfad ? `<button class="kg-ibtn fotobtn" data-act="titelfotoNeu" title="Foto ersetzen">${ic('camera')}</button>` : ''}</div>`;
   // Kopf je Rubrik: Geräte gross mit Foto, Produkte klein, Wissen/Kurzinfo nur Titel
   const kopf = S.edit ? `<div class="card ehead">${foto}${kopfForm(e)}</div>`
-    : rubrik === 'geraet' ? `<div class="card ehead">${foto}<div style="min-width:0">${titel}${S.qr ? '' : `${e.untertitel ? `<div class="subt">${esc(e.untertitel)}</div>` : ''}${meta}
+    : rubrik === 'geraet' ? `<div class="card ehead">${MASCH && x && istBuero() && !S.qr ? `<button class="btn btn-ghost btn-sm qrkopf" data-act="qrKleber" data-x="${x.id}" title="QR-Kleber Sicherheit + Verwendung drucken">${ic('qr')}QR-Kleber</button>` : ''}${foto}<div style="min-width:0">${titel}${S.qr ? '' : `${e.untertitel ? `<div class="subt">${esc(e.untertitel)}</div>` : ''}${meta}
         <div class="facts">${geraet && xs.length > 1 ? `<span>Anzahl <b>${xs.length}</b></span>` : ''}</div>`}${acts}</div></div>`
     : rubrik === 'produkt' ? `<div class="card ehead klein">${foto}<div style="min-width:0">${titel}${e.untertitel && !S.qr ? `<div class="subt">${esc(e.untertitel)}</div>` : ''}${acts}</div></div>`
     : `<div class="card ehead text"><div style="min-width:0"><div class="crumb">${ic('book')}${esc(katName(e.kategorie_id) || RUBRIK[rubrik])}</div>${titel}${acts}</div></div>`;
@@ -1542,10 +1545,9 @@ function stueckBlock(e, x){
       + STK_FELDER.map(([l]) => { const w = stkWert(x, l); return w ? kachel(l, `<b>${esc(w)}</b>`) : ''; }).join('');
   const notizKachel = bu || nt ? `<button class="stk stknotiz ${notizAuf ? 'on' : ''}" data-act="stkNotiz" data-x="${x.id}"><span class="stkl">Notiz</span><span class="stkw einzeilig" title="${esc(nt)}">${nt ? esc(nt.split('\n')[0]) + (nt.includes('\n') ? ' …' : '') : '<span class="muted">+ Notiz</span>'}</span></button>` : '';
   const notizFeld = notizAuf ? (bu ? `<textarea class="svin xnotiz" data-xnotiz="${x.id}" rows="4" placeholder="Nur was dieses Stück betrifft, z. B. «Kupplung rutscht»">${esc(nt)}</textarea>` : `<div class="xnotiztext">${esc(nt)}</div>`) : '';
-  // rechts runde Knöpfe: Planer (dunkelblau = im Planer), Etikette, QR-Kleber (nur Maschinen), QR-Link kopieren, Stück archivieren
+  // rechts runde Knöpfe: Planer (dunkelblau = im Planer), Etikette, QR-Link kopieren, Stück archivieren (QR-Kleber: Knopf oben rechts im Kopf)
   const knoepfe = bu ? `<div class="stkicons"><button class="kg-ibtn ${imPlaner ? 'an' : ''}" data-act="planHaken" data-x="${x.id}" title="${imPlaner ? `Im Planer (${esc(RTYP[res.typ] || res.typ)}) – Klick nimmt es heraus` : 'In den Planer aufnehmen'}">${ic('cal')}</button>
       <button class="kg-ibtn" data-act="etikette" data-id="${x.id}" title="Etikette">${ic('label')}</button>
-      ${MASCH ? `<button class="kg-ibtn" data-act="qrKleber" data-x="${x.id}" title="QR-Kleber Sicherheit + Verwendung">${ic('qr')}</button>` : ''}
       <button class="kg-ibtn" data-act="qrKopie" data-v="${QR_BASIS + x.qr_nr}" title="QR-Link kopieren">${ic('link')}</button>
       <button class="kg-ibtn danger" data-act="exArchiv" data-x="${x.id}" title="Stück archivieren">${ic('archive')}</button></div>` : '';
   const sv = mitService(e) && (logZeilen(e, x).length || bu);
@@ -2524,7 +2526,8 @@ function kleberHTML(x, [feld, text, cls]){
 }
 function qrKleberDialog(x){
   S.kleberX = x.id;
-  ovl(`<h3>QR-Kleber · ${esc(exTitel(x))}</h3>
+  const alle = exVon(byId(x.eintrag_id));
+  ovl(`<h3>QR-Kleber · ${esc(exTitel(x))}</h3>${alle.length > 1 ? `<label class="fld">Stück<select id="kleberX">${alle.map(y => `<option value="${y.id}"${y.id === x.id ? ' selected' : ''}>${esc(y.nummer || exTitel(y))}</option>`).join('')}</select></label>` : ''}
     <div class="ptvor">${KLEBER.map(k => kleberHTML(x, k)).join('')}</div>
     <div class="small muted">P-touch-Band 36 mm, je 70 × 36 mm. Beim Drucken den P-touch wählen, Grösse 100 %. Lesbar ohne Anmeldung, aber nur diese eine Seite.</div>
     <div class="addlinks">${KLEBER.map(([f, t]) => `<a class="addrow" href="${M_BASIS + x[f]}" target="_blank" rel="noopener">${ic('phone')}${t} ansehen</a>`).join('')}</div>
@@ -2765,6 +2768,7 @@ document.addEventListener('input', ev => {
 document.addEventListener('change', ev => {
   if(ev.target.id === 'fmt'){ S.fmt = ev.target.value; merke('fmt', S.fmt); S.used = new Set(); render(); }
   if(ev.target.id === 'fotoChk'){ S.foto = ev.target.checked; render(); }
+  if(ev.target.id === 'kleberX'){ const y = S.exemplare.find(z => z.id === ev.target.value); if(y) qrKleberDialog(y); return; }
   if(ev.target.id === 'katSel'){ S.kat = ev.target.value || null; merke('kat', S.kat); render(); }
   if(ev.target.dataset?.kvk){ kvFeld(ev.target); }
   if(ev.target.dataset?.x && S.eid && exById(ev.target.dataset.x)) S.xid = ev.target.dataset.x;
@@ -2805,7 +2809,8 @@ document.addEventListener('click', async ev => {
   if(e && d.x && a !== 'open' && exById(d.x)?.eintrag_id === e.id) S.xid = d.x;
   try{
   if(a === 'nav') geheZu(d.v);
-  else if(a === 'zurueck'){ if(history.length > 1) history.back(); else geheZu('suche'); }
+  // Zurück: innerhalb der Seite einen Schritt zurück; sonst zur Seite, von der man kam (z. B. Planer), falls sie zum Tool gehört; sonst Übersicht
+  else if(a === 'zurueck'){ if(history.state?.tiefe > 0 || (document.referrer.startsWith(location.origin) && history.length > 1)) history.back(); else geheZu('suche'); }
   else if(a === 'open') oeffne(d.id, null, false, d.x);
   else if(a === 'mode'){ S.mode = d.v; merke('mode', S.mode); render(); }
   else if(a === 'ber' || a === 'kat' || a === 'typ'){ S[a] = d.v || null; merke(a, S[a]); if(a === 'kat'){ S.q = ''; S.rub = S.kat && !MASCH ? katThema(S.kat) : S.rub; } render(); window.scrollTo(0, 0); }
