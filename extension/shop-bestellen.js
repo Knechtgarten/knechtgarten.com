@@ -107,10 +107,29 @@ async function dabagAblauf(auftrag, pos, _sprache, opt) {
   // Test: nur Anmeldung + Warenkorb lesbar (die Suche zeigt den Suchbegriff immer an, taugt nicht zum Prüfen der Nummern)
   if (auftrag === 'test') return { eingeloggt: true, nurLogin: true, gefunden: [], fehlt: [] };
   const summe = (wk, nr) => wk.filter((w) => w.nr === nr).reduce((s, w) => s + w.menge, 0);
-  const vorher = lesen(h0), fehler = [], gesendet = [];
+  const vorher = lesen(h0), fehler = [], gesendet = [], angepasst = [], mitKommission = new Set();
+  // Variante 1 (B-TEAM): Direkterfassung im Warenkorb. Variante 2 (IMMER AG, ohne Direkterfassung): Artikelnummer suchen
+  // (springt auf die Artikelseite), Zeile mit genau dieser Nummer → Knopf «In den Warenkorb» (rpc_basket_item_add), Kommission gleich mit.
+  const direkt = /pg=fastadd/.test(h0);
   for (const p of pos) {
-    const r = await fetch('/?srv=basket&pg=fastadd&companyYN=' + c, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ txtArtNr_free: String(p.nr), txtMenge_free: String(p.menge) }) }).catch(() => null);
+    let r = null;
+    if (direkt) {
+      r = await fetch('/?srv=basket&pg=fastadd&companyYN=' + c, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ txtArtNr_free: String(p.nr), txtMenge_free: String(p.menge) }) }).catch(() => null);
+    } else {
+      const s = await fetch('/?srv=search&q=' + encodeURIComponent(p.nr), { credentials: 'include' }).then((x) => x.text()).catch(() => '');
+      const d = new DOMParser().parseFromString(s, 'text/html');
+      const zeile = [...d.querySelectorAll('tr')].find((t) => t.querySelector('[id^="btn_"]') && [...t.querySelectorAll('a,td,span')].some((e) => e.textContent.trim() === String(p.nr)));
+      if (!zeile) { fehler.push({ nr: p.nr, grund: 'im Shop nicht gefunden' }); continue; }
+      const gid = zeile.querySelector('[id^="btn_"]').id.slice(4), qi = zeile.querySelector('[id^="quantity_"]');
+      // Verpackungseinheit (Schritt): auf ganze Packungen aufrunden und melden
+      const schritt = qi ? parseFloat(qi.getAttribute('step')) || 1 : 1;
+      let menge = p.menge;
+      if (schritt > 1 && menge % schritt) { menge = Math.ceil(menge / schritt) * schritt; angepasst.push({ nr: p.nr, menge, schritt }); }
+      r = await fetch(`/pagesshop/rpc/rpc_basket_item_add.cfm?id=${gid}&quantity=${menge}&laenge=0&unit=0&kommission=${encodeURIComponent(String(p.notiz || '').slice(0, 100))}&zubehoerYN=0`,
+        { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: '' }).catch(() => null);
+      if (p.notiz) mitKommission.add(String(p.nr));
+    }
     if (!r || !r.ok) { fehler.push({ nr: p.nr, grund: 'Shop-Fehler ' + (r ? r.status : '') }); continue; }
     gesendet.push(p);
   }
@@ -119,12 +138,12 @@ async function dabagAblauf(auftrag, pos, _sprache, opt) {
     if (summe(nachher, String(p.nr)) > summe(vorher, String(p.nr))) ok.push(p.nr);
     else fehler.push({ nr: p.nr, grund: 'im Shop nicht gefunden oder nicht im Warenkorb gelandet' });
   }
-  for (const p of gesendet.filter((x) => x.notiz && ok.includes(x.nr))) {
+  for (const p of gesendet.filter((x) => x.notiz && ok.includes(x.nr) && !mitKommission.has(String(x.nr)))) {
     const w = nachher.find((x) => x.nr === String(p.nr) && x.kommentar === '');
     if (w) await fetch(`/pagespartner/rpc/rpc_basket_item_commission_upd.cfm?companyYN=${c}&bsiId=${w.id}`, { method: 'POST', credentials: 'include',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ ['bsiKommission_' + w.id]: String(p.notiz).slice(0, 100) }) }).catch(() => null);
   }
-  return { ok, fehler };
+  return { ok, fehler, angepasst };
 }
 
 const ABLAEUFE = { magento: magentoAblauf, dabag: dabagAblauf };
