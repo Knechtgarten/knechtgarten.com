@@ -249,6 +249,7 @@ button.kg-kachel-kopf,a.kg-kachel-kopf{cursor:pointer;} button.kg-kachel-kopf:ho
     pflege: '<path d="M5 19c0-8 5-13 14-14 0 9-5 14-13 14z"/><path d="M5 19l8-8"/>',
     wissen: '<path d="M3 5.5C5.5 4.5 9 4.5 12 6.5c3-2 6.5-2 9-1v13c-2.5-1-6-1-9 1-3-2-6.5-2-9-1z"/><path d="M12 6.5v13"/>',
     masch: '<rect x="2.5" y="16" width="12" height="4" rx="2"/><path d="M4.5 16v-3.5h5.5l1 3.5"/><path d="M6 12.5V10h3.5"/><path d="M10 12l4.5-6 4.5 3.5"/><path d="M19 9.5l1.5 4.5h-3.5z"/>',   // Maschinen & Fahrzeuge: Bagger
+    qrbest: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M13.5 14h1.5l1.6 5.5h4.4l1-4H16"/><circle cx="17" cy="21.3" r=".4"/><circle cx="20.5" cy="21.3" r=".4"/>',   // QR-Bestellung: QR + Wagen
     rechner: '<rect x="5" y="3" width="14" height="18" rx="2"/><rect x="8" y="6" width="8" height="3" rx=".5"/><path d="M8 13h1M11.5 13h1M15 13h1M8 17h1M11.5 17h1M15 17h1"/>',
     projekte: '<path d="M12 3.5A8.5 8.5 0 0 1 16.88 18.96" stroke-width="2" stroke-dasharray="0.1 3.6"/><path d="M16.88 18.96A8.5 8.5 0 1 1 12 3.5"/>',   // Projekte: Rand, Anfang gepunktet (läuft noch)
     verw: P.gear,
@@ -291,6 +292,8 @@ button.kg-kachel-kopf,a.kg-kachel-kopf{cursor:pointer;} button.kg-kachel-kopf:ho
     { k: 'cad', n: 'CAD', url: 'cad-live-v1.html', farbe: PAL.gruen[1], akzent: PAL.gruen[3], modul: 'cad', seiten: ['cad-live-v1'] },
     { k: 'doku', n: 'Doku-Tools', url: 'doku-live-v1.html', farbe: PAL.beere[1], akzent: PAL.beere[3],
       seiten: ['doku-live-v1', 'doku-dokument-live-v1', 'doku-datei-live-v1', 'doku-formular-live-v1', 'doku-katalog-live-v1'] },
+    // QR-Bestellung: Artikel per Lager-Kleber bestellen, Büro legt es über die Erweiterung in den Shop-Warenkorb (nur angebundene Shops)
+    { k: 'qrbest', n: 'QR-Bestellung', url: 'qr-bestellung-live-v1.html', farbe: PAL.petrol[2], akzent: PAL.petrol[4], seiten: ['qr-bestellung-live-v1'] },
     { k: 'verw', n: 'Einstellungen', url: 'einstellungen-uebersicht-live-v1.html', farbe: '#FFFFFF', akzent: PAL.grau[3], admin: true,
       seiten: ['einstellungen-uebersicht-live-v1', 'handy-ansichten-live-v1', 'verwaltung-live-v1', 'tools-live-v1', 'mailassistent-verwaltung-live-v1', 'dokumentensuche-verwaltung-live-v1', 'zoll-live-v1', 'etiketten-live-v1', 'pflege-kategorien-live-v1', 'projekt-einstellungen-live-v1'] }
   ];
@@ -325,6 +328,8 @@ button.kg-kachel-kopf,a.kg-kachel-kopf{cursor:pointer;} button.kg-kachel-kopf:ho
 
   const cssLeiste = `.kg-ti{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;box-sizing:border-box;}
 header.app .wrap{min-height:46px;}
+.kg-tw{position:relative;} .kg-punkt{position:absolute;top:3px;right:3px;width:10px;height:10px;border-radius:50%;background:#D1DB5F;box-shadow:0 0 0 2px #fff;pointer-events:none;}
+.kg-tw .kg-punkt{top:2px;left:25px;right:auto;box-shadow:0 0 0 2px #323E4E;}
 .kg-tw{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 10px 0 4px;border:0;border-radius:9px;background:rgba(255,255,255,.08);
   color:#fff;font:inherit;font-size:14px;font-weight:600;cursor:pointer;flex-shrink:0;white-space:nowrap;}
 .kg-tw:hover,.kg-tw[aria-expanded="true"]{background:rgba(255,255,255,.16);}
@@ -640,6 +645,14 @@ html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!import
   // Tool-Menü: «Meine Tools» (tool_menue.an = true, gross, Reihenfolge per Ziehen) und «Weitere Tools» (an = false, klein,
   // nach Häufigkeit oder frei). Ohne Zeile: bei «Meine Tools», Einstellungen bei «Weitere». Startseite oben rechts statt Kachel.
   // Schalter «nach Häufigkeit»: Zeile '_weitere_haeufig' (an), ohne Zeile = an. Häufigkeit = tool_menue.aufrufe (RPC tool_aufruf).
+  // Grüner Punkt am Tool-Icon (heute nur QR-Bestellung): nur für Zuständige und nur wenn etwas offen ist (RPC qr_bestellung_punkt).
+  let PUNKTE = new Set(), punktLaden = null;
+  KG.punkte = () => punktLaden || (punktLaden = (async () => { try {
+    if(!window.supabase || !window.supabase.createClient) return PUNKTE;
+    KG._sb = KG._sb || window.supabase.createClient('https://oalapdxinqlnzwxhyuzy.supabase.co', 'sb_publishable_DoeD4uEnwemmnFu4AxE9uw_5lmQYc5P');
+    const { data: { session } } = await KG._sb.auth.getSession(); if(!session) return PUNKTE;
+    const { data } = await KG._sb.rpc('qr_bestellung_punkt'); PUNKTE = new Set(data ? ['qrbest'] : []);
+  } catch(e){} return PUNKTE; })());
   const HAEUFIG = '_weitere_haeufig';
   let alleWeitere = false;
   function menuListen(s){
@@ -655,10 +668,10 @@ html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!import
   function menuHtml(s){
     const verwUrl = 'einstellungen-uebersicht-live-v1.html', L = menuListen(s), href = t => t.k === 'verw' ? verwUrl : t.url;
     const home = TOOLS.find(t => t.k === 'home');
-    const gross = L.meine.map(t => `<a class="kg-gr${t.k === aktuell.k ? ' on' : ''}" href="${href(t)}" draggable="true" data-tk="${t.k}">${KG.toolIcon(t.k, 44)}<span>${esc(t.n)}</span></a>`).join('')
+    const gross = L.meine.map(t => `<a class="kg-gr${t.k === aktuell.k ? ' on' : ''}" href="${href(t)}" draggable="true" data-tk="${t.k}">${KG.toolIcon(t.k, 44)}<span>${esc(t.n)}</span>${PUNKTE.has(t.k) ? '<i class="kg-punkt" title="Neue Bestellungen offen"></i>' : ''}</a>`).join('')
       || '<div class="kg-leer">Tools hierher ziehen</div>';
     const w = alleWeitere ? L.weitere : L.weitere.slice(0, 8);
-    const klein = w.map(t => `<a class="kg-kl${t.k === aktuell.k ? ' on' : ''}" href="${href(t)}" draggable="true" data-tk="${t.k}" title="${esc(t.n)}">${KG.toolIcon(t.k, 22)}<span>${esc(t.n)}</span>${L.haeufig && L.zahl(t) ? `<small>${L.zahl(t)}×</small>` : ''}</a>`).join('')
+    const klein = w.map(t => `<a class="kg-kl${t.k === aktuell.k ? ' on' : ''}" href="${href(t)}" draggable="true" data-tk="${t.k}" title="${esc(t.n)}">${KG.toolIcon(t.k, 22)}<span>${esc(t.n)}</span>${PUNKTE.has(t.k) ? '<i class="kg-punkt" title="Neue Bestellungen offen"></i>' : ''}${L.haeufig && L.zahl(t) ? `<small>${L.zahl(t)}×</small>` : ''}</a>`).join('')
       || '<div class="kg-leer">Hierher ziehen, was du selten brauchst</div>';
     const ext = s.extern.length ? `<div class="kg-sep"></div><details class="kg-links"><summary class="kg-h">Links</summary><div class="kg-ext">${s.extern.map(m =>
       `<a href="${esc(m.url)}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${EXT}</svg>${esc(m.kurzname || m.name)}</a>`).join('')}</div></details>` : '';
@@ -715,7 +728,9 @@ html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!import
 
     // Tool-Menü: erst ohne Daten (schnell), dann mit Rechten und persönlicher Auswahl; Ziehen/Schalter zeichnen neu
     popup(btn, 'kg-toolmenu', 'links', async (setze, zu, menu) => { let s = { rolle: null, module: null, extern: [] }; const neu = () => setze(menuHtml(s));
-      neu(); s = await ladeSichtbarkeit(); neu(); if(menu) menuBinden(menu, s, neu); });
+      neu(); s = await ladeSichtbarkeit(); await KG.punkte(); neu(); if(menu) menuBinden(menu, s, neu); });
+    // Punkt auch am Umschalter, damit man es in jedem Tool sieht
+    setTimeout(() => KG.punkte().then(p => { if(p.size && !btn.querySelector('.kg-punkt')) btn.insertAdjacentHTML('beforeend', '<i class="kg-punkt" title="Neue Bestellungen offen"></i>'); }), 1500);
     // Häufigkeit für «Weitere Tools»: Öffnen dieses Tools zählen (die Datenbank zählt höchstens einmal pro 20 Minuten)
     setTimeout(async () => { try {
       if(aktuell.k === 'home' || !window.supabase || !window.supabase.createClient) return;

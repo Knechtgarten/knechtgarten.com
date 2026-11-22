@@ -71,6 +71,13 @@
       const ids = [...new Set((d || []).map(x => x.eintrag_id))];
       if (ids.length) { const { data: e } = await sb.from('wissen_eintrag').select('id,titel').in('id', ids).is('archiviert_am', null).order('titel'); produkte = e || []; }
     }
+    // Bestellen per Scan geht nur bei angebundenem Shop (QR-Bestellung); der Code bleibt gleich, es klappt später ohne neue Kleber
+    const liefIds = [...new Set(artikel.map(a => a.lieferant_id).filter(Boolean))];
+    const { data: anb } = liefIds.length ? await sb.from('bestell_anbindung').select('lieferant_id').in('lieferant_id', liefIds).eq('aktiv', true) : { data: [] };
+    const ohneShop = liefIds.filter(id => !(anb || []).some(x => x.lieferant_id === id)).map(id => liefName(id)).filter(Boolean);
+    const bestellHin = !liefIds.length ? ''
+      : ohneShop.length ? ` «Bestellen» per Scan geht erst, wenn der Shop von ${esc(ohneShop.join(', '))} angebunden ist – dann ohne neue Kleber.`
+      : ' Angemeldet kann man nach dem Scan direkt «Bestellen».';
     const w = document.createElement('div'); w.className = 'kga-sch';
     const zeichnen = () => {
       const a0 = { ...artikel[0], qr_code: artikel[0].qr_code || 'vorschauvorschau' };
@@ -79,7 +86,7 @@
         <div class="vor">${html(a0, g, liefName)}</div>
         <div class="reihe"><label>Anzahl${artikel.length > 1 ? ' pro Artikel' : ''}<input type="number" min="1" max="50" id="kgaAnz" value="${anzahl}" style="width:90px"></label>
           ${artikel.length === 1 ? `<label style="flex:1;min-width:220px">Sicherheitsdatenblatt von Produkt <span style="font-weight:400;color:#8B9097">optional</span><select id="kgaSdb"><option value="">– keines –</option>${produkte.map(p => `<option value="${p.id}"${p.id === artikel[0].wissen_eintrag_id ? ' selected' : ''}>${esc(p.titel)}</option>`).join('')}</select></label>` : ''}</div>
-        <div class="hin">P-touch-Band 36 mm, beim Drucken den P-touch wählen, Grösse 100 %. Der QR öffnet ohne Anmeldung den Artikel${artikel.length === 1 ? ' und, falls gewählt, das Sicherheitsdatenblatt' : ''}. Später kommt dort «Bestellen» dazu (bei angebundenem Shop), ohne neue Kleber.</div>
+        <div class="hin">P-touch-Band 36 mm, beim Drucken den P-touch wählen, Grösse 100 %. Der QR öffnet ohne Anmeldung den Artikel${artikel.length === 1 ? ' und, falls gewählt, das Sicherheitsdatenblatt' : ''}.${bestellHin}</div>
         <div class="kn"><button type="button" class="btn kga-ab" data-zu>Abbrechen</button><button type="button" class="btn" data-druck>Drucken${artikel.length > 1 ? ` (${artikel.length * anzahl} Kleber)` : ''}</button></div></div>`;
     };
     zeichnen(); document.body.appendChild(w);
