@@ -22,6 +22,7 @@
 .ffdaten .kgd-felder{gap:12px;}
 .ffpos{border:1px solid #E1E5E9;border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:8px;}
 .ffpos .kopf{display:flex;align-items:center;gap:8px;font-weight:600;font-size:13px;} .ffpos .kopf .kg-ibtn{margin-left:auto;}
+.ffpos .kopf .ffhand{margin-left:auto;display:flex;gap:5px;align-items:center;font-weight:400;font-size:12.5px;color:#4C5C70;cursor:pointer;} .ffpos .kopf .ffhand + .kg-ibtn{margin-left:4px;} .ffhand input{width:15px;height:15px;accent-color:#323E4E;margin:0;}
 .ffart{font-size:12.5px;background:#F5F7F9;border-radius:8px;padding:0 4px 0 10px;min-height:36px;box-sizing:border-box;display:flex;gap:8px;align-items:center;} .ffart b{font-variant-numeric:tabular-nums;}
 .ffgrund{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;font-size:12.5px;} .ffgrund label{display:flex;gap:6px;align-items:center;cursor:pointer;}
 .ffre{border-radius:10px;padding:10px;font-size:12.5px;display:flex;flex-direction:column;gap:8px;}
@@ -133,9 +134,11 @@ async function aufbau(main){
     const { data } = await sb.storage.from('unterschriften').download(`mitarbeiter/${id}.png`);
     return sigCache[id] = data ? new Uint8Array(await data.arrayBuffer()) : null;
   }
-  const rechnungNoetig = () => werte.pos.some(p => GRUENDE.find(g => g.k === p.grund)?.rechnung);
-  const pflicht = () => !werte.sb ? 'Sachbearbeiter fehlt.' : !werte.pos.some(p => p.nr) ? 'Mindestens ein Artikel fehlt.'
-    : werte.pos.some(p => p.nr && !p.grund) ? 'Grund der Rücksendung fehlt.' : rechnungNoetig() && !werte.rechnungen.length ? 'Rechnungskopie fehlt.' : '';
+  // «Von Hand» (p.vonHand): Artikel bleibt auf dem Blatt leer (Nummer, Bezeichnung, Menge, Grund mit Kugelschreiber), Kundenadresse steht trotzdem
+  const aktiv = p => p.nr || p.vonHand;
+  const rechnungNoetig = () => werte.pos.some(p => !p.vonHand && GRUENDE.find(g => g.k === p.grund)?.rechnung);
+  const pflicht = () => !werte.sb ? 'Sachbearbeiter fehlt.' : !werte.pos.some(aktiv) ? 'Mindestens ein Artikel fehlt.'
+    : werte.pos.some(p => p.nr && !p.vonHand && !p.grund) ? 'Grund der Rücksendung fehlt.' : rechnungNoetig() && !werte.rechnungen.length ? 'Rechnungskopie fehlt.' : '';
 
   // PDF erzeugen: Vorlage + Angaben (+ Rechnungskopie)
   async function erzeugen(mitRechnung){
@@ -150,9 +153,9 @@ async function aufbau(main){
     text(ABSENDER[0], 125, 698, 11, true); text(ABSENDER[1], 125, 675, 10);
     const pe = person(werte.sb); text([pe?.name, pe?.telefon, pe?.mail].filter(Boolean).join(' · '), 125, 651, 10, false, 420);
     werte.pos.slice(0, 3).forEach((p, i) => { const d = i * BLOCK, g = GRUENDE.find(x => x.k === p.grund);
-      if(g) s.drawText('X', { x: g.x + 1.2, y: g.y - d + 0.8, size: 10, font: fb, color: farbe });
-      text(p.nr, 36, 505 - d, 10, true, 88); text(p.bez, 125, 505 - d, 9.5, false, 385); text(p.menge, 522, 505 - d, 10, true, 50);
-      if(p.nr){ text(kundeZeile(), 125, 483 - d, 9.5, false, 425); text(p.bem, 125, 471 - d, 9.5, false, 425); } });
+      if(g && !p.vonHand) s.drawText('X', { x: g.x + 1.2, y: g.y - d + 0.8, size: 10, font: fb, color: farbe });
+      if(p.nr && !p.vonHand){ text(p.nr, 36, 505 - d, 10, true, 88); text(p.bez, 125, 505 - d, 9.5, false, 385); text(p.menge, 522, 505 - d, 10, true, 50); }
+      if(aktiv(p)){ text(kundeZeile(), 125, 483 - d, 9.5, false, 425); text(p.bem, 125, 471 - d, 9.5, false, 425); } });
     const heute = new Date(); text(`Heimenschwand, ${heute.getDate()}.${heute.getMonth() + 1}.${heute.getFullYear()}`, 96, 173, 10);
     const sig = werte.vonHand ? null : await unterschrift(werte.sb);   // «Von Hand unterschreiben»: Feld bleibt leer
     if(sig){ try { const bild = await doc.embedPng(sig), h = 24, b = Math.min(150, bild.width * h / bild.height); s.drawImage(bild, { x: 335, y: 164, width: b, height: h * b / (bild.width * h / bild.height) }); } catch(e){} }
@@ -178,8 +181,8 @@ async function aufbau(main){
   // Speichern (still, nach Änderungen)
   let spT = null; const speichernSpaeter = () => { clearTimeout(spT); spT = setTimeout(speichern, 900); };
   async function speichern(){
-    const json = JSON.stringify(werte); if(json === gespeichert || !werte.pos.some(p => p.nr)) return true;
-    const zeile = { vorlage_id: V.id, kunde_id: werte.kunde?.id || null, werte, datum: new Date().toISOString().slice(0, 10), adresse: werte.pos.filter(p => p.nr).map(p => p.nr).join(', '), geaendert_am: new Date().toISOString() };
+    const json = JSON.stringify(werte); if(json === gespeichert || !werte.pos.some(aktiv)) return true;
+    const zeile = { vorlage_id: V.id, kunde_id: werte.kunde?.id || null, werte, datum: new Date().toISOString().slice(0, 10), adresse: werte.pos.filter(aktiv).map(p => p.vonHand ? 'von Hand' : p.nr).join(', '), geaendert_am: new Date().toISOString() };
     const r = dokId ? await sb.from('doku_dokument').update(zeile).eq('id', dokId).select('id').single() : await sb.from('doku_dokument').insert(zeile).select('id').single();
     if(r.error){ KGD.toast('Speichern fehlgeschlagen: ' + r.error.message, true); return false; }
     dokId = r.data.id; gespeichert = json; history.replaceState(null, '', 'doku-formular-live-v1.html?d=' + dokId); return true;
@@ -465,12 +468,12 @@ async function aufbau(main){
         <div class="ffsig" id="sigZeile"></div></div>
       <div class="kgd-feld"><label for="kundeQ">Kunde</label>${werte.kunde ? `<div class="ffart"><span style="flex:1;min-width:0"><b>${esc(werte.kunde.name)}</b>${werte.kunde.adresse ? ' · ' + esc(werte.kunde.adresse) : ''}</span><button type="button" class="kg-ibtn" id="kundeWeg" title="Anderen Kunden wählen">${ic('x', 12)}</button></div>`
         : `<input class="kgd-t" id="kundeQ" autocomplete="off" placeholder="Kunde suchen (Name, Ort …)"><div class="kgd-menue hidden" id="kundeM"></div><span class="ffhinweis">Leer = Knecht AG (eigenes Lager). Ein Kunde pro Rücksendung.</span>`}</div>
-      ${werte.pos.map((p, i) => `<div class="ffpos"><div class="kopf">Artikel ${i + 1}${werte.pos.length > 1 ? `<button type="button" class="kg-ibtn danger" data-posweg="${i}" title="Artikel entfernen">${ic('trash', 13)}</button>` : ''}</div>
-        <div class="kgd-reihe"><div class="kgd-feld"><label>Artikel</label>${p.nr ? `<div class="ffart"><b>${esc(p.nr)}</b><span style="flex:1;min-width:0">${esc(p.bez || '')}</span><button type="button" class="kg-ibtn" data-artweg="${i}" title="Anderen Artikel wählen">${ic('x', 12)}</button></div>`
+      ${werte.pos.map((p, i) => `<div class="ffpos"><div class="kopf">Artikel ${i + 1}<label class="ffhand" title="Artikel auf dem Blatt leer lassen und beim Versand von Hand ausfüllen"><input type="checkbox" data-vonhand="${i}"${p.vonHand ? ' checked' : ''}>Von Hand</label>${werte.pos.length > 1 ? `<button type="button" class="kg-ibtn danger" data-posweg="${i}" title="Artikel entfernen">${ic('trash', 13)}</button>` : ''}</div>
+        ${p.vonHand ? '<div class="ffhinweis">Nummer, Bezeichnung, Menge und Grund bleiben leer und werden beim Versand von Hand eingetragen.</div>' : `<div class="kgd-reihe"><div class="kgd-feld"><label>Artikel</label>${p.nr ? `<div class="ffart"><b>${esc(p.nr)}</b><span style="flex:1;min-width:0">${esc(p.bez || '')}</span><button type="button" class="kg-ibtn" data-artweg="${i}" title="Anderen Artikel wählen">${ic('x', 12)}</button></div>`
           : `<div class="ffnr"><input class="kgd-t" data-artq="${i}" autocomplete="off" placeholder="Nummer oder Stichwort"><button type="button" class="kg-ibtn ffbuch" data-rechnungen="${i}" title="In Aqua-Solar-Rechnungen suchen (PEAX)" aria-label="In Aqua-Solar-Rechnungen suchen">${ic('rechnung', 16)}</button><button type="button" class="kg-ibtn ffbuch" data-katalog="${i}" title="Im Katalog suchen" aria-label="Im Katalog suchen">${ic('buch', 16)}</button><div class="kgd-menue hidden" data-artm="${i}"></div></div>`}</div>
-          <div class="kgd-feld" style="flex:0 0 70px"><label>Menge</label><input class="kgd-t" data-menge="${i}" value="${esc(p.menge || '')}" inputmode="numeric"></div></div>
+          <div class="kgd-feld" style="flex:0 0 70px"><label>Menge</label><input class="kgd-t" data-menge="${i}" value="${esc(p.menge || '')}" inputmode="numeric"></div></div>`}
         <div class="kgd-feld"><label>Zusatz <small class="opt">optional, steht unter der Kundenadresse</small></label><input class="kgd-t" data-bem="${i}" value="${esc(p.bem || '')}" placeholder="z. B. Pumpe läuft nicht an, brummt nur" autocomplete="off"></div>
-        <div class="ffgrund">${GRUENDE.map(g => `<label><input type="radio" name="g${i}" data-grund="${i}" value="${g.k}" ${p.grund === g.k ? 'checked' : ''}>${esc(g.n)}</label>`).join('')}</div></div>`).join('')}
+        ${p.vonHand ? '' : `<div class="ffgrund">${GRUENDE.map(g => `<label><input type="radio" name="g${i}" data-grund="${i}" value="${g.k}" ${p.grund === g.k ? 'checked' : ''}>${esc(g.n)}</label>`).join('')}</div>`}</div>`).join('')}
       ${werte.pos.length < 3 ? '<button type="button" class="kgd-btn ghost" id="posNeu">+ Artikel</button>' : ''}
       ${rechnungNoetig() ? `<div class="ffre ${werte.rechnungen.length ? 'ok' : 'noetig'}"><b>${werte.rechnungen.length ? (werte.rechnungen.length > 1 ? werte.rechnungen.length + ' Rechnungskopien angehängt' : 'Rechnungskopie angehängt') : 'Rechnungskopie nötig'}</b>
         ${werte.rechnungen.map((r, k) => `<div class="zeile">${ic('rechnung', 14)}<span style="flex:1;min-width:0">${esc(r.name)}</span><button type="button" class="kg-ibtn danger" data-reweg="${k}" title="Rechnungskopie entfernen">${ic('trash', 13)}</button></div>`).join('')}
@@ -539,6 +542,7 @@ async function aufbau(main){
     const t = e.target;
     if(t.id === 'sb'){ werte.sb = t.value; angaben(); neu(); }
     else if(t.id === 'vonHand'){ werte.vonHand = t.checked || undefined; sigZeile(); neu(); }
+    else if(t.dataset.vonhand != null){ const p = werte.pos[+t.dataset.vonhand]; if(t.checked){ p.vonHand = true; p.nr = ''; p.bez = ''; p.artikel_id = null; p.grund = ''; } else delete p.vonHand; angaben(); neu(); }
     else if(t.dataset.grund != null){ werte.pos[+t.dataset.grund].grund = t.value; angaben(); neu(); }
   });
   main.addEventListener('click', async e => {
