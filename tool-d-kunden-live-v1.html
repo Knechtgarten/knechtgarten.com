@@ -294,6 +294,14 @@ td.kats{white-space:normal;}
 .kkz .st{width:7px;height:7px;border-radius:50%;background:#DCE2E8;} .kkz .st.ok{background:#3F7D3F;} .kkz .st.no{background:#B4655F;}
 .kkz .ebtyp{grid-column:1;} .kkleer{color:var(--muted);font-size:12px;}
 /* Kachel «Dokumente»: erstellt (blau) / hochgeladen (grau, PDF), Ersteller, Drive-Stand, Löschen beim Darüberfahren */
+.dokpop{position:fixed;inset:0;background:rgba(35,43,53,.45);display:flex;align-items:center;justify-content:center;padding:16px;z-index:200;}
+.dokpopbox{background:#fff;border-radius:12px;width:min(460px,100%);max-height:85vh;overflow:auto;padding:18px 20px;display:flex;flex-direction:column;gap:10px;box-shadow:0 12px 40px rgba(0,0,0,.2);}
+.dokpopbox h3{margin:0;font-size:17px;} .dokpopk{margin:0;color:#8B9097;font-size:12.5px;}
+.dokpopl{display:flex;flex-direction:column;gap:6px;}
+.dokpopl a{display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid #E1E5E9;border-radius:9px;color:#232B35;text-decoration:none;}
+.dokpopl a:hover{border-color:#323E4E;background:#F5F7F9;} .dokpopl a span{display:flex;flex-direction:column;min-width:0;} .dokpopl small{color:#8B9097;font-size:12px;}
+.dokpopl .dic{width:26px;height:26px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;flex:none;} .dokpopl .dic svg{width:15px;height:15px;}
+.dokpopf{display:flex;justify-content:flex-end;} .dokabbr{all:unset;cursor:pointer;border:1px solid #E1E5E9;border-radius:7px;padding:6px 14px;font-weight:600;font-size:12.5px;color:#323E4E;background:#fff;} .dokabbr:hover{background:#F5F7F9;}
 .kkz.kkd{grid-template-columns:18px minmax(0,1fr) auto minmax(0,70px) auto 24px;}
 .kkd .kkdrive{color:#3F7D3F;font-weight:600;text-decoration:none;} .kkd .kkdrive:hover{text-decoration:underline;} .kkd .b .kklink{font-size:11px;padding:1px 6px;}
 .kkd .dic{grid-column:1;width:18px;height:18px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;font-style:normal;font-size:7.5px;font-weight:800;letter-spacing:.02em;}
@@ -1357,10 +1365,6 @@ function dokIcon(d){
 }
 function dokKachel(k){
   const doks = DOKU_PRO_KUNDE[k.id];
-  if(DOK_NEU === k.id){
-    if(!DOK_VORLAGEN){ sb.from('doku_vorlage').select('id,name,art').order('sortierung').then(({ data }) => { DOK_VORLAGEN = (data || []).filter(v => !v.art || v.art === 'brief'); renderKundenTable(); }); return leerT('Lädt …'); }
-    return `<div class="dokneu"><span class="lbl">Neues Dokument aus Vorlage</span>${DOK_VORLAGEN.map(v => `<a class="kkz" href="doku-dokument-live-v1.html?v=${v.id}&kunde=${k.id}"><i class="dic tool">${KG.icon('dokument', 14)}</i><span class="t">${escHtml(v.name)}</span></a>`).join('') || leerT('Keine Vorlagen.')}<button type="button" class="kklink dokab" data-dokneu="">Abbrechen</button></div>`;
-  }
   if(!doks) return leerT('Lädt …');
   if(!doks.length) return leerT('Keine Dokumente. «Neu» erstellt eines aus einer Vorlage, «Hochladen» legt eine Datei ab.');
   const zeile = d => d.typ === 'doku'
@@ -1402,12 +1406,25 @@ async function dokInsDrive(kid, d){
     await ladeDokumente(kid); renderKundenTable(); showToast('Abgelegt in ' + ziel.pfad);
   } catch(e){ showToast('Ablegen fehlgeschlagen: ' + (e.message || e), true); }
 }
+// «Neu»: Fenster mit den Vorlagen (Briefe), Klick öffnet das neue Dokument mit Kunde und Adresse
+async function dokNeuFenster(k){
+  if(!DOK_VORLAGEN){ const { data } = await sb.from('doku_vorlage').select('id,name,beschreibung,art').order('sortierung'); DOK_VORLAGEN = (data || []).filter(v => !v.art || v.art === 'brief'); }
+  document.getElementById('dokPop')?.remove();
+  const d = document.createElement('div'); d.id = 'dokPop'; d.className = 'dokpop';
+  d.innerHTML = `<div class="dokpopbox" role="dialog" aria-label="Neues Dokument"><h3>Neues Dokument</h3><p class="dokpopk">für ${escHtml([anzeigename(k), k.vorname].filter(Boolean).join(' '))} · ${escHtml([k.strasse, [k.plz, k.ort].filter(Boolean).join(' ')].filter(Boolean).join(', '))}</p>
+    <div class="dokpopl">${DOK_VORLAGEN.map(v => `<a href="doku-dokument-live-v1.html?v=${v.id}&kunde=${k.id}"><i class="dic tool">${KG.icon('dokument', 16)}</i><span><b>${escHtml(v.name)}</b>${v.beschreibung ? `<small>${escHtml(v.beschreibung)}</small>` : ''}</span></a>`).join('') || '<p class="kkleer">Keine Vorlagen.</p>'}</div>
+    <div class="dokpopf"><button type="button" class="dokabbr" data-dokzu>Abbrechen</button></div></div>`;
+  d.addEventListener('click', ev => { if(ev.target === d) d.remove(); });
+  document.body.appendChild(d);
+}
+document.addEventListener('keydown', e => { if(e.key === 'Escape') document.getElementById('dokPop')?.remove(); });
 // Klicks in der Kachel «Dokumente»
 document.addEventListener('click', async e => {
-  const b = e.target.closest('[data-dokneu],[data-dokup],[data-dokalle],[data-dokauf],[data-dokweg],[data-dokwegok],[data-dokdrive]'); if(!b) return; e.preventDefault(); e.stopPropagation();
+  const b = e.target.closest('[data-dokneu],[data-dokup],[data-dokalle],[data-dokauf],[data-dokweg],[data-dokwegok],[data-dokdrive],[data-dokzu]'); if(!b) return; e.preventDefault(); e.stopPropagation();
   if(b.dataset.dokdrive){ const d = (DOKU_PRO_KUNDE[b.dataset.kunde] || []).find(x => x.id === b.dataset.dokdrive); if(d){ b.disabled = true; await dokInsDrive(b.dataset.kunde, d); } return; }
   if('dokalle' in b.dataset){ DOK_ALLE = !DOK_ALLE; renderKundenTable(); return; }
-  if('dokneu' in b.dataset){ DOK_NEU = b.dataset.dokneu || null; renderKundenTable(); return; }
+  if('dokneu' in b.dataset){ const k = KUNDEN.find(x => x.id === b.dataset.dokneu); if(k) dokNeuFenster(k); return; }
+  if('dokzu' in b.dataset){ document.getElementById('dokPop')?.remove(); return; }
   if('dokweg' in b.dataset){ DOK_WEG = b.dataset.dokweg || null; renderKundenTable(); return; }
   if(b.dataset.dokup){ const i = document.createElement('input'); i.type = 'file'; i.multiple = true; i.onchange = () => { if(i.files.length) dokHochladen(b.dataset.dokup, [...i.files]); }; i.click(); return; }
   const kid = b.dataset.kunde, d = (DOKU_PRO_KUNDE[kid] || []).find(x => x.id === (b.dataset.dokauf || b.dataset.dokwegok)); if(!d) return;
