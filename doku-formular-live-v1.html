@@ -49,7 +49,8 @@
 .kkat-rumpf aside button{all:unset;cursor:pointer;padding:5px 8px;border-radius:6px;font-size:12.5px;color:#323E4E;line-height:1.35;}
 .kkat-rumpf aside button:hover{background:#F5F7F9;} .kkat-rumpf aside button.e0{font-weight:600;margin-top:4px;} .kkat-rumpf aside button.e1{padding-left:18px;color:#4C5C70;}
 .kkat-rumpf aside button small{display:block;color:#8B9097;font-size:11px;} .kkat-titel{font-size:11px;color:#8B9097;text-transform:uppercase;letter-spacing:.04em;padding:4px 8px;}
-.kkat-seite{flex:1;overflow:auto;background:#E3E7EC;display:flex;justify-content:center;padding:12px;}
+.kkat-seite{flex:1;overflow:auto;background:#E3E7EC;padding:12px;position:relative;}
+.kkat-seiten{display:flex;flex-direction:column;align-items:center;gap:12px;}
 .kkat-blatt{position:relative;flex:none;box-shadow:0 4px 18px rgba(35,43,53,.15);background:#fff;}
 .kkat-layer{position:absolute;inset:0;}
 .kkat-nr{all:unset;position:absolute;cursor:pointer;border-radius:3px;box-shadow:inset 0 0 0 1.5px rgba(209,219,95,.0);}
@@ -260,11 +261,11 @@ async function aufbau(main){
       <div class="kkat-kopf"><b>Katalog Aqua Solar</b><span class="kgd-hinweis">${KAT.stand ? 'Stand ' + esc(KAT.stand.split('-').reverse().join('.')) : ''}</span>
         <input class="kgd-t" id="katQ" placeholder="Suchen: Wort oder Nummer" autocomplete="off"><button type="button" class="kg-ibtn" id="katZu" title="Schliessen">${ic('x', 13)}</button></div>
       <div class="kkat-rumpf"><aside id="katListe"><span class="kgd-hinweis">Katalog lädt …</span></aside>
-        <div class="kkat-seite" id="katSeite"><div class="kkat-blatt" id="katBlatt"><canvas id="katCanvas"></canvas><div class="kkat-layer" id="katLayer"></div></div></div></div>
+        <div class="kkat-seite" id="katSeite"><div class="kkat-seiten" id="katSeiten"></div></div></div>
       <div class="kkat-fuss"><button type="button" class="kg-ibtn" id="katZurueck" title="Vorherige Seite">‹</button><span>Seite <input id="katNr" inputmode="numeric"> von <span id="katVon">…</span></span><button type="button" class="kg-ibtn" id="katVor" title="Nächste Seite">›</button>
         <span class="kgd-hinweis" style="margin-left:auto">Auf eine Artikelnummer klicken, um sie zu übernehmen.</span></div></div>`;
     document.body.appendChild(box);
-    const zu = () => { box.remove(); removeEventListener('keydown', taste); };
+    const zu = () => { if(katObs) katObs.disconnect(); box.remove(); removeEventListener('keydown', taste); };
     const taste = e => { if(e.key === 'Escape') zu(); else if(e.target.tagName !== 'INPUT' && e.key === 'ArrowRight') katZeigen(katSeite + 1); else if(e.target.tagName !== 'INPUT' && e.key === 'ArrowLeft') katZeigen(katSeite - 1); };
     addEventListener('keydown', taste);
     box.addEventListener('click', e => { if(e.target === box) zu(); });
@@ -276,7 +277,7 @@ async function aufbau(main){
       if(!katPdf){ const { data, error } = await sb.storage.from('doku-dateien').createSignedUrl(KAT.pfad, 6 * 3600); if(error) throw error;
         katPdf = await pdfjsLib.getDocument({ url: data.signedUrl, disableAutoFetch: true, disableStream: true }).promise; }
       $('katVon').textContent = katPdf.numPages;
-      katInhalt(); katZeigen(katSeite); $('katQ').focus();
+      await katAufbauen(); katInhalt(); katZeigen(katSeite); $('katQ').focus();
     } catch(err){ $('katListe').innerHTML = `<span class="kgd-hinweis">Katalog konnte nicht geladen werden: ${esc(err.message || err)}</span>`; }
   }
   let katZu = () => {};
@@ -297,28 +298,60 @@ async function aufbau(main){
       : '<span class="kgd-hinweis">Nichts gefunden. Im Inhaltsverzeichnis blättern hilft oft weiter.</span>';
     $('katListe').querySelectorAll('[data-ktr]').forEach(b => b.onclick = () => { const r = data[+b.dataset.ktr]; katZeigen(r.seite, r.nr); });
   }
-  let katLauf = 0;
-  async function katZeigen(s, markiere){
-    if(!katPdf) return; s = Math.max(1, Math.min(katPdf.numPages, s)); katSeite = s; $('katNr').value = s;
-    const nr = ++katLauf, pg = await katPdf.getPage(s); if(nr !== katLauf) return;
-    const breite = Math.min($('katSeite').clientWidth - 24, 900), vp1 = pg.getViewport({ scale: 1 }), sk = breite / vp1.width, vp = pg.getViewport({ scale: sk });
-    const c = $('katCanvas'), dpr = devicePixelRatio || 1; c.width = Math.round(vp.width * dpr); c.height = Math.round(vp.height * dpr); c.style.width = vp.width + 'px'; c.style.height = vp.height + 'px';
-    $('katBlatt').style.width = vp.width + 'px'; $('katBlatt').style.height = vp.height + 'px'; $('katLayer').innerHTML = '';
-    await pg.render({ canvasContext: c.getContext('2d'), viewport: pg.getViewport({ scale: sk * dpr }) }).promise; if(nr !== katLauf) return;
-    const [tc, an] = await Promise.all([pg.getTextContent(), pg.getAnnotations({ intent: 'display' })]); if(nr !== katLauf) return;
+  // Alle Seiten untereinander (durchgehend scrollbar), gezeichnet werden nur die Seiten in der Nähe des sichtbaren Bereichs.
+  // Platzhalter haben die Grösse von Seite 1; eine abweichende Seite passt ihre Höhe beim Zeichnen an.
+  const KAT_ABST = 12;
+  let katW = 0, katH = 0, katObs = null, katMark = null;
+  const katBlaetter = () => $('katSeiten').children;
+  async function katAufbauen(){
+    const vp1 = (await katPdf.getPage(1)).getViewport({ scale: 1 });
+    katW = Math.min($('katSeite').clientWidth - 24, 900); katH = Math.round(vp1.height * katW / vp1.width);
+    $('katSeiten').innerHTML = Array.from({ length: katPdf.numPages }, (_, k) => `<div class="kkat-blatt" data-s="${k + 1}" style="width:${katW}px;height:${katH}px"></div>`).join('');
+    katObs = new IntersectionObserver(eintraege => eintraege.forEach(e => e.isIntersecting ? katRender(e.target) : katLeeren(e.target)), { root: $('katSeite'), rootMargin: '1200px 0px' });
+    [...katBlaetter()].forEach(d => katObs.observe(d));
+    $('katSeite').addEventListener('scroll', () => { const s = katSichtbar(); if(s !== katSeite){ katSeite = s; $('katNr').value = s; } }, { passive: true });
+  }
+  function katSichtbar(){
+    const top = $('katSeite').scrollTop + 40, L = katBlaetter(); let k = Math.min(L.length - 1, Math.max(0, Math.floor(top / (katH + KAT_ABST))));
+    while(k > 0 && L[k].offsetTop > top) k--; while(k < L.length - 1 && L[k].offsetTop + L[k].offsetHeight < top) k++;
+    return k + 1;
+  }
+  function katZeigen(s, markiere){
+    if(!katPdf || !$('katSeiten')) return; s = Math.max(1, Math.min(katPdf.numPages, s)); katSeite = s; $('katNr').value = s;
+    katMark = markiere ? { s, nr: markiere } : null;
+    const d = katBlaetter()[s - 1]; $('katSeite').scrollTop = d.offsetTop - KAT_ABST;
+    if(markiere && d.dataset.fertig) katMarkieren(d);
+  }
+  function katMarkieren(d){
+    if(!katMark || +d.dataset.s !== katMark.s) return;
+    d.querySelectorAll('.kkat-nr').forEach(b => b.classList.toggle('treffer', b.dataset.nr === katMark.nr));
+    const t = d.querySelector('.treffer'); if(t) t.scrollIntoView({ block: 'center' });
+    katMark = null;
+  }
+  function katLeeren(d){ if(!d.dataset.r) return; delete d.dataset.r; delete d.dataset.fertig; d.dataset.tok = (+d.dataset.tok || 0) + 1; d.innerHTML = ''; }
+  async function katRender(d){
+    if(d.dataset.r) return; d.dataset.r = '1'; const tok = d.dataset.tok = (+d.dataset.tok || 0) + 1, s = +d.dataset.s, weg = () => d.dataset.tok != tok;
+    const pg = await katPdf.getPage(s); if(weg()) return;
+    const vp1 = pg.getViewport({ scale: 1 }), sk = katW / vp1.width, vp = pg.getViewport({ scale: sk }), dpr = devicePixelRatio || 1;
+    if(Math.abs(vp.height - katH) > 1) d.style.height = vp.height + 'px';
+    const c = document.createElement('canvas'); c.width = Math.round(vp.width * dpr); c.height = Math.round(vp.height * dpr); c.style.width = vp.width + 'px'; c.style.height = vp.height + 'px';
+    const L = document.createElement('div'); L.className = 'kkat-layer';
+    await pg.render({ canvasContext: c.getContext('2d'), viewport: pg.getViewport({ scale: sk * dpr }) }).promise; if(weg()) return;
+    d.innerHTML = ''; d.append(c, L);
+    const [tc, an] = await Promise.all([pg.getTextContent(), pg.getAnnotations({ intent: 'display' })]); if(weg()) return;
     // Index-Zeilen dieser Seite: n-te Nummer auf der Seite = n-te Zeile im Index (gleiche Reihenfolge wie beim Auslesen)
-    const { data: idx } = await sb.from('doku_katalog_artikel').select('nr,bez').eq('vorlage_id', V.id).eq('seite', s).order('id'); if(nr !== katLauf) return;
-    const L = $('katLayer'), zaehler = {}, rect = r => { const [x1, y1, x2, y2] = vp.convertToViewportRectangle(r); return `left:${Math.min(x1, x2)}px;top:${Math.min(y1, y2)}px;width:${Math.abs(x2 - x1)}px;height:${Math.abs(y2 - y1)}px`; };
-    an.filter(a => a.subtype === 'Link' && a.dest).forEach(a => { const d = document.createElement('a'); d.className = 'kkat-link'; d.style.cssText = rect(a.rect); d.title = 'Gehe zu';
-      d.onclick = async () => { const z = await katZiel(a.dest); if(z) katZeigen(z); }; L.appendChild(d); });
+    const { data: idx } = await sb.from('doku_katalog_artikel').select('nr,bez').eq('vorlage_id', V.id).eq('seite', s).order('id'); if(weg()) return;
+    const zaehler = {}, rect = r => { const [x1, y1, x2, y2] = vp.convertToViewportRectangle(r); return `left:${Math.min(x1, x2)}px;top:${Math.min(y1, y2)}px;width:${Math.abs(x2 - x1)}px;height:${Math.abs(y2 - y1)}px`; };
+    an.filter(a => a.subtype === 'Link' && a.dest).forEach(a => { const l = document.createElement('a'); l.className = 'kkat-link'; l.style.cssText = rect(a.rect); l.title = 'Gehe zu';
+      l.onclick = async () => { const z = await katZiel(a.dest); if(z) katZeigen(z); }; L.appendChild(l); });
     tc.items.forEach(i => { const m = (i.str || '').trim().match(NR_RX); if(!m) return;
       const k = zaehler[m[1]] = (zaehler[m[1]] || 0) + 1, treffer = (idx || []).filter(r => r.nr === m[1]), zeile = treffer[k - 1] || treffer[0] || { bez: '' };
       const w = Math.max(i.width, (i.height || 8) * 3.4), h = i.height || 8, x = i.transform[4], y = i.transform[5];
-      const b = document.createElement('button'); b.type = 'button'; b.className = 'kkat-nr' + (markiere === m[1] ? ' treffer' : ''); b.style.cssText = rect([x - 2, y - 2, x + w + 2, y + h + 1]);
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'kkat-nr'; b.dataset.nr = m[1]; b.style.cssText = rect([x - 2, y - 2, x + w + 2, y + h + 1]);
       b.title = `${m[1]} ${zeile.bez || ''} übernehmen`;
       b.onclick = () => { katZu(); artikelSetzen(katFuer, m[1], zeile.bez, null); };
       L.appendChild(b); });
-    if(markiere){ const t = L.querySelector('.treffer'); if(t) t.scrollIntoView({ block: 'center', behavior: 'smooth' }); } else $('katSeite').scrollTop = 0;
+    d.dataset.fertig = '1'; katMarkieren(d);
   }
 
   // Angaben (links)
