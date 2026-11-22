@@ -644,7 +644,7 @@ html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!import
   let alleWeitere = false;
   function menuListen(s){
     const M = new Map((s.menue || []).map(m => [m.app_key, m]));
-    const tools = TOOLS.filter(t => t.k !== 'home' && sichtbar(t, s));
+    const tools = TOOLS.filter(t => t.k !== 'home' && t.k !== 'verw' && sichtbar(t, s));   // Einstellungen: Zahnrad in der Leiste
     const istMeine = t => M.has(t.k) ? M.get(t.k).an : t.k !== 'verw';
     const pos = t => M.has(t.k) ? M.get(t.k).sortierung : 1000 + TOOLS.indexOf(t), zahl = t => (M.get(t.k) || {}).aufrufe || 0;
     const haeufig = M.has(HAEUFIG) ? M.get(HAEUFIG).an : true;
@@ -808,6 +808,13 @@ html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!import
       h.innerHTML = SVG(I_HILFE); h.addEventListener('click', e => { e.stopPropagation(); hilfeOrig.click(); });
       ub.appendChild(h);
     }
+    // Einstellungen: Zahnrad in der Leiste (nicht im Tool-Menü), nur für wer sie sehen darf
+    const verwTool = TOOLS.find(t => t.k === 'verw');
+    if(verwTool){
+      const g = document.createElement('a'); g.className = 'kg-rund' + (aktuell.k === 'verw' ? ' kg-an' : ''); g.href = 'einstellungen-uebersicht-live-v1.html'; g.title = 'Einstellungen'; g.setAttribute('aria-label', 'Einstellungen');
+      g.innerHTML = SVG(P.gear); g.style.display = 'none'; ub.appendChild(g);
+      ladeSichtbarkeit().then(s => { if(s.rolle === 'admin' || s.rolle === 'buero_team' || (s.rechte && s.rechte.admin)) g.style.display = ''; }).catch(() => {});
+    }
     const p = document.createElement('button'); p.type = 'button'; p.className = 'kg-rund kg-person'; p.title = 'Mein Konto'; p.setAttribute('aria-label', 'Mein Konto');
     const txt = document.getElementById('userbarText');
     const initialen = () => {
@@ -826,7 +833,7 @@ html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!import
         const verw = s.rolle === 'admin' || s.rolle === 'buero_team' ? 'einstellungen-uebersicht-live-v1.html' : (s.module && s.module.get('tools') ? 'tools-live-v1.html' : null);
         return `<div class="kg-pkopf"><b>${esc(name)}</b>${rolle ? `<span>${esc(rolle)}</span>` : ''}</div>`
           + (eigene ? `<button type="button" data-k="eigene">${SVG(P.gear)}Meine Einstellungen · ${esc(aktuell.n)}</button>` : '')
-          + (verw && aktuell.k !== 'verw' ? `<a href="${verw}">${SVG(P.gear)}Einstellungen</a>` : '')
+          + (verw && !/^einstellungen/.test(verw) ? `<a href="${verw}">${SVG(P.gear)}Tools & Kacheln</a>` : '')   // Büro/Admin: Zahnrad in der Leiste
           + `<div class="kg-sep"></div><button type="button" data-k="aus">${SVG(I_AUS)}Abmelden</button>`;
       };
       const binden = () => {
