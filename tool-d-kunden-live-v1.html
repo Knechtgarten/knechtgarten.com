@@ -293,6 +293,19 @@ td.kats{white-space:normal;}
 .kkz .b{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;min-width:60px;} .kkz .b.gelb{color:#8A6410;font-weight:600;} .kkz .b.orange{color:#C05A1C;font-weight:600;}
 .kkz .st{width:7px;height:7px;border-radius:50%;background:#DCE2E8;} .kkz .st.ok{background:#3F7D3F;} .kkz .st.no{background:#B4655F;}
 .kkz .ebtyp{grid-column:1;} .kkleer{color:var(--muted);font-size:12px;}
+/* Kachel «Dokumente»: erstellt (blau) / hochgeladen (grau, PDF), Ersteller, Drive-Stand, Löschen beim Darüberfahren */
+.kkz.kkd{grid-template-columns:18px minmax(0,1fr) auto minmax(0,70px) auto 24px;}
+.kkd .dic{grid-column:1;width:18px;height:18px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;font-style:normal;font-size:7.5px;font-weight:800;letter-spacing:.02em;}
+.dic.tool{background:#E3EBF5;color:#2E5E9E;} .dic.datei{background:#EEF0F3;color:#6B7079;} .dic.datei.pdf{background:#F6E3E1;color:#B4423A;}
+.dic svg{width:12px;height:12px;}
+.kkd .v{color:#8B9097;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.kkd .b{min-width:0;font-size:11px;color:#8B9097;}
+.kkdl{all:unset;box-sizing:border-box;cursor:pointer;grid-column:1 / 3;display:flex;align-items:center;gap:8px;min-width:0;}
+.kkdl .t{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;} .kkdl:hover .t{text-decoration:underline;}
+.kkd .kg-ibtn{width:22px;height:22px;}
+.kkd.dokweg .t{grid-column:1 / 5;color:#B4423A;font-weight:600;} .kklink.rot{color:#B4423A;}
+.dokneu{display:flex;flex-direction:column;gap:2px;} .dokneu .lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:#8B9097;font-weight:600;margin-bottom:2px;}
+.dokneu .kkz{grid-template-columns:18px minmax(0,1fr);} .dokneu .dic{width:18px;height:18px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;} .dokab{align-self:flex-start;margin-top:4px;}
 /* geöffnete Karte etwas hervorheben */
 tr.kundenrow.open td,tr.liefrow.open td{background:#D6E7F4!important;color:#232B35;border-bottom-color:#D6E7F4;padding-top:10px;padding-bottom:10px;}
 tr.kundenrow.open td b,tr.liefrow.open td b{font-size:15px;}
@@ -1324,10 +1337,62 @@ async function zuordnungSetzen(ebId, wert){
 // Kunde aufgeklappt: gleich grosse Kacheln (Adresse, Pflege, Offerten, Projekte, Bauprogramm, Dokumente, Easybill).
 // Oben rechts in jeder Kachel die Links (Öffnen, Neu …); Inhalt scrollt, wenn er nicht Platz hat.
 let DOKU_PRO_KUNDE = {}, OFF_ALLE = false;
+// Dokumente des Kunden: im Doku-Tool erstellte (doku_dokument) + hochgeladene Dateien (kunde_datei, Speicher «kunden-dateien»)
+let DOK_ALLE = false, DOK_NEU = null, DOK_WEG = null, DOK_VORLAGEN = null;
 async function ladeDokumente(kundeId){
-  const { data } = await sb.from('doku_dokument').select('id,datum,adresse,drive_datei_id,vorlage:vorlage_id(name)').eq('kunde_id', kundeId).order('datum', { ascending: false });
-  DOKU_PRO_KUNDE[kundeId] = data || [];
+  const [d, f] = await Promise.all([
+    sb.from('doku_dokument').select('id,datum,erstellt_am,adresse,drive_datei_id,vorlage:vorlage_id(name),von:benutzer!doku_dokument_erstellt_von_fkey(anzeigename)').eq('kunde_id', kundeId),
+    sb.from('kunde_datei').select('id,name,mime,storage_pfad,erstellt_am,drive_datei_id,von:benutzer!kunde_datei_erstellt_von_fkey(anzeigename)').eq('kunde_id', kundeId),
+  ]);
+  const l = [...(d.data || []).map(x => ({ typ: 'doku', id: x.id, name: x.vorlage ? x.vorlage.name : 'Dokument', datum: x.datum || x.erstellt_am, von: x.von?.anzeigename || '', drive: !!x.drive_datei_id })),
+             ...(f.data || []).map(x => ({ typ: 'datei', id: x.id, name: x.name, mime: x.mime || '', pfad: x.storage_pfad, datum: x.erstellt_am, von: x.von?.anzeigename || '', drive: !!x.drive_datei_id }))];
+  DOKU_PRO_KUNDE[kundeId] = l.sort((a, b) => String(b.datum || '').localeCompare(String(a.datum || '')));
 }
+// Icon vorne: im Tool erstellt = Dokument in Knechtgarten-Blau, hochgeladen = grau (PDF mit Kürzel, Foto mit Bild-Icon)
+function dokIcon(d){
+  if(d.typ === 'doku') return `<i class="dic tool" title="Im Doku-Tool erstellt">${KG.icon('dokument', 14)}</i>`;
+  const pdf = /pdf/i.test(d.mime) || /\.pdf$/i.test(d.name), bild = /^image\//.test(d.mime);
+  return `<i class="dic datei${pdf ? ' pdf' : ''}" title="Hochgeladen">${pdf ? 'PDF' : KG.icon(bild ? 'foto' : 'dokument', 14)}</i>`;
+}
+function dokKachel(k){
+  const doks = DOKU_PRO_KUNDE[k.id];
+  if(DOK_NEU === k.id){
+    if(!DOK_VORLAGEN){ sb.from('doku_vorlage').select('id,name,art').order('sortierung').then(({ data }) => { DOK_VORLAGEN = (data || []).filter(v => !v.art || v.art === 'brief'); renderKundenTable(); }); return leerT('Lädt …'); }
+    return `<div class="dokneu"><span class="lbl">Neues Dokument aus Vorlage</span>${DOK_VORLAGEN.map(v => `<a class="kkz" href="doku-dokument-live-v1.html?v=${v.id}&kunde=${k.id}"><i class="dic tool">${KG.icon('dokument', 14)}</i><span class="t">${escHtml(v.name)}</span></a>`).join('') || leerT('Keine Vorlagen.')}<button type="button" class="kklink dokab" data-dokneu="">Abbrechen</button></div>`;
+  }
+  if(!doks) return leerT('Lädt …');
+  if(!doks.length) return leerT('Keine Dokumente. «Neu» erstellt eines aus einer Vorlage, «Hochladen» legt eine Datei ab.');
+  const zeile = d => d.typ === 'doku'
+    ? `<a class="kkz kkd" href="doku-dokument-live-v1.html?d=${d.id}" title="Dokument öffnen">${dokIcon(d)}<span class="t">${escHtml(d.name)}</span><span class="d">${kDat(d.datum)}</span><span class="v">${escHtml(d.von)}</span><span class="b">${d.drive ? 'im Drive' : ''}</span></a>`
+    : DOK_WEG === d.id
+      ? `<div class="kkz kkd dokweg"><span class="t">«${escHtml(d.name)}» löschen?</span><button type="button" class="kklink rot" data-dokwegok="${d.id}" data-kunde="${k.id}">Löschen</button><button type="button" class="kklink" data-dokweg="">Nein</button></div>`
+      : `<div class="kkz kkd kg-zeile"><button type="button" class="kkdl" data-dokauf="${d.id}" data-kunde="${k.id}" title="Datei öffnen">${dokIcon(d)}<span class="t">${escHtml(d.name)}</span></button><span class="d">${kDat(d.datum)}</span><span class="v">${escHtml(d.von)}</span><span class="b">${d.drive ? 'im Drive' : ''}</span><button type="button" class="kg-ibtn danger kg-hover" data-dokweg="${d.id}" title="Löschen">${KG.icon('trash', 13)}</button></div>`;
+  return (DOK_ALLE ? doks : doks.slice(0, 8)).map(zeile).join('');
+}
+async function dokHochladen(kundeId, dateien){
+  for(const f of dateien){
+    const sauber = f.name.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^\w.\-]+/g, '_');
+    const pfad = `${kundeId}/${crypto.randomUUID()}-${sauber}`;
+    const up = await sb.storage.from('kunden-dateien').upload(pfad, f, { contentType: f.type || undefined });
+    if(up.error){ showToast('Hochladen fehlgeschlagen: ' + up.error.message, true); continue; }
+    const { error } = await sb.from('kunde_datei').insert({ kunde_id: kundeId, name: f.name, storage_pfad: pfad, mime: f.type || null, groesse: f.size });
+    if(error){ await sb.storage.from('kunden-dateien').remove([pfad]); showToast('Speichern fehlgeschlagen: ' + error.message, true); continue; }
+  }
+  await ladeDokumente(kundeId); renderKundenTable(); showToast(dateien.length === 1 ? 'Datei hochgeladen' : dateien.length + ' Dateien hochgeladen');
+}
+// Klicks in der Kachel «Dokumente»
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-dokneu],[data-dokup],[data-dokalle],[data-dokauf],[data-dokweg],[data-dokwegok]'); if(!b) return; e.preventDefault(); e.stopPropagation();
+  if('dokalle' in b.dataset){ DOK_ALLE = !DOK_ALLE; renderKundenTable(); return; }
+  if('dokneu' in b.dataset){ DOK_NEU = b.dataset.dokneu || null; renderKundenTable(); return; }
+  if('dokweg' in b.dataset){ DOK_WEG = b.dataset.dokweg || null; renderKundenTable(); return; }
+  if(b.dataset.dokup){ const i = document.createElement('input'); i.type = 'file'; i.multiple = true; i.onchange = () => { if(i.files.length) dokHochladen(b.dataset.dokup, [...i.files]); }; i.click(); return; }
+  const kid = b.dataset.kunde, d = (DOKU_PRO_KUNDE[kid] || []).find(x => x.id === (b.dataset.dokauf || b.dataset.dokwegok)); if(!d) return;
+  if(b.dataset.dokauf){ const w = window.open('', '_blank'); const { data, error } = await sb.storage.from('kunden-dateien').createSignedUrl(d.pfad, 600);
+    if(error){ w?.close(); showToast('Öffnen fehlgeschlagen: ' + error.message, true); return; } if(w) w.location = data.signedUrl; else location.href = data.signedUrl; return; }
+  if(b.dataset.dokwegok){ const { error } = await sb.from('kunde_datei').delete().eq('id', d.id); if(error){ showToast('Löschen fehlgeschlagen: ' + error.message, true); return; }
+    await sb.storage.from('kunden-dateien').remove([d.pfad]); DOK_WEG = null; await ladeDokumente(kid); renderKundenTable(); showToast('Gelöscht'); }
+}, true);
 const kDat = v => { if(!v) return ''; const [y, m, d] = String(v).slice(0, 10).split('-'); return `${+d}.${+m}.${y.slice(2)}`; };
 const kBetrag = n => n == null ? '' : Number(n).toLocaleString('de-CH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 // Kachelköpfe wie die Listen in Pendenzen: farbiger Balken mit Icon (Farbe = Tool bzw. Palette Stufe 2; Easybill in seiner Markenfarbe, Drive grau mit farbigem Drive-Logo)
@@ -1462,7 +1527,7 @@ function kundeDetail(k){
     Bauprogramm: bps0.length === 1 ? `bauprogramm-live-v1.html?programm=${bps0[0].id}` : 'bauprogramm-live-v1.html',
     Grundstück: `data-karte="${k.id}"`,
     Ablage: ord && ord.liste && ord.liste.length ? `data-ablage="${k.id}"` : null,
-    Dokumente: 'doku-live-v1.html',
+    Dokumente: 'data-dokalle="1"',
   };
   T.push(kachel('Adresse &amp; Kontakt', MIT_ADR ? `<button type="button" class="kklink km-edit" data-id="${k.id}">Bearbeiten</button>` : '', adresseHtml([anzeigename(k), k.vorname].filter(Boolean).join(' '), k) + objBezHtml(k)));
   if(MIT_PF && PF.reg.length){ const pk = PF.kunden.get(k.id);
@@ -1490,8 +1555,7 @@ function kundeDetail(k){
     const doks = DOKU_PRO_KUNDE[k.id];
     T.push(kachel('Grundstück', `<button type="button" class="kklink" data-karte="${k.id}">Karte öffnen</button>`, karteKachel(k)));
     T.push(kachel('Ablage (Drive)', ordnerKnoepfe(k), ordnerKachel(k)));
-    T.push(kachel('Dokumente', `<a class="kklink" href="doku-live-v1.html">Neu</a>`, !doks ? leerT('Lädt …') : !doks.length ? leerT('Keine Dokumente.')
-      : doks.map(d => `<a class="kkz" href="doku-dokument-live-v1.html?d=${d.id}"><span class="t">${escHtml(d.vorlage ? d.vorlage.name : 'Dokument')}</span><span class="d">${kDat(d.datum)}</span><span class="b">${d.drive_datei_id ? 'im Drive' : ''}</span></a>`).join('')));
+    T.push(kachel(`Dokumente${doks && doks.length ? ` <small>${doks.length}</small>` : ''}`, `${doks && doks.length > 8 ? `<button type="button" class="kklink" data-dokalle>${DOK_ALLE ? 'Weniger' : 'Alle'}</button>` : ''}<button type="button" class="kklink" data-dokneu="${k.id}">Neu</button><button type="button" class="kklink" data-dokup="${k.id}">Hochladen</button>`, dokKachel(k)));
     T.push(kachel('Easybill', k.easybill_id ? `<button type="button" class="kklink eb-kunde" data-id="${k.id}">Jetzt holen</button>` : '', easybillKachel(k)));
   }
   KK_ZIEL = {};
