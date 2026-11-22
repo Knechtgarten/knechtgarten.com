@@ -1,6 +1,6 @@
 // ============================================================================
 // QR-Bestellung: Artikel in den Warenkorb eines Lieferanten-Shops legen (läuft in background.js).
-// Pro Shop-System ein Ablauf (heute: Magento = Aquasolar, Dabag = B-TEAM + IMMER AG, Hybris = HGC). Was sich ändern kann (Shop-Adresse, Sprache,
+// Pro Shop-System ein Ablauf (heute: Magento = Aquasolar, Dabag = B-TEAM + IMMER AG, Hybris = HGC, PrestaShop = MIDAS; Magento auch Aqua-Technik). Was sich ändern kann (Shop-Adresse, Sprache,
 // Adresse der Bestätigungsseite), kommt vom Tool aus der Tabelle bestell_anbindung mit – kein Code im Tool.
 //
 // Ablauf «bestellen»: Shop-Warenkorb im eigenen Browser öffnen (du bist dort angemeldet), Artikelnummern im Shop
@@ -39,7 +39,8 @@ async function shopTab(a, aktiv) {
 // ---------- Magento (läuft im Shop-Tab, Welt MAIN, darum ganz eigenständig) ----------
 async function magentoAblauf(auftrag, pos, sprache) {
   const fk = (window.hyva && window.hyva.getFormKey && window.hyva.getFormKey()) || (document.cookie.match(/(?:^|;\s*)form_key=([^;]+)/) || [])[1];
-  const acc = await fetch(`/${sprache}/customer/account/`, { credentials: 'include' });
+  const P = sprache ? '/' + sprache : '';   // Sprache im Pfad (Aquasolar /de), ohne bei Aqua-Technik
+  const acc = await fetch(`${P}/customer/account/`, { credentials: 'include' });
   if (/\/login/.test(acc.url)) return { fehler: 'Im Shop nicht angemeldet. Bitte im Shop anmelden und nochmals starten.' };
   if (!fk) return { fehler: 'Shop-Seite nicht bereit (Formular-Schlüssel fehlt).' };
   const nrn = [...new Set(pos.map((p) => String(p.nr)))];
@@ -53,7 +54,7 @@ async function magentoAblauf(auftrag, pos, sprache) {
     body: new URLSearchParams({ ...o, form_key: fk }) });
   // Warenkorb lesen: Positionen aus der Warenkorb-Seite (id, Menge, Kommentar, Artikelnummer)
   const warenkorb = async () => {
-    const html = await fetch(`/${sprache}/checkout/cart/`, { credentials: 'include' }).then((r) => r.text());
+    const html = await fetch(`${P}/checkout/cart/`, { credentials: 'include' }).then((r) => r.text());
     const d = new DOMParser().parseFromString(html, 'text/html');
     return [...d.querySelectorAll('input[name^="cart["][name$="[qty]"]')].map((inp) => {
       const id = inp.name.match(/cart\[(\d+)\]/)[1];
@@ -70,7 +71,7 @@ async function magentoAblauf(auftrag, pos, sprache) {
   for (const p of pos) {
     const id = ids.get(String(p.nr));
     if (!id) { fehler.push({ nr: p.nr, grund: 'im Shop nicht gefunden' }); continue; }
-    const r = await post(`/${sprache}/checkout/cart/add/`, { product: String(id), qty: String(p.menge) }).catch(() => null);
+    const r = await post(`${P}/checkout/cart/add/`, { product: String(id), qty: String(p.menge) }).catch(() => null);
     if (!r || !r.ok) { fehler.push({ nr: p.nr, grund: 'Shop-Fehler ' + (r ? r.status : '') }); continue; }
     gesendet.push(p);
   }
@@ -85,7 +86,7 @@ async function magentoAblauf(auftrag, pos, sprache) {
     const w = nachher.find((x) => x.nr === String(p.nr) && x.kommentar === '');
     if (w) { upd[`cart[${w.id}][qty]`] = String(w.menge); upd[`cart[${w.id}][item_comment]`] = String(p.notiz).slice(0, 250); }
   }
-  if (Object.keys(upd).length) await post(`/${sprache}/checkout/cart/updatePost/`, { update_cart_action: 'update_qty', ...upd }).catch(() => null);
+  if (Object.keys(upd).length) await post(`${P}/checkout/cart/updatePost/`, { update_cart_action: 'update_qty', ...upd }).catch(() => null);
   return { ok, fehler };
 }
 // ---------- Dabag (B-TEAM, IMMER AG): Direkterfassung im Warenkorb, Notiz ins Feld «Kommission» ----------
@@ -185,12 +186,47 @@ async function hybrisAblauf(auftrag, pos, sprache) {
   return { ok, fehler, angepasst };
 }
 
-const ABLAEUFE = { magento: magentoAblauf, dabag: dabagAblauf, hybris: hybrisAblauf };
+// ---------- PrestaShop (MIDAS): Suche liefert JSON mit Referenz, Warenkorb über ajax-Aufruf mit static_token ----------
+async function prestashopAblauf(auftrag, pos, sprache) {
+  // leerer Warenkorb leitet auf die Startseite um: warten, bis die Shop-Seite bereit ist
+  for (let i = 0; i < 40 && !(window.prestashop && window.prestashop.static_token); i++) await new Promise((r) => setTimeout(r, 250));
+  const ps = window.prestashop, P = sprache ? '/' + sprache : '';
+  if (!ps || !ps.static_token) return { fehler: 'Shop-Seite nicht bereit (Sicherheits-Token fehlt).' };
+  if (!(ps.customer && ps.customer.is_logged)) return { fehler: 'Im Shop nicht angemeldet. Bitte im Shop anmelden und nochmals starten.' };
+  const hdr = { Accept: 'application/json, text/javascript, */*; q=0.01', 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' };
+  const sucheUrl = ps.urls?.pages?.search || P + '/suche', korbUrl = ps.urls?.pages?.cart || P + '/warenkorb';
+  const finde = async (nr) => {
+    const j = await fetch(sucheUrl + (sucheUrl.includes('?') ? '&' : '?') + 'controller=search&s=' + encodeURIComponent(nr), { headers: hdr, credentials: 'include' }).then((r) => r.json()).catch(() => null);
+    return (j?.products || []).find((p) => String(p.reference || '').trim().toLowerCase() === String(nr).trim().toLowerCase()) || null;
+  };
+  if (auftrag === 'test') {
+    const gefunden = [], fehlt = [];
+    for (const p of pos) (await finde(p.nr) ? gefunden : fehlt).push(p.nr);
+    return { eingeloggt: true, gefunden, fehlt };
+  }
+  const summe = (produkte, nr) => (produkte || []).filter((x) => String(x.reference || '').toLowerCase() === String(nr).toLowerCase()).reduce((s, x) => s + (+x.quantity || 0), 0);
+  const vorher = ps.cart?.products || [], fehler = [], angepasst = [], ok = [];
+  for (const p of pos) {
+    const pr = await finde(p.nr);
+    if (!pr) { fehler.push({ nr: p.nr, grund: 'im Shop nicht gefunden' }); continue; }
+    let menge = p.menge; const min = +pr.minimal_quantity || 1;
+    if (menge < min) { menge = min; angepasst.push({ nr: p.nr, menge, schritt: min }); }
+    const r = await fetch(korbUrl, { method: 'POST', headers: hdr, credentials: 'include', body: new URLSearchParams({ token: ps.static_token, id_product: String(pr.id_product),
+      id_product_attribute: String(pr.id_product_attribute || 0), id_customization: '0', qty: String(menge), add: '1', action: 'update', ajax: '1' }) }).catch(() => null);
+    const j = r ? await r.json().catch(() => null) : null;
+    if (!j || !j.success) { fehler.push({ nr: p.nr, grund: (j && [].concat(j.errors || []).join(' ')) || 'Shop-Fehler ' + (r ? r.status : '') }); continue; }
+    if (summe(j.cart?.products, p.nr) > summe(vorher, p.nr)) ok.push(p.nr); else fehler.push({ nr: p.nr, grund: 'nicht im Warenkorb gelandet' });
+  }
+  return { ok, fehler, angepasst };
+}
+
+const ABLAEUFE = { magento: magentoAblauf, dabag: dabagAblauf, hybris: hybrisAblauf, prestashop: prestashopAblauf };
 // Seite, die beim Start im Shop-Tab geöffnet wird (Warenkorb)
 const STARTSEITE = {
-  magento: (a) => `/${a.sprache || 'de'}/checkout/cart/`,
+  magento: (a) => (a.sprache ? '/' + a.sprache : '') + '/checkout/cart/',
   dabag: (a) => '/?srv=basket&companyYN=' + (a.optionen?.firmenkorb ? 1 : 0),
   hybris: (a) => `/${a.sprache || 'de'}/cart`,
+  prestashop: (a) => (a.sprache ? '/' + a.sprache : '') + (a.optionen?.warenkorb || '/warenkorb'),
 };
 
 async function shopAuftrag(typ, daten) {
@@ -208,7 +244,7 @@ async function shopAuftrag(typ, daten) {
   let erg;
   try {
     const [r] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'MAIN', func: ablauf,
-      args: [typ === 'test' ? 'test' : 'bestellen', daten.positionen || [], a.sprache || 'de', a.optionen || {}] });
+      args: [typ === 'test' ? 'test' : 'bestellen', daten.positionen || [], a.sprache || '', a.optionen || {}] });
     erg = r?.result || { fehler: 'Keine Antwort vom Shop.' };
   } catch (e) { erg = { fehler: 'Im Shop lief etwas schief: ' + (e?.message || e) }; }
   if (typ === 'test') { if (tab.eigen) chrome.tabs.remove(tab.id).catch(() => {}); return erg; }
