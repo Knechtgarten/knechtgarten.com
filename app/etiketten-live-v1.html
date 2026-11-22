@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script src="/kg-pw-schutz.js?v=5"></script>
-<script src="/kg-stil.js?v=98"></script>
+<script src="/kg-stil.js?v=99"></script>
 <title>Etiketten – Einstellungen</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#323E4E">
@@ -11,6 +11,8 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="/kg-doku.js?v=9"></script>
 <script src="/kg-etikette.js?v=5"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<script src="/kg-sdb.js?v=1"></script>
 <style>
 .kgd-weg{display:flex;align-items:center;gap:6px;font-size:14px;color:#6B7079;flex-wrap:wrap;min-width:0;}
 .kgd-weg a{color:#A63A52;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:2px;}
@@ -24,6 +26,11 @@
 .evhalter{position:relative;}
 .ewahl{border:1px solid #E1E5E9;border-radius:8px;padding:8px 10px;font-size:13.5px;line-height:1.45;background:#F5F7F9;display:flex;gap:8px;align-items:flex-start;}
 .ewahl span{flex:1;}
+.sdbl{display:flex;flex-direction:column;border:1px solid #E1E5E9;border-radius:8px;max-height:340px;overflow:auto;}
+.sdbz{display:flex;align-items:center;gap:10px;padding:7px 10px;border-top:1px solid #EEF1F4;cursor:pointer;font-size:13.5px;} .sdbz:first-child{border-top:0;}
+.sdbz input[type=checkbox]{width:16px;height:16px;accent-color:#323E4E;flex:none;}
+.sdbn{flex:1;min-width:0;display:flex;flex-direction:column;} .sdbn small{color:#6B7079;font-size:12px;} .sdbn small.sdbfehlt{color:#B4423A;}
+.sdbanz{width:70px!important;height:30px!important;flex:none;}
 </style>
 </head>
 <body>
@@ -53,6 +60,9 @@ async function aufbau(main){
         <div class="kgd-feld" style="flex:0 0 100px"><label for="anz">Anzahl</label><input class="kgd-t" id="anz" type="number" min="1" max="200" value="${anzahl}"></div>
         <button type="button" class="kgd-btn prim" id="druck" style="height:36px">${ic('drucken', 14)}Drucken</button></div>
       <div class="evorschau"><div class="evhalter" id="evHalter"><iframe id="ev" title="Vorschau der Etikette" scrolling="no"></iframe></div></div></div>
+    <div class="ekarte"><h2>Sicherheitsdatenblätter</h2>
+      <span class="kgd-hinweis">Kleber für Kanister auf gelbem P-touch-Band (z. B. TZe-661). Der QR öffnet ohne Anmeldung das Datenblatt mit Notfallnummer Tox Info 145. Datenblätter und UFI-Nummer pflegst du im Nachschlagewerk beim Produkt.</span>
+      <div id="sdbBox"><span class="kgd-hinweis">Lädt …</span></div></div>
     <div class="ekarte"><h2>Format und Absender${admin ? '<button type="button" class="kgd-btn ghost" id="speichern">Speichern</button>' : ''}</h2>
       <span class="kgd-hinweis">Gilt für alle Adressetiketten im Tool (z. B. Knopf «Etikette» in Kontakte). Brother-Rolle DK-11240 = 102 × 51 mm.${admin ? '' : ' Ändern kann nur ein Admin.'}</span>
       <div class="ereihe"><div class="kgd-feld"><label for="br">Breite (mm)</label><input class="kgd-t" id="br" type="number" min="40" max="200" value="${E.breite}" ${admin ? '' : 'disabled'}></div>
@@ -97,6 +107,41 @@ async function aufbau(main){
     $('evHalter').style.width = w * s + 'px'; $('evHalter').style.height = h * s + 'px';
     f.srcdoc = KGE.html(wahl ? wahl.zeilen : ['Empfänger wählen', 'Strasse 1', '3600 Ort'], E, 1);
   }
+  // Sicherheitsdatenblätter: alle Produkte mit Datenblatt, ankreuzen + Anzahl, eine Serie auf den P-touch (kg-sdb.js)
+  let sdbListe = [], sdbG = (() => { try { return localStorage.getItem('kgSdbGr') || 'M'; } catch(_){ return 'M'; } })();
+  const sdbWahl = new Map();
+  async function sdbLaden(){
+    const { data: d } = await sb.from('wissen_datei').select('eintrag_id').eq('bereich', 'sicherheit').is('exemplar_id', null);
+    const ids = [...new Set((d || []).map(x => x.eintrag_id))];
+    const { data: e } = ids.length ? await sb.from('wissen_eintrag').select('id,titel,untertitel,ufi,sdb_code').in('id', ids).is('archiviert_am', null).order('titel') : { data: [] };
+    sdbListe = e || []; sdbZeichnen();
+  }
+  function sdbZeichnen(){
+    const box = $('sdbBox'); if(!box) return;
+    if(!sdbListe.length){ box.innerHTML = '<span class="kgd-hinweis">Noch kein Produkt mit Sicherheitsdatenblatt. Im Nachschlagewerk beim Produkt unter Arbeitssicherheit hochladen.</span>'; return; }
+    const total = [...sdbWahl.values()].reduce((s, n) => s + n, 0);
+    box.innerHTML = `<div class="sdbl">${sdbListe.map(p => `<label class="sdbz"><input type="checkbox" data-sdbw="${p.id}"${sdbWahl.has(p.id) ? ' checked' : ''}>
+        <span class="sdbn"><b>${esc(p.titel)}</b>${p.untertitel ? `<small>${esc(p.untertitel)}</small>` : ''}${p.ufi ? '' : '<small class="sdbfehlt">UFI-Nummer fehlt</small>'}</span>
+        <input class="kgd-t sdbanz" type="number" min="1" max="50" data-sdba="${p.id}" value="${sdbWahl.get(p.id) || 1}" aria-label="Anzahl"${sdbWahl.has(p.id) ? '' : ' disabled'}></label>`).join('')}</div>
+      <div class="ereihe" style="align-items:center"><div class="kg-seg" role="group" aria-label="Grösse">${Object.entries(KGS.GR).map(([k, mm]) => `<button type="button" data-sdbg="${k}" class="${k === sdbG ? 'on' : ''}">${k} · ${mm} mm</button>`).join('')}</div>
+        <button type="button" class="kgd-btn prim" id="sdbDruck"${total ? '' : ' disabled'}>${ic('drucken', 14)}${total ? `${total} Kleber drucken` : 'Drucken'}</button></div>
+      ${sdbListe[0] ? `<div class="evorschau" style="justify-content:flex-start">${KGS.vorschau({ titel: (sdbListe.find(p => sdbWahl.has(p.id)) || sdbListe[0]).titel, ufi: 'XXXX-XXXX-XXXX-XXXX', code: 'vorschauvorschau' }, sdbG)}</div>` : ''}`;
+  }
+  main.addEventListener('change', e => {
+    const w = e.target.dataset.sdbw, a = e.target.dataset.sdba;
+    if(w){ if(e.target.checked) sdbWahl.set(w, 1); else sdbWahl.delete(w); sdbZeichnen(); }
+    if(a && sdbWahl.has(a)){ sdbWahl.set(a, Math.max(1, Math.min(50, +e.target.value || 1))); sdbZeichnen(); }
+  });
+  main.addEventListener('click', async e => {
+    const g = e.target.closest('[data-sdbg]'); if(g){ sdbG = g.dataset.sdbg; try { localStorage.setItem('kgSdbGr', sdbG); } catch(_){} sdbZeichnen(); return; }
+    if(e.target.closest('#sdbDruck')){
+      try { const liste = [];
+        for(const p of sdbListe.filter(p => sdbWahl.has(p.id))){ await KGS.code(sb, p); liste.push({ titel: p.titel, ufi: p.ufi, code: p.sdb_code, anzahl: sdbWahl.get(p.id) }); }
+        KGS.drucken(liste, sdbG);
+      } catch(err){ KGD.toast(err.message, true); }
+    }
+  });
+  sdbLaden();
   adrBox();
 }
 KGD.start(aufbau);
