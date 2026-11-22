@@ -90,20 +90,19 @@ async function aufbau(main){
       <span>:</span><select class="kgd-t" id="${id}M" aria-label="${id} Minuten">${o(minuten, m || '00')}</select></div>`;
   };
   const BAU = {
-    // nur Strasse und Ort (z. B. Helikoptereinsatz): frei tippen/einfügen oder aus Easybill übernehmen
-    adresse: () => `<div class="kgd-feld"><label for="adresse">Strasse Nr., PLZ Ort</label>
-      <div class="kgd-reihe" style="align-items:stretch"><input class="kgd-t" id="adresse" autocomplete="off" placeholder="Ländteweg 6, 3600 Thun" value="${esc([werte.strasse, werte.ort].filter(Boolean).join(', '))}">
-        <button type="button" class="kgd-btn ghost" id="ebBtn" style="flex:none;height:36px">Aus Easybill</button></div>
-      <div class="kgd-feld hidden" id="ebSuche" style="margin-top:6px"><input class="kgd-t" id="ebQ" autocomplete="off" placeholder="Kunde suchen (Name, Strasse, Ort oder Nummer)">
-        <div class="kgd-menue hidden" id="ebMenue"></div></div>
+    // nur Strasse und Ort (z. B. Helikoptereinsatz): Kunde aus unserer Kundenliste suchen oder Adresse frei eintippen
+    // (aus der Kundenkarte geöffnet, steht der Kunde schon drin)
+    adresse: () => `<div class="kgd-feld"><label for="adresse">Kunde oder Adresse</label>
+      <input class="kgd-t" id="adresse" autocomplete="off" placeholder="Name, Strasse oder Ort suchen – oder «Ländteweg 6, 3600 Thun» eintippen" value="${esc([werte.strasse, werte.ort].filter(Boolean).join(', '))}">
+      <div class="kgd-menue hidden" id="ebMenue"></div>
       <span class="kgd-hinweis" id="adrInfo"></span></div>`,
     kunde: () => `<div class="kgd-feld"><label for="kunde">Kunde oder Adresse</label><input class="kgd-t" id="kunde" autocomplete="off" placeholder="Name, Strasse oder Ort suchen">
       <div class="kgd-menue hidden" id="kundeMenue"></div><span class="kgd-hinweis" id="kundeInfo"></span></div>`,
-    termin: () => `<div class="kgd-feld"><label for="datum">Datum</label><input class="kgd-t" type="date" id="datum" value="${esc(werte.datum || '')}" style="max-width:180px"></div>
+    termin: () => `<div class="kgd-feld"><label for="datum">Datum des Einsatzes</label><input class="kgd-t" type="date" id="datum" value="${esc(werte.datum || '')}" style="max-width:180px"></div>
       <div class="kgd-reihe"><div class="kgd-feld"><label for="vonH">von <small class="opt">optional</small></label>${zeit('von', werte.von)}</div>
       <div class="kgd-feld"><label for="bisH">bis <small class="opt">optional</small></label>${zeit('bis', werte.bis)}</div></div>
       <span class="kgd-hinweis">Ohne Zeit steht: «die genaue Zeit geben wir kurzfristig bekannt».</span>`,
-    zeitraum: () => `<div class="kgd-reihe"><div class="kgd-feld"><label for="vonDatum">von <small class="opt">optional</small></label><input class="kgd-t" type="date" id="vonDatum" value="${esc(werte.von_datum || '')}"></div>
+    zeitraum: () => `<div class="kgd-reihe"><div class="kgd-feld"><label for="vonDatum">Arbeiten von <small class="opt">optional</small></label><input class="kgd-t" type="date" id="vonDatum" value="${esc(werte.von_datum || '')}"></div>
       <div class="kgd-feld"><label for="bisDatum">bis <small class="opt">optional</small></label><input class="kgd-t" type="date" id="bisDatum" value="${esc(werte.bis_datum || '')}"></div></div>
       <span class="kgd-hinweis">Ohne Datum steht: «in nächster Zeit».</span>`,
     arbeiten: () => `<div class="kgd-feld"><label for="arbeiten">Arbeiten</label><input class="kgd-t" id="arbeiten" autocomplete="off" value="${esc(werte.arbeiten || 'Umgebungsarbeiten')}"></div>`,
@@ -139,18 +138,17 @@ async function aufbau(main){
   an('pl', 'change', e => { werte.pl = e.target.value || null; geaendert(); });
   an('va', 'change', e => { werte.va = e.target.value || null; geaendert(); });
 
-  // Adresse: «Strasse Nr., PLZ Ort»; der Easybill-Name bleibt unsichtbar und hilft nur beim Finden des Drive-Ordners
+  // Adresse: «Strasse Nr., PLZ Ort»; der Kundenname bleibt unsichtbar und hilft nur beim Finden des Drive-Ordners
   if($('adresse')){
     const a = $('adresse');
     const info = () => { $('adrInfo').textContent = werte.kunde_name ? `Kunde: ${werte.kunde_name} (Name kommt nicht aufs Blatt)` : ''; };
+    // ein Feld: Tippen = freie Adresse; gleichzeitig Vorschläge aus unserer Kundenliste, Klick übernimmt Kunde + Adresse
+    const m = $('ebMenue'); let lauf = 0, treffer = [], warte = null;
     a.addEventListener('input', () => {
       const t = a.value.split(','); werte.strasse = t[0].trim(); werte.ort = t.slice(1).join(',').trim();
       werte.kunde_name = ''; werte.kunde_id = null; info(); geaendert();
-    });
-    an('ebBtn', 'click', () => { const s = $('ebSuche'); s.classList.toggle('hidden'); if(!s.classList.contains('hidden')) $('ebQ').focus(); });
-    const q = $('ebQ'), m = $('ebMenue'); let lauf = 0, treffer = [], warte = null;
-    q.addEventListener('input', () => { clearTimeout(warte); warte = setTimeout(async () => {
-      const text = q.value.trim(), nr = ++lauf;
+      clearTimeout(warte); warte = setTimeout(async () => {
+      const text = a.value.trim(), nr = ++lauf;
       if(text.length < 2){ m.classList.add('hidden'); return; }
       // Kundenliste (jede Nacht aus Easybill abgeglichen): schnell, und der Kunde wird beim Dokument gespeichert (Kontakte zeigen es dort)
       const { data, error } = await sb.rpc('kunde_suche', { q: text, anzahl: 12 });
@@ -158,17 +156,17 @@ async function aufbau(main){
       if(error){ m.innerHTML = `<div class="kopfzeile">Suche fehlgeschlagen: ${esc(error.message)}</div>`; m.classList.remove('hidden'); return; }
       treffer = data || [];
       m.innerHTML = treffer.length ? treffer.map((k, i) => `<button type="button" data-i="${i}"><b>${esc(k.name || '')}</b><small>${esc([k.strasse, [k.plz, k.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ') || 'keine Adresse')}${k.kundennummer ? ' · Nr. ' + esc(k.kundennummer) : ''}</small></button>`).join('')
-        : '<div class="kopfzeile">Kein Kunde gefunden.</div>';
-      m.classList.remove('hidden');
+        : '';
+      m.classList.toggle('hidden', !treffer.length);   // freie Adresse: keine Meldung, einfach weiter tippen
     }, 250); });
     m.addEventListener('mousedown', e => {
       const b = e.target.closest('button'); if(!b) return; e.preventDefault();
       const k = treffer[+b.dataset.i];
       werte.strasse = k.strasse || ''; werte.ort = [k.plz, k.ort].filter(Boolean).join(' '); werte.kunde_name = k.name || ''; werte.kunde_id = k.id;
       a.value = [werte.strasse, werte.ort].filter(Boolean).join(', ');
-      m.classList.add('hidden'); $('ebSuche').classList.add('hidden'); q.value = ''; info(); geaendert();
+      m.classList.add('hidden'); info(); geaendert();
     });
-    q.addEventListener('blur', () => setTimeout(() => m.classList.add('hidden'), 180));
+    a.addEventListener('blur', () => setTimeout(() => m.classList.add('hidden'), 180));
     info();
   }
 
