@@ -472,6 +472,7 @@ a.wlink:hover{background:#C3DBEF;}
 .kopflinks2 .klneu{color:#8B9097;} .kopflinks2 .klneu:hover{color:#323E4E;}
 @media (max-width:760px){ .ehead.klein.mitlinks{grid-template-columns:72px minmax(0,1fr);} .ehead.klein.mitlinks .kopflinks2{grid-column:1 / -1;flex-wrap:wrap;} }
 .btn.neuein{padding:8px 16px;font-size:13.5px;gap:6px;} .btn.neuein svg{width:15px;height:15px;}
+.kivl{display:flex;flex-direction:column;gap:6px;max-height:50vh;overflow:auto;margin:6px 0;} .kivl label{display:flex;gap:9px;align-items:flex-start;border:1px solid var(--line,#E1E5E9);border-radius:8px;padding:8px 10px;cursor:pointer;font-size:13px;} .kivl input{width:auto;margin-top:3px;flex:none;} .kivl span{display:flex;flex-direction:column;gap:2px;min-width:0;} .kivl small{color:#8B9097;font-size:12px;} .tbtn.laeuft{opacity:.5;cursor:progress;}
 .stkacheln{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px;}
 .stkachel{all:unset;box-sizing:border-box;cursor:pointer;border:1px solid var(--line);border-radius:8px;padding:6px 10px;background:#fff;display:flex;flex-direction:column;min-width:0;}
 .stkachel b{font-size:13px;} .stkachel span{font-size:12px;color:var(--muted,#8B9097);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
@@ -1378,6 +1379,73 @@ function verweisSetzen(id){
   if(r){ r.deleteContents(); r.insertNode(document.createTextNode(' ')); r.insertNode(a); } else { z.ed.append(' ', a, ' '); }
   rteLink = null; rteGeaendert(z.ed);
 }
+// --- KI-Verlinkung (Funktion «wissen-verlinken»): Vorschläge, die man bestätigt ---
+// Stelle (wörtlicher Text) im Element als Verweis umschliessen; nicht innerhalb bestehender Links
+function stelleVerlinken(root, stelle, eid){
+  const e = byId(eid); if(!e) return false;
+  const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  while(w.nextNode()){ const n = w.currentNode; if(n.parentElement.closest('a')) continue; const i = n.nodeValue.indexOf(stelle); if(i < 0) continue;
+    const r = document.createRange(); r.setStart(n, i); r.setEnd(n, i + stelle.length);
+    const a = document.createElement('a'); a.dataset.eintrag = e.id; a.className = 'wlink'; a.setAttribute('contenteditable', 'false'); a.textContent = stelle;
+    r.deleteContents(); r.insertNode(a); return true; }
+  return false;
+}
+const kiEintragsliste = () => S.eintraege.filter(e => !istKurz(e)).map(e => ({ id: e.id, titel: e.titel, untertitel: e.untertitel || '', tags: e.tags || [] }));
+let kiVorschlaege = null;
+async function kiVerlinken(ed){
+  const kid = ed.dataset.rte.split(':')[1], btn = document.querySelector(`[data-rte="kap:${kid}"]`)?.closest('.rte')?.querySelector('[data-cmd="ki"]');
+  if(btn){ btn.disabled = true; btn.classList.add('laeuft'); }
+  toast('KI sucht passende Einträge …');
+  try{
+    const { data, error } = await sb.functions.invoke('wissen-verlinken', { body: { aktion: 'kapitel', text: ed.innerText, eintraege: kiEintragsliste(), schon: verlinkteIds(saubererHTML(ed)) } });
+    if(error || data?.error) throw new Error(data?.error || error.message);
+    const v = (data.vorschlaege || []).filter(x => byId(x.id));
+    if(!v.length) return toast('Keine weiteren Einträge im Text gefunden.');
+    kiVorschlaege = { art: 'kapitel', kid, v };
+    ovl(`<h3>Vorschläge der KI</h3><div class="small muted">Angehakte Stellen werden verlinkt.</div>
+      <div class="kivl">${v.map((x, i) => `<label><input type="checkbox" data-kiv="${i}" checked><span><b>«${esc(x.stelle)}»</b> → ${esc(byId(x.id).titel)}${x.grund ? `<small>${esc(x.grund)}</small>` : ''}</span></label>`).join('')}</div>
+      <div class="ovlbtns"><button class="btn btn-ghost" data-act="ovlZu">Abbrechen</button><button class="btn btn-primary" data-act="kiUebernehmen">Übernehmen</button></div>`);
+  }catch(err){ fehler(err, 'KI-Verlinkung'); }
+  finally{ if(btn){ btn.disabled = false; btn.classList.remove('laeuft'); } }
+}
+// nach einem neuen Eintrag: kommt er im Wissen schon vor? (läuft im Hintergrund, fragt nur bei Treffern)
+async function kiNeuerEintrag(e){
+  const kap = (S.kapitel || []).filter(k => (k.html || '').replace(/<[^>]+>/g, ' ').trim());
+  if(!kap.length || istKurz(e)) return;
+  try{
+    const tmp = document.createElement('div');
+    const { data, error } = await sb.functions.invoke('wissen-verlinken', { body: { aktion: 'eintrag', eintrag: { id: e.id, titel: e.titel, untertitel: e.untertitel || '', tags: e.tags || [] },
+      kapitel: kap.map(k => { tmp.innerHTML = k.html; tmp.querySelectorAll('a[data-eintrag]').forEach(a => a.replaceWith(document.createTextNode(' '))); return { id: k.id, titel: k.titel, text: tmp.textContent }; }) } });
+    if(error || data?.error) return;
+    const v = (data.vorschlaege || []).filter(x => S.kapitel.some(k => k.id === x.kapitel_id));
+    if(!v.length || $('ovl').classList.contains('show')) return;
+    kiVorschlaege = { art: 'eintrag', eid: e.id, v };
+    ovl(`<h3>«${esc(e.titel)}» kommt im Wissen vor</h3><div class="small muted">Die KI hat diese Stellen gefunden. Angehakte werden mit dem neuen Eintrag verlinkt.</div>
+      <div class="kivl">${v.map((x, i) => { const k = S.kapitel.find(q => q.id === x.kapitel_id); return `<label><input type="checkbox" data-kiv="${i}" checked><span><b>${esc(themaName(k.thema_id))} › ${esc(k.titel)}</b>: «${esc(x.stelle)}»${x.grund ? `<small>${esc(x.grund)}</small>` : ''}</span></label>`; }).join('')}</div>
+      <div class="ovlbtns"><button class="btn btn-ghost" data-act="ovlZu">Nicht verlinken</button><button class="btn btn-primary" data-act="kiUebernehmen">Verlinken</button></div>`);
+  }catch(err){ console.warn('KI-Suche im Wissen', err); }
+}
+async function kiUebernehmen(){
+  const z = kiVorschlaege; if(!z) return ovlZu();
+  const gew = z.v.filter((x, i) => document.querySelector(`[data-kiv="${i}"]`)?.checked); ovlZu(); kiVorschlaege = null;
+  let ok = 0;
+  if(z.art === 'kapitel'){
+    const ed = document.querySelector(`[data-rte="kap:${z.kid}"]`); if(!ed) return;
+    gew.forEach(x => { if(stelleVerlinken(ed, x.stelle, x.id)) ok++; });
+    if(ok) rteGeaendert(ed);
+  } else {
+    const proKap = {}; gew.forEach(x => (proKap[x.kapitel_id] ??= []).push(x));
+    for(const [kid, l] of Object.entries(proKap)){
+      const kp = S.kapitel.find(k => k.id === kid); if(!kp) continue;
+      const tmp = document.createElement('div'); tmp.innerHTML = kp.html; let n = 0; l.forEach(x => { if(stelleVerlinken(tmp, x.stelle, z.eid)) n++; });
+      if(!n) continue;
+      const { error } = await sb.from('wissen_kapitel').update({ html: tmp.innerHTML, geaendert_am: new Date().toISOString(), geaendert_von: S.userId }).eq('id', kid);
+      if(error){ fehler(error, 'Verlinken'); continue; } kp.html = tmp.innerHTML; ok += n;
+    }
+    render();
+  }
+  toast(ok ? `${ok} ${ok === 1 ? 'Stelle' : 'Stellen'} verlinkt` : 'Nichts verlinkt (Text hat sich inzwischen geändert).', !ok);
+}
 function verweisVorschlag(kid, eid){
   const ed = document.querySelector(`[data-rte="kap:${kid}"]`), e = byId(eid); if(!ed || !e) return;
   const w = document.createTreeWalker(ed, NodeFilter.SHOW_TEXT), t = e.titel.toLowerCase();
@@ -2179,7 +2247,7 @@ function rte(kind, id, html, head, editierbar, notizId, platzhalter){
     <button class="tbtn" data-cmd="ol" title="Nummerierte Liste">${ic('ol')}</button>
     <button class="tbtn" data-cmd="table" title="Tabelle einfügen">${ic('table')}</button>
     <span class="tsep"></span>
-    ${kind === 'kap' ? `<button class="tbtn tbtxt" data-cmd="link" title="Produkt oder Gerät verlinken (auch mit @)">${ic('link')}Eintrag verlinken</button>` : `<button class="tbtn" data-cmd="foto" title="Foto einfügen">${ic('camera')}</button>
+    ${kind === 'kap' ? `<button class="tbtn tbtxt" data-cmd="link" title="Produkt oder Gerät verlinken (auch mit @)">${ic('link')}Eintrag verlinken</button><button class="tbtn tbtxt" data-cmd="ki" title="Die KI sucht im Text nach Einträgen und schlägt Verweise vor">${ic('link')}Mit KI verlinken</button>` : `<button class="tbtn" data-cmd="foto" title="Foto einfügen">${ic('camera')}</button>
     <button class="tbtn" data-cmd="video" title="Video einfügen (max. 50 MB)">${ic('video')}</button>`}
     ${kind.startsWith('notiz') ? `<span class="tsep"></span><button class="tbtn" data-cmd="datum" title="Datum einfügen">${ic('cal')}</button>` : ''}
     ${notizId ? `<span class="tsep"></span><button class="tbtn" data-act="notizDel" data-id="${notizId}" title="Notiz löschen">${ic('x')}</button>` : ''}</div>`;
@@ -2228,6 +2296,7 @@ function rteBefehl(btn){
   }
   const c = btn.dataset.cmd;
   if(c === 'link'){ verweisWahl(ed); return; }
+  if(c === 'ki'){ kiVerlinken(ed); return; }
   if(c === 'bold') document.execCommand('bold');
   else if(c === 'ul') document.execCommand('insertUnorderedList');
   else if(c === 'ol') document.execCommand('insertOrderedList');
@@ -2942,7 +3011,9 @@ async function nwSpeichern(){
     const { data, error } = await sb.from('wissen_eintrag').insert({ titel, typ: typVon(haupt) === 'geraet' ? 'geraet' : 'produkt', kategorie_id: haupt, auch_kategorie_ids: auch, erstellt_von: S.userId }).select().single();
     if(error) return fehler(error, 'Anlegen');
     S.eintraege.push(data); S.alleE.push(data); S.nWahl = []; ovlZu();   // Nachschlagewerk: ohne Stück (das gibt es nur bei Maschinen)
-    await oeffne(data.id); S.bearb = true; S.edit = JSON.parse(JSON.stringify(data)); render(); return;
+    await oeffne(data.id); S.bearb = true; S.edit = JSON.parse(JSON.stringify(data)); render();
+    kiNeuerEintrag(data);   // im Hintergrund: kommt der neue Eintrag im Wissen schon vor? Dann nachfragen
+    return;
   }
   const t = $('nwThema').value;
   if(S.nArt === 'kapitel'){
@@ -3441,6 +3512,7 @@ document.addEventListener('click', async ev => {
       S.kapitel = S.kapitel.filter(x => x.id !== kp.id); S.kapEdit = null; toast('Kapitel gelöscht'); render(); }, 'Text und Verweise dieses Kapitels sind danach weg.'); }
   else if(a === 'kapVerlinke') verweisVorschlag(d.v, d.e);
   else if(a === 'vwSetzen') verweisSetzen(d.id);
+  else if(a === 'kiUebernehmen') await kiUebernehmen();
   else if(a === 'nwArt'){ const t = $('nTitel')?.value || ''; neuDialogNw(d.v, $('nwThema')?.value); if($('nTitel')) $('nTitel').value = t; }
   else if(a === 'nwSave') await nwSpeichern();
   else if(a === 'kzEdit'){ S.kzEdit = d.id; render(); setTimeout(() => { const i = $(d.id.startsWith('neu:') ? 'kzfT' : 'kzfW'); i?.focus(); i?.select?.(); }, 0); }
