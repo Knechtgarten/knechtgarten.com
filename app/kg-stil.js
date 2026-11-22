@@ -852,4 +852,11 @@ body.kg-tippt .kg-handyleiste{display:none !important}
     }
     return r;
   };
+  // Taste «/» springt von überall ins Suchfeld der Liste (Feld mit data-kg-suche), nicht beim Tippen in einem Feld
+  document.addEventListener('keydown', e => {
+    if(e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) return;
+    const t = e.target; if(t && t.closest && t.closest('input, textarea, select, [contenteditable="true"]')) return;
+    const i = [...document.querySelectorAll('[data-kg-suche]')].find(x => x.offsetParent !== null); if(!i) return;
+    e.preventDefault(); i.focus(); if(i.select) i.select();
+  });
 })();
