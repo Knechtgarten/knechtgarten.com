@@ -204,6 +204,9 @@ tr.offertenrow td{padding:0;border-bottom:1px solid var(--soft);}
 .marow2{display:flex;gap:6px;} .marow2 select{flex:1;} .marow2 .btn{white-space:nowrap;padding:4px 10px;font-size:12px;}
 .maakt{display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-top:10px;} .maakt .btn{padding:4px 10px;font-size:12px;}
 .malink{display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-top:10px;} .malink input{flex:1 1 180px;font-size:12px;border:1px solid #D5DBE1;border-radius:6px;padding:4px 6px;}
+.masig{display:flex;align-items:center;gap:8px;margin-top:12px;padding-top:10px;border-top:1px solid #EEF1F4;font-size:12.5px;flex-wrap:wrap;}
+.masig img{height:34px;max-width:170px;object-fit:contain;background:#fff;border:1px solid #E1E5E9;border-radius:4px;padding:2px 6px;}
+.masig .lbl{color:var(--muted);font-size:11.5px;width:100%;}
 .mamk{display:flex;flex-wrap:wrap;gap:5px;align-items:center;} .mamk input{font-size:12px;border:1px solid #D5DBE1;border-radius:6px;padding:4px 7px;}
 .mafarben{display:flex;flex-direction:column;gap:4px;} .mafr{display:flex;align-items:center;gap:3px;flex-wrap:wrap;} .mafr span{width:92px;font-size:11px;color:var(--muted);}
 .masw{all:unset;cursor:pointer;width:18px;height:18px;border-radius:5px;box-sizing:border-box;position:relative;} .masw.on{outline:2px solid #323E4E;outline-offset:1px;}
@@ -2273,6 +2276,7 @@ const MA = { geladen: false, personen: [], gruppen: [], pp: [], pg: [], merkmale
   if(pid){ MA.offen = pid; MA.scrollen = true; } if(n === 'temp' || n === 'ohne') MA.neu = n; })();
 const maName = b => b.anzeigename || (b.email || '').split('@')[0] || '?';
 const maPP = id => MA.pp.find(p => p.benutzer_id === id && p.aktiv !== false && !p.archiviert_am);
+const maHatMk = (b, schl) => { const m = MA.merkmale.find(x => x.schluessel === schl); return !!m && MA.bm.some(x => x.benutzer_id === b.id && x.merkmal_id === m.id); };
 const maLogin = b => b.ist_temporaer ? 'temporär' : b.ist_platzhalter ? 'ohne Login' : !b.rolle ? 'wartet' : b.aktiv === false ? 'gesperrt' : 'aktiv';
 const MA_PW = 'autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other"';
 async function maLaden(){
@@ -2397,9 +2401,12 @@ function maFarbwahl(p){
 }
 function maDetail(b){
   const p = maPP(b.id), lg = maLogin(b), T = [];
-  const f = (feld, label, typ = 'text', voll) => `<label${voll ? ' class="voll"' : ''}>${label}<input type="${typ}" data-mab="${feld}" value="${escHtml(b[feld] || '')}" ${MA_PW}></label>`;
-  T.push(kachel('Person &amp; Kontakt', '', `<div class="mag">${f('anzeigename', 'Name')}${b.ist_platzhalter ? f('email', 'E-Mail', 'email') : `<label>E-Mail (Login)<input type="text" value="${escHtml(b.email || '')}" readonly></label>`}
-    ${f('strasse', 'Strasse, Nr.')}${f('plz_ort', 'PLZ, Ort')}${f('telefon', 'Handy', 'tel')}${f('geburtsdatum', 'Geburtsdatum', 'date')}${f('eintritt', 'Eintritt', 'date')}${f('pensum', 'Pensum')}
+  const f = (feld, label, typ = 'text', voll, ph) => `<label${voll ? ' class="voll"' : ''}>${label}<input type="${typ}" data-mab="${feld}" value="${escHtml(b[feld] || '')}"${ph ? ` placeholder="${escHtml(ph)}"` : ''} ${MA_PW}></label>`;
+  // Voller Name und E-Mail gelten für Dokumente (Doku-Tools); leer = Name bzw. Login-Mail @knechtgarten.ch
+  const loginMail = /@knechtgarten\.ch$/i.test(b.email || '') ? b.email : '';
+  T.push(kachel('Person &amp; Kontakt', '', `<div class="mag">${f('anzeigename', 'Name')}${f('name_dokumente', 'Voller Name', 'text', false, maName(b))}
+    ${f('mail_dokumente', 'E-Mail', 'email', false, loginMail)}${f('telefon', 'Handy', 'tel')}
+    ${f('strasse', 'Strasse, Nr.')}${f('plz_ort', 'PLZ, Ort')}${f('geburtsdatum', 'Geburtsdatum', 'date')}${f('eintritt', 'Eintritt', 'date')}${f('pensum', 'Pensum')}
     ${f('notfallkontakt', 'Notfallkontakt (Name, Beziehung, Telefon)', 'text', true)}<label class="voll">Interne Notizen<textarea data-mab="notizen">${escHtml(b.notizen || '')}</textarea></label></div>`, ' ma'));
   // Login & Gruppe: Gruppe wählen (Rechte), Status, Links, sperren, löschen
   const gOpts = MA.gruppen.map(g => `<option value="${g.id}"${g.id === b.recht_gruppe_id ? ' selected' : ''}>${escHtml(g.name)}</option>`).join('');
@@ -2408,6 +2415,7 @@ function maDetail(b){
     : b.ist_platzhalter ? knopf('einladen', 'Einladen') : b.rolle ? knopf('einladen', 'Passwort-Link') : '';
   const zN = MA.zust[b.id] || 0, ziele = MA.personen.filter(x => x.id !== b.id && x.pflege_zustaendig && x.aktiv !== false && (x.rolle || x.ist_platzhalter));
   T.push(kachel('Login &amp; Gruppe', links, `<div class="mag">
+      ${b.ist_temporaer ? '' : b.ist_platzhalter ? f('email', 'E-Mail für die Einladung', 'email', true) : `<label class="voll">E-Mail (Login)<input type="text" value="${escHtml(b.email || '')}" readonly></label>`}
       ${!b.rolle && !b.ist_platzhalter ? `<label class="voll">Wartet auf Freischaltung – Gruppe wählen<span class="marow2"><select data-mafrei>${gOpts}</select><button type="button" class="btn btn-primary" data-mafreiok>Freischalten</button></span></label>`
         : `<label>Gruppe (Rechte)<select data-magruppe>${b.recht_gruppe_id ? '' : '<option value="">– ohne Gruppe –</option>'}${gOpts}</select></label>`}
       <label>Login<input type="text" value="${lg}${b.erstellt_am ? ' · seit ' + new Date(b.erstellt_am).toLocaleDateString('de-CH') : ''}" readonly></label>
@@ -2422,14 +2430,34 @@ function maDetail(b){
       <label class="voll">Zeile im Einsatzplaner<select data-mappwahl><option value="">– keine Zeile –</option>${p ? '' : '<option value="_neu">+ Neue Zeile anlegen</option>'}${frei.map(x => `<option value="${x.id}"${p && x.id === p.id ? ' selected' : ''}>${escHtml(x.name)} (${escHtml((MA.pg.find(g => g.id === x.gruppe_id) || {}).name || 'ohne Gruppe')})</option>`).join('')}</select></label>
       ${p ? `<label>Planer-Gruppe<select data-mapp="gruppe_id">${MA.pg.map(g => `<option value="${g.id}"${g.id === p.gruppe_id ? ' selected' : ''}>${escHtml(g.name)}</option>`).join('')}</select></label>
       <label>Kürzel<input type="text" data-mapp="kuerzel" value="${escHtml(p.kuerzel || '')}" ${MA_PW}></label>
-      <label class="ck"><input type="checkbox" data-mappck="ist_projektleiter"${p.ist_projektleiter ? ' checked' : ''}>Projektleiter</label>
-      <label class="ck"><input type="checkbox" data-mappck="ist_vorarbeiter"${p.ist_vorarbeiter ? ' checked' : ''}>Vorarbeiter</label>
-      ${p.ist_vorarbeiter || p.ist_projektleiter || p.farbe ? `<div class="voll">${maFarbwahl(p)}</div>` : ''}` : `<span class="kkleer voll">Ohne Zeile erscheint die Person nicht im Einsatzplaner.</span>`}</div>`, ' ma'));
-  // Merkmale: Projektleiter, Vorarbeiter, Lernende … (für Doku-Tools, Listen, Planer)
+      ${maHatMk(b, 'vorarbeiter') || maHatMk(b, 'projektleiter') || p.farbe ? `<div class="voll">${maFarbwahl(p)}</div>` : ''}` : `<span class="kkleer voll">Ohne Zeile erscheint die Person nicht im Einsatzplaner.</span>`}</div>`, ' ma'));
+  // Merkmale (Projektleiter, Vorarbeiter, Lernende … für Doku-Tools, Listen, Planer) und Unterschrift für Dokumente
   const hat = new Set(MA.bm.filter(x => x.benutzer_id === b.id).map(x => x.merkmal_id));
-  T.push(kachel('Merkmale', '', `<div class="mamk">${MA.merkmale.map(m => `<button type="button" class="fchip" data-mamk="${m.id}" aria-pressed="${hat.has(m.id)}">${escHtml(m.name)}</button>`).join('')}<button type="button" class="kklink" data-mamkneu>+ Merkmal</button></div>
-    <div class="mag" style="margin-top:10px">${f('name_dokumente', 'Name auf Dokumenten <small>optional</small>')}${f('mail_dokumente', 'Mail auf Dokumenten <small>optional</small>', 'email')}</div>`, ' ma'));
+  T.push(kachel('Merkmale &amp; Unterschrift', '', `<div class="mamk">${MA.merkmale.map(m => `<button type="button" class="fchip" data-mamk="${m.id}" aria-pressed="${hat.has(m.id)}">${escHtml(m.name)}</button>`).join('')}<button type="button" class="kklink" data-mamkneu>+ Merkmal</button></div>
+    <div class="masig" id="maSig"><span class="kkleer">Unterschrift lädt …</span></div>`, ' ma'));
   return `<div class="det">${T.join('')}</div>`;
+}
+// Unterschrift für Dokumente (z. B. Rücksendung Aqua Solar): Speicher «unterschriften», mitarbeiter/<benutzer-id>.png
+async function maSigZeigen(b){
+  const el = $('maSig'); if(!el) return;
+  const pfad = `mitarbeiter/${b.id}.png`, { data } = await sb.storage.from('unterschriften').download(pfad);
+  if(!$('maSig')) return;
+  el.innerHTML = `<span class="lbl">Unterschrift auf Dokumenten</span>` + (data
+    ? `<img src="${URL.createObjectURL(data)}" alt="Unterschrift"><button type="button" class="kklink" data-signeu>Ersetzen</button><button type="button" class="kg-ibtn danger" data-sigweg title="Unterschrift entfernen" aria-label="Unterschrift entfernen">${KG.icon('trash', 13)}</button>`
+    : `<span class="kkleer">Keine hinterlegt</span><button type="button" class="kklink" data-signeu>${KG.icon('upload', 13)} Hochladen</button>`);
+  el.querySelector('[data-signeu]').onclick = () => { const i = document.createElement('input'); i.type = 'file'; i.accept = 'image/png,image/jpeg';
+    i.onchange = async () => { const f = i.files[0]; if(!f) return;
+      // als PNG speichern (Dokumente brauchen PNG), weisser Hintergrund wird durchsichtig
+      const bild = await createImageBitmap(f), c = document.createElement('canvas'), h = 160; c.width = Math.round(bild.width * h / bild.height); c.height = h;
+      const x = c.getContext('2d'); x.drawImage(bild, 0, 0, c.width, h); const px = x.getImageData(0, 0, c.width, h);
+      for(let k = 0; k < px.data.length; k += 4){ if(px.data[k] > 225 && px.data[k + 1] > 225 && px.data[k + 2] > 225) px.data[k + 3] = 0; } x.putImageData(px, 0, 0);
+      const blob = await new Promise(ok => c.toBlob(ok, 'image/png'));
+      const { error } = await sb.storage.from('unterschriften').upload(pfad, blob, { contentType: 'image/png', upsert: true });
+      if(error) return showToast(friendlyError(error), true); showToast('Unterschrift gespeichert.'); maSigZeigen(b); };
+    i.click(); };
+  const weg = el.querySelector('[data-sigweg]');
+  if(weg) weg.onclick = async () => { if(!await confirmDialog(`Unterschrift von ${maName(b)} entfernen?`)) return;
+    const { error } = await sb.storage.from('unterschriften').remove([pfad]); if(error) return showToast(friendlyError(error), true); showToast('Unterschrift entfernt.'); maSigZeigen(b); };
 }
 function maBinden(b, p){
   const d = document.querySelector('#maWrap .offertenwrap'); if(!d) return;
@@ -2459,7 +2487,7 @@ function maBinden(b, p){
     showToast(`${data} Zuständigkeiten an ${maName(MA.personen.find(x => x.id === an))} übertragen.`); await maLaden(); maZeichnen(); });
   d.querySelectorAll('[data-zug]').forEach(bt => bt.addEventListener('click', async () => { const a = bt.dataset.zug;
     if(a === 'sperren' && !await confirmDialog(`Link von ${maName(b)} sperren? Der Zugang funktioniert danach nicht mehr, bis du einen neuen Link erstellst.`)) return;
-    if(a === 'einladen' && b.ist_platzhalter && !(b.email || '').includes('@')) return showToast('Bitte zuerst bei «Person & Kontakt» eine E-Mail erfassen.', true);
+    if(a === 'einladen' && b.ist_platzhalter && !(b.email || '').includes('@')) return showToast('Bitte zuerst bei «Login & Gruppe» die E-Mail für die Einladung erfassen.', true);
     const r = await maZugangAufruf({ aktion: a, id: b.id }); if(!r) return;
     if(a === 'sperren') return showToast('Link gesperrt.');
     if(r.id && r.id !== b.id){ MA.offen = r.id; MA.link[r.id] = r.link; await maLaden(); } else MA.link[b.id] = r.link;   // Platzhalter wurde zum Login (neue ID)
@@ -2479,10 +2507,11 @@ function maBinden(b, p){
   if(pw) pw.addEventListener('change', async () => {
     if(p){ const { error } = await sb.from('planer_person').update({ benutzer_id: null }).eq('id', p.id); if(error) return showToast(friendlyError(error), true); p.benutzer_id = null; }
     if(pw.value === '_neu'){ const g = MA.pg[MA.pg.length - 1];
-      const { data, error } = await sb.from('planer_person').insert({ name: maName(b), benutzer_id: b.id, gruppe_id: g ? g.id : null, aktiv: true, sortierung: 10 + Math.max(0, ...MA.pp.filter(x => x.gruppe_id === (g && g.id)).map(x => x.sortierung || 0)) })
+      const { data, error } = await sb.from('planer_person').insert({ name: maName(b), benutzer_id: b.id, ist_projektleiter: maHatMk(b, 'projektleiter'), ist_vorarbeiter: maHatMk(b, 'vorarbeiter'), gruppe_id: g ? g.id : null, aktiv: true, sortierung: 10 + Math.max(0, ...MA.pp.filter(x => x.gruppe_id === (g && g.id)).map(x => x.sortierung || 0)) })
         .select('id,name,kuerzel,farbe,gruppe_id,ist_vorarbeiter,ist_projektleiter,benutzer_id,aktiv,archiviert_am').single();
       if(error) return showToast(friendlyError(error), true); MA.pp.push(data); showToast('Zeile im Einsatzplaner angelegt.'); return maZeichnen(); }
-    if(pw.value){ const neu = MA.pp.find(x => x.id === pw.value); const { error } = await sb.from('planer_person').update({ benutzer_id: b.id }).eq('id', neu.id); if(error) return showToast(friendlyError(error), true); neu.benutzer_id = b.id; }
+    if(pw.value){ const neu = MA.pp.find(x => x.id === pw.value), haken = { ist_projektleiter: maHatMk(b, 'projektleiter'), ist_vorarbeiter: maHatMk(b, 'vorarbeiter') };
+      const { error } = await sb.from('planer_person').update({ benutzer_id: b.id, ...haken }).eq('id', neu.id); if(error) return showToast(friendlyError(error), true); Object.assign(neu, { benutzer_id: b.id }, haken); }
     showToast(pw.value ? 'Mit der Planer-Zeile verknüpft.' : 'Verknüpfung entfernt.'); maZeichnen(); });
   d.querySelectorAll('[data-mapp]').forEach(el => el.addEventListener('change', async () => { if(await setP(el.dataset.mapp, el.value.trim() || null)) maZeichnen(); }));
   // Planer-Haken und Merkmal gleich halten (eine Stelle zum Pflegen)
@@ -2491,9 +2520,7 @@ function maBinden(b, p){
     const r = an ? await sb.from('benutzer_merkmal').insert({ benutzer_id: b.id, merkmal_id: m.id }) : await sb.from('benutzer_merkmal').delete().eq('benutzer_id', b.id).eq('merkmal_id', m.id);
     if(r.error && r.error.code !== '23505'){ showToast(friendlyError(r.error), true); return false; }
     MA.bm = MA.bm.filter(x => !(x.benutzer_id === b.id && x.merkmal_id === m.id)); if(an) MA.bm.push({ benutzer_id: b.id, merkmal_id: m.id }); return true; };
-  d.querySelectorAll('[data-mappck]').forEach(el => el.addEventListener('change', async () => {
-    if(!await setP(el.dataset.mappck, el.checked)) return;
-    const m = MA.merkmale.find(x => MK_PP[x.schluessel] === el.dataset.mappck); if(m) await mkSetzen(m, el.checked); maZeichnen(); }));
+  maSigZeigen(b);
   d.querySelectorAll('[data-mamk]').forEach(el => el.addEventListener('click', async () => {
     const m = MA.merkmale.find(x => x.id === el.dataset.mamk), an = el.getAttribute('aria-pressed') !== 'true';
     if(!await mkSetzen(m, an)) return;
