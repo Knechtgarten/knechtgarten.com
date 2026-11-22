@@ -36,7 +36,7 @@
 .ffblatt{display:flex;flex-direction:column;align-items:center;gap:10px;}
 .ffblatt canvas{width:100%;max-width:760px;height:auto;background:#fff;box-shadow:0 4px 18px rgba(35,43,53,.15);border-radius:2px;}
 .ffhinweis{font-size:12px;color:#6B7079;}
-.ffsig{display:flex;align-items:center;gap:8px;font-size:12.5px;} .ffsig img{height:28px;max-width:140px;object-fit:contain;background:#fff;border:1px solid #E1E5E9;border-radius:4px;}
+.ffsig{display:flex;align-items:center;gap:8px;font-size:12.5px;} .ffsig img{height:28px;max-width:140px;object-fit:contain;background:#fff;border:1px solid #E1E5E9;border-radius:4px;} .ffsig a{color:#323E4E;font-weight:600;}
 @media (max-width:900px){ .ff{grid-template-columns:minmax(0,1fr);padding:12px;} .ffang{position:static;max-height:none;} }
 @media print{ body > *:not(#druckFrame){display:none!important;} }
 </style>
@@ -226,9 +226,12 @@ async function aufbau(main){
   }
   async function sigZeile(){
     const el = $('sigZeile'); if(!el) return; const sig = await unterschrift(werte.sb);
-    el.innerHTML = sig ? `<img src="${URL.createObjectURL(new Blob([sig], { type: 'image/png' }))}" alt="Unterschrift"><button type="button" class="kgd-btn ghost" id="sigNeu" style="height:28px">Ersetzen</button>`
-      : `<span style="color:#B4423A">Keine Unterschrift hinterlegt.</span><button type="button" class="kgd-btn ghost" id="sigNeu" style="height:28px">Unterschrift hochladen</button>`;
+    // Unterschriften werden in Kontakte › Mitarbeitende › «Merkmale & Unterschrift» gepflegt
+    el.innerHTML = sig ? `<img src="${URL.createObjectURL(new Blob([sig], { type: 'image/png' }))}" alt="Unterschrift">`
+      : `<span style="color:#B4423A">Keine Unterschrift hinterlegt.</span><a href="tool-d-kunden-live-v1.html?modus=mitarbeitende&person=${encodeURIComponent(werte.sb || '')}" target="_blank" rel="noopener">In Kontakte hinterlegen</a>`;
   }
+  // zurück aus Kontakte (anderer Tab): Unterschrift neu laden
+  addEventListener('focus', () => { if(werte.sb && !sigCache[werte.sb]){ delete sigCache[werte.sb]; sigZeile(); neu(); } });
 
   main.innerHTML = `<div class="ff"><div class="ffang" id="ang"></div><div class="ffblatt"><canvas id="blatt" aria-label="Vorschau des Formulars"></canvas><span class="ffhinweis" id="seitenHinweis"></span></div></div>`;
   angaben(); vorschau();
@@ -272,17 +275,6 @@ async function aufbau(main){
         const pfad = `ruecksendung/${crypto.randomUUID()}.pdf`, up = await sb.storage.from('doku-anhaenge').upload(pfad, f, { contentType: 'application/pdf' });
         if(up.error){ KGD.toast('Hochladen fehlgeschlagen: ' + up.error.message, true); return; }
         werte.rechnung = { pfad, name: f.name }; angaben(); neu(); KGD.toast('Rechnungskopie angehängt'); };
-      i.click(); return; }
-    if(b.id === 'sigNeu'){ const i = document.createElement('input'); i.type = 'file'; i.accept = 'image/png,image/jpeg';
-      i.onchange = async () => { const f = i.files[0]; if(!f) return;
-        // als PNG speichern (pdf-lib braucht PNG), weisser Hintergrund wird durchsichtig
-        const bild = await createImageBitmap(f), c = document.createElement('canvas'), h = 160; c.width = Math.round(bild.width * h / bild.height); c.height = h;
-        const x = c.getContext('2d'); x.drawImage(bild, 0, 0, c.width, h); const px = x.getImageData(0, 0, c.width, h);
-        for(let k = 0; k < px.data.length; k += 4){ if(px.data[k] > 225 && px.data[k + 1] > 225 && px.data[k + 2] > 225) px.data[k + 3] = 0; } x.putImageData(px, 0, 0);
-        const blob = await new Promise(ok => c.toBlob(ok, 'image/png'));
-        const { error } = await sb.storage.from('unterschriften').upload(`mitarbeiter/${werte.sb}.png`, blob, { contentType: 'image/png', upsert: true });
-        if(error){ KGD.toast('Unterschrift konnte nicht gespeichert werden: ' + error.message, true); return; }
-        delete sigCache[werte.sb]; sigZeile(); neu(); KGD.toast('Unterschrift gespeichert'); };
       i.click(); return; }
   });
 
