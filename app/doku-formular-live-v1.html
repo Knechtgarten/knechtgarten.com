@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script src="/kg-pw-schutz.js?v=5"></script>
-<script src="/kg-stil.js?v=91"></script>
+<script src="/kg-stil.js?v=92"></script>
 <title>Formular – Doku-Tools</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#323E4E">
@@ -37,9 +37,7 @@
 .ffhinweis{font-size:12px;color:#6B7079;}
 .ffsig{display:flex;align-items:center;gap:8px;font-size:12.5px;flex-wrap:wrap;color:#6B7079;} .ffsig img{height:28px;max-width:140px;object-fit:contain;background:#fff;border:1px solid #E1E5E9;border-radius:4px;} .ffsig img.aus{opacity:.3;} .ffsig a{color:#323E4E;font-weight:600;}
 .ffsig .kgd-schalter{height:auto;font-size:12.5px;} .ffsig .kgd-schalter input{width:15px;height:15px;}
-.ffnr{display:flex;gap:8px;} .ffnr .kgd-t{flex:1;min-width:0;} .ffnr .kgd-btn{height:36px;white-space:nowrap;}
-.ffnicht{font-size:12.5px;color:#B4423A;margin-top:4px;}
-.ffbez{flex:1;min-width:0;border:0;background:transparent;font:inherit;font-size:13px;outline:none;}
+.ffnr{display:flex;gap:6px;align-items:center;} .ffnr .kgd-t{flex:1;min-width:0;} .ffbuch{width:36px;height:36px;flex:none;}
 /* Katalog-Fenster */
 .kkat{position:fixed;inset:0;background:rgba(35,43,53,.45);z-index:60;display:flex;align-items:center;justify-content:center;padding:16px;}
 .kkat-box{background:#fff;border-radius:12px;width:min(1200px,100%);height:min(94vh,1100px);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 18px 50px rgba(20,28,38,.35);}
@@ -110,13 +108,19 @@ async function aufbau(main){
   document.title = V.name + ' – Doku-Tools'; $('docTitel').textContent = V.name; $('ordnerLink').insertAdjacentText('beforeend', V.ordner ? V.ordner.name : 'Dokumente');
   werte = werte || { sb: KGD.ich, pos: [{ menge: '1' }] };
   if(!werte.pos?.length) werte.pos = [{ menge: '1' }];
-  // aus Kontakte (Kachel «Doku-Tool» › Neu): Kunde in die Bemerkung des ersten Artikels, Dokument hängt am Kunden
+  // Ein Kunde pro Rücksendung (werte.kunde = { id, name, adresse }); leer = Knecht AG (eigenes Lager).
+  // Die Adresse steht bei jedem Artikel auf der ersten Bemerkungszeile, der Zusatz (p.bem) darunter. Dokument hängt am Kunden (Kontakte).
   // Name wie in der Kundensuche (kunde_suche): Firma, sonst Vorname Nachname, sonst Name
-  const kundeText = k => [(k.firma || '').trim() || [k.vorname, k.nachname].filter(Boolean).join(' ').trim() || k.name, k.ort].filter(Boolean).join(', ');
-  if(!quelle && P.get('kunde')){
-    const { data: k } = await sb.from('kunde').select('id,name,firma,vorname,nachname,ort').eq('id', P.get('kunde')).maybeSingle();
-    if(k){ werte.kunde_id = k.id; werte.kunde_name = kundeText(k); werte.pos[0].bem = werte.kunde_name; }
+  const kundeName = k => (k.firma || '').trim() || [k.vorname, k.nachname].filter(Boolean).join(' ').trim() || k.name || '';
+  const kundeAdr = k => [k.strasse, [k.plz, k.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  if(!quelle && P.get('kunde')){   // aus Kontakte (Kachel «Doku-Tool» › Neu)
+    const { data: k } = await sb.from('kunde').select('id,name,firma,vorname,nachname,strasse,plz,ort').eq('id', P.get('kunde')).maybeSingle();
+    if(k) werte.kunde = { id: k.id, name: kundeName(k), adresse: kundeAdr(k) };
   }
+  // ältere Dokumente: Kunde stand in der Bemerkung
+  if(werte.kunde_id && !werte.kunde){ werte.kunde = { id: werte.kunde_id, name: werte.kunde_name || '', adresse: '' }; werte.pos.forEach(p => { if(p.bem === werte.kunde_name) p.bem = ''; }); }
+  delete werte.kunde_id; delete werte.kunde_name;
+  const kundeZeile = () => werte.kunde ? 'Kunde: ' + [werte.kunde.name, werte.kunde.adresse].filter(Boolean).join(', ') : 'Knecht AG Naturnahe Gärten, Badhaus 42, 3615 Heimenschwand';
   let gespeichert = dokId ? JSON.stringify(werte) : null;
 
   const vorlageBytes = await (await fetch(V.datei_pfad)).arrayBuffer();
@@ -146,7 +150,7 @@ async function aufbau(main){
     werte.pos.slice(0, 3).forEach((p, i) => { const d = i * BLOCK, g = GRUENDE.find(x => x.k === p.grund);
       if(g) s.drawText('X', { x: g.x + 1.2, y: g.y - d + 0.8, size: 10, font: fb, color: farbe });
       text(p.nr, 36, 505 - d, 10, true, 88); text(p.bez, 125, 505 - d, 9.5, false, 385); text(p.menge, 522, 505 - d, 10, true, 50);
-      text(p.bem, 125, 483 - d, 9.5, false, 425); });
+      if(p.nr){ text(kundeZeile(), 125, 483 - d, 9.5, false, 425); text(p.bem, 125, 471 - d, 9.5, false, 425); } });
     const heute = new Date(); text(`Heimenschwand, ${heute.getDate()}.${heute.getMonth() + 1}.${heute.getFullYear()}`, 96, 173, 10);
     const sig = werte.vonHand ? null : await unterschrift(werte.sb);   // «Von Hand unterschreiben»: Feld bleibt leer
     if(sig){ try { const bild = await doc.embedPng(sig), h = 24, b = Math.min(150, bild.width * h / bild.height); s.drawImage(bild, { x: 335, y: 164, width: b, height: h * b / (bild.width * h / bild.height) }); } catch(e){} }
@@ -173,8 +177,7 @@ async function aufbau(main){
   let spT = null; const speichernSpaeter = () => { clearTimeout(spT); spT = setTimeout(speichern, 900); };
   async function speichern(){
     const json = JSON.stringify(werte); if(json === gespeichert || !werte.pos.some(p => p.nr)) return true;
-    const kundeDrin = werte.kunde_id && werte.kunde_name && werte.pos.some(p => (p.bem || '').includes(werte.kunde_name));   // Kunde steht noch in einer Bemerkung → Dokument erscheint in Kontakte beim Kunden
-    const zeile = { vorlage_id: V.id, kunde_id: kundeDrin ? werte.kunde_id : null, werte, datum: new Date().toISOString().slice(0, 10), adresse: werte.pos.filter(p => p.nr).map(p => p.nr).join(', '), geaendert_am: new Date().toISOString() };
+    const zeile = { vorlage_id: V.id, kunde_id: werte.kunde?.id || null, werte, datum: new Date().toISOString().slice(0, 10), adresse: werte.pos.filter(p => p.nr).map(p => p.nr).join(', '), geaendert_am: new Date().toISOString() };
     const r = dokId ? await sb.from('doku_dokument').update(zeile).eq('id', dokId).select('id').single() : await sb.from('doku_dokument').insert(zeile).select('id').single();
     if(r.error){ KGD.toast('Speichern fehlgeschlagen: ' + r.error.message, true); return false; }
     dokId = r.data.id; gespeichert = json; history.replaceState(null, '', 'doku-formular-live-v1.html?d=' + dokId); return true;
@@ -233,20 +236,30 @@ async function aufbau(main){
     const s = nummern().join('|'); if(s && s !== px.schluessel) pxSuchen();
   }
 
-  // Artikel: Aqua-Solar-Nummer eingeben (Bezeichnung aus dem Katalog, sonst aus dem Artikelstamm) oder im Katalog suchen.
+  // Artikel: ein Feld «Nummer oder Stichwort» (Ziffern = Aqua-Solar-Nummer, Wörter = Bezeichnung), Treffer aus dem Katalog
+  // und dem Artikelstamm (Lieferant Aqua Solar); daneben Buch-Icon «Im Katalog suchen». Nur gefundene Artikel lassen sich wählen.
   // Katalog = PDF aus Einstellungen › Doku-Tools › «Rücksendung Aqua Solar», Nummern in doku_katalog_artikel (doku-katalog-live-v1.html).
-  const nrNicht = {};   // Position → eingegebene Nummer, die weder im Katalog noch im Artikelstamm steht
   const KAT = (V.einstellungen || {}).katalog || null;
   function artikelSetzen(i, nr, bez, artikel_id){
-    Object.assign(werte.pos[i], { nr, bez: bez || '', artikel_id: artikel_id || null }); delete nrNicht[i]; angaben(); neu();
+    Object.assign(werte.pos[i], { nr, bez: bez || '', artikel_id: artikel_id || null }); angaben(); neu();
   }
-  async function nrSuchen(i, nr){
-    const [k, a] = await Promise.all([
-      sb.from('doku_katalog_artikel').select('bez').eq('vorlage_id', V.id).eq('nr', nr).neq('bez', '').order('id').limit(1),
-      sb.from('artikel').select('id,bezeichnung').eq('lieferant_id', AS_LIEFERANT).eq('artikelnummer_lieferant', nr).limit(1)]);
-    const kat = k.data?.[0], art = a.data?.[0];
-    if(!kat && !art){ nrNicht[i] = nr; angaben(); return; }
-    artikelSetzen(i, nr, kat ? kat.bez : art.bezeichnung, art ? art.id : null);
+  let artT = null, artLauf = 0, artTreffer = {};
+  function artSuchen(i, q){
+    clearTimeout(artT); const m = main.querySelector(`[data-artm="${i}"]`); if(!m) return;
+    const zahl = /^\d+$/.test(q), w = q.replace(/[%_,()]/g, ' ').trim();
+    if(zahl ? w.length < 3 : w.length < 3){ m.classList.add('hidden'); return; }
+    artT = setTimeout(async () => { const nr = ++artLauf, muster = '%' + w.split(/\s+/).join('%') + '%';
+      const [k, a] = await Promise.all([
+        sb.from('doku_katalog_artikel').select('nr,bez,seite').eq('vorlage_id', V.id).neq('bez', '').or(zahl ? `nr.like.${w}%` : `bez.ilike.${muster}`).order('nr').order('id').limit(60),
+        sb.from('artikel').select('id,artikelnummer_lieferant,bezeichnung').eq('lieferant_id', AS_LIEFERANT).or(zahl ? `artikelnummer_lieferant.like.${w}%` : `bezeichnung.ilike.${muster}`).limit(15)]);
+      if(nr !== artLauf) return;
+      const L = [], gesehen = new Set();
+      (k.data || []).forEach(r => { if(gesehen.has(r.nr)) return; gesehen.add(r.nr); L.push({ nr: r.nr, bez: r.bez, info: 'Katalog S. ' + r.seite }); });
+      (a.data || []).forEach(r => { const n = r.artikelnummer_lieferant; if(!n || gesehen.has(n)) { const x = L.find(y => y.nr === n); if(x) x.id = r.id; return; } gesehen.add(n); L.push({ nr: n, bez: r.bezeichnung, id: r.id, info: 'Artikelstamm' }); });
+      artTreffer[i] = L.slice(0, 15);
+      m.innerHTML = artTreffer[i].map((t, j) => `<button type="button" data-artw="${i}:${j}"><b>${esc(t.nr)} ${esc(t.bez)}</b><small>${esc(t.info)}</small></button>`).join('')
+        || `<div class="kopfzeile">Nichts gefunden. ${KAT ? 'Im Katalog blättern (Buch-Icon rechts).' : ''}</div>`;
+      m.classList.remove('hidden'); }, 250);
   }
 
   // Katalog-Fenster: Seiten mit pdf.js (lädt nur die angezeigten Teile), links Inhaltsverzeichnis bzw. Suchtreffer,
@@ -360,12 +373,13 @@ async function aufbau(main){
     const pe = person(werte.sb);
     $('ang').innerHTML = `<div class="kgd-feld"><label for="sb">Sachbearbeiter</label><select class="kgd-t" id="sb">${(KGD.personen || []).map(p => `<option value="${p.id}" ${p.id === werte.sb ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
         <div class="ffsig" id="sigZeile"></div></div>
+      <div class="kgd-feld"><label for="kundeQ">Kunde</label>${werte.kunde ? `<div class="ffart"><span style="flex:1;min-width:0"><b>${esc(werte.kunde.name)}</b>${werte.kunde.adresse ? ' · ' + esc(werte.kunde.adresse) : ''}</span><button type="button" class="kg-ibtn" id="kundeWeg" title="Anderen Kunden wählen">${ic('x', 12)}</button></div>`
+        : `<input class="kgd-t" id="kundeQ" autocomplete="off" placeholder="Kunde suchen (Name, Ort …)"><div class="kgd-menue hidden" id="kundeM"></div><span class="ffhinweis">Leer = Knecht AG (eigenes Lager). Ein Kunde pro Rücksendung.</span>`}</div>
       ${werte.pos.map((p, i) => `<div class="ffpos"><div class="kopf">Artikel ${i + 1}${werte.pos.length > 1 ? `<button type="button" class="kg-ibtn danger" data-posweg="${i}" title="Artikel entfernen">${ic('trash', 13)}</button>` : ''}</div>
-        <div class="kgd-reihe"><div class="kgd-feld"><label>Artikel</label>${p.nr ? `<div class="ffart"><b>${esc(p.nr)}</b>${p.bez ? `<span style="flex:1;min-width:0">${esc(p.bez)}</span>` : `<input class="ffbez" data-bez="${i}" placeholder="Bezeichnung eintippen" autocomplete="off">`}<button type="button" class="kg-ibtn" data-artweg="${i}" title="Anderen Artikel wählen">${ic('x', 12)}</button></div>`
-          : `<div class="ffnr"><input class="kgd-t" data-artnr="${i}" autocomplete="off" inputmode="numeric" maxlength="7" placeholder="Aqua-Solar-Nr."><button type="button" class="kgd-btn ghost" data-katalog="${i}">${ic('suche', 14)}Im Katalog suchen</button></div>
-            ${nrNicht[i] ? `<div class="ffnicht">${esc(nrNicht[i])} steht nicht im Katalog. <button type="button" class="kklink" data-trotzdem="${i}">Trotzdem übernehmen</button></div>` : ''}`}</div>
+        <div class="kgd-reihe"><div class="kgd-feld"><label>Artikel</label>${p.nr ? `<div class="ffart"><b>${esc(p.nr)}</b><span style="flex:1;min-width:0">${esc(p.bez || '')}</span><button type="button" class="kg-ibtn" data-artweg="${i}" title="Anderen Artikel wählen">${ic('x', 12)}</button></div>`
+          : `<div class="ffnr"><input class="kgd-t" data-artq="${i}" autocomplete="off" placeholder="Nummer oder Stichwort"><button type="button" class="kg-ibtn ffbuch" data-katalog="${i}" title="Im Katalog suchen" aria-label="Im Katalog suchen">${ic('buch', 16)}</button><div class="kgd-menue hidden" data-artm="${i}"></div></div>`}</div>
           <div class="kgd-feld" style="flex:0 0 70px"><label>Menge</label><input class="kgd-t" data-menge="${i}" value="${esc(p.menge || '')}" inputmode="numeric"></div></div>
-        <div class="kgd-feld"><label>Bemerkungen <small class="opt">optional</small></label><input class="kgd-t" data-bem="${i}" value="${esc(p.bem || '')}" placeholder="Kunde suchen oder Text, z. B. Kommission Steiner" autocomplete="off"><div class="kgd-menue hidden" data-bemm="${i}"></div></div>
+        <div class="kgd-feld"><label>Zusatz <small class="opt">optional, steht unter der Kundenadresse</small></label><input class="kgd-t" data-bem="${i}" value="${esc(p.bem || '')}" placeholder="z. B. Pumpe läuft nicht an, brummt nur" autocomplete="off"></div>
         <div class="ffgrund">${GRUENDE.map(g => `<label><input type="radio" name="g${i}" data-grund="${i}" value="${g.k}" ${p.grund === g.k ? 'checked' : ''}>${esc(g.n)}</label>`).join('')}</div></div>`).join('')}
       ${werte.pos.length < 3 ? '<button type="button" class="kgd-btn ghost" id="posNeu">+ Artikel</button>' : ''}
       ${rechnungNoetig() ? `<div class="ffre ${werte.rechnung ? 'ok' : 'noetig'}"><b>${werte.rechnung ? 'Rechnungskopie angehängt' : 'Rechnungskopie nötig'}</b>
@@ -399,34 +413,38 @@ async function aufbau(main){
   $('datenOk').addEventListener('click', () => { fenster(false); speichern(); });
   fenster(!dokId);
 
-  // Bemerkungen: beim Tippen Kunden vorschlagen (Kundenliste wie im Doku-Dokument); Auswahl schreibt «Name, Ort» hinein
-  // und hängt das Dokument an den Kunden (Kontakte › Kachel «Doku-Tool»). Freier Text geht weiterhin.
-  let bemT = null, bemLauf = 0, bemTreffer = [];
-  function bemVorschlaege(i, q){
-    clearTimeout(bemT); const m = main.querySelector(`[data-bemm="${i}"]`); if(!m) return;
-    if(q.length < 3 || q === werte.kunde_name){ m.classList.add('hidden'); return; }
-    bemT = setTimeout(async () => { const nr = ++bemLauf;
-      const { data } = await sb.rpc('kunde_suche', { q, anzahl: 8 }); if(nr !== bemLauf) return;
-      bemTreffer = data || [];
-      m.innerHTML = bemTreffer.length ? `<div class="kopfzeile">Kunde übernehmen (sonst einfach weiterschreiben)</div>` + bemTreffer.map((k, j) => `<button type="button" data-bemw="${i}:${j}"><b>${esc(k.name || '')}</b><small>${esc([k.strasse, [k.plz, k.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ') || 'keine Adresse')}</small></button>`).join('') : '';
-      m.classList.toggle('hidden', !bemTreffer.length); }, 250);
+  // Kunde (einmal pro Rücksendung): Kundenliste wie im Doku-Dokument
+  let kuT = null, kuLauf = 0, kuTreffer = [];
+  function kundeSuchen(q){
+    clearTimeout(kuT); const m = $('kundeM'); if(!m) return;
+    if(q.length < 2){ m.classList.add('hidden'); return; }
+    kuT = setTimeout(async () => { const nr = ++kuLauf;
+      const { data } = await sb.rpc('kunde_suche', { q, anzahl: 10 }); if(nr !== kuLauf) return;
+      kuTreffer = data || [];
+      m.innerHTML = kuTreffer.map((k, j) => `<button type="button" data-kuw="${j}"><b>${esc(k.name || '')}</b><small>${esc(kundeAdr(k) || 'keine Adresse')}${k.kundennummer ? ' · Nr. ' + esc(k.kundennummer) : ''}</small></button>`).join('') || '<div class="kopfzeile">Kein Kunde gefunden.</div>';
+      m.classList.remove('hidden'); }, 250);
   }
-  main.addEventListener('mousedown', e => { const b = e.target.closest('[data-bemw]'); if(!b) return; e.preventDefault();
-    const [i, j] = b.dataset.bemw.split(':').map(Number), k = bemTreffer[j];
-    werte.kunde_id = k.id; werte.kunde_name = [k.name, k.ort].filter(Boolean).join(', '); werte.pos[i].bem = werte.kunde_name; angaben(); neu(); });
-  main.addEventListener('focusout', e => { if(e.target.dataset?.bem != null) setTimeout(() => main.querySelector(`[data-bemm="${e.target.dataset.bem}"]`)?.classList.add('hidden'), 180); });
+  main.addEventListener('mousedown', e => {
+    const k = e.target.closest('[data-kuw]'), a = e.target.closest('[data-artw]'); if(!k && !a) return; e.preventDefault();
+    if(k){ const x = kuTreffer[+k.dataset.kuw]; werte.kunde = { id: x.id, name: x.name || '', adresse: kundeAdr(x) }; angaben(); neu(); return; }
+    const [i, j] = a.dataset.artw.split(':').map(Number), t = artTreffer[i][j]; artikelSetzen(i, t.nr, t.bez, t.id || null);
+  });
+  main.addEventListener('focusout', e => { const t = e.target;
+    if(t.id === 'kundeQ') setTimeout(() => $('kundeM')?.classList.add('hidden'), 180);
+    if(t.dataset?.artq != null) setTimeout(() => main.querySelector(`[data-artm="${t.dataset.artq}"]`)?.classList.add('hidden'), 180); });
 
   // Ereignisse
   main.addEventListener('input', e => {
     const t = e.target;
     if(t.dataset.menge != null){ werte.pos[+t.dataset.menge].menge = t.value.trim(); neu(); }
-    else if(t.dataset.bem != null){ werte.pos[+t.dataset.bem].bem = t.value.trim(); neu(); bemVorschlaege(+t.dataset.bem, t.value.trim()); }
-    else if(t.dataset.artnr != null){ const v = t.value.replace(/\D/g, ''); if(v.length === 6) nrSuchen(+t.dataset.artnr, v); }
+    else if(t.dataset.bem != null){ werte.pos[+t.dataset.bem].bem = t.value.trim(); neu(); }
+    else if(t.dataset.artq != null) artSuchen(+t.dataset.artq, t.value.trim());
+    else if(t.id === 'kundeQ') kundeSuchen(t.value.trim());
   });
-  main.addEventListener('keydown', e => { const t = e.target; if(t.dataset.artnr == null || e.key !== 'Enter') return; e.preventDefault();
-    const v = t.value.replace(/\D/g, ''); if(v) nrSuchen(+t.dataset.artnr, v); });
-  // freie Bezeichnung (Nummer nicht im Katalog): beim Verlassen übernehmen
-  main.addEventListener('focusout', e => { const t = e.target; if(t.dataset.bez == null || !t.value.trim()) return; werte.pos[+t.dataset.bez].bez = t.value.trim(); angaben(); neu(); });
+  // Enter im Artikelfeld: ersten Treffer übernehmen (bei genauer Nummer genau diesen)
+  main.addEventListener('keydown', e => { const t = e.target; if(t.dataset.artq == null || e.key !== 'Enter') return; e.preventDefault();
+    const i = +t.dataset.artq, L = artTreffer[i] || [], q = t.value.trim(), x = L.find(y => y.nr === q) || (L.length === 1 ? L[0] : null);
+    if(x) artikelSetzen(i, x.nr, x.bez, x.id || null); });
   main.addEventListener('change', e => {
     const t = e.target;
     if(t.id === 'sb'){ werte.sb = t.value; angaben(); neu(); }
@@ -436,7 +454,7 @@ async function aufbau(main){
   main.addEventListener('click', async e => {
     const b = e.target.closest('button'); if(!b) return;
     if(b.dataset.katalog != null){ katalogOeffnen(+b.dataset.katalog); return; }
-    if(b.dataset.trotzdem != null){ const i = +b.dataset.trotzdem; artikelSetzen(i, nrNicht[i], '', null); return; }
+    if(b.id === 'kundeWeg'){ werte.kunde = null; angaben(); neu(); setTimeout(() => $('kundeQ')?.focus(), 0); return; }
     if(b.id === 'posNeu'){ werte.pos.push({ menge: '1' }); angaben(); return; }
     if(b.dataset.posweg != null){ werte.pos.splice(+b.dataset.posweg, 1); angaben(); neu(); return; }
     if(b.dataset.artweg != null){ const p = werte.pos[+b.dataset.artweg]; p.nr = ''; p.bez = ''; p.artikel_id = null; angaben(); neu(); return; }
