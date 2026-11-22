@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script src="/kg-pw-schutz.js?v=5"></script>
-<script src="/kg-stil.js?v=98"></script>
+<script src="/kg-stil.js?v=99"></script>
 <title>Nachschlagewerk &amp; Maschinen – Knechtgarten</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jost:wght@500;600&display=swap">
@@ -790,6 +790,7 @@ body.qr nav.subnav{display:none;}
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<script src="/kg-sdb.js?v=1"></script>
 <script>
 const $ = id => document.getElementById(id);
 const SUPABASE_URL = 'https://oalapdxinqlnzwxhyuzy.supabase.co';
@@ -2208,7 +2209,10 @@ function secBody(e, k){
           <div class="small muted">${esc(datumCH(x.erstellt_am.slice(0,10)))}</div></div>
           ${bu ? `<button class="xbtn kg-hover" data-act="dateiDel" data-id="${x.id}" title="Löschen">${ic('trash')}</button>` : ''}</div>`).join('')}</div>`
         : '<div class="small muted">Noch keine.</div>'}
-      ${bu ? `<div><button class="addrow" data-act="sichUpload">${ic('upload')}Sicherheitsdatenblatt / Merkblatt hochladen</button> <span class="small muted">PDF oder Foto</span></div>` : ''}`;
+      ${bu ? `<div><button class="addrow" data-act="sichUpload">${ic('upload')}Sicherheitsdatenblatt / Merkblatt hochladen</button> <span class="small muted">PDF oder Foto</span></div>` : ''}
+      ${bu ? `<label class="fld ufifld">UFI-Nummer <span class="small muted">von der Produktetikette, fragt Tox Info 145 nach</span><input class="svin" data-ufi="${e.id}" value="${esc(e.ufi || '')}" placeholder="z. B. N1QV-R02N-J00H-1R9P" autocomplete="off"></label>`
+        : e.ufi ? `<div class="small muted">UFI-Nummer ${esc(e.ufi)}</div>` : ''}
+      ${docs.length && istBuero() ? `<div><button class="addrow" data-act="sdbKleber">${ic('qr')}Kleber für Kanister drucken</button> <span class="small muted">gelbes P-touch-Band, QR zum Datenblatt</span></div>` : ''}`;
   }
   if(k === 'anw') return rte('anw', e.id, e.anwendung_html || '', 'Kurzanleitung, Arbeitsschritte, Tabellen, Fotos', darfEdit());
   if(k === 'service') return serviceBody(e);
@@ -3179,6 +3183,7 @@ document.addEventListener('change', ev => {
   if(ev.target.id === 'fmt'){ S.fmt = ev.target.value; merke('fmt', S.fmt); S.used = new Set(); render(); }
   if(ev.target.id === 'fotoChk'){ S.foto = ev.target.checked; render(); }
   if(ev.target.id === 'kleberX'){ const y = S.exemplare.find(z => z.id === ev.target.value); if(y) qrKleberDialog(y); return; }
+  if(ev.target.dataset?.ufi){ const e = byId(ev.target.dataset.ufi), v = ev.target.value.trim().toUpperCase() || null; if(e) speichereEintrag(e.id, { ufi: v }).then(ok => { if(ok){ e.ufi = v; toast('Gespeichert'); } }); return; }
   if(ev.target.id === 'katSel'){ S.kat = ev.target.value || null; merke('kat', S.kat); render(); }
   if(ev.target.dataset?.kvk){ kvFeld(ev.target); }
   if(ev.target.dataset?.x && S.eid && exById(ev.target.dataset.x)) S.xid = ev.target.dataset.x;
@@ -3336,6 +3341,21 @@ document.addEventListener('click', async ev => {
   // Dokumente
   else if(a === 'psaT'){ const an = e.psa || [], neu = an.includes(d.v) ? an.filter(x => x !== d.v) : [...an, d.v];
     if(await speichereEintrag(e.id, { psa: neu })) render(); }
+  // Kleber für Kanister mit QR zum Datenblatt (kg-sdb.js, gelbes P-touch-Band); Grösse S/M/L wie bei den Maschinen-Klebern
+  else if(a === 'sdbKleber' || a === 'sdbGr'){
+    if(a === 'sdbGr') S.sdbG = d.v; else { S.sdbG = (() => { try { return localStorage.getItem('kgSdbGr') || 'M'; } catch(_){ return 'M'; } })(); S.sdbAnz = 1; }
+    try { await KGS.code(sb, e); } catch(err){ return toast(err.message); }
+    const g = S.sdbG, p = { titel: e.titel, ufi: e.ufi, code: e.sdb_code };
+    ovl(`<h3>Kleber für Kanister · ${esc(e.titel)}</h3>
+      <div class="kg-seg ptgr" role="group" aria-label="Grösse">${Object.entries(KGS.GR).map(([k, mm]) => `<button type="button" data-act="sdbGr" data-v="${k}" class="${k === g ? 'on' : ''}">${k} · ${mm} mm</button>`).join('')}</div>
+      <div class="ptvor">${KGS.vorschau(p, g)}</div>
+      <label class="fld" style="max-width:140px">Anzahl<input class="svin" type="number" min="1" max="50" id="sdbAnz" value="${S.sdbAnz || 1}"></label>
+      <div class="small muted">Gelbes laminiertes P-touch-Band 36 mm (z. B. TZe-661). Beim Drucken den P-touch wählen, Grösse 100 %. Der QR öffnet ohne Anmeldung das Datenblatt mit Notfallnummer${e.ufi ? ' und UFI' : ' (UFI-Nummer fehlt noch, siehe Bearbeiten)'}.</div>
+      <div class="addlinks"><a class="addrow" href="${KGS.BASIS + e.sdb_code}" target="_blank" rel="noopener">${ic('phone')}Handy-Seite ansehen</a></div>
+      <div class="ovlbtns"><button class="btn btn-ghost" data-act="ovlZu">Schliessen</button><button class="btn btn-primary" data-act="sdbDruck">${ic('print')}Drucken</button></div>`);
+  }
+  else if(a === 'sdbDruck'){ const n = +($('sdbAnz')?.value || 1); S.sdbAnz = n; try { localStorage.setItem('kgSdbGr', S.sdbG || 'M'); } catch(_){}
+    KGS.drucken([{ titel: e.titel, ufi: e.ufi, code: e.sdb_code, anzahl: n }], S.sdbG || 'M'); ovlZu(); }
   else if(a === 'sichUpload') waehleDateien('application/pdf,image/*', true, async files => {
     for(const f of files){ toast(`«${f.name}» wird hochgeladen …`); await hochladen(f, e.id, 'sicherheit', null); }
     await signiere(S.det.dateien.flatMap(x => [x.storage_pfad, x.vorschau_pfad]).filter(Boolean)); render();
