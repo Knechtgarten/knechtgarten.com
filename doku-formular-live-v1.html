@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<script src="/kg-pw-schutz.js?v=5"></script>
+<script src="/kg-stil.js?v=90"></script>
+<title>Formular – Doku-Tools</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#323E4E">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600;700&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="/kg-doku.js?v=9"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<style>
+.unvoll{display:none !important;}
+.kgd-weg{display:flex;align-items:center;gap:6px;font-size:14px;color:#6B7079;flex-wrap:wrap;min-width:0;}
+.kgd-weg a{color:#A63A52;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:2px;}
+.kgd-weg b{color:#323E4E;font-size:15px;} .kgd-zurueck svg{transform:rotate(90deg);}
+/* Formular: links die Angaben, rechts das Blatt genau wie gedruckt (Original-PDF + unsere Angaben) */
+.ff{display:grid;grid-template-columns:400px minmax(0,1fr);gap:20px;align-items:start;padding:20px;max-width:1300px;margin:0 auto;}
+.ffang{background:#fff;border:1px solid #E1E5E9;border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:12px;position:sticky;top:12px;max-height:calc(100vh - 24px);overflow:auto;}
+.ffang h3{margin:0;font-size:15px;}
+.ffpos{border:1px solid #E1E5E9;border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:8px;}
+.ffpos .kopf{display:flex;align-items:center;gap:8px;font-weight:600;font-size:13px;} .ffpos .kopf .kg-ibtn{margin-left:auto;}
+.ffart{font-size:12.5px;background:#F5F7F9;border-radius:7px;padding:6px 8px;display:flex;gap:8px;align-items:center;} .ffart b{font-variant-numeric:tabular-nums;}
+.ffgrund{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;font-size:12.5px;} .ffgrund label{display:flex;gap:6px;align-items:center;cursor:pointer;}
+.ffre{border-radius:10px;padding:10px;font-size:12.5px;display:flex;flex-direction:column;gap:8px;}
+.ffre.noetig{background:#FDF1EF;border:1px solid #F0C9C3;} .ffre.ok{background:#EEF6EC;border:1px solid #C9E2C3;}
+.ffre .zeile{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+.ffblatt{display:flex;flex-direction:column;align-items:center;gap:10px;}
+.ffblatt canvas{width:100%;max-width:760px;height:auto;background:#fff;box-shadow:0 4px 18px rgba(35,43,53,.15);border-radius:2px;}
+.ffhinweis{font-size:12px;color:#6B7079;}
+.ffsig{display:flex;align-items:center;gap:8px;font-size:12.5px;} .ffsig img{height:28px;max-width:140px;object-fit:contain;background:#fff;border:1px solid #E1E5E9;border-radius:4px;}
+@media (max-width:900px){ .ff{grid-template-columns:minmax(0,1fr);padding:12px;} .ffang{position:static;max-height:none;} }
+@media print{ body > *:not(#druckFrame){display:none!important;} }
+</style>
+</head>
+<body>
+<header class="app"><div class="wrap">
+  <a class="backlink" href="index.html">Startseite</a>
+  <div class="brand"><h1>Doku-Tools</h1></div>
+  <span class="userbar hidden" id="userbar"><span id="userbarText"></span><button id="logoutBtn">Abmelden</button></span>
+</div></header>
+<nav class="subnav"><div class="wrap">
+  <a href="doku-live-v1.html" class="on">Dokumente</a>
+</div></nav>
+<span class="kgd-weg" data-kg-seite="links"><a class="kgd-zurueck" href="doku-live-v1.html" id="ordnerLink"></a><span>/</span><b id="docTitel"></b></span>
+<button type="button" class="kgd-btn ghost unvoll" data-kg-seite="rechts" id="driveBtn"></button>
+<button type="button" class="kgd-btn prim kg-haupt unvoll" data-kg-seite="rechts" id="druckBtn"></button>
+<main id="appMain"></main>
+<script>
+// Formular eines Lieferanten (Art «formular»): Original-PDF als Hintergrund, unsere Angaben werden mit pdf-lib daraufgeschrieben.
+// Vorschau = genau das PDF, das gedruckt bzw. abgelegt wird (pdf.js zeichnet Seite 1). Rechnungskopie wird als weitere Seiten angehängt.
+// Erste Vorlage: «Rücksendung Aqua Solar» (Positionen in PDF-Punkten, Ursprung unten links, A4 = 595 × 842).
+const $ = id => document.getElementById(id);
+const P = new URLSearchParams(location.search);
+const AS_LIEFERANT = 'd792a7b8-cdb5-4443-bd9d-67bdf4a6f87b';
+const ABSENDER = ['Knecht AG Naturnahe Gärten', 'Badhaus 42, 3615 Heimenschwand · Kunde Nr. 240043'];
+// Gründe (nur die vier, die wir brauchen) mit Lage des Kästchens; Reparatur braucht keine Rechnungskopie
+const GRUENDE = [
+  { k: 'lieferung', n: 'falsche Lieferung (Fehler AS)', x: 123, y: 566, rechnung: true },
+  { k: 'bestellung', n: 'falsche Bestellung (Fehler Kunde)', x: 123, y: 543, rechnung: true },
+  { k: 'reparatur', n: 'zur Reparatur', x: 257, y: 566, rechnung: false },
+  { k: 'garantie', n: 'zur Garantiereparatur', x: 257, y: 543, rechnung: true },
+];
+const BLOCK = 131;   // Abstand der drei Artikelblöcke
+async function aufbau(main){
+  const { esc, ic } = KGD, sb = KGD.sb;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+  $('driveBtn').innerHTML = ic('ordner') + 'In Drive ablegen'; $('druckBtn').innerHTML = ic('drucken') + 'Drucken'; $('ordnerLink').innerHTML = KG.icon('chev', 14);
+
+  let dokId = null, werte = null, vorlageId = P.get('v');
+  const quelle = P.get('d') || P.get('kopie');   // Kopie = gleiche Angaben, neues Dokument (ohne Rechnungskopie)
+  if(quelle){
+    const { data } = await sb.from('doku_dokument').select('*').eq('id', quelle).maybeSingle();
+    if(!data){ main.innerHTML = '<p class="kgd-hinweis" style="padding:20px">Dokument nicht gefunden.</p>'; return; }
+    vorlageId = data.vorlage_id; werte = data.werte || {}; if(P.get('d')) dokId = data.id; else werte.rechnung = null;
+  }
+  const { data: V } = await sb.from('doku_vorlage').select('*, ordner:doku_ordner(name)').eq('id', vorlageId).maybeSingle();
+  if(!V){ main.innerHTML = '<p class="kgd-hinweis" style="padding:20px">Vorlage nicht gefunden.</p>'; return; }
+  document.title = V.name + ' – Doku-Tools'; $('docTitel').textContent = V.name; $('ordnerLink').insertAdjacentText('beforeend', V.ordner ? V.ordner.name : 'Dokumente');
+  werte = werte || { sb: KGD.ich, pos: [{ menge: '1' }] };
+  if(!werte.pos?.length) werte.pos = [{ menge: '1' }];
+  let gespeichert = dokId ? JSON.stringify(werte) : null;
+
+  const vorlageBytes = await (await fetch(V.datei_pfad)).arrayBuffer();
+  const person = id => (KGD.personen || []).find(p => p.id === id) || null;
+  const sigCache = {};   // Unterschrift pro Person (PNG-Bytes) aus dem Speicher «unterschriften»
+  async function unterschrift(id){
+    if(!id) return null; if(id in sigCache) return sigCache[id];
+    const { data } = await sb.storage.from('unterschriften').download(`mitarbeiter/${id}.png`);
+    return sigCache[id] = data ? new Uint8Array(await data.arrayBuffer()) : null;
+  }
+  const rechnungNoetig = () => werte.pos.some(p => GRUENDE.find(g => g.k === p.grund)?.rechnung);
+  const pflicht = () => !werte.sb ? 'Sachbearbeiter fehlt.' : !werte.pos.some(p => p.nr) ? 'Mindestens ein Artikel fehlt.'
+    : werte.pos.some(p => p.nr && !p.grund) ? 'Grund der Rücksendung fehlt.' : rechnungNoetig() && !werte.rechnung ? 'Rechnungskopie fehlt.' : '';
+
+  // PDF erzeugen: Vorlage + Angaben (+ Rechnungskopie)
+  async function erzeugen(mitRechnung){
+    const { PDFDocument, StandardFonts, rgb } = PDFLib;
+    const doc = await PDFDocument.load(vorlageBytes), s = doc.getPage(0);
+    const f = await doc.embedFont(StandardFonts.Helvetica), fb = await doc.embedFont(StandardFonts.HelveticaBold), farbe = rgb(0.08, 0.1, 0.16);
+    // Standardschrift kennt nur westeuropäische Zeichen: Rest weglassen statt Fehler
+    const text = (t, x, y, gr = 10, bold = false, maxB = 0) => { t = String(t || '').replace(/[^\x20-\x7E\xA0-\xFF€–—‘’“”„…•]/g, ''); if(!t) return; const font = bold ? fb : f; let g = gr;
+      if(maxB) while(g > 6.5 && font.widthOfTextAtSize(t, g) > maxB) g -= 0.5;
+      if(maxB) while(t.length > 3 && font.widthOfTextAtSize(t, g) > maxB) t = t.slice(0, -2) + '…';
+      s.drawText(t, { x, y, size: g, font, color: farbe }); };
+    text(ABSENDER[0], 125, 698, 11, true); text(ABSENDER[1], 125, 675, 10);
+    const pe = person(werte.sb); text([pe?.name, pe?.telefon, pe?.mail].filter(Boolean).join(' · '), 125, 651, 10, false, 420);
+    werte.pos.slice(0, 3).forEach((p, i) => { const d = i * BLOCK, g = GRUENDE.find(x => x.k === p.grund);
+      if(g) s.drawText('X', { x: g.x + 1.2, y: g.y - d + 0.8, size: 10, font: fb, color: farbe });
+      text(p.nr, 36, 505 - d, 10, true, 88); text(p.bez, 125, 505 - d, 9.5, false, 385); text(p.menge, 522, 505 - d, 10, true, 50);
+      text(p.bem, 125, 483 - d, 9.5, false, 425); });
+    const heute = new Date(); text(`Heimenschwand, ${heute.getDate()}.${heute.getMonth() + 1}.${heute.getFullYear()}`, 96, 173, 10);
+    const sig = await unterschrift(werte.sb);
+    if(sig){ try { const bild = await doc.embedPng(sig), h = 24, b = Math.min(150, bild.width * h / bild.height); s.drawImage(bild, { x: 335, y: 164, width: b, height: h * b / (bild.width * h / bild.height) }); } catch(e){} }
+    if(mitRechnung && werte.rechnung){
+      const { data, error } = await sb.storage.from('doku-anhaenge').download(werte.rechnung.pfad);
+      if(error) throw new Error('Rechnungskopie konnte nicht geladen werden: ' + error.message);
+      const r = await PDFDocument.load(await data.arrayBuffer(), { ignoreEncryption: true });
+      (await doc.copyPages(r, r.getPageIndices())).forEach(pg => doc.addPage(pg));
+    }
+    return doc.save();
+  }
+
+  // Vorschau: Seite 1 des erzeugten PDF
+  let laeuft = 0;
+  async function vorschau(){
+    const nr = ++laeuft, bytes = await erzeugen(false); if(nr !== laeuft) return;
+    const pdf = await pdfjsLib.getDocument({ data: bytes }).promise, pg = await pdf.getPage(1), vp = pg.getViewport({ scale: 2 });
+    const c = $('blatt'); c.width = vp.width; c.height = vp.height; await pg.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+    const fertig = !pflicht(); ['druckBtn', 'driveBtn'].forEach(id => $(id).classList.toggle('unvoll', !fertig));
+  }
+  let warte = null; const neu = () => { clearTimeout(warte); warte = setTimeout(() => { vorschau(); speichernSpaeter(); }, 250); };
+
+  // Speichern (still, nach Änderungen)
+  let spT = null; const speichernSpaeter = () => { clearTimeout(spT); spT = setTimeout(speichern, 900); };
+  async function speichern(){
+    const json = JSON.stringify(werte); if(json === gespeichert || !werte.pos.some(p => p.nr)) return true;
+    const zeile = { vorlage_id: V.id, werte, datum: new Date().toISOString().slice(0, 10), adresse: werte.pos.filter(p => p.nr).map(p => p.nr).join(', '), geaendert_am: new Date().toISOString() };
+    const r = dokId ? await sb.from('doku_dokument').update(zeile).eq('id', dokId).select('id').single() : await sb.from('doku_dokument').insert(zeile).select('id').single();
+    if(r.error){ KGD.toast('Speichern fehlgeschlagen: ' + r.error.message, true); return false; }
+    dokId = r.data.id; gespeichert = json; history.replaceState(null, '', 'doku-formular-live-v1.html?d=' + dokId); return true;
+  }
+
+  // Angaben (links)
+  const gr = GRUENDE.map(g => g.k);
+  function angaben(){
+    const pe = person(werte.sb);
+    $('ang').innerHTML = `<h3>Angaben</h3>
+      <div class="kgd-feld"><label for="sb">Sachbearbeiter</label><select class="kgd-t" id="sb">${(KGD.personen || []).map(p => `<option value="${p.id}" ${p.id === werte.sb ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
+        <div class="ffsig" id="sigZeile"></div></div>
+      ${werte.pos.map((p, i) => `<div class="ffpos"><div class="kopf">Artikel ${i + 1}${werte.pos.length > 1 ? `<button type="button" class="kg-ibtn danger" data-posweg="${i}" title="Artikel entfernen">${ic('trash', 13)}</button>` : ''}</div>
+        ${p.nr ? `<div class="ffart"><b>${esc(p.nr)}</b><span style="flex:1;min-width:0">${esc(p.bez || '')}</span><button type="button" class="kg-ibtn" data-artweg="${i}" title="Anderen Artikel wählen">${ic('x', 12)}</button></div>`
+          : `<div class="kgd-feld"><input class="kgd-t" data-artq="${i}" autocomplete="off" placeholder="Artikel suchen (Nummer oder Bezeichnung)"><div class="kgd-menue hidden" data-artm="${i}"></div></div>`}
+        <div class="kgd-reihe"><div class="kgd-feld" style="flex:0 0 90px"><label>Menge</label><input class="kgd-t" data-menge="${i}" value="${esc(p.menge || '')}" inputmode="numeric"></div>
+          <div class="kgd-feld"><label>Bemerkungen <small class="opt">optional</small></label><input class="kgd-t" data-bem="${i}" value="${esc(p.bem || '')}" placeholder="z. B. Kommission Steiner, Spiez"></div></div>
+        <div class="ffgrund">${GRUENDE.map(g => `<label><input type="radio" name="g${i}" data-grund="${i}" value="${g.k}" ${p.grund === g.k ? 'checked' : ''}>${esc(g.n)}</label>`).join('')}</div></div>`).join('')}
+      ${werte.pos.length < 3 ? '<button type="button" class="kgd-btn ghost" id="posNeu">+ Artikel</button>' : ''}
+      ${rechnungNoetig() ? `<div class="ffre ${werte.rechnung ? 'ok' : 'noetig'}"><b>${werte.rechnung ? 'Rechnungskopie angehängt' : 'Rechnungskopie nötig'}</b>
+        ${werte.rechnung ? `<div class="zeile">${ic('dokument', 14)}<span style="flex:1;min-width:0">${esc(werte.rechnung.name)}</span><button type="button" class="kg-ibtn danger" id="reWeg" title="Rechnungskopie entfernen">${ic('trash', 13)}</button></div>`
+          : `<span>Für Gutschrift und Garantie verlangt Aqua Solar die Rechnung. Rechnung in PEAX suchen (Artikelnummer ins Suchfeld oben rechts), als PDF herunterladen und hier hochladen.</span>
+          <div class="zeile"><button type="button" class="kgd-btn prim" id="reHoch">${ic('upload', 14)}Rechnung hochladen</button><a class="kgd-btn ghost" href="https://app.peax.ch/inbox/search" target="_blank" rel="noopener">PEAX öffnen</a></div>`}</div>` : ''}
+      <div class="ffhinweis">Absender, Ort, Datum und Unterschrift stehen automatisch auf dem Blatt.</div>`;
+    sigZeile();
+  }
+  async function sigZeile(){
+    const el = $('sigZeile'); if(!el) return; const sig = await unterschrift(werte.sb);
+    el.innerHTML = sig ? `<img src="${URL.createObjectURL(new Blob([sig], { type: 'image/png' }))}" alt="Unterschrift"><button type="button" class="kgd-btn ghost" id="sigNeu" style="height:28px">Ersetzen</button>`
+      : `<span style="color:#B4423A">Keine Unterschrift hinterlegt.</span><button type="button" class="kgd-btn ghost" id="sigNeu" style="height:28px">Unterschrift hochladen</button>`;
+  }
+
+  main.innerHTML = `<div class="ff"><div class="ffang" id="ang"></div><div class="ffblatt"><canvas id="blatt" aria-label="Vorschau des Formulars"></canvas><span class="ffhinweis" id="seitenHinweis"></span></div></div>`;
+  angaben(); vorschau();
+
+  // Ereignisse
+  let artT = null, artTreffer = {};
+  main.addEventListener('input', e => {
+    const t = e.target;
+    if(t.dataset.menge != null){ werte.pos[+t.dataset.menge].menge = t.value.trim(); neu(); }
+    else if(t.dataset.bem != null){ werte.pos[+t.dataset.bem].bem = t.value.trim(); neu(); }
+    else if(t.dataset.artq != null){ const i = +t.dataset.artq, q = t.value.trim(), m = main.querySelector(`[data-artm="${i}"]`); clearTimeout(artT);
+      if(q.length < 2){ m.classList.add('hidden'); return; }
+      artT = setTimeout(async () => {
+        const muster = `%${q.replace(/[%_]/g, '')}%`;
+        const { data } = await sb.from('artikel').select('id,artikelnummer_lieferant,bezeichnung').eq('lieferant_id', AS_LIEFERANT).or(`artikelnummer_lieferant.ilike.${muster},bezeichnung.ilike.${muster}`).limit(15);
+        artTreffer[i] = data || [];
+        m.innerHTML = (data || []).map((a, j) => `<button type="button" data-artw="${i}:${j}"><b>${esc(a.artikelnummer_lieferant || '–')}</b><small>${esc(a.bezeichnung)}</small></button>`).join('') || '<div class="kopfzeile">Nichts gefunden. Nummer und Bezeichnung auch frei eintippen: «Nummer Bezeichnung» und Enter.</div>';
+        m.classList.remove('hidden'); }, 250); }
+  });
+  main.addEventListener('keydown', e => { const t = e.target; if(t.dataset.artq == null || e.key !== 'Enter') return; e.preventDefault();
+    const v = t.value.trim(); if(!v) return; const [nr, ...rest] = v.split(/\s+/); const p = werte.pos[+t.dataset.artq]; p.nr = nr; p.bez = rest.join(' '); p.artikel_id = null; angaben(); neu(); });
+  main.addEventListener('change', e => {
+    const t = e.target;
+    if(t.id === 'sb'){ werte.sb = t.value; angaben(); neu(); }
+    else if(t.dataset.grund != null){ werte.pos[+t.dataset.grund].grund = t.value; angaben(); neu(); }
+  });
+  main.addEventListener('mousedown', e => { const b = e.target.closest('[data-artw]'); if(!b) return; e.preventDefault();
+    const [i, j] = b.dataset.artw.split(':').map(Number), a = artTreffer[i][j], p = werte.pos[i];
+    p.artikel_id = a.id; p.nr = a.artikelnummer_lieferant || ''; p.bez = a.bezeichnung; angaben(); neu(); });
+  main.addEventListener('click', async e => {
+    const b = e.target.closest('button'); if(!b) return;
+    if(b.id === 'posNeu'){ werte.pos.push({ menge: '1' }); angaben(); return; }
+    if(b.dataset.posweg != null){ werte.pos.splice(+b.dataset.posweg, 1); angaben(); neu(); return; }
+    if(b.dataset.artweg != null){ const p = werte.pos[+b.dataset.artweg]; p.nr = ''; p.bez = ''; p.artikel_id = null; angaben(); neu(); return; }
+    if(b.id === 'reWeg'){ const alt = werte.rechnung; werte.rechnung = null; angaben(); neu(); if(alt) sb.storage.from('doku-anhaenge').remove([alt.pfad]); return; }
+    if(b.id === 'reHoch'){ const i = document.createElement('input'); i.type = 'file'; i.accept = 'application/pdf';
+      i.onchange = async () => { const f = i.files[0]; if(!f) return;
+        try { await PDFLib.PDFDocument.load(await f.arrayBuffer(), { ignoreEncryption: true }); } catch(err){ KGD.toast('Das ist kein lesbares PDF.', true); return; }
+        const pfad = `ruecksendung/${crypto.randomUUID()}.pdf`, up = await sb.storage.from('doku-anhaenge').upload(pfad, f, { contentType: 'application/pdf' });
+        if(up.error){ KGD.toast('Hochladen fehlgeschlagen: ' + up.error.message, true); return; }
+        werte.rechnung = { pfad, name: f.name }; angaben(); neu(); KGD.toast('Rechnungskopie angehängt'); };
+      i.click(); return; }
+    if(b.id === 'sigNeu'){ const i = document.createElement('input'); i.type = 'file'; i.accept = 'image/png,image/jpeg';
+      i.onchange = async () => { const f = i.files[0]; if(!f) return;
+        // als PNG speichern (pdf-lib braucht PNG), weisser Hintergrund wird durchsichtig
+        const bild = await createImageBitmap(f), c = document.createElement('canvas'), h = 160; c.width = Math.round(bild.width * h / bild.height); c.height = h;
+        const x = c.getContext('2d'); x.drawImage(bild, 0, 0, c.width, h); const px = x.getImageData(0, 0, c.width, h);
+        for(let k = 0; k < px.data.length; k += 4){ if(px.data[k] > 225 && px.data[k + 1] > 225 && px.data[k + 2] > 225) px.data[k + 3] = 0; } x.putImageData(px, 0, 0);
+        const blob = await new Promise(ok => c.toBlob(ok, 'image/png'));
+        const { error } = await sb.storage.from('unterschriften').upload(`mitarbeiter/${werte.sb}.png`, blob, { contentType: 'image/png', upsert: true });
+        if(error){ KGD.toast('Unterschrift konnte nicht gespeichert werden: ' + error.message, true); return; }
+        delete sigCache[werte.sb]; sigZeile(); neu(); KGD.toast('Unterschrift gespeichert'); };
+      i.click(); return; }
+  });
+
+  // Drucken: fertiges PDF (mit Rechnungskopie) in einem unsichtbaren Rahmen drucken
+  $('druckBtn').addEventListener('click', async () => {
+    const f = pflicht(); if(f) return KGD.toast(f, true); await speichern();
+    try { const bytes = await erzeugen(true), url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+      $('druckFrame')?.remove(); const fr = document.createElement('iframe'); fr.id = 'druckFrame'; fr.style.cssText = 'position:fixed;width:0;height:0;border:0;right:0;bottom:0'; fr.src = url;
+      fr.onload = () => { try { fr.contentWindow.focus(); fr.contentWindow.print(); } catch(e){ window.open(url, '_blank'); } }; document.body.appendChild(fr);
+    } catch(err){ KGD.toast(err.message || String(err), true); }
+  });
+  // In Drive ablegen: Ordner per Link (wird gemerkt), PDF mit Rechnungskopie
+  $('driveBtn').addEventListener('click', async () => {
+    const f = pflicht(); if(f) return KGD.toast(f, true); await speichern();
+    let token = null; try { token = await KGD.googleToken(); } catch(e){}
+    if(!token){ try { await KGD.gsiLaden(); await KGD.googleVerbinden(); } catch(e){ return KGD.toast(e.message || 'Google-Verbindung fehlgeschlagen', true); } }
+    let link = ''; try { link = localStorage.getItem('kgd_ruecksendung_ordner') || ''; } catch(e){}
+    let form = null;
+    const los = await KGD.dialog(`<h3>In Drive ablegen</h3><div class="kgd-feld"><label for="zielLink">Drive-Ordner (Link)</label><input class="kgd-t" id="zielLink" value="${esc(link)}" placeholder="https://drive.google.com/drive/folders/…" autocomplete="off"></div>
+      <div class="kgd-feld"><label for="zielName">Dateiname</label><input class="kgd-t" id="zielName" value="${esc(dateiname())}" autocomplete="off"></div>`, [['Abbrechen', 'ghost', null], ['Ablegen', 'prim', 'los']], el => { form = el; });
+    if(los !== 'los') return;
+    try {
+      const l = form.querySelector('#zielLink').value.trim(), ziel = await KGD.ordnerAusLink(l); try { localStorage.setItem('kgd_ruecksendung_ordner', l); } catch(e){}
+      KGD.toast('Lege ab …'); const bytes = await erzeugen(true);
+      await KGD.hochladen(new Blob([bytes], { type: 'application/pdf' }), KGD.dateiName(form.querySelector('#zielName').value.replace(/\.pdf$/i, '')), ziel.id);
+      KGD.toast('Abgelegt in ' + ziel.pfad);
+    } catch(err){ KGD.toast(err.message || String(err), true); }
+  });
+  const dateiname = () => `${new Date().toISOString().slice(0, 10)} Rücksendung Aqua Solar ${werte.pos.filter(p => p.nr).map(p => p.nr).join(' ')}`.trim();
+}
+KGD.start(aufbau);
+</script>
+</body>
+</html>
