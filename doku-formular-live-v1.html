@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script src="/kg-pw-schutz.js?v=5"></script>
-<script src="/kg-stil.js?v=90"></script>
+<script src="/kg-stil.js?v=91"></script>
 <title>Formular – Doku-Tools</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#323E4E">
@@ -37,6 +37,28 @@
 .ffhinweis{font-size:12px;color:#6B7079;}
 .ffsig{display:flex;align-items:center;gap:8px;font-size:12.5px;flex-wrap:wrap;color:#6B7079;} .ffsig img{height:28px;max-width:140px;object-fit:contain;background:#fff;border:1px solid #E1E5E9;border-radius:4px;} .ffsig img.aus{opacity:.3;} .ffsig a{color:#323E4E;font-weight:600;}
 .ffsig .kgd-schalter{height:auto;font-size:12.5px;} .ffsig .kgd-schalter input{width:15px;height:15px;}
+.ffnr{display:flex;gap:8px;} .ffnr .kgd-t{flex:1;min-width:0;} .ffnr .kgd-btn{height:36px;white-space:nowrap;}
+.ffnicht{font-size:12.5px;color:#B4423A;margin-top:4px;}
+.ffbez{flex:1;min-width:0;border:0;background:transparent;font:inherit;font-size:13px;outline:none;}
+/* Katalog-Fenster */
+.kkat{position:fixed;inset:0;background:rgba(35,43,53,.45);z-index:60;display:flex;align-items:center;justify-content:center;padding:16px;}
+.kkat-box{background:#fff;border-radius:12px;width:min(1200px,100%);height:min(94vh,1100px);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 18px 50px rgba(20,28,38,.35);}
+.kkat-kopf{display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid #EEF1F4;} .kkat-kopf b{font-size:15px;color:#323E4E;} .kkat-kopf .kgd-t{margin-left:auto;width:300px;}
+.kkat-rumpf{flex:1;display:flex;min-height:0;}
+.kkat-rumpf aside{width:300px;flex:none;border-right:1px solid #EEF1F4;overflow:auto;padding:8px;display:flex;flex-direction:column;}
+.kkat-rumpf aside button{all:unset;cursor:pointer;padding:5px 8px;border-radius:6px;font-size:12.5px;color:#323E4E;line-height:1.35;}
+.kkat-rumpf aside button:hover{background:#F5F7F9;} .kkat-rumpf aside button.e0{font-weight:600;margin-top:4px;} .kkat-rumpf aside button.e1{padding-left:18px;color:#4C5C70;}
+.kkat-rumpf aside button small{display:block;color:#8B9097;font-size:11px;} .kkat-titel{font-size:11px;color:#8B9097;text-transform:uppercase;letter-spacing:.04em;padding:4px 8px;}
+.kkat-seite{flex:1;overflow:auto;background:#E3E7EC;display:flex;justify-content:center;padding:12px;}
+.kkat-blatt{position:relative;flex:none;box-shadow:0 4px 18px rgba(35,43,53,.15);background:#fff;}
+.kkat-layer{position:absolute;inset:0;}
+.kkat-nr{all:unset;position:absolute;cursor:pointer;border-radius:3px;box-shadow:inset 0 0 0 1.5px rgba(209,219,95,.0);}
+.kkat-nr:hover{background:rgba(209,219,95,.45);box-shadow:inset 0 0 0 1.5px #A3AE3A;}
+.kkat-nr.treffer{background:rgba(209,219,95,.55);box-shadow:inset 0 0 0 1.5px #A3AE3A;}
+.kkat-link{position:absolute;cursor:pointer;} .kkat-link:hover{background:rgba(214,231,244,.5);}
+.kkat-fuss{display:flex;align-items:center;gap:8px;padding:8px 14px;border-top:1px solid #EEF1F4;font-size:13px;}
+.kkat-fuss input{width:50px;height:28px;border:1px solid #B9C0C8;border-radius:6px;text-align:center;font:inherit;}
+@media (max-width:760px){ .kkat-rumpf aside{display:none;} .kkat-kopf .kgd-t{width:150px;} }
 @media print{ body > *:not(#druckFrame){display:none!important;} }
 </style>
 </head>
@@ -202,6 +224,95 @@ async function aufbau(main){
     const s = nummern().join('|'); if(s && s !== px.schluessel) pxSuchen();
   }
 
+  // Artikel: Aqua-Solar-Nummer eingeben (Bezeichnung aus dem Katalog, sonst aus dem Artikelstamm) oder im Katalog suchen.
+  // Katalog = PDF aus Einstellungen › Doku-Tools › «Rücksendung Aqua Solar», Nummern in doku_katalog_artikel (doku-katalog-live-v1.html).
+  const nrNicht = {};   // Position → eingegebene Nummer, die weder im Katalog noch im Artikelstamm steht
+  const KAT = (V.einstellungen || {}).katalog || null;
+  function artikelSetzen(i, nr, bez, artikel_id){
+    Object.assign(werte.pos[i], { nr, bez: bez || '', artikel_id: artikel_id || null }); delete nrNicht[i]; angaben(); neu();
+  }
+  async function nrSuchen(i, nr){
+    const [k, a] = await Promise.all([
+      sb.from('doku_katalog_artikel').select('bez').eq('vorlage_id', V.id).eq('nr', nr).neq('bez', '').order('id').limit(1),
+      sb.from('artikel').select('id,bezeichnung').eq('lieferant_id', AS_LIEFERANT).eq('artikelnummer_lieferant', nr).limit(1)]);
+    const kat = k.data?.[0], art = a.data?.[0];
+    if(!kat && !art){ nrNicht[i] = nr; angaben(); return; }
+    artikelSetzen(i, nr, kat ? kat.bez : art.bezeichnung, art ? art.id : null);
+  }
+
+  // Katalog-Fenster: Seiten mit pdf.js (lädt nur die angezeigten Teile), links Inhaltsverzeichnis bzw. Suchtreffer,
+  // auf der Seite sind Artikelnummern und Links (Inhaltsverzeichnis) anklickbar. Klick auf eine Nummer übernimmt sie.
+  let katPdf = null, katSeite = 1, katFuer = null, katOutline = null, katT = null;
+  const NR_RX = /^(\d{6})\*?(?:\s|$)/;
+  async function katalogOeffnen(i){
+    if(!KAT) return KGD.toast('Noch kein Katalog hinterlegt: Einstellungen › Doku-Tools › Rücksendung Aqua Solar.', true);
+    katFuer = i;
+    const box = document.createElement('div'); box.className = 'kkat'; box.id = 'kkat';
+    box.innerHTML = `<div class="kkat-box" role="dialog" aria-label="Katalog Aqua Solar">
+      <div class="kkat-kopf"><b>Katalog Aqua Solar</b><span class="kgd-hinweis">${KAT.stand ? 'Stand ' + esc(KAT.stand.split('-').reverse().join('.')) : ''}</span>
+        <input class="kgd-t" id="katQ" placeholder="Suchen: Wort oder Nummer" autocomplete="off"><button type="button" class="kg-ibtn" id="katZu" title="Schliessen">${ic('x', 13)}</button></div>
+      <div class="kkat-rumpf"><aside id="katListe"><span class="kgd-hinweis">Katalog lädt …</span></aside>
+        <div class="kkat-seite" id="katSeite"><div class="kkat-blatt" id="katBlatt"><canvas id="katCanvas"></canvas><div class="kkat-layer" id="katLayer"></div></div></div></div>
+      <div class="kkat-fuss"><button type="button" class="kg-ibtn" id="katZurueck" title="Vorherige Seite">‹</button><span>Seite <input id="katNr" inputmode="numeric"> von <span id="katVon">…</span></span><button type="button" class="kg-ibtn" id="katVor" title="Nächste Seite">›</button>
+        <span class="kgd-hinweis" style="margin-left:auto">Auf eine Artikelnummer klicken, um sie zu übernehmen.</span></div></div>`;
+    document.body.appendChild(box);
+    const zu = () => { box.remove(); removeEventListener('keydown', taste); };
+    const taste = e => { if(e.key === 'Escape') zu(); else if(e.target.tagName !== 'INPUT' && e.key === 'ArrowRight') katZeigen(katSeite + 1); else if(e.target.tagName !== 'INPUT' && e.key === 'ArrowLeft') katZeigen(katSeite - 1); };
+    addEventListener('keydown', taste);
+    box.addEventListener('click', e => { if(e.target === box) zu(); });
+    $('katZu').onclick = zu; katZu = zu;
+    $('katZurueck').onclick = () => katZeigen(katSeite - 1); $('katVor').onclick = () => katZeigen(katSeite + 1);
+    $('katNr').onchange = () => katZeigen(+$('katNr').value || 1);
+    $('katQ').oninput = () => { clearTimeout(katT); katT = setTimeout(katSuchen, 250); };
+    try {
+      if(!katPdf){ const { data, error } = await sb.storage.from('doku-dateien').createSignedUrl(KAT.pfad, 6 * 3600); if(error) throw error;
+        katPdf = await pdfjsLib.getDocument({ url: data.signedUrl, disableAutoFetch: true, disableStream: true }).promise; }
+      $('katVon').textContent = katPdf.numPages;
+      katInhalt(); katZeigen(katSeite); $('katQ').focus();
+    } catch(err){ $('katListe').innerHTML = `<span class="kgd-hinweis">Katalog konnte nicht geladen werden: ${esc(err.message || err)}</span>`; }
+  }
+  let katZu = () => {};
+  const katZiel = async dest => { try { const d = typeof dest === 'string' ? await katPdf.getDestination(dest) : dest; return d ? await katPdf.getPageIndex(d[0]) + 1 : null; } catch(e){ return null; } };
+  async function katInhalt(){
+    if(katOutline == null) katOutline = (await katPdf.getOutline().catch(() => null)) || [];
+    const flach = []; const tief = (l, e) => l.forEach(o => { flach.push({ t: o.title, dest: o.dest, e }); if(e < 1 && o.items?.length) tief(o.items, e + 1); }); tief(katOutline, 0);
+    $('katListe').innerHTML = flach.length ? `<div class="kkat-titel">Inhalt</div>` + flach.map((o, j) => `<button type="button" class="e${o.e}" data-kinh="${j}">${esc(o.t)}</button>`).join('')
+      : '<span class="kgd-hinweis">Oben suchen oder blättern.</span>';
+    $('katListe').querySelectorAll('[data-kinh]').forEach(b => b.onclick = async () => { const s = await katZiel(flach[+b.dataset.kinh].dest); if(s) katZeigen(s); });
+  }
+  async function katSuchen(){
+    const q = $('katQ').value.trim(); if(q.length < 2) return katInhalt();
+    const m = q.replace(/[%_,()]/g, ' ').trim();
+    const { data } = await sb.from('doku_katalog_artikel').select('nr,bez,seite').eq('vorlage_id', V.id)
+      .or(/^\d+$/.test(m) ? `nr.like.${m}%` : `bez.ilike.%${m.split(/\s+/).join('%')}%`).order('seite').order('id').limit(80);
+    $('katListe').innerHTML = (data || []).length ? `<div class="kkat-titel">${data.length === 80 ? 'Erste 80 Treffer' : data.length + ' Treffer'}</div>` + data.map((r, j) => `<button type="button" data-ktr="${j}"><b>${esc(r.nr)}</b> ${esc(r.bez || '')}<small>S. ${r.seite}</small></button>`).join('')
+      : '<span class="kgd-hinweis">Nichts gefunden. Im Inhaltsverzeichnis blättern hilft oft weiter.</span>';
+    $('katListe').querySelectorAll('[data-ktr]').forEach(b => b.onclick = () => { const r = data[+b.dataset.ktr]; katZeigen(r.seite, r.nr); });
+  }
+  let katLauf = 0;
+  async function katZeigen(s, markiere){
+    if(!katPdf) return; s = Math.max(1, Math.min(katPdf.numPages, s)); katSeite = s; $('katNr').value = s;
+    const nr = ++katLauf, pg = await katPdf.getPage(s); if(nr !== katLauf) return;
+    const breite = Math.min($('katSeite').clientWidth - 24, 900), vp1 = pg.getViewport({ scale: 1 }), sk = breite / vp1.width, vp = pg.getViewport({ scale: sk });
+    const c = $('katCanvas'), dpr = devicePixelRatio || 1; c.width = Math.round(vp.width * dpr); c.height = Math.round(vp.height * dpr); c.style.width = vp.width + 'px'; c.style.height = vp.height + 'px';
+    $('katBlatt').style.width = vp.width + 'px'; $('katBlatt').style.height = vp.height + 'px'; $('katLayer').innerHTML = '';
+    await pg.render({ canvasContext: c.getContext('2d'), viewport: pg.getViewport({ scale: sk * dpr }) }).promise; if(nr !== katLauf) return;
+    const [tc, an] = await Promise.all([pg.getTextContent(), pg.getAnnotations({ intent: 'display' })]); if(nr !== katLauf) return;
+    // Index-Zeilen dieser Seite: n-te Nummer auf der Seite = n-te Zeile im Index (gleiche Reihenfolge wie beim Auslesen)
+    const { data: idx } = await sb.from('doku_katalog_artikel').select('nr,bez').eq('vorlage_id', V.id).eq('seite', s).order('id'); if(nr !== katLauf) return;
+    const L = $('katLayer'), zaehler = {}, rect = r => { const [x1, y1, x2, y2] = vp.convertToViewportRectangle(r); return `left:${Math.min(x1, x2)}px;top:${Math.min(y1, y2)}px;width:${Math.abs(x2 - x1)}px;height:${Math.abs(y2 - y1)}px`; };
+    an.filter(a => a.subtype === 'Link' && a.dest).forEach(a => { const d = document.createElement('a'); d.className = 'kkat-link'; d.style.cssText = rect(a.rect); d.title = 'Gehe zu';
+      d.onclick = async () => { const z = await katZiel(a.dest); if(z) katZeigen(z); }; L.appendChild(d); });
+    tc.items.forEach(i => { const m = (i.str || '').trim().match(NR_RX); if(!m) return;
+      const k = zaehler[m[1]] = (zaehler[m[1]] || 0) + 1, treffer = (idx || []).filter(r => r.nr === m[1]), zeile = treffer[k - 1] || treffer[0] || { bez: '' };
+      const w = Math.max(i.width, (i.height || 8) * 3.4), h = i.height || 8, x = i.transform[4], y = i.transform[5];
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'kkat-nr' + (markiere === m[1] ? ' treffer' : ''); b.style.cssText = rect([x - 2, y - 2, x + w + 2, y + h + 1]);
+      b.title = `${m[1]} ${zeile.bez || ''} übernehmen`;
+      b.onclick = () => { katZu(); artikelSetzen(katFuer, m[1], zeile.bez, null); };
+      L.appendChild(b); });
+    if(markiere){ const t = L.querySelector('.treffer'); if(t) t.scrollIntoView({ block: 'center', behavior: 'smooth' }); } else $('katSeite').scrollTop = 0;
+  }
+
   // Angaben (links)
   const gr = GRUENDE.map(g => g.k);
   function angaben(){
@@ -209,8 +320,9 @@ async function aufbau(main){
     $('ang').innerHTML = `<div class="kgd-feld"><label for="sb">Sachbearbeiter</label><select class="kgd-t" id="sb">${(KGD.personen || []).map(p => `<option value="${p.id}" ${p.id === werte.sb ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select>
         <div class="ffsig" id="sigZeile"></div></div>
       ${werte.pos.map((p, i) => `<div class="ffpos"><div class="kopf">Artikel ${i + 1}${werte.pos.length > 1 ? `<button type="button" class="kg-ibtn danger" data-posweg="${i}" title="Artikel entfernen">${ic('trash', 13)}</button>` : ''}</div>
-        <div class="kgd-reihe"><div class="kgd-feld"><label>Artikel</label>${p.nr ? `<div class="ffart"><b>${esc(p.nr)}</b><span style="flex:1;min-width:0">${esc(p.bez || '')}</span><button type="button" class="kg-ibtn" data-artweg="${i}" title="Anderen Artikel wählen">${ic('x', 12)}</button></div>`
-          : `<input class="kgd-t" data-artq="${i}" autocomplete="off" placeholder="Nummer oder Bezeichnung suchen"><div class="kgd-menue hidden" data-artm="${i}"></div>`}</div>
+        <div class="kgd-reihe"><div class="kgd-feld"><label>Artikel</label>${p.nr ? `<div class="ffart"><b>${esc(p.nr)}</b>${p.bez ? `<span style="flex:1;min-width:0">${esc(p.bez)}</span>` : `<input class="ffbez" data-bez="${i}" placeholder="Bezeichnung eintippen" autocomplete="off">`}<button type="button" class="kg-ibtn" data-artweg="${i}" title="Anderen Artikel wählen">${ic('x', 12)}</button></div>`
+          : `<div class="ffnr"><input class="kgd-t" data-artnr="${i}" autocomplete="off" inputmode="numeric" maxlength="7" placeholder="Aqua-Solar-Nr."><button type="button" class="kgd-btn ghost" data-katalog="${i}">${ic('suche', 14)}Im Katalog suchen</button></div>
+            ${nrNicht[i] ? `<div class="ffnicht">${esc(nrNicht[i])} steht nicht im Katalog. <button type="button" class="kklink" data-trotzdem="${i}">Trotzdem übernehmen</button></div>` : ''}`}</div>
           <div class="kgd-feld" style="flex:0 0 70px"><label>Menge</label><input class="kgd-t" data-menge="${i}" value="${esc(p.menge || '')}" inputmode="numeric"></div></div>
         <div class="kgd-feld"><label>Bemerkungen <small class="opt">optional</small></label><input class="kgd-t" data-bem="${i}" value="${esc(p.bem || '')}" placeholder="z. B. Kommission Steiner, Spiez"></div>
         <div class="ffgrund">${GRUENDE.map(g => `<label><input type="radio" name="g${i}" data-grund="${i}" value="${g.k}" ${p.grund === g.k ? 'checked' : ''}>${esc(g.n)}</label>`).join('')}</div></div>`).join('')}
@@ -247,33 +359,26 @@ async function aufbau(main){
   fenster(!dokId);
 
   // Ereignisse
-  let artT = null, artTreffer = {};
   main.addEventListener('input', e => {
     const t = e.target;
     if(t.dataset.menge != null){ werte.pos[+t.dataset.menge].menge = t.value.trim(); neu(); }
     else if(t.dataset.bem != null){ werte.pos[+t.dataset.bem].bem = t.value.trim(); neu(); }
-    else if(t.dataset.artq != null){ const i = +t.dataset.artq, q = t.value.trim(), m = main.querySelector(`[data-artm="${i}"]`); clearTimeout(artT);
-      if(q.length < 2){ m.classList.add('hidden'); return; }
-      artT = setTimeout(async () => {
-        const muster = `%${q.replace(/[%_]/g, '')}%`;
-        const { data } = await sb.from('artikel').select('id,artikelnummer_lieferant,bezeichnung').eq('lieferant_id', AS_LIEFERANT).or(`artikelnummer_lieferant.ilike.${muster},bezeichnung.ilike.${muster}`).limit(15);
-        artTreffer[i] = data || [];
-        m.innerHTML = (data || []).map((a, j) => `<button type="button" data-artw="${i}:${j}"><b>${esc(a.artikelnummer_lieferant || '–')}</b><small>${esc(a.bezeichnung)}</small></button>`).join('') || '<div class="kopfzeile">Nichts gefunden. Nummer und Bezeichnung auch frei eintippen: «Nummer Bezeichnung» und Enter.</div>';
-        m.classList.remove('hidden'); }, 250); }
+    else if(t.dataset.artnr != null){ const v = t.value.replace(/\D/g, ''); if(v.length === 6) nrSuchen(+t.dataset.artnr, v); }
   });
-  main.addEventListener('keydown', e => { const t = e.target; if(t.dataset.artq == null || e.key !== 'Enter') return; e.preventDefault();
-    const v = t.value.trim(); if(!v) return; const [nr, ...rest] = v.split(/\s+/); const p = werte.pos[+t.dataset.artq]; p.nr = nr; p.bez = rest.join(' '); p.artikel_id = null; angaben(); neu(); });
+  main.addEventListener('keydown', e => { const t = e.target; if(t.dataset.artnr == null || e.key !== 'Enter') return; e.preventDefault();
+    const v = t.value.replace(/\D/g, ''); if(v) nrSuchen(+t.dataset.artnr, v); });
+  // freie Bezeichnung (Nummer nicht im Katalog): beim Verlassen übernehmen
+  main.addEventListener('focusout', e => { const t = e.target; if(t.dataset.bez == null || !t.value.trim()) return; werte.pos[+t.dataset.bez].bez = t.value.trim(); angaben(); neu(); });
   main.addEventListener('change', e => {
     const t = e.target;
     if(t.id === 'sb'){ werte.sb = t.value; angaben(); neu(); }
     else if(t.id === 'vonHand'){ werte.vonHand = t.checked || undefined; sigZeile(); neu(); }
     else if(t.dataset.grund != null){ werte.pos[+t.dataset.grund].grund = t.value; angaben(); neu(); }
   });
-  main.addEventListener('mousedown', e => { const b = e.target.closest('[data-artw]'); if(!b) return; e.preventDefault();
-    const [i, j] = b.dataset.artw.split(':').map(Number), a = artTreffer[i][j], p = werte.pos[i];
-    p.artikel_id = a.id; p.nr = a.artikelnummer_lieferant || ''; p.bez = a.bezeichnung; angaben(); neu(); });
   main.addEventListener('click', async e => {
     const b = e.target.closest('button'); if(!b) return;
+    if(b.dataset.katalog != null){ katalogOeffnen(+b.dataset.katalog); return; }
+    if(b.dataset.trotzdem != null){ const i = +b.dataset.trotzdem; artikelSetzen(i, nrNicht[i], '', null); return; }
     if(b.id === 'posNeu'){ werte.pos.push({ menge: '1' }); angaben(); return; }
     if(b.dataset.posweg != null){ werte.pos.splice(+b.dataset.posweg, 1); angaben(); neu(); return; }
     if(b.dataset.artweg != null){ const p = werte.pos[+b.dataset.artweg]; p.nr = ''; p.bez = ''; p.artikel_id = null; angaben(); neu(); return; }
