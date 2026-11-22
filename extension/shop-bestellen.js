@@ -1,6 +1,6 @@
 // ============================================================================
 // QR-Bestellung: Artikel in den Warenkorb eines Lieferanten-Shops legen (läuft in background.js).
-// Pro Shop-System ein Ablauf (heute: Magento = Aquasolar, Dabag = B-TEAM). Was sich ändern kann (Shop-Adresse, Sprache,
+// Pro Shop-System ein Ablauf (heute: Magento = Aquasolar, Dabag = B-TEAM + IMMER AG, Hybris = HGC). Was sich ändern kann (Shop-Adresse, Sprache,
 // Adresse der Bestätigungsseite), kommt vom Tool aus der Tabelle bestell_anbindung mit – kein Code im Tool.
 //
 // Ablauf «bestellen»: Shop-Warenkorb im eigenen Browser öffnen (du bist dort angemeldet), Artikelnummern im Shop
@@ -146,11 +146,51 @@ async function dabagAblauf(auftrag, pos, _sprache, opt) {
   return { ok, fehler, angepasst };
 }
 
-const ABLAEUFE = { magento: magentoAblauf, dabag: dabagAblauf };
+// ---------- Hybris / SAP Commerce (HGC): Shop-eigene Schnittstelle /<sprache>/api/… mit CSRF-Token aus <meta name="_csrf"> ----------
+async function hybrisAblauf(auftrag, pos, sprache) {
+  const L = sprache || 'de';
+  const tok = document.querySelector('meta[name="_csrf"]')?.content;
+  if (window.initialData?.app?.isloggedIn === false) return { fehler: 'Im Shop nicht angemeldet. Bitte im Shop anmelden und nochmals starten.' };
+  if (!tok) return { fehler: 'Shop-Seite nicht bereit (Sicherheits-Token fehlt).' };
+  const hdr = { Accept: 'application/json', 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest', CSRFToken: tok };
+  const korb = async () => { const j = await fetch(`/${L}/api/cart`, { headers: hdr, credentials: 'include' }).then((r) => r.json()).catch(() => null); return j?.data?.cart?.entries || []; };
+  const produkt = async (nr) => { const r = await fetch(`/${L}/api/product/${encodeURIComponent(nr)}`, { headers: hdr, credentials: 'include' }).catch(() => null);
+    if (!r || !r.ok) return null; const j = await r.json().catch(() => null); return j?.data?.product?.code ? j.data.product : null; };
+  if (auftrag === 'test') {
+    const gefunden = [], fehlt = [];
+    for (const p of pos) (await produkt(p.nr) ? gefunden : fehlt).push(p.nr);
+    return { eingeloggt: true, gefunden, fehlt };
+  }
+  const summe = (wk, code) => wk.filter((w) => w.product?.code === code).reduce((s, w) => s + (+w.quantity || 0), 0);
+  const vorher = await korb(), fehler = [], gesendet = [], angepasst = [];
+  for (const p of pos) {
+    const pr = await produkt(p.nr);
+    if (!pr) { fehler.push({ nr: p.nr, grund: 'im Shop nicht gefunden' }); continue; }
+    const einheit = pr.orderUnit?.code || pr.baseUnit?.code || 'PCE';
+    const faktor = (pr.quantityUnits || []).find((q) => q.unit?.code === einheit)?.roundingUnitFactor || 1;
+    let menge = p.menge;
+    if (faktor > 1 && menge % faktor) { menge = Math.ceil(menge / faktor) * faktor; angepasst.push({ nr: p.nr, menge, schritt: faktor }); }
+    const r = await fetch(`/${L}/api/cart-entry`, { method: 'POST', headers: hdr, credentials: 'include',
+      body: JSON.stringify({ rawQuantity: menge, unitCode: einheit, product: { code: pr.code, name: pr.name }, commissionId: '' }) }).catch(() => null);
+    const j = r ? await r.json().catch(() => null) : null;
+    const err = j?.messages?.ERROR?.[0]?.message;
+    if (!r || !r.ok || err) { fehler.push({ nr: p.nr, grund: err || 'Shop-Fehler ' + (r ? r.status : '') }); continue; }
+    gesendet.push({ ...p, code: pr.code });
+  }
+  const nachher = await korb(), ok = [];
+  for (const p of gesendet) {
+    if (summe(nachher, p.code) > summe(vorher, p.code)) ok.push(p.nr);
+    else fehler.push({ nr: p.nr, grund: 'nicht im Warenkorb gelandet' });
+  }
+  return { ok, fehler, angepasst };
+}
+
+const ABLAEUFE = { magento: magentoAblauf, dabag: dabagAblauf, hybris: hybrisAblauf };
 // Seite, die beim Start im Shop-Tab geöffnet wird (Warenkorb)
 const STARTSEITE = {
   magento: (a) => `/${a.sprache || 'de'}/checkout/cart/`,
   dabag: (a) => '/?srv=basket&companyYN=' + (a.optionen?.firmenkorb ? 1 : 0),
+  hybris: (a) => `/${a.sprache || 'de'}/cart`,
 };
 
 async function shopAuftrag(typ, daten) {
