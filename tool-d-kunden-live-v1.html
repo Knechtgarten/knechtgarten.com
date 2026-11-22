@@ -295,6 +295,7 @@ td.kats{white-space:normal;}
 .kkz .ebtyp{grid-column:1;} .kkleer{color:var(--muted);font-size:12px;}
 /* Kachel «Dokumente»: erstellt (blau) / hochgeladen (grau, PDF), Ersteller, Drive-Stand, Löschen beim Darüberfahren */
 .kkz.kkd{grid-template-columns:18px minmax(0,1fr) auto minmax(0,70px) auto 24px;}
+.kkd .kkdrive{color:#3F7D3F;font-weight:600;text-decoration:none;} .kkd .kkdrive:hover{text-decoration:underline;} .kkd .b .kklink{font-size:11px;padding:1px 6px;}
 .kkd .dic{grid-column:1;width:18px;height:18px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;font-style:normal;font-size:7.5px;font-weight:800;letter-spacing:.02em;}
 .dic.tool{background:#E3EBF5;color:#2E5E9E;} .dic.datei{background:#EEF0F3;color:#6B7079;} .dic.datei.pdf{background:#F6E3E1;color:#B4423A;}
 .dic svg{width:12px;height:12px;}
@@ -1345,7 +1346,7 @@ async function ladeDokumente(kundeId){
     sb.from('kunde_datei').select('id,name,mime,storage_pfad,erstellt_am,drive_datei_id,von:benutzer!kunde_datei_erstellt_von_fkey(anzeigename)').eq('kunde_id', kundeId),
   ]);
   const l = [...(d.data || []).map(x => ({ typ: 'doku', id: x.id, name: x.vorlage ? x.vorlage.name : 'Dokument', datum: x.datum || x.erstellt_am, von: x.von?.anzeigename || '', drive: !!x.drive_datei_id })),
-             ...(f.data || []).map(x => ({ typ: 'datei', id: x.id, name: x.name, mime: x.mime || '', pfad: x.storage_pfad, datum: x.erstellt_am, von: x.von?.anzeigename || '', drive: !!x.drive_datei_id }))];
+             ...(f.data || []).map(x => ({ typ: 'datei', id: x.id, name: x.name, mime: x.mime || '', pfad: x.storage_pfad, datum: x.erstellt_am, von: x.von?.anzeigename || '', drive: !!x.drive_datei_id, driveId: x.drive_datei_id }))];
   DOKU_PRO_KUNDE[kundeId] = l.sort((a, b) => String(b.datum || '').localeCompare(String(a.datum || '')));
 }
 // Icon vorne: im Tool erstellt = Dokument in Knechtgarten-Blau, hochgeladen = grau (PDF mit Kürzel, Foto mit Bild-Icon)
@@ -1366,7 +1367,9 @@ function dokKachel(k){
     ? `<a class="kkz kkd" href="doku-dokument-live-v1.html?d=${d.id}" title="Dokument öffnen">${dokIcon(d)}<span class="t">${escHtml(d.name)}</span><span class="d">${kDat(d.datum)}</span><span class="v">${escHtml(d.von)}</span><span class="b">${d.drive ? 'im Drive' : ''}</span></a>`
     : DOK_WEG === d.id
       ? `<div class="kkz kkd dokweg"><span class="t">«${escHtml(d.name)}» löschen?</span><button type="button" class="kklink rot" data-dokwegok="${d.id}" data-kunde="${k.id}">Löschen</button><button type="button" class="kklink" data-dokweg="">Nein</button></div>`
-      : `<div class="kkz kkd kg-zeile"><button type="button" class="kkdl" data-dokauf="${d.id}" data-kunde="${k.id}" title="Datei öffnen">${dokIcon(d)}<span class="t">${escHtml(d.name)}</span></button><span class="d">${kDat(d.datum)}</span><span class="v">${escHtml(d.von)}</span><span class="b">${d.drive ? 'im Drive' : ''}</span><button type="button" class="kg-ibtn danger kg-hover" data-dokweg="${d.id}" title="Löschen">${KG.icon('trash', 13)}</button></div>`;
+      : `<div class="kkz kkd kg-zeile"><button type="button" class="kkdl" data-dokauf="${d.id}" data-kunde="${k.id}" title="Datei öffnen">${dokIcon(d)}<span class="t">${escHtml(d.name)}</span></button><span class="d">${kDat(d.datum)}</span><span class="v">${escHtml(d.von)}</span>
+        <span class="b">${d.drive ? `<a class="kkdrive" href="https://drive.google.com/file/d/${d.driveId}/view" target="_blank" rel="noopener" title="Im Drive öffnen">im Drive</a>` : `<button type="button" class="kklink kg-hover" data-dokdrive="${d.id}" data-kunde="${k.id}" title="Im Drive-Ordner des Kunden ablegen">Ins Drive</button>`}</span>
+        <button type="button" class="kg-ibtn danger kg-hover" data-dokweg="${d.id}" title="Löschen">${KG.icon('trash', 13)}</button></div>`;
   return (DOK_ALLE ? doks : doks.slice(0, 8)).map(zeile).join('');
 }
 async function dokHochladen(kundeId, dateien){
@@ -1380,9 +1383,29 @@ async function dokHochladen(kundeId, dateien){
   }
   await ladeDokumente(kundeId); renderKundenTable(); showToast(dateien.length === 1 ? 'Datei hochgeladen' : dateien.length + ' Dateien hochgeladen');
 }
+// Hochgeladene Datei in den verknüpften Drive-Ordner des Kunden legen (neuester Ordner, dort Unterordner wie beim Doku-Tool)
+async function dokInsDrive(kid, d){
+  let token = null; try { token = await KGD.googleToken(); } catch(e){}
+  if(!token){ showToast('Zuerst mit Google verbinden: in der Kachel «Ablage (Drive)» auf «Verknüpfen».', true); return; }
+  const ordner = (await KKO.liste(kid))[0];
+  if(!ordner){ showToast('Dieser Kunde hat noch keinen Drive-Ordner. In «Ablage (Drive)» zuerst verknüpfen oder anlegen.', true); return; }
+  showToast('Lege ab …');
+  try {
+    const ziel = await KGD.zielOrdner({ id: ordner.drive_id, name: ordner.name, jahr: ordner.jahr });
+    const dl = await sb.storage.from('kunden-dateien').download(d.pfad); if(dl.error) throw dl.error;
+    const form = new FormData();
+    form.append('metadata', new Blob([JSON.stringify({ name: d.name, parents: [ziel.id], mimeType: d.mime || dl.data.type || 'application/octet-stream' })], { type: 'application/json' }));
+    form.append('file', dl.data);
+    const r = await KGD.gapi('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true&fields=id', { method: 'POST', body: form });
+    const { error } = await sb.from('kunde_datei').update({ drive_datei_id: r.id, drive_abgelegt_am: new Date().toISOString() }).eq('id', d.id);
+    if(error) throw new Error('Abgelegt, aber nicht vermerkt: ' + error.message);
+    await ladeDokumente(kid); renderKundenTable(); showToast('Abgelegt in ' + ziel.pfad);
+  } catch(e){ showToast('Ablegen fehlgeschlagen: ' + (e.message || e), true); }
+}
 // Klicks in der Kachel «Dokumente»
 document.addEventListener('click', async e => {
-  const b = e.target.closest('[data-dokneu],[data-dokup],[data-dokalle],[data-dokauf],[data-dokweg],[data-dokwegok]'); if(!b) return; e.preventDefault(); e.stopPropagation();
+  const b = e.target.closest('[data-dokneu],[data-dokup],[data-dokalle],[data-dokauf],[data-dokweg],[data-dokwegok],[data-dokdrive]'); if(!b) return; e.preventDefault(); e.stopPropagation();
+  if(b.dataset.dokdrive){ const d = (DOKU_PRO_KUNDE[b.dataset.kunde] || []).find(x => x.id === b.dataset.dokdrive); if(d){ b.disabled = true; await dokInsDrive(b.dataset.kunde, d); } return; }
   if('dokalle' in b.dataset){ DOK_ALLE = !DOK_ALLE; renderKundenTable(); return; }
   if('dokneu' in b.dataset){ DOK_NEU = b.dataset.dokneu || null; renderKundenTable(); return; }
   if('dokweg' in b.dataset){ DOK_WEG = b.dataset.dokweg || null; renderKundenTable(); return; }
