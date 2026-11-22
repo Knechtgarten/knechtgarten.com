@@ -3,7 +3,7 @@
 // Der Code steht auf dem Kleber im Lager (artikel.qr_code, 16 Zufallszeichen). Gibt nur diesen Artikel heraus:
 // Bezeichnung, Nummern, Einheit, Lieferant, Foto und – falls mit einem Produkt im Nachschlagewerk verknüpft, das ein
 // Sicherheitsdatenblatt hat – den Link zur Datenblatt-Seite /s/<sdb_code> (Code wird bei Bedarf erzeugt).
-// Keine Preise. Aufruf: POST { code }
+// Keine Preise. Dazu id + bestellbar (Shop angebunden) für «Bestellen» (nur angemeldet, RLS). Aufruf: POST { code }
 // ============================================================================
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
@@ -19,12 +19,16 @@ Deno.serve(async (req) => {
     if (!/^[a-z0-9]{12,40}$/.test(c)) return json({ error: 'ungueltig' }, 404);
     const sb = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
-    const { data: a } = await sb.from('artikel').select('bezeichnung,artikelnummer_lieferant,artikelnummer_knecht,einheit,foto_url,lieferant_id,wissen_eintrag_id')
+    const { data: a } = await sb.from('artikel').select('id,bezeichnung,artikelnummer_lieferant,artikelnummer_knecht,einheit,foto_url,lieferant_id,wissen_eintrag_id')
       .eq('qr_code', c).maybeSingle();
     if (!a) return json({ error: 'ungueltig' }, 404);
 
     let lieferant = '';
     if (a.lieferant_id) { const { data: l } = await sb.from('lieferant').select('firma,name').eq('id', a.lieferant_id).maybeSingle(); lieferant = l?.firma || l?.name || ''; }
+
+    // Bestellen nur bei angebundenem Shop (bestell_anbindung.aktiv); die Seite zeigt den Knopf nur angemeldet
+    let bestellbar = false;
+    if (a.lieferant_id) { const { data: b } = await sb.from('bestell_anbindung').select('aktiv').eq('lieferant_id', a.lieferant_id).maybeSingle(); bestellbar = !!b?.aktiv; }
 
     let sdb: { titel: string; url: string } | null = null;
     if (a.wissen_eintrag_id) {
@@ -38,6 +42,8 @@ Deno.serve(async (req) => {
     }
 
     return json({
+      id: a.id,
+      bestellbar,
       bezeichnung: a.bezeichnung || '',
       nummer: a.artikelnummer_lieferant || a.artikelnummer_knecht || '',
       einheit: a.einheit || '',

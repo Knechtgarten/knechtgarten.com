@@ -3,15 +3,16 @@
 <head>
 <meta charset="utf-8">
 <script src="/kg-pw-schutz.js?v=5"></script>
-<script src="/kg-stil.js?v=100"></script>
+<script src="/kg-stil.js?v=101"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title>Knechtgarten · Artikel</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Jost:wght@600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <style>
 /* Handy-Seite nach dem Scan eines Artikel-Klebers im Lager (ohne Anmeldung): Artikel, Nummer, Lieferant und – falls
-   verknüpft – das Sicherheitsdatenblatt. «Bestellen» kommt später auf diese Seite (nur bei angebundenem Shop). Daten über die Edge Function «artikel-qr». */
+   verknüpft – das Sicherheitsdatenblatt. «Bestellen» (nur angemeldet, nur bei angebundenem Shop) setzt den Artikel auf die Liste der QR-Bestellung. Daten über die Edge Function «artikel-qr». */
 :root{--navy:#323E4E;--bg:#F5F7F9;--grau:#8B9097;--line:#E1E5EA;--gelbhell:#FFF8D6;}
 *{box-sizing:border-box;}
 body{margin:0;background:var(--bg);color:var(--navy);font:16px/1.5 -apple-system,"Segoe UI",Arial,sans-serif;}
@@ -28,6 +29,19 @@ h1{font-family:Jost,sans-serif;font-weight:600;font-size:21px;line-height:1.25;m
 .leer{color:var(--grau);}
 .fuss{text-align:center;color:var(--grau);font-size:13px;margin-top:20px;}
 .fuss a{color:var(--navy);}
+/* Bestellen */
+.best{display:flex;flex-direction:column;gap:12px;border-color:#C4D3E0;}
+.best .bt{font-family:Jost,sans-serif;font-weight:600;font-size:18px;}
+.best .schon{background:#D6E7F4;border-radius:8px;padding:9px 11px;font-size:14px;color:#25384D;}
+.best .ok{background:#EEF2C8;border-radius:8px;padding:9px 11px;font-size:14px;color:#3D4210;font-weight:600;}
+.stepper{display:flex;align-items:center;gap:10px;}
+.stepper .rund{width:48px;height:48px;border-radius:10px;border:1px solid #D5DBE1;background:#fff;color:var(--navy);font-size:24px;}
+.stepper input{width:76px;height:48px;border:1px solid #D5DBE1;border-radius:10px;text-align:center;font-size:20px;font-weight:700;color:#232B35;}
+.stepper .ein{color:var(--grau);font-size:15px;}
+.notiz{display:flex;flex-direction:column;gap:4px;font-size:13px;color:#4C5C70;font-weight:600;} .notiz small{font-weight:400;color:var(--grau);}
+.notiz input{height:44px;border:1px solid #D5DBE1;border-radius:8px;padding:0 10px;font-size:16px;}
+.best .los,.best .anm{height:52px;border:0;border-radius:10px;background:var(--navy);color:#fff;font-size:17px;font-weight:700;display:flex;align-items:center;justify-content:center;text-decoration:none;}
+.best .los[disabled]{opacity:.6;}
 </style>
 </head>
 <body data-kg-ohne-leiste>
@@ -51,9 +65,46 @@ async function start(){
   document.title = d.bezeichnung + ' · Knechtgarten';
   let h = `<div class="card titel">${d.foto ? `<img src="${esc(d.foto)}" alt="">` : ''}<h1>${esc(d.bezeichnung)}</h1></div>
     <div class="card daten">${d.nummer ? `<span>Artikel-Nr.</span><b>${esc(d.nummer)}</b>` : ''}${d.einheit ? `<span>Einheit</span><b>${esc(d.einheit)}</b>` : ''}${d.lieferant ? `<span>Lieferant</span><b>${esc(d.lieferant)}</b>` : ''}</div>`;
+  if(d.bestellbar) h += `<div class="card best" id="best"><div class="bt">Bestellen</div><div class="leer">Lädt …</div></div>`;
   if(d.sdb) h += `<a class="knopf" href="${esc(d.sdb.url)}">${WARN}<span><b>Sicherheitsdatenblatt</b><small>${esc(d.sdb.titel)} · mit Notfallnummer</small></span></a>`;
   h += `<div class="fuss">Fragen? Knechtgarten · <a href="tel:+41334531020">033 453 10 20</a></div>`;
   el.innerHTML = h;
+  if(d.bestellbar) bestellen(d, code);
+}
+// «Bestellen» (QR-Bestellung): nur angemeldet, nur bei angebundenem Shop. Kommt als Vormerkung auf die Liste,
+// das Büro legt es über die Erweiterung in den Shop-Warenkorb. Gleiche Anmeldung wie die Tools (gleiche Domain).
+async function bestellen(d, code){
+  const box = document.getElementById('best');
+  if(!window.supabase){ box.remove(); return; }
+  const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const { data: { session } } = await sb.auth.getSession();
+  if(!session){ box.innerHTML = `<div class="bt">Bestellen</div><a class="anm" href="/qr-bestellung-live-v1.html?zurueck=${encodeURIComponent('/a/' + code)}">Anmelden zum Bestellen</a>`; return; }
+  let menge = 1;
+  const zeichnen = async (fertig) => {
+    const { data: vor } = await sb.from('bestell_position').select('menge,status,erstellt_name,erstellt_am').eq('artikel_id', d.id).in('status', ['offen', 'warenkorb']).order('erstellt_am');
+    const tag = v => { const x = new Date(v), h = new Date(); return x.toDateString() === h.toDateString() ? 'heute ' + x.toLocaleTimeString('de-CH', { hour: '2-digit', minute: '2-digit' }) : x.toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit' }) + '.'; };
+    const schon = (vor || []).map(v => `<b>${String(+v.menge)} ${esc(d.einheit || '')}</b> von ${esc(v.erstellt_name || '')}, ${tag(v.erstellt_am)}${v.status === 'warenkorb' ? ' (im Warenkorb)' : ''}`);
+    box.innerHTML = `<div class="bt">Bestellen</div>
+      ${fertig ? '<div class="ok">Auf der Bestellliste. Das Büro bestellt es im Shop.</div>' : ''}
+      ${schon.length ? `<div class="schon">Schon vorgemerkt: ${schon.join('; ')}</div>` : ''}
+      <div class="stepper"><button type="button" class="rund" data-m="-1" aria-label="Weniger">−</button>
+        <input id="bMenge" type="number" inputmode="decimal" min="1" value="${menge}" aria-label="Menge">
+        <button type="button" class="rund" data-m="1" aria-label="Mehr">+</button><span class="ein">${esc(d.einheit || '')}${schon.length ? ' dazu' : ''}</span></div>
+      <label class="notiz">Notiz <small>optional</small><input id="bNotiz" type="text" placeholder="z. B. dringend, Baustelle …"></label>
+      <button type="button" class="los" id="bLos">Auf Bestellliste setzen</button>`;
+  };
+  await zeichnen(false);
+  box.addEventListener('click', async e => {
+    const s = e.target.closest('[data-m]');
+    if(s){ const i = document.getElementById('bMenge'); i.value = Math.max(1, (+i.value || 1) + +s.dataset.m); return; }
+    if(e.target.closest('#bLos')){
+      const b = e.target.closest('#bLos'); menge = Math.max(0.01, +document.getElementById('bMenge').value || 1);
+      b.disabled = true; b.textContent = 'Speichert …';
+      const { error } = await sb.from('bestell_position').insert({ artikel_id: d.id, menge, notiz: document.getElementById('bNotiz').value.trim() || null });
+      if(error){ b.disabled = false; b.textContent = 'Auf Bestellliste setzen'; alert('Bestellen ging nicht: ' + error.message); return; }
+      menge = 1; await zeichnen(true);
+    }
+  });
 }
 start();
 </script>

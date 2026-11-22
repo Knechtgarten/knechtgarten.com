@@ -68,3 +68,6 @@ chrome.runtime.onMessage.addListener((msg, _sender, antwort) => {
 });
 
 chrome.tabs.onRemoved.addListener((id) => { if (id === peaxTabEigen) { peaxTabEigen = null; clearTimeout(peaxZuTimer); } });
+
+// QR-Bestellung (Tool auf knechtgarten.com): Artikel in den Warenkorb des Lieferanten-Shops legen, Bestätigung erkennen
+importScripts('shop-bestellen.js');
