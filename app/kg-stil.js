@@ -285,7 +285,7 @@ button.kg-kachel-kopf,a.kg-kachel-kopf{cursor:pointer;} button.kg-kachel-kopf:ho
     // CAD: Gartenpläne zeichnen (Grundlage aus der Vermessung, Bauteile, automatische Vermassung); Pläne & Bewill. holt später Grundriss/Schnitt daraus
     { k: 'cad', n: 'CAD', url: 'cad-live-v1.html', farbe: PAL.gruen[1], akzent: PAL.gruen[3], modul: 'cad', seiten: ['cad-live-v1'] },
     { k: 'doku', n: 'Doku-Tools', url: 'doku-live-v1.html', farbe: PAL.beere[1], akzent: PAL.beere[3],
-      seiten: ['doku-live-v1', 'doku-dokument-live-v1', 'doku-datei-live-v1', 'doku-formular-live-v1', 'doku-personen-live-v1'] },
+      seiten: ['doku-live-v1', 'doku-dokument-live-v1', 'doku-datei-live-v1', 'doku-formular-live-v1', 'doku-katalog-live-v1'] },
     { k: 'verw', n: 'Einstellungen', url: 'einstellungen-uebersicht-live-v1.html', farbe: '#FFFFFF', akzent: PAL.grau[3], admin: true,
       seiten: ['einstellungen-uebersicht-live-v1', 'handy-ansichten-live-v1', 'verwaltung-live-v1', 'tools-live-v1', 'mailassistent-verwaltung-live-v1', 'dokumentensuche-verwaltung-live-v1', 'zoll-live-v1', 'pflege-kategorien-live-v1', 'projekt-einstellungen-live-v1'] }
   ];
@@ -516,7 +516,7 @@ html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!import
     'werkzeug-pool-salz-live-v1': ['werkzeuge', 'pool_salz'], 'werkzeug-pool-alk-live-v1': ['werkzeuge', 'pool_alk'],
     'werkzeug-pool-afm-live-v1': ['werkzeuge', 'pool_afm'], 'werkzeug-pool-volumen-live-v1': ['werkzeuge', 'pool_volumen'],
     'werkzeug-bau-diagonale-live-v1': ['werkzeuge', 'bau_diagonale'], 'werkzeug-bau-kies-live-v1': ['werkzeuge', 'bau_kies'], 'werkzeug-bau-stahl-live-v1': ['werkzeuge', 'bau_stahl'], 'werkzeug-bau-schalit-live-v1': ['werkzeuge', 'bau_schalit'], 'werkzeug-pflege-spritz-live-v1': ['werkzeuge', 'pflege_spritz'], 'werkzeug-allg-gefaelle-live-v1': ['werkzeuge', 'allg_gefaelle'],
-    'doku-live-v1': ['doku', '_tool'], 'doku-dokument-live-v1': ['doku', '_tool'], 'doku-datei-live-v1': ['doku', '_tool'], 'doku-formular-live-v1': ['doku', '_tool'], 'doku-personen-live-v1': ['doku', 'personen']
+    'doku-live-v1': ['doku', '_tool'], 'doku-dokument-live-v1': ['doku', '_tool'], 'doku-datei-live-v1': ['doku', '_tool'], 'doku-formular-live-v1': ['doku', '_tool'], 'doku-katalog-live-v1': ['doku', 'vorlagen']
   };
   const TOOLRECHT = { offerten: ['offerten', 'offerten'], artikel: ['offerten', 'artikel'], kunden: [['offerten', 'kunden'], ['pflege', 'kunden']], projekte: ['offerten', 'kunden'],
     pend: ['pend', '_tool'], plan: ['plan', '_tool'], pflege: ['pflege', '_tool'], wissen: ['wissen', '_tool'], masch: ['wissen', '_tool'],

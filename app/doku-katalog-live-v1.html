@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<script src="/kg-pw-schutz.js?v=5"></script>
+<script src="/kg-stil.js?v=91"></script>
+<title>Katalog – Doku-Tools</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#323E4E">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600;700&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="/kg-doku.js?v=9"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<style>
+.kgd-weg{display:flex;align-items:center;gap:6px;font-size:14px;color:#6B7079;flex-wrap:wrap;min-width:0;}
+.kgd-weg a{color:#A63A52;font-weight:600;text-decoration:none;display:inline-flex;align-items:center;gap:2px;}
+.kgd-weg b{color:#323E4E;font-size:15px;} .kgd-zurueck svg{transform:rotate(90deg);}
+.kk{max-width:720px;margin:24px auto;padding:0 16px;display:flex;flex-direction:column;gap:14px;}
+.kkarte{background:#fff;border:1px solid #E1E5E9;border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:12px;}
+.kkarte h2{margin:0;font-size:16px;color:#323E4E;}
+.kinfo{display:grid;grid-template-columns:120px 1fr;gap:6px 12px;font-size:13.5px;} .kinfo span{color:#6B7079;}
+.kreihe{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;}
+.kfort{height:8px;background:#EEF1F4;border-radius:4px;overflow:hidden;} .kfort i{display:block;height:100%;background:#323E4E;width:0;transition:width .2s;}
+</style>
+</head>
+<body>
+<header class="app"><div class="wrap">
+  <a class="backlink" href="index.html">Startseite</a>
+  <div class="brand"><h1>Doku-Tools</h1></div>
+  <span class="userbar hidden" id="userbar"><span id="userbarText"></span><button id="logoutBtn">Abmelden</button></span>
+</div></header>
+<nav class="subnav"><div class="wrap">
+  <a href="doku-live-v1.html" class="on">Dokumente</a>
+</div></nav>
+<span class="kgd-weg" data-kg-seite="links"><a class="kgd-zurueck" href="einstellungen-uebersicht-live-v1.html" id="zurueck"></a><span>/</span><b id="titel">Katalog</b></span>
+<main id="appMain"></main>
+<script>
+// Einstellungen einer Doku-Vorlage mit Lieferanten-Katalog (zurzeit: Rücksendung Aqua Solar).
+// Katalog-PDF hochladen → Speicher «doku-dateien» katalog/<vorlage-id>/…pdf, doku_vorlage.einstellungen.katalog = { pfad, name, stand, seiten }.
+// Danach werden alle Artikelnummern (6 Ziffern) mit Bezeichnung und Seite ausgelesen → doku_katalog_artikel
+// (Suche und «Nummer eingeben» im Formular). Nummer und Bezeichnung stehen im Katalog auf derselben Zeile.
+const $ = id => document.getElementById(id);
+const P = new URLSearchParams(location.search);
+const NR = /^(\d{6})\*?(?:\s+(.*))?$/, PREIS = /^(?:[\d']+\.\d{2}|auf Anfrage)(?:\/\S*)?$/i;
+
+// Katalog auslesen. Aufbau (Aqua Solar 2026): links die Nummer, rechts ein Textblock (1–6 Zeilen, Abstand ~10 pt),
+// die Nummer steht senkrecht in der Mitte ihres Blocks, Blöcke sind durch grössere Lücken getrennt.
+// Bezeichnung = erste Zeile des Blocks, bei kurzen Blöcken (≤ 3 Zeilen) auch die zweite (Varianten wie «PVC weiss (Farb-Nr. …)»).
+async function katalogLesen(pdf, fortschritt){
+  const zeilen = [];
+  const sauber = t => t.replace(/^\([a-z]{1,2}\)\s*/i, '').replace(/\s+(?:[\d']+\.\d{2}(?:\/\S*)?\s*)+$/, '').trim();
+  for(let s = 1; s <= pdf.numPages; s++){
+    const tc = await (await pdf.getPage(s)).getTextContent();
+    const it = tc.items.filter(i => i.str && i.str.trim()).map(i => ({ t: i.str.replace(/\s+/g, ' ').trim(), x: i.transform[4], y: i.transform[5] }));
+    const nummern = it.filter(i => NR.test(i.t));
+    nummern.forEach(n => {
+      const m = n.t.match(NR);
+      // rechts davon bis zur nächsten Nummer auf gleicher Höhe (zweispaltige Tabellen)
+      const bis = Math.min(Infinity, ...nummern.filter(o => o !== n && o.x > n.x + 5 && Math.abs(o.y - n.y) < 3).map(o => o.x));
+      const kand = it.filter(o => o !== n && o.x > n.x + 5 && o.x < bis && Math.abs(o.y - n.y) < 45 && !NR.test(o.t) && !PREIS.test(o.t));
+      const Z = [];
+      kand.sort((a, b) => b.y - a.y || a.x - b.x).forEach(i => { const z = Z.find(z => Math.abs(z.y - i.y) < 2.5); if(z) z.t.push(i.t); else Z.push({ y: i.y, t: [i.t] }); });
+      const bloecke = [];
+      Z.forEach(z => { const b = bloecke[bloecke.length - 1]; if(b && b.unten - z.y <= 12) { b.z.push(z); b.unten = z.y; } else bloecke.push({ oben: z.y, unten: z.y, z: [z] }); });
+      const mitte = b => (b.oben + b.unten) / 2;
+      const blk = bloecke.find(b => b.oben + 3 >= n.y && n.y >= b.unten - 3) || bloecke.filter(b => Math.abs(mitte(b) - n.y) < 12).sort((a, b) => Math.abs(mitte(a) - n.y) - Math.abs(mitte(b) - n.y))[0];
+      let bez = m[2] ? sauber(m[2]) : '';
+      if(!bez && blk){ const l = blk.z.map(z => sauber(z.t.join(' '))).filter(Boolean); bez = (l.length <= 3 ? l.slice(0, 2) : l.slice(0, 1)).join(' '); }
+      zeilen.push({ nr: m[1], bez: bez.slice(0, 160), seite: s });
+    });
+    if(fortschritt) fortschritt(s, pdf.numPages);
+  }
+  return zeilen;
+}
+
+async function aufbau(main){
+  const { esc, ic } = KGD, sb = KGD.sb;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+  $('zurueck').innerHTML = KG.icon('chev', 14) + 'Einstellungen';
+  const { data: V } = await sb.from('doku_vorlage').select('id,name,schluessel,einstellungen').eq('schluessel', P.get('v') || 'ruecksendung_as').maybeSingle();
+  if(!V){ main.innerHTML = '<p class="kgd-hinweis" style="padding:20px">Vorlage nicht gefunden.</p>'; return; }
+  document.title = V.name + ' – Einstellungen'; $('titel').textContent = V.name;
+  if(!KGD.darfVorlagen){ main.innerHTML = '<p class="kgd-hinweis" style="padding:20px">Nur wer Vorlagen bearbeiten darf, kann den Katalog ändern.</p>'; return; }
+
+  async function zeichnen(){
+    const k = (V.einstellungen || {}).katalog;
+    const { count } = await sb.from('doku_katalog_artikel').select('id', { count: 'exact', head: true }).eq('vorlage_id', V.id);
+    main.innerHTML = `<div class="kk"><div class="kkarte"><h2>Katalog</h2>
+      ${k ? `<div class="kinfo"><span>Datei</span><b>${esc(k.name)}</b><span>Stand</span><b>${k.stand ? esc(k.stand.split('-').reverse().join('.')) : '–'}</b>
+        <span>Seiten</span><b>${k.seiten || '–'}</b><span>Artikelnummern</span><b>${count || 0}</b></div>
+        <div class="kreihe"><button type="button" class="kgd-btn ghost" id="ansehen">${ic('auge', 14)}Ansehen</button></div>`
+        : '<span class="kgd-hinweis">Noch kein Katalog hinterlegt. Im Formular kann man dann nur Nummern aus dem Artikelstamm eingeben.</span>'}
+      </div>
+      <div class="kkarte"><h2>${k ? 'Neuen Katalog hochladen' : 'Katalog hochladen'}</h2>
+        <span class="kgd-hinweis">PDF vom Lieferanten (z. B. von der Webseite). ${k ? 'Ersetzt den bisherigen Katalog. ' : ''}Danach liest das Tool alle Artikelnummern aus, das dauert ein bis zwei Minuten.</span>
+        <div class="kreihe"><div class="kgd-feld"><label for="stand">Stand</label><input class="kgd-t" type="date" id="stand" style="width:170px"></div>
+          <button type="button" class="kgd-btn prim" id="hoch">${ic('upload', 14)}PDF wählen und hochladen</button></div>
+        <div id="lauf" class="hidden"><div class="kgd-hinweis" id="laufText"></div><div class="kfort"><i id="laufBalken"></i></div></div></div></div>`;
+    const an = $('ansehen');
+    if(an) an.onclick = async () => { const { data, error } = await sb.storage.from('doku-dateien').createSignedUrl(k.pfad, 3600); if(error) return KGD.toast(error.message, true); window.open(data.signedUrl, '_blank'); };
+    $('hoch').onclick = () => { const i = document.createElement('input'); i.type = 'file'; i.accept = 'application/pdf'; i.onchange = () => i.files[0] && hochladen(i.files[0]); i.click(); };
+  }
+
+  async function hochladen(f){
+    const stand = $('stand').value || null, lauf = (t, anteil) => { $('lauf').classList.remove('hidden'); $('laufText').textContent = t; $('laufBalken').style.width = Math.round(anteil * 100) + '%'; };
+    $('hoch').disabled = true;
+    try {
+      lauf('PDF wird geprüft …', 0);
+      const pdf = await pdfjsLib.getDocument({ data: await f.arrayBuffer() }).promise;
+      const zeilen = await katalogLesen(pdf, (s, n) => lauf(`Lese Seite ${s} von ${n} …`, s / n * 0.8));
+      if(zeilen.length < 20) throw new Error('Im PDF wurden kaum Artikelnummern gefunden. Ist das der richtige Katalog?');
+      lauf('Lade PDF hoch …', 0.82);
+      const pfad = `katalog/${V.id}/${Date.now()}.pdf`, alt = (V.einstellungen || {}).katalog;
+      const up = await sb.storage.from('doku-dateien').upload(pfad, f, { contentType: 'application/pdf' });
+      if(up.error) throw new Error('Hochladen fehlgeschlagen: ' + up.error.message);
+      lauf(`Speichere ${zeilen.length} Artikelnummern …`, 0.9);
+      const weg = await sb.from('doku_katalog_artikel').delete().eq('vorlage_id', V.id); if(weg.error) throw new Error(weg.error.message);
+      for(let i = 0; i < zeilen.length; i += 500){
+        const r = await sb.from('doku_katalog_artikel').insert(zeilen.slice(i, i + 500).map(z => ({ ...z, vorlage_id: V.id })));
+        if(r.error) throw new Error(r.error.message);
+      }
+      const einstellungen = { ...(V.einstellungen || {}), katalog: { pfad, name: f.name, stand, seiten: pdf.numPages } };
+      const u = await sb.from('doku_vorlage').update({ einstellungen }).eq('id', V.id); if(u.error) throw new Error(u.error.message);
+      V.einstellungen = einstellungen;
+      if(alt?.pfad) sb.storage.from('doku-dateien').remove([alt.pfad]);
+      KGD.toast(`Katalog gespeichert, ${zeilen.length} Artikelnummern gelesen`); zeichnen();
+    } catch(err){ KGD.toast(err.message, true); $('hoch').disabled = false; $('lauf').classList.add('hidden'); }
+  }
+  zeichnen();
+}
+KGD.start(aufbau);
+</script>
+</body>
+</html>
