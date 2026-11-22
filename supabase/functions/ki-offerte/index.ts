@@ -279,7 +279,7 @@ Deno.serve(async (req) => {
     if (name === 'artikel_suchen') {
       const woerter = String(input?.suchbegriff || '').trim().split(/\s+/).filter(Boolean).slice(0, 5);
       if (!woerter.length) return 'Kein Suchbegriff.';
-      let q = sb.from('artikel').select('id, artikelnummer_knecht, bezeichnung, einheit, vp_knecht, kategorie, mwst_art').limit(20);
+      let q = sb.from('artikel').select('id, artikelnummer_knecht, bezeichnung, einheit, vp_knecht, kategorie, mwst_art').eq('nur_lager', false).limit(20);   // Lagerartikel nie in Offerten
       for (const w of woerter) q = q.ilike('bezeichnung', `%${w.replace(/[%_]/g, '')}%`);
       if (input?.kategorie) q = q.eq('kategorie', input.kategorie);
       const { data, error } = await q;

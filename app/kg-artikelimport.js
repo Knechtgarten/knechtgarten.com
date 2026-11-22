@@ -2,6 +2,7 @@
    kg-artikelimport.js – Artikel aus Liste oder Bild (Artikelstamm)
    Ein Fenster, zwei Arten:
      KAI.oeffnen({ sb, modus: 'neu' })     → nur neue Artikel anlegen (bestehende grau «existiert schon»)
+     (opt.lager: Häkchen «Als Lagerartikel» vorgewählt → nur_lager, nicht nach Easybill)
      KAI.oeffnen({ sb, modus: 'preise' })  → nur Preise bestehender Artikel nachführen (alt → neu, ±%)
    Weitere Angaben: lieferantId (Vorauswahl), vonHand (Funktion → Reiter «Von Hand»), fertig (nach dem Speichern).
    Lesen macht die Edge Function «artikel-import» (Claude): Bild, PDF, Excel/CSV (hier zu Text) oder Text.
@@ -84,7 +85,8 @@
       <div class="kai-inhalt">
         <div class="kai-zeile">
           <div class="kai-fld"><label>Lieferant</label><select data-f="lief"></select></div>
-          ${modus === 'neu' ? `<div class="kai-fld"><label>Kategorie</label><select data-f="kat"><option value="material">Material</option><option value="personal">Personal</option><option value="maschine">Maschine</option><option value="logistik">Logistik</option></select></div>` : ''}
+          ${modus === 'neu' ? `<div class="kai-fld"><label>Kategorie</label><select data-f="kat"><option value="material">Material</option><option value="personal">Personal</option><option value="maschine">Maschine</option><option value="logistik">Logistik</option></select></div>
+            <label class="kai-fld" style="flex-direction:row;align-items:center;gap:7px;align-self:flex-end;height:34px;cursor:pointer" title="Nur fürs Lager und die QR-Bestellung, erscheint nicht in Offerten"><input type="checkbox" data-f="lager"${opt.lager ? ' checked' : ''} style="width:16px;height:16px;accent-color:#323E4E">Als Lagerartikel</label>` : ''}
           <div class="kai-fld"><label>Preise in der Liste</label><select data-f="art"><option value="ep">Einkauf netto</option><option value="liste">Listenpreis</option></select></div>
           <div class="kai-fld" data-w="rabatt" hidden><label>Rabatt %</label><input type="text" class="kurz" data-f="rabatt" inputmode="decimal" autocomplete="off" data-form-type="other"></div>
           <div class="kai-fld"><label>MwSt</label><select data-f="mwst"><option value="0">ohne MwSt</option><option value="1">inkl. MwSt</option></select></div>
@@ -364,7 +366,8 @@
           artikelnummer_knecht: a.nr ? `${l.kuerzel}_${a.nr}` : null,
           lieferant_id: l.id, kategorie: kat, einheit: a.einheit || 'Stk.',
           ep_lieferant: p.ep, vp_lieferant: p.vp, waehrung,
-          mwst_satz_pct: l.da.mwst_satz ?? 8.1, sync_easybill: true
+          mwst_satz_pct: l.da.mwst_satz ?? 8.1, sync_easybill: !f('lager')?.checked,   // Lagerartikel nicht nach Easybill
+          nur_lager: !!f('lager')?.checked
         };
         const vk = vpKnecht(z1); if(vk != null) z1.vp_knecht = vk;
         return z1;
