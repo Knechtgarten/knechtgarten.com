@@ -1,9 +1,10 @@
 // ============================================================================
 // Maschinen-QR (ohne Anmeldung): knechtgarten.com/m/<code> → /maschine-qr.html?c=<code>
-// Der Code steht auf dem Kleber (wissen_exemplar.qr_sicher oder qr_verw, 16 Zufallszeichen).
-// Gibt nur diese eine Seite heraus: Name, Nummer, Foto und
-//   Sicherheit  → Schutzausrüstung, Verhaltensregeln, Sicherheitsdatenblätter
-//   Verwendung  → Anwendung (Kurzanleitung)
+// Der Code steht auf dem Kleber (16 Zufallszeichen). Seit 2026-11-22 ein Kleber pro Stück mit wissen_exemplar.qr_verw
+// (Handy-Seite zeigt eine Auswahl); alte Sicherheits-Kleber (qr_sicher) öffnen direkt die Sicherheit.
+// Gibt nur diese eine Maschine heraus: Name, Nummer, Foto und beide Teile
+//   sicherheit → Schutzausrüstung, Verhaltensregeln, Sicherheitsdatenblätter
+//   anleitung  → Anwendung (Kurzanleitung)
 // Keine Preise, Notizen, Service oder andere Maschinen. Dateien als kurz gültige signierte Links.
 // Aufruf: POST { code }
 // ============================================================================
@@ -30,31 +31,30 @@ Deno.serve(async (req) => {
       .eq('id', x.eintrag_id).is('archiviert_am', null).maybeSingle();
     if (!e) return json({ error: 'ungueltig' }, 404);
 
-    let html = (art === 'sicherheit' ? e.sicherheit_html : e.anwendung_html) || '';
-    let dateien: { name: string; art: string; pfad: string }[] = [];
-    if (art === 'sicherheit') {
-      const { data: d } = await sb.from('wissen_datei').select('name,art,storage_pfad')
-        .eq('eintrag_id', x.eintrag_id).eq('bereich', 'sicherheit').is('exemplar_id', null).order('erstellt_am');
-      dateien = (d || []).map((z) => ({ name: z.name, art: z.art, pfad: z.storage_pfad }));
-    }
+    let html = e.sicherheit_html || '', anleitung = e.anwendung_html || '';
+    const { data: d } = await sb.from('wissen_datei').select('name,art,storage_pfad')
+      .eq('eintrag_id', x.eintrag_id).eq('bereich', 'sicherheit').is('exemplar_id', null).order('erstellt_am');
+    const dateien = (d || []).map((z) => ({ name: z.name, art: z.art, pfad: z.storage_pfad }));
 
     // alle Pfade auf einmal signieren: Titelfoto, Medien im Text (data-pfad), Datenblätter
-    const imText = [...html.matchAll(/data-pfad="([^"]+)"/g)].map((m) => m[1]);
+    const imText = [...(html + anleitung).matchAll(/data-pfad="([^"]+)"/g)].map((m) => m[1]);
     const pfade = [...new Set([e.titelfoto_pfad, ...imText, ...dateien.map((z) => z.pfad)].filter(Boolean))] as string[];
     const url: Record<string, string> = {};
     if (pfade.length) {
       const { data: s } = await sb.storage.from(BUCKET).createSignedUrls(pfade, GUELTIG);
       (s || []).forEach((z) => { if (z.signedUrl && z.path) url[z.path] = z.signedUrl; });
     }
-    html = html.replace(/<(img|video|source)([^>]*?)data-pfad="([^"]+)"/g, (_m, t, a, p) => `<${t}${a}src="${url[p] || ''}" data-pfad="${p}"`);
+    const mitUrl = (h: string) => h.replace(/<(img|video|source)([^>]*?)data-pfad="([^"]+)"/g, (_m, t, a, p) => `<${t}${a}src="${url[p] || ''}" data-pfad="${p}"`);
+    html = mitUrl(html); anleitung = mitUrl(anleitung);
 
     return json({
-      art,
+      art,   // sicherheit = alter Sicherheits-Kleber (direkt), verwendung = Kleber pro Stück (Auswahl)
       titel: e.titel,
       nummer: x.nummer || '',
       foto: e.titelfoto_pfad ? url[e.titelfoto_pfad] || null : null,
-      psa: art === 'sicherheit' ? e.psa || [] : [],
-      html,
+      psa: e.psa || [],
+      html,        // Sicherheit
+      anleitung,
       dateien: dateien.map((z) => ({ name: z.name, art: z.art, url: url[z.pfad] || null })),
     });
   } catch (err) {
