@@ -73,8 +73,7 @@
   <a href="doku-live-v1.html" class="on">Dokumente</a>
 </div></nav>
 <span class="kgd-weg" data-kg-seite="links"><a class="kgd-zurueck" href="doku-live-v1.html" id="ordnerLink"></a><span>/</span><b id="docTitel"></b></span>
-<button type="button" class="kgd-btn ghost" data-kg-seite="rechts" id="datenBtn">Angaben</button>
-<button type="button" class="kgd-btn ghost unvoll" data-kg-seite="rechts" id="driveBtn"></button>
+<button type="button" class="kgd-btn ghost" data-kg-seite="rechts" id="datenBtn">Angaben anpassen</button>
 <button type="button" class="kgd-btn prim kg-haupt unvoll" data-kg-seite="rechts" id="druckBtn"></button>
 <main id="appMain"></main>
 <script>
@@ -96,7 +95,7 @@ const BLOCK = 131;   // Abstand der drei Artikelblöcke
 async function aufbau(main){
   const { esc, ic } = KGD, sb = KGD.sb;
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
-  $('driveBtn').innerHTML = ic('ordner') + 'In Drive ablegen'; $('druckBtn').innerHTML = ic('drucken') + 'Drucken'; $('ordnerLink').innerHTML = KG.icon('chev', 14);
+  $('druckBtn').innerHTML = ic('drucken') + 'Drucken'; $('ordnerLink').innerHTML = KG.icon('chev', 14);
 
   let dokId = null, werte = null, vorlageId = P.get('v');
   const quelle = P.get('d') || P.get('kopie');   // Kopie = gleiche Angaben, neues Dokument (ohne Rechnungskopie)
@@ -139,7 +138,8 @@ async function aufbau(main){
   const aktiv = p => p.nr || p.vonHand;
   const rechnungNoetig = () => werte.pos.some(p => !p.vonHand && GRUENDE.find(g => g.k === p.grund)?.rechnung);
   const pflicht = () => !werte.sb ? 'Sachbearbeiter fehlt.' : !werte.pos.some(aktiv) ? 'Mindestens ein Artikel fehlt.'
-    : werte.pos.some(p => p.nr && !p.vonHand && !p.grund) ? 'Grund der Rücksendung fehlt.' : rechnungNoetig() && !werte.rechnungen.length ? 'Rechnungskopie fehlt.' : '';
+    : werte.pos.some(p => p.nr && !p.vonHand && !p.grund) ? 'Grund der Rücksendung fehlt.' : '';
+  const rechnungFehlt = () => rechnungNoetig() && !werte.rechnungen.length;
 
   // PDF erzeugen: Vorlage + Angaben (+ Rechnungskopie)
   async function erzeugen(mitRechnung){
@@ -175,7 +175,7 @@ async function aufbau(main){
     const nr = ++laeuft, bytes = await erzeugen(false); if(nr !== laeuft) return;
     const pdf = await pdfjsLib.getDocument({ data: bytes }).promise, pg = await pdf.getPage(1), vp = pg.getViewport({ scale: 2 });
     const c = $('blatt'); c.width = vp.width; c.height = vp.height; await pg.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
-    const fertig = !pflicht(); ['druckBtn', 'driveBtn'].forEach(id => $(id).classList.toggle('unvoll', !fertig));
+    $('druckBtn').classList.toggle('unvoll', !!pflicht());   // fehlende Rechnungskopie blockiert nicht, beim Drucken kommt eine Nachfrage
   }
   let warte = null; const neu = () => { clearTimeout(warte); warte = setTimeout(() => { vorschau(); speichernSpaeter(); }, 250); };
 
@@ -192,7 +192,8 @@ async function aufbau(main){
   // Rechnungskopie aus PEAX über die Chrome-Erweiterung «Knechtgarten» (kg-seite.js → PEAX-Tab):
   // Volltextsuche nach den Artikelnummern, nur Rechnungen von Aqua Solar, Klick auf einen Treffer hängt das PDF an.
   const px = { laeuft: false, treffer: null, fehler: '', schluessel: '', holt: null };
-  const PEAX_LINK = '<a href="https://app.peax.ch/inbox/search" target="_blank" rel="noopener">PEAX öffnen</a>';
+  // PEAX immer im selben Tab (Name «peax»): ein zweiter Klick springt in diesen Tab statt einen neuen zu öffnen
+  const PEAX_URL = 'https://app.peax.ch/inbox/search', PEAX_LINK = '<a href="' + PEAX_URL + '" target="peax">PEAX öffnen</a>';
   function ext(auftrag, daten){
     return new Promise((ok, nein) => {
       const ver = document.documentElement.dataset.kgExt; if(!ver) return nein(new Error('ohne'));
@@ -220,6 +221,7 @@ async function aufbau(main){
     return `<div class="ffpx">${px.treffer.map((t, j) => `<button type="button" data-px="${j}" ${px.holt != null ? 'disabled' : ''}><span class="t">${esc(t.titel)}${nummern().length > 1 ? ` <small class="d">${esc((t.nr || []).join(', '))}</small>` : ''}</span><span class="d">${datumCH(t.datum)}</span><span class="b">${t.betrag != null ? 'CHF ' + Number(t.betrag).toLocaleString('de-CH', { minimumFractionDigits: 2 }) : ''}</span>${px.holt === j ? '<span class="d">lädt …</span>' : ''}</button>`).join('')}</div>`;
   }
   async function pxSuchen(){
+    if(!document.documentElement.dataset.kgExt){ window.open(PEAX_URL, 'peax'); px.fehler = pxFehler('ohne'); angaben(); return; }   // ohne Erweiterung: PEAX zum Suchen von Hand öffnen
     const nr = nummern();
     if(!nr.length){ px.fehler = 'Zuerst einen Artikel wählen.'; angaben(); return; }
     px.laeuft = true; px.fehler = ''; px.treffer = null; px.schluessel = nr.join('|'); angaben();
@@ -568,7 +570,13 @@ async function aufbau(main){
 
   // Drucken: fertiges PDF (mit Rechnungskopie) in einem unsichtbaren Rahmen drucken
   $('druckBtn').addEventListener('click', async () => {
-    const f = pflicht(); if(f) return KGD.toast(f, true); await speichern();
+    const f = pflicht(); if(f) return KGD.toast(f, true);
+    if(rechnungFehlt()){   // Gutschrift/Garantie ohne Rechnungskopie: nachfragen statt blockieren
+      const w = await KGD.dialog('<h3>Rechnungskopie fehlt</h3><p class="kgd-hinweis" style="font-size:13px">Für Gutschrift und Garantie verlangt Aqua Solar die Rechnung. Trotzdem drucken und die Kopie von Hand ins Paket legen?</p>',
+        [['Zurück', 'ghost', null], ['Trotzdem drucken', 'prim', 'los']]);
+      if(w !== 'los') return;
+    }
+    await speichern();
     try { const bytes = await erzeugen(true), url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
       $('druckFrame')?.remove(); const fr = document.createElement('iframe'); fr.id = 'druckFrame'; fr.style.cssText = 'position:fixed;width:0;height:0;border:0;right:0;bottom:0'; fr.src = url;
       fr.onload = () => { try { fr.contentWindow.focus(); fr.contentWindow.print(); } catch(e){ window.open(url, '_blank'); } setTimeout(etiketteFragen, 900); }; document.body.appendChild(fr);
@@ -581,24 +589,6 @@ async function aufbau(main){
     if(!l?.strasse) return KGD.toast('Adresse von Aqua Solar fehlt in Kontakte › Lieferanten.', true);
     KGE.fragen({ titel: 'Versandetikette drucken?', text: 'Etikette für das Paket an Aqua Solar (Absender Knecht AG).', an: KGE.zeilen(l) });
   }
-  // In Drive ablegen: Ordner per Link (wird gemerkt), PDF mit Rechnungskopie
-  $('driveBtn').addEventListener('click', async () => {
-    const f = pflicht(); if(f) return KGD.toast(f, true); await speichern();
-    let token = null; try { token = await KGD.googleToken(); } catch(e){}
-    if(!token){ try { await KGD.gsiLaden(); await KGD.googleVerbinden(); } catch(e){ return KGD.toast(e.message || 'Google-Verbindung fehlgeschlagen', true); } }
-    let link = ''; try { link = localStorage.getItem('kgd_ruecksendung_ordner') || ''; } catch(e){}
-    let form = null;
-    const los = await KGD.dialog(`<h3>In Drive ablegen</h3><div class="kgd-feld"><label for="zielLink">Drive-Ordner (Link)</label><input class="kgd-t" id="zielLink" value="${esc(link)}" placeholder="https://drive.google.com/drive/folders/…" autocomplete="off"></div>
-      <div class="kgd-feld"><label for="zielName">Dateiname</label><input class="kgd-t" id="zielName" value="${esc(dateiname())}" autocomplete="off"></div>`, [['Abbrechen', 'ghost', null], ['Ablegen', 'prim', 'los']], el => { form = el; });
-    if(los !== 'los') return;
-    try {
-      const l = form.querySelector('#zielLink').value.trim(), ziel = await KGD.ordnerAusLink(l); try { localStorage.setItem('kgd_ruecksendung_ordner', l); } catch(e){}
-      KGD.toast('Lege ab …'); const bytes = await erzeugen(true);
-      await KGD.hochladen(new Blob([bytes], { type: 'application/pdf' }), KGD.dateiName(form.querySelector('#zielName').value.replace(/\.pdf$/i, '')), ziel.id);
-      KGD.toast('Abgelegt in ' + ziel.pfad);
-    } catch(err){ KGD.toast(err.message || String(err), true); }
-  });
-  const dateiname = () => `${new Date().toISOString().slice(0, 10)} Rücksendung Aqua Solar ${werte.pos.filter(p => p.nr).map(p => p.nr).join(' ')}`.trim();
 }
 KGD.start(aufbau);
 </script>
