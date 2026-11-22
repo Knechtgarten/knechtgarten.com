@@ -344,7 +344,11 @@ body.bearb .sec.skachel .sec-b, .sec.skachel.sedit .sec-b{max-height:none;}
 .doc:last-child{border-bottom:0;}
 .doc .n{font-weight:600;}
 /* Sicherheitsdatenblätter & Merkblätter: ganz leicht gelb hinterlegt (Notfall-Thema später im Erste-Hilfe-Tool) */
-.doc.sdb{background:#FFFBEB;} .doc.sdb:first-child{border-radius:8px 8px 0 0;} .doc.sdb:last-child{border-radius:0 0 8px 8px;} .doc.sdb:only-child{border-radius:8px;}
+.doc.sdb{background:#FFFBEB;}
+.ufibox{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#EAF3FA;border:1px solid #D6E7F4;border-radius:8px;padding:8px 12px;margin-top:8px;}
+.ufibox .ufil{font-weight:600;font-size:12.5px;color:var(--primary);} .ufibox b{font-family:Consolas,monospace;letter-spacing:.4px;}
+.ufibox .svin{flex:1;min-width:220px;max-width:340px;font-family:Consolas,monospace;letter-spacing:.4px;background:#fff;}
+.ufibox .small{flex-basis:100%;margin-top:-4px;} .doc.sdb:first-child{border-radius:8px 8px 0 0;} .doc.sdb:last-child{border-radius:0 0 8px 8px;} .doc.sdb:only-child{border-radius:8px;}
 .doc a.n{color:var(--primary);text-decoration:none;}
 .doc a.n:hover{text-decoration:underline;}
 .doc > .i{color:var(--muted);}
@@ -1563,7 +1567,8 @@ const SECS = [['notizen','note','Notizen'],['sicher','helm','Arbeitssicherheit']
 const PSA = [['brille', 'Schutzbrille'], ['gesicht', 'Gesichtsschutz'], ['gehoer', 'Gehörschutz'], ['atem', 'Atemschutz'], ['handschuhe', 'Schutzhandschuhe'],
   ['schuhe', 'Sicherheitsschuhe'], ['helm', 'Schutzhelm'], ['schnitt', 'Schnittschutz'], ['weste', 'Warnweste'], ['kleidung', 'Schutzkleidung']];
 const psaText = e => PSA.filter(([k]) => (e.psa || []).includes(k)).map(z => z[1]);
-const sichDocs = (e, d) => d.dateien.filter(x => x.bereich === 'sicherheit' && !x.exemplar_id);
+const sichDocs = (e, d) => d.dateien.filter(x => (x.bereich === 'sicherheit' || x.bereich === 'sdb') && !x.exemplar_id);
+const sdbDocs = (e, d) => d.dateien.filter(x => x.bereich === 'sdb' && !x.exemplar_id), merkDocs = (e, d) => d.dateien.filter(x => x.bereich === 'sicherheit' && !x.exemplar_id);
 // Arbeitssicherheit hat Inhalt (dann rot hervorgehoben, solange zugeklappt)
 const sichInhalt = e => { const d = S.det && S.det.id === e.id ? S.det : null; return !!(e.psa?.length || (e.sicherheit_html || '').replace(/<[^>]+>/g, '').trim() || (d && sichDocs(e, d).length)); };
 const allgDocs = (e, d) => d.dateien.filter(x => x.bereich === 'dokument' && !x.exemplar_id && x.storage_pfad !== e.titelfoto_pfad);
@@ -1594,8 +1599,8 @@ function zaehl(e, k){
   if(!d) return '';
   if(k === 'kontakte') return d.kontakte.length || '';
   if(k === 'docs') return (allgDocs(e, d).length + (MASCH ? (e.links || []).length : 0)) || '';
-  if(k === 'sicher'){ const p = (e.psa || []).length, n = sichDocs(e, d).length;
-    return [p && p + (p === 1 ? ' Schutzausrüstung' : ' Schutzausrüstungen'), n && n + (n === 1 ? ' Datenblatt' : ' Datenblätter')].filter(Boolean).join(' · '); }
+  if(k === 'sicher'){ const p = (e.psa || []).length, n = sdbDocs(e, d).length, m = merkDocs(e, d).length;
+    return [p && p + (p === 1 ? ' Schutzausrüstung' : ' Schutzausrüstungen'), n && 'Datenblatt', m && m + (m === 1 ? ' Merkblatt' : ' Merkblätter')].filter(Boolean).join(' · '); }
   if(k === 'notizen') return '';
   return '';
 }
@@ -2198,21 +2203,27 @@ function secBody(e, k){
       ${kinder.length ? `<div class="grp-title">Anbaugeräte</div><div class="anbau">${kinder.map(x => `<button data-act="open" data-id="${x.id}"><span class="chip">${ic('link')}${esc(x.titel)}</span></button>`).join('')}</div>` : ''}`;
   }
   if(k === 'sicher'){
-    const bu = darfEdit(), an = e.psa || [], docs = d ? sichDocs(e, d) : [];
+    // Sicherheitsdatenblatt (bereich 'sdb', genau eines, druckbar als Kanister-Kleber, mit UFI-Nummer) und Merkblätter (bereich 'sicherheit', beliebig viele)
+    const bu = darfEdit(), an = e.psa || [], sdb = d ? sdbDocs(e, d) : [], merk = d ? merkDocs(e, d) : [];
+    const zeile = (x, mitDruck) => `<div class="doc kg-zeile${mitDruck ? ' sdb' : ''}">${ic(x.art === 'foto' ? 'image' : 'file')}
+          <div class="grow"><a class="n" href="${esc(urls.get(x.storage_pfad) || '#')}" target="_blank" rel="noopener">${esc(x.name)}</a>
+          <div class="small muted">${esc(datumCH(x.erstellt_am.slice(0,10)))}</div></div>
+          ${mitDruck && istBuero() ? `<button class="kg-ibtn" data-act="sdbKleber" title="Kleber für Kanister drucken (gelbes P-touch-Band, QR zum Datenblatt)">${ic('qr')}</button>` : ''}
+          ${bu ? `<button class="xbtn kg-hover" data-act="dateiDel" data-id="${x.id}" title="Löschen">${ic('trash')}</button>` : ''}</div>`;
+    const ufi = sdb.length || bu ? `<div class="ufibox"><span class="ufil">UFI-Nummer</span>${istBuero()
+        ? `<input class="svin" data-ufi="${e.id}" value="${esc(e.ufi || '')}" placeholder="steht auf der Produktetikette, z. B. N1QV-R02N-J00H-1R9P" autocomplete="off">`
+        : `<b>${esc(e.ufi || '–')}</b>`}<span class="small muted">fragt Tox Info 145 im Notfall nach</span></div>` : '';
     return `<div class="grp-title">Schutzausrüstung</div>
       ${bu ? `<div class="psawahl">${PSA.map(([v, t]) => `<button type="button" class="yb" data-act="psaT" data-v="${v}" aria-pressed="${an.includes(v)}">${esc(t)}</button>`).join('')}</div>`
         : an.length ? `<div class="meta">${psaText(e).map(t => `<span class="chip psa">${ic('helm')}${esc(t)}</span>`).join('')}</div>` : '<div class="small muted">Keine besondere Schutzausrüstung.</div>'}
       ${rte('sich', e.id, e.sicherheit_html || '', 'Verhaltensregeln: Gefahren, worauf achten, was im Notfall tun', bu)}
-      <div class="grp-title">Sicherheitsdatenblätter &amp; Merkblätter</div>
-      ${!d ? '<div class="small muted">Lädt …</div>' : docs.length ? `<div class="docs">${docs.map(x => `<div class="doc kg-zeile sdb">${ic(x.art === 'foto' ? 'image' : 'file')}
-          <div class="grow"><a class="n" href="${esc(urls.get(x.storage_pfad) || '#')}" target="_blank" rel="noopener">${esc(x.name)}</a>
-          <div class="small muted">${esc(datumCH(x.erstellt_am.slice(0,10)))}</div></div>
-          ${bu ? `<button class="xbtn kg-hover" data-act="dateiDel" data-id="${x.id}" title="Löschen">${ic('trash')}</button>` : ''}</div>`).join('')}</div>`
-        : '<div class="small muted">Noch keine.</div>'}
-      ${bu ? `<div><button class="addrow" data-act="sichUpload">${ic('upload')}Sicherheitsdatenblatt / Merkblatt hochladen</button> <span class="small muted">PDF oder Foto</span></div>` : ''}
-      ${bu ? `<label class="fld ufifld">UFI-Nummer <span class="small muted">von der Produktetikette, fragt Tox Info 145 nach</span><input class="svin" data-ufi="${e.id}" value="${esc(e.ufi || '')}" placeholder="z. B. N1QV-R02N-J00H-1R9P" autocomplete="off"></label>`
-        : e.ufi ? `<div class="small muted">UFI-Nummer ${esc(e.ufi)}</div>` : ''}
-      ${docs.length && istBuero() ? `<div><button class="addrow" data-act="sdbKleber">${ic('qr')}Kleber für Kanister drucken</button> <span class="small muted">gelbes P-touch-Band, QR zum Datenblatt</span></div>` : ''}`;
+      <div class="grp-title">Sicherheitsdatenblatt</div>
+      ${!d ? '<div class="small muted">Lädt …</div>' : sdb.length ? `<div class="docs">${sdb.map(x => zeile(x, true)).join('')}</div>` : '<div class="small muted">Keines.</div>'}
+      ${bu ? `<div><button class="addrow" data-act="sdbUpload">${ic('upload')}${sdb.length ? 'Sicherheitsdatenblatt ersetzen' : 'Sicherheitsdatenblatt hochladen'}</button> <span class="small muted">PDF, eines pro Produkt</span></div>` : ''}
+      ${ufi}
+      <div class="grp-title">Merkblätter</div>
+      ${!d ? '' : merk.length ? `<div class="docs">${merk.map(x => zeile(x, false)).join('')}</div>` : '<div class="small muted">Keine.</div>'}
+      ${bu ? `<div><button class="addrow" data-act="sichUpload">${ic('upload')}Merkblatt hochladen</button> <span class="small muted">PDF oder Foto</span></div>` : ''}`;
   }
   if(k === 'anw') return rte('anw', e.id, e.anwendung_html || '', 'Kurzanleitung, Arbeitsschritte, Tabellen, Fotos', darfEdit());
   if(k === 'service') return serviceBody(e);
@@ -3356,6 +3367,13 @@ document.addEventListener('click', async ev => {
   }
   else if(a === 'sdbDruck'){ const n = +($('sdbAnz')?.value || 1); S.sdbAnz = n; try { localStorage.setItem('kgSdbGr', S.sdbG || 'M'); } catch(_){}
     KGS.drucken([{ titel: e.titel, ufi: e.ufi, code: e.sdb_code, anzahl: n }], S.sdbG || 'M'); ovlZu(); }
+  // Sicherheitsdatenblatt: genau eines pro Produkt – ein neues ersetzt das bisherige (Datei wird gelöscht)
+  else if(a === 'sdbUpload') waehleDateien('application/pdf', false, async files => {
+    const f = files[0]; if(!f) return; const alt = sdbDocs(e, S.det);
+    toast(`«${f.name}» wird hochgeladen …`); await hochladen(f, e.id, 'sdb', null);
+    for(const x of alt){ const { error } = await sb.from('wissen_datei').delete().eq('id', x.id); if(!error){ await sb.storage.from(BUCKET).remove([x.storage_pfad, x.vorschau_pfad].filter(Boolean)); S.det.dateien = S.det.dateien.filter(z => z.id !== x.id); } }
+    await signiere(S.det.dateien.flatMap(x => [x.storage_pfad, x.vorschau_pfad]).filter(Boolean)); render();
+  });
   else if(a === 'sichUpload') waehleDateien('application/pdf,image/*', true, async files => {
     for(const f of files){ toast(`«${f.name}» wird hochgeladen …`); await hochladen(f, e.id, 'sicherheit', null); }
     await signiere(S.det.dateien.flatMap(x => [x.storage_pfad, x.vorschau_pfad]).filter(Boolean)); render();
