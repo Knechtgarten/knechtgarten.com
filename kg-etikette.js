@@ -37,8 +37,8 @@
   // Schrift wächst mit der Etikettenhöhe, bei vielen Zeilen etwas kleiner.
   function html(an, e = einst || STANDARD, anzahl = 1) {
     const B = +e.breite || 102, H = +e.hoehe || 51, abs = e.absender || STANDARD.absender;
-    const gr = Math.max(8, Math.min(16, H * 0.245)) * (an.length > 4 ? 0.85 : 1), vg = Math.max(5.5, Math.min(8, H * 0.13));
-    const eine = `<div class="et"><div class="von"><b>${esc(abs[0])}</b><span>${abs.slice(1).map(esc).join(', ')}</span></div>
+    const gr = Math.max(8, Math.min(16, H * 0.245)) * (an.length > 4 ? 0.85 : 1), vg = Math.max(6, Math.min(10, H * 0.165));   // Absender: bei 51 mm Höhe ca. 8.4 pt
+    const eine = `<div class="et"><div class="von">${abs.map((s, i) => i === 0 ? `<b>${esc(s)}</b>` : `<span>${esc(s)}</span>`).join('')}</div>
       <div class="an">${an.map((s, i) => `<div class="z${i === 0 ? ' n' : ''}${i === an.length - 1 && /^\d{4,5}\s/.test(s) ? ' ort' : ''}">${esc(s)}</div>`).join('')}</div></div>`;
     return `<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>Etikette</title><style>
       @page { size: ${B}mm ${H}mm; margin: 0; }
@@ -48,7 +48,7 @@
       body { font-family: Arial, Helvetica, sans-serif; color: #000; }
       .et { width: ${B}mm; height: ${H}mm; padding: 3mm 4mm 3mm 3mm; display: flex; overflow: hidden; page-break-after: always; break-after: page; }
       .et:last-child { page-break-after: auto; break-after: auto; }
-      .von { width: ${(vg * 1.5).toFixed(1)}mm; flex: none; writing-mode: vertical-rl; transform: rotate(180deg); font-size: ${vg.toFixed(1)}pt; line-height: 1.25;
+      .von { width: ${(abs.length * vg * 0.45 + 2.5).toFixed(1)}mm; flex: none; writing-mode: vertical-rl; transform: rotate(180deg); font-size: ${vg.toFixed(1)}pt; line-height: 1.25;
         display: flex; flex-direction: column; justify-content: center; text-align: center; border-left: 0.3mm solid #000; padding-left: 1.5mm; }
       .von b { font-size: ${(vg + 0.5).toFixed(1)}pt; }
       .an { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; padding-left: 5mm; }
