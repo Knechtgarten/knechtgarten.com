@@ -343,6 +343,32 @@ header.app .wrap{min-height:46px;}
 .kg-twmenu .kg-ext a:hover{border-color:#323E4E;}
 .kg-twmenu .kg-ext svg{width:12px;height:12px;color:#6B7079;}
 @media (max-width:600px){.kg-twmenu .kg-grid{grid-template-columns:repeat(2,minmax(0,1fr));}}
+/* Tool-Menü: «Meine Tools» gross (Name darunter, nicht fett, Reihenfolge per Ziehen), «Weitere Tools» klein (4 pro Zeile) */
+.kg-twmenu.kg-toolmenu{width:620px;padding:14px 16px 10px;}
+.kg-toolmenu .kg-mk{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 6px 6px;}
+.kg-toolmenu .kg-mk .kg-h{padding:0;}
+.kg-toolmenu .kg-start{display:inline-flex;align-items:center;gap:6px;color:#323E4E;font-size:12.5px;text-decoration:none;padding:3px 8px;border-radius:7px;}
+.kg-toolmenu .kg-start:hover{background:#EEF3F7;} .kg-toolmenu .kg-start svg{width:15px;height:15px;}
+.kg-toolmenu .kg-meine{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:2px;min-height:96px;border-radius:10px;padding:2px;}
+.kg-toolmenu .kg-gr{display:flex;flex-direction:column;align-items:center;gap:7px;padding:11px 6px 9px;border-radius:10px;text-decoration:none;color:#232B35;font-weight:400;font-size:12.5px;text-align:center;line-height:1.25;position:relative;}
+.kg-toolmenu .kg-gr:hover{background:#F5F7F9;} .kg-toolmenu .kg-gr.on{background:#EEF3F7;}
+.kg-toolmenu .kg-weitere{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:2px 6px;min-height:36px;border-radius:10px;padding:2px;}
+.kg-toolmenu .kg-kl{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:8px;text-decoration:none;color:#232B35;font-size:12.5px;min-width:0;position:relative;}
+.kg-toolmenu .kg-kl:hover{background:#F5F7F9;} .kg-toolmenu .kg-kl.on{background:#EEF3F7;}
+.kg-toolmenu .kg-kl span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.kg-toolmenu .kg-kl small{margin-left:auto;color:#8B9097;font-size:10.5px;font-variant-numeric:tabular-nums;}
+.kg-toolmenu .kg-kl .kg-ti{flex:none;}
+.kg-toolmenu .kg-schalter{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#6B7079;cursor:pointer;user-select:none;}
+.kg-toolmenu .kg-schalter input{appearance:none;-webkit-appearance:none;width:28px;height:16px;border-radius:8px;background:#C9CED4;position:relative;margin:0;cursor:pointer;transition:background .15s;}
+.kg-toolmenu .kg-schalter input::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#fff;transition:left .15s;}
+.kg-toolmenu .kg-schalter input:checked{background:#323E4E;} .kg-toolmenu .kg-schalter input:checked::after{left:14px;}
+.kg-toolmenu .kg-alle{border:0;background:none;color:#323E4E;font:600 12.5px inherit;font-family:inherit;cursor:pointer;padding:4px 8px;border-radius:6px;margin:4px 0 0 2px;}
+.kg-toolmenu .kg-alle:hover{background:#EEF3F7;}
+.kg-toolmenu .kg-leer{grid-column:1/-1;color:#8B9097;font-size:12.5px;padding:12px;text-align:center;border:1px dashed #E1E5E9;border-radius:10px;}
+.kg-toolmenu .kg-zieht{opacity:.35;} .kg-toolmenu .kg-ziel{outline:2px dashed #323E4E;outline-offset:-2px;background:#EEF3F7;}
+.kg-toolmenu .kg-ml{box-shadow:inset 3px 0 0 #323E4E;} .kg-toolmenu .kg-mr{box-shadow:inset -3px 0 0 #323E4E;}
+@media (max-width:600px){.kg-toolmenu .kg-weitere{grid-template-columns:repeat(2,minmax(0,1fr));}}
+@media (hover:hover) and (pointer:fine){.kg-toolmenu [draggable="true"]{cursor:grab;}}
 /* Einheitliche Leiste: [Umschalter][Reiter …][Tool-Icons] … [Hilfe][Person] */
 header.app.kg-leiste .wrap{display:flex!important;align-items:center!important;max-width:none!important;padding:0 16px!important;margin:0!important;gap:14px!important;flex-wrap:nowrap!important;height:auto!important;}
 header.app.kg-leiste .kg-reiter{display:flex!important;align-items:stretch;gap:2px;flex:1 1 auto;min-width:0;margin:0!important;background:transparent!important;border:0!important;overflow-x:auto;scrollbar-width:none;}
@@ -467,7 +493,7 @@ html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!import
       const [{ data: ben }, { data: mods }, { data: menue }] = await Promise.all([
         client.from('benutzer').select('rolle,recht_gruppe_id').eq('id', session.user.id).maybeSingle(),
         client.from('modul_sichtbarkeit').select('modul_key,name,kurzname,url,icon_url,ist_extern,fuer_buero_team,fuer_mitarbeitende,fuer_service_team'),
-        client.from('tool_menue').select('app_key,sortierung,an').eq('benutzer_id', session.user.id)
+        client.from('tool_menue').select('app_key,sortierung,an,aufrufe').eq('benutzer_id', session.user.id)
       ]);
       sicht.menue = menue || [];
       sicht.rolle = ben && ben.rolle;
@@ -609,16 +635,68 @@ html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!import
   }
   if(SEITENRECHT[seite]){ if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', rechteBeobachten); else rechteBeobachten(); }
 
+  // Tool-Menü: «Meine Tools» (tool_menue.an = true, gross, Reihenfolge per Ziehen) und «Weitere Tools» (an = false, klein,
+  // nach Häufigkeit oder frei). Ohne Zeile: bei «Meine Tools», Einstellungen bei «Weitere». Startseite oben rechts statt Kachel.
+  // Schalter «nach Häufigkeit»: Zeile '_weitere_haeufig' (an), ohne Zeile = an. Häufigkeit = tool_menue.aufrufe (RPC tool_aufruf).
+  const HAEUFIG = '_weitere_haeufig';
+  let alleWeitere = false;
+  function menuListen(s){
+    const M = new Map((s.menue || []).map(m => [m.app_key, m]));
+    const tools = TOOLS.filter(t => t.k !== 'home' && sichtbar(t, s));
+    const istMeine = t => M.has(t.k) ? M.get(t.k).an : t.k !== 'verw';
+    const pos = t => M.has(t.k) ? M.get(t.k).sortierung : 1000 + TOOLS.indexOf(t), zahl = t => (M.get(t.k) || {}).aufrufe || 0;
+    const haeufig = M.has(HAEUFIG) ? M.get(HAEUFIG).an : true;
+    const meine = tools.filter(istMeine).sort((a, b) => pos(a) - pos(b));
+    const weitere = tools.filter(t => !istMeine(t)).sort((a, b) => haeufig ? zahl(b) - zahl(a) || pos(a) - pos(b) : pos(a) - pos(b));
+    return { meine, weitere, haeufig, zahl };
+  }
   function menuHtml(s){
-    const verwUrl = 'einstellungen-uebersicht-live-v1.html';
-    // eigene Auswahl (Einstellungen: Schalter «Computer», Reihenfolge per Ziehen); Startseite und Einstellungen immer
-    const M = new Map((s.menue || []).map(m => [m.app_key, m])), pos = t => M.has(t.k) ? M.get(t.k).sortierung : 1000 + TOOLS.indexOf(t);
-    const items = TOOLS.filter(t => sichtbar(t, s) && (t.k === 'home' || t.admin || !M.has(t.k) || M.get(t.k).an))
-      .sort((a, b) => (a.k === 'home' ? -1 : b.k === 'home' ? 1 : a.admin ? 1 : b.admin ? -1 : pos(a) - pos(b))).map(t =>
-      `<a class="kg-it${t.k === aktuell.k ? ' on' : ''}" href="${t.k === 'verw' ? verwUrl : t.url}">${KG.toolIcon(t.k, 32)}<span>${esc(t.n)}</span></a>`).join('');
+    const verwUrl = 'einstellungen-uebersicht-live-v1.html', L = menuListen(s), href = t => t.k === 'verw' ? verwUrl : t.url;
+    const home = TOOLS.find(t => t.k === 'home');
+    const gross = L.meine.map(t => `<a class="kg-gr${t.k === aktuell.k ? ' on' : ''}" href="${href(t)}" draggable="true" data-tk="${t.k}">${KG.toolIcon(t.k, 44)}<span>${esc(t.n)}</span></a>`).join('')
+      || '<div class="kg-leer">Tools hierher ziehen</div>';
+    const w = alleWeitere ? L.weitere : L.weitere.slice(0, 8);
+    const klein = w.map(t => `<a class="kg-kl${t.k === aktuell.k ? ' on' : ''}" href="${href(t)}" draggable="true" data-tk="${t.k}" title="${esc(t.n)}">${KG.toolIcon(t.k, 22)}<span>${esc(t.n)}</span>${L.haeufig && L.zahl(t) ? `<small>${L.zahl(t)}×</small>` : ''}</a>`).join('')
+      || '<div class="kg-leer">Hierher ziehen, was du selten brauchst</div>';
     const ext = s.extern.length ? `<div class="kg-sep"></div><details class="kg-links"><summary class="kg-h">Links</summary><div class="kg-ext">${s.extern.map(m =>
       `<a href="${esc(m.url)}" target="_blank" rel="noopener"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${EXT}</svg>${esc(m.kurzname || m.name)}</a>`).join('')}</div></details>` : '';
-    return `<div class="kg-h">Tools</div><div class="kg-grid">${items}</div>${ext}`;
+    return `<div class="kg-mk"><span class="kg-h">Meine Tools</span>${home ? `<a class="kg-start" href="${home.url}">${SVG(TI.home)}Startseite</a>` : ''}</div>
+      <div class="kg-meine" data-bereich="meine">${gross}</div><div class="kg-sep"></div>
+      <div class="kg-mk"><span class="kg-h">Weitere Tools</span><label class="kg-schalter" title="An: was du oft öffnest, steht oben. Aus: Reihenfolge selber ziehen."><input type="checkbox" data-haeufig${L.haeufig ? ' checked' : ''}>nach Häufigkeit</label></div>
+      <div class="kg-weitere" data-bereich="weitere">${klein}</div>
+      ${L.weitere.length > 8 ? `<button type="button" class="kg-alle" data-alle>${alleWeitere ? 'Weniger anzeigen' : `Alle anzeigen (${L.weitere.length})`}</button>` : ''}${ext}`;
+  }
+  // Ziehen (Maus): innerhalb «Meine Tools» an die genaue Stelle, zwischen den Bereichen hin und her; «Weitere» nur bei «nach Häufigkeit» aus.
+  // Speichert pro Person in tool_menue (an + sortierung beider Listen).
+  function menuBinden(menu, s, neu){
+    let gezogen = null;
+    const L = () => menuListen(s);
+    const speichern = async (meine, weitere, haeufigAn) => {
+      const M = new Map((s.menue || []).map(m => [m.app_key, m]));
+      const rows = meine.map((k, i) => ({ app_key: k, sortierung: (i + 1) * 10, an: true, aufrufe: (M.get(k) || {}).aufrufe || 0 }))
+        .concat(weitere.map((k, i) => ({ app_key: k, sortierung: (i + 1) * 10, an: false, aufrufe: (M.get(k) || {}).aufrufe || 0 })));
+      if(haeufigAn !== undefined) rows.push({ app_key: HAEUFIG, sortierung: 0, an: haeufigAn, aufrufe: 0 });
+      rows.forEach(r => M.set(r.app_key, { ...(M.get(r.app_key) || {}), ...r })); s.menue = [...M.values()];
+      neu();
+      try { if(KG._sb) await KG._sb.from('tool_menue').upsert(rows.map(({ aufrufe, ...r }) => r)); } catch(e){}
+    };
+    const zielPos = (e, box, liste) => { const el = e.target.closest('[data-tk]'); if(!el || el.dataset.tk === gezogen) return { idx: liste.length };
+      const r = el.getBoundingClientRect(), nach = box.dataset.bereich === 'meine' ? e.clientX > r.left + r.width / 2 : e.clientY > r.top + r.height / 2 || e.clientX > r.left + r.width * .75;
+      return { idx: liste.indexOf(el.dataset.tk) + (nach ? 1 : 0), el, nach }; };
+    const aus = () => menu.querySelectorAll('.kg-ziel,.kg-ml,.kg-mr').forEach(x => x.classList.remove('kg-ziel', 'kg-ml', 'kg-mr'));
+    menu.addEventListener('dragstart', e => { const el = e.target.closest('[data-tk]'); if(!el) return; gezogen = el.dataset.tk; el.classList.add('kg-zieht'); e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', gezogen); } catch(_){} });
+    menu.addEventListener('dragend', () => { gezogen = null; aus(); menu.querySelectorAll('.kg-zieht').forEach(x => x.classList.remove('kg-zieht')); });
+    {
+      menu.addEventListener('dragover', e => { const box = e.target.closest('[data-bereich]'); if(!gezogen || !box) return; e.preventDefault(); aus(); box.classList.add('kg-ziel');
+        const l = L(), frei = box.dataset.bereich === 'meine' || !l.haeufig; if(frei){ const z = zielPos(e, box, (box.dataset.bereich === 'meine' ? l.meine : l.weitere).map(t => t.k)); if(z.el) z.el.classList.add(z.nach ? 'kg-mr' : 'kg-ml'); } });
+      menu.addEventListener('drop', e => { const box = e.target.closest('[data-bereich]'); if(!gezogen || !box) return; e.preventDefault(); const k = gezogen, l = L();
+        const meine = l.meine.map(t => t.k), weitere = l.weitere.map(t => t.k), ziel = box.dataset.bereich === 'meine' ? meine : weitere, frei = ziel === meine || !l.haeufig;
+        let { idx } = frei ? zielPos(e, box, ziel) : { idx: ziel.length };
+        const von = meine.includes(k) ? meine : weitere, alt = von.indexOf(k); von.splice(alt, 1); if(von === ziel && alt < idx) idx--; ziel.splice(Math.max(0, idx), 0, k);
+        gezogen = null; speichern(meine, weitere); });
+    }
+    menu.addEventListener('change', e => { if(e.target.matches('[data-haeufig]')){ const l = L(); speichern(l.meine.map(t => t.k), l.weitere.map(t => t.k), e.target.checked); } });
+    menu.addEventListener('click', e => { if(e.target.closest('[data-alle]')){ e.stopPropagation(); alleWeitere = !alleWeitere; neu(); } });
   }
 
   function leiste(){
@@ -633,7 +711,15 @@ html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!import
     if(back) back.replaceWith(btn); else wrap.insertBefore(btn, wrap.firstChild);
     if(brand) brand.style.display = 'none';
 
-    popup(btn, 'kg-twmenu', 'links', async setze => { setze(menuHtml({ rolle: null, module: null, extern: [] })); setze(menuHtml(await ladeSichtbarkeit())); });
+    // Tool-Menü: erst ohne Daten (schnell), dann mit Rechten und persönlicher Auswahl; Ziehen/Schalter zeichnen neu
+    popup(btn, 'kg-toolmenu', 'links', async (setze, zu, menu) => { let s = { rolle: null, module: null, extern: [] }; const neu = () => setze(menuHtml(s));
+      neu(); s = await ladeSichtbarkeit(); neu(); if(menu) menuBinden(menu, s, neu); });
+    // Häufigkeit für «Weitere Tools»: Öffnen dieses Tools zählen (die Datenbank zählt höchstens einmal pro 20 Minuten)
+    setTimeout(async () => { try {
+      if(aktuell.k === 'home' || !window.supabase || !window.supabase.createClient) return;
+      KG._sb = KG._sb || window.supabase.createClient('https://oalapdxinqlnzwxhyuzy.supabase.co', 'sb_publishable_DoeD4uEnwemmnFu4AxE9uw_5lmQYc5P');
+      const { data: { session } } = await KG._sb.auth.getSession(); if(session) await KG._sb.rpc('tool_aufruf', { p_key: aktuell.k });
+    } catch(e){} }, 4000);
     vereinheitlichen(head, wrap, btn);
   }
 
@@ -647,7 +733,7 @@ html:not(.kg-voll) header.app.kg-leiste .wrap{padding-left:var(--kg-rand)!import
       menu.style.top = (r.bottom + 6) + 'px';
       if(seite === 'rechts') menu.style.right = Math.max(12, window.innerWidth - r.right) + 'px'; else menu.style.left = Math.max(12, r.left) + 'px';
       document.body.appendChild(menu); btn.setAttribute('aria-expanded', 'true');
-      fuellen(html => { if(menu) menu.innerHTML = html; }, zu);
+      fuellen(html => { if(menu) menu.innerHTML = html; }, zu, menu);
     };
     btn.setAttribute('aria-haspopup', 'true'); btn.setAttribute('aria-expanded', 'false');
     btn.addEventListener('click', e => { e.stopPropagation(); menu ? zu() : auf(); });
