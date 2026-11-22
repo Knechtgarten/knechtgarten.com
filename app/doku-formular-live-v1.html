@@ -109,6 +109,13 @@ async function aufbau(main){
   document.title = V.name + ' – Doku-Tools'; $('docTitel').textContent = V.name; $('ordnerLink').insertAdjacentText('beforeend', V.ordner ? V.ordner.name : 'Dokumente');
   werte = werte || { sb: KGD.ich, pos: [{ menge: '1' }] };
   if(!werte.pos?.length) werte.pos = [{ menge: '1' }];
+  // aus Kontakte (Kachel «Doku-Tool» › Neu): Kunde in die Bemerkung des ersten Artikels, Dokument hängt am Kunden
+  // Name wie in der Kundensuche (kunde_suche): Firma, sonst Vorname Nachname, sonst Name
+  const kundeText = k => [(k.firma || '').trim() || [k.vorname, k.nachname].filter(Boolean).join(' ').trim() || k.name, k.ort].filter(Boolean).join(', ');
+  if(!quelle && P.get('kunde')){
+    const { data: k } = await sb.from('kunde').select('id,name,firma,vorname,nachname,ort').eq('id', P.get('kunde')).maybeSingle();
+    if(k){ werte.kunde_id = k.id; werte.kunde_name = kundeText(k); werte.pos[0].bem = werte.kunde_name; }
+  }
   let gespeichert = dokId ? JSON.stringify(werte) : null;
 
   const vorlageBytes = await (await fetch(V.datei_pfad)).arrayBuffer();
@@ -165,7 +172,8 @@ async function aufbau(main){
   let spT = null; const speichernSpaeter = () => { clearTimeout(spT); spT = setTimeout(speichern, 900); };
   async function speichern(){
     const json = JSON.stringify(werte); if(json === gespeichert || !werte.pos.some(p => p.nr)) return true;
-    const zeile = { vorlage_id: V.id, werte, datum: new Date().toISOString().slice(0, 10), adresse: werte.pos.filter(p => p.nr).map(p => p.nr).join(', '), geaendert_am: new Date().toISOString() };
+    const kundeDrin = werte.kunde_id && werte.kunde_name && werte.pos.some(p => (p.bem || '').includes(werte.kunde_name));   // Kunde steht noch in einer Bemerkung → Dokument erscheint in Kontakte beim Kunden
+    const zeile = { vorlage_id: V.id, kunde_id: kundeDrin ? werte.kunde_id : null, werte, datum: new Date().toISOString().slice(0, 10), adresse: werte.pos.filter(p => p.nr).map(p => p.nr).join(', '), geaendert_am: new Date().toISOString() };
     const r = dokId ? await sb.from('doku_dokument').update(zeile).eq('id', dokId).select('id').single() : await sb.from('doku_dokument').insert(zeile).select('id').single();
     if(r.error){ KGD.toast('Speichern fehlgeschlagen: ' + r.error.message, true); return false; }
     dokId = r.data.id; gespeichert = json; history.replaceState(null, '', 'doku-formular-live-v1.html?d=' + dokId); return true;
@@ -324,7 +332,7 @@ async function aufbau(main){
           : `<div class="ffnr"><input class="kgd-t" data-artnr="${i}" autocomplete="off" inputmode="numeric" maxlength="7" placeholder="Aqua-Solar-Nr."><button type="button" class="kgd-btn ghost" data-katalog="${i}">${ic('suche', 14)}Im Katalog suchen</button></div>
             ${nrNicht[i] ? `<div class="ffnicht">${esc(nrNicht[i])} steht nicht im Katalog. <button type="button" class="kklink" data-trotzdem="${i}">Trotzdem übernehmen</button></div>` : ''}`}</div>
           <div class="kgd-feld" style="flex:0 0 70px"><label>Menge</label><input class="kgd-t" data-menge="${i}" value="${esc(p.menge || '')}" inputmode="numeric"></div></div>
-        <div class="kgd-feld"><label>Bemerkungen <small class="opt">optional</small></label><input class="kgd-t" data-bem="${i}" value="${esc(p.bem || '')}" placeholder="z. B. Kommission Steiner, Spiez"></div>
+        <div class="kgd-feld"><label>Bemerkungen <small class="opt">optional</small></label><input class="kgd-t" data-bem="${i}" value="${esc(p.bem || '')}" placeholder="Kunde suchen oder Text, z. B. Kommission Steiner" autocomplete="off"><div class="kgd-menue hidden" data-bemm="${i}"></div></div>
         <div class="ffgrund">${GRUENDE.map(g => `<label><input type="radio" name="g${i}" data-grund="${i}" value="${g.k}" ${p.grund === g.k ? 'checked' : ''}>${esc(g.n)}</label>`).join('')}</div></div>`).join('')}
       ${werte.pos.length < 3 ? '<button type="button" class="kgd-btn ghost" id="posNeu">+ Artikel</button>' : ''}
       ${rechnungNoetig() ? `<div class="ffre ${werte.rechnung ? 'ok' : 'noetig'}"><b>${werte.rechnung ? 'Rechnungskopie angehängt' : 'Rechnungskopie nötig'}</b>
@@ -358,11 +366,28 @@ async function aufbau(main){
   $('datenOk').addEventListener('click', () => { fenster(false); speichern(); });
   fenster(!dokId);
 
+  // Bemerkungen: beim Tippen Kunden vorschlagen (Kundenliste wie im Doku-Dokument); Auswahl schreibt «Name, Ort» hinein
+  // und hängt das Dokument an den Kunden (Kontakte › Kachel «Doku-Tool»). Freier Text geht weiterhin.
+  let bemT = null, bemLauf = 0, bemTreffer = [];
+  function bemVorschlaege(i, q){
+    clearTimeout(bemT); const m = main.querySelector(`[data-bemm="${i}"]`); if(!m) return;
+    if(q.length < 3 || q === werte.kunde_name){ m.classList.add('hidden'); return; }
+    bemT = setTimeout(async () => { const nr = ++bemLauf;
+      const { data } = await sb.rpc('kunde_suche', { q, anzahl: 8 }); if(nr !== bemLauf) return;
+      bemTreffer = data || [];
+      m.innerHTML = bemTreffer.length ? `<div class="kopfzeile">Kunde übernehmen (sonst einfach weiterschreiben)</div>` + bemTreffer.map((k, j) => `<button type="button" data-bemw="${i}:${j}"><b>${esc(k.name || '')}</b><small>${esc([k.strasse, [k.plz, k.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ') || 'keine Adresse')}</small></button>`).join('') : '';
+      m.classList.toggle('hidden', !bemTreffer.length); }, 250);
+  }
+  main.addEventListener('mousedown', e => { const b = e.target.closest('[data-bemw]'); if(!b) return; e.preventDefault();
+    const [i, j] = b.dataset.bemw.split(':').map(Number), k = bemTreffer[j];
+    werte.kunde_id = k.id; werte.kunde_name = [k.name, k.ort].filter(Boolean).join(', '); werte.pos[i].bem = werte.kunde_name; angaben(); neu(); });
+  main.addEventListener('focusout', e => { if(e.target.dataset?.bem != null) setTimeout(() => main.querySelector(`[data-bemm="${e.target.dataset.bem}"]`)?.classList.add('hidden'), 180); });
+
   // Ereignisse
   main.addEventListener('input', e => {
     const t = e.target;
     if(t.dataset.menge != null){ werte.pos[+t.dataset.menge].menge = t.value.trim(); neu(); }
-    else if(t.dataset.bem != null){ werte.pos[+t.dataset.bem].bem = t.value.trim(); neu(); }
+    else if(t.dataset.bem != null){ werte.pos[+t.dataset.bem].bem = t.value.trim(); neu(); bemVorschlaege(+t.dataset.bem, t.value.trim()); }
     else if(t.dataset.artnr != null){ const v = t.value.replace(/\D/g, ''); if(v.length === 6) nrSuchen(+t.dataset.artnr, v); }
   });
   main.addEventListener('keydown', e => { const t = e.target; if(t.dataset.artnr == null || e.key !== 'Enter') return; e.preventDefault();
