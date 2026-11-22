@@ -5,9 +5,9 @@
 //   KGE.fragen({ titel, an, text })                                         → kleines Fenster «… drucken?»
 //   KGE.zeilen(adresse)  macht aus { firma, name, vorname, nachname, zusatz1, zusatz2, strasse, plz, ort, land } die Zeilen
 //
-// Format 102 × 152 mm (Brother QL, Rolle DK-11241) – auch das Format der späteren Post-Paketetiketten (A6).
+// Format 102 × 50 mm quer (Brother QL-1110NWB, Endlosrolle 102 mm DK-22243; spätere Post-Paketetiketten A6 von derselben Rolle).
 // Auf einem normalen Drucker kommt die Etikette in Originalgrösse oben links aufs A4-Blatt (zum Testen).
-// Absender klein oben, Empfänger gross. Der Browser zeigt immer den Druckdialog; Chrome merkt sich den
+// Absender hochkant links, Empfänger gross rechts. Der Browser zeigt immer den Druckdialog; Chrome merkt sich den
 // zuletzt gewählten Drucker, mit dem Brother als Ziel reicht danach Enter.
 // ============================================================================
 (function () {
@@ -21,21 +21,25 @@
     return z.map(s => String(s || '').trim()).filter(Boolean).filter((s, i, l) => l.indexOf(s) === i);
   }
 
+  // 102 × 50 mm quer (Endlosrolle 102 mm, z. B. DK-22243): links Absender hochkant (von unten nach oben lesbar),
+  // rechts der Empfänger über die ganze Höhe zentriert; bei vielen Zeilen etwas kleiner
   function html(an) {
+    const gr = an.length > 4 ? 10.5 : 12.5;
     return `<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>Etikette</title><style>
-      @page { size: 102mm 152mm; margin: 0; }
+      @page { size: 102mm 50mm; margin: 0; }
       * { box-sizing: border-box; }
       html, body { margin: 0; padding: 0; }
       body { font-family: Arial, Helvetica, sans-serif; color: #000; }
-      .et { width: 102mm; height: 152mm; padding: 7mm 7mm 6mm; display: flex; flex-direction: column; overflow: hidden; page-break-after: always; }
-      .von { font-size: 8.5pt; line-height: 1.3; padding-bottom: 2.5mm; border-bottom: 0.4mm solid #000; }
-      .von b { font-size: 9pt; }
-      .an { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 0 2mm 10mm; }
-      .an .z { font-size: 15pt; line-height: 1.3; word-break: break-word; }
+      .et { width: 102mm; height: 50mm; padding: 3mm 4mm 3mm 3mm; display: flex; overflow: hidden; page-break-after: always; }
+      .von { width: 9mm; flex: none; writing-mode: vertical-rl; transform: rotate(180deg); font-size: 6.5pt; line-height: 1.25;
+        display: flex; flex-direction: column; justify-content: center; text-align: center; border-left: 0.3mm solid #000; padding-left: 1.5mm; }
+      .von b { font-size: 7pt; }
+      .an { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; padding-left: 5mm; }
+      .an .z { font-size: ${gr}pt; line-height: 1.25; overflow-wrap: anywhere; }
       .an .z.n { font-weight: bold; }
-      .an .z.ort { font-weight: bold; font-size: 16pt; margin-top: 1mm; }
+      .an .z.ort { font-weight: bold; }
     </style></head><body><div class="et">
-      <div class="von"><b>${esc(ABSENDER[0])}</b><br>${ABSENDER.slice(1).map(esc).join(', ')}</div>
+      <div class="von"><b>${esc(ABSENDER[0])}</b><span>${ABSENDER.slice(1).map(esc).join(', ')}</span></div>
       <div class="an">${an.map((s, i) => `<div class="z${i === 0 ? ' n' : ''}${i === an.length - 1 && /^\d{4,5}\s/.test(s) ? ' ort' : ''}">${esc(s)}</div>`).join('')}</div>
     </div></body></html>`;
   }
