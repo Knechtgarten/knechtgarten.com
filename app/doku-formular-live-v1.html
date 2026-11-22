@@ -28,6 +28,11 @@
 .ffre{border-radius:10px;padding:10px;font-size:12.5px;display:flex;flex-direction:column;gap:8px;}
 .ffre.noetig{background:#FDF1EF;border:1px solid #F0C9C3;} .ffre.ok{background:#EEF6EC;border:1px solid #C9E2C3;}
 .ffre .zeile{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+.ffre a{color:#323E4E;font-weight:600;}
+.ffpx{display:flex;flex-direction:column;background:#fff;border:1px solid #E1E5E9;border-radius:8px;overflow:hidden;}
+.ffpx button{all:unset;display:flex;gap:10px;align-items:baseline;padding:7px 10px;cursor:pointer;border-top:1px solid #EEF1F4;font-size:12.5px;}
+.ffpx button:first-child{border-top:0;} .ffpx button:hover:not([disabled]){background:#F5F7F9;} .ffpx button[disabled]{cursor:default;opacity:.7;}
+.ffpx .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;} .ffpx .d{color:#6B7079;} .ffpx .b{font-variant-numeric:tabular-nums;text-align:right;min-width:78px;}
 .ffblatt{display:flex;flex-direction:column;align-items:center;gap:10px;}
 .ffblatt canvas{width:100%;max-width:760px;height:auto;background:#fff;box-shadow:0 4px 18px rgba(35,43,53,.15);border-radius:2px;}
 .ffhinweis{font-size:12px;color:#6B7079;}
@@ -144,6 +149,59 @@ async function aufbau(main){
     dokId = r.data.id; gespeichert = json; history.replaceState(null, '', 'doku-formular-live-v1.html?d=' + dokId); return true;
   }
 
+  // Rechnungskopie aus PEAX über die Chrome-Erweiterung «Knechtgarten» (kg-seite.js → PEAX-Tab):
+  // Volltextsuche nach den Artikelnummern, nur Rechnungen von Aqua Solar, Klick auf einen Treffer hängt das PDF an.
+  const px = { laeuft: false, treffer: null, fehler: '', schluessel: '', holt: null };
+  const PEAX_LINK = '<a href="https://app.peax.ch/inbox/search" target="_blank" rel="noopener">PEAX öffnen</a>';
+  function ext(auftrag, daten){
+    return new Promise((ok, nein) => {
+      if(!document.documentElement.dataset.kgExt) return nein(new Error('ohne'));
+      const nr = crypto.randomUUID();
+      const f = e => { if(e.source !== window || e.data?.kanal !== 'kg-ext' || e.data.typ !== 'antwort' || e.data.nr !== nr) return;
+        removeEventListener('message', f); clearTimeout(t); ok(e.data.antwort || { fehler: 'keine Antwort' }); };
+      const t = setTimeout(() => { removeEventListener('message', f); nein(new Error('PEAX antwortet nicht')); }, 120000);
+      addEventListener('message', f);
+      postMessage({ kanal: 'kg-ext', typ: 'anfrage', nr, auftrag, daten }, location.origin);
+    });
+  }
+  const pxFehler = f => f === 'ohne' ? `Automatisch geht es mit der Chrome-Erweiterung «Knechtgarten» (ab Version 0.32). Sonst Rechnung in PEAX als PDF herunterladen und hochladen. ${PEAX_LINK}`
+    : f === 'anmelden' ? `In PEAX nicht angemeldet. ${PEAX_LINK}, anmelden und nochmals suchen.`
+    : /\b401\b/.test(f) ? 'PEAX-Anmeldung abgelaufen. PEAX-Tab neu laden und nochmals suchen.'
+    : esc(f) + ` ${PEAX_LINK}`;
+  const nummern = () => [...new Set(werte.pos.filter(p => p.nr).map(p => p.nr))];
+  const datumCH = d => d ? d.split('-').reverse().join('.') : '';
+  function pxListe(){
+    if(px.laeuft) return '<span class="ffhinweis">Suche in PEAX …</span>';
+    if(px.fehler) return `<span>${px.fehler}</span>`;
+    if(!px.treffer) return '';
+    if(!px.treffer.length) return `<span>Keine Rechnung von Aqua Solar mit ${esc(nummern().join(', '))} gefunden.</span>`;
+    return `<div class="ffpx">${px.treffer.map((t, j) => `<button type="button" data-px="${j}" ${px.holt != null ? 'disabled' : ''}><span class="t">${esc(t.titel)}${nummern().length > 1 ? ` <small class="d">${esc((t.nr || []).join(', '))}</small>` : ''}</span><span class="d">${datumCH(t.datum)}</span><span class="b">${t.betrag != null ? 'CHF ' + Number(t.betrag).toLocaleString('de-CH', { minimumFractionDigits: 2 }) : ''}</span>${px.holt === j ? '<span class="d">lädt …</span>' : ''}</button>`).join('')}</div>`;
+  }
+  async function pxSuchen(){
+    const nr = nummern();
+    if(!nr.length){ px.fehler = 'Zuerst einen Artikel wählen.'; angaben(); return; }
+    px.laeuft = true; px.fehler = ''; px.treffer = null; px.schluessel = nr.join('|'); angaben();
+    try { const a = await ext('suche', { suche: nr, sender: 'aqua.?solar' });
+      if(a.fehler) px.fehler = pxFehler(a.fehler); else px.treffer = a.treffer || []; }
+    catch(err){ px.fehler = pxFehler(err.message); }
+    px.laeuft = false; angaben();
+  }
+  async function pxHolen(j){
+    const t = px.treffer[j]; px.holt = j; angaben();
+    try { const a = await ext('pdf', { id: t.id });
+      if(a.fehler || !a.pdf) throw new Error(a.fehler || 'Das ist keine Rechnung.');
+      const bin = atob(a.pdf), u8 = new Uint8Array(bin.length); for(let k = 0; k < bin.length; k++) u8[k] = bin.charCodeAt(k);
+      const pfad = `ruecksendung/${crypto.randomUUID()}.pdf`, up = await sb.storage.from('doku-anhaenge').upload(pfad, new Blob([u8], { type: 'application/pdf' }), { contentType: 'application/pdf' });
+      if(up.error) throw new Error('Speichern fehlgeschlagen: ' + up.error.message);
+      werte.rechnung = { pfad, name: (t.titel || 'Rechnung') + '.pdf', peax_id: t.id }; px.holt = null; angaben(); neu(); KGD.toast('Rechnungskopie aus PEAX angehängt');
+    } catch(err){ px.holt = null; px.fehler = pxFehler(err.message); angaben(); }
+  }
+  // automatisch suchen, sobald eine Rechnung nötig ist (einmal pro Artikel-Auswahl)
+  function pxAuto(){
+    if(!rechnungNoetig() || werte.rechnung || px.laeuft || !document.documentElement.dataset.kgExt) return;
+    const s = nummern().join('|'); if(s && s !== px.schluessel) pxSuchen();
+  }
+
   // Angaben (links)
   const gr = GRUENDE.map(g => g.k);
   function angaben(){
@@ -160,10 +218,11 @@ async function aufbau(main){
       ${werte.pos.length < 3 ? '<button type="button" class="kgd-btn ghost" id="posNeu">+ Artikel</button>' : ''}
       ${rechnungNoetig() ? `<div class="ffre ${werte.rechnung ? 'ok' : 'noetig'}"><b>${werte.rechnung ? 'Rechnungskopie angehängt' : 'Rechnungskopie nötig'}</b>
         ${werte.rechnung ? `<div class="zeile">${ic('dokument', 14)}<span style="flex:1;min-width:0">${esc(werte.rechnung.name)}</span><button type="button" class="kg-ibtn danger" id="reWeg" title="Rechnungskopie entfernen">${ic('trash', 13)}</button></div>`
-          : `<span>Für Gutschrift und Garantie verlangt Aqua Solar die Rechnung. Rechnung in PEAX suchen (Artikelnummer ins Suchfeld oben rechts), als PDF herunterladen und hier hochladen.</span>
-          <div class="zeile"><button type="button" class="kgd-btn prim" id="reHoch">${ic('upload', 14)}Rechnung hochladen</button><a class="kgd-btn ghost" href="https://app.peax.ch/inbox/search" target="_blank" rel="noopener">PEAX öffnen</a></div>`}</div>` : ''}
+          : `<span>Für Gutschrift und Garantie verlangt Aqua Solar die Rechnung.</span>
+          <div class="zeile"><button type="button" class="kgd-btn prim" id="rePeax" ${px.laeuft ? 'disabled' : ''}>${ic('suche', 14)}In PEAX suchen</button><button type="button" class="kgd-btn ghost" id="reHoch">${ic('upload', 14)}Hochladen</button></div>
+          ${pxListe()}`}</div>` : ''}
       <div class="ffhinweis">Absender, Ort, Datum und Unterschrift stehen automatisch auf dem Blatt.</div>`;
-    sigZeile();
+    sigZeile(); setTimeout(pxAuto, 0);
   }
   async function sigZeile(){
     const el = $('sigZeile'); if(!el) return; const sig = await unterschrift(werte.sb);
@@ -205,6 +264,8 @@ async function aufbau(main){
     if(b.dataset.posweg != null){ werte.pos.splice(+b.dataset.posweg, 1); angaben(); neu(); return; }
     if(b.dataset.artweg != null){ const p = werte.pos[+b.dataset.artweg]; p.nr = ''; p.bez = ''; p.artikel_id = null; angaben(); neu(); return; }
     if(b.id === 'reWeg'){ const alt = werte.rechnung; werte.rechnung = null; angaben(); neu(); if(alt) sb.storage.from('doku-anhaenge').remove([alt.pfad]); return; }
+    if(b.id === 'rePeax'){ pxSuchen(); return; }
+    if(b.dataset.px != null){ pxHolen(+b.dataset.px); return; }
     if(b.id === 'reHoch'){ const i = document.createElement('input'); i.type = 'file'; i.accept = 'application/pdf';
       i.onchange = async () => { const f = i.files[0]; if(!f) return;
         try { await PDFLib.PDFDocument.load(await f.arrayBuffer(), { ignoreEncryption: true }); } catch(err){ KGD.toast('Das ist kein lesbares PDF.', true); return; }

@@ -10,6 +10,8 @@
 //      hinzufügen», beobachtet 2026-11-06):
 //      POST /core-service-pdf/api/v1/object-contents/{id}/page-manipulation/insert
 //      FormData file=PDF, data={"pageIndexes":[Seitenzahl]} → 204, sofort gespeichert
+// Ausserdem für die Waren-Rücksendung im Doku-Tool: Rechnungen suchen (typ 'suche')
+// und eine Rechnung als PDF liefern (typ 'pdf').
 // Kann bei einem Umbau von PEAX brechen – dann meldet es einen Fehler, hängt
 // aber nie etwas Falsches an.
 // ============================================================================
@@ -79,7 +81,7 @@
 
   // Für den Knopf «Verfügung anfordern»: offene Rechnung als PDF (Base64) mit Absender, nur Typ INVOICE
   async function rechnungPdf({ id }) {
-    if (!(await bereit(15000))) return { fehler: 'PEAX-Anmeldung nicht erkannt' };
+    if (!(await bereit(15000))) return { fehler: 'anmelden' };
     const d = await (await peax('/document/api/v3/documents/' + id)).json();
     if (d?.type !== 'INVOICE') return { skip: true };
     const buf = await (await peax('/core-feature-media/api/v1/media/document/' + id, { headers: { Accept: '*/*' } })).arrayBuffer();
@@ -88,9 +90,33 @@
     return { titel: d.title || '', sender: d.sender?.name || '', pdf: btoa(s) };
   }
 
+  // Für die Waren-Rücksendung (Doku-Tool): Rechnungen eines Lieferanten per Volltextsuche (z. B. Artikelnummer).
+  // { suche: ['046101', …], sender: 'aqua.?solar' } → { treffer: [{ id, titel, datum, betrag, sender, nr }] }, neueste zuerst
+  async function rechnungSuche({ suche = [], sender = '' }) {
+    if (!(await bereit(25000))) return { fehler: 'anmelden' };
+    const rx = sender ? new RegExp(sender, 'i') : null, gesehen = new Map();
+    for (const q of suche.slice(0, 3)) {
+      const s = await (await peax('/core-feature-search/search-api/api/v1/search', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filter: [{ path: 'inboxType', op: 'isEqualTo', value: 'SEARCH' }], search: String(q) }) })).json();
+      for (const id of (s?.documents?.items || []).slice(0, 12)) {
+        if (gesehen.has(id)) { gesehen.get(id)?.nr.push(q); continue; }
+        gesehen.set(id, null);
+        try { const d = await (await peax('/document/api/v3/documents/' + id)).json();
+          if (d?.type !== 'INVOICE' || d.movedToBin || (rx && !rx.test(d.sender?.name || ''))) continue;
+          gesehen.set(id, { id, titel: d.title || '', datum: d.documentDate || '', betrag: d.metadata?.invoiceAmount?.value ?? d.metadata?.totalAmount?.value ?? null, sender: d.sender?.name || '', nr: [q] }); } catch (_) {}
+      }
+    }
+    return { treffer: [...gesehen.values()].filter(Boolean).sort((a, b) => (b.datum || '').localeCompare(a.datum || '')) };
+  }
+
   window.addEventListener('message', async (e) => {
-    if (e.source !== window || e.data?.kanal !== KANAL || !['auftrag', 'pdf'].includes(e.data.typ)) return;
+    if (e.source !== window || e.data?.kanal !== KANAL || !['auftrag', 'pdf', 'suche'].includes(e.data.typ)) return;
     let antwort;
+    if (e.data.typ === 'suche') {
+      try { antwort = await rechnungSuche(e.data.evv); } catch (err) { antwort = { fehler: String(err?.message || err).slice(0, 200) }; }
+      window.postMessage({ kanal: KANAL, typ: 'antwort', nr: e.data.nr, antwort }, '*');
+      return;
+    }
     if (e.data.typ === 'pdf') {
       try { antwort = await rechnungPdf(e.data.evv); } catch (err) { antwort = { fehler: String(err?.message || err).slice(0, 200) }; }
       window.postMessage({ kanal: KANAL, typ: 'antwort', nr: e.data.nr, antwort }, '*');

@@ -51,6 +51,14 @@
     } finally { laeuft = false; }
   }
 
+  // Waren-Rücksendung (Doku-Tool): Aufträge vom Hintergrund (kommen von knechtgarten.com über kg-seite.js)
+  //   suche → Rechnungen finden, pdf → Rechnung als PDF (Base64)
+  chrome.runtime.onMessage.addListener((msg, _sender, antwort) => {
+    if (msg?.kg !== 'peax' || !['suche', 'pdf'].includes(msg.typ)) return;
+    auftrag(msg.daten || {}, msg.typ).then((a) => antwort(a?.ergebnis === 'fehler' ? { fehler: a.hinweis } : a));
+    return true;
+  });
+
   setTimeout(lauf, 8000);
   setInterval(lauf, 15 * 60000);
 
