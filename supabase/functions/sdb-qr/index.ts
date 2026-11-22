@@ -23,9 +23,9 @@ Deno.serve(async (req) => {
       .eq('sdb_code', c).is('archiviert_am', null).maybeSingle();
     if (!e) return json({ error: 'ungueltig' }, 404);
 
-    const { data: d } = await sb.from('wissen_datei').select('name,art,storage_pfad')
-      .eq('eintrag_id', e.id).eq('bereich', 'sicherheit').is('exemplar_id', null).order('erstellt_am');
-    const dateien = (d || []).map((z) => ({ name: z.name, art: z.art, pfad: z.storage_pfad }));
+    const { data: d } = await sb.from('wissen_datei').select('name,art,storage_pfad,bereich')
+      .eq('eintrag_id', e.id).in('bereich', ['sdb', 'sicherheit']).is('exemplar_id', null).order('erstellt_am');   // sdb = Datenblatt, sicherheit = Merkblätter
+    const dateien = (d || []).map((z) => ({ name: z.name, art: z.art, pfad: z.storage_pfad, sdb: z.bereich === 'sdb' }));
 
     let html = e.sicherheit_html || '';
     const imText = [...html.matchAll(/data-pfad="([^"]+)"/g)].map((m) => m[1]);
@@ -44,7 +44,7 @@ Deno.serve(async (req) => {
       foto: e.titelfoto_pfad ? url[e.titelfoto_pfad] || null : null,
       psa: e.psa || [],
       html,
-      dateien: dateien.map((z) => ({ name: z.name, art: z.art, url: url[z.pfad] || null })),
+      dateien: dateien.map((z) => ({ name: z.name, art: z.art, sdb: z.sdb, url: url[z.pfad] || null })),
     });
   } catch (err) {
     return json({ error: String(err) }, 500);

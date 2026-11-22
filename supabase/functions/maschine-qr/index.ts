@@ -33,7 +33,7 @@ Deno.serve(async (req) => {
 
     let html = e.sicherheit_html || '', anleitung = e.anwendung_html || '';
     const { data: d } = await sb.from('wissen_datei').select('name,art,storage_pfad')
-      .eq('eintrag_id', x.eintrag_id).eq('bereich', 'sicherheit').is('exemplar_id', null).order('erstellt_am');
+      .eq('eintrag_id', x.eintrag_id).in('bereich', ['sdb', 'sicherheit']).is('exemplar_id', null).order('erstellt_am');   // Datenblatt + Merkblätter
     const dateien = (d || []).map((z) => ({ name: z.name, art: z.art, pfad: z.storage_pfad }));
 
     // alle Pfade auf einmal signieren: Titelfoto, Medien im Text (data-pfad), Datenblätter
