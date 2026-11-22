@@ -1,6 +1,6 @@
 // ============================================================================
 // QR-Bestellung: Artikel in den Warenkorb eines Lieferanten-Shops legen (läuft in background.js).
-// Pro Shop-System ein Ablauf (heute: Magento, z. B. Aquasolar). Was sich ändern kann (Shop-Adresse, Sprache,
+// Pro Shop-System ein Ablauf (heute: Magento = Aquasolar, Dabag = B-TEAM). Was sich ändern kann (Shop-Adresse, Sprache,
 // Adresse der Bestätigungsseite), kommt vom Tool aus der Tabelle bestell_anbindung mit – kein Code im Tool.
 //
 // Ablauf «bestellen»: Shop-Warenkorb im eigenen Browser öffnen (du bist dort angemeldet), Artikelnummern im Shop
@@ -26,7 +26,7 @@ function warteAufTab(id, sek = 40) {
 }
 
 async function shopTab(a, aktiv) {
-  const basis = a.shop_url.replace(/\/+$/, ''), url = `${basis}/${a.sprache || 'de'}/checkout/cart/`;
+  const basis = a.shop_url.replace(/\/+$/, ''), url = basis + STARTSEITE[a.plattform](a);
   const offen = await chrome.tabs.query({ url: basis + '/*' });
   let tab = offen[0], eigen = false;
   if (tab) await chrome.tabs.update(tab.id, { url, active: aktiv });
@@ -88,7 +88,51 @@ async function magentoAblauf(auftrag, pos, sprache) {
   if (Object.keys(upd).length) await post(`/${sprache}/checkout/cart/updatePost/`, { update_cart_action: 'update_qty', ...upd }).catch(() => null);
   return { ok, fehler };
 }
-const ABLAEUFE = { magento: magentoAblauf };
+// ---------- Dabag (B-TEAM, IMMER AG): Direkterfassung im Warenkorb, Notiz ins Feld «Kommission» ----------
+async function dabagAblauf(auftrag, pos, _sprache, opt) {
+  const c = opt && opt.firmenkorb ? 1 : 0;
+  const nrn = [...new Set(pos.map((p) => String(p.nr)))];
+  const korbHtml = () => fetch('/?srv=basket&companyYN=' + c, { credentials: 'include' }).then((r) => r.text());
+  const h0 = await korbHtml();
+  if (!/srv=logout/.test(h0)) return { fehler: 'Im Shop nicht angemeldet. Bitte im Shop anmelden und nochmals starten.' };
+  const lesen = (html) => {
+    const d = new DOMParser().parseFromString(html, 'text/html');
+    return [...d.querySelectorAll('tr[id^="bsi-"]')].filter((t) => /^bsi-\d+$/.test(t.id)).map((t) => {
+      const id = t.id.slice(4), text = t.textContent || '';
+      const nr = nrn.find((n) => new RegExp('(^|[^0-9A-Za-z])' + n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '([^0-9A-Za-z]|$)').test(text)) || null;
+      const m = d.querySelector(`[name="menge_${id}"]`), k = d.querySelector(`[name="bsiKommission_${id}"]`);
+      return { id, nr, menge: m ? parseFloat(m.value) || 0 : 0, kommentar: k ? k.value : null };
+    });
+  };
+  // Test: nur Anmeldung + Warenkorb lesbar (die Suche zeigt den Suchbegriff immer an, taugt nicht zum Prüfen der Nummern)
+  if (auftrag === 'test') return { eingeloggt: true, nurLogin: true, gefunden: [], fehlt: [] };
+  const summe = (wk, nr) => wk.filter((w) => w.nr === nr).reduce((s, w) => s + w.menge, 0);
+  const vorher = lesen(h0), fehler = [], gesendet = [];
+  for (const p of pos) {
+    const r = await fetch('/?srv=basket&pg=fastadd&companyYN=' + c, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ txtArtNr_free: String(p.nr), txtMenge_free: String(p.menge) }) }).catch(() => null);
+    if (!r || !r.ok) { fehler.push({ nr: p.nr, grund: 'Shop-Fehler ' + (r ? r.status : '') }); continue; }
+    gesendet.push(p);
+  }
+  const nachher = lesen(await korbHtml()), ok = [];
+  for (const p of gesendet) {
+    if (summe(nachher, String(p.nr)) > summe(vorher, String(p.nr))) ok.push(p.nr);
+    else fehler.push({ nr: p.nr, grund: 'im Shop nicht gefunden oder nicht im Warenkorb gelandet' });
+  }
+  for (const p of gesendet.filter((x) => x.notiz && ok.includes(x.nr))) {
+    const w = nachher.find((x) => x.nr === String(p.nr) && x.kommentar === '');
+    if (w) await fetch(`/pagespartner/rpc/rpc_basket_item_commission_upd.cfm?companyYN=${c}&bsiId=${w.id}`, { method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ ['bsiKommission_' + w.id]: String(p.notiz).slice(0, 100) }) }).catch(() => null);
+  }
+  return { ok, fehler };
+}
+
+const ABLAEUFE = { magento: magentoAblauf, dabag: dabagAblauf };
+// Seite, die beim Start im Shop-Tab geöffnet wird (Warenkorb)
+const STARTSEITE = {
+  magento: (a) => `/${a.sprache || 'de'}/checkout/cart/`,
+  dabag: (a) => '/?srv=basket&companyYN=' + (a.optionen?.firmenkorb ? 1 : 0),
+};
 
 async function shopAuftrag(typ, daten) {
   if (typ === 'bestaetigungen') return { liste: await ladeListe(SHOP_BESTAETIGT) };
@@ -105,15 +149,15 @@ async function shopAuftrag(typ, daten) {
   let erg;
   try {
     const [r] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: 'MAIN', func: ablauf,
-      args: [typ === 'test' ? 'test' : 'bestellen', daten.positionen || [], a.sprache || 'de'] });
+      args: [typ === 'test' ? 'test' : 'bestellen', daten.positionen || [], a.sprache || 'de', a.optionen || {}] });
     erg = r?.result || { fehler: 'Keine Antwort vom Shop.' };
   } catch (e) { erg = { fehler: 'Im Shop lief etwas schief: ' + (e?.message || e) }; }
   if (typ === 'test') { if (tab.eigen) chrome.tabs.remove(tab.id).catch(() => {}); return erg; }
   // Bestellen: Warenkorb neu laden (zeigt die neuen Artikel) und auf die Bestätigungsseite warten
   chrome.tabs.reload(tab.id).catch(() => {});
-  if (erg.ok?.length && daten.lauf) {
+  if (erg.ok?.length && daten.lauf && a.bestaetigung) {   // ohne bekannte Bestätigungsseite keine Erkennung (nur «Ist schon bestellt?»)
     const offen = (await ladeListe(SHOP_OFFEN)).filter((o) => o.lauf !== daten.lauf && Date.now() - o.am < 7 * 864e5);
-    offen.push({ lauf: daten.lauf, lieferant_id: daten.lieferant_id, basis: a.shop_url.replace(/\/+$/, ''), muster: a.bestaetigung || '/checkout/onepage/success', am: Date.now() });
+    offen.push({ lauf: daten.lauf, lieferant_id: daten.lieferant_id, basis: a.shop_url.replace(/\/+$/, ''), muster: a.bestaetigung, am: Date.now() });
     await speichereListe(SHOP_OFFEN, offen);
   }
   return erg;

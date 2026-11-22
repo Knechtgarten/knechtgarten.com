@@ -118,6 +118,10 @@ async function aufbau(main){
     return d.toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit' }) + '.'; };
   const datumLang = v => v ? new Date(v).toLocaleDateString('de-CH', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
   const lname = l => (l && (l.name || l.firma)) || 'Lieferant';
+  // Shop-Systeme, die die Erweiterung kann; Warenkorb-Adresse pro System
+  const SYSTEME = { magento: 'Magento', dabag: 'Dabag' };
+  const korbUrl = a => { if(!a) return '#'; const b = (a.shop_url || '').replace(/\/+$/, '');
+    return a.plattform === 'dabag' ? `${b}/?srv=basket&companyYN=${a.optionen?.firmenkorb ? 1 : 0}` : `${b}/${a.sprache || 'de'}/checkout/cart/`; };
   const kuerzel = n => n.replace(/[^A-Za-zÄÖÜäöü ]/g, '').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || '?';
   const zahl = n => (Math.round(n * 100) / 100).toLocaleString('de-CH');
 
@@ -180,7 +184,7 @@ async function aufbau(main){
         ${wk.length ? `<span class="qb-badge">Im Warenkorb seit ${datum(wkSeit)} · noch nicht abgeschickt</span>` : ''}
         ${buero ? `<span class="knoepfe nurpc">
           ${wk.length ? `<button type="button" class="qb-link" data-istbestellt="${lid}">Ist schon bestellt?</button>
-            <a class="kgd-btn ghost" href="${esc((anb?.shop_url || '').replace(/\/+$/, '') + '/' + (anb?.sprache || 'de') + '/checkout/cart/')}" target="_blank" rel="noopener">${ic('link', 14)}Warenkorb öffnen</a>` : ''}
+            <a class="kgd-btn ghost" href="${esc(korbUrl(anb))}" target="_blank" rel="noopener">${ic('link', 14)}Warenkorb öffnen</a>` : ''}
           ${offen.length ? `<button type="button" class="kgd-btn prim" data-shop="${lid}"${laeuft ? ' disabled' : ''}>${laeuft === lid ? 'Läuft …' : 'Im Shop bestellen'}</button>` : ''}</span>` : ''}
         </div>
         <div class="qb-kz"><span>Art.-Nr.</span><span>Bezeichnung</span><span style="text-align:right">Menge</span><span>Einheit</span><span>Vorgemerkt</span><span>Notiz</span><span></span></div>
@@ -225,18 +229,20 @@ async function aufbau(main){
       <div class="qb-karte"><h2>Shop-Anbindungen</h2>
         <span class="qb-hin">Nur Lieferanten mit angebundenem Shop erscheinen beim Bestellen. Den Ablauf im Shop macht die Erweiterung «Knechtgarten» (pro Shop-System). Hier steht, was sich ändern kann.</span>
         ${anb.map(a => `<div class="qb-anb" data-anb="${a.lieferant_id}">
-          <div class="kopf"><b>${esc(lname(a.l))}</b><span class="qb-badge">${esc(a.plattform === 'magento' ? 'Magento' : a.plattform)}</span>
+          <div class="kopf"><b>${esc(lname(a.l))}</b><span class="qb-badge">${esc(SYSTEME[a.plattform] || a.plattform)}</span>
             <label style="display:flex;gap:6px;align-items:center;font-size:13px"><input type="checkbox" data-anbf="aktiv"${a.aktiv ? ' checked' : ''}>aktiv</label>
+            ${a.plattform === 'dabag' ? `<label style="display:flex;gap:6px;align-items:center;font-size:13px" title="Aus: persönlicher Warenkorb"><input type="checkbox" data-opt="firmenkorb"${a.optionen?.firmenkorb ? ' checked' : ''}>Firmenwarenkorb</label>` : ''}
             <span style="margin-left:auto">${a.zuletzt_ok ? `<span class="qb-ok">zuletzt geklappt ${datumLang(a.zuletzt_ok)}</span>` : ''} ${a.zuletzt_fehler ? `<span class="qb-err">${esc(a.zuletzt_fehler)}</span>` : ''}</span>
             <button type="button" class="kgd-btn ghost" data-test="${a.lieferant_id}">Testen</button></div>
           <div class="reihe"><div class="kgd-feld"><label>Shop-Adresse</label><input class="kgd-t" data-anbf="shop_url" value="${esc(a.shop_url)}"></div>
-            <div class="kgd-feld" style="flex:0 0 90px;min-width:90px"><label>Sprache</label><input class="kgd-t" data-anbf="sprache" value="${esc(a.sprache)}"></div>
-            <div class="kgd-feld"><label>Bestätigungsseite (Teil der Adresse)</label><input class="kgd-t" data-anbf="bestaetigung" value="${esc(a.bestaetigung)}"></div></div>
+            ${a.plattform === 'magento' ? `<div class="kgd-feld" style="flex:0 0 90px;min-width:90px"><label>Sprache</label><input class="kgd-t" data-anbf="sprache" value="${esc(a.sprache || '')}"></div>` : ''}
+            <div class="kgd-feld"><label>Bestätigungsseite (Teil der Adresse)</label><input class="kgd-t" data-anbf="bestaetigung" value="${esc(a.bestaetigung || '')}" placeholder="leer = noch unbekannt, nur «Ist schon bestellt?»"></div></div>
           <div class="kgd-feld"><label>So funktioniert es</label><textarea class="kgd-t" rows="2" data-anbf="beschrieb">${esc(a.beschrieb || '')}</textarea></div></div>`).join('')}
         <div class="reihe" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap"><div class="kgd-feld" style="flex:1;min-width:220px"><label for="neuLief">Neuer Lieferant mit Shop</label>
           <select class="kgd-t" id="neuLief"><option value="">– wählen –</option>${LIEF.filter(l => !ANB.has(l.id)).map(l => `<option value="${l.id}">${esc(lname(l))}</option>`).join('')}</select></div>
+          <div class="kgd-feld" style="flex:0 0 170px;min-width:150px"><label for="neuSys">Shop-System</label><select class="kgd-t" id="neuSys">${Object.entries(SYSTEME).map(([k, n]) => `<option value="${k}">${esc(n)}</option>`).join('')}</select></div>
           <button type="button" class="kgd-btn ghost" id="neuAnb">Anbindung anlegen</button></div>
-        <span class="qb-hin">Heute kann die Erweiterung Magento-Shops (z. B. Aquasolar). Andere Shop-Systeme (z. B. B-Team) brauchen zuerst eine neue Version der Erweiterung.</span></div>`;
+        <span class="qb-hin">Heute kann die Erweiterung Magento (z. B. Aquasolar) und Dabag (z. B. B-Team, IMMER AG). Jeder neue Shop braucht zusätzlich eine Freigabe in der Erweiterung (neue Version).</span></div>`;
   }
 
   async function zeichnen(){
@@ -260,7 +266,7 @@ async function aufbau(main){
     laeuft = lid; zeichnen();
     let r;
     try { r = await ext('shopBestellen', { lieferant_id: lid, lauf, positionen,
-      anbindung: { plattform: anb.plattform, shop_url: anb.shop_url, sprache: anb.sprache, bestaetigung: anb.bestaetigung } }); }
+      anbindung: { plattform: anb.plattform, shop_url: anb.shop_url, sprache: anb.sprache, bestaetigung: anb.bestaetigung, optionen: anb.optionen || {} } }); }
     catch(e){ laeuft = null; zeichnen(); return KGD.toast(extFehler(e), true); }
     laeuft = null;
     // ganzer Ablauf gescheitert (Text) oder Liste der Artikel, die nicht geklappt haben
@@ -287,7 +293,10 @@ async function aufbau(main){
       const { error } = await sb.from('app_einstellung').upsert({ schluessel: 'qr_bestellung', wert: JSON.stringify(EINST), aktualisiert_am: new Date().toISOString() });
       if(error) KGD.toast('Speichern fehlgeschlagen: ' + error.message, true); else KGD.toast('Gespeichert'); return; }
     const anbBox = e.target.closest('[data-anb]');
-    if(anbBox && e.target.dataset.anbf){ const f = e.target.dataset.anbf, v = f === 'aktiv' ? e.target.checked : e.target.value.trim();
+    if(anbBox && e.target.dataset.opt){ const a = ANB.get(anbBox.dataset.anb), opt = { ...(a.optionen || {}), [e.target.dataset.opt]: e.target.checked };
+      const { error } = await sb.from('bestell_anbindung').update({ optionen: opt, aktualisiert_am: new Date().toISOString() }).eq('lieferant_id', a.lieferant_id);
+      if(error) return KGD.toast('Speichern fehlgeschlagen: ' + error.message, true); a.optionen = opt; KGD.toast('Gespeichert'); return; }
+    if(anbBox && e.target.dataset.anbf){ const f = e.target.dataset.anbf, v = f === 'aktiv' ? e.target.checked : (e.target.value.trim() || (f === 'bestaetigung' ? null : ''));
       if(f === 'shop_url' && !/^https:\/\/[^/]+/.test(v)) return KGD.toast('Shop-Adresse muss mit https:// beginnen.', true);
       const { error } = await sb.from('bestell_anbindung').update({ [f]: v, aktualisiert_am: new Date().toISOString() }).eq('lieferant_id', anbBox.dataset.anb);
       if(error) return KGD.toast('Speichern fehlgeschlagen: ' + error.message, true);
@@ -310,14 +319,16 @@ async function aufbau(main){
     if(b.dataset.test){ const a = ANB.get(b.dataset.test);
       const { data: art } = await sb.from('artikel').select('artikelnummer_lieferant').eq('lieferant_id', a.lieferant_id).not('artikelnummer_lieferant', 'is', null).limit(3);
       b.disabled = true; b.textContent = 'Teste …';
-      try { const r = await ext('shopTest', { anbindung: { plattform: a.plattform, shop_url: a.shop_url, sprache: a.sprache }, positionen: (art || []).map(x => ({ nr: x.artikelnummer_lieferant, menge: 1 })) }, 90);
+      try { const r = await ext('shopTest', { anbindung: { plattform: a.plattform, shop_url: a.shop_url, sprache: a.sprache, optionen: a.optionen || {} }, positionen: (art || []).map(x => ({ nr: x.artikelnummer_lieferant, menge: 1 })) }, 90);
         if(r.fehler){ await sb.from('bestell_anbindung').update({ zuletzt_fehler: r.fehler }).eq('lieferant_id', a.lieferant_id); KGD.toast(r.fehler, true); }
         else { await sb.from('bestell_anbindung').update({ zuletzt_ok: new Date().toISOString(), zuletzt_fehler: null }).eq('lieferant_id', a.lieferant_id);
-          KGD.toast(`Klappt: angemeldet, ${r.gefunden.length} von ${r.gefunden.length + r.fehlt.length} Testartikel im Shop gefunden.`, !!r.fehlt.length); }
+          KGD.toast(r.nurLogin ? 'Klappt: im Shop angemeldet, Warenkorb erreichbar.' : `Klappt: angemeldet, ${r.gefunden.length} von ${r.gefunden.length + r.fehlt.length} Testartikel im Shop gefunden.`, !!r.fehlt.length); }
       } catch(err){ KGD.toast(extFehler(err), true); }
       await laden(); zeichnen(); return; }
     if(b.id === 'neuAnb'){ const lid = $('neuLief').value; if(!lid) return KGD.toast('Zuerst einen Lieferanten wählen.', true);
-      const { error } = await sb.from('bestell_anbindung').insert({ lieferant_id: lid, plattform: 'magento', shop_url: 'https://', sprache: 'de' });
+      const sys = $('neuSys').value;
+      const { error } = await sb.from('bestell_anbindung').insert({ lieferant_id: lid, plattform: sys, shop_url: 'https://', sprache: sys === 'magento' ? 'de' : null,
+        bestaetigung: sys === 'magento' ? '/checkout/onepage/success' : null });
       if(error) return KGD.toast('Anlegen fehlgeschlagen: ' + error.message, true); await laden(); zeichnen(); }
   });
 
