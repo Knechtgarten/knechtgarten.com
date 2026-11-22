@@ -109,11 +109,28 @@
     return { treffer: [...gesehen.values()].filter(Boolean).sort((a, b) => (b.datum || '').localeCompare(a.datum || '')) };
   }
 
+  // Alle Rechnungen bestimmter Absender (Filter wie in PEAX «Absender»), optional mit Volltext.
+  // { absender: ['Aqua Solar AG', 'Aqua-Solar AG'], suche: 'Pumpe' | null } → { treffer: [{ id, titel, datum, betrag }] }, neueste zuerst
+  async function rechnungListe({ absender = [], suche = null }) {
+    if (!(await bereit(25000))) return { fehler: 'anmelden' };
+    if (!absender.length) return { treffer: [] };
+    const s = await (await peax('/core-feature-search/search-api/api/v1/search?page=0&size=200', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filter: [{ path: 'inboxType', op: 'isEqualTo', value: 'SEARCH' }, { path: '/document/sender', op: 'isIn', values: absender.slice(0, 5) }], search: suche ? String(suche).slice(0, 100) : null }) })).json();
+    const ids = (s?.documents?.items || []).slice(0, 200), treffer = [];
+    for (let i = 0; i < ids.length; i += 10) {
+      await Promise.all(ids.slice(i, i + 10).map(async (id) => {
+        try { const d = await (await peax('/document/api/v3/documents/' + id)).json();
+          if (d?.type === 'INVOICE' && !d.movedToBin) treffer.push({ id, titel: d.title || '', datum: d.documentDate || '', betrag: d.metadata?.invoiceAmount?.value ?? d.metadata?.totalAmount?.value ?? null }); } catch (_) {}
+      }));
+    }
+    return { treffer: treffer.sort((a, b) => (b.datum || '').localeCompare(a.datum || '')) };
+  }
+
   window.addEventListener('message', async (e) => {
-    if (e.source !== window || e.data?.kanal !== KANAL || !['auftrag', 'pdf', 'suche'].includes(e.data.typ)) return;
+    if (e.source !== window || e.data?.kanal !== KANAL || !['auftrag', 'pdf', 'suche', 'liste'].includes(e.data.typ)) return;
     let antwort;
-    if (e.data.typ === 'suche') {
-      try { antwort = await rechnungSuche(e.data.evv); } catch (err) { antwort = { fehler: String(err?.message || err).slice(0, 200) }; }
+    if (e.data.typ === 'suche' || e.data.typ === 'liste') {
+      try { antwort = await (e.data.typ === 'liste' ? rechnungListe : rechnungSuche)(e.data.evv); } catch (err) { antwort = { fehler: String(err?.message || err).slice(0, 200) }; }
       window.postMessage({ kanal: KANAL, typ: 'antwort', nr: e.data.nr, antwort }, '*');
       return;
     }

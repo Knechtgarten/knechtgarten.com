@@ -62,7 +62,7 @@ async function peaxAuftrag(typ, daten) {
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, antwort) => {
-  if (msg?.kg !== 'peaxAuftrag' || !['suche', 'pdf'].includes(msg.typ)) return;
+  if (msg?.kg !== 'peaxAuftrag' || !['suche', 'pdf', 'liste'].includes(msg.typ)) return;
   peaxAuftrag(msg.typ, msg.daten).then(antwort).catch((e) => antwort({ fehler: String(e?.message || e) }));
   return true;
 });

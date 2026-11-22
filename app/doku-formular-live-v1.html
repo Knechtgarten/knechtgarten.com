@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <script src="/kg-pw-schutz.js?v=5"></script>
-<script src="/kg-stil.js?v=92"></script>
+<script src="/kg-stil.js?v=93"></script>
 <title>Formular – Doku-Tools</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#323E4E">
@@ -45,7 +45,7 @@
 .kkat-rumpf{flex:1;display:flex;min-height:0;}
 .kkat-rumpf aside{width:300px;flex:none;border-right:1px solid #EEF1F4;overflow:auto;padding:8px;display:flex;flex-direction:column;}
 .kkat-rumpf aside button{all:unset;cursor:pointer;padding:5px 8px;border-radius:6px;font-size:12.5px;color:#323E4E;line-height:1.35;}
-.kkat-rumpf aside button:hover{background:#F5F7F9;} .kkat-rumpf aside button.e0{font-weight:600;margin-top:4px;} .kkat-rumpf aside button.e1{padding-left:18px;color:#4C5C70;}
+.kkat-rumpf aside button:hover{background:#F5F7F9;} .kkat-rumpf aside button.an{background:#EEF3F7;} .kkat-rumpf aside button.e0{font-weight:600;margin-top:4px;} .kkat-rumpf aside button.e1{padding-left:18px;color:#4C5C70;}
 .kkat-rumpf aside button small{display:block;color:#8B9097;font-size:11px;} .kkat-titel{font-size:11px;color:#8B9097;text-transform:uppercase;letter-spacing:.04em;padding:4px 8px;}
 .kkat-seite{flex:1;overflow:auto;background:#E3E7EC;padding:12px;position:relative;}
 .kkat-seiten{display:flex;flex-direction:column;align-items:center;gap:12px;}
@@ -101,7 +101,7 @@ async function aufbau(main){
   if(quelle){
     const { data } = await sb.from('doku_dokument').select('*').eq('id', quelle).maybeSingle();
     if(!data){ main.innerHTML = '<p class="kgd-hinweis" style="padding:20px">Dokument nicht gefunden.</p>'; return; }
-    vorlageId = data.vorlage_id; werte = data.werte || {}; if(P.get('d')) dokId = data.id; else werte.rechnung = null;
+    vorlageId = data.vorlage_id; werte = data.werte || {}; if(P.get('d')) dokId = data.id; else { werte.rechnung = null; werte.rechnungen = []; }
   }
   const { data: V } = await sb.from('doku_vorlage').select('*, ordner:doku_ordner(name)').eq('id', vorlageId).maybeSingle();
   if(!V){ main.innerHTML = '<p class="kgd-hinweis" style="padding:20px">Vorlage nicht gefunden.</p>'; return; }
@@ -120,6 +120,8 @@ async function aufbau(main){
   // ältere Dokumente: Kunde stand in der Bemerkung
   if(werte.kunde_id && !werte.kunde){ werte.kunde = { id: werte.kunde_id, name: werte.kunde_name || '', adresse: '' }; werte.pos.forEach(p => { if(p.bem === werte.kunde_name) p.bem = ''; }); }
   delete werte.kunde_id; delete werte.kunde_name;
+  // Rechnungskopien: mehrere möglich (Artikel von verschiedenen Rechnungen), früher nur werte.rechnung
+  werte.rechnungen = werte.rechnungen || (werte.rechnung ? [werte.rechnung] : []); delete werte.rechnung;
   const kundeZeile = () => werte.kunde ? 'Kunde: ' + [werte.kunde.name, werte.kunde.adresse].filter(Boolean).join(', ') : 'Knecht AG Naturnahe Gärten, Badhaus 42, 3615 Heimenschwand';
   let gespeichert = dokId ? JSON.stringify(werte) : null;
 
@@ -133,7 +135,7 @@ async function aufbau(main){
   }
   const rechnungNoetig = () => werte.pos.some(p => GRUENDE.find(g => g.k === p.grund)?.rechnung);
   const pflicht = () => !werte.sb ? 'Sachbearbeiter fehlt.' : !werte.pos.some(p => p.nr) ? 'Mindestens ein Artikel fehlt.'
-    : werte.pos.some(p => p.nr && !p.grund) ? 'Grund der Rücksendung fehlt.' : rechnungNoetig() && !werte.rechnung ? 'Rechnungskopie fehlt.' : '';
+    : werte.pos.some(p => p.nr && !p.grund) ? 'Grund der Rücksendung fehlt.' : rechnungNoetig() && !werte.rechnungen.length ? 'Rechnungskopie fehlt.' : '';
 
   // PDF erzeugen: Vorlage + Angaben (+ Rechnungskopie)
   async function erzeugen(mitRechnung){
@@ -154,8 +156,8 @@ async function aufbau(main){
     const heute = new Date(); text(`Heimenschwand, ${heute.getDate()}.${heute.getMonth() + 1}.${heute.getFullYear()}`, 96, 173, 10);
     const sig = werte.vonHand ? null : await unterschrift(werte.sb);   // «Von Hand unterschreiben»: Feld bleibt leer
     if(sig){ try { const bild = await doc.embedPng(sig), h = 24, b = Math.min(150, bild.width * h / bild.height); s.drawImage(bild, { x: 335, y: 164, width: b, height: h * b / (bild.width * h / bild.height) }); } catch(e){} }
-    if(mitRechnung && werte.rechnung){
-      const { data, error } = await sb.storage.from('doku-anhaenge').download(werte.rechnung.pfad);
+    if(mitRechnung) for(const re of werte.rechnungen){
+      const { data, error } = await sb.storage.from('doku-anhaenge').download(re.pfad);
       if(error) throw new Error('Rechnungskopie konnte nicht geladen werden: ' + error.message);
       const r = await PDFDocument.load(await data.arrayBuffer(), { ignoreEncryption: true });
       (await doc.copyPages(r, r.getPageIndices())).forEach(pg => doc.addPage(pg));
@@ -189,7 +191,8 @@ async function aufbau(main){
   const PEAX_LINK = '<a href="https://app.peax.ch/inbox/search" target="_blank" rel="noopener">PEAX öffnen</a>';
   function ext(auftrag, daten){
     return new Promise((ok, nein) => {
-      if(!document.documentElement.dataset.kgExt) return nein(new Error('ohne'));
+      const ver = document.documentElement.dataset.kgExt; if(!ver) return nein(new Error('ohne'));
+      if(auftrag === 'liste' && ver.split('.').map(Number).reduce((s, v) => s * 1000 + v, 0) < 33000) return nein(new Error('alt'));   // Rechnungsliste ab 0.33
       const nr = crypto.randomUUID();
       const f = e => { if(e.source !== window || e.data?.kanal !== 'kg-ext' || e.data.typ !== 'antwort' || e.data.nr !== nr) return;
         removeEventListener('message', f); clearTimeout(t); ok(e.data.antwort || { fehler: 'keine Antwort' }); };
@@ -198,7 +201,8 @@ async function aufbau(main){
       postMessage({ kanal: 'kg-ext', typ: 'anfrage', nr, auftrag, daten }, location.origin);
     });
   }
-  const pxFehler = f => f === 'ohne' ? `Automatisch geht es mit der Chrome-Erweiterung «Knechtgarten» (ab Version 0.32). Sonst Rechnung in PEAX als PDF herunterladen und hochladen. ${PEAX_LINK}`
+  const pxFehler = f => f === 'alt' ? 'Dafür braucht es die Chrome-Erweiterung «Knechtgarten» ab Version 0.33 (wird gerade von Google geprüft).'
+    : f === 'ohne' ? `Automatisch geht es mit der Chrome-Erweiterung «Knechtgarten» (ab Version 0.32). Sonst Rechnung in PEAX als PDF herunterladen und hochladen. ${PEAX_LINK}`
     : f === 'anmelden' ? `In PEAX nicht angemeldet. ${PEAX_LINK}, anmelden und nochmals suchen.`
     : /\b401\b/.test(f) ? 'PEAX-Anmeldung abgelaufen. PEAX-Tab neu laden und nochmals suchen.'
     : esc(f) + ` ${PEAX_LINK}`;
@@ -220,19 +224,29 @@ async function aufbau(main){
     catch(err){ px.fehler = pxFehler(err.message); }
     px.laeuft = false; angaben();
   }
+  // Rechnung als PDF aus PEAX (pro Sitzung gemerkt) und als Rechnungskopie anhängen (gleiche Rechnung nur einmal)
+  const pdfCache = {};
+  async function peaxPdf(id){
+    if(pdfCache[id]) return pdfCache[id];
+    const a = await ext('pdf', { id }); if(a.fehler || !a.pdf) throw new Error(a.fehler === 'anmelden' ? 'anmelden' : a.fehler || 'Das ist keine Rechnung.');
+    const bin = atob(a.pdf), u8 = new Uint8Array(bin.length); for(let k = 0; k < bin.length; k++) u8[k] = bin.charCodeAt(k);
+    return pdfCache[id] = u8;
+  }
+  async function rechnungAnhaengen(t){
+    if(werte.rechnungen.some(r => r.peax_id === t.id)) return false;
+    const u8 = await peaxPdf(t.id), pfad = `ruecksendung/${crypto.randomUUID()}.pdf`;
+    const up = await sb.storage.from('doku-anhaenge').upload(pfad, new Blob([u8], { type: 'application/pdf' }), { contentType: 'application/pdf' });
+    if(up.error) throw new Error('Speichern fehlgeschlagen: ' + up.error.message);
+    werte.rechnungen.push({ pfad, name: (t.titel || 'Rechnung') + '.pdf', peax_id: t.id }); return true;
+  }
   async function pxHolen(j){
     const t = px.treffer[j]; px.holt = j; angaben();
-    try { const a = await ext('pdf', { id: t.id });
-      if(a.fehler || !a.pdf) throw new Error(a.fehler || 'Das ist keine Rechnung.');
-      const bin = atob(a.pdf), u8 = new Uint8Array(bin.length); for(let k = 0; k < bin.length; k++) u8[k] = bin.charCodeAt(k);
-      const pfad = `ruecksendung/${crypto.randomUUID()}.pdf`, up = await sb.storage.from('doku-anhaenge').upload(pfad, new Blob([u8], { type: 'application/pdf' }), { contentType: 'application/pdf' });
-      if(up.error) throw new Error('Speichern fehlgeschlagen: ' + up.error.message);
-      werte.rechnung = { pfad, name: (t.titel || 'Rechnung') + '.pdf', peax_id: t.id }; px.holt = null; angaben(); neu(); KGD.toast('Rechnungskopie aus PEAX angehängt');
-    } catch(err){ px.holt = null; px.fehler = pxFehler(err.message); angaben(); }
+    try { await rechnungAnhaengen(t); px.holt = null; angaben(); neu(); KGD.toast('Rechnungskopie aus PEAX angehängt'); }
+    catch(err){ px.holt = null; px.fehler = pxFehler(err.message); angaben(); }
   }
   // automatisch suchen, sobald eine Rechnung nötig ist (einmal pro Artikel-Auswahl)
   function pxAuto(){
-    if(!rechnungNoetig() || werte.rechnung || px.laeuft || !document.documentElement.dataset.kgExt) return;
+    if(!rechnungNoetig() || werte.rechnungen.length || px.laeuft || !document.documentElement.dataset.kgExt) return;
     const s = nummern().join('|'); if(s && s !== px.schluessel) pxSuchen();
   }
 
@@ -367,6 +381,82 @@ async function aufbau(main){
     d.dataset.fertig = '1'; katMarkieren(d);
   }
 
+  // Rechnungs-Fenster (Erweiterung «Knechtgarten», PEAX): links alle Aqua-Solar-Rechnungen (neueste zuerst, Volltextsuche),
+  // rechts die gewählte Rechnung; Klick auf eine Artikelnummer übernimmt den Artikel UND hängt diese Rechnung als Kopie an.
+  const AS_ABSENDER = ['Aqua Solar AG', 'Aqua-Solar AG'];   // so heisst Aqua Solar in PEAX (zwei Schreibweisen)
+  let reListe = null, reFuer = null, reT = null, reLauf = 0, reWahl = null;
+  async function rechnungenOeffnen(i){
+    reFuer = i;
+    const box = document.createElement('div'); box.className = 'kkat'; box.id = 'kre';
+    box.innerHTML = `<div class="kkat-box" role="dialog" aria-label="Rechnungen Aqua Solar">
+      <div class="kkat-kopf"><b>Rechnungen Aqua Solar</b><span class="kgd-hinweis">aus PEAX</span>
+        <input class="kgd-t" id="reQ" placeholder="In Rechnungen suchen: Wort oder Nummer" autocomplete="off"><button type="button" class="kg-ibtn" id="reZu" title="Schliessen">${ic('x', 13)}</button></div>
+      <div class="kkat-rumpf"><aside id="reListe"><span class="kgd-hinweis">Rechnungen werden geladen …</span></aside>
+        <div class="kkat-seite" id="reSeite"><div class="kkat-seiten" id="reSeiten"><span class="kgd-hinweis" style="padding:20px">Links eine Rechnung wählen.</span></div></div></div>
+      <div class="kkat-fuss"><span class="kgd-hinweis" style="margin-left:auto">Auf eine Artikelnummer klicken: Artikel wird übernommen und die Rechnung als Kopie angehängt.</span></div></div>`;
+    document.body.appendChild(box);
+    const zu = () => { box.remove(); removeEventListener('keydown', taste); };
+    const taste = e => { if(e.key === 'Escape') zu(); };
+    addEventListener('keydown', taste); box.addEventListener('click', e => { if(e.target === box) zu(); });
+    $('reZu').onclick = zu; reZu = zu;
+    $('reQ').oninput = () => { clearTimeout(reT); reT = setTimeout(() => reLaden($('reQ').value.trim()), 400); };
+    reLaden('');
+  }
+  let reZu = () => {};
+  async function reLaden(q){
+    const nr = ++reLauf, L = $('reListe'); if(!L) return;
+    if(!q && reListe){ reZeigenListe(reListe); return; }
+    L.innerHTML = `<span class="kgd-hinweis">${q ? 'Suche …' : 'Rechnungen werden geladen …'}</span>`;
+    try { const a = await ext('liste', { absender: AS_ABSENDER, suche: q || null }); if(nr !== reLauf) return;
+      if(a.fehler) throw new Error(a.fehler);
+      if(!q) reListe = a.treffer || [];
+      reZeigenListe(a.treffer || []);
+    } catch(err){ if(nr === reLauf) L.innerHTML = `<span class="kgd-hinweis">${pxFehler(err.message)}</span>`; }
+  }
+  function reZeigenListe(T){
+    const L = $('reListe'); if(!L) return;
+    L.innerHTML = T.length ? `<div class="kkat-titel">${T.length} Rechnungen</div>` + T.map((t, j) => `<button type="button" data-rew="${j}"${reWahl === t.id ? ' class="an"' : ''}><b>${esc(t.titel)}</b><small>${datumCH(t.datum)}${t.betrag != null ? ' · CHF ' + Number(t.betrag).toLocaleString('de-CH', { minimumFractionDigits: 2 }) : ''}${werte.rechnungen.some(r => r.peax_id === t.id) ? ' · angehängt' : ''}</small></button>`).join('')
+      : '<span class="kgd-hinweis">Keine Rechnung gefunden.</span>';
+    L.querySelectorAll('[data-rew]').forEach(b => b.onclick = () => { L.querySelectorAll('.an').forEach(x => x.classList.remove('an')); b.classList.add('an'); reZeigen(T[+b.dataset.rew]); });
+  }
+  async function reZeigen(t){
+    reWahl = t.id; const S = $('reSeiten'), nr = ++reLauf; S.innerHTML = '<span class="kgd-hinweis" style="padding:20px">Rechnung wird geladen …</span>';
+    try {
+      const pdf = await pdfjsLib.getDocument({ data: (await peaxPdf(t.id)).slice(0) }).promise; if(nr !== reLauf) return;
+      S.innerHTML = '';
+      const breite = Math.min($('reSeite').clientWidth - 24, 900), dpr = devicePixelRatio || 1;
+      for(let s = 1; s <= pdf.numPages; s++){
+        const pg = await pdf.getPage(s), vp1 = pg.getViewport({ scale: 1 }), sk = breite / vp1.width, vp = pg.getViewport({ scale: sk });
+        const d = document.createElement('div'); d.className = 'kkat-blatt'; d.style.cssText = `width:${vp.width}px;height:${vp.height}px`;
+        const c = document.createElement('canvas'); c.width = Math.round(vp.width * dpr); c.height = Math.round(vp.height * dpr); c.style.width = vp.width + 'px'; c.style.height = vp.height + 'px';
+        const L = document.createElement('div'); L.className = 'kkat-layer'; d.append(c, L); S.appendChild(d);
+        await pg.render({ canvasContext: c.getContext('2d'), viewport: pg.getViewport({ scale: sk * dpr }) }).promise; if(nr !== reLauf) return;
+        const tc = await pg.getTextContent(), it = tc.items.filter(i => (i.str || '').trim());
+        const rect = r => { const [x1, y1, x2, y2] = vp.convertToViewportRectangle(r); return `left:${Math.min(x1, x2)}px;top:${Math.min(y1, y2)}px;width:${Math.abs(x2 - x1)}px;height:${Math.abs(y2 - y1)}px`; };
+        it.forEach(i => { const m = i.str.trim().match(/^(\d{6})\b/); if(!m) return;
+          const x = i.transform[4], y = i.transform[5], h = i.height || 8, w = Math.min(i.width, h * 3.6) || h * 3.4;
+          // Bezeichnung von der Rechnungszeile (falls weder Katalog noch Artikelstamm die Nummer kennen)
+          const zeile = it.filter(o => o !== i && Math.abs(o.transform[5] - y) < 2.5 && o.transform[4] > x).sort((a, b) => a.transform[4] - b.transform[4])
+            .map(o => o.str.trim()).filter(s => !/^[\d'.,\s%-]+$/.test(s)).slice(0, 4).join(' ');
+          const rest = i.str.trim().slice(6).trim(), bezZeile = (rest && !/^[\d'.,\s%-]+$/.test(rest) ? rest + ' ' : '') + zeile;
+          const b = document.createElement('button'); b.type = 'button'; b.className = 'kkat-nr'; b.style.cssText = rect([x - 2, y - 2, x + w + 2, y + h + 1]);
+          b.title = `${m[1]} übernehmen und Rechnung anhängen`;
+          b.onclick = () => reUebernehmen(t, m[1], bezZeile.trim());
+          L.appendChild(b); });
+      }
+    } catch(err){ if(nr === reLauf) S.innerHTML = `<span class="kgd-hinweis" style="padding:20px">${pxFehler(err.message)}</span>`; }
+  }
+  async function reUebernehmen(t, nr, bezZeile){
+    const i = reFuer; reZu();
+    const [k, a] = await Promise.all([
+      sb.from('doku_katalog_artikel').select('bez').eq('vorlage_id', V.id).eq('nr', nr).neq('bez', '').order('id').limit(1),
+      sb.from('artikel').select('id,bezeichnung').eq('lieferant_id', AS_LIEFERANT).eq('artikelnummer_lieferant', nr).limit(1)]);
+    const kat = k.data?.[0], art = a.data?.[0];
+    artikelSetzen(i, nr, kat ? kat.bez : art ? art.bezeichnung : bezZeile, art ? art.id : null);
+    try { if(await rechnungAnhaengen(t)){ angaben(); neu(); KGD.toast(`${t.titel} als Rechnungskopie angehängt`); } }
+    catch(err){ KGD.toast('Rechnung konnte nicht angehängt werden: ' + err.message, true); }
+  }
+
   // Angaben (links)
   const gr = GRUENDE.map(g => g.k);
   function angaben(){
@@ -377,16 +467,16 @@ async function aufbau(main){
         : `<input class="kgd-t" id="kundeQ" autocomplete="off" placeholder="Kunde suchen (Name, Ort …)"><div class="kgd-menue hidden" id="kundeM"></div><span class="ffhinweis">Leer = Knecht AG (eigenes Lager). Ein Kunde pro Rücksendung.</span>`}</div>
       ${werte.pos.map((p, i) => `<div class="ffpos"><div class="kopf">Artikel ${i + 1}${werte.pos.length > 1 ? `<button type="button" class="kg-ibtn danger" data-posweg="${i}" title="Artikel entfernen">${ic('trash', 13)}</button>` : ''}</div>
         <div class="kgd-reihe"><div class="kgd-feld"><label>Artikel</label>${p.nr ? `<div class="ffart"><b>${esc(p.nr)}</b><span style="flex:1;min-width:0">${esc(p.bez || '')}</span><button type="button" class="kg-ibtn" data-artweg="${i}" title="Anderen Artikel wählen">${ic('x', 12)}</button></div>`
-          : `<div class="ffnr"><input class="kgd-t" data-artq="${i}" autocomplete="off" placeholder="Nummer oder Stichwort"><button type="button" class="kg-ibtn ffbuch" data-katalog="${i}" title="Im Katalog suchen" aria-label="Im Katalog suchen">${ic('buch', 16)}</button><div class="kgd-menue hidden" data-artm="${i}"></div></div>`}</div>
+          : `<div class="ffnr"><input class="kgd-t" data-artq="${i}" autocomplete="off" placeholder="Nummer oder Stichwort"><button type="button" class="kg-ibtn ffbuch" data-rechnungen="${i}" title="In Aqua-Solar-Rechnungen suchen (PEAX)" aria-label="In Aqua-Solar-Rechnungen suchen">${ic('rechnung', 16)}</button><button type="button" class="kg-ibtn ffbuch" data-katalog="${i}" title="Im Katalog suchen" aria-label="Im Katalog suchen">${ic('buch', 16)}</button><div class="kgd-menue hidden" data-artm="${i}"></div></div>`}</div>
           <div class="kgd-feld" style="flex:0 0 70px"><label>Menge</label><input class="kgd-t" data-menge="${i}" value="${esc(p.menge || '')}" inputmode="numeric"></div></div>
         <div class="kgd-feld"><label>Zusatz <small class="opt">optional, steht unter der Kundenadresse</small></label><input class="kgd-t" data-bem="${i}" value="${esc(p.bem || '')}" placeholder="z. B. Pumpe läuft nicht an, brummt nur" autocomplete="off"></div>
         <div class="ffgrund">${GRUENDE.map(g => `<label><input type="radio" name="g${i}" data-grund="${i}" value="${g.k}" ${p.grund === g.k ? 'checked' : ''}>${esc(g.n)}</label>`).join('')}</div></div>`).join('')}
       ${werte.pos.length < 3 ? '<button type="button" class="kgd-btn ghost" id="posNeu">+ Artikel</button>' : ''}
-      ${rechnungNoetig() ? `<div class="ffre ${werte.rechnung ? 'ok' : 'noetig'}"><b>${werte.rechnung ? 'Rechnungskopie angehängt' : 'Rechnungskopie nötig'}</b>
-        ${werte.rechnung ? `<div class="zeile">${ic('dokument', 14)}<span style="flex:1;min-width:0">${esc(werte.rechnung.name)}</span><button type="button" class="kg-ibtn danger" id="reWeg" title="Rechnungskopie entfernen">${ic('trash', 13)}</button></div>`
-          : `<span>Für Gutschrift und Garantie verlangt Aqua Solar die Rechnung.</span>
-          <div class="zeile"><button type="button" class="kgd-btn prim" id="rePeax" ${px.laeuft ? 'disabled' : ''}>${ic('suche', 14)}In PEAX suchen</button><button type="button" class="kgd-btn ghost" id="reHoch">${ic('upload', 14)}Hochladen</button></div>
-          ${pxListe()}`}</div>` : ''}`;
+      ${rechnungNoetig() ? `<div class="ffre ${werte.rechnungen.length ? 'ok' : 'noetig'}"><b>${werte.rechnungen.length ? (werte.rechnungen.length > 1 ? werte.rechnungen.length + ' Rechnungskopien angehängt' : 'Rechnungskopie angehängt') : 'Rechnungskopie nötig'}</b>
+        ${werte.rechnungen.map((r, k) => `<div class="zeile">${ic('rechnung', 14)}<span style="flex:1;min-width:0">${esc(r.name)}</span><button type="button" class="kg-ibtn danger" data-reweg="${k}" title="Rechnungskopie entfernen">${ic('trash', 13)}</button></div>`).join('')}
+        ${werte.rechnungen.length ? '' : '<span>Für Gutschrift und Garantie verlangt Aqua Solar die Rechnung. Wählst du den Artikel über das Rechnungs-Icon, hängt sie automatisch an.</span>'}
+        <div class="zeile"><button type="button" class="kgd-btn ${werte.rechnungen.length ? 'ghost' : 'prim'}" id="rePeax" ${px.laeuft ? 'disabled' : ''}>${ic('suche', 14)}${werte.rechnungen.length ? 'Weitere in PEAX suchen' : 'In PEAX suchen'}</button><button type="button" class="kgd-btn ghost" id="reHoch">${ic('upload', 14)}Hochladen</button></div>
+        ${pxListe()}</div>` : ''}`;
     sigZeile(); setTimeout(pxAuto, 0);
   }
   async function sigZeile(){
@@ -453,12 +543,13 @@ async function aufbau(main){
   });
   main.addEventListener('click', async e => {
     const b = e.target.closest('button'); if(!b) return;
+    if(b.dataset.rechnungen != null){ rechnungenOeffnen(+b.dataset.rechnungen); return; }
     if(b.dataset.katalog != null){ katalogOeffnen(+b.dataset.katalog); return; }
     if(b.id === 'kundeWeg'){ werte.kunde = null; angaben(); neu(); setTimeout(() => $('kundeQ')?.focus(), 0); return; }
     if(b.id === 'posNeu'){ werte.pos.push({ menge: '1' }); angaben(); return; }
     if(b.dataset.posweg != null){ werte.pos.splice(+b.dataset.posweg, 1); angaben(); neu(); return; }
     if(b.dataset.artweg != null){ const p = werte.pos[+b.dataset.artweg]; p.nr = ''; p.bez = ''; p.artikel_id = null; angaben(); neu(); return; }
-    if(b.id === 'reWeg'){ const alt = werte.rechnung; werte.rechnung = null; angaben(); neu(); if(alt) sb.storage.from('doku-anhaenge').remove([alt.pfad]); return; }
+    if(b.dataset.reweg != null){ const [alt] = werte.rechnungen.splice(+b.dataset.reweg, 1); angaben(); neu(); if(alt) sb.storage.from('doku-anhaenge').remove([alt.pfad]); return; }
     if(b.id === 'rePeax'){ pxSuchen(); return; }
     if(b.dataset.px != null){ pxHolen(+b.dataset.px); return; }
     if(b.id === 'reHoch'){ const i = document.createElement('input'); i.type = 'file'; i.accept = 'application/pdf';
@@ -466,7 +557,7 @@ async function aufbau(main){
         try { await PDFLib.PDFDocument.load(await f.arrayBuffer(), { ignoreEncryption: true }); } catch(err){ KGD.toast('Das ist kein lesbares PDF.', true); return; }
         const pfad = `ruecksendung/${crypto.randomUUID()}.pdf`, up = await sb.storage.from('doku-anhaenge').upload(pfad, f, { contentType: 'application/pdf' });
         if(up.error){ KGD.toast('Hochladen fehlgeschlagen: ' + up.error.message, true); return; }
-        werte.rechnung = { pfad, name: f.name }; angaben(); neu(); KGD.toast('Rechnungskopie angehängt'); };
+        werte.rechnungen.push({ pfad, name: f.name }); angaben(); neu(); KGD.toast('Rechnungskopie angehängt'); };
       i.click(); return; }
   });
 
