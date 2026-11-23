@@ -10,6 +10,7 @@
 //   { modus: 'nacht' }  – vom nächtlichen Cron (Header x-abgleich-token)
 //   { modus: 'alles' }  – Knopf «Jetzt alles holen» (angemeldete Person)
 //   { modus: 'kunde', kunde_id } – ein Kunde inkl. älterer Dokumente
+//   { modus: 'kunden' } – nur den Kundenstamm holen (schnell, Knopf «Neue Offerte»)
 // 'nacht'/'alles': Kunden komplett, ABs der letzten zwei Jahre.
 // ============================================================================
 
@@ -101,6 +102,11 @@ Deno.serve(async (req) => {
     for (let i = 0; i < zeilen.length; i += 500) {
       const { error } = await db.from('kunde').upsert(zeilen.slice(i, i + 500), { onConflict: 'easybill_id' });
       if (error) throw new Error('Kunden speichern: ' + error.message);
+    }
+    // 'kunden': nur der Kundenstamm (schnell, z. B. Knopf im Fenster «Neue Offerte» nach dem Erfassen in Easybill)
+    if (modus === 'kunden') {
+      if (logId) await db.from('easybill_abgleich').update({ beendet: new Date().toISOString(), kunden: zeilen.length, dokumente: 0 }).eq('id', logId);
+      return json({ kunden: zeilen.length });
     }
     // Lieferanten (Easybill-Adressen mit Lieferantennummer) für die Kontakte, nur bei 'nacht'/'alles'
     let lieferanten = 0, lz: any = {};
