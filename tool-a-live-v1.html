@@ -7423,10 +7423,17 @@ const lwModusToggleHtml = '<span style="display:flex;gap:4px;">' + [['zeit', 'St
           .filter(r => r.zusatzeinheit === zielEinheit && (!nurGleicherArbeitsschritt || r.arbeitsschritt === rz.arbeitsschritt))
           .reduce((s, r) => s + (r.zusatzwert || 0) * r.menge, 0);
         const summe = summeRoh * (1 + (rz.staffelgruppe.summen_reserve_prozent || 0) / 100);
-        const stufe = (rz.staffelgruppe.staffelstufe || []).find(s => summe >= s.menge_von && (s.menge_bis == null || summe < s.menge_bis));
+        // Mengenoption (z. B. Netzteil «Normal» 2 Stk. = 2 Gruppen/Zonen):
+        // Last gleichmässig auf die Stücke verteilen, Stufe pro Stück suchen,
+        // Menge = Anzahl Stücke. Ohne Mengenoption wie bisher 1 Pauschale.
+        const anzahl = Math.max(0, Math.ceil(anzahlFaktor(rz)));
+        if(!anzahl) return { ...rz, einheit: 'Pauschale', menge: 0, preis: 0, betrag: 0, artikelId: null, zusatzwert: null, zusatzeinheit: null };
+        const proStueck = summe / anzahl;
+        const stufe = (rz.staffelgruppe.staffelstufe || []).find(s => proStueck >= s.menge_von && (s.menge_bis == null || proStueck < s.menge_bis));
         const preis = stufe?.artikel?.vp_knecht ?? 0;
         const bezeichnung = stufe ? rz.bezeichnung : rz.bezeichnung + ' (keine Stufe gefunden)';
-        return { ...rz, bezeichnung, einheit: 'Pauschale', menge: 1, preis, betrag: preis, artikelId: stufe?.artikel_id ?? null, zusatzwert: stufe?.artikel?.zusatzwert ?? null, zusatzeinheit: stufe?.artikel?.zusatzeinheit ?? null };
+        const einheit = anzahl > 1 ? (stufe?.artikel?.einheit || 'Stk.') : 'Pauschale';
+        return { ...rz, bezeichnung, einheit, menge: anzahl, preis, betrag: anzahl * preis, artikelId: stufe?.artikel_id ?? null, zusatzwert: stufe?.artikel?.zusatzwert ?? null, zusatzeinheit: stufe?.artikel?.zusatzeinheit ?? null };
       });
       const berechnet = berechnetNormal.concat(berechnetSummen);
       // Für den Arbeitsbeschrieb: welche Teilschritte ergeben wirklich etwas (Menge > 0), z. B. LED-Bänder mit Länge 0 → kein Text
