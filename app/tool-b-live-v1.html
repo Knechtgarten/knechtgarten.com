@@ -551,11 +551,18 @@ input[type=number]{-moz-appearance:textfield;}
           <select id="efEditTyp">
             <option value="zahl">Zahl</option>
             <option value="ja_nein">Ja/Nein</option>
+            <option value="auswahl">Auswahl</option>
           </select>
         </div>
         <div class="fld" style="max-width:140px;"><label>Einheit</label><select id="efEditEinheit"></select></div>
         <div class="fld" style="max-width:150px;" id="efEditWertWrap"><label id="efEditWertLabel">Vorschlagswert</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="number" step="any" id="efEditWert" title="Ja/Nein: wird uebernommen, wenn der Mitarbeiter das Haekchen setzt. Zahl: wird in Tool A vorausgefuellt, kann ueberschrieben werden."></div>
         <div class="fld" style="max-width:140px;" id="efEditMindestwertWrap"><label>Mindestwert</label><input autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other" type="number" step="any" id="efEditMindestwert" title="Warnt in Tool A farblich, wenn der eingegebene Wert kleiner ist"></div>
+      </div>
+    </div>
+    <div class="row hidden" id="efEditAuswahlRow">
+      <div class="fld" style="flex:1;"><label>Einträge im Menü (Text · Zahl, mit der gerechnet wird)</label>
+        <div id="efEditAuswahlListe" style="display:flex;flex-direction:column;gap:6px;"></div>
+        <button type="button" class="btnlink" id="efEditAuswahlAdd" style="align-self:flex-start;margin-top:4px;">+ Eintrag</button>
       </div>
     </div>
     <div class="row" id="efEditErklaerungRow">
@@ -1553,7 +1560,7 @@ async function loadFormelBibliothek(){
   // faelschlich nicht greifen, bis die Seite neu geladen wird).
   await ladeAlleVariablen();
 
-  let efQuery = sb.from('eingabefeld').select('id,name,einheit,offertentyp_id,reihenfolge,typ,fixer_wert,mindestwert,beschriftung,erklaerung,ausgeblendet,notiz,ist_titel,ist_tabelle,zusatztext_moeglich,flaechenformel_moeglich').order('reihenfolge');
+  let efQuery = sb.from('eingabefeld').select('id,name,einheit,offertentyp_id,reihenfolge,typ,fixer_wert,mindestwert,beschriftung,erklaerung,ausgeblendet,notiz,ist_titel,ist_tabelle,zusatztext_moeglich,flaechenformel_moeglich,auswahl_werte').order('reihenfolge');
   efQuery = istAllgemein ? efQuery.is('offertentyp_id', null) : efQuery.eq('offertentyp_id', formelBibliothekKategorie);
   const { data: efs, error: efErr } = await efQuery;
   if(efErr){ console.error(efErr); return; }
@@ -1916,9 +1923,9 @@ function renderEingabefelder(){
     <tr data-ef="${ef.id}">
       <td><span class="draghandle admin-only" title="Verschieben">${ICON.drag}</span></td>
       <td>${ef.name}</td>
-      <td>${ef.typ === 'ja_nein' ? 'Ja/Nein' : 'Zahl'}</td>
+      <td>${ef.typ === 'ja_nein' ? 'Ja/Nein' : ef.typ === 'auswahl' ? 'Auswahl' : 'Zahl'}</td>
       <td>${ef.einheit || ''}</td>
-      <td>${ef.fixer_wert != null ? fmtNum(ef.fixer_wert) : ''}</td>
+      <td>${ef.typ === 'auswahl' && Array.isArray(ef.auswahl_werte) ? escapeHtml(ef.auswahl_werte.map(a => a.text).join(' / ')) : ef.fixer_wert != null ? fmtNum(ef.fixer_wert) : ''}</td>
       <td>${ef.mindestwert != null ? fmtNum(ef.mindestwert) : ''}</td>
       <td style="display:flex;gap:4px;justify-content:flex-end;">
         <button class="icobtn admin-only ${ef.ausgeblendet?'active':'kg-hover'}" onclick="toggleAusgeblendet('${ef.id}',${!!ef.ausgeblendet})" title="${ef.ausgeblendet?'Im Konfigurator ausgeblendet (klicken zum Einblenden)':'Im Konfigurator ausblenden (Wert wird trotzdem berechnet)'}">${ef.ausgeblendet?ICON.eyeOff:ICON.eye}</button>
@@ -1953,6 +1960,8 @@ function openEditEingabefeldModal(id){
   $('efEditFlaechenformel').checked = !!ef.flaechenformel_moeglich;
   $('efEditFlaechenformelWrap').classList.toggle('hidden', istJaNein);
   $('efEditEinheit').innerHTML = einheitOptionsHtml(ef.einheit, true);
+  efAuswahl = Array.isArray(ef.auswahl_werte) ? ef.auswahl_werte.map(a => ({ text: a.text, wert: a.wert })) : [];
+  efTypAnzeigen();
   $('efEditNotizInput').value = ef.notiz || '';
   $('efEditNotizBox').classList.toggle('show', !!ef.notiz);
   $('efEditNotizBtn').classList.toggle('has', !!ef.notiz);
@@ -1974,6 +1983,8 @@ function openNeuesEingabefeldModal(){
   $('efEditFlaechenformel').checked = false;
   $('efEditFlaechenformelWrap').classList.toggle('hidden', false);
   $('efEditEinheit').innerHTML = einheitOptionsHtml('', true);
+  efAuswahl = [];
+  efTypAnzeigen();
   $('efEditNotizInput').value = '';
   $('efEditNotizBox').classList.remove('show');
   $('efEditNotizBtn').classList.remove('has');
@@ -1981,12 +1992,33 @@ function openNeuesEingabefeldModal(){
   $('efEditName').focus();
 }
 $('addEfBtn').addEventListener('click', openNeuesEingabefeldModal);
-$('efEditTyp').addEventListener('change', () => {
-  const istJaNein = $('efEditTyp').value === 'ja_nein';
-  $('efEditWertLabel').textContent = istJaNein ? 'Fixer Wert' : 'Vorschlagswert';
-  $('efEditMindestwertWrap').classList.toggle('hidden', istJaNein);
-  $('efEditFlaechenformelWrap').classList.toggle('hidden', istJaNein);
-});
+// Typ «Auswahl»: Menü in Tool A, pro Eintrag Text + Zahl (gerechnet wird mit der Zahl); Vorschlagswert = Zahl des Standard-Eintrags
+let efAuswahl = [];
+function efTypAnzeigen(){
+  const typ = $('efEditTyp').value, istJaNein = typ === 'ja_nein', istAuswahl = typ === 'auswahl';
+  $('efEditWertLabel').textContent = istJaNein ? 'Fixer Wert' : istAuswahl ? 'Standard (Zahl)' : 'Vorschlagswert';
+  $('efEditMindestwertWrap').classList.toggle('hidden', istJaNein || istAuswahl);
+  $('efEditFlaechenformelWrap').classList.toggle('hidden', istJaNein || istAuswahl);
+  $('efEditAuswahlRow').classList.toggle('hidden', !istAuswahl);
+  if(istAuswahl && !efAuswahl.length) efAuswahl = [{ text: '', wert: 1 }, { text: '', wert: 2 }];
+  efAuswahlZeichnen();
+}
+function efAuswahlZeichnen(){
+  const st = 'font-size:11.5px;padding:3px 6px;border:1px solid var(--line);border-radius:6px;color:var(--ink);';
+  $('efEditAuswahlListe').innerHTML = efAuswahl.map((a, i) => `<div data-ai="${i}" style="display:flex;align-items:center;gap:6px;">
+    <input data-a="text" value="${(a.text || '').replace(/"/g, '&quot;')}" placeholder="Text, z.B. Fertigbecken" style="width:200px;${st}">
+    <span style="font-size:11.5px;color:var(--muted);">=</span>
+    <input type="number" step="any" data-a="wert" value="${a.wert ?? ''}" style="width:64px;${st}" title="Zahl, mit der gerechnet wird">
+    <button type="button" class="icobtn danger" data-a="del" title="Eintrag entfernen">${ICON.trash}</button></div>`).join('');
+  $('efEditAuswahlListe').querySelectorAll('[data-ai]').forEach(z => {
+    const a = efAuswahl[Number(z.dataset.ai)];
+    z.querySelector('[data-a="text"]').addEventListener('input', e => { a.text = e.target.value; });
+    z.querySelector('[data-a="wert"]').addEventListener('input', e => { a.wert = e.target.value === '' ? null : parseFloat(e.target.value); });
+    z.querySelector('[data-a="del"]').addEventListener('click', () => { efAuswahl.splice(Number(z.dataset.ai), 1); efAuswahlZeichnen(); });
+  });
+}
+$('efEditAuswahlAdd').addEventListener('click', () => { efAuswahl.push({ text: '', wert: null }); efAuswahlZeichnen(); });
+$('efEditTyp').addEventListener('change', efTypAnzeigen);
 $('efEditCancel').addEventListener('click', () => $('efEditOverlay').classList.remove('show'));
 $('efEditSave').addEventListener('click', async () => {
   const name = $('efEditName').value.trim();
@@ -2001,14 +2033,20 @@ $('efEditSave').addEventListener('click', async () => {
   const notiz = $('efEditNotizInput').value.trim() || null;
   const zusatztext_moeglich = $('efEditZusatztextMoeglich').checked;
   const flaechenformel_moeglich = (typ === 'zahl') && $('efEditFlaechenformel').checked;
-  if(!name || !einheit || (typ === 'ja_nein' && (fixer_wert === null || isNaN(fixer_wert)))) return;
+  if(!name || (!einheit && typ !== 'auswahl') || (typ === 'ja_nein' && (fixer_wert === null || isNaN(fixer_wert)))) return;
+  let auswahl_werte = null;
+  if(typ === 'auswahl'){
+    const gueltig = efAuswahl.filter(a => (a.text || '').trim() && a.wert != null && !isNaN(a.wert));
+    if(gueltig.length < 2 || gueltig.length !== efAuswahl.length){ showToast('Bitte mindestens zwei Einträge mit Text und Zahl angeben (leere Zeilen entfernen).', true); return; }
+    auswahl_werte = gueltig.map(a => ({ text: a.text.trim(), wert: a.wert }));
+  }
   if(efEditId === null){
     const offertentyp_id = formelBibliothekKategorie === 'allgemein' ? null : formelBibliothekKategorie;
     const reihenfolge = EINGABEFELDER.length ? Math.max(...EINGABEFELDER.map(e => e.reihenfolge || 0)) + 1 : 1;
-    const { error } = await sb.from('eingabefeld').insert({ offertentyp_id, name, einheit, typ, fixer_wert, mindestwert, erklaerung, ausgeblendet, notiz, zusatztext_moeglich, flaechenformel_moeglich, reihenfolge });
+    const { error } = await sb.from('eingabefeld').insert({ offertentyp_id, name, einheit, typ, fixer_wert: typ === 'auswahl' && fixer_wert == null ? auswahl_werte[0].wert : fixer_wert, mindestwert, erklaerung, ausgeblendet, notiz, zusatztext_moeglich, flaechenformel_moeglich, reihenfolge, auswahl_werte });
     if(error){ showToast(friendlyError(error), true); return; }
   }else{
-    const { error } = await sb.from('eingabefeld').update({ name, einheit, typ, fixer_wert, mindestwert, erklaerung, ausgeblendet, notiz, zusatztext_moeglich, flaechenformel_moeglich }).eq('id', efEditId);
+    const { error } = await sb.from('eingabefeld').update({ name, einheit, typ, fixer_wert: typ === 'auswahl' && fixer_wert == null ? auswahl_werte[0].wert : fixer_wert, mindestwert, erklaerung, ausgeblendet, notiz, zusatztext_moeglich, flaechenformel_moeglich, auswahl_werte }).eq('id', efEditId);
     if(error){ showToast(friendlyError(error), true); return; }
   }
   $('efEditOverlay').classList.remove('show');
