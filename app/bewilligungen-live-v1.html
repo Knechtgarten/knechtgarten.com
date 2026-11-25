@@ -363,7 +363,9 @@ async function laden(){
     return { ...x, name: pers?.name || x.anzeigename || x.email, telefon: pers?.telefon || '' }; }).sort((a, b) => a.name.localeCompare(b.name, 'de'));
   zeichneListe();
 }
-const plName = id => PL.find(x => x.id === id)?.name || '–';
+const plName = id => id ? (PL.find(x => x.id === id)?.name || '–') : 'Ohne (extern)';
+// Auswahl Projektleiter; «Ohne Projektleiter» = externer Verfasser (Architekt, Kunde): in allen Dokumenten bleibt der Verfasser leer
+const plOptionen = sel => `<option value=""${sel ? '' : ' selected'}>Ohne Projektleiter (extern)</option>` + PL.map(p => `<option value="${p.id}"${p.id === sel ? ' selected' : ''}>${esc(p.name)}</option>`).join('');
 const kundeName = k => k ? (k.name || [k.vorname, k.nachname].filter(Boolean).join(' ') || k.firma || 'Kunde') : 'Kunde';
 
 // Schritte je nach Abklärung (Pool, Wärmepumpe, Näherbaurecht …)
@@ -426,7 +428,7 @@ $('bwNeu').addEventListener('click', () => {
       <label>Kunde<input type="text" id="nKq" placeholder="Name, Ort oder Strasse" autocomplete="off" data-lpignore="true" data-1p-ignore="true" data-dashlane-ignore="true" data-form-type="other"></label>
       <div id="nKl" class="doks"></div>
       <label>Projekt (optional)<select id="nPj"><option value="">– kein Projekt –</option></select></label>
-      <label>Projektleiter (unterschreibt)<select id="nPl">${PL.map(p => `<option value="${p.id}"${p.id === ME ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
+      <label>Projektleiter (unterschreibt)<select id="nPl">${plOptionen(ME)}</select></label>
       <label>Bauvorhaben<input type="text" id="nBv" value="Neubau Aussenschwimmbad mit aussen aufgestellter Wärmepumpe"></label>
       <div><div class="klein" style="margin-bottom:4px">Was gehört dazu?</div><div class="abkl" id="nAb">${ABKL.map(([k, t]) => `<button type="button" data-ab="${k}" aria-pressed="${!!abkl[k]}">${t}</button>`).join('')}</div></div>
       <div style="display:flex;gap:8px;justify-content:flex-end"><button type="button" class="btn btn-ghost" data-zu>Abbrechen</button><button type="button" class="btn btn-primary" id="nOk" disabled>Starten</button></div>
@@ -554,7 +556,7 @@ function zeichneFenster(){
     <div class="fkopf"><div class="k"><div class="klein" style="text-transform:uppercase;letter-spacing:.05em;font-weight:700">Baugesuch</div>
       <h2>${esc(kundeName(b.kunde))}${b.bauvorhaben ? ' · ' + esc(b.bauvorhaben) : ''}</h2>
       <small>${esc([b.strasse, [b.plz, b.ort].filter(Boolean).join(' ')].filter(Boolean).join(', '))}${b.parzelle ? ' · Parzelle ' + esc(b.parzelle) : ''}${b.egrid ? ' · EGRID ' + esc(b.egrid) : ''}${b.ebau_nr ? ' · eBau-Nr. ' + esc(b.ebau_nr) : ''}</small></div>
-      <label>Projektleiter (unterschreibt)<select data-feld="projektleiter_id">${PL.map(p => `<option value="${p.id}"${p.id === b.projektleiter_id ? ' selected' : ''}>${esc(p.name)}</option>`).join('')}</select></label>
+      <label>Projektleiter (unterschreibt)<select data-feld="projektleiter_id">${plOptionen(b.projektleiter_id)}</select></label>
       <label>Stand<select data-feld="status">${Object.entries(STAND).map(([k, t]) => `<option value="${k}"${k === b.status ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
       <span class="pill ${b.status}">${f.n} / ${f.von}</span>
       <button type="button" class="kg-ibtn" data-act="zu" aria-label="Schliessen">${K('x')}</button></div>
@@ -797,7 +799,7 @@ document.addEventListener('click', async e => {
 });
 document.addEventListener('change', async e => {
   if(!OFFEN || !e.target.closest('#fenOvl')) return; const b = G(); if(!b) return; const t = e.target;
-  if(t.id === 'fUbIn' && t.files[0]){ const f = t.files[0], pfad = `${b.projektleiter_id}/${Date.now()}.${(f.name.split('.').pop() || 'png').toLowerCase()}`;
+  if(t.id === 'fUbIn' && t.files[0] && b.projektleiter_id){ const f = t.files[0], pfad = `${b.projektleiter_id}/${Date.now()}.${(f.name.split('.').pop() || 'png').toLowerCase()}`;
     const { error } = await sb.storage.from('unterschriften').upload(pfad, f, { upsert: true, contentType: f.type }); if(error) return fehler(error, 'Unterschrift');
     const { error: e2 } = await sb.from('benutzer').update({ unterschrift_pfad: pfad }).eq('id', b.projektleiter_id); if(e2) return fehler(e2, 'Unterschrift');
     const p = PL.find(x => x.id === b.projektleiter_id); if(p) p.unterschrift_pfad = pfad; toast('Unterschrift gespeichert'); return zeichneFenster(); }
@@ -950,7 +952,7 @@ async function blattZust(b, liste){
     <div class="blk"><div class="lab">Grundeigentümer/in</div>${esc(x.name || '…')}${x.adresse ? ', ' + esc(x.adresse) : ''}<br>Parzelle Nr. ${esc(x.parzelle || '…')}</div>
     <div class="erkl">Ich/wir, Eigentümer/in der Parzelle Nr. ${esc(x.parzelle || '…')}, bestätige(n), dass ich/wir die oben genannten Pläne und Unterlagen eingesehen habe(n), gegen das Bauvorhaben keine Einwendungen habe(n) und keine Einsprache erhebe(n).</div>
     <div class="lab">Grundeigentümer/in</div><div class="unt"><div>Ort, Datum</div><div>Unterschrift(en) aller Eigentümer/innen</div></div>
-    <div class="lab" style="margin-top:5mm">Projektverfasser/in</div><div class="unt"><div>Heimenschwand, ${dokDatum(b)}</div><div>${u ? `<img src="${u}" alt="">` : ''}${esc(p?.name || '')}, Knecht AG Naturnahe Gärten${p?.telefon ? ', ' + esc(p.telefon) : ''}</div></div>
+    <div class="lab" style="margin-top:5mm">Projektverfasser/in</div><div class="unt">${p ? `<div>Heimenschwand, ${dokDatum(b)}</div><div>${u ? `<img src="${u}" alt="">` : ''}${esc(p.name || '')}, Knecht AG Naturnahe Gärten${p.telefon ? ', ' + esc(p.telefon) : ''}</div>` : '<div>Ort, Datum</div><div>Name, Unterschrift</div>'}</div>
     <div class="hinw">Bei Mit- oder Gesamteigentum unterschreiben alle Eigentümer/innen oder eine bevollmächtigte Person (Vollmacht beilegen).</div>
     ${fuss}</div>`;
   return (liste.length ? liste : [{}]).map(seite).join('');
@@ -1042,10 +1044,10 @@ async function blattLaerm(b){
     ${T(72.4, 300.5, 8.5, 'Einhaltung Belastungsgrenzwerte')}${T(216.9, 300.5, 8.5, R.ok ? 'Ja' : 'Nein', B)}${T(265.1, 300.5, 8.5, R.ok ? 'Die Planungswerte werden eingehalten.' : 'Die Planungswerte werden nicht eingehalten.')}
     ${T(72.4, 315.9, 8.5, 'Beurteilung Vorsorge')}${T(216.9, 315.9, 8.5, 'Ja', B)}${T(265.1, 315.9, 8.5, 'Die in Betracht fallenden vorsorglichen Massnahmen wurden geprüft, und')}
     ${T(265.1, 326.1, 8.5, 'die verhältnismässigen Massnahmen werden umgesetzt. Das')}${T(265.1, 336.3, 8.5, 'Vorsorgeprinzip wird somit erfüllt.')}
-    ${T(72.3, 609.4, 10, 'Für Rückfragen', B)}${T(72.3, 624.9, 8.3, 'Verfasser/in:')}${T(128.2, 624.9, 8.3, esc([p?.name, 'Knecht AG Naturnahe Gärten', p?.telefon || '033 453 10 20'].filter(Boolean).join(', ')))}
+    ${T(72.3, 609.4, 10, 'Für Rückfragen', B)}${T(72.3, 624.9, 8.3, 'Verfasser/in:')}${p ? T(128.2, 624.9, 8.3, esc([p.name, 'Knecht AG Naturnahe Gärten', p.telefon || '033 453 10 20'].filter(Boolean).join(', '))) : ''}
     ${T(72.3, 645.3, 6.9, 'Ort, Datum', 'color:#555')}${T(330.3, 645.3, 6.9, 'Unterschrift', 'color:#555')}
     ${u ? `<img src="${u}" alt="" style="left:334pt;top:648pt;height:25pt;max-width:200pt">` : ''}
-    ${T(72.3, 667.7, 8.3, 'Heimenschwand, ' + dokDatum(b))}
+    ${p ? T(72.3, 667.7, 8.3, 'Heimenschwand, ' + dokDatum(b)) : ''}
     ${box(71.2, 674.5, 240.6, 0, 'pl')}${box(334.2, 674.5, 240.5, 0, 'pl')}
     ${T(72.3, 701.7, 10, 'Beilagen:', B)}
     ${bl.map(([k, t], i) => { const y = 720.6 + i * 15.17; return `<i class="cb" style="left:72.6pt;top:${(y - 6.4).toFixed(2)}pt">${L.beilagen[k] ? haken : ''}</i>` + T(92.0, y, 8.3, t); }).join('')}
@@ -1163,7 +1165,7 @@ async function pdfHoehenplan(b, knopf){
   g.fillStyle = '#323e4e'; g.textAlign = 'left'; g.textBaseline = 'alphabetic';
   g.font = 'bold 46px Arial'; g.fillText('Grundstücksplan mit Höhen', ox, 15 * PXMM);
   g.font = '28px Arial'; g.fillText(`Parzelle ${eig.properties.number}${b.gemeinde ? ' ' + b.gemeinde : ''} · ${standort(b)} · ${kundeName(b.kunde)}`, ox, 21 * PXMM);
-  g.textAlign = 'right'; g.font = 'bold 28px Arial'; g.fillText('Knechtgarten', ox + W, 15 * PXMM); g.font = '24px Arial'; g.fillText(`Massstab 1:${MST} (A4)`, ox + W, 21 * PXMM);
+  g.textAlign = 'right'; g.font = 'bold 28px Arial'; if(b.projektleiter_id) g.fillText('Knechtgarten', ox + W, 15 * PXMM); // extern: kein Firmenname g.font = '24px Arial'; g.fillText(`Massstab 1:${MST} (A4)`, ox + W, 21 * PXMM);
   const ny = oy + H; g.textAlign = 'left'; g.font = '21px Arial';
   [`Höhenlinien alle ${STUFE.toFixed(2)} m (ganze Meter kräftig und beschriftet), Koten in m ü. M. (Grenzecken fett). Unter Gebäuden keine Höhen.`,
    `Höhen: swisstopo swissALTI3D ${jahr} (Raster 0.5 m), Genauigkeit ca. ±0.25 m – Grundlage, nicht für Absteckung oder Höhenkontrolle.`,
