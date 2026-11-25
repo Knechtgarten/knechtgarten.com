@@ -238,6 +238,11 @@ html:not(.ep-eingebettet) .tl .grid{margin-bottom:50vh;} /* unten Platz, damit a
 .vneuz{background:#D6E7F4;color:#323E4E;border:1.5px dashed #323E4E;line-height:13px;pointer-events:none;}
 .lane.vziel{box-shadow:inset 0 0 0 2px #323E4E;background:rgba(214,231,244,.45);}
 .vpop{width:290px;} .vpop input[type=text]{width:100%;box-sizing:border-box;} .vpop .vrow{display:flex;align-items:center;gap:8px;} .vpop .vrow .sp{flex:1;}
+.kwahl{position:fixed;z-index:10000;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(35,43,53,.18);max-height:320px;overflow:auto;min-width:440px;font-size:12.5px;}
+.kwahl .kw{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1.2fr) minmax(0,1fr);gap:8px;padding:6px 10px;cursor:pointer;border-bottom:1px solid #F0F2F5;}
+.kwahl .kw:last-child{border-bottom:0;} .kwahl .kw.akt,.kwahl .kw:hover{background:#F5F7F9;}
+.kwahl .kw b{font-weight:600;color:#323E4E;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;} .kwahl .kw span{color:#8B9097;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.kwahl .kwleer{padding:8px 10px;color:#8B9097;}
 .vpop #vD{width:70px;} .vpop .vchk{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;}
 body.kopiert, body.kopiert *{cursor:copy !important;}
 .aufp{width:300px;flex:none;border-left:1px solid var(--line);border-top:1px solid var(--line);background:#fff;overflow:auto;height:calc(100vh - 200px);min-height:300px;font-size:12px;}
@@ -1287,28 +1292,26 @@ function vorratBlock(ber, gid, lab){
 function vorratZeichnen(){ renderRows(); } // der Vorrat ist Teil des Plans
 // Neu / ändern: kleines Fenster
 function vorratDialog(v, tage, rect, ber0, lage){
-  if(!document.getElementById('kListV')){ const d = document.createElement('datalist'); d.id = 'kListV'; d.innerHTML = KLIST.map(x => `<option value="${esc(x.lab)}">`).join(''); document.body.appendChild(d); }
   const k = v && KUNDEN[v.kunde_id], ber = v ? v.bereich : (ber0 || 'bau');
   const pop = popAt(rect, `<b>${v ? 'Vorrat ändern' : 'Arbeit in den Vorrat'}</b>
-    <input type="text" id="vK" list="kListV" placeholder="Kunde suchen" value="${esc(k ? kLabel(k) : '')}">
+    <input type="text" id="vK" placeholder="Kunde suchen" value="${esc(k ? kLabel(k) : '')}"${k ? ` data-kid="${k.id}"` : ''}>
     <input type="text" id="vT" placeholder="Titel (optional)" value="${esc(v?.titel || '')}">
     <div class="vrow"><label>Tage <input type="number" id="vD" min="0.5" step="0.5" value="${v ? Number(v.tage) : tage}"></label>
       <label class="vchk"><input type="checkbox" id="vG"${v?.geschaetzt ? ' checked' : ''}> geschätzt</label></div>
-    <div class="seg" id="vB">${Object.keys(VBER).filter(b => vorratRecht() === 'A' || b === ber).map(b => `<button type="button" data-b="${b}" aria-pressed="${ber === b}">${VBER[b]}</button>`).join('')}</div>
     <div class="vrow">${v ? `<button type="button" class="kg-ibtn danger" id="vX" title="Aus dem Vorrat löschen" aria-label="Löschen">${I('trash')}</button>` : ''}<span class="sp"></span><button type="button" class="btn btn-ghost" id="vA">Abbrechen</button><button type="button" class="btn btn-primary" id="vS">${v ? 'Speichern' : 'In den Vorrat'}</button></div>`);
   pop.classList.add('vpop');
-  let bereich = ber;
-  pop.querySelectorAll('#vB [data-b]').forEach(b => b.onclick = () => { bereich = b.dataset.b; pop.querySelectorAll('#vB [data-b]').forEach(x => x.setAttribute('aria-pressed', x === b)); });
+  const bereich = ber; // Bereich = Vorrat, in dem man ist (keine Auswahl)
+  kundeAuswahl(pop.querySelector('#vK'));
   pop.querySelector('#vA').onclick = closePop;
   setTimeout(() => pop.querySelector(v ? '#vD' : '#vK')?.focus(), 0);
   const speichern = async () => {
-    const kv = pop.querySelector('#vK').value.trim(), hit = KLIST.find(x => x.lab === kv) || (kv.length > 2 ? KLIST.find(x => x.lab.toLowerCase().includes(kv.toLowerCase())) : null);
+    const kv = pop.querySelector('#vK').value.trim(), hit = kundeAusFeld(pop.querySelector('#vK'));
     const titel = pop.querySelector('#vT').value.trim() || (kv && !hit ? kv : '');
     const row = { kunde_id: hit ? hit.id : null, titel: titel || null, tage: Math.max(.5, Number(pop.querySelector('#vD').value) || 1), bereich, geschaetzt: pop.querySelector('#vG').checked };
     if(!row.kunde_id && !row.titel){ toast('Bitte einen Kunden oder Titel angeben.'); return; }
     closePop();
     if(v){ const { error } = await sb.from('planer_vorrat').update(row).eq('id', v.id); if(error){ fehler(error, 'Vorrat'); return; } Object.assign(v, row); }
-    else { const pl = myPerson(); const { data, error } = await sb.from('planer_vorrat').insert({ ...row, ...(lage && bereich === ber ? lage : {}), projektleiter_id: pl?.ist_projektleiter ? pl.id : null, erstellt_von: ME }).select('*').single(); if(error){ fehler(error, 'Vorrat'); return; } VOR.push(data); }
+    else { const pl = myPerson(); const { data, error } = await sb.from('planer_vorrat').insert({ ...row, ...(lage || {}), projektleiter_id: pl?.ist_projektleiter ? pl.id : null, erstellt_von: ME }).select('*').single(); if(error){ fehler(error, 'Vorrat'); return; } VOR.push(data); }
     vorratZeichnen();
   };
   pop.querySelector('#vS').onclick = speichern;
@@ -1456,6 +1459,39 @@ const kName = k => k ? (k.firma || [k.nachname, k.vorname].filter(Boolean).join(
 const kShort = k => k ? (k.firma || k.nachname || k.name || '') : '';
 const kOrt = k => k ? [k.strasse, [k.plz, k.ort].filter(Boolean).join(' ')].filter(Boolean).join(', ') : '';
 const kLabel = k => `${kName(k)}${k.ort ? ' · ' + k.ort : ''}`;
+// Kundensuche wie bei «Neue Offerte»: eigene Trefferliste (Name · Strasse · PLZ Ort) statt Browser-Vorschlagsliste.
+// Auswahl setzt input.value = kLabel, input.dataset.kid und löst «change» aus.
+function kundeAuswahl(inp){
+  if(!inp || inp.dataset.kw) return; inp.dataset.kw = '1'; inp.removeAttribute('list'); inp.autocomplete = 'off';
+  let box = null, hits = [], akt = 0;
+  const zu = () => { box?.remove(); box = null; };
+  const waehle = k => { inp.value = kLabel(k); inp.dataset.kid = k.id; zu(); inp.dispatchEvent(new Event('change', { bubbles: true })); };
+  const zeig = () => {
+    const w = inp.value.toLowerCase().split(/\s+/).filter(Boolean); delete inp.dataset.kid;
+    if(!w.length){ zu(); return; }
+    hits = Object.values(KUNDEN).filter(k => { const t = [k.firma, k.nachname, k.vorname, k.name, k.strasse, k.plz, k.ort].join(' ').toLowerCase(); return w.every(x => t.includes(x)); })
+      .sort((a, b) => kName(a).localeCompare(kName(b), 'de')).slice(0, 30);
+    akt = 0; if(!box){ box = document.createElement('div'); box.className = 'kwahl'; document.body.appendChild(box);
+      box.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); const r = e.target.closest('.kw'); if(r) waehle(hits[+r.dataset.i]); }); }
+    const r = inp.getBoundingClientRect(); box.style.left = r.left + 'px'; box.style.top = (r.bottom + 2) + 'px'; box.style.width = Math.max(440, r.width) + 'px'; if(r.left + Math.max(440, r.width) > innerWidth - 8) box.style.left = Math.max(8, innerWidth - 8 - Math.max(440, r.width)) + 'px';
+    box.innerHTML = hits.length ? hits.map((k, i) => `<div class="kw${i === akt ? ' akt' : ''}" data-i="${i}"><b>${esc(kName(k))}</b><span>${esc(k.strasse || '')}</span><span>${esc([k.plz, k.ort].filter(Boolean).join(' '))}</span></div>`).join('')
+      : '<div class="kwleer">Kein Kunde gefunden – wird als Titel übernommen.</div>';
+  };
+  const markiere = () => box?.querySelectorAll('.kw').forEach((x, i) => { x.classList.toggle('akt', i === akt); if(i === akt) x.scrollIntoView({ block: 'nearest' }); });
+  inp.addEventListener('input', zeig);
+  inp.addEventListener('blur', () => setTimeout(zu, 120));
+  inp.addEventListener('keydown', e => {
+    if(!box || !hits.length) return;
+    if(e.key === 'ArrowDown'){ e.preventDefault(); akt = Math.min(hits.length - 1, akt + 1); markiere(); }
+    else if(e.key === 'ArrowUp'){ e.preventDefault(); akt = Math.max(0, akt - 1); markiere(); }
+    else if(e.key === 'Enter' || e.key === 'Tab'){ e.preventDefault(); e.stopImmediatePropagation(); waehle(hits[akt]); }
+    else if(e.key === 'Escape'){ e.stopImmediatePropagation(); zu(); }
+  }, true);
+}
+// Treffer zum Kundenfeld: zuerst die ausgewählte ID, sonst wie bisher über den Text
+const kundeAusFeld = inp => { const v = inp.value.trim(), id = inp.dataset.kid;
+  if(id && KUNDEN[id] && kLabel(KUNDEN[id]) === v) return KLIST.find(x => x.id === id);
+  return KLIST.find(x => x.lab === v) || (v.length > 2 ? KLIST.find(x => x.lab.toLowerCase().includes(v.toLowerCase())) : null); };
 const byId = id => EINS.find(x => x.id === id) || (String(id).startsWith('R') ? ALL.find(x => x.id === id) : undefined); // R… = berechnete Wiederholung
 const first = n => String(n || '').split(' ')[0];
 // Bearbeiten nach Gruppen & Rechte (Einsatzplaner › Planen › Bearbeiten):
@@ -4229,7 +4265,7 @@ function openPanel(id, isNew){
   const pflege = it.kid && it.pkk ? pflegeHTML(it.kid, it.pkk, Math.floor(it.s + 1e-9)) : '';
   $('side').innerHTML = `<aside class="sidepanel">
     <div class="sd-head"><div${offen ? ' class="offenhd" title="Offener Auftrag – noch nicht abgemacht, wandert mit"' : ' style="min-width:0"'}><h3>${esc(it.kind === 'absenz' ? (it.title || 'Absenz') : titleOf(it))}${auftrag && ed && !kundeNeu ? `<button class="kedit" id="pKEdit" title="Kunde oder Titel ändern" aria-label="Kunde oder Titel ändern">${I('edit')}</button>` : ''}</h3>${k && kOrt(k) ? `<div class="small muted">${I('pin').replace('class="i"', 'class="i" style="width:12px;height:12px;vertical-align:-2px"')} ${esc(kOrt(k))}</div>` : ''}</div>${punkte}${allKnopf}${it.serie || it.wdh ? `<span class="icon-btn on sdrep" id="pWdh" title="Wiederkehrender Termin" aria-label="Wiederkehrender Termin">${I('repeat')}</span>` : ''}<button class="icon-btn" id="pX" aria-label="Schliessen">${I('x')}</button></div>
-    ${kundeNeu ? `<div class="kneu"><input type="text" id="pKunde" list="kList" value="${esc(KUNDEN[it.kid] ? kLabel(KUNDEN[it.kid]) : '')}" placeholder="Kunde suchen"><input type="text" id="pTitel" value="${esc(it.title)}" placeholder="${it.kid ? 'Zusatz, z. B. Hecke schneiden' : 'oder Titel, z. B. Werkhof, Besichtigung'}"></div>` : ''}
+    ${kundeNeu ? `<div class="kneu"><input type="text" id="pKunde" value="${esc(KUNDEN[it.kid] ? kLabel(KUNDEN[it.kid]) : '')}" placeholder="Kunde suchen"><input type="text" id="pTitel" value="${esc(it.title)}" placeholder="${it.kid ? 'Zusatz, z. B. Hecke schneiden' : 'oder Titel, z. B. Werkhof, Besichtigung'}"></div>` : ''}
     ${zeile}${kopie}${zust}
     ${fixe}
     ${it.kind === 'absenz' ? `<div class="abs-chips">${ABST.map(t => `<button data-pabs="${esc(t.name)}" class="${t.name === it.title ? 'on' : ''}" ${dis}><i style="background:${absStyle(t.name).bg}"></i>${esc(t.name)}</button>`).join('')}</div>` : ''}
@@ -4240,7 +4276,7 @@ function openPanel(id, isNew){
     ${secs}
     ${pflege}
     <div class="sd-foot">${ed ? `<button class="btn btn-danger" id="pDel">${I('trash')}Löschen</button>` : '<span class="small muted">Nur lesen</span>'}<span class="small muted" id="pSave"></span></div>
-  </aside><datalist id="kList">${KLIST.map(x => `<option value="${esc(x.lab)}">`).join('')}</datalist>`;
+  </aside>`;
   const on = (sel, ev, fn) => { const el = $('side').querySelector(sel); if(el) el[ev] = fn; };
   on('#pX', 'onclick', closePanel); bindAcc();
   $('side').querySelectorAll('[data-open]').forEach(b => b.onclick = () => openPanel(b.dataset.open));
@@ -4252,7 +4288,8 @@ function openPanel(id, isNew){
   $('side').querySelectorAll('[data-pabs]').forEach(b => b.onclick = () => save({ titel: b.dataset.pabs }, { title: b.dataset.pabs }).then(() => openPanel(id)));
   on('#pKEdit', 'onclick', () => { panelKunde = true; openPanel(id); setTimeout(() => $('pKunde')?.focus(), 0); });
   on('#pLink', 'onchange', async e => { await save({ mit_einsatz_id: e.target.value || null }, { link: e.target.value || null }); openPanel(id); });
-  on('#pKunde', 'onchange', async e => { const v = e.target.value.trim(); const hit = KLIST.find(x => x.lab === v) || (v.length > 2 ? KLIST.find(x => x.lab.toLowerCase().includes(v.toLowerCase())) : null);
+  kundeAuswahl($('pKunde'));
+  on('#pKunde', 'onchange', async e => { const v = e.target.value.trim(); const hit = kundeAusFeld(e.target);
     if(v && !hit){ toast('Kunde nicht gefunden. Name als Titel übernommen.'); await save({ kunde_id: null, titel: v }, { kid: null, title: v }); }
     else await save({ kunde_id: hit ? hit.id : null }, { kid: hit ? hit.id : null });
     panelKunde = false; openPanel(id); });
