@@ -263,6 +263,7 @@ main.wrap{padding-top:48px;padding-bottom:60px;}
 .vp-fertig{font:inherit;font-size:11.5px;font-weight:600;border:none;background:var(--primary);color:#fff;border-radius:6px;padding:5px 12px;cursor:pointer;}
 .tbdim.tabellenzelle{width:100%;flex:none;}
 .tabellenberechnet{width:100%;box-sizing:border-box;border:1px dashed var(--line);border-radius:6px;padding:6px 7px;font:inherit;font-size:12.5px;color:var(--muted);background:var(--soft);}
+.tbdim.tbdimauswahl{width:auto;min-width:104px;}
 .tabelleauswahl{width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:6px;padding:7px 0 7px 3px;font:inherit;font-size:10.5px;color:var(--ink);background:#fff;}
 .tabellenzeilendel{width:24px;flex:0 0 auto;color:var(--muted);cursor:pointer;display:flex;align-items:center;justify-content:center;padding-top:8px;}
 .tabellenzeilendel:hover{color:var(--danger);}
@@ -3709,7 +3710,7 @@ async function vorlageVorladen(otId){
   }catch(e){ /* nur Vorladen – Fehler egal */ }
 }
 async function ladeFormelDaten(otId){
-  const { data: efs, error: efErr } = await vorlageHolen('ef', otId, id => sb.from('eingabefeld').select('id,name,einheit,typ,fixer_wert,mindestwert,beschriftung,erklaerung,ausgeblendet,reihenfolge,ist_titel,ist_tabelle,zusatztext_moeglich,flaechenformel_moeglich,zeilen_position').eq('offertentyp_id', id).order('reihenfolge'));
+  const { data: efs, error: efErr } = await vorlageHolen('ef', otId, id => sb.from('eingabefeld').select('id,name,einheit,typ,fixer_wert,mindestwert,beschriftung,erklaerung,ausgeblendet,reihenfolge,ist_titel,ist_tabelle,zusatztext_moeglich,flaechenformel_moeglich,zeilen_position,auswahl_werte').eq('offertentyp_id', id).order('reihenfolge'));
   if(efErr) throw efErr;
   eingabefelder = efs;
 
@@ -3980,7 +3981,7 @@ async function ladeDatenFuerOffertentyp(otId){
 // Offerte zurueck - Ersatz fuer das frueher hier stehende neueTeilflaeche().
 function initBereich(){
   bereichWerteMap = {};
-  eingabefelder.forEach(ef => { bereichWerteMap[ef.id] = (ef.typ === 'zahl' && ef.fixer_wert != null) ? ef.fixer_wert : (START_WERTE[ef.name] ?? 0); });
+  eingabefelder.forEach(ef => { bereichWerteMap[ef.id] = ((ef.typ === 'zahl' || ef.typ === 'auswahl') && ef.fixer_wert != null) ? ef.fixer_wert : (START_WERTE[ef.name] ?? 0); });
   bereichNotizMap = {};
   // Eine neue Offerte startet immer ohne jede Auswahl - keine automatische
   // Vorauswahl. Die Vorauswahl-Buttons in renderBereich() muessen bewusst
@@ -4484,6 +4485,16 @@ function renderEinDim(ef, container, zeigeZusatztextZeile){
     if(ef.zusatztext_moeglich){
       div.querySelector('.tbdimzusatz').addEventListener('input', e => { bereichNotizMap[ef.id] = e.target.value; });
     }
+    return;
+  }
+  // Auswahl (Tool B: Typ «Auswahl»): Text im Menü, gerechnet wird mit der Zahl dahinter
+  if(ef.typ === 'auswahl' && Array.isArray(ef.auswahl_werte) && ef.auswahl_werte.length){
+    div.classList.add("tbdimauswahl");
+    if(!ef.auswahl_werte.some(a => Number(a.wert) === Number(bereichWerteMap[ef.id]))) bereichWerteMap[ef.id] = Number(ef.fixer_wert ?? ef.auswahl_werte[0].wert);
+    div.innerHTML = `<label${erklaerungAttr}>${escHtml(beschriftung)}</label>${zusatztextHtml}<div class="tbdiminput"${erklaerungAttr}><select class="tabelleauswahl">${ef.auswahl_werte.map(a => `<option value="${a.wert}"${Number(bereichWerteMap[ef.id]) === Number(a.wert) ? ' selected' : ''}>${escHtml(a.text)}</option>`).join('')}</select></div>`;
+    container.appendChild(div);
+    div.querySelector('select').addEventListener('change', e => { bereichWerteMap[ef.id] = parseFloat(e.target.value) || 0; recalc(); });
+    if(ef.zusatztext_moeglich) div.querySelector('.tbdimzusatz').addEventListener('input', e => { bereichNotizMap[ef.id] = e.target.value; });
     return;
   }
   const mindestTitel = ef.mindestwert != null ? ` title="Sollte mindestens ${ef.mindestwert} ${ef.einheit || ''} sein"` : erklaerungAttr;
