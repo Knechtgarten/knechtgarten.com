@@ -132,9 +132,10 @@ async function schonDa(admin: any, zanr: string | null, art: string) {
 // Spediteur-Rechnung lesen (Knopf «Verfügung anfordern» in PEAX): Zollanmeldungsnummer(n) + Zugangscode per KI aus dem PDF
 const KI_MODELLE = ['claude-haiku-5-5', 'claude-haiku-4-5-20251001', 'claude-sonnet-5-5'];
 const KI_SYS = `Du liest eine Rechnung eines Spediteurs oder Paketdienstes (Verzollung Import Schweiz).
-Antworte NUR mit JSON: {"zollanmeldungen":[{"nr":"26CHEI004567593991","code":"6LjEWz8K4cnE3hzJ"}]}
+Antworte NUR mit JSON: {"zollanmeldungen":[{"nr":"26CHEI004567593991","code":"6LjEWz8K4cnE3hzJ","portal":null}]}
 - nr: Zollanmeldungsnummer bzw. eVV-Nummer, z. B. 26CHEI004505039773 (ohne Zusatz wie ".1") oder Passar-MRN wie 26CH02IMQML5N08LN6. Auch «ZQNr.», «Quittung», «eVV Nummer».
-- code: Zugangscode, auch «EVV Code», «Accesscode», «Access code». Gross-/Kleinschreibung exakt übernehmen. Fehlt er: null.
+- code: Zugangscode für e-dec-web des Zolls (BAZG), auch «EVV Code», «Accesscode», «Access code». Gross-/Kleinschreibung exakt übernehmen. Fehlt er: null.
+- portal: Nennt der Spediteur stattdessen einen Code für SEIN EIGENES Portal (z. B. «Link: https://docs.ssag.ch Ihr Zugangscode: …»), ist das KEIN e-dec-Code: code = null, portal = {"url":"https://…","code":"…"}. Sonst portal = null.
 - Mehrere Zollanmeldungen: alle aufführen. Keine gefunden: leere Liste. Nichts erfinden.`;
 async function kiLesen(pdf: string) {
   const key = Deno.env.get('ANTHROPIC_API_KEY'); if (!key) throw new Error('ANTHROPIC_API_KEY fehlt');
@@ -146,7 +147,7 @@ async function kiLesen(pdf: string) {
         { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: pdf } }, { type: 'text', text: 'Zollanmeldungen als JSON.' }] }] }) });
     const d = await r.json().catch(() => ({}));
     if (r.ok) { const t = (d.content || []).filter((c: any) => c.type === 'text').map((c: any) => c.text).join('');
-      const j = JSON.parse((t.match(/\{[\s\S]*\}/) || ['{}'])[0]); return (j.zollanmeldungen || []) as { nr: string; code: string | null }[]; }
+      const j = JSON.parse((t.match(/\{[\s\S]*\}/) || ['{}'])[0]); return (j.zollanmeldungen || []) as { nr: string; code: string | null; portal?: { url?: string; code?: string } | null }[]; }
     letzter = d?.error?.message || String(r.status);
     if (r.status !== 404 && r.status !== 400 && r.status !== 529) break;
   }
@@ -177,7 +178,8 @@ Deno.serve(async (req) => {
     if (body.aktion === 'lesen') {
       if (!body.pdf) return json({ error: 'PDF fehlt' }, 400);
       try {
-        const liste = (await kiLesen(String(body.pdf))).filter((z) => z?.nr).map((z) => ({ nr: String(z.nr).replace(/\.\d+$/, '').replace(/\s+/g, ''), code: z.code ? String(z.code).trim() : null }));
+        const liste = (await kiLesen(String(body.pdf))).filter((z) => z?.nr).map((z) => ({ nr: String(z.nr).replace(/\.\d+$/, '').replace(/\s+/g, ''), code: z.code ? String(z.code).trim() : null,
+          portal: z.portal?.url ? { url: String(z.portal.url).trim().slice(0, 200), code: z.portal.code ? String(z.portal.code).trim() : null } : null }));
         const nrn = [...new Set(liste.map((z) => z.nr))];
         const { data } = nrn.length ? await admin.from('zoll_evv').select('zanr,status').in('zanr', nrn).in('art', ['mwst', 'unbekannt']).neq('status', 'ignoriert') : { data: [] };
         return json({ zollanmeldungen: liste.map((z) => ({ ...z, edec: /^\d{2}CHEI\d/.test(z.nr),

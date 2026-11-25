@@ -99,7 +99,32 @@
       if (z.stand === 'angehaengt') rechts.textContent = 'angehängt';
       else if (z.stand === 'vorhanden') rechts.textContent = 'eingegangen, wird angehängt';
       else if (!z.edec) rechts.textContent = 'kommt über Passar';
-      else if (!z.code) rechts.textContent = 'kein Zugangscode gefunden';
+      else if (!z.code) {
+        // Kein e-dec-Code (z. B. DSV-Portal, Post): Verfügung beim Spediteur holen und von Hand anhängen
+        zeile.style.flexWrap = 'wrap';
+        rechts.textContent = 'kein e-dec-Code';
+        const info = document.createElement('div');
+        info.style.cssText = 'flex-basis:100%;font-size:12px;color:#8B9097;white-space:normal;';
+        info.textContent = 'Verfügung beim Spediteur holen und von Hand anhängen.';
+        if (z.portal?.url && /^https?:\/\//i.test(z.portal.url)) {
+          info.textContent = 'Verfügung im Portal des Spediteurs holen und von Hand anhängen: ';
+          const a = document.createElement('a');
+          a.href = z.portal.url; a.target = '_blank'; a.rel = 'noopener';
+          a.textContent = z.portal.url.replace(/^https?:\/\//i, '').replace(/\/$/, '');
+          a.style.cssText = 'color:#323E4E;font-weight:700;';
+          info.appendChild(a);
+          if (z.portal.code) {
+            info.appendChild(document.createTextNode(' · Code '));
+            const c = document.createElement('span');
+            c.textContent = z.portal.code; c.title = 'Klicken zum Kopieren';
+            c.style.cssText = 'font-family:Consolas,monospace;color:#323E4E;cursor:pointer;';
+            c.onclick = () => { navigator.clipboard?.writeText(z.portal.code); c.textContent = z.portal.code + ' (kopiert)'; };
+            info.appendChild(c);
+          }
+        }
+        zeile.appendChild(rechts); zeile.appendChild(info); p.appendChild(zeile);
+        continue;
+      }
       else {
         const b = document.createElement('button');
         b.textContent = 'Verfügung anfordern';
@@ -113,16 +138,17 @@
   }
 
   async function dokumentPruefen(id) {
-    let info = await speicher.holen('zollDok:' + id);
+    const SCHLUESSEL = 'zollDok2:' + id;   // 2 = mit Portal-Erkennung (alte Einträge werden neu gelesen)
+    let info = await speicher.holen(SCHLUESSEL);
     if (!info) {
       const d = await auftrag({ id }, 'pdf');
-      if (d.fehler || d.skip) { if (d.skip) await speicher.setzen('zollDok:' + id, { liste: [] }); return; }
-      if (!SPEDITEUR.test(d.sender + ' ' + d.titel)) { await speicher.setzen('zollDok:' + id, { liste: [] }); return; }
+      if (d.fehler || d.skip) { if (d.skip) await speicher.setzen(SCHLUESSEL, { liste: [] }); return; }
+      if (!SPEDITEUR.test(d.sender + ' ' + d.titel)) { await speicher.setzen(SCHLUESSEL, { liste: [] }); return; }
       const token = await new Promise((ok) => chrome.runtime.sendMessage({ kg: 'googleToken' }, (r) => ok(r?.token || null)));
       if (!token) return;
       const r = await fn({ aktion: 'lesen', googleAccessToken: token, pdf: d.pdf });
-      info = { liste: (r.zollanmeldungen || []).map(({ nr, code, edec }) => ({ nr, code, edec })) };
-      await speicher.setzen('zollDok:' + id, info);
+      info = { liste: (r.zollanmeldungen || []).map(({ nr, code, edec, portal }) => ({ nr, code, edec, portal })) };
+      await speicher.setzen(SCHLUESSEL, info);
     }
     if (offenesDok !== id || !info.liste.length) return;
     // Stand (angehängt / eingegangen) jedes Mal frisch, Nummer und Code aus dem Speicher
