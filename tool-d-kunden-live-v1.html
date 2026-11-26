@@ -213,7 +213,7 @@ tr.offertenrow td{padding:0;border-bottom:1px solid var(--soft);}
 .masw{all:unset;cursor:pointer;width:18px;height:18px;border-radius:5px;box-sizing:border-box;position:relative;} .masw.on{outline:2px solid #323E4E;outline-offset:1px;}
 .masw.keine{border:1px dashed #A9B0B7;background:#fff;} .masw.vergeben::after{content:"";position:absolute;top:2px;right:2px;width:4px;height:4px;border-radius:50%;background:#fff;}
 .maneu{display:flex;flex-wrap:wrap;gap:6px;align-items:center;background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px;font-size:13px;}
-.maneu input{font:inherit;font-size:13px;border:1px solid #D5DBE1;border-radius:6px;padding:5px 8px;min-width:180px;}
+.maneu input,.maneu select{font:inherit;font-size:13px;border:1px solid #D5DBE1;border-radius:6px;padding:5px 8px;min-width:180px;}
 .kfilter{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px;min-height:28px;}
 /* Suche direkt über der Liste, in einer Zeile mit «Filter» (Taste «/» springt hinein) */
 .ksuchzeile{display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;margin-bottom:10px;} .ksuchzeile .kundensearch-wrap{flex:0 1 460px;min-width:240px;margin:0;} .ksuchzeile .kfilter{flex:1;min-width:0;margin:0;padding-top:4px;}
@@ -2321,7 +2321,7 @@ async function maZeichnen(){
     [['_wartet', 'Wartet auf Freischaltung', anz(b => !b.recht_gruppe_id && !b.rolle && !b.ist_platzhalter)], ['_gesperrt', 'Gesperrt', anz(b => b.aktiv === false)]].filter(x => x[2]));
   const L = maGefiltert();
   w.innerHTML = `<div class="kfilter">${chips.map(([k, n, c]) => `<button type="button" class="fchip" data-mag="${k}" aria-pressed="${MA.gruppe === k}">${escHtml(n)}<small>${c}</small></button>`).join('')}
-      <span style="flex:1"></span><button type="button" class="fchip" data-maausw aria-pressed="${!!MA.ausw}" title="Geburtstage, Dienstjubiläen, Lernende">Auswertungen</button><button type="button" class="btn kg-neben" data-maneu="temp" title="Name und Handy genügen, Anmeldung über einen persönlichen Link, nur ansehen">+ Temporär</button><button type="button" class="btn kg-neben" data-maneu="ohne" title="Person ohne Login, z. B. im Pflege-Tool zuständig">+ Ohne Login</button></div>
+      <span style="flex:1"></span><button type="button" class="fchip" data-maausw aria-pressed="${!!MA.ausw}" title="Geburtstage, Dienstjubiläen, Lernende">Auswertungen</button><button type="button" class="btn kg-neben" data-maneu="temp" title="Name und Handy genügen, Anmeldung über einen persönlichen Link, nur ansehen">+ Temporär</button><button type="button" class="btn kg-neben" data-maneu="ma" title="Neue Person mit Login: E-Mail ist der Benutzername, sie wählt ihr Passwort über einen Link selbst">+ Mitarbeiter</button></div>
     ${MA.neu ? maNeuForm() : ''}${MA.ausw ? maAuswertung() : ''}
     <table class="kundentable matab"><thead><tr><th style="width:20px;"></th><th style="width:22%;">Name</th><th style="width:18%;">Gruppe</th><th style="width:14%;">Handy</th><th style="width:14%;">Einsatzplaner</th><th>Merkmale</th><th style="width:10%;">Login</th></tr></thead><tbody>
     ${L.map(b => { const p = maPP(b.id), gr = MA.gruppen.find(g => g.id === b.recht_gruppe_id), mks = MA.bm.filter(x => x.benutzer_id === b.id).map(x => MA.merkmale.find(m => m.id === x.merkmal_id)).filter(Boolean), lg = maLogin(b);
@@ -2362,6 +2362,11 @@ function maAuswertung(){
 }
 function maNeuForm(){
   const temp = MA.neu === 'temp';
+  // Mitarbeiter mit Login: E-Mail = Benutzername, Gruppe (ohne Administrator für Büro-Team, ohne Temporär), danach Einrichtungs-Link
+  if(MA.neu === 'ma') return `<div class="maneu"><b>Mitarbeiter erfassen</b><input type="text" id="maNeuName" placeholder="Vorname Name" ${MA_PW}>
+    <input type="email" id="maNeuMail" placeholder="E-Mail (Benutzername)" ${MA_PW}>
+    <select id="maNeuGr"><option value="">Gruppe wählen</option>${MA.gruppen.filter(g => (IST_ADMIN || !g.ist_admin) && g.schluessel !== 'temp').map(g => `<option value="${g.id}">${escHtml(g.name)}</option>`).join('')}</select>
+    <button type="button" class="btn btn-primary" id="maNeuOk">Erfassen und Link erstellen</button><button type="button" class="btn btn-ghost" id="maNeuNo">Abbrechen</button></div>`;
   return `<div class="maneu"><b>${temp ? 'Temporär erfassen' : 'Person ohne Login'}</b><input type="text" id="maNeuName" placeholder="Vorname Name" ${MA_PW}>
     ${temp ? `<input type="tel" id="maNeuTel" placeholder="Handy" ${MA_PW}>` : `<input type="email" id="maNeuMail" placeholder="E-Mail (optional, für spätere Übernahme)" ${MA_PW}>`}
     <button type="button" class="btn btn-primary" id="maNeuOk">${temp ? 'Erfassen und Link erstellen' : 'Erfassen'}</button><button type="button" class="btn btn-ghost" id="maNeuNo">Abbrechen</button></div>`;
@@ -2372,7 +2377,13 @@ function maNeuBinden(){
   $('maNeuOk').onclick = async () => {
     const name = $('maNeuName').value.trim(); if(!name) return showToast('Bitte einen Namen eingeben.', true);
     $('maNeuOk').disabled = true;
-    if(MA.neu === 'temp'){
+    if(MA.neu === 'ma'){
+      const email = $('maNeuMail').value.trim().toLowerCase(), gruppe_id = $('maNeuGr').value;
+      if(!email.includes('@')) { $('maNeuOk').disabled = false; return showToast('Bitte die E-Mail eingeben – sie ist der Benutzername.', true); }
+      if(!gruppe_id) { $('maNeuOk').disabled = false; return showToast('Bitte eine Gruppe wählen.', true); }
+      const r = await maZugangAufruf({ aktion: 'mitarbeiter', name, email, gruppe_id }); $('maNeuOk').disabled = false; if(!r) return;
+      MA.link[r.id] = r.link; MA.offen = r.id; MA.scrollen = true;
+    } else if(MA.neu === 'temp'){
       const telefon = $('maNeuTel').value.trim(), r = await maZugangAufruf({ aktion: 'temporaer', name, telefon }); $('maNeuOk').disabled = false; if(!r) return;
       MA.link[r.id] = r.link; MA.offen = r.id;
     } else {
@@ -2394,7 +2405,7 @@ function maLinkHtml(b){
   const link = MA.link[b.id]; if(!link) return '';
   const name = maName(b).split(' ')[0], text = b.ist_temporaer
     ? `Hallo ${name}, mit diesem Link siehst du deine Einsätze bei Knechtgarten (einfach öffnen, kein Passwort nötig): ${link}`
-    : `Hallo ${name}, hier ist dein Zugang zu den Knechtgarten-Tools. Link öffnen und ein Passwort festlegen: ${link}`;
+    : `Hallo ${name}, hier ist dein Zugang zu den Knechtgarten-Tools. Dein Benutzername ist deine E-Mail ${b.email || ''}. Link öffnen und ein Passwort wählen (gilt 7 Tage): ${link}`;
   const tel = String(b.telefon || '').replace(/[^\d+]/g, '').replace(/^0/, '41').replace(/^\+/, '');
   return `<div class="malink"><input type="text" readonly value="${escHtml(link)}" id="maLinkIn"><button type="button" class="kklink" id="maLinkCp">Kopieren</button>
     ${!b.ist_temporaer && b.email ? `<a class="kklink" href="mailto:${encodeURIComponent(b.email)}?subject=${encodeURIComponent('Dein Zugang zu den Knechtgarten-Tools')}&body=${encodeURIComponent(text)}">Per E-Mail</a>` : ''}
@@ -2425,10 +2436,10 @@ function maDetail(b){
   const gOpts = MA.gruppen.filter(g => IST_ADMIN || !admG(g) || g.id === b.recht_gruppe_id).map(g => `<option value="${g.id}"${g.id === b.recht_gruppe_id ? ' selected' : ''}>${escHtml(g.name)}</option>`).join('');
   const knopf = (a, t) => `<button type="button" class="kklink" data-zug="${a}">${t}</button>`;
   const links = b.ist_temporaer ? knopf('link-neu', 'Neuer Link') + knopf('sperren', 'Link sperren')
-    : b.ist_platzhalter ? knopf('einladen', 'Einladen') : b.rolle ? knopf('einladen', 'Passwort-Link') : '';
+    : gesperrt ? '' : b.ist_platzhalter ? knopf('login-einrichten', 'Login einrichten') : b.rolle ? knopf('login-einrichten', 'Neuer Einrichtungs-Link') : '';
   const zN = MA.zust[b.id] || 0, ziele = MA.personen.filter(x => x.id !== b.id && x.pflege_zustaendig && x.aktiv !== false && (x.rolle || x.ist_platzhalter));
   T.push(kachel('Login &amp; Gruppe', links, `<div class="mag">
-      ${b.ist_temporaer ? '' : b.ist_platzhalter ? f('email', 'E-Mail für die Einladung', 'email', true) : `<label class="voll">E-Mail (Login)<input type="text" value="${escHtml(b.email || '')}" readonly></label>`}
+      ${b.ist_temporaer ? '' : b.ist_platzhalter ? f('email', 'E-Mail (wird der Benutzername)', 'email', true) : `<label class="voll">E-Mail (Benutzername)<input type="text" value="${escHtml(b.email || '')}" readonly></label>`}
       ${!b.rolle && !b.ist_platzhalter ? `<label class="voll">Wartet auf Freischaltung – Gruppe wählen<span class="marow2"><select data-mafrei>${gOpts}</select><button type="button" class="btn btn-primary" data-mafreiok>Freischalten</button></span></label>`
         : `<label>Gruppe (Rechte)<select data-magruppe${gesperrt ? ' disabled title="Nur ein Admin kann das ändern"' : ''}>${b.recht_gruppe_id ? '' : '<option value="">– ohne Gruppe –</option>'}${gOpts}</select></label>`}
       <label>Login<input type="text" value="${lg}${b.erstellt_am ? ' · seit ' + new Date(b.erstellt_am).toLocaleDateString('de-CH') : ''}" readonly></label>
@@ -2500,8 +2511,11 @@ function maBinden(b, p){
     showToast(`${data} Zuständigkeiten an ${maName(MA.personen.find(x => x.id === an))} übertragen.`); await maLaden(); maZeichnen(); });
   d.querySelectorAll('[data-zug]').forEach(bt => bt.addEventListener('click', async () => { const a = bt.dataset.zug;
     if(a === 'sperren' && !await confirmDialog(`Link von ${maName(b)} sperren? Der Zugang funktioniert danach nicht mehr, bis du einen neuen Link erstellst.`)) return;
-    if(a === 'einladen' && b.ist_platzhalter && !(b.email || '').includes('@')) return showToast('Bitte zuerst bei «Login & Gruppe» die E-Mail für die Einladung erfassen.', true);
-    const r = await maZugangAufruf({ aktion: a, id: b.id }); if(!r) return;
+    // Login einrichten: E-Mail direkt aus dem Feld (auch wenn noch nicht gespeichert)
+    const mailFeld = d.querySelector('[data-mab="email"]'), email = (mailFeld ? mailFeld.value : b.email || '').trim().toLowerCase();
+    if((a === 'einladen' || a === 'login-einrichten') && b.ist_platzhalter && !email.includes('@')) return showToast('Bitte zuerst die E-Mail erfassen – sie wird der Benutzername.', true);
+    const r = await maZugangAufruf({ aktion: a, id: b.id, email }); if(!r) return;
+    if(a === 'login-einrichten'){ MA.link[b.id] = r.link; await maLaden(); maZeichnen(); if(b.ist_platzhalter) showToast('Login angelegt. Link schicken, die Person wählt ihr Passwort selbst.'); return; }
     if(a === 'sperren') return showToast('Link gesperrt.');
     if(r.id && r.id !== b.id){ MA.offen = r.id; MA.link[r.id] = r.link; await maLaden(); } else MA.link[b.id] = r.link;   // Platzhalter wurde zum Login (neue ID)
     maZeichnen(); }));
