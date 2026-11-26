@@ -1648,6 +1648,12 @@ async function soloSetzen(b, ks, an){
   const k0 = Math.floor(b.s * 2 + 1e-9), A = soloSet(b); ks.forEach(k => an ? A.add(k) : A.delete(k));
   const vorher = { at: b.at, allein: b.allein }; b.at = [...A].map(k => k - k0).sort((x, y) => x - y); b.allein = false; renderRows();
   if(!(await speichere(b, { allein_tage: b.at, allein: false }))){ Object.assign(b, vorher); renderRows(); } }
+// Klick (links oder rechts) auf den Personal-Streifen: rot = allein setzen, blau = aufheben erst nach Bestätigung
+function soloKlick(b, ks, an){
+  if(an){ soloSetzen(b, ks, true); return; }
+  renderRows(); const tage = [...new Set([...ks].map(k => k >> 1))].sort((x, y) => x - y), halb = ks.size === 1 ? ([...ks][0] & 1 ? ' Nachmittag' : ' Vormittag') : '';
+  bestaetige('Allein aufheben?', `<div>${esc(P[b.mid]?.name || '')} · ${esc(labOf(b))}<br>${tage.map(d => esc(dLab(d))).join(', ')}${halb}</div><div class="small muted">Danach gilt wieder: Personal nötig.</div>`, 'Allein aufheben', () => soloSetzen(b, ks, false));
+}
 // Vorab «Allein» für eine Person (leere Fläche › Allein): pro Tag eine Markierung art 'allein' (ganz / vm / nm)
 // Knopfzeile «Allein: Ganzer Tag | Vormittag | Nachmittag» (leeres Feld: data-allein, Rechtsklick auf Auftrag: data-cmallein)
 const ALLEIN_TEIL = [['ganz', 'Ganzer Tag'], ['vm', 'Vormittag'], ['nm', 'Nachmittag']];
@@ -3540,6 +3546,9 @@ function bindTimeline(t){
       const darf = p.lane.startsWith('g:') ? PERSONEN.some(x => x.aktiv && canEdit(x.id) && x.gruppe_id === p.lane.slice(2)) : canEdit(p.lane.slice(2));
       if(darf) openAbmachen({ pid: p.id }, { left: e.clientX, bottom: e.clientY }); else openProvPanel(p.id); return; }
     const bar = e.target.closest('.bar[data-id]'), lane = e.target.closest('.lane[data-mid]'); if(!lane) return;
+    // Rechtsklick auf den Personal-Streifen = gleich wie Linksklick (blau: Aufheben mit Bestätigung)
+    const sdr = e.target.closest('.rdot[data-solo]'); if(sdr){ e.preventDefault(); const b = byId(sdr.dataset.solo), L = b && LAY[b.id]; if(!L) return; const k = +sdr.dataset.k;
+      const ks = new Set((sdr.dataset.tag ? [(k >> 1) * 2, (k >> 1) * 2 + 1] : [k]).filter(x => L.free.includes(x))); if(ks.size) soloKlick(b, ks, !sdr.classList.contains('blau')); return; }
     // Rechtsklick in leere Fläche = gleiche Leiste wie Linksklick (inkl. «Kopie einfügen»)
     if(!bar){ if(!lane.classList.contains('ed') || e.target.closest('.band, .vchip, .bpz, .rdot, .vic')) return; e.preventDefault();
       const len = zoom === 'tag' ? 4 / 48 : zoom === 'woche' ? 1 / 6 : .5, a = snapU(uAt(e.clientX) - len / 2); const um = uAt(e.clientX), rr = { left: e.clientX, bottom: e.clientY }; openNeuLeiste(lane, lane.dataset.mid, r48(a), r48(a + len)); return; }
@@ -3890,7 +3899,7 @@ function bindWindow(){
       Object.assign(m, neu); renderRows();
       const { error } = await sb.from('planer_markierung').update(neu).eq('id', m.id); if(error){ Object.assign(m, alt); renderRows(); fehler(error, 'Verschieben'); }
       return; }
-    if(d.kind === 'solo'){ const b = byId(d.id); if(b && d.ks.size) await soloSetzen(b, d.ks, d.an); return; }
+    if(d.kind === 'solo'){ const b = byId(d.id); if(b && d.ks.size) soloKlick(b, d.ks, d.an); return; }
     if(d.kind === 'pz'){ const it = byId(d.id); if(!it) return;
       // Klick in die Lücke: hier etwas Neues eintragen (wie in leerer Fläche) oder den Unterbruch aufheben
       if(!d.moved){ const ln = document.querySelector(`.row[data-mid="${it.mid}"] > .lane[data-mid="${it.mid}"]`); const a = Math.floor(d.u0 * 2) / 2;
