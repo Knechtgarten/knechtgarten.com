@@ -797,23 +797,24 @@ async function ladeObjekteBez(){ try { OBJ = await KGKunde.ladeAlle(); } catch(e
 // Kontakte: Lieferanten (Easybill-Adressen + unsere Lieferantenliste) und die
 // Kennzahlen für die Schnellfilter (AB, offene Offerte, Pflegekunde, Bauprogramm)
 // ---------------------------------------------------------------------------
-let LIEF = [], AB_SET = new Set(), OFFEN_SET = new Set(), PFLEGE_SET = new Set(), BP_SET = new Set(), BP_PRO_KUNDE = {}, IST_ADMIN = false;
+let LIEF = [], AB_SET = new Set(), OFFEN_SET = new Set(), PFLEGE_SET = new Set(), BP_SET = new Set(), BP_PRO_KUNDE = {}, IST_ADMIN = false, IST_BUERO = false;
 let bereich = 'kunden', schnell = new Set(), buchstabe = null, seite = 0;
 const PRO_SEITE = 50;
 async function ladeAlleZeilen(q){ const out = []; for(let von = 0; ; von += 1000){ const { data, error } = await q().range(von, von + 999); if(error || !data) break; out.push(...data); if(data.length < 1000) break; } return out; }
 async function ladeKontaktDaten(){
-  const [ab, of, pf, bp, el, li, adm] = await Promise.all([
+  const [ab, of, pf, bp, el, li, adm, bue] = await Promise.all([
     ladeAlleZeilen(() => sb.from('easybill_dokument').select('kunde_id').eq('typ', 'ORDER').not('kunde_id', 'is', null)),
     ladeAlleZeilen(() => sb.from('offerte').select('kunde_id').eq('status', 'offen')),
     ladeAlleZeilen(() => sb.from('pflege_kunde').select('kunde_id').neq('abo_typ', 'kein_abo')),
     ladeAlleZeilen(() => sb.from('bauprogramm').select('id,kunde_id,start')),
     ladeAlleZeilen(() => sb.from('easybill_lieferant').select('*').order('name')),
     ladeAlleZeilen(() => sb.from('lieferant').select('id,name,kuerzel,logo_url,firma,strasse,plz,ort,kontaktdaten,easybill_id,lieferantennummer,sync_typ,archiviert_am,lieferant_datenabgleich(*)')),
-    sb.rpc('ist_admin')
+    sb.rpc('ist_admin'),
+    sb.rpc('ist_buero_oder_admin')
   ]);
   AB_SET = new Set(ab.map(x => x.kunde_id)); OFFEN_SET = new Set(of.map(x => x.kunde_id));
   PFLEGE_SET = new Set(pf.map(x => x.kunde_id)); BP_SET = new Set(bp.map(x => x.kunde_id)); BP_PRO_KUNDE = {}; bp.forEach(b => (BP_PRO_KUNDE[b.kunde_id] = BP_PRO_KUNDE[b.kunde_id] || []).push(b));
-  IST_ADMIN = adm && adm.data === true;
+  IST_ADMIN = adm && adm.data === true; IST_BUERO = IST_ADMIN || (bue && bue.data === true);
   const liefVon = new Map(li.map(l => [l.id, l])), verbunden = new Set(el.map(e => e.lieferant_id).filter(Boolean));
   LIEF = el.map(e => ({ art: 'lief', id: 'eb' + e.easybill_id, eb: e, liste: e.lieferant_id ? liefVon.get(e.lieferant_id) : null,
       name: e.firma || e.nachname || e.name || '(unbenannt)', vorname: e.firma ? '' : (e.vorname || ''), strasse: e.strasse, plz: e.plz, ort: e.ort,
@@ -1019,7 +1020,7 @@ function renderOffertenTabelle(kundeId){
 // Eine Leiste: Alle · Kunden · Pflege · Projekte · Lieferanten (Pflege/Projekte = Ansicht der Kunden)
 function bereicheZeigen(){
   const akt = modus === 'pf' ? 'pf' : modus === 'pj' ? 'pj' : modus === 'ma' ? 'ma' : bereich;
-  const sicht = { alle: MIT_ADR, kunden: MIT_ADR, pf: MIT_PF && PF.reg.length > 0, pj: MIT_ADR, lief: MIT_ADR, ma: IST_ADMIN };
+  const sicht = { alle: MIT_ADR, kunden: MIT_ADR, pf: MIT_PF && PF.reg.length > 0, pj: MIT_ADR, lief: MIT_ADR, ma: IST_BUERO };
   document.querySelectorAll('#bereiche [data-b]').forEach(b => { b.classList.toggle('on', b.dataset.b === akt); b.style.display = sicht[b.dataset.b] ? '' : 'none'; });
   const nAktiv = KUNDEN.filter(k => !k.inaktiv).length;
   $('nAlle').textContent = nAktiv + LIEF.length; $('nKunden').textContent = nAktiv; $('nLief').textContent = LIEF.length;
@@ -2276,7 +2277,7 @@ async function uebernehmeEasybillKunde(kundeId, ek){
 
 
 // ---------------------------------------------------------------------------
-// Mitarbeitende (nur Admin): eine Zeile pro Person (benutzer), aufgeklappt Kacheln wie bei den Kunden –
+// Mitarbeitende (Admin + Büro-Team; Admins ändern nur Admins): eine Zeile pro Person (benutzer), aufgeklappt Kacheln wie bei den Kunden –
 // Person & Kontakt, Login & Gruppe, Einsatzplaner (planer_person.benutzer_id), Merkmale.
 // Ersetzt «Personen» und «Benutzerverwaltung» der Verwaltung; Gruppen und Rechte bleiben dort.
 // ---------------------------------------------------------------------------
@@ -2419,7 +2420,9 @@ function maDetail(b){
     ${f('strasse', 'Strasse, Nr.')}${f('plz_ort', 'PLZ, Ort')}${f('geburtsdatum', 'Geburtsdatum', 'date')}${f('eintritt', 'Eintritt', 'date')}${f('pensum', 'Pensum')}
     ${f('notfallkontakt', 'Notfallkontakt (Name, Beziehung, Telefon)', 'text', true)}<label class="voll">Interne Notizen<textarea data-mab="notizen">${escHtml(b.notizen || '')}</textarea></label></div>`, ' ma'));
   // Login & Gruppe: Gruppe wählen (Rechte), Status, Links, sperren, löschen
-  const gOpts = MA.gruppen.map(g => `<option value="${g.id}"${g.id === b.recht_gruppe_id ? ' selected' : ''}>${escHtml(g.name)}</option>`).join('');
+  // Büro-Team: Administratoren nur ansehen, Gruppe «Administrator» nicht vergebbar (DB-Trigger benutzer_admin_schutz)
+  const admG = g => g?.ist_admin, istAdm = b.rolle === 'admin' || admG(MA.gruppen.find(g => g.id === b.recht_gruppe_id)), gesperrt = !IST_ADMIN && istAdm;
+  const gOpts = MA.gruppen.filter(g => IST_ADMIN || !admG(g) || g.id === b.recht_gruppe_id).map(g => `<option value="${g.id}"${g.id === b.recht_gruppe_id ? ' selected' : ''}>${escHtml(g.name)}</option>`).join('');
   const knopf = (a, t) => `<button type="button" class="kklink" data-zug="${a}">${t}</button>`;
   const links = b.ist_temporaer ? knopf('link-neu', 'Neuer Link') + knopf('sperren', 'Link sperren')
     : b.ist_platzhalter ? knopf('einladen', 'Einladen') : b.rolle ? knopf('einladen', 'Passwort-Link') : '';
@@ -2427,13 +2430,13 @@ function maDetail(b){
   T.push(kachel('Login &amp; Gruppe', links, `<div class="mag">
       ${b.ist_temporaer ? '' : b.ist_platzhalter ? f('email', 'E-Mail für die Einladung', 'email', true) : `<label class="voll">E-Mail (Login)<input type="text" value="${escHtml(b.email || '')}" readonly></label>`}
       ${!b.rolle && !b.ist_platzhalter ? `<label class="voll">Wartet auf Freischaltung – Gruppe wählen<span class="marow2"><select data-mafrei>${gOpts}</select><button type="button" class="btn btn-primary" data-mafreiok>Freischalten</button></span></label>`
-        : `<label>Gruppe (Rechte)<select data-magruppe>${b.recht_gruppe_id ? '' : '<option value="">– ohne Gruppe –</option>'}${gOpts}</select></label>`}
+        : `<label>Gruppe (Rechte)<select data-magruppe${gesperrt ? ' disabled title="Nur ein Admin kann das ändern"' : ''}>${b.recht_gruppe_id ? '' : '<option value="">– ohne Gruppe –</option>'}${gOpts}</select></label>`}
       <label>Login<input type="text" value="${lg}${b.erstellt_am ? ' · seit ' + new Date(b.erstellt_am).toLocaleDateString('de-CH') : ''}" readonly></label>
       <label class="ck voll"><input type="checkbox" data-mack="pflege_zustaendig"${b.pflege_zustaendig ? ' checked' : ''}>Im Pflege-Tool bei «Zuständig» auswählbar</label>
       ${zN ? `<label class="voll">${zN} Zuständigkeiten im Pflege-Tool übertragen an<span class="marow2"><select data-maan><option value="">– wählen –</option>${ziele.map(x => `<option value="${x.id}">${escHtml(maName(x))}</option>`).join('')}</select><button type="button" class="btn btn-ghost" data-maueb>Übertragen</button></span></label>` : ''}
     </div>${maLinkHtml(b)}
-    <div class="maakt">${b.rolle && !b.ist_platzhalter && !b.ist_temporaer ? `<button type="button" class="btn btn-ghost" data-maaktiv>${b.aktiv === false ? 'Login aktivieren' : 'Login sperren'}</button>` : ''}
-      ${b.id === ICH_ID ? '' : `<button type="button" class="kg-ibtn danger" data-maweg title="Person löschen" aria-label="Person löschen">${KG.icon('trash', 14)}</button>`}</div>`, ' ma'));
+    <div class="maakt">${!gesperrt && b.rolle && !b.ist_platzhalter && !b.ist_temporaer ? `<button type="button" class="btn btn-ghost" data-maaktiv>${b.aktiv === false ? 'Login aktivieren' : 'Login sperren'}</button>` : ''}
+      ${b.id === ICH_ID || gesperrt ? '' : `<button type="button" class="kg-ibtn danger" data-maweg title="Person löschen" aria-label="Person löschen">${KG.icon('trash', 14)}</button>`}</div>`, ' ma'));
   // Einsatzplaner: Zeile verknüpfen, Planer-Gruppe, Kürzel, Haken, Farbe
   const frei = MA.pp.filter(x => x.aktiv !== false && !x.archiviert_am && (!x.benutzer_id || x.id === (p && p.id))).sort((x, y) => x.name.localeCompare(y.name, 'de'));
   T.push(kachel('Einsatzplaner', p ? `<a class="kklink" href="einsatzplaner-live-v1.html">Öffnen</a>` : '', `<div class="mag">
