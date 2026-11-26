@@ -2596,7 +2596,7 @@ async function toolDrop(d, mid, u){
   if(d.typ === 'mh'){ if(d.val === mid){ toast('Mithilfe bei sich selbst geht nicht.', null, true); return; }
     const o = mithilfeWahl(mid, a, b).find(x => x.pid === d.val);
     const neu = await neuerEinsatz({ mid, kind: 'hilfe', s: a, e: b, link: null, mp: d.val, ok: true }, false);
-    if(neu) toast(`${P[mid].name}: mit ${first(P[d.val].name)}`, () => loescheEinsatz(neu)); }
+    if(neu) toast(`${P[mid].name}: mit ${first(P[d.val].name)}${neu._teile?.length ? ` · ${neu._teile.length + 1} Stücke` : ''}`, () => hilfeWeg(neu)); }
 }
 async function mkEinfuegen(mid, u){ if(!MKCOPY) return; const row = { person_id: mid, tag: isoDate(Math.floor(u + 1e-9)), teil: MKCOPY.teil, art: MKCOPY.art, text: MKCOPY.text || null, lieferant: MKCOPY.lieferant || null, erstellt_von: ME };
   const { data, error } = await sb.from('planer_markierung').insert(row).select().single(); if(error) return fehler(error, 'Einfügen'); MARK.push(data); renderRows(); toast(`${MARKART[data.art]} eingefügt · ${dLab(fromIso(data.tag))}`, async () => { await sb.from('planer_markierung').delete().eq('id', data.id); MARK = MARK.filter(x => x.id !== data.id); renderRows(); }); }
@@ -3398,7 +3398,7 @@ async function legeAn(art, extra = {}){
   const kind = art === 'absenz' ? 'absenz' : art === 'hilfe' ? 'hilfe' : (kurz ? 'termin' : 'baustelle');
   const mePl = myPerson(); const pl = kind === 'baustelle' ? (P[L.mid]?.ist_projektleiter ? L.mid : (mePl?.ist_projektleiter ? mePl.id : null)) : null;
   const neu = await neuerEinsatz({ mid: L.mid, kind, s: L.a, e: L.b, title: extra.title || '', link: extra.link || null, mp: extra.mp || null, ok: art !== 'offen' && L.lane?.dataset?.off !== '1', fw: art === 'offen' && L.lane?.dataset?.off !== '1' && hatOffen(L.mid), pl }, kind === 'termin' || kind === 'baustelle');
-  if(neu && (kind === 'absenz' || kind === 'hilfe')) toast(`${kind === 'absenz' ? extra.title : labOf(neu)} eingetragen`, () => loescheEinsatz(neu));
+  if(neu && (kind === 'absenz' || kind === 'hilfe')) toast(`${kind === 'absenz' ? extra.title : labOf(neu)} eingetragen${neu._teile?.length ? ` · ${neu._teile.length + 1} Stücke` : ''}`, () => kind === 'hilfe' ? hilfeWeg(neu) : loescheEinsatz(neu));
 }
 addEventListener('keydown', e => {
   if(!neuL || e.target.closest?.('input, textarea, select')) return;
@@ -3898,12 +3898,13 @@ function bindWindow(){
       tageFixNachholen(); // neu lang geworden = fixe Arbeitstage
       if(!inAblage) await vorabUebernehmen(it); // auf vorgemerktes «Allein» gezogen
       if(it.kind === 'absenz' && !inAblage) await ausgleich(it, vorher);
+      const teile = it.kind === 'hilfe' && !inAblage ? (compute(), await hilfeTeilen(it)) : []; // Mithilfe über Wochenende, Frei, andere Einträge: in Stücke
       // Ganzer Termin verschoben (auch andere Zeile): Sprung-Regel Faktor 2 – Absenzen immer, höchstens ein Kundentermin
       if(!inAblage && d.mode === 'move' && istLang(it) && it.soll && !it.frei){ compute(); const ne = sprungEnde(it, 2, it.s);
         if(ne != null && Math.abs(ne - it.e) > 1e-6){ const e0 = it.e; it.e = ne; if(!(await speichere(it, { ende: fromU(it.e, true) }))) it.e = e0; } }
       renderRows();
       const msg = it.ok !== d.ok0 ? `${labOf(it)}: ${it.ok === false ? 'wieder offen' : 'abgemacht'}${it.mid !== d.mid0 ? ' · ' + P[it.mid].name : ''}` : it.mid !== d.mid0 ? (inAblage ? `${labOf(it)} in die Ablage gelegt` : `${labOf(it)} → ${P[it.mid].name}`) : `Verschoben auf ${spanLabel(it)}`;
-      const undo = async () => { Object.assign(it, vorher); renderRows(); await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true), person_id: it.mid, abgemacht: it.ok !== false, fixe_woche: !!it.fw, ...(vorher.pz ? { pausen: it.pz } : {}) }); };
+      const undo = async () => { if(teile.length){ await sb.from('planer_einsatz').delete().in('id', teile.map(x => x.id)); EINS = EINS.filter(x => !teile.includes(x)); } Object.assign(it, vorher); renderRows(); await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true), person_id: it.mid, abgemacht: it.ok !== false, fixe_woche: !!it.fw, ...(vorher.pz ? { pausen: it.pz } : {}) }); };
       const nJetzt = LAY[it.id]?.n, abwR = d.mode !== 'move' && it.soll && nJetzt != null && Math.abs(nJetzt - it.soll) > .01;
       if(abwR || it.ok === d.ok0) toast(abwR ? `${labOf(it)}: ${fmtN(nJetzt)} statt ${fmtN(it.soll)} T` : msg, abwR ? [{ l: 'Als neue Länge übernehmen', fn: async () => { it.soll = nJetzt; renderRows(); await speichere(it, { soll_tage: it.soll }); if(selId === it.id) openPanel(it.id); } }, { l: 'Rückgängig', fn: undo }] : undo);
       if(selId === it.id) openPanel(it.id);
@@ -4053,10 +4054,35 @@ async function neuerEinsatz(it, open){
   const neu = rowToItem(data); EINS.push(neu);
   if(VIEW === 'plan') renderRows();
   if(neu.kind === 'absenz') await ausgleich(neu, null);
+  if(neu.kind === 'hilfe'){ compute(); neu._teile = await hilfeTeilen(neu); if(neu._teile.length && VIEW === 'plan') renderRows(); } // Mithilfe über Wochenende usw.: in Stücke
   await vorabUebernehmen(neu); // auf vorgemerktem «Allein» angelegt
   if(open) openPanel(neu.id, true);
   return neu;
 }
+// Mithilfe = Zuteilung, keine Baustelle: über mehrere Tage aufgezogen wird sie beim Loslassen in einzelne Stücke geteilt,
+// Unterbruch bei Wochenende/Feiertag, Absenz der Person oder der Hauptperson und anderen Einträgen in der eigenen Zeile.
+// Jedes Stück ist danach ein eigener Eintrag (frei verschieb- und kürzbar). Rückgabe: neu angelegte Stücke.
+async function hilfeTeilen(it){
+  if(!it || it.kind !== 'hilfe' || it.wdh || it.rep || P[it.mid]?.ist_ablage || it.e - it.s <= .5 + 1e-6) return [];
+  const chef = it.mp || byId(it.link)?.mid, ov = (x, a, b) => x.s < b - 1e-6 && x.e > a + 1e-6;
+  const andere = ALL.filter(o => o.id !== it.id && !istOffen(o) && (o.mid === it.mid || (chef && o.mid === chef && o.kind === 'absenz')));
+  const k0 = Math.floor(it.s * 2 + 1e-9), k1 = Math.ceil(it.e * 2 - 1e-9) - 1, runs = [];
+  for(let k = k0; k <= k1; k++){ const a = Math.max(it.s, k / 2), b = Math.min(it.e, (k + 1) / 2);
+    if(isOff(k >> 1) || andere.some(o => ov(o, a, b))) continue;
+    const q = runs[runs.length - 1]; if(q && Math.abs(q[1] - a) < 1e-6) q[1] = b; else runs.push([a, b]); }
+  if(!runs.length || (runs.length === 1 && Math.abs(runs[0][0] - it.s) < 1e-6 && Math.abs(runs[0][1] - it.e) < 1e-6)) return [];
+  const [s0, e0] = runs[0], alt = { s: it.s, e: it.e }; it.s = s0; it.e = e0;
+  if(!(await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true) }))){ Object.assign(it, alt); return []; }
+  const linkOk = (l, a, b) => { const x = l && byId(l); return x && ov(x, a, b) ? l : null; };
+  if(it.link && !linkOk(it.link, s0, e0)){ it.mp ||= chef; it.link = null; await speichere(it, { mit_einsatz_id: null, mit_person_id: it.mp || null }); }
+  const rows = runs.slice(1).map(([a, b]) => { const l = linkOk(it.link, a, b); const r = itemToRow({ ...it, s: a, e: b, link: l, mp: it.mp || chef || null, files: [] }); r.erstellt_von = ME; return r; });
+  const { data, error } = await sb.from('planer_einsatz').insert(rows).select('*, planer_datei(id,art,name,storage_pfad)');
+  if(error){ fehler(error, 'Mithilfe teilen'); return []; }
+  const neu = (data || []).map(rowToItem); EINS.push(...neu); return neu;
+}
+// Rückgängig für eine neu aufgezogene Mithilfe: auch die abgeteilten Stücke weg
+async function hilfeWeg(neu){ const ids = [neu, ...(neu._teile || [])].map(x => x.id); const { error } = await sb.from('planer_einsatz').delete().in('id', ids);
+  if(error) return fehler(error, 'Löschen'); EINS = EINS.filter(x => !ids.includes(x.id)); closePanel(); render(); }
 async function loescheEinsatz(it){
   const kopie = { ...it }; const files = it.files || [];
   const { error } = await sb.from('planer_einsatz').delete().eq('id', it.id);
