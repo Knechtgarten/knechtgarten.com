@@ -341,6 +341,18 @@ body.bearb .sec.skachel .sec-b, .sec.skachel.sedit .sec-b{max-height:none;}
 .notes{display:flex;flex-direction:column;gap:10px;}
 .saving{font-size:11.5px;color:var(--muted);}
 
+/* Dokumente als Kacheln */
+.dockacheln{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:10px;}
+.dk{position:relative;min-width:0;}
+.dk > a{display:flex;flex-direction:column;align-items:center;gap:6px;padding:8px 6px;border:1px solid var(--line);border-radius:8px;text-decoration:none;color:var(--primary);background:#fff;height:100%;box-sizing:border-box;}
+.dk > a:hover{border-color:#8B9097;}
+.dkb{position:relative;width:100%;height:64px;display:flex;align-items:center;justify-content:center;color:#8B9097;}
+.dkb .i{width:44px;height:44px;stroke-width:1.1;}
+.dkb img{width:100%;height:64px;object-fit:cover;border-radius:5px;}
+.dtyp{position:absolute;left:50%;bottom:4px;transform:translateX(-50%);font-size:9.5px;font-weight:700;letter-spacing:.4px;padding:1px 5px;border-radius:3px;line-height:1.3;}
+.dkn{font-size:11.5px;font-weight:600;line-height:1.3;text-align:center;word-break:break-word;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
+.dk .dkx{position:absolute;top:4px;right:4px;}
+
 /* Listen (Dokumente, Kontakte, Erledigt) */
 .docs{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:8px;}
 .doc{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--line);}
@@ -2255,12 +2267,15 @@ function secBody(e, k){
   if(k === 'docs'){
     if(!d) return '<div class="small muted">Lädt …</div>';
     const docs = allgDocs(e, d);
-    return `${docs.length ? `<div class="docs">${docs.map(x => {
+    // Kacheln: Fotos mit Vorschau, sonst Dokument-Icon mit farbigem Typ-Schildchen; Details beim Darüberfahren
+    return `${docs.length ? `<div class="dockacheln">${docs.map(x => {
         const andere = [x.eintrag_id, ...x.auch_bei].filter(i => i !== e.id).map(i => byId(i)?.titel).filter(Boolean);
-        return `<div class="doc kg-zeile">${ic(x.art === 'foto' ? 'image' : x.art === 'video' ? 'video' : 'file')}
-          <div class="grow"><a class="n" href="${esc(urls.get(x.storage_pfad) || '#')}" target="_blank" rel="noopener">${esc(x.name)}</a>
-          <div class="small muted">${esc([x.beschreibung, datumCH(x.erstellt_am.slice(0,10)), andere.length ? 'auch bei ' + andere.join(', ') : ''].filter(Boolean).join(' · '))}</div></div>
-          ${darfEdit() ? `<button class="xbtn kg-hover" data-act="dateiDel" data-id="${x.id}" title="Löschen">${ic('trash')}</button>` : ''}</div>`; }).join('')}</div>`
+        const url = urls.get(x.storage_pfad) || '#', typ = dokTyp(x);
+        const info = [x.name, x.beschreibung, datumCH(x.erstellt_am.slice(0,10)), andere.length ? 'auch bei ' + andere.join(', ') : ''].filter(Boolean).join('\n');
+        const bild = x.art === 'foto' && url !== '#' ? `<img src="${esc(url)}" alt="" loading="lazy">`
+          : `${ic(x.art === 'video' ? 'video' : 'file')}${typ ? `<span class="dtyp" style="background:${typ[1]};color:${KG.textAuf(typ[1])}">${typ[0]}</span>` : ''}`;
+        return `<div class="dk kg-zeile"><a href="${esc(url)}" target="_blank" rel="noopener" title="${esc(info)}"><span class="dkb">${bild}</span><span class="dkn">${esc(x.name)}</span></a>
+          ${darfEdit() ? `<button class="kg-ibtn danger kg-hover dkx" data-act="dateiDel" data-id="${x.id}" title="Löschen">${ic('trash')}</button>` : ''}</div>`; }).join('')}</div>`
       : MASCH && (e.links || []).length ? '' : `<div class="small muted">${MASCH ? 'Noch keine Dokumente oder Links.' : 'Noch keine Dokumente.'}</div>`}
       ${MASCH && (e.links || []).length ? `<div class="docs">${e.links.map((l, i) => `<div class="doc kg-zeile">${ic('link')}<div class="grow"><a class="n" href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.titel || l.url)}</a><div class="small muted">${esc(l.url.replace(/^https?:\/\//, '').slice(0, 60))}</div></div>${darfEdit() ? `<button class="xbtn kg-hover" data-act="linkDel" data-i="${i}" title="Link entfernen">${ic('trash')}</button>` : ''}</div>`).join('')}</div>` : ''}
       ${darfEdit() ? `<div class="addlinks"><button class="addrow" data-act="docUpload">${ic('upload')}Dokument hochladen</button>${MASCH ? `<button class="addrow" data-act="linkNeu">${ic('link')}Link hinzufügen</button>` : ''}<span class="small muted">PDF, Fotos, Videos (max. 50 MB)${MASCH ? ' oder Webseite' : ''}</span></div>` : ''}`;
@@ -2270,6 +2285,17 @@ function secBody(e, k){
     return notizFeld(e, null, d);
   }
   return '';
+}
+
+// Dateityp fürs Schildchen der Dokument-Kachel: [Kürzel, Farbe aus KG.palette]
+function dokTyp(x){
+  const end = (String(x.name || x.storage_pfad || '').match(/\.([a-z0-9]{2,5})$/i) || [])[1]?.toLowerCase() || '';
+  if(end === 'pdf') return ['PDF', KG.palette.beere[1]];
+  if(['doc','docx','odt','rtf'].includes(end)) return ['DOC', KG.palette.blau[1]];
+  if(['xls','xlsx','xlsm','csv','ods'].includes(end)) return ['XLS', KG.palette.gruen[1]];
+  if(['ppt','pptx'].includes(end)) return ['PPT', KG.palette.orange[1]];
+  if(x.art === 'video') return null;
+  return end ? [end.toUpperCase().slice(0, 4), KG.palette.grau[2]] : null;
 }
 
 // --- Textfeld wie Notizfeld Tool A ---
