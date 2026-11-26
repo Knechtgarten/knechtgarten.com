@@ -778,6 +778,8 @@ table.bp td{padding:4px;border-top:1px solid var(--soft);white-space:nowrap;}
 .leiste .lb button.on{background:var(--primary);color:#fff;border-color:var(--primary);}
 .leiste .lb button:hover{border-color:var(--primary);}
 .leiste .lb button:focus-visible{outline:2px solid var(--primary);outline-offset:1px;}
+.alz,.cmalz{flex-wrap:wrap;} .alz>b,.cmalz>b{flex-basis:100%;margin:2px 0 0;} .alz{display:flex;align-items:center;gap:4px;} .alz>b{font-size:12px;color:var(--primary);} .leiste .lb .alz button,.cmalz button{flex:1;justify-content:center;padding:6px 4px;font-size:12px;font-weight:600;} /* Allein: ganzer Tag / VM / NM */
+.cmalz{display:flex;align-items:center;gap:4px;margin-top:6px;} .cmalz>b{font-size:12px;color:var(--primary);margin-right:2px;} .cmalz button{all:unset;cursor:pointer;border:1px solid var(--line);border-radius:7px;color:var(--primary);text-align:center;} .cmalz button:hover{border-color:var(--primary);} .cmalz button.on{background:#2E9BF0;border-color:#2E9BF0;color:#fff;}
 .leiste .lb .sep{border-top:1px solid var(--soft);margin:2px 0;}
 .leiste.mh{width:320px;}
 .leiste .mhg{display:grid;grid-template-columns:1fr 1fr;gap:4px 6px;align-items:start;}
@@ -1645,8 +1647,13 @@ async function soloSetzen(b, ks, an){
   const vorher = { at: b.at, allein: b.allein }; b.at = [...A].map(k => k - k0).sort((x, y) => x - y); b.allein = false; renderRows();
   if(!(await speichere(b, { allein_tage: b.at, allein: false }))){ Object.assign(b, vorher); renderRows(); } }
 // Vorab «Allein» für eine Person (leere Fläche › Allein): pro Tag eine Markierung art 'allein' (ganz / vm / nm)
-async function alleinVorab(mid, a, b){
+// Knopfzeile «Allein: Ganzer Tag | Vormittag | Nachmittag» (leeres Feld: data-allein, Rechtsklick auf Auftrag: data-cmallein)
+const ALLEIN_TEIL = [['ganz', 'Ganzer Tag'], ['vm', 'Vormittag'], ['nm', 'Nachmittag']];
+const alleinZeile = (attr = 'data-allein', on = null) => `<div class="${attr === 'data-allein' ? 'alz' : 'cmalz'}"><b>Allein</b>${ALLEIN_TEIL.map(([k, l]) => `<button type="button" ${attr}="${k}" class="${on === k ? 'on' : ''}" title="Allein · ${l}">${l}</button>`).join('')}</div>`;
+// teil = 'ganz' | 'vm' | 'nm': gilt für jeden Tag im Bereich (ohne teil: genau die markierten Halbtage)
+async function alleinVorab(mid, a, b, teil){
   const tage = {}; for(let k = Math.floor(a * 2 + 1e-9); k < Math.ceil(b * 2 - 1e-9); k++){ const d = k >> 1; if(!isOff(d)) (tage[d] ??= new Set()).add(k & 1); }
+  if(teil) Object.keys(tage).forEach(d => { tage[d] = new Set(teil === 'ganz' ? [0, 1] : [teil === 'vm' ? 0 : 1]); });
   const rows = Object.entries(tage).map(([d, h]) => ({ person_id: mid, tag: isoDate(+d), teil: h.size === 2 ? 'ganz' : h.has(0) ? 'vm' : 'nm', art: 'allein', erstellt_von: ME }))
     .filter(r => !MARK.some(m => m.person_id === mid && m.art === 'allein' && m.tag === r.tag && (m.teil === 'ganz' || m.teil === r.teil)));
   if(!rows.length) return;
@@ -3346,11 +3353,12 @@ function drawNeuLeiste(){
       + (L.baus.some(o => o.sp === 'rest') ? `<div class="mhg unten"><div>${sp((o, i) => o.sp === 'rest' && o.n % 2 === 0)}</div><div>${sp(o => o.sp === 'rest' && o.n % 2 === 1)}</div></div>` : ''); }
   else if(mkKat(L.mid) === 'a') list = ''; // Anlässe / Diverses: nur die Icons (unten)
   else list = (COPY ? btn('data-paste', `${I('copy')}<span>Kopie einfügen: ${esc(COPY.lab)}</span>`, false) + '<div class="sep"></div>' : '')
-    + arten.map(([k, l], i) => btn(`data-art="${k}"`, `<span>${l}</span>`, L.def === k)).join('')
+    + arten.map(([k, l], i) => k === 'allein' ? alleinZeile() : btn(`data-art="${k}"`, `<span>${l}</span>`, L.def === k)).join('')
     + (L.extra ? '<div class="sep"></div>' + btn('data-extra', `${I(L.extra.ic || 'x')}<span>${esc(L.extra.lab)}</span>`, false) : '');
   if(L.step === 'art' && canEdit(L.mid) && mkErlaubt(L.mid)) list += (list ? '<div class="sep"></div>' : '') + '<div class="lmk">' + mkKnoepfe(L.mid) + '</div>'; // Markierungen direkt als Icons
   L.el.innerHTML = `<div class="lh">${kopf ? `<b>${kopf}</b>` : ''}<span class="small muted">${esc(spanLabel({ s: L.a, e: L.b }))} · ${esc(P[L.mid]?.name || '')}</span></div><div class="lb">${list}</div>`;
   L.el.querySelectorAll('[data-art]').forEach(x => x.onclick = () => waehleArt(x.dataset.art));
+  L.el.querySelectorAll('[data-allein]').forEach(x => x.onclick = () => { const { mid, a, b } = L; closeNeuLeiste(); alleinVorab(mid, a, b, x.dataset.allein); });
   L.el.querySelectorAll('[data-abs]').forEach(x => x.onclick = () => legeAn('absenz', { title: x.dataset.abs }));
   L.el.classList.toggle('mh', L.step === 'hilfe');
   L.el.querySelectorAll('[data-mh]').forEach(x => x.onclick = () => { const o = L.baus[+x.dataset.mh]; legeAn('hilfe', { mp: o.pid }); });
@@ -3539,9 +3547,13 @@ function bindTimeline(t){
     const b = (k, ic, l, st = '', tip = '') => `<button class="btn btn-ghost" data-cm="${k}" style="justify-content:flex-start;${st}"${tip ? ` title="${tip}"` : ''}>${I(ic)}<span>${l}</span></button>`;
     const ib = (k, ic, l, cls = '') => `<button class="kg-ibtn${cls}" data-cm="${k}" title="${l}" aria-label="${l}">${I(ic)}</button>`;
     const mehrt = it.e - it.s > 1 + 1e-6 && !rep;
+    // Allein für den angeklickten Tag: ganzer Tag / VM / NM (blau); gewählter Teil nochmals = aufheben
+    const aTag = Math.floor(uAt(x)), alleinOk = ed && !rep && (it.kind === 'baustelle' || it.kind === 'termin') && !isOff(aTag) && !P[it.mid]?.ist_ablage;
+    const alleinIst = () => { const S = soloSet(it), M = MARK.filter(q => q.person_id === it.mid && q.art === 'allein' && q.tag === isoDate(aTag)), h = [0, 1].map(i => S.has(aTag * 2 + i) || M.some(q => q.teil === 'ganz' || q.teil === (i ? 'nm' : 'vm')));
+      return h[0] && h[1] ? 'ganz' : h[0] ? 'vm' : h[1] ? 'nm' : null; };
     const pop = popAt({ left: x, bottom: e.clientY }, `<b>${esc(labOf(it))}</b><div class="cmgrid">${b('det', 'file', 'Details', '', 'Details öffnen')}${(it.kind === 'baustelle' || it.kind === 'termin' || (it.kind === 'hilfe' && it.link)) && !rep && !EINGEBETTET ? b('bp', 'cal', 'Bauprogramm', '', BPE.has(bpVon(it)) ? 'Bauprogramm öffnen' : 'Bauprogramm erstellen') : ''}${ed && !rep && istAuftrag(it) && it.ok !== false && it.kind !== 'intern' ? b('ofn', 'cal', 'Wieder offen', '', 'Wieder offen (gestrichelt)') : ''}${INFO_IM_TERMIN && it.kind !== 'absenz' && zoom !== 'quartal' && zoom !== 'jahr' ? b('inf', 'info', 'Info', '', infoAm(it, Math.floor(uAt(x))) ? 'Wichtige Info ändern' : 'Wichtige Info …') : ''}${ed && m.serie ? b('serx', 'trash', 'Serie löschen', 'color:var(--danger)', 'Ganze Serie löschen') : ''}</div>${ed && !rep && resOk(m) ? resZeile(m) : ''}${ed
       ? (rep ? b('del1', 'trash', 'Nur diesen löschen', 'color:var(--danger)') + b('delf', 'trash', 'Diesen und alle folgenden löschen', 'color:var(--danger)') + b('dela', 'trash', 'Alle löschen', 'color:var(--danger)')
-        : `<div class="cmrow">${ed ? mkKnoepfe(it.mid) : ''}${ed && !rep && it.kind !== 'absenz' && it.kind !== 'hilfe' ? (() => { const d = Math.floor(uAt(x)), ks = (LAY[it.id]?.free || []).filter(k => k >> 1 === d), S = soloSet(it), an = ks.length && ks.every(k => S.has(k)); return ks.length ? ib('solo', 'user', an ? 'Nur dieser Tag allein – Klick: aufheben' : 'Nur dieser Tag allein (blauer Punkt)', an ? ' on' : '') : ''; })() : ''}${istAuftrag(it) && it.ok !== false ? ib('fix', m.fix ? 'lock' : 'unlock', m.fix ? 'Start fix – Klick: lösen' : 'Start fixieren', m.fix ? ' on' : '') : ''}${istAuftrag(it) ? ib('cpy', 'copy', 'Auftrag kopieren') : ''}${ib('del', 'trash', 'Löschen', ' danger')}</div>`) : ''}`);
+        : `${alleinOk ? alleinZeile('data-cmallein', alleinIst()) : ''}<div class="cmrow">${ed ? mkKnoepfe(it.mid) : ''}${istAuftrag(it) && it.ok !== false ? ib('fix', m.fix ? 'lock' : 'unlock', m.fix ? 'Start fix – Klick: lösen' : 'Start fixieren', m.fix ? ' on' : '') : ''}${istAuftrag(it) ? ib('cpy', 'copy', 'Auftrag kopieren') : ''}${ib('del', 'trash', 'Löschen', ' danger')}</div>`) : ''}`);
     mausWegZu(pop); // Maus weit weg = Menü zu
     pop.classList.add('cmpop'); { const r = pop.getBoundingClientRect(); if(r.right > innerWidth - 8) pop.style.left = Math.max(8, innerWidth - 8 - r.width) + 'px'; } resZeileBinden(pop, m);
     pop.querySelectorAll('[data-cm]').forEach(bt => bt.onclick = () => { closePop(); const c = bt.dataset.cm;
@@ -3549,6 +3561,15 @@ function bindTimeline(t){
       else if(c === 'del1') wdhLoeschen(it, 'nur'); else if(c === 'delf') wdhLoeschen(it, 'folgende'); else if(c === 'dela') loescheEinsatz(m);
       else loescheEinsatz(m); }); // Löschen im Rechtsklick ohne Rückfrage (Rückgängig im Hinweis unten)
     pop.querySelectorAll('[data-mkm]').forEach(bt => bt.onclick = () => { closePop(); openMark({ ...markAn(it.mid, uAt(x)), art: bt.dataset.mkm }, { left: x, bottom: e.clientY }); });
+    pop.querySelectorAll('[data-cmallein]').forEach(bt => bt.onclick = async () => { closePop(); const t = bt.dataset.cmallein, weg = t === alleinIst();
+      const tgt = weg ? [] : (t === 'ganz' ? [0, 1] : [t === 'vm' ? 0 : 1]).map(i => aTag * 2 + i), frei = (LAY[it.id]?.free || []).filter(k => k >> 1 === aTag);
+      // alte Vorab-Markierung dieses Tages weg (wird neu gesetzt, falls nötig)
+      const alt = MARK.filter(q => q.person_id === it.mid && q.art === 'allein' && q.tag === isoDate(aTag));
+      if(alt.length){ const { error } = await sb.from('planer_markierung').delete().in('id', alt.map(q => q.id)); if(error) return fehler(error); MARK = MARK.filter(q => !alt.includes(q)); }
+      const aus = frei.filter(k => !tgt.includes(k)); if(aus.length) await soloSetzen(it, aus, false);
+      const an = tgt.filter(k => frei.includes(k)); if(an.length) await soloSetzen(it, an, true);
+      for(const k of tgt.filter(k => !frei.includes(k))) await alleinVorab(it.mid, k / 2, (k + 1) / 2); // Halbtag ausserhalb des Auftrags: vormerken
+      renderRows(); toast(weg ? 'Allein aufgehoben' : `Allein · ${ALLEIN_TEIL.find(q => q[0] === t)[1]} · ${dLab(aTag)}`); });
     pop.querySelectorAll('[data-mkp]').forEach(bt => bt.onclick = () => { closePop(); mkEinfuegen(it.mid, uAt(x)); }); });
   const pp = $('phPanel'); if(pp) pp.addEventListener('pointerdown', e => { if(e.button !== 0) return; closePop();
     const tc = e.target.closest("[data-tool]"); if(tc){ drag = { kind: "tool", typ: tc.dataset.tool, val: tc.dataset.val, lab: tc.textContent.trim() || MARKART[tc.dataset.val] || "", x0: e.clientX, y0: e.clientY, moved: false }; e.preventDefault(); } });
