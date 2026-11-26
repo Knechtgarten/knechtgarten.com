@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<script src="/kg-pw-schutz.js?v=5"></script>
+<script src="/kg-stil.js?v=101"></script>
+<title>Zugang einrichten – Knechtgarten</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:#F5F7F9;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#232B35;}
+.karte{background:#fff;border:1px solid #E1E5E9;border-radius:12px;padding:28px 24px;max-width:360px;width:calc(100% - 32px);box-sizing:border-box;}
+h1{font-size:18px;color:#323E4E;margin:0 0 6px;}
+p{font-size:13px;color:#8B9097;line-height:1.5;margin:0 0 16px;}
+p.err{color:#C05A1C;margin:10px 0 0;}
+label{display:block;font-size:12px;font-weight:600;color:#323E4E;margin:0 0 12px;}
+input{display:block;width:100%;box-sizing:border-box;margin-top:4px;padding:10px 12px;font-size:15px;border:1px solid #DCE1E7;border-radius:8px;font-family:inherit;color:#232B35;}
+input[readonly]{background:#F5F7F9;color:#4C5C70;}
+input:focus{outline:none;border-color:#323E4E;}
+button{width:100%;margin-top:6px;padding:11px;font-size:15px;font-weight:700;border:0;border-radius:8px;background:#323E4E;color:#fff;cursor:pointer;font-family:inherit;}
+button:disabled{opacity:.6;cursor:default;}
+.zeigen{display:flex;align-items:center;gap:6px;font-weight:400;color:#8B9097;}
+.zeigen input{width:auto;margin:0;}
+</style>
+</head>
+<body>
+<!-- Einrichtungs-Link für Mitarbeitende: einrichten.html#t=<schlüssel> (7 Tage, einmal). Die Person wählt ihr Passwort selbst, danach angemeldet. -->
+<form class="karte logincard" id="karte" autocomplete="on" onsubmit="return false">
+  <h1>Knechtgarten</h1><p id="txt">Link wird geprüft …</p>
+  <div id="form" hidden>
+    <label>Benutzername (deine E-Mail)<input type="text" id="email" autocomplete="username" readonly></label>
+    <label>Neues Passwort<input type="password" id="pw1" autocomplete="new-password" minlength="8"></label>
+    <label>Passwort wiederholen<input type="password" id="pw2" autocomplete="new-password" minlength="8"></label>
+    <label class="zeigen"><input type="checkbox" id="zeig">Passwort anzeigen</label>
+    <button type="submit" id="ok">Speichern und anmelden</button>
+    <p class="err" id="err" hidden></p>
+  </div>
+</form>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+const SUPABASE_URL = 'https://oalapdxinqlnzwxhyuzy.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_DoeD4uEnwemmnFu4AxE9uw_5lmQYc5P';
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const $ = id => document.getElementById(id);
+const token = new URLSearchParams(location.hash.slice(1)).get('t');
+const fn = async body => { const r = await fetch(`${SUPABASE_URL}/functions/v1/zugang`, { method: 'POST', headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY }, body: JSON.stringify({ token, ...body }) });
+  const d = await r.json().catch(() => ({})); if(!r.ok || d.error) throw new Error(d.error || 'Es hat nicht geklappt. Bitte später nochmals versuchen.'); return d; };
+const kopfFehler = m => { $('txt').textContent = m; $('txt').className = 'err'; $('form').hidden = true; };
+const fehler = m => { $('err').textContent = m; $('err').hidden = false; };
+(async () => {
+  if(!token) return kopfFehler('Dieser Link ist unvollständig. Bitte im Büro einen neuen verlangen.');
+  try {
+    const d = await fn({ aktion: 'info' });
+    $('txt').textContent = `Hallo ${(d.name || '').split(' ')[0] || ''}, wähle dein Passwort für die Knechtgarten-Tools (mindestens 8 Zeichen).`.replace('Hallo ,', 'Hallo,');
+    $('email').value = d.email; $('form').hidden = false; $('pw1').focus();
+  } catch(e){ kopfFehler(e.message); }
+})();
+$('zeig').onchange = () => { $('pw1').type = $('pw2').type = $('zeig').checked ? 'text' : 'password'; };
+$('karte').addEventListener('submit', async () => {
+  $('err').hidden = true;
+  const pw = $('pw1').value;
+  if(pw.length < 8) return fehler('Das Passwort braucht mindestens 8 Zeichen.');
+  if(pw !== $('pw2').value) return fehler('Die beiden Passwörter sind nicht gleich.');
+  $('ok').disabled = true;
+  try {
+    const d = await fn({ aktion: 'passwort', passwort: pw });
+    const { error } = await KG.anmelden(sb, { email: d.email, password: pw });
+    if(error) throw new Error('Passwort gespeichert, aber die Anmeldung hat nicht geklappt: ' + error.message);
+    history.replaceState(null, '', location.pathname); // Schlüssel nicht im Verlauf lassen
+    location.replace('tool-start-live-v1.html');
+  } catch(e){ fehler(e.message); $('ok').disabled = false; }
+});
+</script>
+</body>
+</html>

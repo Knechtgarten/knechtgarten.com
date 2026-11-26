@@ -13,6 +13,13 @@
 //                                          «Schnupper / Temporär», persönlicher Link.
 //   { aktion: 'link-neu', id }             Temporär: neuer Link, der alte gilt sofort nicht mehr.
 //   { aktion: 'sperren', id }              Temporär: Link sperren.
+//   { aktion: 'login-einrichten', id, email }  Login für eine Person (E-Mail = Benutzername):
+//                                          Platzhalter bekommt ein Konto mit GLEICHER ID (Verknüpfungen
+//                                          bleiben), dazu ein Einrichtungs-Link. Hat sie schon ein Login:
+//                                          nur neuer Einrichtungs-Link (Passwort vergessen).
+//   { aktion: 'mitarbeiter', name, email, gruppe_id }  Neue Person mit Login + Einrichtungs-Link.
+//   Einrichtungs-Link = einrichten.html#t=…, 7 Tage gültig, einmal; die Person wählt ihr Passwort selbst.
+//   Büro-Team darf keine Admins anfassen und niemanden zum Admin machen.
 //
 // Der Link wird NICHT per Mail verschickt, sondern zurückgegeben – das Büro schickt ihn
 // selbst (kopieren, Mail, WhatsApp). Nur Admins und Büro-Team dürfen das auslösen.
@@ -51,6 +58,62 @@ Deno.serve(async (req) => {
       if (error) throw new Error(error.message);
       return `${basis}/zugang.html#t=${token}`;
     };
+
+    // Einrichtungs-Link (Passwort selbst wählen): 7 Tage, einmal, nur Hash gespeichert
+    const einrichtungsLink = async (benutzerId: string) => {
+      const token = zufall();
+      const { error } = await sb.from('benutzer_einrichtung').upsert({ benutzer_id: benutzerId, token_hash: await sha256(token), gueltig_bis: new Date(Date.now() + 7 * 86400000).toISOString(), erstellt_am: new Date().toISOString() });
+      if (error) throw new Error(error.message);
+      return `${basis}/einrichten.html#t=${token}`;
+    };
+    const istAdmin = ich?.rolle === 'admin';
+    const adminGruppe = async (gid: string | null) => !!gid && !!(await sb.from('recht_gruppe').select('ist_admin').eq('id', gid).maybeSingle()).data?.ist_admin;
+    const mailOk = (m: string) => /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i.test(m);
+    const planerZeile = async (id: string, name: string) => {
+      const { data: pp } = await sb.from('planer_person').select('id').eq('benutzer_id', id).limit(1);
+      if (pp?.length) return;
+      const { data: g } = await sb.from('planer_gruppe').select('id').eq('name', 'Neu').maybeSingle();
+      if (g) await sb.from('planer_person').insert({ gruppe_id: g.id, name, benutzer_id: id, sortierung: 1, aktiv: true });
+    };
+    const mailFrei = async (email: string, ausser: string | null) => {
+      const { data } = await sb.from('benutzer').select('id').ilike('email', email);
+      return !(data || []).some(x => x.id !== ausser);
+    };
+
+    if (body.aktion === 'login-einrichten') {
+      const { data: b } = await sb.from('benutzer').select('id,email,anzeigename,rolle,recht_gruppe_id,ist_platzhalter,ist_temporaer').eq('id', body.id).maybeSingle();
+      if (!b) return json({ error: 'Person nicht gefunden.' }, 404);
+      if (b.ist_temporaer) return json({ error: 'Temporäre melden sich über ihren persönlichen Link an.' }, 400);
+      if (!istAdmin && (b.rolle === 'admin' || await adminGruppe(b.recht_gruppe_id))) return json({ error: 'Administratoren kann nur ein Admin ändern.' }, 403);
+      if (b.ist_platzhalter) {
+        const email = String(body.email || b.email || '').trim().toLowerCase();
+        if (!mailOk(email)) return json({ error: 'Bitte eine gültige E-Mail-Adresse eingeben (sie ist der Benutzername).' }, 400);
+        if (!await mailFrei(email, b.id)) return json({ error: 'Diese E-Mail hat schon jemand anderes.' }, 400);
+        await sb.from('benutzer').update({ email }).eq('id', b.id);
+        await sb.from('benutzer_einladung').upsert({ email, erstellt_am: new Date().toISOString() }); // Freigabe für den Trigger
+        const { error } = await sb.auth.admin.createUser({ id: b.id, email, email_confirm: true, password: zufall(24), app_metadata: { eingeladen: true } });
+        if (error) return json({ error: /already|registered|exists/i.test(error.message) ? 'Für diese E-Mail gibt es schon ein Login.' : error.message }, 400);
+        await planerZeile(b.id, b.anzeigename || email);
+      }
+      return json({ ok: true, id: b.id, link: await einrichtungsLink(b.id) });
+    }
+
+    if (body.aktion === 'mitarbeiter') {
+      const name = String(body.name || '').trim(), email = String(body.email || '').trim().toLowerCase(), gid = body.gruppe_id || null;
+      if (!name) return json({ error: 'Name fehlt.' }, 400);
+      if (!mailOk(email)) return json({ error: 'Bitte eine gültige E-Mail-Adresse eingeben (sie ist der Benutzername).' }, 400);
+      if (!gid) return json({ error: 'Bitte eine Gruppe wählen.' }, 400);
+      if (!istAdmin && await adminGruppe(gid)) return json({ error: 'Die Gruppe Administrator kann nur ein Admin vergeben.' }, 403);
+      if (!await mailFrei(email, null)) return json({ error: 'Diese E-Mail hat schon jemand.' }, 400);
+      await sb.from('benutzer_einladung').upsert({ email, erstellt_am: new Date().toISOString() });
+      const { data: au, error } = await sb.auth.admin.createUser({ email, email_confirm: true, password: zufall(24), app_metadata: { eingeladen: true } });
+      if (error || !au?.user) return json({ error: /already|registered|exists/i.test(error?.message || '') ? 'Für diese E-Mail gibt es schon ein Login.' : (error?.message || 'Konto nicht angelegt.') }, 400);
+      const id = au.user.id;
+      const { error: be } = await sb.from('benutzer').update({ anzeigename: name, recht_gruppe_id: gid, aktiv: true }).eq('id', id);
+      if (be) return json({ error: be.message }, 500);
+      await planerZeile(id, name);
+      return json({ ok: true, id, link: await einrichtungsLink(id) });
+    }
 
     if (body.aktion === 'einladen') {
       const { data: b } = await sb.from('benutzer').select('id,email,anzeigename,ist_platzhalter').eq('id', body.id).maybeSingle();
