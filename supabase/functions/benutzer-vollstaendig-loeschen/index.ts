@@ -52,10 +52,19 @@ Deno.serve(async (req) => {
     if (!user) return json({ error: 'Nicht angemeldet.' }, 401);
 
     const { data: aufrufer } = await sbAlsAufrufer.from('benutzer').select('rolle').eq('id', user.id).maybeSingle();
-    if (aufrufer?.rolle !== 'admin') return json({ error: 'Nur Admins duerfen das ausloesen.' }, 403);
+    if (!['admin', 'buero_team'].includes(aufrufer?.rolle || '')) return json({ error: 'Nur Admins und Büro-Team dürfen das auslösen.' }, 403);
 
     const { id } = await req.json().catch(() => ({ id: '' }));
     if (!id) return json({ error: 'User-ID fehlt.' }, 400);
+
+    // Büro-Team darf keine Admins löschen
+    if (aufrufer?.rolle !== 'admin') {
+      const sbS = createClient(supabaseUrl, serviceRoleKey);
+      const { data: ziel, error: ze } = await sbS.from('benutzer').select('rolle, recht_gruppe_id').eq('id', id).maybeSingle();
+      if (ze) return json({ error: ze.message }, 500);
+      const { data: grp } = ziel?.recht_gruppe_id ? await sbS.from('recht_gruppe').select('ist_admin').eq('id', ziel.recht_gruppe_id).maybeSingle() : { data: null };
+      if (ziel?.rolle === 'admin' || grp?.ist_admin) return json({ error: 'Administratoren kann nur ein Admin löschen.' }, 403);
+    }
 
     // Ab hier mit Service-Role-Key arbeiten (umgeht RLS, kann Auth-Konten
     // loeschen) - bewusst erst NACH der Admin-Pruefung oben.
