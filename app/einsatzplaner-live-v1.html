@@ -532,7 +532,7 @@ body.kopiert, body.kopiert *{cursor:copy !important;}
 .row.azz .lane > .bar{top:19px!important;height:15px;}
 .row.azz .lane > .ferb.fer-betrieb{top:19px;}
 .azi{position:absolute;top:19px;height:15px;display:inline-flex;align-items:center;gap:2px;cursor:pointer;z-index:3;font-size:10px;color:#323E4E;}
-.teamrahmen{position:absolute;border:2px solid;border-radius:6px;box-sizing:border-box;z-index:3;pointer-events:none;} /* Team-Tag: Rahmen durch alle Zeilen */
+.teamrahmen{position:absolute;border:1px solid;border-radius:4px;background:rgba(50,62,78,.06);box-sizing:border-box;z-index:3;pointer-events:none;} /* Team-Tag: Rahmen durch alle Zeilen */
 .row.teamz .azi{top:3px;} /* Arbeitsstart in der Team-Zeile */
 .azi svg{width:15px;height:15px;} .azi b{font-weight:700;background:rgba(255,255,255,.8);border-radius:3px;padding:0 2px;}
 .ferb{position:absolute;top:2px;height:14px;line-height:12px;border:1px solid #A9B0B7;border-radius:3px;background:#E9ECEF;color:#323E4E;font-size:10.5px;font-weight:600;padding:0 5px;box-sizing:border-box;white-space:nowrap;overflow:hidden;cursor:pointer;z-index:1;display:flex;align-items:center;gap:3px;}
@@ -2260,13 +2260,11 @@ function fokusRahmen(t){
   // (keine Rahmen um Baustellen: Lieferwagen werden über Tage/Wochen geplant, nicht auf die Baustelle)
   g.insertAdjacentHTML('beforeend', h);
 }
-// Team-Tage (Einträge in der Zeile «Team», Arbeitsstart-Wechsel): Rahmen in Team-Farbe von der Team-Zeile bis zur letzten Person (Variante A, 2026-11-27)
+// Team-Anlässe (Einträge in der Zeile «Team»: Firmenausflug, Schulung … – niemand auf der Baustelle): dünner Rahmen + leichte Fläche
+// von der Team-Zeile bis zur letzten Person. Infos (Icons, Arbeitsstart) bekommen keinen Rahmen (Entscheid 2026-11-27)
 function teamTage(){ const tid = teamId(), s = new Set(); if(!tid) return [];
   const add = (a, b) => { for(let d = Math.max(0, Math.floor(a + 1e-9)); d < Math.min(NDAYS, Math.ceil(b - 1e-9)); d++) s.add(d); };
   ALL.filter(it => it.mid === tid && !it.rep).forEach(it => add(it.s, it.e));
-  MARK.filter(m => m.person_id === tid && m.art !== 'allein').forEach(m => { const d = fromIso(m.tag); add(d, d + 1); });
-  const y0 = dDate(0).getFullYear(), y1 = dDate(NDAYS - 1).getFullYear();
-  AZ.forEach(z => { for(let y = y0; y <= y1; y++){ const d = kwMonday(y, z.ab_kw); if(d >= 0 && d < NDAYS) add(d, d + 1); } });
   const o = []; [...s].sort((a, b) => a - b).forEach(d => { const L = o[o.length - 1]; if(L && L[1] === d) L[1] = d + 1; else o.push([d, d + 1]); }); return o; }
 function teamRahmen(t){
   if(zoom === 'jahr') return; const g = t.querySelector('.grid'); if(!g) return;
@@ -3415,7 +3413,7 @@ function drawNeuLeiste(){
     const sp = f => L.baus.map((o, i) => f(o) ? b1(o, i) : '').join('');
     list = `<div class="mhg"><div>${sp(o => o.sp === 'bau')}</div><div>${sp(o => o.sp === 'pflege')}</div></div>`
       + (L.baus.some(o => o.sp === 'rest') ? `<div class="mhg unten"><div>${sp((o, i) => o.sp === 'rest' && o.n % 2 === 0)}</div><div>${sp(o => o.sp === 'rest' && o.n % 2 === 1)}</div></div>` : ''); }
-  else if(mkKat(L.mid) === 'a') list = ''; // Anlässe / Diverses: nur die Icons (unten)
+  else if(mkKat(L.mid) === 'a') list = istTeamZeile(L.mid) ? btn('data-art="termin" title="Firmenausflug, Schulung für alle … – niemand auf der Baustelle (Rahmen durch alle Zeilen)"', '<span>Team-Anlass</span>', true) : ''; // Team: Team-Anlass + Info-Icons (unten); Diverses: nur Icons
   else list = (COPY ? btn('data-paste', `${I('copy')}<span>Kopie einfügen: ${esc(COPY.lab)}</span>`, false) + '<div class="sep"></div>' : '')
     + arten.map(([k, l], i) => k === 'allein' ? alleinZeile() : k === 'termin' ? `<div class="lauf">${btn(`data-art="${k}"`, `<span>${l}</span>`, L.def === k)}<button type="button" class="lhk${L.allein ? ' an' : ''}" data-alleinhk title="Auftrag gleich als «allein» anlegen (kein Personal nötig)"><i></i>allein</button></div>` : btn(`data-art="${k}"`, `<span>${l}</span>`, L.def === k)).join('')
     + (L.extra ? '<div class="sep"></div>' + btn('data-extra', `${I(L.extra.ic || 'x')}<span>${esc(L.extra.lab)}</span>`, false) : '');
@@ -3473,7 +3471,7 @@ async function fuegeKopieEin(){
 async function legeAn(art, extra = {}){
   const L = neuL; if(!L) return; closeNeuLeiste();
   const kurz = L.b - L.a < .5 - 1e-6;
-  const kind = art === 'absenz' ? 'absenz' : art === 'hilfe' ? 'hilfe' : (kurz ? 'termin' : 'baustelle');
+  const kind = art === 'absenz' ? 'absenz' : art === 'hilfe' ? 'hilfe' : (kurz || istTeamZeile(L.mid) ? 'termin' : 'baustelle'); // Team-Anlass = Termin ohne Zuständige
   const mePl = myPerson(); const pl = kind === 'baustelle' ? (P[L.mid]?.ist_projektleiter ? L.mid : (mePl?.ist_projektleiter ? mePl.id : null)) : null;
   const neu = await neuerEinsatz({ mid: L.mid, kind, s: L.a, e: L.b, title: extra.title || '', link: extra.link || null, mp: extra.mp || null, ok: art !== 'offen' && L.lane?.dataset?.off !== '1', fw: false, pl, allein: art === 'termin' && !!L.allein }, kind === 'termin' || kind === 'baustelle');
   if(neu && (kind === 'absenz' || kind === 'hilfe')) toast(`${kind === 'absenz' ? extra.title : labOf(neu)} eingetragen${neu._teile?.length ? ` · ${neu._teile.length + 1} Stücke` : ''}`, () => kind === 'hilfe' ? hilfeWeg(neu) : loescheEinsatz(neu));
@@ -4369,10 +4367,10 @@ function openPanel(id, isNew){
   const hilfeB = it.kind === 'hilfe' ? byId(it.link) : null;
   // Zeile «Person · Dauer» nur noch bei Mithilfe (bei Aufträgen steht das im Plan, 2026-11-27)
   const zeile = `${it.kind === 'hilfe' ? `<div class="kopf2"><b>${esc(P[it.mid]?.name || '')}</b> · <b>${hilfeB ? 'Mit ' + esc(first(P[hilfeB.mid]?.name)) : 'Mithilfe'}</b></div>` : ''}${wunschTxt(it) ? `<div class="wunschz${ausserWunsch(it).length ? ' aus' : ''}">Wunsch-Tage: <b>${esc(wunschTxt(it))}</b>${ausserWunsch(it).length ? ' – liegt nicht auf einem Wunsch-Tag' : ''}</div>` : ''}`;
-  const zust = auftrag ? `<label class="zst">Zuständig<select id="pPl" ${dis}><option value="">– selber abgemacht –</option>${pls.map(p => `<option value="${p.id}"${p.id === it.pl ? ' selected' : ''}>${esc(plKurz(p))}</option>`).join('')}</select></label>` : '';
+  const zust = auftrag && !istTeamZeile(it.mid) ? `<label class="zst">Zuständig<select id="pPl" ${dis}><option value="">– selber abgemacht –</option>${pls.map(p => `<option value="${p.id}"${p.id === it.pl ? ' selected' : ''}>${esc(plKurz(p))}</option>`).join('')}</select></label>` : '';
   // Knopfzeile im Kopf (2026-11-27): «Allein» (ganzer Auftrag, wächst mit), «Dauer fix», «Reserve» als Auswahl
   const allKnopf = '';
-  const kchips = auftrag && !offen && !it.rep ? (() => {
+  const kchips = auftrag && !offen && !it.rep && !istTeamZeile(it.mid) ? (() => { // Team-Anlass: keine Knöpfe
     const fr = (LAY[it.id] || {}).free || [], S = soloSet(it), alAn = fr.length && fr.every(k => S.has(k)), teil = !alAn && fr.some(k => S.has(k));
     const al = fr.length || it.allein ? `<button type="button" id="pAllein" class="kchip al${alAn ? ' an' : ''}" ${dis} aria-pressed="${!!alAn}" title="${alAn ? 'Ganzer Auftrag allein – Klick: aufheben' : teil ? 'Nur teilweise allein – Klick: ganzer Auftrag allein' : 'Ganzer Auftrag allein, so lange er dauert'}">${I('user')}<span>Allein${teil ? ' (teilweise)' : ''}</span></button>` : '';
     const dfAn = !it.frei;
