@@ -1733,6 +1733,9 @@ function offenLayout(list){
 }
 // TEAMK: Halbtage mit Team-Anlass (Kurs, Ausflug …): für alle wie frei – Baustellen werden unterbrochen (Verbindungsstrich),
 // verlängern sich aber nicht; mit fixen Arbeitstagen zeigen sie rot «x von y T» (Entscheid 2026-11-27)
+// Block Lehrlinge / Mitarbeitende und Schnupper / Temporär: werden anderen zugeteilt – rot «Personal fehlt» nur auf einer eigenen Baustelle,
+// keine roten Striche an leeren Tagen; Vorarbeiter-Häkchen spielt dort keine Rolle (Entscheid 2026-11-27)
+const hilfsBlock = mid => /lehrling|schnupper|tempor/i.test(GRUPPEN.find(g => g.id === P[mid]?.gruppe_id)?.name || '');
 let TEAMK = new Set();
 const teamFrei = (it, k) => TEAMK.has(k) && it.kind !== 'absenz' && !istAllg(it.mid) && !P[it.mid]?.ist_ablage;
 const offT = d => isOff(d) || (TEAMK.has(d * 2) && TEAMK.has(d * 2 + 1)); // ganzer Team-Tag: neues Einplanen springt darüber
@@ -1790,14 +1793,14 @@ function compute(){
   const cover = {}; ALL.forEach(h => { if(h.kind !== 'hilfe' || !LAY[h.id]) return; const m = (h.link && byId(h.link)?.mid) || h.mp; if(m) LAY[h.id].free.forEach(k => (cover[m] ??= new Set()).add(k)); });
   // Vorarbeiter an leeren Arbeitstagen (ab heute) ohne Hilfskraft: auch dort «Personal fehlt» – sieht man vor dem Einplanen eines Kunden
   // Belegt = eigener Auftrag/Absenz (auch Reserve), Mithilfe eingeteilt, «Allein» vorgemerkt, Wochenende/Feiertag, Betriebsferien
-  LEER = {}; PERSONEN.filter(p => p.aktiv && !p.archiviert_am && p.ist_vorarbeiter).forEach(p => {
+  LEER = {}; PERSONEN.filter(p => p.aktiv && !p.archiviert_am && p.ist_vorarbeiter && !hilfsBlock(p.id)).forEach(p => {
     const bel = new Set(); ALL.forEach(i => { if(i.mid !== p.id || istOffen(i) || !LAY[i.id]) return; LAY[i.id].free.forEach(k => bel.add(k)); (LAY[i.id].res || []).forEach(k => bel.add(k)); });
     MARK.forEach(m => { if(m.person_id !== p.id || m.art !== 'allein') return; const d = fromIso(m.tag); if(m.teil !== 'nm') bel.add(d * 2); if(m.teil !== 'vm') bel.add(d * 2 + 1); });
     const c = cover[p.id] || new Set(), out = [];
     for(let d = Math.max(0, TODAY); d < NDAYS; d++){ if(isOff(d) || FER_GRAU.some(([a, b]) => d >= a && d < b)) continue; [d * 2, d * 2 + 1].forEach(k => { if(!TEAMK.has(k) && !bel.has(k) && !c.has(k)) out.push(k); }); }
     LEER[p.id] = out; });
   // Blau = an diesem Halbtag allein (kein Personal nötig); blau + Mithilfe eingeteilt = Konflikt (roter Rand)
-  ALL.forEach(b => { if(istOffen(b) || istKurs(b) || !(b.kind === 'baustelle' || (b.kind === 'termin' && b.e - b.s >= 2 / 12 - 1e-6)) || !P[b.mid]?.ist_vorarbeiter || !LAY[b.id] || LAY[b.id].mini) return; const c = cover[b.mid] || new Set(), A = soloSet(b), L = LAY[b.id];
+  ALL.forEach(b => { if(istOffen(b) || istKurs(b) || !(b.kind === 'baustelle' || (b.kind === 'termin' && b.e - b.s >= 2 / 12 - 1e-6)) || !(hilfsBlock(b.mid) ? b.kind === 'baustelle' : P[b.mid]?.ist_vorarbeiter) || !LAY[b.id] || LAY[b.id].mini) return; const c = cover[b.mid] || new Set(), A = soloSet(b), L = LAY[b.id];
     L.solo = L.free.filter(k => A.has(k)); L.soloCf = new Set(L.solo.filter(k => c.has(k)));
     L.miss = L.free.filter(k => !c.has(k) && !A.has(k) && k >= TODAY * 2); L.vorarb = true; });
   computeRU(); computeProv(); computeSvc();
