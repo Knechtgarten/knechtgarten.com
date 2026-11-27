@@ -850,7 +850,7 @@ window.addEventListener('popstate', async ev => {
 // Einsätze und Daten stehen nur im Einsatzplaner. Rechte: Adressen = offerten/kunden, Pflege = pflege/kunden.
 let modus = 'adr', pfKarteAn = false, filterAuf = false, MIT_ADR = true, MIT_PF = true, ICH_ID = null;
 const PF = { kunden: new Map(), kat: [], kk: [], kz: [], reg: [], regPlz: {}, obj: [], tags: [], felder: [], arbeiten: [], ka: [], zust: [] };
-const pff = { reg: new Set(), kat: '', abo: '', wer: '', tag: '', meine: false, pruefen: false };
+const pff = { reg: new Set(), kat: '', arb: '', abo: '', wer: '', tag: '', meine: false, pruefen: false };
 const PSVG = p => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
 const PI = {
   repeat: PSVG('<path d="M4 12V9a3 3 0 0 1 3-3h13M17 3l3 3-3 3M20 12v3a3 3 0 0 1-3 3H4M7 21l-3-3 3-3"/>'),
@@ -871,10 +871,10 @@ async function ladePflege(){
   const q = (t, s = '*') => ladeAlleZeilen(() => sb.from(t).select(s));
   const [pk, kat, kk, kz, reg, rp, obj, tags, felder, arb, ka, zu, alt] = await Promise.all([
     q('pflege_kunde', 'kunde_id,abo_typ,region_id,voranmeldung_kanaele,rohnertec_id'), sb.from('pflege_kategorie').select('id,name,farbe,kuerzel,reihenfolge').order('reihenfolge').then(r => r.data || []),
-    q('pflege_kunde_kategorie', 'id,kunde_id,kategorie_id,objekt_id,werte'), q('pflege_kunde_kategorie_zustaendig', 'kunde_kategorie_id,benutzer_id'),
+    q('pflege_kunde_kategorie', 'id,kunde_id,kategorie_id,objekt_id,werte'), Promise.resolve([]), // Zuständig steht seit 2026-11-27 an der Arbeit
     sb.from('pflege_region').select('*').order('reihenfolge').then(r => r.data || []), q('pflege_region_plz'), q('pflege_objekt', 'kunde_id,plz,ort,region_id'),
-    sb.from('pflege_tag').select('*').order('name').then(r => r.data || []), q('pflege_feld', 'id,kategorie_id,typ,tags'), q('pflege_arbeit', 'id,tag_id'),
-    q('pflege_kunde_arbeit', 'id,kunde_kategorie_id,arbeit_id'), sb.rpc('pflege_zustaendige').then(r => r.data || []),
+    sb.from('pflege_tag').select('*').order('name').then(r => r.data || []), q('pflege_feld', 'id,kategorie_id,typ,tags'), q('pflege_arbeit', 'id,tag_id,name,kategorie_id,reihenfolge'),
+    q('pflege_kunde_arbeit', 'id,kunde_kategorie_id,arbeit_id,zustaendig_id'), sb.rpc('pflege_zustaendige').then(r => r.data || []),
     sb.from('pflege_kunde_arbeit_alt').select('kunde_arbeit_id').eq('erledigt', false).then(r => r.data || [])
   ]);
   PF.kunden = new Map(pk.map(x => [x.kunde_id, x])); PF.kat = kat; PF.kk = kk; PF.kz = kz; PF.reg = reg; PF.obj = obj;
@@ -884,7 +884,7 @@ async function ladePflege(){
 const pfKk = id => PF.kk.filter(x => x.kunde_id === id);
 const pfZuPruefen = id => { const kks = new Set(pfKk(id).map(x => x.id)); return PF.ka.some(x => kks.has(x.kunde_kategorie_id) && PF.alt?.has(x.id)); };
 const pfKats = id => [...new Set(pfKk(id).map(x => x.kategorie_id))].map(kid => PF.kat.find(c => c.id === kid)).filter(Boolean).sort((a, b) => (a.reihenfolge ?? 0) - (b.reihenfolge ?? 0));
-const pfZustIds = id => { const kks = new Set(pfKk(id).map(x => x.id)); return [...new Set(PF.kz.filter(z => kks.has(z.kunde_kategorie_id)).map(z => z.benutzer_id))]; };
+const pfZustIds = id => { const kks = new Set(pfKk(id).map(x => x.id)); return [...new Set(PF.ka.filter(x => kks.has(x.kunde_kategorie_id) && x.zustaendig_id).map(x => x.zustaendig_id))]; };
 const zustName = bid => { const b = PF.zust.find(x => x.id === bid); if(!b) return 'Unbekannt'; return b.anzeigename || String(b.email || '').split('@')[0].split(/[._-]+/).filter(Boolean).map(s => s[0].toUpperCase() + s.slice(1)).join(' '); };
 // Region: von Hand gesetzt geht vor, sonst über die PLZ, sonst die Rest-Region (wie im Pflege-Tool)
 const plzZahl = (...s) => { for(const x of s){ const m = String(x || '').match(/\b(\d{4})\b/); if(m) return +m[1]; } return null; };
@@ -907,6 +907,7 @@ function pfPasst(k){
   const pk = PF.kunden.get(k.id); if(!pk) return false;
   if(pff.reg.size && ![...pfRegionen(k)].some(r => pff.reg.has(r))) return false;
   if(pff.kat && !pfKk(k.id).some(x => x.kategorie_id === pff.kat)) return false;
+  if(pff.arb && !(() => { const kks = new Set(pfKk(k.id).map(x => x.id)); return PF.ka.some(x => kks.has(x.kunde_kategorie_id) && x.arbeit_id === pff.arb); })()) return false; // Filter Standardarbeit (2026-11-27)
   if(pff.abo && pk.abo_typ !== pff.abo) return false;
   const z = pfZustIds(k.id);
   if(pff.wer && !(pff.wer === '-' ? !z.length : z.includes(pff.wer))) return false;
@@ -917,12 +918,13 @@ function pfPasst(k){
 }
 function pfFilterHtml(){
   const chip = (attr, an, t) => `<button type="button" class="fchip" ${attr} aria-pressed="${an}">${t}</button>`;
-  const zIds = [...new Set(PF.kz.map(z => z.benutzer_id))].sort((a, b) => zustName(a).localeCompare(zustName(b), 'de'));
+  const zIds = [...new Set(PF.ka.map(x => x.zustaendig_id).filter(Boolean))].sort((a, b) => zustName(a).localeCompare(zustName(b), 'de'));
   const nPr = [...PF.kunden.keys()].filter(pfZuPruefen).length;
   return chip('data-pm="1"', pff.meine, 'Meine Kunden')
     + (nPr || pff.pruefen ? chip('data-ppr="1" title="Bisherige eigene Wochen noch in fixe Tage umwandeln oder verwerfen"', pff.pruefen, `Zu prüfen (${nPr})`) : '')
     + pfRegHtml()
     + `<span class="fgrp">Pflege</span><select data-pf="kat" aria-label="Kategorie"><option value="">Alle Kategorien</option>${PF.kat.map(c => `<option value="${c.id}"${pff.kat === c.id ? ' selected' : ''}>${escHtml(c.name)}</option>`).join('')}</select>
+      <select data-pf="arb" aria-label="Arbeit"><option value="">Alle Arbeiten</option>${PF.kat.filter(c => !pff.kat || c.id === pff.kat).map(c => { const l = PF.arbeiten.filter(a => a.kategorie_id === c.id && a.name).sort((a, b) => a.name.localeCompare(b.name, 'de')); return l.length ? `<optgroup label="${escHtml(c.name)}">${l.map(a => `<option value="${a.id}"${pff.arb === a.id ? ' selected' : ''}>${escHtml(a.name)}</option>`).join('')}</optgroup>` : ''; }).join('')}</select>
       <select data-pf="abo" aria-label="Abo"><option value="">Alle Abos</option>${ABO.map(a => `<option value="${a.id}"${pff.abo === a.id ? ' selected' : ''}>${a.n}</option>`).join('')}</select>
       <select data-pf="wer" aria-label="Zuständig"><option value="">Alle Zuständigen</option><option value="-"${pff.wer === '-' ? ' selected' : ''}>Niemand zuständig</option>${zIds.map(id => `<option value="${id}"${pff.wer === id ? ' selected' : ''}>${escHtml(zustName(id))}</option>`).join('')}</select>
       ${PF.tags.length ? `<select data-pf="tag" aria-label="Tag"><option value="">Alle Tags</option>${PF.tags.map(t => `<option value="${t.id}"${pff.tag === t.id ? ' selected' : ''}>${escHtml(t.name)}</option>`).join('')}</select>` : ''}
@@ -1766,11 +1768,11 @@ $('kundenSearchInput').addEventListener('input', () => {
 $('sLeer').addEventListener('click', () => { $('kundenSearchInput').value = ''; $('sLeer').hidden = true; $('kundenSearchInput').focus(); suchtext = ''; schnell.clear(); buchstabe = null; seite = 0; chipKontakt = null; chipOrt = null; ksChips(); renderKundenTable(); });
 document.querySelectorAll('#modusSeg [data-m]').forEach(b => b.addEventListener('click', () => {
   modus = b.dataset.m; buchstabe = null; seite = 0; geoeffneterKunde = null; schnell.clear(); filterAuf = false;
-  pff.reg.clear(); pff.kat = pff.abo = pff.wer = pff.tag = ''; pff.meine = false; pff.pruefen = false; renderKundenTable();
+  pff.reg.clear(); pff.kat = pff.arb = pff.abo = pff.wer = pff.tag = ''; pff.meine = false; pff.pruefen = false; renderKundenTable();
 }));
 document.querySelectorAll('#bereiche [data-b]').forEach(b => b.addEventListener('click', () => {
   const v = b.dataset.b, neu = v === 'pf' ? 'pf' : v === 'pj' ? 'pj' : v === 'ma' ? 'ma' : 'adr';
-  if(neu !== modus){ schnell.clear(); filterAuf = false; pff.reg.clear(); pff.kat = pff.abo = pff.wer = pff.tag = ''; pff.meine = false; pff.pruefen = false; }
+  if(neu !== modus){ schnell.clear(); filterAuf = false; pff.reg.clear(); pff.kat = pff.arb = pff.abo = pff.wer = pff.tag = ''; pff.meine = false; pff.pruefen = false; }
   modus = neu; bereich = neu === 'adr' ? v : 'kunden'; buchstabe = null; seite = 0; geoeffneterKunde = null; if(bereich === 'lief') schnell.clear(); renderKundenTable();
 }));
 
@@ -2305,13 +2307,13 @@ async function maLaden(){
     sb.from('planer_gruppe').select('id,name,sortierung').order('sortierung'),
     sb.from('merkmal').select('id,name,schluessel,sortierung').order('sortierung').order('name'),
     sb.from('benutzer_merkmal').select('benutzer_id,merkmal_id'),
-    sb.from('pflege_kunde_kategorie_zustaendig').select('benutzer_id')
+    sb.from('pflege_kunde_arbeit').select('zustaendig_id').not('zustaendig_id', 'is', null)
   ]);
   const err = b.error || g.error || pp.error || pg.error || mk.error || bm.error;
   if(err){ showToast(friendlyError(err), true); return; }
   MA.personen = b.data.sort((x, y) => maName(x).localeCompare(maName(y), 'de'));
   MA.gruppen = g.data; MA.pp = pp.data; MA.pg = pg.data; MA.merkmale = mk.data; MA.bm = bm.data;
-  MA.zust = {}; (z.data || []).forEach(x => { MA.zust[x.benutzer_id] = (MA.zust[x.benutzer_id] || 0) + 1; });
+  MA.zust = {}; (z.data || []).forEach(x => { MA.zust[x.zustaendig_id] = (MA.zust[x.zustaendig_id] || 0) + 1; }); // Anzahl Pflege-Arbeiten pro Person
   MA.geladen = true;
 }
 function maGefiltert(){

@@ -328,15 +328,20 @@ const katById = id => S.kat.find(k => k.id === id);
 const felderVon = katId => S.felder.filter(f => f.kategorie_id === katId).sort(nachReihe);
 const tabelleVon = katId => S.tabellen.find(t => t.kategorie_id === katId);
 const spaltenVon = tabId => S.spalten.filter(s => s.tabelle_id === tabId).sort(nachReihe);
-const zustVon = kkId => S.kz.filter(z => z.kunde_kategorie_id === kkId).map(z => z.benutzer_id);
+// Zuständig steht seit 2026-11-27 an der Arbeit; Bündel = Person oder «-»
+const buendelVon = ka => ka.zustaendig_id || '-';
+const zustVon = kkId => [...new Set(S.ka.filter(x => x.kunde_kategorie_id === kkId && x.zustaendig_id).map(x => x.zustaendig_id))];
 const kundeById = id => S.kunden.find(k => k.kunde_id === id);
 const objById = id => id ? S.obj.find(o => o.id === id) : null;
 const objekteVon = kundeId => S.obj.filter(o => o.kunde_id === kundeId).sort((a, b) => nachReihe(a, b) || a.erstellt_am.localeCompare(b.erstellt_am));
 const objektName = o => [o.name, [o.strasse, o.ort].filter(Boolean).join(', ')].filter(Boolean).join(' · ') || 'Objekt';
 // objektId: null = Hauptadresse, id = nur dieses Objekt, undefined = alles des Kunden
 const kkVonKunde = (kundeId, objektId) => S.kk.filter(x => x.kunde_id === kundeId && (objektId === undefined || (x.objekt_id || null) === objektId)).sort((a, b) => (katById(a.kategorie_id)?.reihenfolge ?? 0) - (katById(b.kategorie_id)?.reihenfolge ?? 0));
-const statusKey = (kkId, jahr, kw) => `${kkId}|${jahr}|${kw}`;
-const erledigt = (kkId, jahr, kw) => S.status.has(statusKey(kkId, jahr, kw));
+const statusKey = (kkId, jahr, kw, b) => `${kkId}|${jahr}|${kw}|${b ?? ''}`;
+const erledigtB = (kkId, jahr, kw, b) => S.status.has(statusKey(kkId, jahr, kw, b)) || S.status.has(statusKey(kkId, jahr, kw, ''));
+// ganze Woche erledigt = alle Bündel der Woche erledigt
+const buendelWoche = (kk, jahr, kw) => [...new Set(jobsVonKk(kk, jahr).filter(x => x.kw === kw).map(x => buendelVon(x.ka)))];
+const erledigt = (kkId, jahr, kw) => { const kk = S.kk.find(x => x.id === kkId), l = kk ? buendelWoche(kk, jahr, kw) : []; return l.length ? l.every(b => erledigtB(kkId, jahr, kw, b)) : S.status.has(statusKey(kkId, jahr, kw, '')); };
 
 async function ladeAlles(){
   const r = await Promise.all([
@@ -349,9 +354,9 @@ async function ladeAlles(){
     sb.from('pflege_kunde').select('*, kunde(id,name,strasse,plz,ort,kontaktdaten)'),
     sb.from('pflege_objekt').select('*'),
     sb.from('pflege_kunde_kategorie').select('*'),
-    sb.from('pflege_kunde_kategorie_zustaendig').select('*'),
+    Promise.resolve({ data: [] }), // früher Zuständige pro Kategorie
     sb.from('pflege_kunde_arbeit').select('*'),
-    sb.from('pflege_einsatz_status').select('kunde_kategorie_id,jahr,kw'),
+    sb.from('pflege_einsatz_status').select('kunde_kategorie_id,jahr,kw,buendel'),
     sb.from('pflege_foto').select('*').order('aufgenommen_am', { ascending: false }),
     sb.from('pflege_foto_kategorie').select('*'),
     sb.from('pflege_dokument').select('*').order('datum', { ascending: false, nullsFirst: false }),
@@ -361,7 +366,7 @@ async function ladeAlles(){
   if(fehler){ showToast(friendlyError(fehler.error), true); return; }
   let st;
   [S.kat, S.felder, S.arbeiten, S.tabellen, S.spalten, S.zust, S.kunden, S.obj, S.kk, S.kz, S.ka, st, S.fotos, S.fk, S.dok, S.dk] = r.map(x => x.data || []);
-  S.status = new Set(st.map(s => statusKey(s.kunde_kategorie_id, s.jahr, s.kw)));
+  S.status = new Set(st.map(s => statusKey(s.kunde_kategorie_id, s.jahr, s.kw, s.buendel)));
   S.kunden.sort((a, b) => (a.kunde?.name || '').localeCompare(b.kunde?.name || '', 'de'));
   // Techniker sieht standardmaessig die eigenen Einsaetze (wenn er bei «Pflegetool» angehakt ist)
   if(S.f.ma === null) S.f.ma = S.zust.some(b => b.id === aktuelleUserId && b.pflege_zustaendig) ? aktuelleUserId : '';
@@ -389,14 +394,15 @@ function einsaetze(jahr){
     kkVonKunde(k.kunde_id).forEach(kk => {
       const kat = katById(kk.kategorie_id); if(!kat) return;
       if(f.kat && kat.id !== f.kat) return;
-      const zust = zustVon(kk.id);
-      if(f.ma === '-' ? zust.length : (f.ma && !zust.includes(f.ma))) return;
+      // eine Karte pro Woche und zuständiger Person (wie die Vorschläge im Einsatzplaner)
       const proKw = {};
-      jobsVonKk(kk, jahr).forEach(j => (proKw[j.kw] = proKw[j.kw] || []).push(j.ka));
-      Object.entries(proKw).forEach(([kw, jobs]) => {
-        const done = erledigt(kk.id, jahr, +kw);
+      jobsVonKk(kk, jahr).forEach(j => { const key = j.kw + '|' + buendelVon(j.ka); (proKw[key] = proKw[key] || []).push(j.ka); });
+      Object.entries(proKw).forEach(([key, jobs]) => {
+        const [kw, b] = key.split('|'), zust = b === '-' ? [] : [b];
+        if(f.ma === '-' ? zust.length : (f.ma && !zust.includes(f.ma))) return;
+        const done = erledigtB(kk.id, jahr, +kw, b);
         if(f.status.length && !f.status.includes(done ? 'erledigt' : 'offen')) return;
-        out.push({ k, o: objById(kk.objekt_id), kk, kat, jahr, kw: +kw, jobs, done, zust });
+        out.push({ k, o: objById(kk.objekt_id), kk, kat, jahr, kw: +kw, b, jobs, done, zust });
       });
     });
   });
@@ -434,7 +440,7 @@ function karte(c){
       <span class="mc-j">${c.jobs.map(ka => esc(arbeitName(ka))).join(' · ')}</span>
     </button>
     <div class="mc-act">
-      <button class="mc-done${c.done ? ' on' : ''}" data-act="erledigt" data-kk="${c.kk.id}" data-wk="${c.jahr}-${c.kw}" aria-pressed="${c.done}">${I('check')}${c.done ? 'Erledigt' : 'Erledigen'}</button>
+      <button class="mc-done${c.done ? ' on' : ''}" data-act="erledigt" data-kk="${c.kk.id}" data-b="${c.b}" data-wk="${c.jahr}-${c.kw}" aria-pressed="${c.done}">${I('check')}${c.done ? 'Erledigt' : 'Erledigen'}</button>
       <label class="mc-foto">${I('cam')}Foto<input type="file" accept="image/*" capture="environment" hidden data-act="foto" data-kunde="${c.k.kunde_id}" data-objekt="${c.o?.id || ''}" data-kat="${c.kat.id}"></label>
       <a class="mh-ic" href="${routeLink(c.o || ku)}" target="_blank" rel="noopener" aria-label="Route">${I('pin')}</a>
       ${tel ? `<a class="mh-ic" href="tel:${esc(tel.replace(/\s+/g, ''))}" aria-label="Anrufen">${I('phone')}</a>` : ''}
@@ -443,7 +449,7 @@ function karte(c){
 }
 function filterHtml(){
   const f = S.f;
-  const personen = S.zust.filter(b => b.pflege_zustaendig || S.kz.some(z => z.benutzer_id === b.id));
+  const personen = S.zust.filter(b => b.pflege_zustaendig || S.ka.some(x => x.zustaendig_id === b.id));
   return `<div class="mh-filter">
       <select data-act="f-kat" aria-label="Pflegekategorie"><option value="">Alle Kategorien</option>${S.kat.map(c => `<option value="${c.id}" ${c.id === f.kat ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select>
       <select data-act="f-ma" aria-label="Zuständig"><option value="">Alle Zuständigen</option>${personen.map(b => `<option value="${b.id}" ${f.ma === b.id ? 'selected' : ''}>${esc(zustName(b.id))}${b.id === aktuelleUserId ? ' (ich)' : ''}</option>`).join('')}<option value="-" ${f.ma === '-' ? 'selected' : ''}>Niemand zuständig</option></select>
@@ -569,7 +575,8 @@ function renderKunde(r){
   $('app').innerHTML = kopf + `
     <div class="mh-ktabs">${kks.map(x => { const c = katById(x.kategorie_id); return c ? `<button data-act="kat" data-kat="${c.id}" aria-pressed="${c.id === kat.id}">${dot(c)}${esc(c.name)}</button>` : ''; }).join('')}</div>
     ${sichtbar.length ? `<div class="mh-wk">${sichtbar.map(x => { const ok = erledigt(kk.id, x.jahr, x.kw); return `<button data-act="wk" data-wk="${wk(x)}" class="${fokus && wk(x) === wk(fokus) ? 'on' : ''}${ok ? ' ok' : ''}">${ok ? I('check') : ''}KW ${x.kw}${x.jahr !== JETZT.jahr ? ' / ' + x.jahr : ''}</button>`; }).join('')}</div>` : ''}
-    ${fokus ? `<button class="big-done${done ? ' on' : ''}" data-act="erledigt" data-kk="${kk.id}" data-wk="${wk(fokus)}" aria-pressed="${done}">${I('check')}${done ? `Erledigt · KW ${fokus.kw}` : `Als erledigt markieren · KW ${fokus.kw}`}</button>` : ''}
+    ${fokus ? (() => { const bl = buendelWoche(kk, fokus.jahr, fokus.kw); return bl.map(b => { const d = erledigtB(kk.id, fokus.jahr, fokus.kw, b), wer = bl.length > 1 ? ` · ${b === '-' ? 'ohne Zuständige' : esc(zustName(b))}` : '';
+      return `<button class="big-done${d ? ' on' : ''}" data-act="erledigt" data-kk="${kk.id}" data-b="${b}" data-wk="${wk(fokus)}" aria-pressed="${d}">${I('check')}${d ? `Erledigt · KW ${fokus.kw}` : `Als erledigt markieren · KW ${fokus.kw}`}${wer}</button>`; }).join(''); })() : ''}
     <section class="sd-sec"><h3>Fotos</h3>
       ${fotos.length ? `<div class="photos">${fotos.map(f => `<button class="ph" data-act="lb" data-foto="${f.id}">${S.urls[vorschauPfad(f.storage_pfad)] ? `<img alt="" src="${esc(S.urls[vorschauPfad(f.storage_pfad)])}">` : ''}</button>`).join('')}</div>` : '<div class="muted small">Noch keine Fotos.</div>'}
       <label class="big-foto">${I('cam')}Foto hinzufügen<input type="file" accept="image/*" capture="environment" hidden data-act="foto" data-kunde="${k.kunde_id}" data-objekt="${kk.objekt_id || ''}" data-kat="${kat.id}"></label>
@@ -655,12 +662,13 @@ $('lb').addEventListener('click', e => {
 // ---------------------------------------------------------------------------
 // Ereignisse
 // ---------------------------------------------------------------------------
-async function setzeErledigt(kkId, jahr, kw, soll){
+async function setzeErledigt(kkId, jahr, kw, soll, b){
+  // pro Bündel (Person); «Wieder offen» löscht auch einen alten Eintrag für die ganze Woche
   const { error } = soll
-    ? await sb.from('pflege_einsatz_status').insert({ kunde_kategorie_id: kkId, jahr, kw, erledigt_von: aktuelleUserId })
-    : await sb.from('pflege_einsatz_status').delete().eq('kunde_kategorie_id', kkId).eq('jahr', jahr).eq('kw', kw);
+    ? await sb.from('pflege_einsatz_status').insert({ kunde_kategorie_id: kkId, jahr, kw, buendel: b, erledigt_von: aktuelleUserId })
+    : await sb.from('pflege_einsatz_status').delete().eq('kunde_kategorie_id', kkId).eq('jahr', jahr).eq('kw', kw).or(`buendel.eq.${b},buendel.is.null`);
   if(error){ showToast(friendlyError(error), true); return; }
-  if(soll) S.status.add(statusKey(kkId, jahr, kw)); else S.status.delete(statusKey(kkId, jahr, kw));
+  if(soll) S.status.add(statusKey(kkId, jahr, kw, b)); else { S.status.delete(statusKey(kkId, jahr, kw, b)); S.status.delete(statusKey(kkId, jahr, kw, '')); }
   showToast(soll ? 'Erledigt.' : 'Wieder offen.');
   render();
 }
@@ -678,7 +686,7 @@ document.addEventListener('click', async e => {
     if(f[liste].length === max) f[liste] = [];
     render();
   }
-  else if(act === 'erledigt'){ const [j, w] = b.dataset.wk.split('-').map(Number); await setzeErledigt(b.dataset.kk, j, w, b.getAttribute('aria-pressed') !== 'true'); }
+  else if(act === 'erledigt'){ const [j, w] = b.dataset.wk.split('-').map(Number); await setzeErledigt(b.dataset.kk, j, w, b.getAttribute('aria-pressed') !== 'true', b.dataset.b || '-'); }
   else if(act === 'kat') zeigeKunde(r.kunde, aktOrt(), b.dataset.kat);
   else if(act === 'wk'){ const p = new URLSearchParams({ k: r.kunde }); if(aktOrt()) p.set('o', aktOrt()); p.set('kat', r.kat || ''); p.set('wk', b.dataset.wk); history.replaceState(null, '', '#' + p.toString()); render(); }
   else if(act === 'lb'){
