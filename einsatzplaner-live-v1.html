@@ -1817,6 +1817,7 @@ function render(){
 // PLANER
 // ---------------------------------------------------------------------------
 let zoom = EINGEBETTET ? 'woche' : lsGet('zoom', 'monat'), dayW = 26, query = '', plFilter = null, selId = null, drag = null;
+let panelNeuId = null; // neu angelegter Termin: Detail-Fenster schliesst nach der Kundenwahl (siehe openPanel)
 // Woche/Monat/Quartal: Wochenenden schmaler, Jahr: ohne Wochenenden (WEK = 0, Freitag direkt an Montag) (WEK = Anteil eines Werktags). X(u) = Pixel ab Planbeginn, UX(px) = Tag (Bruch)
 let WEK = 1;
 const wdW = d => ((d % 7 + 7) % 7 >= 5 ? WEK : 1) * dayW;
@@ -4193,7 +4194,7 @@ async function leerWeg(id){
   toast('Leerer Auftrag gelöscht', async () => { const row = itemToRow(kopie); row.id = kopie.id; row.erstellt_von = ME;
     const { error } = await sb.from('planer_einsatz').insert(row); if(error){ fehler(error); return; } EINS.push(kopie); render(); });
 }
-function closePanel(){ const leer = selId && istLeer(byId(selId)) ? selId : null; selProv = null; $('side').innerHTML = ''; if(selId){ selId = null; if(VIEW === 'plan') renderRows(); } if(leer) leerWeg(leer); }
+function closePanel(){ panelNeuId = null; const leer = selId && istLeer(byId(selId)) ? selId : null; selProv = null; $('side').innerHTML = ''; if(selId){ selId = null; if(VIEW === 'plan') renderRows(); } if(leer) leerWeg(leer); }
 // ---------------------------------------------------------------------------
 // Detailfeld rechts – gleicher Aufbau für Baustelle, Termin, Mithilfe, Absenz und
 // Pflege-Vorschlag: oben Titel + Zeit, dann Notiz, dann aufklappbare Abschnitte
@@ -4304,7 +4305,9 @@ function openAbmachen(q, anchor){ // q = { it } (Einsatz) oder { pid } (Pflege-V
   };
 }
 
+// Neu angelegter Termin: Detail-Fenster schliesst nach der Kundenwahl (Rahmen weg), Entscheid 2026-11-27
 function openPanel(id, isNew){
+  if(isNew) panelNeuId = id; else if(panelNeuId !== id) panelNeuId = null;
   const it = byId(id); if(!it) return; if(selId && selId !== id && istLeer(byId(selId))) leerWeg(selId);
   if(selId !== id){ panelAbm = false; panelOpen = {}; panelKunde = false; } selId = id; if(VIEW === 'plan') renderRows();
   const ed = canEdit(it.mid), dis = ed ? '' : 'disabled';
@@ -4373,7 +4376,7 @@ function openPanel(id, isNew){
   on('#pKunde', 'onchange', async e => { const v = e.target.value.trim(); const hit = kundeAusFeld(e.target);
     if(v && !hit){ toast('Kunde nicht gefunden. Name als Titel übernommen.'); await save({ kunde_id: null, titel: v }, { kid: null, title: v }); }
     else await save({ kunde_id: hit ? hit.id : null }, { kid: hit ? hit.id : null });
-    panelKunde = false; openPanel(id); });
+    panelKunde = false; if(panelNeuId === id && (hit || v)){ panelNeuId = null; closePanel(); return; } openPanel(id); });
   on('#pTitel', 'onchange', e => save({ titel: e.target.value.trim() || null }, { title: e.target.value.trim() }).then(() => { panelKunde = false; openPanel(id); }));
   on('#pPl', 'onchange', e => save({ projektleiter_id: e.target.value || null }, { pl: e.target.value || null }).then(() => openPanel(id)));
   on('#pRes', 'onchange', e => resSetzen(it, +e.target.value));
