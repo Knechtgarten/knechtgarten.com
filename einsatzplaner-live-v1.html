@@ -3225,7 +3225,7 @@ async function ladePflege(){
       fetchAll(() => sb.from('pflege_arbeit').select('id,kategorie_id,name,standard_kws,dauer_min,ablauf')),
       fetchAll(() => sb.from('pflege_kunde').select('kunde_id,abo_typ,wunsch_wochentage,notiz'), ['kunde_id']),
       fetchAll(() => sb.from('pflege_kunde_kategorie').select('id,kunde_id,kategorie_id,werte,bewaesserung')),
-      fetchAll(() => sb.from('pflege_kunde_arbeit').select('id,kunde_kategorie_id,arbeit_id,titel,beschrieb,kws,standard_aus,fixe_tage,abgewaehlte_jahre,dauer_min,allein,anmelden,fixe_woche')),
+      fetchAll(() => sb.from('pflege_kunde_arbeit').select('id,kunde_kategorie_id,arbeit_id,titel,beschrieb,kws,standard_aus,fixe_tage,abgewaehlte_jahre,rhythmus_jahre,start_jahr,dauer_min,allein,anmelden,fixe_woche')),
       fetchAll(() => sb.from('pflege_kunde_kategorie_zustaendig').select('*'), ['kunde_kategorie_id', 'benutzer_id']),
       fetchAll(() => sb.from('pflege_einsatz_status').select('kunde_kategorie_id,jahr,kw').in('jahr', [y, y + 1]), ['kunde_kategorie_id', 'jahr', 'kw']),
       fetchAll(() => sb.from('pflege_feld').select('id,kategorie_id,name,typ,einheit,reihenfolge'))
@@ -3244,6 +3244,7 @@ async function syncPflegeErledigt(){
   if(!error) rows.forEach(r => PF.st.add(`${r.kunde_kategorie_id}_${r.jahr}_${r.kw}`));
 }
 function kwMonday(y, w){ const j4 = new Date(y, 0, 4); const mon = new Date(y, 0, 4 - ((j4.getDay() + 6) % 7) + (w - 1) * 7); return dayIdx(mon); }
+const pfJahrAktiv = (a, y) => { const r = +a.rhythmus_jahre || 1, s = +a.start_jahr || y; return r <= 1 || (y >= s && (y - s) % r === 0); }; // Jahresrhythmus aus dem Pflege-Tool (2026-11-27)
 const teamLaneId = () => (GRUPPEN.find(g => /pflege|service/i.test(g.name)) || GRUPPEN[0])?.id;
 function computeProv(){
   PROV = []; PROVLAY = {}; if(!PF || !showProv) return;
@@ -3259,11 +3260,11 @@ function computeProv(){
     weeks.forEach(({ y, w, mon }) => {
       if(PF.st.has(`${kk.id}_${y}_${w}`) || linked.has(`${kk.id}_${y}_${w}`)) return;
       const arb = []; let min = 0, fehlt = false, allein = false, anm = false, fixe = false, fd = null;
-      (byKk[kk.id] || []).forEach(a => { if((a.abgewaehlte_jahre || []).includes(y)) return; const std = a.arbeit_id ? PF.arb[a.arbeit_id] : null;
+      (byKk[kk.id] || []).forEach(a => { if(!pfJahrAktiv(a, y)) return; const std = a.arbeit_id ? PF.arb[a.arbeit_id] : null;
         // Zeitpunkt (2026-11-27): Standardwochen (ausser beim Kunden ausgeschaltet) und/oder fixe Tage [{kw, wt}]
         const fx = (Array.isArray(a.fixe_tage) ? a.fixe_tage : []).find(f => f && f.kw === w);
         const inStd = std && !a.standard_aus && (std.standard_kws || []).includes(w);
-        if(!fx && !inStd) return; if(fx && fd == null) fd = fx.wt || 1; arb.push(std ? std.name : a.titel); if(a.allein) allein = true; /* «Anmelden» und «Fixe Woche» seit 2026-11-27 ohne Wirkung: die Zeile bestimmt offen/fix */ const dm = a.dauer_min ?? std?.dauer_min; if(dm == null) fehlt = true; min += dm ?? 60; });
+        if(!fx && !inStd) return; if(fx && fd == null) fd = fx.wt || 1; arb.push(std ? std.name : a.titel); if(a.allein) allein = true; if(a.fixe_woche) fixe = true; /* «Fix» beim Kunden: Vorschlag direkt in der Zeile der zuständigen Person (2026-11-27) */ const dm = a.dauer_min ?? std?.dauer_min; if(dm == null) fehlt = true; min += dm ?? 60; });
       if(!arb.length) return;
       PROV.push({ id: `${kk.id}_${y}_${w}`, kk: kk.id, y, w, mon, kid: kk.kunde_id, kat, arb, min, fehlt, allein, anm, fixe, lane, key: fixe && lane.startsWith('p:') ? 'pf:' + lane.slice(2) : lane, wd: [], fd, fdTag: fd != null ? mon + fd - 1 : null });
     });
@@ -4276,7 +4277,7 @@ const isoKwJahr = d => { const x = dDate(d); return dDate(d + 3 - ((x.getDay() +
 // Pflege-Infos eines Dauerpflege-Kunden (aus dem Pflege-Tool, nur lesen)
 function pflegeArbeiten(kk, y, w){
   const out = [];
-  PF.ka.filter(a => a.kunde_kategorie_id === kk.id).forEach(a => { if((a.abgewaehlte_jahre || []).includes(y)) return; const std = a.arbeit_id ? PF.arb[a.arbeit_id] : null;
+  PF.ka.filter(a => a.kunde_kategorie_id === kk.id).forEach(a => { if(!pfJahrAktiv(a, y)) return; const std = a.arbeit_id ? PF.arb[a.arbeit_id] : null;
     const kws = new Set([...(std && !a.standard_aus ? (std.standard_kws || []) : []), ...(Array.isArray(a.fixe_tage) ? a.fixe_tage : []).map(f => f && f.kw)]); // Standardwochen + fixe Tage (2026-11-27)
     if(!kws.has(w)) return; const dm = a.dauer_min ?? std?.dauer_min;
     out.push({ name: std ? std.name : a.titel, min: dm, ablauf: String((std?.ablauf || '') + (a.beschrieb ? '\n' + a.beschrieb : '')).split('\n').map(s => s.trim()).filter(Boolean) }); });
