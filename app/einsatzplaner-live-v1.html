@@ -1296,7 +1296,7 @@ function vorratBlock(ber, gid, lab){
       tip = `${kName(k)} · ${p.kat.name}\n${k?.ort || ''} · KW ${p.w} · ${fmtN(p.min / 60)} Std.\n${p.arb.join(', ')}\nPflege-Vorschlag ohne zuständige Person\nRunterziehen = einplanen · Klick = Details`; }
     const st = []; for(let q = Math.floor(a / 5 + 1e-9); q * 5 < a + n - 1e-9; q++) st.push([Math.max(a, 5 * q), Math.min(a + n, 5 * q + 5)]);
     if(!WEK) st.splice(0, st.length, [a, a + n]);
-    const fc = v ? (v.geschaetzt && !P[v.projektleiter_id]?.farbe ? '#8B9097' : plFarbe(v.projektleiter_id)) : '#323E4E'; // Farbe Projektleiter (Gitter + Steg)
+    const fc = v ? (v.geschaetzt && !P[v.projektleiter_id]?.farbe ? '#8B9097' : plFarbe(v.projektleiter_id)) : provFarbe(p); // Farbe Projektleiter (Gitter + Steg)
     return st.map(([s, e], i) => { const x = vX(s), w = WEK ? (e - s) * dayW : vX(e) - x;
       const brg = i ? `<div class="vbrg" style="background:${fc};left:${vX(st[i - 1][0]) + (st[i - 1][1] - st[i - 1][0]) * dayW - 1}px;top:${top + 6.5}px;width:${x - vX(st[i - 1][0]) - (st[i - 1][1] - st[i - 1][0]) * dayW + 2}px"></div>` : '';
       return brg + `<div class="vbar${v?.geschaetzt ? ' gesch' : ''}${p ? ' vprov' : ''}" ${attr} style="left:${x + 1}px;top:${top}px;width:${Math.max(8, w - 2)}px;border:1px solid ${fc};background:${strichBg(fc)}" title="${esc(tip)}"><span class="vlab">${esc(lab1)}</span></div>`; }).join('');
@@ -3171,10 +3171,10 @@ async function ladePflege(){
   try{
     const y = new Date().getFullYear();
     const [kat, arb, ku, kk, ka, zu, st, feld] = await Promise.all([
-      fetchAll(() => sb.from('pflege_kategorie').select('id,name,kuerzel,farbe')),
+      fetchAll(() => sb.from('pflege_kategorie').select('id,name,kuerzel,farbe,projektleiter')),
       fetchAll(() => sb.from('pflege_arbeit').select('id,kategorie_id,name,standard_kws,dauer_min,ablauf')),
       fetchAll(() => sb.from('pflege_kunde').select('kunde_id,abo_typ,wunsch_wochentage,notiz'), ['kunde_id']),
-      fetchAll(() => sb.from('pflege_kunde_kategorie').select('id,kunde_id,kategorie_id,werte,bewaesserung')),
+      fetchAll(() => sb.from('pflege_kunde_kategorie').select('id,kunde_id,kategorie_id,werte,bewaesserung,projektleiter')),
       fetchAll(() => sb.from('pflege_kunde_arbeit').select('id,kunde_kategorie_id,arbeit_id,titel,beschrieb,kws,kws_plus,kws_minus,abgewaehlte_jahre,dauer_min,allein,anmelden,fixe_woche')),
       fetchAll(() => sb.from('pflege_kunde_kategorie_zustaendig').select('*'), ['kunde_kategorie_id', 'benutzer_id']),
       fetchAll(() => sb.from('pflege_einsatz_status').select('kunde_kategorie_id,jahr,kw').in('jahr', [y, y + 1]), ['kunde_kategorie_id', 'jahr', 'kw']),
@@ -3213,7 +3213,7 @@ function computeProv(){
         const kws = std ? new Set([...(std.standard_kws || []).filter(x => !(a.kws_minus || []).includes(x)), ...(a.kws_plus || [])]) : new Set(a.kws || []);
         if(!kws.has(w)) return; arb.push(std ? std.name : a.titel); if(a.allein) allein = true; /* «Anmelden» und «Fixe Woche» seit 2026-11-27 ohne Wirkung: die Zeile bestimmt offen/fix */ const dm = a.dauer_min ?? std?.dauer_min; if(dm == null) fehlt = true; min += dm ?? 60; });
       if(!arb.length) return;
-      PROV.push({ id: `${kk.id}_${y}_${w}`, kk: kk.id, y, w, mon, kid: kk.kunde_id, kat, arb, min, fehlt, allein, anm, fixe, lane, key: fixe && lane.startsWith('p:') ? 'pf:' + lane.slice(2) : lane,wd: ku.wunsch_wochentage || [] });
+      PROV.push({ id: `${kk.id}_${y}_${w}`, kk: kk.id, y, w, mon, kid: kk.kunde_id, kat, arb, min, fehlt, allein, anm, fixe, lane, plw: kk.projektleiter || kat.projektleiter || null, key: fixe && lane.startsWith('p:') ? 'pf:' + lane.slice(2) : lane,wd: ku.wunsch_wochentage || [] });
     });
   });
   // Perlenkette pro Zeile
@@ -3236,12 +3236,15 @@ function computeProv(){
     PROVLAY[key] = out;
   });
 }
-function provBars(key){ return (PROVLAY[key] || []).map(x => { const p = x.p, k = KUNDEN[p.kid]; const l = X(x.s) + 1, w = Math.max(4, XW(x.s, x.e) - 2);
+// Pflege-Vorschlag: Farbe des Projektleiters (Pflegekunde › Kategorie, sonst Vorgabe der Kategorie); «selbst» schwarz, keiner grau (2026-11-27)
+const provFarbe = p => p.plw === 'selbst' ? '#232B35' : (p.plw && P[p.plw]?.farbe) || '#8B9097';
+const provPl = p => p.plw && P[p.plw] ? p.plw : null;
+function provBars(key){ return (PROVLAY[key] || []).map(x => { const p = x.p, k = KUNDEN[p.kid]; const l = X(x.s) + 1, w = Math.max(4, XW(x.s, x.e) - 2), fc = provFarbe(p);
   const tip = `${kName(k)} · ${p.kat.name}\n${k?.ort || ''} · KW ${p.w} · ${fmtN(p.min / 60)} Std.\n${p.arb.join(', ')}\nNoch nicht abgemacht${p.anm ? '\nKunde vorher anmelden' : ''}${p.fixe ? '\nFixe Woche' : ''}${p.fehlt ? '\nZeit fehlt im Pflege-Tool – 1 Std. angenommen' : ''}${x.alt ? '\nOffen seit KW ' + p.w : ''}${VNOT[p.id]?.n ? '\nNotiz: ' + VNOT[p.id].n : ''}`;
-  return `<div class="bar prov${x.alt ? ' over' : ''}${p.fehlt ? ' nozeit' : ''}" data-prov="${p.id}" style="left:${l}px;width:${w}px" title="${esc(tip)}">${w > 16 ? `<span class="t" style="left:3px;width:${w - 6}px">${x.alt && w > 60 ? `seit KW ${p.w} · ` : ''}${esc(kShort(k))}</span>` : ''}${p.anm && w > 30 ? `<span class="panm" aria-label="Kunde vorher anmelden">${I('phone')}</span>` : ''}</div>`; }).join(''); }
+  return `<div class="bar prov${x.alt ? ' over' : ''}${p.fehlt ? ' nozeit' : ''}" data-prov="${p.id}" style="left:${l}px;width:${w}px;border:${x.alt ? '1.5px solid var(--red)' : '1px solid ' + fc};background:${strichBg(fc)}" title="${esc(tip)}">${w > 16 ? `<span class="t" style="left:3px;width:auto;max-width:${w - 6}px;background:#fff;padding:0 2px">${x.alt && w > 60 ? `seit KW ${p.w} · ` : ''}${esc(kShort(k))}</span>` : ''}${p.anm && w > 30 ? `<span class="panm" aria-label="Kunde vorher anmelden">${I('phone')}</span>` : ''}</div>`; }).join(''); }
 async function provToEinsatz(pid, mid, s, e, ok, pl, ueber, weicht, fw){
   const p = PROV.find(x => x.id === pid); if(!p) return;
-  const neu = await neuerEinsatz({ mid, kind: 'termin', s: r48(s), e: r48(e), kid: p.kid, title: `${p.kat.name}: ${p.arb.join(', ')}`, text: VNOT[p.id]?.n || '', ok, pl: pl !== undefined ? pl : VNOT[p.id]?.pl || null, pkk: p.kk, pj: p.y, pkw: p.w, ueber: !!ueber, weicht: !!weicht, allein: !!p.allein, fw: !!fw }, false); // «Allein» aus dem Pflege-Tool
+  const neu = await neuerEinsatz({ mid, kind: 'termin', s: r48(s), e: r48(e), kid: p.kid, title: `${p.kat.name}: ${p.arb.join(', ')}`, text: VNOT[p.id]?.n || '', ok, pl: pl !== undefined ? pl : VNOT[p.id]?.pl || provPl(p), pkk: p.kk, pj: p.y, pkw: p.w, ueber: !!ueber, weicht: !!weicht, allein: !!p.allein, fw: !!fw }, false); // «Allein» aus dem Pflege-Tool
   if(neu && VNOT[p.id]){ await sb.from('planer_vorschlag_notiz').delete().eq('kunde_kategorie_id', p.kk).eq('jahr', p.y).eq('kw', p.w); delete VNOT[p.id]; }
   if(neu) renderRows(); // kein Hinweis mit Rückgängig: offen/abgemacht wechselt man einfach durch Ziehen
 }
