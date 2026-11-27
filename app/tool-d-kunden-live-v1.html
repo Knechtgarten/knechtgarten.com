@@ -850,7 +850,7 @@ window.addEventListener('popstate', async ev => {
 // Einsätze und Daten stehen nur im Einsatzplaner. Rechte: Adressen = offerten/kunden, Pflege = pflege/kunden.
 let modus = 'adr', pfKarteAn = false, filterAuf = false, MIT_ADR = true, MIT_PF = true, ICH_ID = null;
 const PF = { kunden: new Map(), kat: [], kk: [], kz: [], reg: [], regPlz: {}, obj: [], tags: [], felder: [], arbeiten: [], ka: [], zust: [] };
-const pff = { reg: new Set(), kat: '', abo: '', wer: '', tag: '', meine: false };
+const pff = { reg: new Set(), kat: '', abo: '', wer: '', tag: '', meine: false, pruefen: false };
 const PSVG = p => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
 const PI = {
   repeat: PSVG('<path d="M4 12V9a3 3 0 0 1 3-3h13M17 3l3 3-3 3M20 12v3a3 3 0 0 1-3 3H4M7 21l-3-3 3-3"/>'),
@@ -869,17 +869,20 @@ function aboHtml(pk){
 }
 async function ladePflege(){
   const q = (t, s = '*') => ladeAlleZeilen(() => sb.from(t).select(s));
-  const [pk, kat, kk, kz, reg, rp, obj, tags, felder, arb, ka, zu] = await Promise.all([
+  const [pk, kat, kk, kz, reg, rp, obj, tags, felder, arb, ka, zu, alt] = await Promise.all([
     q('pflege_kunde', 'kunde_id,abo_typ,region_id,voranmeldung_kanaele,rohnertec_id'), sb.from('pflege_kategorie').select('id,name,farbe,kuerzel,reihenfolge').order('reihenfolge').then(r => r.data || []),
     q('pflege_kunde_kategorie', 'id,kunde_id,kategorie_id,objekt_id,werte'), q('pflege_kunde_kategorie_zustaendig', 'kunde_kategorie_id,benutzer_id'),
     sb.from('pflege_region').select('*').order('reihenfolge').then(r => r.data || []), q('pflege_region_plz'), q('pflege_objekt', 'kunde_id,plz,ort,region_id'),
     sb.from('pflege_tag').select('*').order('name').then(r => r.data || []), q('pflege_feld', 'id,kategorie_id,typ,tags'), q('pflege_arbeit', 'id,tag_id'),
-    q('pflege_kunde_arbeit', 'kunde_kategorie_id,arbeit_id'), sb.rpc('pflege_zustaendige').then(r => r.data || [])
+    q('pflege_kunde_arbeit', 'id,kunde_kategorie_id,arbeit_id'), sb.rpc('pflege_zustaendige').then(r => r.data || []),
+    sb.from('pflege_kunde_arbeit_alt').select('kunde_arbeit_id').eq('erledigt', false).then(r => r.data || [])
   ]);
   PF.kunden = new Map(pk.map(x => [x.kunde_id, x])); PF.kat = kat; PF.kk = kk; PF.kz = kz; PF.reg = reg; PF.obj = obj;
   PF.regPlz = Object.fromEntries(rp.map(x => [x.plz, x.region_id])); PF.tags = tags; PF.felder = felder; PF.arbeiten = arb; PF.ka = ka; PF.zust = zu;
+  PF.alt = new Set(alt.map(x => x.kunde_arbeit_id)); // bisherige eigene Wochen, noch nicht in fixe Tage umgewandelt (2026-11-27)
 }
 const pfKk = id => PF.kk.filter(x => x.kunde_id === id);
+const pfZuPruefen = id => { const kks = new Set(pfKk(id).map(x => x.id)); return PF.ka.some(x => kks.has(x.kunde_kategorie_id) && PF.alt?.has(x.id)); };
 const pfKats = id => [...new Set(pfKk(id).map(x => x.kategorie_id))].map(kid => PF.kat.find(c => c.id === kid)).filter(Boolean).sort((a, b) => (a.reihenfolge ?? 0) - (b.reihenfolge ?? 0));
 const pfZustIds = id => { const kks = new Set(pfKk(id).map(x => x.id)); return [...new Set(PF.kz.filter(z => kks.has(z.kunde_kategorie_id)).map(z => z.benutzer_id))]; };
 const zustName = bid => { const b = PF.zust.find(x => x.id === bid); if(!b) return 'Unbekannt'; return b.anzeigename || String(b.email || '').split('@')[0].split(/[._-]+/).filter(Boolean).map(s => s[0].toUpperCase() + s.slice(1)).join(' '); };
@@ -909,12 +912,15 @@ function pfPasst(k){
   if(pff.wer && !(pff.wer === '-' ? !z.length : z.includes(pff.wer))) return false;
   if(pff.meine && !z.includes(ICH_ID)) return false;
   if(pff.tag && !pfTags(k.id).has(pff.tag)) return false;
+  if(pff.pruefen && !pfZuPruefen(k.id)) return false;
   return true;
 }
 function pfFilterHtml(){
   const chip = (attr, an, t) => `<button type="button" class="fchip" ${attr} aria-pressed="${an}">${t}</button>`;
   const zIds = [...new Set(PF.kz.map(z => z.benutzer_id))].sort((a, b) => zustName(a).localeCompare(zustName(b), 'de'));
+  const nPr = [...PF.kunden.keys()].filter(pfZuPruefen).length;
   return chip('data-pm="1"', pff.meine, 'Meine Kunden')
+    + (nPr || pff.pruefen ? chip('data-ppr="1" title="Bisherige eigene Wochen noch in fixe Tage umwandeln oder verwerfen"', pff.pruefen, `Zu prüfen (${nPr})`) : '')
     + pfRegHtml()
     + `<span class="fgrp">Pflege</span><select data-pf="kat" aria-label="Kategorie"><option value="">Alle Kategorien</option>${PF.kat.map(c => `<option value="${c.id}"${pff.kat === c.id ? ' selected' : ''}>${escHtml(c.name)}</option>`).join('')}</select>
       <select data-pf="abo" aria-label="Abo"><option value="">Alle Abos</option>${ABO.map(a => `<option value="${a.id}"${pff.abo === a.id ? ' selected' : ''}>${a.n}</option>`).join('')}</select>
@@ -1051,6 +1057,7 @@ function renderKundenTable(){
       + (filterAuf ? FILTER.map(([k, n, set]) => `<button type="button" class="fchip" data-f="${k}" aria-pressed="${schnell.has(k)}">${n}<small>${KUNDEN.filter(x => set ? set.has(x.id) : !x.easybill_id).length}</small></button>`).join('') : '');
   if($('filterAuf')) $('filterAuf').onclick = () => { filterAuf = !filterAuf; renderKundenTable(); };
   $('kfilter').querySelectorAll('[data-pm]').forEach(b => b.onclick = () => { pff.meine = !pff.meine; seite = 0; renderKundenTable(); });
+  $('kfilter').querySelectorAll('[data-ppr]').forEach(b => b.onclick = () => { pff.pruefen = !pff.pruefen; seite = 0; renderKundenTable(); });
   $('kfilter').querySelectorAll('input[data-preg]').forEach(b => b.onchange = () => { const r = b.dataset.preg; b.checked ? pff.reg.add(r) : pff.reg.delete(r); seite = 0; renderKundenTable(); if($('pfReg')) $('pfReg').open = true; });
   $('kfilter').querySelectorAll('[data-preg-alle]').forEach(b => b.onclick = () => { pff.reg.clear(); seite = 0; renderKundenTable(); });
   if($('pfKarteBtn')) $('pfKarteBtn').onclick = () => { pfKarteAn = !pfKarteAn; renderKundenTable(); };
@@ -1759,11 +1766,11 @@ $('kundenSearchInput').addEventListener('input', () => {
 $('sLeer').addEventListener('click', () => { $('kundenSearchInput').value = ''; $('sLeer').hidden = true; $('kundenSearchInput').focus(); suchtext = ''; schnell.clear(); buchstabe = null; seite = 0; chipKontakt = null; chipOrt = null; ksChips(); renderKundenTable(); });
 document.querySelectorAll('#modusSeg [data-m]').forEach(b => b.addEventListener('click', () => {
   modus = b.dataset.m; buchstabe = null; seite = 0; geoeffneterKunde = null; schnell.clear(); filterAuf = false;
-  pff.reg.clear(); pff.kat = pff.abo = pff.wer = pff.tag = ''; pff.meine = false; renderKundenTable();
+  pff.reg.clear(); pff.kat = pff.abo = pff.wer = pff.tag = ''; pff.meine = false; pff.pruefen = false; renderKundenTable();
 }));
 document.querySelectorAll('#bereiche [data-b]').forEach(b => b.addEventListener('click', () => {
   const v = b.dataset.b, neu = v === 'pf' ? 'pf' : v === 'pj' ? 'pj' : v === 'ma' ? 'ma' : 'adr';
-  if(neu !== modus){ schnell.clear(); filterAuf = false; pff.reg.clear(); pff.kat = pff.abo = pff.wer = pff.tag = ''; pff.meine = false; }
+  if(neu !== modus){ schnell.clear(); filterAuf = false; pff.reg.clear(); pff.kat = pff.abo = pff.wer = pff.tag = ''; pff.meine = false; pff.pruefen = false; }
   modus = neu; bereich = neu === 'adr' ? v : 'kunden'; buchstabe = null; seite = 0; geoeffneterKunde = null; if(bereich === 'lief') schnell.clear(); renderKundenTable();
 }));
 
