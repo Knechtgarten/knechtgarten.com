@@ -778,6 +778,10 @@ table.bp td{padding:4px;border-top:1px solid var(--soft);white-space:nowrap;}
 .leiste .lb button .i{width:15px;height:15px;}
 .leiste .lb button span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .leiste .lb button.on{background:var(--primary);color:#fff;border-color:var(--primary);}
+/* Auftrag + Haken «allein» in einer Zeile (Entscheid 2026-11-27) */
+.leiste .lb .lauf{display:flex;gap:6px;align-items:stretch;} .leiste .lb .lauf > button[data-art]{flex:1;min-width:0;}
+.leiste .lb .lauf > button.lhk{flex:none;font-weight:600;font-size:12px;color:var(--muted);padding:6px 8px;gap:5px;} .leiste .lb .lauf > button.lhk i{width:12px;height:12px;border:1.5px solid currentColor;border-radius:3px;box-sizing:border-box;display:inline-block;}
+.leiste .lb .lauf > button.lhk.an{color:#2E9BF0;border-color:#2E9BF0;} .leiste .lb .lauf > button.lhk.an i{background:#2E9BF0;box-shadow:inset 0 0 0 2px #fff;}
 .leiste .lb button:hover{border-color:var(--primary);}
 .leiste .lb button:focus-visible{outline:2px solid var(--primary);outline-offset:1px;}
 .alz,.cmalz{flex-wrap:wrap;} .alz>b,.cmalz>b{flex-basis:100%;margin:2px 0 0;} .alz{display:flex;align-items:center;gap:4px;} .alz>b{font-size:12px;color:var(--primary);} .leiste .lb .alz button{flex:1;justify-content:center;padding:6px 3px;font-size:11.5px;font-weight:600;white-space:nowrap;} .cmalz button{white-space:nowrap;} /* Allein: ganzer Tag / VM / NM */
@@ -3378,11 +3382,12 @@ function drawNeuLeiste(){
       + (L.baus.some(o => o.sp === 'rest') ? `<div class="mhg unten"><div>${sp((o, i) => o.sp === 'rest' && o.n % 2 === 0)}</div><div>${sp(o => o.sp === 'rest' && o.n % 2 === 1)}</div></div>` : ''); }
   else if(mkKat(L.mid) === 'a') list = ''; // Anlässe / Diverses: nur die Icons (unten)
   else list = (COPY ? btn('data-paste', `${I('copy')}<span>Kopie einfügen: ${esc(COPY.lab)}</span>`, false) + '<div class="sep"></div>' : '')
-    + arten.map(([k, l], i) => k === 'allein' ? alleinZeile() : btn(`data-art="${k}"`, `<span>${l}</span>`, L.def === k)).join('')
+    + arten.map(([k, l], i) => k === 'allein' ? alleinZeile() : k === 'termin' ? `<div class="lauf">${btn(`data-art="${k}"`, `<span>${l}</span>`, L.def === k)}<button type="button" class="lhk${L.allein ? ' an' : ''}" data-alleinhk title="Auftrag gleich als «allein» anlegen (kein Personal nötig)"><i></i>allein</button></div>` : btn(`data-art="${k}"`, `<span>${l}</span>`, L.def === k)).join('')
     + (L.extra ? '<div class="sep"></div>' + btn('data-extra', `${I(L.extra.ic || 'x')}<span>${esc(L.extra.lab)}</span>`, false) : '');
   if(L.step === 'art' && canEdit(L.mid) && mkErlaubt(L.mid)) list += (list ? '<div class="sep"></div>' : '') + '<div class="lmk">' + mkKnoepfe(L.mid) + '</div>'; // Markierungen direkt als Icons
   L.el.innerHTML = `<div class="lh">${kopf ? `<b>${kopf}</b>` : ''}<span class="small muted">${esc(spanLabel({ s: L.a, e: L.b }))} · ${esc(P[L.mid]?.name || '')}</span></div><div class="lb">${list}</div>`;
   L.el.querySelectorAll('[data-art]').forEach(x => x.onclick = () => waehleArt(x.dataset.art));
+  L.el.querySelectorAll('[data-alleinhk]').forEach(x => x.onclick = e => { e.stopPropagation(); L.allein = !L.allein; x.classList.toggle('an', L.allein); });
   L.el.querySelectorAll('[data-allein]').forEach(x => x.onclick = () => { const { mid, a, b } = L; closeNeuLeiste(); alleinVorab(mid, a, b, x.dataset.allein); });
   L.el.querySelectorAll('[data-abs]').forEach(x => x.onclick = () => legeAn('absenz', { title: x.dataset.abs }));
   L.el.classList.toggle('mh', L.step === 'hilfe');
@@ -3435,7 +3440,7 @@ async function legeAn(art, extra = {}){
   const kurz = L.b - L.a < .5 - 1e-6;
   const kind = art === 'absenz' ? 'absenz' : art === 'hilfe' ? 'hilfe' : (kurz ? 'termin' : 'baustelle');
   const mePl = myPerson(); const pl = kind === 'baustelle' ? (P[L.mid]?.ist_projektleiter ? L.mid : (mePl?.ist_projektleiter ? mePl.id : null)) : null;
-  const neu = await neuerEinsatz({ mid: L.mid, kind, s: L.a, e: L.b, title: extra.title || '', link: extra.link || null, mp: extra.mp || null, ok: art !== 'offen' && L.lane?.dataset?.off !== '1', fw: art === 'offen' && L.lane?.dataset?.off !== '1' && hatOffen(L.mid), pl }, kind === 'termin' || kind === 'baustelle');
+  const neu = await neuerEinsatz({ mid: L.mid, kind, s: L.a, e: L.b, title: extra.title || '', link: extra.link || null, mp: extra.mp || null, ok: art !== 'offen' && L.lane?.dataset?.off !== '1', fw: art === 'offen' && L.lane?.dataset?.off !== '1' && hatOffen(L.mid), pl, allein: art === 'termin' && !!L.allein }, kind === 'termin' || kind === 'baustelle');
   if(neu && (kind === 'absenz' || kind === 'hilfe')) toast(`${kind === 'absenz' ? extra.title : labOf(neu)} eingetragen${neu._teile?.length ? ` · ${neu._teile.length + 1} Stücke` : ''}`, () => kind === 'hilfe' ? hilfeWeg(neu) : loescheEinsatz(neu));
 }
 addEventListener('keydown', e => {
