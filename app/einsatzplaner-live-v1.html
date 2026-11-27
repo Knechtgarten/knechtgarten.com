@@ -1381,8 +1381,8 @@ async function zurueckInVorrat(it, ber){
 // Einplanen: Vorrat-Balken auf eine Personenzeile ziehen (Beginn = Tag unter der Maus, Länge = Arbeitstage)
 async function vorratEinplanen(v, mid, u, offen = false){
   if(!canEdit(mid)){ toast('Diese Zeile darfst du nicht bearbeiten.'); return; }
-  let d = Math.floor(u + 1e-9); while(isOff(d)) d++;
-  let last = d, n = vTage(v) - 1; while(n > 0){ last++; if(!isOff(last)) n--; }
+  let d = Math.floor(u + 1e-9); while(offT(d)) d++;
+  let last = d, n = vTage(v) - 1; while(n > 0){ last++; if(!offT(last)) n--; }
   const p = P[mid], ich = myPerson(), pl = v.projektleiter_id || (p?.ist_projektleiter ? mid : (ich?.ist_projektleiter ? ich.id : null));
   const neu = await neuerEinsatz({ mid, kind: v.bereich === 'bau' || v.bereich === 'pool' ? 'baustelle' : 'termin', s: d, e: last + 1, kid: v.kunde_id || null, title: v.titel || '', text: v.notiz || '', pl, ok: !offen, soll: Number(v.tage) }, false);
   if(!neu) return;
@@ -1723,7 +1723,7 @@ function offenLayout(list){
   const ende = [];
   list.slice().sort((a, b) => a.s - b.s || b.e - a.e).forEach(it => {
     const multi = it.e - it.s > 1 + 1e-6, free = [];
-    for(let k = Math.floor(it.s * 2 + 1e-9); k <= Math.ceil(it.e * 2 - 1e-9) - 1; k++){ if(multi && isOff(k >> 1)) continue; if(inPause(it, k)) continue; free.push(k); }
+    for(let k = Math.floor(it.s * 2 + 1e-9); k <= Math.ceil(it.e * 2 - 1e-9) - 1; k++){ if(multi && (isOff(k >> 1) || teamFrei(it, k))) continue; if(inPause(it, k)) continue; free.push(k); }
     const segs = []; free.forEach(k => { const a = Math.max(it.s, k / 2), b = Math.min(it.e, (k + 1) / 2); const L = segs[segs.length - 1]; if(L && Math.abs(L[1] - a) < 1e-6) L[1] = b; else segs.push([a, b]); });
     const a = Math.floor(it.s * 2 + 1e-9) / 2, b = Math.ceil(it.e * 2 - 1e-9) / 2; // Balken füllen ganze Halbtage
     let lv = ende.findIndex(x => x <= a + 1e-6); if(lv < 0){ lv = ende.length; ende.push(0); } ende[lv] = b;
@@ -1731,10 +1731,16 @@ function offenLayout(list){
   });
   OFFLV[list[0].mid] = ende.length;
 }
+// TEAMK: Halbtage mit Team-Anlass (Kurs, Ausflug …): für alle wie frei – Baustellen werden unterbrochen (Verbindungsstrich),
+// verlängern sich aber nicht; mit fixen Arbeitstagen zeigen sie rot «x von y T» (Entscheid 2026-11-27)
+let TEAMK = new Set();
+const teamFrei = (it, k) => TEAMK.has(k) && it.kind !== 'absenz' && !istAllg(it.mid) && !P[it.mid]?.ist_ablage;
+const offT = d => isOff(d) || (TEAMK.has(d * 2) && TEAMK.has(d * 2 + 1)); // ganzer Team-Tag: neues Einplanen springt darüber
 let DUPS = [], LEER = {}; // LEER: Vorarbeiter-Halbtage ohne Auftrag und ohne Hilfskraft (roter Strich)
 function compute(){
   floatOffene();
   ALL = EINS.filter(it => !wdhAusSelbst(it)).concat(occs()); LAY = {}; DUPS = []; OFFLV = {};
+  TEAMK = new Set(); teamAnlaesse().forEach(([a, b]) => { for(let k = Math.round(a * 2); k < Math.round(b * 2); k++) TEAMK.add(k); });
   const rows = {}; ALL.forEach(it => (rows[istOffen(it) ? 'o:' + it.mid : it.mid] ??= []).push(it));
   Object.values(rows).forEach(list => {
     if(istOffen(list[0])){ offenLayout(list); return; } // offene Linie: eigene Zeile, keine Konflikte
@@ -1746,7 +1752,7 @@ function compute(){
       const k0 = Math.floor(it.s * 2 + 1e-9), k1 = Math.ceil(it.e * 2 - 1e-9) - 1;
       const moeglich = []; // Halbtage, die der Termin überhaupt belegt
       for(let k = k0; k <= k1; k++){
-        const d = k >> 1; if(multi && isOff(d)) continue;
+        const d = k >> 1; if(multi && (isOff(d) || teamFrei(it, k))) continue;
         if(inPause(it, k)) continue;
         const a = Math.max(it.s, k / 2), b = Math.min(it.e, (k + 1) / 2); if(b - a < 1e-6) continue;
         moeglich.push(k);
@@ -1788,7 +1794,7 @@ function compute(){
     const bel = new Set(); ALL.forEach(i => { if(i.mid !== p.id || istOffen(i) || !LAY[i.id]) return; LAY[i.id].free.forEach(k => bel.add(k)); (LAY[i.id].res || []).forEach(k => bel.add(k)); });
     MARK.forEach(m => { if(m.person_id !== p.id || m.art !== 'allein') return; const d = fromIso(m.tag); if(m.teil !== 'nm') bel.add(d * 2); if(m.teil !== 'vm') bel.add(d * 2 + 1); });
     const c = cover[p.id] || new Set(), out = [];
-    for(let d = Math.max(0, TODAY); d < NDAYS; d++){ if(isOff(d) || FER_GRAU.some(([a, b]) => d >= a && d < b)) continue; [d * 2, d * 2 + 1].forEach(k => { if(!bel.has(k) && !c.has(k)) out.push(k); }); }
+    for(let d = Math.max(0, TODAY); d < NDAYS; d++){ if(isOff(d) || FER_GRAU.some(([a, b]) => d >= a && d < b)) continue; [d * 2, d * 2 + 1].forEach(k => { if(!TEAMK.has(k) && !bel.has(k) && !c.has(k)) out.push(k); }); }
     LEER[p.id] = out; });
   // Blau = an diesem Halbtag allein (kein Personal nötig); blau + Mithilfe eingeteilt = Konflikt (roter Rand)
   ALL.forEach(b => { if(istOffen(b) || istKurs(b) || !(b.kind === 'baustelle' || (b.kind === 'termin' && b.e - b.s >= 2 / 12 - 1e-6)) || !P[b.mid]?.ist_vorarbeiter || !LAY[b.id] || LAY[b.id].mini) return; const c = cover[b.mid] || new Set(), A = soloSet(b), L = LAY[b.id];
@@ -4041,7 +4047,7 @@ function bindWindow(){
 // Absenz (z. B. «Frei») in einer Baustelle: Arbeitstage bleiben gleich. Ist hinten frei, wandert das Ende nach hinten;
 // sonst bleibt das Ende und die Baustelle zeigt rot «Geplant X Tage, aktuell Y Tage»
 function halbtageIn(b, list, e, stop){ let c = 0;
-  for(let k = Math.floor(b.s * 2 + 1e-9); k <= Math.ceil(e * 2 - 1e-9) - 1; k++){ const d = k >> 1; if(isOff(d)) continue;
+  for(let k = Math.floor(b.s * 2 + 1e-9); k <= Math.ceil(e * 2 - 1e-9) - 1; k++){ const d = k >> 1; if(isOff(d) || TEAMK.has(k)) continue;
     const a = Math.max(b.s, k / 2), z = Math.min(e, (k + 1) / 2); if(z - a < 1e-6) continue;
     const o = list.find(x => x.s < z - 1e-6 && x.e > a + 1e-6);
     if(o){ if(stop && k / 2 >= b.e - 1e-6 && o.kind !== 'absenz') return { blockiert: true }; continue; }
@@ -4129,7 +4135,7 @@ function sprungEnde(b, faktor, ab, maxSpr = 1){
   const list = mitPausen(b, EINS.filter(o => o.mid === b.mid && o !== b && o.id !== b.id && !o.ueber && !o.wdh));
   let c = 0, spr = 0, block = 0;
   for(let k = Math.floor(b.s * 2 + 1e-9), g = 0; g < 3000; k++, g++){
-    if(isOff(k >> 1)) continue;
+    if(isOff(k >> 1) || TEAMK.has(k)) continue;
     const a = Math.max(b.s, k / 2), z = (k + 1) / 2, o = list.find(x => x.s < z - 1e-6 && x.e > a + 1e-6);
     if(o && (o.kind === 'absenz' || z <= ab + 1e-6)) continue;
     if(o){ if(!block && spr >= maxSpr) return null; block++; continue; }
