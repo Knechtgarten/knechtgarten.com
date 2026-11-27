@@ -2377,6 +2377,8 @@ const MARK_ALLG = ['sitzung', 'anlass', 'pneu', 'kurs', 'liefer'], MARK_PERS = [
 const LIEFERANT = { gruetter: { name: 'Grütter', farbe: '#8B5A2B' }, fontarocca: { name: 'Fontarocca', farbe: '#2F6F9F' }, diverse: { name: 'Diverse', farbe: '#8B9097' } };
 // Art der Zeile: l = Liefertermine, x = Maschinenservice (keine Icons), a = Anlässe / Diverses, p = Mitarbeitende
 const mkKat = mid => !istAllg(mid) ? 'p' : /liefer/i.test(P[mid]?.name || '') ? 'l' : /service/i.test(P[mid]?.name || '') ? 'x' : /arbeitszeit/i.test(P[mid]?.name || '') ? 'z' : 'a';
+// Lieferung mit Lieferant + Farbe in den allgemeinen Zeilen (Liefertermine, Termine & Infos); in Personenzeilen rot ohne Lieferant (2026-11-27)
+const mkLief = mid => ['l', 'a'].includes(mkKat(mid));
 // Mitarbeitende: freie Icons pro Tag (Kran, Wichtige Info, Lieferung); Ämtli (Besen) nur bei Lehrlingen
 const istLehrling = mid => /lehrling/i.test(GRUPPEN.find(g => g.id === P[mid]?.gruppe_id)?.name || '');
 const mkArten = mid => { const k = mkKat(mid); if(k === 'p') return MARK_PERS.filter(a => a !== 'aemtli' || istLehrling(mid)); return ({ l: ['liefer'], a: MARK_ALLG, x: [], z: MARK_AZ })[k]; };
@@ -2389,7 +2391,7 @@ function markHTML(p){
   MARK.filter(m => m.person_id === p.id && m.art !== 'allein').forEach(m => { const d = fromIso(m.tag); if(d < 0 || d >= NDAYS) return; // «allein» = Vorab-Strich, kein Icon
     const a = X(d + (zoom === 'tag' ? 1 / 12 : 0)), b = zoom === 'tag' ? X(d + 11 / 12) : X(d) + wdW(d);
     const l = eng || m.teil === 'ganz' ? (a + b) / 2 - sz / 2 : m.teil === 'vm' ? a + (m.art === 'info' ? 0 : m.art === 'kran' ? 1.5 : 3) : b - sz - 4;
-    h += `<span class="mk${eng ? ' eng' : ''}" data-mk="${m.id}" style="left:${l}px" title="${esc(m.art === 'liefer' ? ('Lieferung ' + (LIEFERANT[m.lieferant]?.name || '')).trim() : MARKART[m.art] || m.art)} · ${esc(dLab(d))} ${TEIL[m.teil] || ''}${m.text ? '\n' + esc(m.text) : ''}">${mkSvg(m.art, m.art === 'liefer' && mkKat(m.person_id) === 'l' ? (LIEFERANT[m.lieferant] || LIEFERANT.diverse).farbe : m.art === 'info' || m.art === 'kran' ? 'var(--prot)' : null)}</span>`; });
+    h += `<span class="mk${eng ? ' eng' : ''}" data-mk="${m.id}" style="left:${l}px" title="${esc(m.art === 'liefer' ? ('Lieferung ' + (LIEFERANT[m.lieferant]?.name || '')).trim() : MARKART[m.art] || m.art)} · ${esc(dLab(d))} ${TEIL[m.teil] || ''}${m.text ? '\n' + esc(m.text) : ''}">${mkSvg(m.art, m.art === 'liefer' ? (mkLief(m.person_id) ? (LIEFERANT[m.lieferant] || LIEFERANT.diverse).farbe : 'var(--prot)') : m.art === 'info' || m.art === 'kran' ? 'var(--prot)' : null)}</span>`; });
   return h;
 }
 // Setzen / ändern: Icon wählen, ganzer Tag / Vormittag / Nachmittag, optional ein kurzer Text
@@ -2397,7 +2399,7 @@ function openMark(m, rect){
   const neu = !m.id, ed = canEdit(m.person_id);
   const pop = popAt(rect, `<b>${m.art === 'liefer' ? (neu ? 'Lieferung erfassen' : 'Lieferung') : neu ? 'Markierung setzen' : 'Markierung'}</b><span class="small muted">${esc(P[m.person_id]?.name || '')} · ${esc(dLab(fromIso(m.tag)))}</span>
     <div class="mkwahl">${Object.entries(MARKART).filter(([k]) => mkArten(m.person_id).includes(k) || k === m.art).map(([k, l]) => `<button class="mkb${m.art === k ? ' on' : ''}" data-mka="${k}" title="${l}" aria-label="${l}" ${ed ? '' : 'disabled'}>${I('m-' + k)}</button>`).join('')}</div>
-    ${mkKat(m.person_id) === 'l' ? `<div class="seg abseg mklief">${Object.entries(LIEFERANT).map(([k, l]) => `<button type="button" data-mkl="${k}" aria-pressed="${(m.lieferant || 'diverse') === k}" ${ed ? '' : 'disabled'}><span class="sw" style="display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;background:${l.farbe}"></span>${esc(l.name)}</button>`).join('')}</div>` : ''}
+    ${mkLief(m.person_id) ? `<div class="seg abseg mklief"${mkKat(m.person_id) !== 'l' && m.art !== 'liefer' ? ' hidden' : ''}>${Object.entries(LIEFERANT).map(([k, l]) => `<button type="button" data-mkl="${k}" aria-pressed="${(m.lieferant || 'diverse') === k}" ${ed ? '' : 'disabled'}><span class="sw" style="display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;background:${l.farbe}"></span>${esc(l.name)}</button>`).join('')}</div>` : ''}
     <div class="seg abseg">${Object.entries(TEIL).map(([k, l]) => `<button type="button" data-mkt="${k}" aria-pressed="${m.teil === k}" ${ed ? '' : 'disabled'}>${l === 'ganzer Tag' ? 'Ganzer Tag' : l}</button>`).join('')}</div>
     <textarea id="mkT" rows="1" placeholder="${mkKat(m.person_id) === 'l' ? 'Was wird geliefert – eine Zeile pro Artikel, z. B. 12 m³ Humus' : 'Hinweis, z. B. Start 6:30'}" class="mkta" ${ed ? '' : 'disabled'}>${esc(m.text || '')}</textarea>
     ${ed ? `<div class="cmrow">${neu ? '' : `<button class="kg-ibtn danger" id="mkDel" title="Löschen" aria-label="Löschen">${I('trash')}</button>`}<button class="btn btn-primary" id="mkOk" style="margin-left:${neu ? 'auto' : '0'}">${I('check')}Speichern</button></div>` : ''}`);
@@ -2407,10 +2409,10 @@ function openMark(m, rect){
   const r = pop.getBoundingClientRect(); if(r.bottom > innerHeight - 8) pop.style.top = Math.max(8, innerHeight - r.height - 8) + 'px';
   let art = m.art || (mkKat(m.person_id) === 'l' ? 'liefer' : null), teil = m.teil || 'ganz', lief = m.lieferant || 'diverse';
   pop.querySelectorAll('[data-mkl]').forEach(b => b.onclick = () => { lief = b.dataset.mkl; pop.querySelectorAll('[data-mkl]').forEach(x => x.setAttribute('aria-pressed', x === b)); });
-  pop.querySelectorAll('[data-mka]').forEach(b => b.onclick = () => { art = b.dataset.mka; pop.querySelectorAll('[data-mka]').forEach(x => x.classList.toggle('on', x === b)); });
+  pop.querySelectorAll('[data-mka]').forEach(b => b.onclick = () => { art = b.dataset.mka; pop.querySelectorAll('[data-mka]').forEach(x => x.classList.toggle('on', x === b)); const lk = pop.querySelector('.mklief'); if(lk) lk.hidden = art !== 'liefer'; });
   pop.querySelectorAll('[data-mkt]').forEach(b => b.onclick = () => { teil = b.dataset.mkt; pop.querySelectorAll('[data-mkt]').forEach(x => x.setAttribute('aria-pressed', x === b)); });
   const ok = pop.querySelector('#mkOk'); if(ok) ok.onclick = async () => { if(!art){ toast('Bitte ein Icon wählen.', null, true); return; }
-    const row = { person_id: m.person_id, tag: m.tag, teil, art, lieferant: art === 'liefer' && mkKat(m.person_id) === 'l' ? lief : null, text: pop.querySelector('#mkT').value.trim() || null }; closePop();
+    const row = { person_id: m.person_id, tag: m.tag, teil, art, lieferant: art === 'liefer' && mkLief(m.person_id) ? lief : null, text: pop.querySelector('#mkT').value.trim() || null }; closePop();
     const { data, error } = neu ? await sb.from('planer_markierung').insert({ ...row, erstellt_von: ME }).select().single() : await sb.from('planer_markierung').update(row).eq('id', m.id).select().single();
     if(error) return fehler(error, 'Markierung'); MARK = MARK.filter(x => x.id !== data.id).concat([data]); renderRows(); };
   const del = pop.querySelector('#mkDel'); if(del) del.onclick = () => { closePop(); bestaetige('Markierung löschen?', `<div>${esc(MARKART[m.art] || '')} · ${esc(dLab(fromIso(m.tag)))}</div>`, 'Löschen', async () => {
