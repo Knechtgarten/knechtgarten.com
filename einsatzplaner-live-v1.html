@@ -532,7 +532,7 @@ body.kopiert, body.kopiert *{cursor:copy !important;}
 .row.azz .lane > .bar{top:19px!important;height:15px;}
 .row.azz .lane > .ferb.fer-betrieb{top:19px;}
 .azi{position:absolute;top:19px;height:15px;display:inline-flex;align-items:center;gap:2px;cursor:pointer;z-index:3;font-size:10px;color:#323E4E;}
-.teamrahmen{position:absolute;border:1px solid;border-radius:4px;background:rgba(50,62,78,.06);box-sizing:border-box;z-index:3;pointer-events:none;} /* Team-Tag: Rahmen durch alle Zeilen */
+.teamrahmen{position:absolute;border:1px dotted;border-radius:3px;box-sizing:border-box;z-index:3;pointer-events:none;} /* Team-Tag: Rahmen durch alle Zeilen */
 .row.teamz .azi{top:3px;} /* Arbeitsstart in der Team-Zeile */
 .azi svg{width:15px;height:15px;} .azi b{font-weight:700;background:rgba(255,255,255,.8);border-radius:3px;padding:0 2px;}
 .ferb{position:absolute;top:2px;height:14px;line-height:12px;border:1px solid #A9B0B7;border-radius:3px;background:#E9ECEF;color:#323E4E;font-size:10.5px;font-weight:600;padding:0 5px;box-sizing:border-box;white-space:nowrap;overflow:hidden;cursor:pointer;z-index:1;display:flex;align-items:center;gap:3px;}
@@ -1584,6 +1584,7 @@ function mausWegZu(pop){ const weg = e => { if(!pop.isConnected){ removeEventLis
   if(Math.hypot(Math.max(r.left - e.clientX, 0, e.clientX - r.right), Math.max(r.top - e.clientY, 0, e.clientY - r.bottom)) > 60){ closePop(); removeEventListener('pointermove', weg); } };
   setTimeout(() => addEventListener('pointermove', weg), 300); }
 function barStyle(it){
+  if(istTeamZeile(it.mid)) return { bg: TEAMGRAU, fg: '#fff', bd: TEAMGRAU }; // Team-Anlass grau (wie Betriebsferien)
   if(EINGEBETTET && it.kind === 'absenz') return { bg: '#fff', fg: '#8B9097', bd: '#C9CED4' }; // gestrichelt (CSS .abs)
   if(EINGEBETTET && it.kind !== 'absenz' && EFARBE !== 'alle'){
     // Widget: eigene Einsätze in der eigenen Farbe, alles andere nur mit Rahmen
@@ -2204,6 +2205,10 @@ function personRow(p, W, bgx, offen = false){
   if(!offen && P[p.id] && !p.ist_ablage) FEIER.forEach((n, d) => { if(d < 0 || d >= NDAYS || its.some(i => i.kind === 'absenz' && i.s < d + 1 - 1e-6 && i.e > d + 1e-6)) return;
     const st = absStyle(n), w = Math.max(3, XW(d, d + 1) - 2);
     bars += `<div class="fehol" style="left:${X(d) + 1}px;width:${w}px;background:${st.bg};color:${st.fg};border-color:${st.bd}" title="${esc(n)} (Feiertag)">${w > 30 ? `<span>${esc(n)}</span>` : ''}</div>`; });
+  // Team-Anlässe (Firmenausflug, Schulung für alle …): grauer Balken mit Titel bei jeder Person, wie Betriebsferien (Entscheid 2026-11-27)
+  if(!offen && P[p.id] && !p.ist_ablage && !istAllg(p.id)) teamAnlaesse().forEach(([a, b, it]) => {
+    const w = Math.max(3, XW(a, b) - 2);
+    bars += `<div class="fehol tanl" style="left:${X(a) + 1}px;width:${w}px;background:${TEAMGRAU};color:#fff;border-color:${TEAMGRAU}" title="${esc(titleOf(it))} (Team-Anlass)">${w > 24 ? `<span>${esc(titleOf(it))}</span>` : ''}</div>`; });
   if(offen){ // Zeile unter der Person (bzw. «Nicht zugeteilt» unter dem Gruppentitel): jede Unterzeile 17 px
     bars = bars.replace(/(data-(?:id|gid|pzid|bid)="([^"]+)"[^>]*?style=")/g, (m, a, id) => a + `--lv:${LAY[id]?.lv || 0};`);
     const n = Math.max(1, OFFLV[p.id] || 0);
@@ -2260,19 +2265,27 @@ function fokusRahmen(t){
   // (keine Rahmen um Baustellen: Lieferwagen werden über Tage/Wochen geplant, nicht auf die Baustelle)
   g.insertAdjacentHTML('beforeend', h);
 }
-// Team-Anlässe (Einträge in der Zeile «Team»: Firmenausflug, Schulung … – niemand auf der Baustelle): dünner Rahmen + leichte Fläche
-// von der Team-Zeile bis zur letzten Person. Infos (Icons, Arbeitsstart) bekommen keinen Rahmen (Entscheid 2026-11-27)
-function teamTage(){ const tid = teamId(), s = new Set(); if(!tid) return [];
-  const add = (a, b) => { for(let d = Math.max(0, Math.floor(a + 1e-9)); d < Math.min(NDAYS, Math.ceil(b - 1e-9)); d++) s.add(d); };
-  ALL.filter(it => it.mid === tid && !it.rep).forEach(it => add(it.s, it.e));
-  const o = []; [...s].sort((a, b) => a - b).forEach(d => { const L = o[o.length - 1]; if(L && L[1] === d) L[1] = d + 1; else o.push([d, d + 1]); }); return o; }
+// Team-Anlässe (Einträge in der Zeile «Team»: Firmenausflug, Schulung … – niemand auf der Baustelle): grauer Balken mit Titel
+// bei jeder Person (personRow), auf halbe Tage gerundet. Infos der Team-Zeile (Icons, Arbeitsstart): feine gepunktete Linie
+// von der Team-Zeile bis zur letzten Person, gearbeitet wird normal (Entscheid 2026-11-27)
+const TEAMGRAU = '#8B9097';
+const teamAnlaesse = () => { const tid = teamId(); if(!tid) return [];
+  return ALL.filter(it => it.mid === tid && !it.rep && it.e > 0 && it.s < NDAYS).map(it => [Math.max(0, Math.floor(it.s * 2 + 1e-9) / 2), Math.min(NDAYS, Math.ceil(it.e * 2 - 1e-9) / 2), it]); };
+function teamInfoSpannen(){ const tid = teamId(), k = new Set(); if(!tid) return [];
+  const halb = (d, teil) => { if(d < 0 || d >= NDAYS) return; if(teil !== 'nm') k.add(d * 2); if(teil !== 'vm') k.add(d * 2 + 1); };
+  MARK.filter(m => m.person_id === tid && m.art !== 'allein').forEach(m => halb(fromIso(m.tag), m.teil));
+  const y0 = dDate(0).getFullYear(), y1 = dDate(NDAYS - 1).getFullYear();
+  AZ.forEach(z => { for(let y = y0; y <= y1; y++) halb(kwMonday(y, z.ab_kw), 'ganz'); });
+  const o = []; [...k].sort((a, b) => a - b).forEach(h => { const L = o[o.length - 1]; if(L && L[1] === h) L[1] = h + 1; else o.push([h, h + 1]); });
+  return o.map(([a, b]) => [a / 2, b / 2]); }
 function teamRahmen(t){
   if(zoom === 'jahr') return; const g = t.querySelector('.grid'); if(!g) return;
-  const tage = teamTage(); if(!tage.length) return;
+  const sp = teamInfoSpannen(); if(!sp.length) return;
   const tid = teamId(), rows = [...g.children].filter(x => x.classList.contains('row')), ai = rows.findIndex(x => x.classList.contains('arch'));
   const bis = ai < 0 ? rows : rows.slice(0, ai), top = bis.find(x => x.dataset.mid === tid) || bis.find(x => x.classList.contains('grp')), last = bis[bis.length - 1]; if(!top || !last) return;
   const gr = g.getBoundingClientRect(), y0 = top.getBoundingClientRect().top - gr.top + 1, y1 = last.getBoundingClientRect().bottom - gr.top - 1, fc = teamFarbe();
-  g.insertAdjacentHTML('beforeend', tage.map(([a, b]) => `<div class="teamrahmen" style="top:${y0}px;height:${y1 - y0}px;left:${NAMEW + X(a) + 1}px;width:${Math.max(4, XW(a, b) - 2)}px;border-color:${fc}"></div>`).join(''));
+  const lane = top.querySelector('.lane') || bis.find(x => x.dataset.mid)?.querySelector('.lane'), x0 = lane ? lane.getBoundingClientRect().left - gr.left : NAMEW; // echte Lage der Tage
+  g.insertAdjacentHTML('beforeend', sp.map(([a, b]) => `<div class="teamrahmen" style="top:${y0}px;height:${y1 - y0}px;left:${x0 + X(a) + 1}px;width:${Math.max(4, XW(a, b) - 2)}px;border-color:${fc}"></div>`).join(''));
 }
 // Planer füllt das Fenster bis unten (kein leerer Streifen unter dem Plan)
 function tlFuellen(){ const t = tlEl(); if(!t || EINGEBETTET) return; const h = Math.max(300, Math.floor(innerHeight - t.getBoundingClientRect().top - 2)); t.style.setProperty('height', h + 'px', 'important'); const a = $('aufp'); if(a) a.style.height = Math.max(300, Math.floor(innerHeight - a.getBoundingClientRect().top - 2)) + 'px'; }
@@ -4396,14 +4409,14 @@ function openPanel(id, isNew){
   // Kopie: Herkunft zeigen; Notiz, Fotos und Dokumente erst auf Wunsch vom Original holen
   const orig = it.kv ? byId(it.kv) : null;
   const kopie = it.kv ? `<div class="kopie">${I('copy').replace('class="i"', 'class="i" style="width:13px;height:13px"')}Kopie${orig ? ` von ${esc(labOf(orig))}, ${esc(dLab(Math.floor(orig.s)))}` : ''}${ed && orig && (orig.text || (orig.files || []).length) && !it.text && !(it.files || []).length ? `<button class="btn btn-ghost" id="pVomOrig" style="padding:3px 9px;font-size:12px">Notiz, Fotos und Dokumente vom Original übernehmen</button>` : ''}</div>` : '';
-  if(it.kind !== 'absenz'){ const fs = it.files || [];
+  if(it.kind !== 'absenz' && !istTeamZeile(it.mid)){ const fs = it.files || []; // Team-Anlass: nur Titel + Notiz
     secs += accHTML('a-fot', 'Fotos', 'image', fs.filter(f => f.art === 'foto').length, `<div class="files" id="pFotos"></div>${ed ? `<label class="btn btn-ghost" style="align-self:flex-start">${I('plus')}Fotos hinzufügen<input type="file" class="pUp" accept="image/*" multiple hidden></label>` : ''}`, false);
     secs += accHTML('a-dok', 'Angebote und Dokumente', 'file', fs.filter(f => f.art !== 'foto').length, `<div class="docs" id="pDoks"></div>${ed ? `<label class="btn btn-ghost" style="align-self:flex-start">${I('plus')}PDF hinzufügen<input type="file" class="pUp" accept="application/pdf" multiple hidden></label>` : ''}`, false); }
   // Pflege-Infos nur bei Terminen aus dem Pflege-Jahresplan (normale Aufträge haben eigene Fotos/Dokumente)
   const pflege = it.kid && it.pkk ? pflegeHTML(it.kid, it.pkk, Math.floor(it.s + 1e-9)) : '';
   $('side').innerHTML = `<aside class="sidepanel">
     <div class="sd-head"><div${offen ? ' class="offenhd" title="Offener Auftrag – noch nicht abgemacht, wandert mit"' : ' style="min-width:0"'}><h3>${esc(it.kind === 'absenz' ? (it.title || 'Absenz') : titleOf(it))}${auftrag && ed && !kundeNeu ? `<button class="kedit" id="pKEdit" title="Kunde oder Titel ändern" aria-label="Kunde oder Titel ändern">${I('edit')}</button>` : ''}</h3>${k && kOrt(k) ? `<div class="small muted">${I('pin').replace('class="i"', 'class="i" style="width:12px;height:12px;vertical-align:-2px"')} ${esc(kOrt(k))}</div>` : ''}</div>${punkte}${allKnopf}${it.serie || it.wdh ? `<span class="icon-btn on sdrep" id="pWdh" title="Wiederkehrender Termin" aria-label="Wiederkehrender Termin">${I('repeat')}</span>` : ''}<button class="icon-btn" id="pX" aria-label="Schliessen">${I('x')}</button></div>
-    ${kchips}    ${kundeNeu ? `<div class="kneu"><input type="text" id="pKunde" value="${esc(KUNDEN[it.kid] ? kLabel(KUNDEN[it.kid]) : '')}" placeholder="Kunde suchen"><input type="text" id="pTitel" value="${esc(it.title)}" placeholder="${it.kid ? 'Zusatz, z. B. Hecke schneiden' : 'oder Titel, z. B. Werkhof, Besichtigung'}"></div>` : ''}
+    ${kchips}    ${kundeNeu && istTeamZeile(it.mid) ? `<div class="kneu"><input type="text" id="pTitel" value="${esc(it.title)}" placeholder="Titel, z. B. Firmenausflug, Schulung"></div>` : kundeNeu ? `<div class="kneu"><input type="text" id="pKunde" value="${esc(KUNDEN[it.kid] ? kLabel(KUNDEN[it.kid]) : '')}" placeholder="Kunde suchen"><input type="text" id="pTitel" value="${esc(it.title)}" placeholder="${it.kid ? 'Zusatz, z. B. Hecke schneiden' : 'oder Titel, z. B. Werkhof, Besichtigung'}"></div>` : ''}
     ${zeile}${kopie}${zust}
     ${fixe}
     ${it.kind === 'absenz' ? `<div class="abs-chips">${ABST.map(t => `<button data-pabs="${esc(t.name)}" class="${t.name === it.title ? 'on' : ''}" ${dis}><i style="background:${absStyle(t.name).bg}"></i>${esc(t.name)}</button>`).join('')}</div>` : ''}
@@ -4424,14 +4437,14 @@ function openPanel(id, isNew){
   const save = async (patch, local) => { const alt = { s: it.s, e: it.e, mid: it.mid }; Object.assign(it, local); const cur = byId(it.id); if(cur && cur !== it) Object.assign(cur, local); $('pSave').textContent = 'Speichere …'; const ok = await speichere(it, patch); $('pSave').textContent = ok ? 'Gespeichert' : ''; if(VIEW === 'plan') renderRows(); else render();
     if(ok && it.kind === 'absenz' && (patch.beginn || patch.ende || patch.person_id)) await ausgleich(it, alt); return ok; };
   $('side').querySelectorAll('[data-pabs]').forEach(b => b.onclick = () => save({ titel: b.dataset.pabs }, { title: b.dataset.pabs }).then(() => openPanel(id)));
-  on('#pKEdit', 'onclick', () => { panelKunde = true; openPanel(id); setTimeout(() => $('pKunde')?.focus(), 0); });
+  on('#pKEdit', 'onclick', () => { panelKunde = true; openPanel(id); setTimeout(() => ($('pKunde') || $('pTitel'))?.focus(), 0); });
   on('#pLink', 'onchange', async e => { await save({ mit_einsatz_id: e.target.value || null }, { link: e.target.value || null }); openPanel(id); });
   kundeAuswahl($('pKunde'));
   on('#pKunde', 'onchange', async e => { const v = e.target.value.trim(); const hit = kundeAusFeld(e.target);
     if(v && !hit){ toast('Kunde nicht gefunden. Name als Titel übernommen.'); await save({ kunde_id: null, titel: v }, { kid: null, title: v }); }
     else await save({ kunde_id: hit ? hit.id : null }, { kid: hit ? hit.id : null });
     panelKunde = false; if(panelNeuId === id && (hit || v)){ panelNeuId = null; closePanel(); return; } openPanel(id); });
-  on('#pTitel', 'onchange', e => save({ titel: e.target.value.trim() || null }, { title: e.target.value.trim() }).then(() => { panelKunde = false; openPanel(id); }));
+  on('#pTitel', 'onchange', e => save({ titel: e.target.value.trim() || null }, { title: e.target.value.trim() }).then(() => { panelKunde = false; if(istTeamZeile(it.mid) && panelNeuId === id && e.target.value.trim()){ panelNeuId = null; closePanel(); return; } openPanel(id); })); // Team-Anlass: nach dem Titel zu
   on('#pPl', 'onchange', e => save({ projektleiter_id: e.target.value || null }, { pl: e.target.value || null }).then(() => openPanel(id)));
   on('#pRes', 'onchange', e => resSetzen(it, +e.target.value));
   on('#pResUeb', 'onclick', () => resUebernehmen(it));
@@ -4466,7 +4479,7 @@ function openPanel(id, isNew){
     asd.ondrop = e => { if(!nurDateien(e)) return; e.preventDefault(); asd.classList.remove('fdrop'); dateienRein(it, [...e.dataTransfer.files]); };
   }
   pasteZiel = ed && it.kind !== 'absenz' ? it : null;
-  if(isNew && kundeNeu) setTimeout(() => $('pKunde')?.focus(), 0);
+  if(isNew && kundeNeu) setTimeout(() => ($('pKunde') || $('pTitel'))?.focus(), 0);
 }
 // Pflege-Vorschlag (noch kein Einsatz): gleiches Feld, oben «Termin ist abgemacht»
 let selProv = null;
