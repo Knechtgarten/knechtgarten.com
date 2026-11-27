@@ -741,6 +741,8 @@ async function ladeAlles(){
   if(fehler){ showToast(friendlyError(fehler.error), true); return; }
   [S.kat, S.felder, S.arbeiten, S.tabellen, S.spalten, S.zust, S.kunden, S.obj, S.kk, S.kz, S.ka, S.fotos, S.fk, S.dok, S.dk, S.tags, S.reg] = r.map(x => x.data || []);
   S.regPlz = Object.fromEntries((r[17].data || []).map(x => [x.plz, x.region_id]));
+  // Projektleiter (Planer-Personen) für «Projektleiter» pro Pflegekategorie (Farbe im Planer), seit 2026-11-27
+  { const { data: pls } = await sb.from('planer_person').select('id,name').eq('ist_projektleiter', true).eq('aktiv', true).is('archiviert_am', null).order('name'); S.pls = pls || []; }
   S.kunden.sort((a, b) => (a.kunde?.name || '').localeCompare(b.kunde?.name || '', 'de'));
   render();
 }
@@ -1167,6 +1169,12 @@ function feldInput(f, val){
   return `<div class="field">${label}<input type="text" ${a} value="${esc(val)}"></div>`;
 }
 
+// Projektleiter pro Kategorie beim Kunden: leer = Vorgabe der Kategorie (Einstellungen › Pflege), sonst Person / «selbst» / «keine»
+function plHtml(kk){
+  const kat = S.kat.find(k => k.id === kk.kategorie_id), v = kat?.projektleiter, vn = !v || v === 'keine' ? 'Keine Angabe' : v === 'selbst' ? 'Selbst abgemacht' : ((S.pls || []).find(p => p.id === v)?.name || 'Keine Angabe');
+  const w = kk.projektleiter || '', o = (val, lab) => `<option value="${val}"${w === val ? ' selected' : ''}>${esc(lab)}</option>`;
+  return `<div class="zust" style="margin-top:8px"><span class="muted">Projektleiter</span><select data-act="kk-pl" aria-label="Projektleiter" style="height:30px;border:1px solid var(--line);border-radius:7px;padding:0 8px;font:inherit;font-size:13px">${o('', 'Vorgabe: ' + vn)}${(S.pls || []).map(p => o(p.id, p.name)).join('')}${o('selbst', 'Selbst abgemacht')}${o('keine', 'Keine Angabe')}</select></div>`;
+}
 function zustHtml(kk){
   const sel = zustVon(kk.id);
   return `<div class="zust">
@@ -1398,7 +1406,7 @@ function renderDetail(kundeId){
   if(!kat){
     body = `<div class="hint">${obj ? 'Dieses Objekt' : 'Dieser Kunde'} hat noch keine Pflegekategorie. Oben über «+ Pflegekategorie» eine hinzufügen.</div>`;
   } else {
-    const zust = `<section class="card panel"><div class="panel-h"><h3>Zuständig</h3><span class="muted small">${esc(kat.name)}</span></div>${zustHtml(kk)}</section>`;
+    const zust = `<section class="card panel"><div class="panel-h"><h3>Zuständig</h3><span class="muted small">${esc(kat.name)}</span></div>${zustHtml(kk)}${plHtml(kk)}</section>`;
     const arb = arbeitenHtml(kk, kat);
     const angaben = `<section class="card panel"><div class="panel-h"><h3>Angaben / Eckdaten ${esc(kat.name)}</h3></div>
       <div class="fgrid">${felderVon(kat.id).map(f => feldInput(f, (kk.werte || {})[f.id] ?? '')).join('') || '<div class="muted small">Für diese Kategorie sind keine Felder definiert.</div>'}</div></section>`;
@@ -2061,6 +2069,7 @@ appUndLeiste('change', async e => {
     if(f.typ === 'zahl' && v !== '') v = Number(v);
     await setzeWert(kk, f.id, v);
   }
+  else if(act === 'kk-pl'){ const v = el.value || null; if(await speichere('pflege_kunde_kategorie', { id: kk.id }, { projektleiter: v })){ kk.projektleiter = v; showToast('Gespeichert'); } }
   else if(act === 'zust'){
     const neu = [...$('zustMs').querySelectorAll('input:checked')].map(x => x.value);
     await setzeZustaendig(kk, neu);

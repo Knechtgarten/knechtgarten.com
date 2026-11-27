@@ -428,6 +428,8 @@ async function ladeAlles(){
   const fehler = abfragen.find(r => r.error);
   if(fehler){ showToast(friendlyError(fehler.error), true); return; }
   [S.kategorien, S.felder, S.arbeiten, S.tabellen, S.spalten, S.einheiten, S.zustaendige, S.tags, S.reg, S.regPlz] = abfragen.map(r => r.data || []);
+  // Projektleiter (Planer-Personen) für die Vorgabe «Projektleiter» pro Kategorie (Farbe der Pflege-Balken im Planer)
+  const { data: pls } = await sb.from('planer_person').select('id,name,farbe').eq('ist_projektleiter', true).eq('aktiv', true).is('archiviert_am', null).order('name'); S.pls = pls || [];
   if(!S.katId || !kat()) S.katId = S.kategorien[0]?.id || null;
   render();
 }
@@ -578,6 +580,10 @@ function spalteZeile(s){
   </div>${askHtml('spalte', s)}`;
 }
 
+// Auswahl Projektleiter: Büro-Projektleiter, «Selbst abgemacht» (schwarz), «Keine Angabe» (grau)
+const plOptionen = (wert, mitVorgabe) => (mitVorgabe ? `<option value=""${!wert ? ' selected' : ''}>${esc(mitVorgabe)}</option>` : '')
+  + (S.pls || []).map(p => `<option value="${p.id}"${wert === p.id ? ' selected' : ''}>${esc(p.name)}</option>`).join('')
+  + `<option value="selbst"${wert === 'selbst' ? ' selected' : ''}>Selbst abgemacht</option><option value="keine"${(!mitVorgabe && !wert) || wert === 'keine' ? ' selected' : ''}>Keine Angabe</option>`;
 function renderInhalt(){
   const el = $('inhalt');
   if(S.ansicht === 'zustaendige'){ el.innerHTML = zustaendigeHtml(); return; }
@@ -604,6 +610,8 @@ function renderInhalt(){
             <span class="job" style="background:${esc(k.farbe)};color:${txtOn(k.farbe)}">${I('check')}</span></span>
         </div>
       </div>
+      <div class="field" style="max-width:360px"><label for="katPl">Projektleiter (Vorgabe für neue und bestehende Kunden, beim Kunden änderbar · Farbe im Planer)</label>
+        <select id="katPl" data-act="kat-pl">${plOptionen(k.projektleiter)}</select></div>
     </section>`;
 
   const loeschen = `<div><button class="addrow danger" data-act="kat-loeschen">Kategorie «${esc(k.name)}» löschen</button></div>`;
@@ -868,6 +876,7 @@ $('inhalt').addEventListener('change', async e => {
     if(!kuerzel){ el.value = k.kuerzel; return; }
     if(await speichere('pflege_kategorie', k.id, { kuerzel })){ k.kuerzel = kuerzel; render(); }
   }
+  else if(act === 'kat-pl'){ const v = el.value === 'keine' ? null : el.value; if(await speichere('pflege_kategorie', k.id, { projektleiter: v })) k.projektleiter = v; }
   else if(act === 'kat-farbe-eigen'){
     if(await speichere('pflege_kategorie', k.id, { farbe: el.value.toUpperCase() })){ k.farbe = el.value.toUpperCase(); render(); }
   }
