@@ -3211,7 +3211,7 @@ function computeProv(){
       const arb = []; let min = 0, fehlt = false, allein = false, anm = false, fixe = false;
       (byKk[kk.id] || []).forEach(a => { if((a.abgewaehlte_jahre || []).includes(y)) return; const std = a.arbeit_id ? PF.arb[a.arbeit_id] : null;
         const kws = std ? new Set([...(std.standard_kws || []).filter(x => !(a.kws_minus || []).includes(x)), ...(a.kws_plus || [])]) : new Set(a.kws || []);
-        if(!kws.has(w)) return; arb.push(std ? std.name : a.titel); if(a.allein) allein = true; if(a.anmelden !== false) anm = true; if(a.fixe_woche) fixe = true; const dm = a.dauer_min ?? std?.dauer_min; if(dm == null) fehlt = true; min += dm ?? 60; });
+        if(!kws.has(w)) return; arb.push(std ? std.name : a.titel); if(a.allein) allein = true; /* «Anmelden» und «Fixe Woche» seit 2026-11-27 ohne Wirkung: die Zeile bestimmt offen/fix */ const dm = a.dauer_min ?? std?.dauer_min; if(dm == null) fehlt = true; min += dm ?? 60; });
       if(!arb.length) return;
       PROV.push({ id: `${kk.id}_${y}_${w}`, kk: kk.id, y, w, mon, kid: kk.kunde_id, kat, arb, min, fehlt, allein, anm, fixe, lane, key: fixe && lane.startsWith('p:') ? 'pf:' + lane.slice(2) : lane,wd: ku.wunsch_wochentage || [] });
     });
@@ -3363,7 +3363,8 @@ function openNeuLeiste(lane, mid, a, b, extra){ // extra = { lab, ic, fn }: zus�
 function drawNeuLeiste(){
   const L = neuL;
   // offene Linie: nur offener Auftrag; Personen mit offener Linie: «offen» gibt es nur noch über die Linie
-  const arten = L.lane?.dataset?.off === '1' ? [['offen', 'Offener Auftrag']] : [['termin', 'Auftrag'], ['offen', 'Offener Auftrag'], ['hilfe', 'Mithilfe'], ['absenz', 'Absenz'], ['allein', 'Allein']];
+  // Zeile bestimmt offen/fix (2026-11-27): Hauptzeile nur «Auftrag», Zeile «offen» nur «Offener Auftrag»
+  const arten = L.lane?.dataset?.off === '1' ? [['offen', 'Offener Auftrag']] : [['termin', 'Auftrag'], ['hilfe', 'Mithilfe'], ['absenz', 'Absenz'], ['allein', 'Allein']];
   const btn = (attr, lab, on) => `<button ${attr} class="${on ? 'on' : ''}">${lab}</button>`; // Tasten 1–4 / V funktionieren weiter, werden aber nicht angezeigt
   let kopf = '', list;
   if(L.step === 'absenz'){ kopf = 'Art der Absenz'; list = ABS_TYPEN().map((t, i) => btn(`data-abs="${esc(t)}"`, `<span>${esc(t)}</span>`, false)).join(''); }
@@ -3426,14 +3427,14 @@ async function fuegeKopieEin(){
   const L = neuL; if(!L || !COPY) return; const o = byId(COPY.id);
   if(!o){ closeNeuLeiste(); kopieWeg(); toast('Das Original ist nicht mehr im Plan. Bitte neu kopieren.', null, true); return; }
   closeNeuLeiste();
-  await neuerEinsatz({ mid: L.mid, kind: o.kind, s: L.a, e: r48(L.a + (o.e - o.s)), kid: o.kid, title: o.title, pl: o.pl, ok: L.lane?.dataset?.off === '1' ? false : hatOffen(L.mid) ? true : o.ok, kv: o.id }, true);
+  await neuerEinsatz({ mid: L.mid, kind: o.kind, s: L.a, e: r48(L.a + (o.e - o.s)), kid: o.kid, title: o.title, pl: o.pl, ok: L.lane?.dataset?.off !== '1', kv: o.id }, true);
 }
 async function legeAn(art, extra = {}){
   const L = neuL; if(!L) return; closeNeuLeiste();
   const kurz = L.b - L.a < .5 - 1e-6;
   const kind = art === 'absenz' ? 'absenz' : art === 'hilfe' ? 'hilfe' : (kurz ? 'termin' : 'baustelle');
   const mePl = myPerson(); const pl = kind === 'baustelle' ? (P[L.mid]?.ist_projektleiter ? L.mid : (mePl?.ist_projektleiter ? mePl.id : null)) : null;
-  const neu = await neuerEinsatz({ mid: L.mid, kind, s: L.a, e: L.b, title: extra.title || '', link: extra.link || null, mp: extra.mp || null, ok: art !== 'offen' && L.lane?.dataset?.off !== '1', fw: art === 'offen' && L.lane?.dataset?.off !== '1' && hatOffen(L.mid), pl, allein: art === 'termin' && !!L.allein }, kind === 'termin' || kind === 'baustelle');
+  const neu = await neuerEinsatz({ mid: L.mid, kind, s: L.a, e: L.b, title: extra.title || '', link: extra.link || null, mp: extra.mp || null, ok: art !== 'offen' && L.lane?.dataset?.off !== '1', fw: false, pl, allein: art === 'termin' && !!L.allein }, kind === 'termin' || kind === 'baustelle');
   if(neu && (kind === 'absenz' || kind === 'hilfe')) toast(`${kind === 'absenz' ? extra.title : labOf(neu)} eingetragen${neu._teile?.length ? ` · ${neu._teile.length + 1} Stücke` : ''}`, () => kind === 'hilfe' ? hilfeWeg(neu) : loescheEinsatz(neu));
 }
 addEventListener('keydown', e => {
@@ -3442,7 +3443,7 @@ addEventListener('keydown', e => {
   if(e.key === 'Enter'){ e.preventDefault(); if(neuL.step === 'art') waehleArt(neuL.def); return; }
   if((e.key === 'v' || e.key === 'V') && neuL.step === 'art' && COPY){ e.preventDefault(); fuegeKopieEin(); return; }
   if(/^[1-9]$/.test(e.key)){ e.preventDefault(); const n = +e.key - 1;
-    if(neuL.step === 'art'){ const k = ['termin', 'offen', 'hilfe', 'absenz'][n]; if(k) waehleArt(k); }
+    if(neuL.step === 'art'){ const k = (neuL.lane?.dataset?.off === '1' ? ['offen'] : ['termin', 'hilfe', 'absenz'])[n]; if(k) waehleArt(k); }
     else if(neuL.step === 'absenz'){ const t = ABS_TYPEN()[n]; if(t) legeAn('absenz', { title: t }); }
     else if(neuL.step === 'hilfe'){ const o = neuL.baus[n]; if(o) legeAn('hilfe', { mp: o.pid }); } }
 });
@@ -3577,7 +3578,7 @@ function bindTimeline(t){
     const aTag = Math.floor(uAt(x)), alleinOk = ed && !rep && (it.kind === 'baustelle' || it.kind === 'termin') && !isOff(aTag) && !P[it.mid]?.ist_ablage;
     const alleinIst = () => { const S = soloSet(it), M = MARK.filter(q => q.person_id === it.mid && q.art === 'allein' && q.tag === isoDate(aTag)), h = [0, 1].map(i => S.has(aTag * 2 + i) || M.some(q => q.teil === 'ganz' || q.teil === (i ? 'nm' : 'vm')));
       return h[0] && h[1] ? 'ganz' : h[0] ? 'vm' : h[1] ? 'nm' : null; };
-    const pop = popAt({ left: x, bottom: e.clientY }, `<b>${esc(labOf(it))}</b><div class="cmgrid">${b('det', 'file', 'Details', '', 'Details öffnen')}${(it.kind === 'baustelle' || it.kind === 'termin' || (it.kind === 'hilfe' && it.link)) && !rep && !EINGEBETTET ? b('bp', 'cal', 'Bauprogramm', '', BPE.has(bpVon(it)) ? 'Bauprogramm öffnen' : 'Bauprogramm erstellen') : ''}${ed && !rep && istAuftrag(it) && it.ok !== false && it.kind !== 'intern' ? b('ofn', 'cal', 'Wieder offen', '', 'Wieder offen (gestrichelt)') : ''}${INFO_IM_TERMIN && it.kind !== 'absenz' && zoom !== 'quartal' && zoom !== 'jahr' ? b('inf', 'info', 'Info', '', infoAm(it, Math.floor(uAt(x))) ? 'Wichtige Info ändern' : 'Wichtige Info …') : ''}${ed && m.serie ? b('serx', 'trash', 'Serie löschen', 'color:var(--danger)', 'Ganze Serie löschen') : ''}</div>${ed && !rep && resOk(m) ? resZeile(m) : ''}${ed
+    const pop = popAt({ left: x, bottom: e.clientY }, `<b>${esc(labOf(it))}</b><div class="cmgrid">${b('det', 'file', 'Details', '', 'Details öffnen')}${(it.kind === 'baustelle' || it.kind === 'termin' || (it.kind === 'hilfe' && it.link)) && !rep && !EINGEBETTET ? b('bp', 'cal', 'Bauprogramm', '', BPE.has(bpVon(it)) ? 'Bauprogramm öffnen' : 'Bauprogramm erstellen') : ''}${ed && !rep && istAuftrag(it) && it.ok !== false && it.kind !== 'intern' && hatOffen(it.mid) ? b('ofn', 'cal', 'Wieder offen', '', 'In die Zeile «offen» dieser Person') : ''}${INFO_IM_TERMIN && it.kind !== 'absenz' && zoom !== 'quartal' && zoom !== 'jahr' ? b('inf', 'info', 'Info', '', infoAm(it, Math.floor(uAt(x))) ? 'Wichtige Info ändern' : 'Wichtige Info …') : ''}${ed && m.serie ? b('serx', 'trash', 'Serie löschen', 'color:var(--danger)', 'Ganze Serie löschen') : ''}</div>${ed && !rep && resOk(m) ? resZeile(m) : ''}${ed
       ? (rep ? b('del1', 'trash', 'Nur diesen löschen', 'color:var(--danger)') + b('delf', 'trash', 'Diesen und alle folgenden löschen', 'color:var(--danger)') + b('dela', 'trash', 'Alle löschen', 'color:var(--danger)')
         : `${alleinOk ? alleinZeile('data-cmallein', alleinIst()) : ''}<div class="cmrow">${ed ? mkKnoepfe(it.mid) : ''}${istAuftrag(it) && it.ok !== false ? ib('fix', m.fix ? 'lock' : 'unlock', m.fix ? 'Start fix – Klick: lösen' : 'Start fixieren', m.fix ? ' on' : '') : ''}${istAuftrag(it) ? ib('cpy', 'copy', 'Auftrag kopieren') : ''}${ib('del', 'trash', 'Löschen', ' danger')}</div>`) : ''}`);
     mausWegZu(pop); // Maus weit weg = Menü zu
@@ -3728,7 +3729,7 @@ function bindWindow(){
       drag.moved = true; const it = byId(drag.id); const du = snapU(uAt(e.clientX) - drag.u0); const sn = SNAP[zoom];
       if(drag.mode === 'move'){ if(it.fix){ if(du) drag.fixHit = true; } else { it.s = r48(drag.s0 + du); it.e = r48(drag.e0 + du); } // Start fix: nur auf andere Person
         const ue = document.elementFromPoint(e.clientX, e.clientY), el = ue?.closest('.lane[data-mid]'); if(el && canEdit(el.dataset.mid) && P[el.dataset.mid]){ it.mid = el.dataset.mid;
-          if(hatOffen(it.mid) && it.kind !== 'absenz' && it.kind !== 'hilfe' && !it.wdh && !drag.occ){ if(el.dataset.off === '1'){ it.ok = false; it.fw = false; } else if(drag.ok0 === false && drag.fw0){ it.ok = false; it.fw = true; } else { it.ok = true; it.fw = false; } } } // offene Linie = offen, Personenzeile = abgemacht
+          if(hatOffen(it.mid) && it.kind !== 'absenz' && it.kind !== 'hilfe' && !it.wdh && !drag.occ){ if(el.dataset.off === '1'){ it.ok = false; it.fw = false; } else { it.ok = true; it.fw = false; } } } // offene Linie = offen, Personenzeile = abgemacht
         if(vorratAn() && !drag.copy && !drag.occ && !it.wdh) { const vb = ue?.closest('.vorrat[data-ber]'); document.querySelectorAll('.vorrat.drop').forEach(x => { if(x !== vb) x.classList.remove('drop'); }); if(vb && insVorratOk(it)) vb.classList.add('drop'); } }
       else if(drag.mode === 'l'){ it.s = r48(Math.min(drag.e0 - sn, drag.s0 + du)); // Unterbrüche bleiben am gleichen Datum
         if(drag.pz0) it.pz = drag.pz0.map(([a, c]) => [r48(a + drag.s0 - it.s), r48(c + drag.s0 - it.s)]).filter(([a, c]) => c > 0).map(([a, c]) => [Math.max(0, a), c]);
@@ -3839,7 +3840,7 @@ function bindWindow(){
       if(!d.moved){ openProvPanel(d.pid); return; }
       const p = PROV.find(x => x.id === d.pid); const ln = document.elementFromPoint(e.clientX, e.clientY)?.closest('.lane[data-mid]');
       if(p && ln && canEdit(ln.dataset.mid) && P[ln.dataset.mid]){ const len = p.min / 60 / 12; const s = zoom === 'tag' || zoom === 'woche' ? Math.round(uAt(e.clientX) * 48) / 48 : Math.floor(uAt(e.clientX)) + 1 / 12;
-        const oben = ln.dataset.off !== '1', okZ = !hatOffen(ln.dataset.mid) ? false : oben && !(p.fixe && p.anm), fwZ = hatOffen(ln.dataset.mid) && oben && !okZ; // fixe Woche mit Anmeldung: oben, aber gestrichelt // Personenzeile = abgemacht, offene Linie = offen
+        const oben = ln.dataset.off !== '1', okZ = oben, fwZ = false; // Zeile bestimmt: Hauptzeile = fix, Zeile «offen» = offen (Entscheid 2026-11-27) // fixe Woche mit Anmeldung: oben, aber gestrichelt // Personenzeile = abgemacht, offene Linie = offen
         const tmp = { id: '_tmp', mid: ln.dataset.mid, kind: 'termin', s: r48(s), e: r48(s + len), title: '', ok: okZ }; EINS.push(tmp); // erst prüfen: übereinander / reinschieben / dritter Termin
         const pr = await ablegenPruefen(tmp, { x: e.clientX, y: e.clientY }); EINS = EINS.filter(x => x !== tmp); renderRows();
         if(pr !== 'ab') await provToEinsatz(p.id, ln.dataset.mid, s, s + len, okZ, undefined, tmp.ueber, tmp.weicht, fwZ); }
@@ -3958,7 +3959,7 @@ function bindWindow(){
       const msg = it.ok !== d.ok0 ? `${labOf(it)}: ${it.ok === false ? 'wieder offen' : 'abgemacht'}${it.mid !== d.mid0 ? ' · ' + P[it.mid].name : ''}` : it.mid !== d.mid0 ? (inAblage ? `${labOf(it)} in die Ablage gelegt` : `${labOf(it)} → ${P[it.mid].name}`) : `Verschoben auf ${spanLabel(it)}`;
       const undo = async () => { if(teile.length){ await sb.from('planer_einsatz').delete().in('id', teile.map(x => x.id)); EINS = EINS.filter(x => !teile.includes(x)); } Object.assign(it, vorher); renderRows(); await speichere(it, { beginn: fromU(it.s), ende: fromU(it.e, true), person_id: it.mid, abgemacht: it.ok !== false, fixe_woche: !!it.fw, ...(vorher.pz ? { pausen: it.pz } : {}) }); };
       const nJetzt = LAY[it.id]?.n, abwR = d.mode !== 'move' && it.soll && nJetzt != null && Math.abs(nJetzt - it.soll) > .01;
-      if(abwR || it.ok === d.ok0) toast(abwR ? `${labOf(it)}: ${fmtN(nJetzt)} statt ${fmtN(it.soll)} T` : msg, abwR ? [{ l: 'Als neue Länge übernehmen', fn: async () => { it.soll = nJetzt; renderRows(); await speichere(it, { soll_tage: it.soll }); if(selId === it.id) openPanel(it.id); } }, { l: 'Rückgängig', fn: undo }] : undo);
+      toast(abwR ? `${labOf(it)}: ${fmtN(nJetzt)} statt ${fmtN(it.soll)} T` : msg, abwR ? [{ l: 'Als neue Länge übernehmen', fn: async () => { it.soll = nJetzt; renderRows(); await speichere(it, { soll_tage: it.soll }); if(selId === it.id) openPanel(it.id); } }, { l: 'Rückgängig', fn: undo }] : undo);
       if(selId === it.id) openPanel(it.id);
       return;
     }
@@ -4169,8 +4170,8 @@ async function resUebernehmen(it){ const ks = resKeys(it); if(!ks.length) return
   it.e = (ks[ks.length - 1] + 1) / 2; if(it.soll) it.soll = it.soll + it.res; it.res = 0; renderRows();
   if(!(await speichere(it, { ende: fromU(it.e, true), reserve_tage: 0, ...(alt.soll ? { soll_tage: it.soll } : {}) }))){ Object.assign(it, alt); renderRows(); return; }
   if(selId === it.id) openPanel(it.id); toast('Reserve übernommen'); }
-// Abgemachter Auftrag wieder offen: bleibt in der Zeile der Person (gestrichelt), Abmachen per Klick wie gewohnt
-async function offenMachen(it){ const alt = { ok: it.ok, fw: it.fw }; it.ok = false; it.fw = hatOffen(it.mid); renderRows();
+// Abgemachter Auftrag wieder offen: wandert in die Zeile «offen» der Person (die Zeile bestimmt offen/fix, 2026-11-27)
+async function offenMachen(it){ const alt = { ok: it.ok, fw: it.fw }; it.ok = false; it.fw = false; renderRows();
   if(!(await speichere(it, { abgemacht: false, fixe_woche: !!it.fw }))){ Object.assign(it, alt); renderRows(); return; }
   if(selId === it.id) openPanel(it.id); toast(`${labOf(it)}: wieder offen`); }
 // Rechtsklick-Menü: Zeile «Reservetage» mit ganzen Tagen zum Antippen, «+» = eigene Zahl
