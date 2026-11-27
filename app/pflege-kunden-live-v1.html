@@ -250,7 +250,7 @@ tbody tr:last-child td{border-bottom:none;}
 .wt td{padding:6px 8px;border-bottom:1px solid var(--soft);}
 .wt .w-al{width:64px;} .wt .w-fw{width:84px;} .alb{all:unset;cursor:pointer;font-size:12px;padding:3px 9px;border-radius:999px;border:1px solid var(--line);color:var(--muted);background:#fff;} .alb.on{background:#2F6F9F;border-color:#2F6F9F;color:#fff;} /* Allein: blau wie im Planer */
 .wt .c{text-align:center;}
-.wt .w-i{width:44px;} .wt .w-art{width:120px;} .wt .w-wo{width:190px;} .wt .w-x{width:36px;}
+.wt .w-i{width:44px;} .wt .w-art{width:120px;} .wt .w-wo{width:340px;} .wt .w-x{width:36px;}
 .wt .w-zt{width:96px;} .zt{display:inline-flex;align-items:center;gap:4px;} .zt .tin{width:52px;text-align:right;margin-left:0;border:1px solid var(--line) !important;background:#fff !important;border-radius:5px;} .zt span{font-size:11.5px;color:var(--muted);}
 .wt td input[type=number]{width:56px;padding:4px 6px;text-align:center;}
 .wt .ask-row td{padding:0 0 8px;}
@@ -423,6 +423,14 @@ table.au tr.sto td{color:var(--muted);text-decoration:line-through;}
 @media (max-width:900px){ .k-head,.kbody{grid-template-columns:1fr;} }
 @media (max-width:560px){ .fgrid{grid-template-columns:1fr;} }
 /* Wochenstreifen (Standardarbeiten mehrmals pro Jahr, Entwurf Wochenplanung v2) */
+/* Zeitpunkt einer Arbeit: Standardwochen und/oder fixe Tage untereinander, darunter Auswahl «+ Zeitpunkt hinzufügen» (2026-11-27) */
+.zp{display:flex;flex-direction:column;gap:4px;}
+.zp-z{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.zp-art{font-size:12px;font-weight:600;color:var(--primary);min-width:104px;}
+.zp select{font:inherit;font-size:12px;height:26px;border:1px solid var(--line);border-radius:6px;padding:0 4px;background:#fff;}
+.zp select.zp-neu{color:var(--muted);border-style:dashed;}
+.zp-alt{margin-top:2px;padding:6px 8px;border:1px dashed #C9CED4;border-radius:6px;background:#F5F7F9;font-size:12px;color:#4C5C70;display:flex;flex-direction:column;gap:5px;}
+.zp-altk{display:flex;gap:6px;flex-wrap:wrap;align-items:center;} .zp-altk .btn{padding:3px 9px;font-size:12px;}
 .wk{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border:1px solid var(--line);border-radius:6px;background:#fff;font-size:12px;font-variant-numeric:tabular-nums;max-width:100%;box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .wk:hover{border-color:var(--primary);}
 .wk .i{width:14px;height:14px;flex:none;}
@@ -676,7 +684,7 @@ const zustAuswahl = (schon = []) => S.zust.filter(b => b.pflege_zustaendig || sc
 const S = {
   kat: [], felder: [], arbeiten: [], tabellen: [], spalten: [], zust: [],
   kunden: [], obj: [], kk: [], kz: [], ka: [], fotos: [], fk: [], urls: {}, dok: [], dk: [], eb: {}, auNur: true, auZeigen: 20, auVon: '',
-  f: { q: '', abo: [], ma: [], kat: '', tags: [], kanal: [], reg: [], ohneEb: false }, tags: [], reg: [], regPlz: {},
+  f: { q: '', abo: [], ma: [], kat: '', tags: [], kanal: [], reg: [], ohneEb: false, pruefen: false }, tags: [], reg: [], regPlz: {},
   ktab: null, kwAsk: null, modal: null, fotoTag: '', hochladen: 0, lb: null, bpOffen: new Set(), bpLaeuft: false, bpSys: {}
 };
 const katById = id => S.kat.find(k => k.id === id);
@@ -735,12 +743,14 @@ async function ladeAlles(){
     sb.from('pflege_dokument_kategorie').select('*'),
     sb.from('pflege_tag').select('*').order('name'),
     sb.from('pflege_region').select('*').order('reihenfolge'),
-    sb.from('pflege_region_plz').select('*')
+    sb.from('pflege_region_plz').select('*'),
+    sb.from('pflege_kunde_arbeit_alt').select('*').eq('erledigt', false)
   ]);
   const fehler = r.find(x => x.error);
   if(fehler){ showToast(friendlyError(fehler.error), true); return; }
   [S.kat, S.felder, S.arbeiten, S.tabellen, S.spalten, S.zust, S.kunden, S.obj, S.kk, S.kz, S.ka, S.fotos, S.fk, S.dok, S.dk, S.tags, S.reg] = r.map(x => x.data || []);
   S.regPlz = Object.fromEntries((r[17].data || []).map(x => [x.plz, x.region_id]));
+  S.alt = Object.fromEntries((r[18].data || []).map(x => [x.kunde_arbeit_id, x])); // bisherige eigene Wochen (bis 27.11.2026), noch nicht umgewandelt
   S.kunden.sort((a, b) => (a.kunde?.name || '').localeCompare(b.kunde?.name || '', 'de'));
   render();
 }
@@ -861,6 +871,7 @@ function gefilterteKunden(){
       && (!f.ma.length || kks.some(x => zustPass(zustVon(x.id), f.ma)))
       && (!f.reg.length || [...regionenVonKunde(k)].some(r => f.reg.includes(r)))
       && (!f.ohneEb || !k.kunde?.easybill_id)
+      && (!f.pruefen || kundeZuPruefen(k.kunde_id))
       && (!f.tags.length || (t => f.tags.every(x => t.has(x)))(tagsVonKunde(k.kunde_id)));
   });
 }
@@ -878,6 +889,7 @@ function renderListe(){
       ${tagFilterHtml()}
       <select data-act="f-kat" aria-label="Pflegekategorie"><option value="">Alle Pflegekategorien</option>${S.kat.map(k => `<option value="${k.id}" ${f.kat === k.id ? 'selected' : ''}>${esc(k.name)}</option>`).join('')}</select>
       ${(n => n ? `<button type="button" class="ebf" data-act="f-ohne-eb" aria-pressed="${f.ohneEb}" title="Kunden, die noch nicht mit Easybill verknüpft sind">${I('link-off')}Nicht verknüpft (${n})</button>` : '')(S.kunden.filter(k => !k.kunde?.easybill_id).length)}
+      ${(n => n ? `<button type="button" class="ebf" data-act="f-pruefen" aria-pressed="${f.pruefen}" title="Kunden mit bisherigen eigenen Wochen, die noch in fixe Tage umgewandelt oder verworfen werden müssen">${I('cal')}Zu prüfen (${n})</button>` : '')(S.kunden.filter(k => kundeZuPruefen(k.kunde_id)).length)}
     </div>
     <div class="kg-r"><button type="button" class="kg-neben" data-act="karte" title="Gefilterte Kunden auf der Karte zeigen">${I('map')}Karte</button><button type="button" class="kg-neben" data-act="drucken" title="Aktuelle Liste (mit Filtern) drucken oder als PDF speichern">${I('print')}Drucken</button><button type="button" class="kg-haupt" data-act="eb-oeffnen">${I('plus')}Kunde aus Easybill hinzufügen</button></div>`;
   $('pfSeite').classList.remove('hidden');
@@ -1182,12 +1194,28 @@ function zustHtml(kk){
 }
 
 // Arbeiten: eine Liste aus Standard- (arbeit_id) und Zusatzarbeiten, nach erster Woche sortiert.
-// Standardarbeit = Standard-Wochen der Kategorie, beim Kunden nur die Abweichung (kws_plus / kws_minus).
-function wochenVon(ka){
-  if(!ka.arbeit_id) return sortiertW(ka.kws || []);
-  const std = S.arbeiten.find(a => a.id === ka.arbeit_id)?.standard_kws || [], minus = ka.kws_minus || [];
-  return sortiertW(new Set([...std.filter(w => !minus.includes(w)), ...(ka.kws_plus || [])]));
+// Zeitpunkt (seit 2026-11-27): Standardwochen der Arbeit (Einstellungen › Pflege, beim Kunden nur ein/aus = standard_aus)
+// und/oder fixe Tage [{kw, wt}] (wt 1 = Montag). Eigene Wochen pro Kunde gibt es nicht mehr (gesichert in pflege_kunde_arbeit_alt).
+const WT_NAMEN = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag'];
+const stdWochen = ka => ka.arbeit_id && !ka.standard_aus ? (S.arbeiten.find(a => a.id === ka.arbeit_id)?.standard_kws || []) : [];
+const fixeTage = ka => (Array.isArray(ka.fixe_tage) ? ka.fixe_tage : []).filter(f => f && f.kw);
+function wochenVon(ka){ return sortiertW(new Set([...stdWochen(ka), ...fixeTage(ka).map(f => f.kw)])); }
+const altVon = ka => (S.alt || {})[ka.id] || null;
+const kundeZuPruefen = kundeId => { const kks = new Set(kkVonKunde(kundeId).map(x => x.id)); return S.ka.some(x => kks.has(x.kunde_kategorie_id) && altVon(x)); };
+function zeitpunktHtml(ka){
+  const a = ka.arbeit_id && S.arbeiten.find(x => x.id === ka.arbeit_id), std = a ? (a.standard_kws || []) : [], fx = fixeTage(ka), alt = altVon(ka);
+  const kwOpt = v => Array.from({ length: 53 }, (_, i) => `<option value="${i + 1}"${i + 1 === v ? ' selected' : ''}>${i + 1}</option>`).join('');
+  const wtOpt = v => WT_NAMEN.map((n, i) => `<option value="${i + 1}"${i + 1 === v ? ' selected' : ''}>${n}</option>`).join('');
+  const stdAn = a && !ka.standard_aus;
+  return `<div class="zp">
+    ${stdAn ? `<div class="zp-z"><span class="zp-art">Standardwochen</span><span class="muted small" title="Nur in Einstellungen › Pflege änderbar">${std.length ? wochenKurz(std) : 'keine'} · aus Einstellungen</span><button type="button" class="kg-ibtn" data-act="zp-std-weg" title="Standardwochen bei diesem Kunden weglassen" aria-label="Standardwochen weglassen">${I('x')}</button></div>` : ''}
+    ${fx.map((f, i) => `<div class="zp-z"><span class="zp-art">Fixer Tag</span><span class="muted small">KW</span><select data-act="zp-fix-kw" data-i="${i}" aria-label="Kalenderwoche">${kwOpt(f.kw)}</select><select data-act="zp-fix-wt" data-i="${i}" aria-label="Wochentag">${wtOpt(f.wt || 1)}</select><button type="button" class="kg-ibtn" data-act="zp-fix-weg" data-i="${i}" title="Fixen Tag entfernen" aria-label="Fixen Tag entfernen">${I('x')}</button></div>`).join('')}
+    <div class="zp-z"><select class="zp-neu" data-act="zp-neu" aria-label="Zeitpunkt hinzufügen"><option value="">+ Zeitpunkt hinzufügen …</option>${a && !stdAn ? '<option value="std">Standardwochen</option>' : ''}<option value="fix">Fixer Tag</option></select></div>
+    ${alt ? `<div class="zp-alt"><span>Bisher: ${wochenKurz(alt.wochen)}</span><span class="zp-altk"><select data-act="zp-alt-wt" aria-label="Wochentag für die fixen Tage">${wtOpt(0)}</select><button type="button" class="btn btn-ghost" data-act="zp-alt-ueb" title="Für jede bisherige Woche einen fixen Tag am gewählten Wochentag anlegen">Als fixe Tage übernehmen</button><button type="button" class="btn btn-ghost" data-act="zp-alt-weg" title="Hinweis entfernen, bisherige Wochen nicht übernehmen">Verwerfen</button></span></div>` : ''}
+  </div>`;
 }
+async function speichereZp(ka, werte){ if(await speichere('pflege_kunde_arbeit', { id: ka.id }, werte)){ Object.assign(ka, werte); render(); } }
+async function altErledigt(ka){ const { error } = await sb.from('pflege_kunde_arbeit_alt').update({ erledigt: true }).eq('kunde_arbeit_id', ka.id); if(error){ showToast(friendlyError(error), true); return false; } delete S.alt[ka.id]; return true; }
 // ---------------------------------------------------------------------------
 // Wochenstreifen: 52/53 Kaestchen, Klick schaltet eine Woche. Beim Kunden zeigt er die
 // Abweichung vom Standard (gruener Strich = Standard-Woche, gestrichelt = weggelassen).
@@ -1226,7 +1254,7 @@ function arbeitenHtml(kk, kat){
       <td class="c"><button class="rbtn" data-act="arb-info" title="${a ? 'Ablauf' : 'Infos zur Zusatzarbeit'}" aria-label="Infos">${I('info')}</button></td>
       <td class="wt-art">${a ? 'Standard' : 'Zusatz'}${jk ? ' · ' + jk : ''}</td>
       <td>${a ? `<span class="wt-n">${esc(a.name)}</span>` : `<input class="tin" type="text" data-act="zus-titel" value="${esc(ka.titel)}" placeholder="Titel der Zusatzarbeit" aria-label="Titel Zusatzarbeit">`}</td>
-      <td><button type="button" class="wk" data-act="arb-wochen" title="Wochen bearbeiten">${I('cal')}${wochenKurz(wochenVon(ka))}</button></td>
+      <td>${zeitpunktHtml(ka)}</td>
       <td><span class="zt"><input class="tin" type="text" inputmode="decimal" data-act="arb-zeit" value="${zeitText(ka.dauer_min)}" placeholder="${a && a.dauer_min != null ? zeitText(a.dauer_min) : '–'}" title="${a && a.dauer_min != null ? 'Standard: ' + zeitText(a.dauer_min) + ' Std. – hier für diesen Kunden überschreiben' : 'Zeit für diesen Kunden in Stunden (z. B. 1,5)'}" aria-label="Zeit in Stunden"><span>Std.</span></span></td>
       <td class="c"><button type="button" class="alb${ka.allein ? ' on' : ''}" data-act="arb-allein" aria-pressed="${!!ka.allein}" title="Allein ausführbar – im Einsatzplaner blauer Strich statt «Personal fehlt»">Allein</button></td>
       <td><button class="icon-btn" data-act="arb-rm" aria-label="Arbeit entfernen">${I('x')}</button></td>
@@ -1235,7 +1263,7 @@ function arbeitenHtml(kk, kat){
   return `<section class="card panel">
     <div class="panel-h"><h3>Arbeiten</h3></div>
     <table class="wt">
-      <thead><tr><th class="w-i c">Infos</th><th class="w-art">Art</th><th>Arbeit</th><th class="w-wo">Wochen</th><th class="w-zt" title="Zeit pro Einsatz. Grau = Standard der Arbeit, hier überschreibbar.">Zeit</th><th class="w-al c" title="Arbeit kann allein ausgeführt werden">Allein</th><th class="w-x"></th></tr></thead>
+      <thead><tr><th class="w-i c">Infos</th><th class="w-art">Art</th><th>Arbeit</th><th class="w-wo">Zeitpunkt</th><th class="w-zt" title="Zeit pro Einsatz. Grau = Standard der Arbeit, hier überschreibbar.">Zeit</th><th class="w-al c" title="Arbeit kann allein ausgeführt werden">Allein</th><th class="w-x"></th></tr></thead>
       <tbody>${zeilen.map(zeile).join('') || '<tr><td colspan="7" class="muted small">Noch keine Arbeiten. Unten hinzufügen.</td></tr>'}</tbody>
     </table>
     <div class="addlinks">
@@ -1436,7 +1464,6 @@ function renderDetail(kundeId){
       </div>
       <div class="kh-rechts">
         <div class="field kh-notiz"><label for="notiz">Notiz</label><textarea id="notiz" class="autogrow" rows="3" data-act="notiz" placeholder="Zugang, Schlüssel, Haustiere, Parkplatz, Wünsche der Kundschaft">${esc(k.notiz || '')}</textarea></div>
-        <div class="wtage" title="An diesen Tagen plant der Einsatzplaner die Pflege-Vorschläge ein. Keiner gewählt = egal."><span class="muted small">Wunsch-Tage</span>${['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'].map((t, i) => `<button type="button" data-act="wunsch-tag" data-tag="${i + 1}" aria-pressed="${(k.wunsch_wochentage || []).includes(i + 1)}" aria-label="Wunsch-Tag ${t}">${t}</button>`).join('')}</div>
       </div>
     </section>
     ${obj && !OBJ_AUF.has(obj.id) ? `<button type="button" class="card o-head o-zu" data-act="obj-auf" aria-expanded="false">${I('next')}<b>Adresse und Notizen zum Objekt</b><span class="o-zu-adr">${esc(objektName(obj))}</span>${obj.notiz ? `<span class="o-zu-notiz">${esc(obj.notiz.split('\n')[0])}</span>` : ''}</button>` : ''}
@@ -2066,6 +2093,12 @@ appUndLeiste('change', async e => {
     await setzeZustaendig(kk, neu);
     render(); $('zustMs').open = true;
   }
+  else if(['zp-neu', 'zp-fix-kw', 'zp-fix-wt'].includes(act)){ // Zeitpunkt hinzufügen / fixen Tag ändern
+    const ka = S.ka.find(x => x.id === el.closest('[data-id]').dataset.id); if(!ka) return;
+    if(act === 'zp-neu'){ const v = el.value; el.value = ''; if(v === 'std') await speichereZp(ka, { standard_aus: false });
+      else if(v === 'fix') await speichereZp(ka, { fixe_tage: [...fixeTage(ka), { kw: KW_NOW, wt: 1 }] }); }
+    else { const l = fixeTage(ka).map((f, i) => i === +el.dataset.i ? { ...f, [act === 'zp-fix-kw' ? 'kw' : 'wt']: +el.value } : f); await speichereZp(ka, { fixe_tage: l }); }
+  }
   else if(act === 'arb-zeit'){
     const id = el.closest('[data-id]').dataset.id, ka = S.ka.find(x => x.id === id), m = parseZeit(el.value);
     if(m === undefined){ showToast('Zeit in Stunden eingeben, z. B. 1,5', true); el.value = zeitText(ka.dauer_min); return; }
@@ -2120,6 +2153,7 @@ appUndLeiste('click', async e => {
   else if(act === 'eb-verknuepfen') oeffneEasybill(kundeId);
   else if(act === 'karte') oeffneKarte();
   else if(act === 'f-ohne-eb'){ S.f.ohneEb = !S.f.ohneEb; renderListe(); }
+  else if(act === 'f-pruefen'){ S.f.pruefen = !S.f.pruefen; renderListe(); }
   else if(act === 'drucken') druckeListe();
   else if(act === 'f-abo'){
     const a = b.dataset.abo, f = S.f;
@@ -2178,6 +2212,15 @@ appUndLeiste('click', async e => {
   else if(act === 'zust-rm'){ await setzeZustaendig(kk, zustVon(kk.id).filter(x => x !== b.dataset.b)); render(); }
   else if(act === 'zust-niemand'){ await setzeZustaendig(kk, []); render(); }
   else if(act === 'arb-wochen') oeffneWochen(S.ka.find(x => x.id === b.closest('[data-id]').dataset.id));
+  else if(['zp-std-weg', 'zp-fix-weg', 'zp-alt-ueb', 'zp-alt-weg'].includes(act)){ // Zeitpunkt (Standardwochen / fixe Tage) und bisherige Wochen
+    const ka = S.ka.find(x => x.id === b.closest('[data-id]').dataset.id); if(!ka) return;
+    if(act === 'zp-std-weg') await speichereZp(ka, { standard_aus: true });
+    else if(act === 'zp-fix-weg'){ const l = fixeTage(ka).filter((_, i) => i !== +b.dataset.i); await speichereZp(ka, { fixe_tage: l }); }
+    else if(act === 'zp-alt-ueb'){ const alt = altVon(ka); if(!alt) return; const wt = +(b.closest('.zp-alt').querySelector('[data-act="zp-alt-wt"]')?.value || 1);
+      const da = new Set([...stdWochen(ka), ...fixeTage(ka).map(f => f.kw)]), neu = [...fixeTage(ka), ...alt.wochen.filter(w => !da.has(w)).map(kw => ({ kw, wt }))].sort((x, y) => x.kw - y.kw);
+      if(await altErledigt(ka)) await speichereZp(ka, { fixe_tage: neu }); }
+    else if(act === 'zp-alt-weg'){ if(!await kgBestaetigen('Die bisherigen Wochen werden nicht übernommen. Sie bleiben in der Datenbank gesichert.', 'Bisherige Wochen verwerfen?', 'Verwerfen')) return; if(await altErledigt(ka)) render(); }
+  }
   else if(act === 'arb-allein'){ // Allein ausführbar ein/aus – der Planer übernimmt es beim Abmachen
     const id = b.closest('[data-id]').dataset.id, ka = S.ka.find(x => x.id === id), v = !ka.allein;
     if(await speichere('pflege_kunde_arbeit', { id }, { allein: v })){ ka.allein = v; b.classList.toggle('on', v); b.setAttribute('aria-pressed', v); }
@@ -2208,7 +2251,7 @@ appUndLeiste('click', async e => {
     S.ka.push(data); render();
   }
   else if(act === 'zus-add'){
-    const { data, error } = await sb.from('pflege_kunde_arbeit').insert({ kunde_kategorie_id: kk.id, titel: '', kws: [KW_NOW] }).select().single();
+    const { data, error } = await sb.from('pflege_kunde_arbeit').insert({ kunde_kategorie_id: kk.id, titel: '', kws: [], fixe_tage: [{ kw: KW_NOW, wt: 1 }] }).select().single(); // Zusatzarbeit: fixer Tag (anpassbar)
     if(error){ showToast(friendlyError(error), true); return; }
     S.ka.push(data); render();
     document.querySelector(`tr[data-id="${data.id}"] [data-act="zus-titel"]`)?.focus();
