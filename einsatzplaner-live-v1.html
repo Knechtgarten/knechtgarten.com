@@ -532,6 +532,8 @@ body.kopiert, body.kopiert *{cursor:copy !important;}
 .row.azz .lane > .bar{top:19px!important;height:15px;}
 .row.azz .lane > .ferb.fer-betrieb{top:19px;}
 .azi{position:absolute;top:19px;height:15px;display:inline-flex;align-items:center;gap:2px;cursor:pointer;z-index:3;font-size:10px;color:#323E4E;}
+.teamrahmen{position:absolute;border:2px solid;border-radius:6px;box-sizing:border-box;z-index:3;pointer-events:none;} /* Team-Tag: Rahmen durch alle Zeilen */
+.row.teamz .azi{top:3px;} /* Arbeitsstart in der Team-Zeile */
 .azi svg{width:15px;height:15px;} .azi b{font-weight:700;background:rgba(255,255,255,.8);border-radius:3px;padding:0 2px;}
 .ferb{position:absolute;top:2px;height:14px;line-height:12px;border:1px solid #A9B0B7;border-radius:3px;background:#E9ECEF;color:#323E4E;font-size:10.5px;font-weight:600;padding:0 5px;box-sizing:border-box;white-space:nowrap;overflow:hidden;cursor:pointer;z-index:1;display:flex;align-items:center;gap:3px;}
 .ferb .i{width:10px;height:10px;flex:none;}
@@ -1131,7 +1133,12 @@ let AZ = [], FER = [], FERA = [];
 async function ladeArbeitszeit(){
   const [a, f, x] = await Promise.all([sb.from('planer_arbeitszeit').select('*').order('ab_kw'), sb.from('planer_ferien').select('*').order('sortierung').order('von_kw'), sb.from('planer_ferien_ausnahme').select('*')]);
   AZ = a.data || []; FER = f.data || []; FERA = x.data || []; }
-const istAzZeile = mid => istAllg(mid) && /arbeitszeit/i.test(P[mid]?.name || '');
+// Allgemeine Zeilen (2026-11-27): «Büro» (früher Arbeitszeit & Ferien) = Lieferungen, Schulferien, Hinweise, nur oben;
+// «Team» (früher Termine & Infos) = gilt für alle: Rahmen durch alle Zeilen, Arbeitsstart, im Handy als Info
+const istAzZeile = mid => istAllg(mid) && /arbeitszeit|^b(ü|ue)ro$/i.test(P[mid]?.name || '');
+const istTeamZeile = mid => istAllg(mid) && /^team$|termine/i.test(P[mid]?.name || '');
+const teamId = () => PERSONEN.find(p => p.aktiv && istTeamZeile(p.id))?.id || null;
+const teamFarbe = () => P[teamId()]?.farbe || (window.KG && KG.palette ? KG.palette.petrol[1] : '#2A7570');
 const azKey = a => a.ab_kw;
 const hMin = t => { const m = String(t || '').match(/^(\d{1,2}):(\d{2})/); return m ? +m[1] * 60 + +m[2] : null; };
 const azStd = a => { if(!a?.start) return 0; const s = hMin(a.start), e = hMin(a.ende || '17:00'); return s == null || e == null ? 0 : Math.max(0, (e - s) / 60 - Number(a.mittag ?? 1)); };
@@ -2190,7 +2197,7 @@ function personRow(p, W, bgx, offen = false){
     return `<div class="row offen${p.gprov ? ' offg' : ''}" data-offp="${p.id}"><div class="nm" title="Noch nicht abgemacht – hochziehen = abmachen"><span>${esc(p.offLab || 'offen')}</span></div><div class="lane${ed ? ' ed' : ''}" data-mid="${p.id}" data-off="1" style="width:${W}px;height:${n * 17 + 4}px;${bgx}">${feierHTML()}${bars}${provBars('p:' + p.id)}${p.gprov ? provBars('g:' + p.gprov) : ''}</div></div>`;
   }
   const mine = p.benutzer_id === ME;
-  return `<div class="row${istAzZeile(p.id) ? ' azz' : ''}${openMid === p.id ? " fokusp" : ""}${MARKS.includes(p.id) ? " mark" : ""}${P[p.id] && phGruppe()?.id === p.gruppe_id ? " ph" : ""}${GRUPPEN.some(g => g.id === p.gruppe_id && /^neu$/i.test(g.name)) ? " neup" : ""}" data-mid="${p.id}"><div class="nm"${p.farbe ? ` style="--pf:${p.farbe};--pft:${txtOn(p.farbe)}"` : ''} title="${esc(p.name + (p.zusatz ? ' · ' + p.zusatz : ''))}">${isBuero() ? `<span class="pgrip" title="Ziehen: Reihenfolge oder Gruppe ändern">${I('grip')}</span>` : ''}<span class="n">${esc(p.name)}</span>${pzPunkt(p.id)}${p.zusatz ? `<span class="z">${esc(p.zusatz)}</span>` : ''}${mine ? '<span class="me">Ich</span>' : ''}${isBuero() && !EINGEBETTET && !p.archiviert_am && GRUPPEN.some(g => g.id === p.gruppe_id && /schnupper|tempor/i.test(g.name)) ? `<button class="kg-ibtn danger parch" data-parch="${p.id}" title="Ins Archiv" aria-label="${esc(p.name)} archivieren">${I('trash')}</button>` : ''}${p.farbe && !p.ist_projektleiter ? `${mabKnopf(p)}<button class="mab mab2${openMid === p.id && openTyp === 'fahrzeug' ? ' on' : ''}" data-mab="${p.id}" data-typ="fahrzeug" title="Lieferwagen und Anhänger einteilen (aufklappen)" aria-label="Lieferwagen einteilen">${I('truck')}</button>` : ''}</div><div class="lane${ed ? ' ed' : ''}" data-mid="${p.id}" style="width:${W}px;${bgx}">${feierHTML()}${istAzZeile(p.id) ? ferBars() + azIcons() : ''}${bars}${hatOffen(p.id) ? '' : provBars('p:' + p.id)}${provBars('pf:' + p.id)}${vehIcons(p)}${markHTML(p)}${leerStriche(p)}</div></div>`;
+  return `<div class="row${istAzZeile(p.id) ? ' azz' : istTeamZeile(p.id) ? ' teamz' : ''}${openMid === p.id ? " fokusp" : ""}${MARKS.includes(p.id) ? " mark" : ""}${P[p.id] && phGruppe()?.id === p.gruppe_id ? " ph" : ""}${GRUPPEN.some(g => g.id === p.gruppe_id && /^neu$/i.test(g.name)) ? " neup" : ""}" data-mid="${p.id}"><div class="nm"${p.farbe ? ` style="--pf:${p.farbe};--pft:${txtOn(p.farbe)}"` : ''} title="${esc(p.name + (p.zusatz ? ' · ' + p.zusatz : ''))}">${isBuero() ? `<span class="pgrip" title="Ziehen: Reihenfolge oder Gruppe ändern">${I('grip')}</span>` : ''}<span class="n">${esc(p.name)}</span>${pzPunkt(p.id)}${p.zusatz ? `<span class="z">${esc(p.zusatz)}</span>` : ''}${mine ? '<span class="me">Ich</span>' : ''}${isBuero() && !EINGEBETTET && !p.archiviert_am && GRUPPEN.some(g => g.id === p.gruppe_id && /schnupper|tempor/i.test(g.name)) ? `<button class="kg-ibtn danger parch" data-parch="${p.id}" title="Ins Archiv" aria-label="${esc(p.name)} archivieren">${I('trash')}</button>` : ''}${p.farbe && !p.ist_projektleiter ? `${mabKnopf(p)}<button class="mab mab2${openMid === p.id && openTyp === 'fahrzeug' ? ' on' : ''}" data-mab="${p.id}" data-typ="fahrzeug" title="Lieferwagen und Anhänger einteilen (aufklappen)" aria-label="Lieferwagen einteilen">${I('truck')}</button>` : ''}</div><div class="lane${ed ? ' ed' : ''}" data-mid="${p.id}" style="width:${W}px;${bgx}">${feierHTML()}${istAzZeile(p.id) ? ferBars() : istTeamZeile(p.id) ? azIcons() : ''}${bars}${hatOffen(p.id) ? '' : provBars('p:' + p.id)}${provBars('pf:' + p.id)}${vehIcons(p)}${markHTML(p)}${leerStriche(p)}</div></div>`;
 }
 // Leerer Tag beim Vorarbeiter ohne Hilfskraft: roter Strich wie auf den Aufträgen (halber Tag = halber Strich, oben VM, unten NM)
 function leerStriche(p){ const L = LEER[p.id]; if(!L?.length || zoom === 'jahr') return ''; const S = new Set(L); let h = '';
@@ -2239,6 +2246,22 @@ function fokusRahmen(t){
   // Lieferwagen: ganze Fläche weiss (Wagen gehören zur Person, nicht zur Baustelle), Baustellen nur als feiner Rahmen zur Orientierung
   // (keine Rahmen um Baustellen: Lieferwagen werden über Tage/Wochen geplant, nicht auf die Baustelle)
   g.insertAdjacentHTML('beforeend', h);
+}
+// Team-Tage (Einträge in der Zeile «Team», Arbeitsstart-Wechsel): Rahmen in Team-Farbe von der Team-Zeile bis zur letzten Person (Variante A, 2026-11-27)
+function teamTage(){ const tid = teamId(), s = new Set(); if(!tid) return [];
+  const add = (a, b) => { for(let d = Math.max(0, Math.floor(a + 1e-9)); d < Math.min(NDAYS, Math.ceil(b - 1e-9)); d++) s.add(d); };
+  ALL.filter(it => it.mid === tid && !it.rep).forEach(it => add(it.s, it.e));
+  MARK.filter(m => m.person_id === tid && m.art !== 'allein').forEach(m => { const d = fromIso(m.tag); add(d, d + 1); });
+  const y0 = dDate(0).getFullYear(), y1 = dDate(NDAYS - 1).getFullYear();
+  AZ.forEach(z => { for(let y = y0; y <= y1; y++){ const d = kwMonday(y, z.ab_kw); if(d >= 0 && d < NDAYS) add(d, d + 1); } });
+  const o = []; [...s].sort((a, b) => a - b).forEach(d => { const L = o[o.length - 1]; if(L && L[1] === d) L[1] = d + 1; else o.push([d, d + 1]); }); return o; }
+function teamRahmen(t){
+  if(zoom === 'jahr') return; const g = t.querySelector('.grid'); if(!g) return;
+  const tage = teamTage(); if(!tage.length) return;
+  const tid = teamId(), rows = [...g.children].filter(x => x.classList.contains('row')), ai = rows.findIndex(x => x.classList.contains('arch'));
+  const bis = ai < 0 ? rows : rows.slice(0, ai), top = bis.find(x => x.dataset.mid === tid) || bis.find(x => x.classList.contains('grp')), last = bis[bis.length - 1]; if(!top || !last) return;
+  const gr = g.getBoundingClientRect(), y0 = top.getBoundingClientRect().top - gr.top + 1, y1 = last.getBoundingClientRect().bottom - gr.top - 1, fc = teamFarbe();
+  g.insertAdjacentHTML('beforeend', tage.map(([a, b]) => `<div class="teamrahmen" style="top:${y0}px;height:${y1 - y0}px;left:${NAMEW + X(a) + 1}px;width:${Math.max(4, XW(a, b) - 2)}px;border-color:${fc}"></div>`).join(''));
 }
 // Planer füllt das Fenster bis unten (kein leerer Streifen unter dem Plan)
 function tlFuellen(){ const t = tlEl(); if(!t || EINGEBETTET) return; const h = Math.max(300, Math.floor(innerHeight - t.getBoundingClientRect().top - 2)); t.style.setProperty('height', h + 'px', 'important'); const a = $('aufp'); if(a) a.style.height = Math.max(300, Math.floor(innerHeight - a.getBoundingClientRect().top - 2)) + 'px'; }
@@ -2289,7 +2312,7 @@ function renderRows(){
   }
   const sl = t.scrollLeft, stp = t.scrollTop, vsl = {}; t.querySelectorAll('.vsc[data-vsc]').forEach(x => vsl[x.dataset.vsc] = x.scrollLeft);
   t.innerHTML = `<div class="grid" style="width:${W + NAMEW}px">${h}</div>`;
-  t.scrollLeft = sl; t.scrollTop = stp; t.querySelectorAll('.vsc[data-vsc]').forEach(x => { if(vsl[x.dataset.vsc]) x.scrollLeft = vsl[x.dataset.vsc]; }); phPanelZeichnen(); fokusRahmen(t); stickLabels(); tlTopSync(); phBlock(t); swDropZeichnen();
+  t.scrollLeft = sl; t.scrollTop = stp; t.querySelectorAll('.vsc[data-vsc]').forEach(x => { if(vsl[x.dataset.vsc]) x.scrollLeft = vsl[x.dataset.vsc]; }); phPanelZeichnen(); fokusRahmen(t); teamRahmen(t); stickLabels(); tlTopSync(); phBlock(t); swDropZeichnen();
 }
 
 // ---------------------------------------------------------------------------
@@ -2372,13 +2395,13 @@ const canEditRes = typ => isBuero() || (typ === 'anhaenger' && !!myPerson());
 // Markierungen: kleine runde Icons mitten im Balken bzw. in der Zeile. Ganzer Tag = Mitte, Vormittag = links, Nachmittag = rechts
 const MARKART = { kran: 'Kranarbeiten', start: 'Arbeitsstart', sitzung: 'Sitzung', anlass: 'Personalanlass', info: 'Wichtige Info', pneu: 'Pneuwechsel', aemtli: 'Ämtli', liefer: 'Lieferung', kurs: 'Kurs', pruefung: 'Prüfung' };
 // Allgemein-Zeilen: Infos für alle; Mitarbeitende: persönliche Infos
-const MARK_ALLG = ['sitzung', 'anlass', 'pneu', 'kurs', 'liefer'], MARK_PERS = ['kran', 'aemtli', 'info', 'liefer'], MARK_AZ = ['pruefung', 'kurs']; // Termine & Infos / Arbeitszeit & Ferien
+const MARK_ALLG = ['sitzung', 'anlass', 'pneu', 'kurs', 'info'], MARK_PERS = ['kran', 'aemtli', 'info', 'liefer'], MARK_AZ = ['liefer', 'pruefung', 'kurs', 'info']; // Team / Büro
 // Liefertermine: Paletten-Icon in der Farbe des Lieferanten
 const LIEFERANT = { gruetter: { name: 'Grütter', farbe: '#8B5A2B' }, fontarocca: { name: 'Fontarocca', farbe: '#2F6F9F' }, diverse: { name: 'Diverse', farbe: '#8B9097' } };
 // Art der Zeile: l = Liefertermine, x = Maschinenservice (keine Icons), a = Anlässe / Diverses, p = Mitarbeitende
-const mkKat = mid => !istAllg(mid) ? 'p' : /liefer/i.test(P[mid]?.name || '') ? 'l' : /service/i.test(P[mid]?.name || '') ? 'x' : /arbeitszeit/i.test(P[mid]?.name || '') ? 'z' : 'a';
-// Lieferung mit Lieferant + Farbe in den allgemeinen Zeilen (Liefertermine, Termine & Infos); in Personenzeilen rot ohne Lieferant (2026-11-27)
-const mkLief = mid => ['l', 'a'].includes(mkKat(mid));
+const mkKat = mid => !istAllg(mid) ? 'p' : /liefer/i.test(P[mid]?.name || '') ? 'l' : /service/i.test(P[mid]?.name || '') ? 'x' : istAzZeile(mid) ? 'z' : 'a';
+// Lieferung mit Lieferant + Farbe in den allgemeinen Zeilen (Liefertermine, Büro); in Personenzeilen rot ohne Lieferant (2026-11-27)
+const mkLief = mid => ['l', 'z'].includes(mkKat(mid));
 // Mitarbeitende: freie Icons pro Tag (Kran, Wichtige Info, Lieferung); Ämtli (Besen) nur bei Lehrlingen
 const istLehrling = mid => /lehrling/i.test(GRUPPEN.find(g => g.id === P[mid]?.gruppe_id)?.name || '');
 const mkArten = mid => { const k = mkKat(mid); if(k === 'p') return MARK_PERS.filter(a => a !== 'aemtli' || istLehrling(mid)); return ({ l: ['liefer'], a: MARK_ALLG, x: [], z: MARK_AZ })[k]; };
@@ -4579,7 +4602,8 @@ function mIch(d){
 }
 function mTeam(d){
   const its = mIts(d), gruppen = new Map(), los = [];
-  its.filter(i => i.kind !== 'hilfe' && i.kind !== 'absenz').sort((a, b) => a.s - b.s).forEach(it => {
+  its.filter(i => i.kind !== 'hilfe' && i.kind !== 'absenz' && !istTeamZeile(i.mid) && !istAzZeile(i.mid)) // Team steht oben als Info, Büro gar nicht
+    .sort((a, b) => a.s - b.s).forEach(it => {
     const key = istAllg(it.mid) ? 'a' + it.id : it.kid ? 'k' + it.kid : 't' + (it.title || it.id);
     if(!gruppen.has(key)) gruppen.set(key, []); gruppen.get(key).push(it); });
   // Mithilfen ohne passenden Haupteinsatz: eigene Zeile «Mithilfe bei …»
@@ -4660,10 +4684,16 @@ function resLine(it, d){
   const t = [vs.length ? 'Fahrzeug: ' + vs.join(', ') : '', ms.length ? 'Maschinen: ' + ms.join(', ') : ''].filter(Boolean).join(' · ');
   return t ? `<span class="o">${esc(t)}</span>` : '';
 }
-// Handy: allgemeine Markierungen des Tages (Arbeitsstart, Sitzung, Anlass, Pneuwechsel) als Info oben im Tag
+// Handy: alles aus der Zeile «Team» als Info oben im Tag – Markierungen (Sitzung, Kurs, Pneuwechsel …), Einträge (Kurs, Weekendweg …)
+// und der Wechsel der Arbeitszeit (Arbeitsstart); die Zeile «Büro» erscheint hier nicht
 function mInfo(d){
-  const l = MARK.filter(m => fromIso(m.tag) === d && mkKat(m.person_id) === 'a').sort((a, b) => ({ vm: 0, ganz: 1, nm: 2 })[a.teil] - ({ vm: 0, ganz: 1, nm: 2 })[b.teil]);
-  return l.map(m => `<div class="m-info"><span class="mk-i">${mkSvg(m.art)}</span><div><b>${esc(MARKART[m.art] || '')}</b> <span class="small muted">${TEIL[m.teil] || ''}</span>${m.text ? `<div class="mt">${esc(m.text).replace(/\n/g, '<br>')}</div>` : ''}</div></div>`).join('');
+  const info = (ic, t, sub, txt) => `<div class="m-info"><span class="mk-i">${mkSvg(ic)}</span><div><b>${esc(t)}</b> <span class="small muted">${esc(sub || '')}</span>${txt ? `<div class="mt">${esc(txt).replace(/\n/g, '<br>')}</div>` : ''}</div></div>`;
+  const az = AZ.find(z => kwMonday(dDate(d).getFullYear(), z.ab_kw) === d);
+  const tid = teamId(), es = tid ? ALL.filter(it => it.mid === tid && !it.rep && it.s < d + 1 - 1e-6 && it.e > d + 1e-6).sort((a, b) => a.s - b.s) : [];
+  const l = MARK.filter(m => fromIso(m.tag) === d && mkKat(m.person_id) === 'a' && m.art !== 'allein').sort((a, b) => ({ vm: 0, ganz: 1, nm: 2 })[a.teil] - ({ vm: 0, ganz: 1, nm: 2 })[b.teil]);
+  return (az ? info('start', 'Arbeitszeit ab heute', '', azText(az)) : '')
+    + es.map(it => info('info', it.title || kName(KUNDEN[it.kid]) || 'Team', it.e - it.s < 1 - 1e-6 ? (it.s - Math.floor(it.s) >= .5 - 1e-6 ? 'Nachmittag' : 'Vormittag') : '', it.text)).join('')
+    + l.map(m => info(m.art, MARKART[m.art] || '', TEIL[m.teil] || '', m.text)).join('');
 }
 // Sprechen: Spracherkennung des Browsers (Chrome / Safari); sonst Mikrofon der Handy-Tastatur
 let diktat = null;
