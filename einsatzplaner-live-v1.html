@@ -538,7 +538,8 @@ body.kopiert, body.kopiert *{cursor:copy !important;}
 .row.azz .lane > .bar{top:19px!important;height:15px;}
 .row.azz .lane > .ferb.fer-betrieb{top:19px;}
 .azi{position:absolute;top:19px;height:15px;display:inline-flex;align-items:center;gap:2px;cursor:pointer;z-index:3;font-size:10px;color:#323E4E;}
-.teamrahmen{position:absolute;border:1px dotted;border-radius:3px;box-sizing:border-box;z-index:3;pointer-events:none;} /* Team-Tag: Rahmen durch alle Zeilen */
+.teamrahmen{position:absolute;box-sizing:border-box;z-index:3;pointer-events:none;background:rgba(50,62,78,.075);border-left:1px solid rgba(50,62,78,.2);border-right:1px solid rgba(50,62,78,.2);} /* Team-Tag: feiner Schleier + feine Kante (Variante E, 2026-11-28) */
+.teamband{position:absolute;bottom:0;height:4px;background:#323E4E;opacity:.85;border-radius:3px 3px 0 0;pointer-events:none;z-index:5;} /* Team-Tag: Band im Datumskopf */
 .row.teamz .azi{top:3px;} /* Arbeitsstart in der Team-Zeile */
 .azi svg{width:15px;height:15px;} .azi b{font-weight:700;background:rgba(255,255,255,.8);border-radius:3px;padding:0 2px;}
 .ferb{position:absolute;top:2px;height:14px;line-height:12px;border:1px solid #A9B0B7;border-radius:3px;background:#E9ECEF;color:#323E4E;font-size:10.5px;font-weight:600;padding:0 5px;box-sizing:border-box;white-space:nowrap;overflow:hidden;cursor:pointer;z-index:1;display:flex;align-items:center;gap:3px;}
@@ -2333,14 +2334,22 @@ function teamInfoSpannen(){ const tid = teamId(), k = new Set(); if(!tid) return
   AZ.forEach(z => { for(let y = y0; y <= y1; y++) halb(kwMonday(y, z.ab_kw), 'ganz'); });
   const o = []; [...k].sort((a, b) => a - b).forEach(h => { const L = o[o.length - 1]; if(L && L[1] === h) L[1] = h + 1; else o.push([h, h + 1]); });
   return o.map(([a, b]) => [a / 2, b / 2]); }
+// Team-Tag (Kurs, Service, Znüni …) durch alle Zeilen (Variante E, 2026-11-28): feiner dunkelblauer Schleier mit ganz feiner Kante,
+// oben im Datumskopf ein dunkles Band. Über dem Vorrat unterbrochen (keine Kalendertage), endet bei der letzten Person mit Einträgen.
 function teamRahmen(t){
   if(zoom === 'jahr') return; const g = t.querySelector('.grid'); if(!g) return;
   const sp = teamInfoSpannen(); if(!sp.length) return;
   const tid = teamId(), rows = [...g.children].filter(x => x.classList.contains('row')), ai = rows.findIndex(x => x.classList.contains('arch'));
-  const bis = ai < 0 ? rows : rows.slice(0, ai), top = bis.find(x => x.dataset.mid === tid) || bis.find(x => x.classList.contains('grp')), last = bis[bis.length - 1]; if(!top || !last) return;
-  const gr = g.getBoundingClientRect(), y0 = top.getBoundingClientRect().top - gr.top + 1, y1 = last.getBoundingClientRect().bottom - gr.top - 1, fc = teamFarbe();
-  const lane = top.querySelector('.lane') || bis.find(x => x.dataset.mid)?.querySelector('.lane'), x0 = lane ? lane.getBoundingClientRect().left - gr.left : NAMEW; // echte Lage der Tage
-  g.insertAdjacentHTML('beforeend', sp.map(([a, b]) => `<div class="teamrahmen" style="top:${y0}px;height:${y1 - y0}px;left:${x0 + X(a) + 1}px;width:${Math.max(4, XW(a, b) - 2)}px;border-color:${fc}"></div>`).join(''));
+  const bis = ai < 0 ? rows : rows.slice(0, ai), i0 = Math.max(0, bis.findIndex(x => x.dataset.mid === tid) >= 0 ? bis.findIndex(x => x.dataset.mid === tid) : bis.findIndex(x => x.classList.contains('grp')));
+  let i1 = bis.length - 1; while(i1 > i0 && !(bis[i1].dataset.mid && !bis[i1].classList.contains('ablrow') && bis[i1].querySelector('.bar'))) i1--;
+  if(!bis[i0] || i1 < i0) return;
+  const teile = []; let a0 = i0; for(let i = i0; i <= i1; i++) if(bis[i].classList.contains('vrow')){ if(i > a0) teile.push([a0, i - 1]); a0 = i + 1; } if(a0 <= i1) teile.push([a0, i1]);
+  const gr = g.getBoundingClientRect(), lane = bis[i0].querySelector('.lane') || bis.find(x => x.dataset.mid)?.querySelector('.lane'), x0 = lane ? lane.getBoundingClientRect().left - gr.left : NAMEW; // echte Lage der Tage
+  const yT = el => el.getBoundingClientRect().top - gr.top, yB = el => el.getBoundingClientRect().bottom - gr.top;
+  g.insertAdjacentHTML('beforeend', sp.map(([a, b]) => teile.map(([p, q]) => `<div class="teamrahmen" style="top:${yT(bis[p])}px;height:${yB(bis[q]) - yT(bis[p])}px;left:${x0 + X(a) + 1}px;width:${Math.max(4, XW(a, b) - 2)}px"></div>`).join('')).join(''));
+  const hd = t.querySelector('.hdr'); if(hd){ const hr = hd.getBoundingClientRect(), dx = gr.left - hr.left;
+    hd.querySelectorAll('.teamband').forEach(x => x.remove());
+    hd.insertAdjacentHTML('beforeend', sp.map(([a, b]) => `<div class="teamband" style="left:${dx + x0 + X(a) + 1}px;width:${Math.max(4, XW(a, b) - 2)}px"></div>`).join('')); }
 }
 // Planer füllt das Fenster bis unten (kein leerer Streifen unter dem Plan)
 function tlFuellen(){ const t = tlEl(); if(!t || EINGEBETTET) return; const h = Math.max(300, Math.floor(innerHeight - t.getBoundingClientRect().top - 2)); t.style.setProperty('height', h + 'px', 'important'); const a = $('aufp'); if(a) a.style.height = Math.max(300, Math.floor(innerHeight - a.getBoundingClientRect().top - 2)) + 'px'; }
