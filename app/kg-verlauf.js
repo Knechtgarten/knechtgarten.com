@@ -192,7 +192,7 @@
     const s = sel != null ? liste.find(x => x.max === sel) : null;
     const nach = s ? liste.filter(x => x.max > s.max) : [];
     const darfGanz = !O.ganzNurAdmin || ADMIN;
-    let h = `<div class="kgv-kopf"><b>Verlauf${O.bezug ? '<span class="kgv-sub">nur diese ' + esc(O.bezugName || 'Offerte') + '</span>' : ''}</b><button type="button" class="kgv-zu" data-a="zu" aria-label="Verlauf schliessen">${ic('x', 14)}</button></div>
+    let h = `<div class="kgv-kopf"><b>Verlauf${O.bezug ? '<span class="kgv-sub">nur ' + esc(O.bezugName || 'diese Offerte') + '</span>' : ''}</b><button type="button" class="kgv-zu" data-a="zu" aria-label="Verlauf schliessen">${ic('x', 14)}</button></div>
       <div class="kgv-chips"><button type="button" data-a="alle" class="${filterIch ? '' : 'on'}">Alle</button><button type="button" data-a="ich" class="${filterIch ? 'on' : ''}">Nur meine</button></div>`;
     if(s){
       const n = nach.reduce((a, x) => a + 1, 0), wer = [...new Set(nach.map(x => name(x.wer)))];
@@ -200,7 +200,7 @@
         <div class="kgv-bt"><button type="button" class="kgv-btn" data-a="jetzt">Zurück zu jetzt</button>${n && darfGanz ? `<button type="button" class="kgv-btn prim" data-a="ganz">${esc(O.ganz || 'Alles')} auf ${zeitTxt(s.bis)} zurücksetzen${O.ganzNurAdmin ? '<span class="kgv-adm">Admin</span>' : ''}</button>` : ''}</div></div>`;
     }
     h += '<div class="kgv-liste">';
-    if(O.bezug && !b) h += '<div style="padding:16px;color:#6B7178">Erst eine Offerte öffnen.</div>';
+    if(O.bezug && !b) h += '<div style="padding:16px;color:#6B7178">Erst ' + esc(O.bezugName || 'eine Offerte') + ' öffnen.</div>';
     else if(!l.length) h += '<div style="padding:16px;color:#6B7178">Noch keine Änderungen.</div>';
     let tag = '';
     l.forEach(x => {
@@ -263,6 +263,20 @@
     },
     // Tool meldet: andere Offerte geöffnet usw.
     async neu(){ ST = {}; REDO = []; schritte = []; grenze = 0; START = new Date(Date.now() - 1000).toISOString(); sel = null; await eigeneLaden(); if(offen) await listeLaden(); },
+    // Nur Zurück/Vorwärts im Speicher des Tools (z. B. CAD): opt = { zurueck(), vor(), stand: () => ({ z: Text|null, v: Text|null }) }
+    lokal(opt){
+      if(!document.getElementById('kgv-css')){ const st = document.createElement('style'); st.id = 'kgv-css'; st.textContent = css; document.head.appendChild(st); }
+      let b = null;
+      const zeichne = () => { if(!b) return; const s = opt.stand() || {}; const z = b.querySelector('[data-v="z"]'), v = b.querySelector('[data-v="v"]');
+        z.disabled = !s.z; z.title = s.z ? 'Rückgängig: ' + s.z + ' (Ctrl+Z)' : 'Nichts rückgängig zu machen'; v.disabled = !s.v; v.title = s.v ? 'Wiederholen: ' + s.v + ' (Ctrl+Y)' : 'Nichts zu wiederholen'; };
+      const bau = () => { const tw = document.querySelector('header.app .kg-tw'); if(!tw) return false;
+        b = document.createElement('div'); b.className = 'kgv-knoepfe';
+        b.innerHTML = `<button type="button" data-v="z" aria-label="Rückgängig">${ic('schrittZurueck', 18)}</button><button type="button" data-v="v" aria-label="Wiederholen">${ic('schrittVor', 18)}</button>`;
+        b.addEventListener('click', e => { const x = e.target.closest('button'); if(!x) return; x.dataset.v === 'z' ? opt.zurueck() : opt.vor(); zeichne(); });
+        tw.parentNode.insertBefore(b, tw); zeichne(); return true; };
+      let n = 0; const warte = () => { if(!bau() && n++ < 40) setTimeout(warte, 250); }; warte();
+      return { aktualisieren: zeichne };
+    },
     aktualisieren: () => eigeneLaden(),
     offen: () => offen
   };

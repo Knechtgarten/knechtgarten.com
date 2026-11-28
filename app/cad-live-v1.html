@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <script src="/kg-pw-schutz.js?v=5"></script>
-<script src="/kg-stil.js?v=102"></script>
+<script src="/kg-stil.js?v=103"></script>
+<script src="/kg-verlauf.js?v=3"></script>
 <script src="/kg-karte.js?v=4"></script>
 <title>Knecht-Tool · CAD</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -306,7 +307,6 @@ select{border:1px solid var(--line);background:var(--card);border-radius:6px;pad
     <label class="schalt"><input type="checkbox" id="fang" checked> Fangen</label>
     <label class="schalt"><input type="checkbox" id="ortho" checked> Rechtwinklig</label>
     <label class="schalt"><input type="checkbox" id="raster" checked> Raster</label>
-    <button class="btn" id="undo" title="Rückgängig (Ctrl+Z)">↶ Rückgängig</button>
   </footer>
 </div>
 <div class="toast" id="toast"></div>
@@ -357,7 +357,8 @@ const istBew = o => o.bew !== undefined ? o.bew : (o.typ === 'pool' || (o.typ ==
 const ebeneAn = e => e === 'bew' ? ebenen.mbew : ebenen.maus;
 let ansicht = { s: 22, ox: 40, oy: 40 }; // px pro m, Verschiebung
 const undoStack = [];
-const merken = () => { undoStack.push(JSON.stringify(objs)); if(undoStack.length > 60) undoStack.shift(); };
+const redoStack = []; let KGV = null; // Zurück/Vorwärts in der Leiste oben (kg-verlauf.js, 2026-11-28)
+const merken = () => { undoStack.push(JSON.stringify(objs)); if(undoStack.length > 60) undoStack.shift(); redoStack.length = 0; KGV?.aktualisieren(); };
 
 // ===== Geometrie =====
 const fl = p => Math.abs(p.reduce((a, q, i) => { const r = p[(i + 1) % p.length]; return a + q[0] * r[1] - r[0] * q[1]; }, 0)) / 2;
@@ -1059,15 +1060,18 @@ $('#wert').addEventListener('keydown', ev => {
 document.addEventListener('keydown', ev => {
   const imFeld = ['INPUT','SELECT','TEXTAREA'].includes(document.activeElement?.tagName);
   if(ev.key === 'Escape'){ temp = []; platzieren = null; if(werkzeug === 'platz') waehle('auswahl'); else { sel = null; alles(); } schliessePop(); return; }
-  if((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z'){ ev.preventDefault(); rueck(); return; }
+  if((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z' && !ev.shiftKey){ ev.preventDefault(); rueck(); return; }
+  if((ev.ctrlKey || ev.metaKey) && (ev.key.toLowerCase() === 'y' || (ev.key.toLowerCase() === 'z' && ev.shiftKey))){ ev.preventDefault(); vor(); return; }
   if(imFeld) return;
   if(ev.key === 'Enter' && temp.length){ ev.preventDefault(); fertig(); return; }
   if((ev.key === 'Delete' || ev.key === 'Backspace') && sel){ merken(); objs = objs.filter(q => q.id !== sel); sel = null; alles(); return; }
   if(/^[0-9.]$/.test(ev.key) && werkzeug !== 'auswahl'){ $('#wert').focus(); return; }
   const w = WERKZEUGE.find(x => x[2].toLowerCase() === ev.key.toLowerCase()); if(w) waehle(w[0]);
 });
-function rueck(){ const s = undoStack.pop(); if(!s){ toast('Nichts mehr rückgängig zu machen'); return; } objs = JSON.parse(s); sel = null; temp = []; alles(); }
-$('#undo').addEventListener('click', rueck);
+function rueck(){ const s = undoStack.pop(); if(!s){ toast('Nichts mehr rückgängig zu machen'); return; } redoStack.push(JSON.stringify(objs)); objs = JSON.parse(s); sel = null; temp = []; alles(); KGV?.aktualisieren(); }
+function vor(){ const s = redoStack.pop(); if(!s){ toast('Nichts zu wiederholen'); return; } undoStack.push(JSON.stringify(objs)); objs = JSON.parse(s); sel = null; temp = []; alles(); KGV?.aktualisieren(); }
+KGV = window.KG?.verlauf?.lokal({ zurueck: rueck, vor, stand: () => ({ z: undoStack.length ? 'letzte Änderung' : null, v: redoStack.length ? 'rückgängig gemachte Änderung' : null }) }) || null;
+
 
 // ===== Ebenen, Optionen, Diverses =====
 document.querySelectorAll('#ebenen .chip').forEach(c => c.addEventListener('click', () => { ebenen[c.dataset.e] = !ebenen[c.dataset.e]; c.classList.toggle('on', ebenen[c.dataset.e]); zeichnen(); }));
@@ -1227,7 +1231,7 @@ async function oeffnePlan(id){
   const { data: p, error } = await sb.from('cad_plan').select('*, kunde:kunde_id(id,name,vorname,nachname,firma,strasse,plz,ort)').eq('id', id).maybeSingle();
   if(error || !p){ fehler(error || 'Plan nicht gefunden', 'Öffnen'); return ansichtWechseln('plaene'); }
   PLAN = p; objs = Array.isArray(p.objekte) ? p.objekte : []; grundlageAnwenden(p.grundlage);
-  nextId = Math.max(100, ...objs.map(o => Number(o.id) || 0)) + 1; undoStack.length = 0; sel = null; temp = []; werkzeug = 'auswahl'; bauteil = null; HOEHEN = null;
+  nextId = Math.max(100, ...objs.map(o => Number(o.id) || 0)) + 1; undoStack.length = 0; redoStack.length = 0; KGV?.aktualisieren(); sel = null; temp = []; werkzeug = 'auswahl'; bauteil = null; HOEHEN = null;
   const e = p.einstellungen || {}; if(e.ebenen) Object.assign(ebenen, e.ebenen);
   document.querySelectorAll('#ebenen .chip').forEach(c => c.classList.toggle('on', !!ebenen[c.dataset.e]));
   $('#luft').value = e.luft ?? 25;
