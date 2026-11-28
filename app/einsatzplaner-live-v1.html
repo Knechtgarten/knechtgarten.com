@@ -3643,6 +3643,30 @@ async function personEinfuegen(g, name){
   const farbe = /schnupper|tempor/i.test(g.name) ? ([3, 2, 4, 1].map(i => erde[i]).find(c => !belegt.has(c)) || erde[3]) : null; // Schnupper / Temporär: eigene Farbe, sonst keine Balken
   const { error } = await sb.from('planer_person').insert({ name, gruppe_id: g.id, aktiv: true, sortierung: sort, ...(farbe ? { farbe } : {}) }); if(error){ fehler(error, 'Hinzufügen'); return false; }
   await neuLaden(); toast(`${name} hinzugefügt`); return true; }
+// Plus bei festen Gruppen (2026-11-28): nur Mitarbeitende aus Kontakte wählen, keine freien Namen mehr.
+// Neue Mitarbeitende entstehen in Kontakte › Mitarbeitende; freie Namen nur bei Schnupper/Temporär (schnellPerson).
+async function mitarbeitendeWahl(g, rect){
+  const { data: bn, error } = await sb.from('benutzer').select('id,anzeigename,email,aktiv,ist_platzhalter').order('anzeigename');
+  if(error){ fehler(error, 'Mitarbeitende laden'); return; }
+  const name = b => b.anzeigename || (b.email || '').split('@')[0] || '?';
+  const imPlaner = new Set(PERSONEN.filter(x => x.benutzer_id && x.aktiv !== false && !x.archiviert_am).map(x => x.benutzer_id));
+  const frei = (bn || []).filter(b => b.aktiv !== false && !imPlaner.has(b.id)).sort((x, y) => name(x).localeCompare(name(y), 'de'));
+  const pop = popAt(rect, `<b>Mitarbeitende hinzufügen · ${esc(g.name)}</b>
+    <div style="max-height:260px;overflow:auto;display:flex;flex-direction:column;gap:2px;margin:4px 0">${frei.length ? frei.map(b => `<button type="button" class="btn btn-ghost" data-mw="${b.id}" style="justify-content:flex-start;text-align:left">${esc(name(b))}</button>`).join('') : '<span class="small muted">Alle Mitarbeitenden sind schon im Planer.</span>'}</div>
+    <div style="display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--line);padding-top:8px">
+      <a class="small" href="/tool-d-kunden-live-v1.html?modus=mitarbeitende&neu=ma">+ Neue Person in Kontakte anlegen</a>
+      <a class="small" href="#" data-mwz>+ Zeile ohne Person (z. B. Termine, Infos)</a></div>`);
+  pop.addEventListener('click', async e => {
+    if(e.target.closest('[data-mwz]')){ e.preventDefault(); closePop(); personDlg(null, g.id, true); return; }
+    const b = e.target.closest('[data-mw]'); if(!b) return;
+    const ben = frei.find(x => x.id === b.dataset.mw); closePop();
+    const alt = PERSONEN.find(x => x.benutzer_id === ben.id); // früher schon im Planer (archiviert/inaktiv): Zeile zurückholen
+    const r = alt ? await sb.from('planer_person').update({ aktiv: true, archiviert_am: null, gruppe_id: g.id }).eq('id', alt.id)
+      : await sb.from('planer_person').insert({ name: name(ben), benutzer_id: ben.id, gruppe_id: g.id, aktiv: true, sortierung: Math.max(0, ...PERSONEN.filter(x => x.gruppe_id === g.id).map(x => +x.sortierung || 0)) + 10 });
+    if(r.error){ fehler(r.error, 'Hinzufügen'); return; }
+    toast(`${name(ben)} ist jetzt in ${g.name}`); await neuLaden();
+  });
+}
 function schnellPerson(g, rect){
   const pop = popAt(rect, `<b>${esc(g.name)}</b><input type="text" id="spN" placeholder="Vorname Name" style="font:inherit;font-size:13px;border:1px solid var(--line);border-radius:6px;padding:6px 8px"><div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost" id="spNo">Abbrechen</button><button class="btn btn-primary" id="spOk">${I('plus')}Hinzufügen</button></div>`);
   const inp = pop.querySelector('#spN'); inp.focus();
@@ -3815,7 +3839,7 @@ function bindTimeline(t){
         const { error } = await sb.from('planer_person').update({ aktiv: false, archiviert_am: isoDate(TODAY) }).eq('id', p.id); if(error){ fehler(error, 'Archivieren'); return; } await neuLaden(); toast(`${p.name} archiviert`); }); return; }
     const mb = e.target.closest('[data-mab]'); if(mb){ e.stopPropagation(); const same = openMid === mb.dataset.mab && openTyp === mb.dataset.typ; openMid = same ? null : mb.dataset.mab; openTyp = mb.dataset.typ; renderRows(); return; }
     const ga = e.target.closest('[data-gadd]'); if(ga){ e.stopPropagation(); const g = GRUPPEN.find(x => x.id === ga.dataset.gadd);
-      if(/schnupper|tempor/i.test(g?.name || '')) schnellPerson(g, ga.getBoundingClientRect()); else personDlg(null, ga.dataset.gadd); return; }
+      if(/schnupper|tempor/i.test(g?.name || '')) schnellPerson(g, ga.getBoundingClientRect()); else mitarbeitendeWahl(g, ga.getBoundingClientRect()); return; }
     const gof = e.target.closest('[data-goff]'); if(gof){ e.stopPropagation(); const id = gof.dataset.goff;
       if(collapsed.has(id)){ collapsed.delete(id); lsSet(ZU_KEY, [...collapsed]); OFFEN_ZU.delete(id); } // Gruppe zu: aufklappen und offene Aufträge zeigen
       else OFFEN_ZU.has(id) ? OFFEN_ZU.delete(id) : OFFEN_ZU.add(id);
