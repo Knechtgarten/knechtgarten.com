@@ -159,6 +159,9 @@ html:not(.ep-eingebettet) .row.grp > .nm{box-shadow:var(--rand,16px) 0 0 #E6E9ED
 .mittag{position:absolute;top:0;bottom:0;background:repeating-linear-gradient(135deg,#E3E7EA 0 4px,#F5F7F9 4px 8px);z-index:3;pointer-events:none;} /* Tagesansicht 12–13 Uhr */
 .fehol{position:absolute;top:2px;height:19px;box-sizing:border-box;border-radius:3px;border:1px solid;font-size:10.5px;font-weight:600;overflow:hidden;white-space:nowrap;z-index:1;cursor:default;} .fehol span{padding:0 4px;line-height:17px;} /* Feiertag automatisch, nicht ziehbar */
 .bar{position:absolute;top:2px;height:19px;border-radius:3px;border:1px solid;font-size:10.5px;font-weight:600;cursor:pointer;user-select:none;touch-action:none;overflow:hidden;z-index:1;}
+.zieht{pointer-events:none !important;z-index:1000 !important;opacity:.9;box-shadow:0 4px 12px rgba(35,43,53,.3);will-change:transform;} /* Balken beim Verschieben: gleitet mit der Maus (2026-11-28) */
+.lghost{position:absolute;top:1px;height:19px;box-sizing:border-box;border:2px dashed #323E4E;border-radius:3px;background:rgba(214,231,244,.55);pointer-events:none;z-index:2;} /* Landeplatz */
+.bar.bres .rgrip{position:absolute;right:0;top:0;bottom:0;width:8px;cursor:ew-resize;} .bar.bres .rgrip::after{content:"";position:absolute;right:2px;top:4px;bottom:4px;width:2px;border-radius:1px;background:var(--c);opacity:.8;} /* Reserve ziehen */
 .bar.hilfe{font-weight:500;}
 html:not(.ep-eingebettet) .bar.kopf .t.tz{max-width:none;color:#4C5C70;} html:not(.ep-eingebettet) .bar.kopf{font-weight:500;} html:not(.ep-eingebettet) .bar.strich .t,html:not(.ep-eingebettet) .bar.tgrp .t{line-height:14px;} /* Aufträge wie Mithilfe: Name nur im Farbfeld, Rest abgeschnitten */ /* Mithilfe: Farbfeld mit Namen vorne, sonst weiss mit feinem farbigem Rahmen */
 .bar.ed{cursor:pointer;}
@@ -226,6 +229,8 @@ html:not(.ep-eingebettet) .tl .grid{margin-bottom:50vh;} /* unten Platz, damit a
 /* Vorrat unter dem Gruppentitel: bleibt beim Scrollen des Plans links stehen, eigener Scroll */
 .row.vrow > .vorrat{position:sticky;left:calc(var(--namew) + var(--rand, 16px) + 1px);margin-left:calc(var(--rand, 16px) + 1px);border-top:0;}
 .row.vrow > .nm{font-size:10.5px;color:#4C5C70;font-weight:700;text-transform:uppercase;letter-spacing:.04em;align-items:flex-start;padding-top:2px;}
+.row.vrow > .nm{flex-direction:column;} .vrow .vneu{margin-top:3px;padding:0;border:0;background:none;color:#8B9097;font:inherit;font-size:10.5px;font-weight:400;text-transform:none;letter-spacing:0;text-decoration:underline;cursor:pointer;} .vrow .vneu:hover{color:var(--primary);} /* Vorrat neu ordnen */
+.vland{position:absolute;height:15px;box-sizing:border-box;border:2px dashed #323E4E;border-radius:3px;background:rgba(214,231,244,.6);pointer-events:none;z-index:5;} /* Landeplatz im Vorrat */
 .vorrat.drop{background:#F2F5D6;box-shadow:inset 0 0 0 2px var(--primary);}
 .vin{position:relative;}
 .vw{position:absolute;top:1px;height:14px;line-height:14px;font-size:10.5px;font-weight:700;color:#323E4E;padding-left:4px;box-sizing:border-box;}
@@ -1285,17 +1290,37 @@ const vSort = () => VOR.sort((a, b) => String(a.erstellt_am).localeCompare(Strin
 // Reihenfolge: Vorrat-Einträge (älteste zuerst), dann Pflege-Vorschläge nach Woche; jeweils in die Zeile, die am wenigsten weit reicht
 function vorratLage(ber, gid){
   const items = VOR.filter(v => (v.bereich || 'bau') === ber).map(v => ({ v, n: vTage(v) }))
-    .concat(gid ? PROV.filter(p => p.lane === 'g:' + gid).sort((a, b) => a.mon - b.mon).map(p => ({ p, n: Math.max(.25, Math.round(p.min / 60 / 8 * 4) / 4, 72 / dayW) })) : []); // Pflege-Vorschläge mind. 72 px breit: lesbar, hintereinander statt übereinander
+    .concat(gid ? PROV.filter(p => p.lane === 'g:' + gid).sort((a, b) => a.mon - b.mon).map(p => ({ p, n: provN(p) })) : []);
+  // Seit 2026-11-28: was von Hand hingelegt wurde (Vorrat: zeile/start, Pflege-Vorschlag: VNOT z/a), bleibt genau dort.
+  // Was das System neu bringt, füllt nur freie Lücken (oben zuerst) und schiebt Hingelegtes nie weg.
+  const lageVon = x => x.v ? (x.v.zeile != null && x.v.start != null ? [+x.v.zeile, +x.v.start] : null) : (VNOT[x.p.id]?.z != null && VNOT[x.p.id]?.a != null ? [VNOT[x.p.id].z, VNOT[x.p.id].a] : null);
+  const belegt = [], setze = (x, z, a) => { (belegt[z] ||= []).push([a, a + x.n]); return { ...x, z, a }; };
+  const erstFrei = (z, ab, n) => { let a = ab; for(let g = 0; g < 500; g++){ const o = (belegt[z] || []).find(([s, e]) => s < a + n - 1e-9 && e > a + 1e-9); if(!o) return a; a = o[1]; } return a; };
+  const L = [], rest = [];
+  items.forEach(x => { const f = lageVon(x); if(f) L.push(setze(x, Math.max(0, f[0]), Math.max(0, f[1]))); else rest.push(x); });
+  const festMax = Math.max(-1, ...L.map(o => o.z));
   // Pflege: der Reihe nach 3 Wochen (15 Arbeitstage) pro Zeile, dann neue Zeile; unter jeder Zeile eine leere (Luft)
-  if(ber === 'pflege'){ let z = 0, a = 0; const L = items.map(x => { if(a > 1e-9 && a + x.n > 15 + 1e-9){ z++; a = 0; } const o = { ...x, z: 2 * z, a }; a += x.n; return o; }); return { R: 2 * (z + 1), L }; }
-  // Mit der Maus an eine Stelle aufgezogen (zeile/start gespeichert) = bleibt dort; die übrigen reihen sich dahinter ein.
-  // Immer eine leere Zeile mehr als nötig (bis VZ), damit man dort etwas Neues aufziehen kann.
-  const fest = x => x.v && x.v.zeile != null && x.v.start != null;
-  const R = Math.min(VZ, Math.max(items.length + 1, ...items.filter(fest).map(x => x.v.zeile + 1))), ende = new Array(R).fill(0);
-  const L = items.filter(fest).map(x => { const z = Math.min(R - 1, Math.max(0, x.v.zeile)), a = Math.max(0, Number(x.v.start)); ende[z] = Math.max(ende[z], a + x.n); return { ...x, z, a }; });
-  items.filter(x => !fest(x)).forEach(x => { let z = 0; for(let i = 1; i < R; i++) if(ende[i] < ende[z] - 1e-9) z = i; const a = ende[z]; ende[z] = a + x.n; L.push({ ...x, z, a }); });
+  if(ber === 'pflege'){ let z = 0, a = 0;
+    rest.forEach(x => { for(let g = 0; g < 300; g++){ a = erstFrei(2 * z, a, x.n); if(a > 1e-9 && a + x.n > 15 + 1e-9){ z++; a = 0; continue; } break; } L.push(setze(x, 2 * z, a)); a += x.n; });
+    return { R: Math.max(0, ...L.map(o => o.z)) + 2, L }; }
+  // Bau: in die Zeile mit der frühesten passenden Lücke; immer eine leere Zeile mehr als nötig (bis VZ)
+  const R = Math.max(Math.min(VZ, items.length + 1), festMax + 2);
+  rest.forEach(x => { let z = 0, a = erstFrei(0, 0, x.n); for(let i = 1; i < R; i++){ const ai = erstFrei(i, 0, x.n); if(ai < a - 1e-9){ z = i; a = ai; } } L.push(setze(x, z, a)); });
   return { R, L };
 }
+const provN = p => Math.max(.25, Math.round(p.min / 60 / 8 * 4) / 4, 72 / dayW); // Pflege-Vorschläge mind. 72 px breit: lesbar, hintereinander statt übereinander
+// Pflege-Vorschlag: Notiz, Zuständig und Lage im Vorrat (eigene Tabelle); alles leer = Zeile weg
+async function vnotSpeichern(p, neu){ const v = { n: '', pl: null, z: null, a: null, ...(VNOT[p.id] || {}), ...neu }, leer = !v.n && !v.pl && v.z == null;
+  const q = sb.from('planer_vorschlag_notiz'), { error } = leer ? await q.delete().eq('kunde_kategorie_id', p.kk).eq('jahr', p.y).eq('kw', p.w).eq('buendel', p.b)
+    : await q.upsert({ kunde_kategorie_id: p.kk, jahr: p.y, kw: p.w, buendel: p.b, notiz: v.n || null, projektleiter_id: v.pl, zeile: v.z, start: v.a, geaendert_am: new Date().toISOString() }, { onConflict: 'kunde_kategorie_id,jahr,kw,buendel' });
+  if(error){ fehler(error); return false; } if(leer) delete VNOT[p.id]; else VNOT[p.id] = v; return true; }
+// Lage im Vorrat unter der Maus: Zeile + Start (Arbeitstage, halbe genau) aus der linken Kante des Balkens
+function vorratLageAm(vz, links, y){ const r = vz.querySelector('.vfeld')?.getBoundingClientRect(); if(!r) return null;
+  return { zeile: Math.max(0, Math.min(40, Math.floor((y - r.top) / VH))), start: Math.max(0, Math.round(vI(Math.max(0, links - r.left)) * 2) / 2) }; }
+// Landeplatz im Vorrat beim Ziehen (gestrichelter Rahmen)
+function vorratLand(d, vz, links, y, n){ if(!vz){ d.vl?.remove(); d.vl = null; return; } const g = vorratLageAm(vz, links, y); if(!g) return; const vin = vz.querySelector('.vin');
+  if(!d.vl || d.vl.parentNode !== vin){ d.vl?.remove(); d.vl = document.createElement('div'); d.vl.className = 'vland'; vin.appendChild(d.vl); }
+  const w = vX(g.start + n) - vX(g.start); Object.assign(d.vl.style, { left: vX(g.start) + 'px', top: (VKOPF + g.zeile * VH + 2) + 'px', width: Math.max(10, w) + 'px' }); }
 // Vorrat-Block (Zeile unter dem Gruppentitel): eigene Achse Woche 1, 2, 3 … ohne Datum, eigener Scroll, bleibt beim Scrollen des Plans stehen
 function vorratBlock(ber, gid, lab){
   const { R, L } = vorratLage(ber, gid), W7 = (5 + 2 * WEK) * dayW, vw = visW() - RAND() - 1; // links bleibt der graue Rand frei (sonst ist der Anfang verdeckt)
@@ -1320,7 +1345,8 @@ function vorratBlock(ber, gid, lab){
       const brg = i ? `<div class="vbrg" style="background:${fc};left:${vX(st[i - 1][0]) + (st[i - 1][1] - st[i - 1][0]) * dayW - 1}px;top:${top + 6.5}px;width:${x - vX(st[i - 1][0]) - (st[i - 1][1] - st[i - 1][0]) * dayW + 2}px"></div>` : '';
       return brg + `<div class="vbar${v?.geschaetzt ? ' gesch' : ''}${p ? ' vprov' : ''}" ${attr} style="left:${x + 1}px;top:${top}px;width:${Math.max(8, w - 2)}px;border:1px solid ${fc};background:${strichBg(fc)}" title="${esc(tip)}"><span class="vlab">${esc(lab1)}</span></div>`; }).join('');
   }).join('');
-  return `<div class="row vrow"><div class="nm"><span>${esc(lab)}</span></div><div class="vorrat" data-ber="${ber}" data-vr="${R}" style="width:${vw}px"><div class="vsc" data-vsc="${ber}"><div class="vin" style="width:${wochen * W7}px;height:${VKOPF + R * VH + 4}px">${kopf}<div class="vfeld" style="top:${VKOPF}px"></div>${bars}</div></div></div></div>`;
+  const hatLage = L.some(({ v, p }) => v ? v.zeile != null : VNOT[p.id]?.z != null);
+  return `<div class="row vrow"><div class="nm"><span>${esc(lab)}</span>${hatLage && vorratNeuOk(ber) ? `<button type="button" class="vneu" data-vneu="${ber}" data-gid="${gid || ""}" title="Von Hand hingelegte Einträge lösen – das System ordnet alles neu">neu ordnen</button>` : ""}</div><div class="vorrat" data-ber="${ber}" data-gid="${gid || ""}" data-vr="${R}" style="width:${vw}px"><div class="vsc" data-vsc="${ber}"><div class="vin" style="width:${wochen * W7}px;height:${VKOPF + R * VH + 4}px">${kopf}<div class="vfeld" style="top:${VKOPF}px"></div>${bars}</div></div></div></div>`;
 }
 function vorratZeichnen(){ renderRows(); } // der Vorrat ist Teil des Plans
 // Neu / ändern: kleines Fenster
@@ -1358,13 +1384,13 @@ function vorratDialog(v, tage, rect, ber0, lage){
 // Zurück in den Vorrat: Planer-Balken nach oben in den Vorrat ziehen (z. B. Kunde hat abgesagt).
 // Länge = geplante Arbeitstage (fix) bzw. aktuelle Arbeitstage; der Balken verschwindet, Rückgängig im Hinweis.
 const insVorratOk = it => (it.kind === 'baustelle' || it.kind === 'termin') && !it.wdh && !it.rep && canEdit(it.mid);
-async function zurueckInVorrat(it, ber){
+async function zurueckInVorrat(it, ber, lage){ // lage = { zeile, start }: dort abgelegt, bleibt dort
   if(it.files?.length){ toast('Der Termin hat Dateien – bitte zuerst die Dateien entfernen oder den Termin löschen.', null, true); return; }
   const tage = Math.max(.5, Math.round((it.soll || LAY[it.id]?.n || (it.e - it.s)) * 2) / 2);
   const g = GRUPPEN.find(x => x.id === P[it.mid]?.gruppe_id), bereich = ber || g?.vorrat_bereich || (it.kind === 'baustelle' ? 'bau' : 'pflege');
   const { data: pz } = await sb.from('pendenz').select('id').eq('planer_einsatz_id', it.id).limit(1);
   const pendenz_id = pz?.[0]?.id || null;
-  const { data: v, error } = await sb.from('planer_vorrat').insert({ kunde_id: it.kid || null, titel: it.title || null, notiz: it.text || null, tage, bereich, geschaetzt: false,
+  const { data: v, error } = await sb.from('planer_vorrat').insert({ kunde_id: it.kid || null, titel: it.title || null, notiz: it.text || null, tage, bereich, geschaetzt: false, ...(lage || {}),
     projektleiter_id: it.pl || null, erstellt_von: ME, pendenz_id }).select('*').single();
   if(error){ fehler(error, 'Vorrat'); return; }
   const kopie = { ...it }, row = itemToRow(kopie); row.id = kopie.id; row.erstellt_von = ME;
@@ -1394,13 +1420,22 @@ async function vorratEinplanen(v, mid, u, offen = false){
   toast(`Eingeplant: ${vLab(v)}${p ? ' · ' + first(p.name) : ''}`, async () => { await loescheEinsatz(neu); const { error: e2 } = await sb.from('planer_vorrat').insert(v); if(!e2){ VOR.push(v); vSort(); vorratZeichnen(); }
     if(v.pendenz_id) await sb.from('pendenz').update({ planer_einsatz_id: null, eingeplant_am: null }).eq('id', v.pendenz_id); });
 }
+// «neu ordnen»: von Hand hingelegte Lagen in diesem Vorrat lösen, das System ordnet alles neu (Rückgängig im Hinweis)
+addEventListener('click', async e => { const b = e.target.closest('[data-vneu]'); if(!b) return; e.preventDefault(); e.stopPropagation();
+  const ber = b.dataset.vneu, gid = b.dataset.gid, vs = VOR.filter(v => (v.bereich || 'bau') === ber && v.zeile != null), ps = gid ? PROV.filter(p => p.lane === 'g:' + gid && VNOT[p.id]?.z != null) : [];
+  const altV = vs.map(v => ({ v, zeile: v.zeile, start: v.start })), altP = ps.map(p => ({ p, z: VNOT[p.id].z, a: VNOT[p.id].a }));
+  if(vs.length){ const { error } = await sb.from('planer_vorrat').update({ zeile: null, start: null }).in('id', vs.map(v => v.id)); if(error){ fehler(error, 'Vorrat'); return; } vs.forEach(v => { v.zeile = null; v.start = null; }); }
+  for(const p of ps) await vnotSpeichern(p, { z: null, a: null });
+  renderRows();
+  toast('Vorrat neu geordnet', async () => { for(const o of altV){ o.v.zeile = o.zeile; o.v.start = o.start; await sb.from('planer_vorrat').update({ zeile: o.zeile, start: o.start }).eq('id', o.v.id); }
+    for(const o of altP) await vnotSpeichern(o.p, { z: o.z, a: o.a }); renderRows(); }); }, true);
 // Ziehen: Balken runter in den Planer, leere Fläche = neue Arbeit mit gezogener Länge
 addEventListener('pointerdown', e => {
   if(e.button !== 0) return; const el = e.target.closest('.vorrat[data-ber]'); if(!el) return;
   const b = e.target.closest('.vbar'), f = e.target.closest('.vfeld');
   // Pflege-Vorschlag: gleiches Ziehen wie im Plan (Personenzeile = abgemacht, offene Linie = offen)
   if(b?.dataset.prov){ e.preventDefault(); drag = { kind: 'prov', pid: b.dataset.prov, x0: e.clientX, y0: e.clientY, moved: false, rect: b.getBoundingClientRect() }; return; }
-  if(b){ const v = VOR.find(x => x.id === b.dataset.v); if(!v) return; e.preventDefault(); vDrag = { art: 'bar', v, b, x0: e.clientX, y0: e.clientY, moved: false }; return; }
+  if(b){ const v = VOR.find(x => x.id === b.dataset.v); if(!v) return; e.preventDefault(); const br = b.getBoundingClientRect(); vDrag = { art: 'bar', v, b, x0: e.clientX, y0: e.clientY, dx: e.clientX - br.left, dy: e.clientY - br.top, moved: false }; return; }
   if(f && vorratNeuOk(el.dataset.ber)){ e.preventDefault(); const r = f.getBoundingClientRect(); vDrag = { art: 'neu', ber: el.dataset.ber, f, r, x0: e.clientX, y0: e.clientY, i0: Math.floor(vI(e.clientX - r.left)), moved: false,
     z: Math.min((+el.dataset.vr || 1) - 1, Math.max(0, Math.floor((e.clientY - r.top) / VH))) }; } // Zeile unter der Maus
 });
@@ -1410,7 +1445,7 @@ addEventListener('pointermove', e => {
   d.moved = true;
   if(d.art === 'bar'){
     if(!d.g){ d.g = d.b.cloneNode(true); d.g.className = 'vbar vgeist'; d.g.style.width = d.b.offsetWidth + 'px'; document.body.appendChild(d.g); document.querySelectorAll(`.vorrat .vbar[data-v="${d.v.id}"]`).forEach(x => x.classList.add('ziehe')); }
-    d.g.style.left = (e.clientX - 12) + 'px'; d.g.style.top = (e.clientY - 9) + 'px';
+    d.g.style.left = (e.clientX - d.dx) + 'px'; d.g.style.top = (e.clientY - d.dy) + 'px'; const vz = document.elementFromPoint(e.clientX, e.clientY)?.closest('.vorrat[data-ber]'); vorratLand(d, vz && vz.dataset.ber === (d.v.bereich || 'bau') && vorratEditOk(d.v) ? vz : null, e.clientX - d.dx, e.clientY, vTage(d.v));
     const lane = document.elementFromPoint(e.clientX, e.clientY)?.closest('#tl .lane[data-mid]');
     document.querySelectorAll('.lane.vziel').forEach(x => { if(x !== lane) x.classList.remove('vziel'); }); if(lane) lane.classList.add('vziel');
   } else {
@@ -1419,15 +1454,22 @@ addEventListener('pointermove', e => {
     d.n = n; d.a = a; d.g.style.left = vX(a) + 'px'; d.g.style.width = (vX(a + n - 1) + dayW - vX(a)) + 'px'; d.g.style.top = (d.z * VH + 2) + 'px'; d.g.textContent = n + ' T';
   }
 });
-addEventListener('pointerup', e => {
+addEventListener('pointerup', async e => {
   if(!vDrag) return; const d = vDrag; vDrag = null;
   document.querySelectorAll('.lane.vziel').forEach(x => x.classList.remove('vziel'));
-  if(d.g) d.g.remove(); document.querySelectorAll('.vorrat .ziehe').forEach(x => x.classList.remove('ziehe'));
+  if(d.g) d.g.remove(); d.vl?.remove(); document.querySelectorAll('.vorrat .ziehe').forEach(x => x.classList.remove('ziehe'));
   if(d.art === 'bar'){
     if(!d.moved){ if(vorratEditOk(d.v)) vorratDialog(d.v, null, d.b.getBoundingClientRect()); else toast('In deine Zeile ziehen, um es einzuplanen.'); return; }
+    const vz = document.elementFromPoint(e.clientX, e.clientY)?.closest('.vorrat[data-ber]');
+    if(vz && vz.dataset.ber === (d.v.bereich || 'bau')){ // im Vorrat umgelegt: bleibt genau dort (2026-11-28)
+      if(!vorratEditOk(d.v)){ toast('Diesen Vorrat darfst du nicht umordnen.', null, true); return; }
+      const g = vorratLageAm(vz, e.clientX - d.dx, e.clientY); if(!g) return; const v = d.v, alt = { zeile: v.zeile ?? null, start: v.start ?? null };
+      Object.assign(v, g); renderRows(); const { error } = await sb.from('planer_vorrat').update(g).eq('id', v.id);
+      if(error){ Object.assign(v, alt); renderRows(); fehler(error, 'Vorrat'); return; }
+      toast(`Umgelegt: ${vLab(v)}`, async () => { Object.assign(v, alt); renderRows(); await sb.from('planer_vorrat').update(alt).eq('id', v.id); }); return; }
     const lane = document.elementFromPoint(e.clientX, e.clientY)?.closest('#tl .lane[data-mid]');
-    if(lane && P[lane.dataset.mid]) vorratEinplanen(d.v, lane.dataset.mid, uAt(e.clientX), lane.dataset.off === '1');
-  } else vorratDialog(null, d.moved ? d.n : 5, { left: e.clientX, bottom: e.clientY }, d.ber, d.ber === 'pflege' ? null : { zeile: d.z, start: d.moved ? d.a : d.i0 });
+    if(lane && P[lane.dataset.mid]) vorratEinplanen(d.v, lane.dataset.mid, uAt(e.clientX - d.dx + 2), lane.dataset.off === '1');
+  } else vorratDialog(null, d.moved ? d.n : 5, { left: e.clientX, bottom: e.clientY }, d.ber, { zeile: d.z, start: d.moved ? d.a : d.i0 });
 });
 function ladeTypen(wx, we){
   const tit = {}; (we || []).forEach(x => tit[x.id] = x.titel); const by = {};
@@ -1469,7 +1511,7 @@ async function ladeAlles(){
       fetchAll(() => sb.from('planer_markierung').select('*').gte('tag', isoDate(0)).lte('tag', isoDate(NDAYS))),
       fetchAll(() => sb.from('planer_einsatz_info').select('*').gte('tag', isoDate(0)).lte('tag', isoDate(NDAYS)))
     ]);
-    MAG = au; PZ = pz; ABST = at; VNOT = {}; vn.forEach(x => VNOT[`${x.kunde_kategorie_id}_${x.jahr}_${x.kw}_${x.buendel ?? ""}`] = { n: x.notiz || '', pl: x.projektleiter_id });
+    MAG = au; PZ = pz; ABST = at; VNOT = {}; vn.forEach(x => VNOT[`${x.kunde_kategorie_id}_${x.jahr}_${x.kw}_${x.buendel ?? ""}`] = { n: x.notiz || "", pl: x.projektleiter_id, z: x.zeile ?? null, a: x.start == null ? null : +x.start });
     MARK = mk || []; INFO = new Map((ei || []).map(x => [x.einsatz_id + '|' + x.tag, x])); RES = r; ladeTypen(wx, we); RESE = z.map(x => ({ id: x.id, rid: x.ressource_id || (x.typ_eintrag_id ? 'T:' + x.typ_eintrag_id : null), typ: x.typ_eintrag_id || null, wunsch: x.wunsch_ressource_id || null, txt: x.freitext || null, art: x.art, eid: x.einsatz_id, mid: x.person_id, s: x.beginn ? toU(x.beginn) : null, e: x.ende ? toU(x.ende) : null, fest: !!x.fest, ab: x.ab_slot || 0, bv: x.bis_vor_ende_slot || 0, pz: x.pausen || [] }));
     GRUPPEN = g; PERSONEN = p.filter(x => !x.ist_ablage); ABL = p.filter(x => x.ist_ablage && x.aktiv); P = {}; p.forEach(x => P[x.id] = x); // Ablage-Personen nur für die Ablage-Zeilen
     await ladeToolPendenzen();
@@ -2167,7 +2209,7 @@ function personRow(p, W, bgx, offen = false){
       rs.forEach(([a, b]) => { const l = X(a) + rd, w = Math.max(3, XW(a, b) - 2 * rd), konf = [...(L.resKonf || [])].some(k => k / 2 >= a - 1e-6 && k / 2 < b - 1e-6);
         const allein = true; // jedes Reservestück mit «Reserve · Name» beschriften (auch direkt am Auftrag, mitten in der Woche)
         if(l - pe > 0) bars += `<div class="brg${hit ? '' : ' dim'}" data-bid="${it.id}" style="left:${pe}px;width:${l - pe}px;background:${c}"></div>`;
-        bars += `<div class="bar bres${ed ? ' ed' : ''}${konf ? ' resk' : ''}${selId === it.id ? ' sel' : ''}${hit ? '' : ' dim'}" data-id="${it.id}" style="left:${l}px;width:${w}px;--c:${c};border-color:${c}" title="${esc(rTip)}">${allein && w >= 50 ? `<span class="rlab">Reserve · ${esc(labOf(it))}</span>` : ''}</div>`; pe = l + w; }); }
+        bars += `<div class="bar bres${ed ? ' ed' : ''}${konf ? ' resk' : ''}${selId === it.id ? ' sel' : ''}${hit ? '' : ' dim'}" data-id="${it.id}" style="left:${l}px;width:${w}px;--c:${c};border-color:${c}" title="${esc(rTip)}">${allein && w >= 50 ? `<span class="rlab">Reserve · ${esc(labOf(it))}</span>` : ''}${ed && b === rs[rs.length - 1][1] ? '<span class="rgrip" title="Reserve länger/kürzer ziehen"></span>' : ''}</div>`; pe = l + w; }); }
     // Feld im Termin pro Tag (Punkt, Lieferwagen, gelb = wichtige Info)
     if(FELD_ZOOM() && it.kind !== 'absenz') [...new Set(L.free.map(k => k >> 1))].forEach(d => { const fb = feldBreite(it, d); if(!fb) return; const inf = infoAm(it, d);
       if(inf) bars += `<span class="itri" data-svg="1" data-info="${it.rep || it.id}|${d}" style="left:${tagAnker(it, d) + (hatPunkt(it, d) ? 1.5 : -3)}px;color:${prov ? 'var(--red)' : st.fg}" title="${esc('Wichtige Info: ' + inf.text)}"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.8 14.8 14H1.2Z"/><path d="M8 6.2v3.6M8 11.9v.1"/></svg></span>`; });
@@ -3783,6 +3825,9 @@ function bindTimeline(t){
       drag = { kind: 'bar', id: it.id, mode: grp.dataset.side, x0: e.clientX, y0: e.clientY, s0: it.s, e0: it.e, mid0: it.mid, ok0: it.ok, moved: false, ed: canEdit(it.mid), u0: uAt(e.clientX), pz0: it.pz?.length ? JSON.parse(JSON.stringify(it.pz)) : null, at0: it.at?.length ? [...it.at] : null, n0: null };
       e.preventDefault(); return; }
     const bar = e.target.closest('.bar[data-id]'), lane = e.target.closest('.lane[data-mid]');
+    // Griff am Ende der Reserve: Reservetage auf den Halbtag genau ziehen (2026-11-28)
+    if(bar && e.target.classList.contains('rgrip')){ const it = byId(bar.dataset.id); if(!it || !canEdit(it.mid)) return;
+      drag = { kind: 'resg', id: it.id, x0: e.clientX, res0: it.res || 0, moved: false }; e.preventDefault(); return; }
     if(bar){
       const id = bar.dataset.id;
       const it = byId(id); if(!it) return;
@@ -3809,6 +3854,7 @@ function bindWindow(){
     if(drag.kind === 'bar'){
       if(!drag.ed && !drag.copy) return;
       if(!drag.moved && Math.abs(e.clientX - drag.x0) < 4 && Math.abs(e.clientY - drag.y0) < 4) return;
+      drag.src ??= drag.id; // angeklickter Balken (vor Kopie/Wiederholung)
       // Kopie: Arbeitskopie bewegen, Original bleibt; gespeichert wird erst beim Loslassen
       if(!drag.moved && drag.copy){ const o = byId(drag.id); if(!o) return; drag.orig = o.rep || o.id;
         const tmp = { ...o, id: 'K' + Date.now(), rep: null, wdh: null, fix: false, files: [], text: '', soll: null, at: [], kv: drag.orig }; EINS.push(tmp); drag.id = tmp.id; document.body.classList.add('kopiert'); }
@@ -3824,7 +3870,23 @@ function bindWindow(){
         if(drag.pz0) it.pz = drag.pz0.map(([a, c]) => [r48(a + drag.s0 - it.s), r48(c + drag.s0 - it.s)]).filter(([a, c]) => c > 0).map(([a, c]) => [Math.max(0, a), c]);
         if(drag.at0){ const dk = Math.floor(drag.s0 * 2 + 1e-9) - Math.floor(it.s * 2 + 1e-9); it.at = drag.at0.map(r => r + dk).filter(r => r >= 0); } }
       else it.e = r48(Math.max(drag.s0 + sn, drag.e0 + du));
-      if(!drag.raf){ drag.raf = requestAnimationFrame(() => { if(drag) drag.raf = 0; renderRows(); }); }
+      // Verschieben (2026-11-28): Balken gleitet pixelgenau mit der Maus, Schatten zeigt den Landeplatz;
+      // der Plan wird erst beim Loslassen neu gerechnet (vorher bei jeder Bewegung = ruckelig)
+      if(drag.mode === 'move' && !drag.copy){
+        if(!drag.els){ const q = CSS.escape(drag.src); drag.els = [...document.querySelectorAll(`#tl [data-id="${q}"],#tl [data-bid="${q}"],#tl [data-solo="${q}"],#tl [data-pzid="${q}"]`)]; drag.els.forEach(x => x.classList.add('zieht')); drag.left0 = Math.min(...drag.els.map(x => x.getBoundingClientRect().left)); drag.tage = Math.max(.5, Math.round((it.soll || LAY[it.id]?.n || (it.e - it.s)) * 2) / 2);
+          drag.lg = document.createElement('div'); drag.lg.className = 'lghost'; }
+        const dx = it.fix ? 0 : e.clientX - drag.x0, dy = e.clientY - drag.y0; drag.els.forEach(x => x.style.transform = `translate(${dx}px,${dy}px)`);
+        const zl = document.elementFromPoint(e.clientX, e.clientY)?.closest('#tl .lane[data-mid]');
+        if(zl && zl.dataset.mid === it.mid){ if(drag.lg.parentNode !== zl) zl.appendChild(drag.lg); drag.lg.style.left = X(it.s) + 'px'; drag.lg.style.width = XW(it.s, it.e) + 'px'; drag.lg.hidden = false; }
+        else drag.lg.hidden = true;
+        const vzB = document.elementFromPoint(e.clientX, e.clientY)?.closest('.vorrat[data-ber]'); vorratLand(drag, vzB && vorratAn() && !drag.occ && insVorratOk(it) ? vzB : null, drag.left0 + e.clientX - drag.x0, e.clientY, drag.tage);
+      } else { const key = `${it.s}|${it.e}|${it.mid}|${it.ok}`; // Länger/kürzer: nur neu zeichnen, wenn sich etwas ändert
+        if(key !== drag.lk && !drag.raf){ drag.lk = key; drag.raf = requestAnimationFrame(() => { if(drag) drag.raf = 0; renderRows(); }); } }
+    } else if(drag.kind === 'resg'){
+      if(!drag.moved && Math.abs(e.clientX - drag.x0) < 3) return; drag.moved = true;
+      const it = byId(drag.id); if(!it) return; const k0 = Math.ceil(it.e * 2 - 1e-9), k1 = Math.floor(uAt(e.clientX) * 2);
+      const old = it.res; it.res = 20; const ks = resKeys(it); it.res = Math.min(RES_MAX, ks.filter(k => k <= k1).length / 2); if(k1 < k0) it.res = 0;
+      if(Math.abs(old - it.res) > .01 && !drag.raf) drag.raf = requestAnimationFrame(() => { if(drag) drag.raf = 0; renderRows(); });
     } else if(drag.kind === 'mk'){
       if(!drag.moved && Math.abs(e.clientX - drag.x0) < 4 && Math.abs(e.clientY - drag.y0) < 4) return;
       if(!drag.moved && drag.copy){ const c = drag.el.cloneNode(true); c.removeAttribute('data-mk'); drag.el.after(c); drag.el = c; document.body.classList.add('kopiert'); } // Kopie wandert, Original bleibt
@@ -3879,6 +3941,7 @@ function bindWindow(){
       drag.gh.style.left = e.clientX + 10 + 'px'; drag.gh.style.top = e.clientY + 8 + 'px';
       document.querySelectorAll('.lane.drop').forEach(l => l.classList.remove('drop'));
       const ln = document.elementFromPoint(e.clientX, e.clientY)?.closest('.lane[data-mid]'); if(ln && canEdit(ln.dataset.mid)) ln.classList.add('drop');
+      { const p = PROV.find(x => x.id === drag.pid), vz = document.elementFromPoint(e.clientX, e.clientY)?.closest('.vorrat[data-gid]'); vorratLand(drag, p && vz && 'g:' + vz.dataset.gid === p.lane && vorratNeuOk(vz.dataset.ber) ? vz : null, e.clientX - (drag.x0 - drag.rect.left), e.clientY, p ? provN(p) : 1); }
     } else if(drag.kind === 'mres'){
       if(!drag.moved && Math.abs(e.clientX - drag.x0) < 4) return; drag.moved = true;
       const z = RESE.find(o => o.id === drag.zid); if(!z) return; const n = drag.all.length, dl = slotIdx(drag.all, uAt(e.clientX)) - drag.i0;
@@ -3907,6 +3970,10 @@ function bindWindow(){
   });
   addEventListener('pointerup', async e => {
     const d = drag; drag = null; if(!d) return;
+    if(d.els){ d.els.forEach(x => { x.classList.remove('zieht'); x.style.transform = ''; }); d.lg?.remove(); d.vl?.remove(); if(d.moved) renderRows(); } // gleitender Balken: jetzt am Landeplatz zeichnen
+    if(d.kind === 'resg'){ const it = byId(d.id); if(!it || !d.moved || Math.abs((it.res || 0) - d.res0) < .01) return;
+      const v = it.res; if(!(await speichere(it, { reserve_tage: v }))){ it.res = d.res0; renderRows(); return; } if(selId === it.id) openPanel(it.id);
+      toast(v ? `Reserve: ${tageTxt(v)}` : 'Reserve entfernt', async () => { it.res = d.res0; renderRows(); await speichere(it, { reserve_tage: d.res0 }); if(selId === it.id) openPanel(it.id); }); return; }
     if(d.kind === 'click'){ d.fn(); return; }
     if(d.kind === 'vchip'){
       d.gh?.remove(); document.querySelectorAll('.lane.vown.drop').forEach(l => l.classList.remove('drop'));
@@ -3925,8 +3992,12 @@ function bindWindow(){
       if(!d.moved){ toast("Knopf auf eine Person und einen Tag ziehen."); return; }
       const ln = document.elementFromPoint(e.clientX, e.clientY)?.closest(".lane[data-mid]"); if(ln) await toolDrop(d, ln.dataset.mid, uAt(e.clientX)); return; }
     if(d.kind === 'prov'){
-      d.gh?.remove(); document.querySelectorAll('.lane.drop').forEach(l => l.classList.remove('drop'));
+      d.gh?.remove(); d.vl?.remove(); document.querySelectorAll('.lane.drop').forEach(l => l.classList.remove('drop'));
       if(!d.moved){ openProvPanel(d.pid); return; }
+      { const p = PROV.find(x => x.id === d.pid), vz = document.elementFromPoint(e.clientX, e.clientY)?.closest('.vorrat[data-gid]'); // im Vorrat umgelegt: bleibt dort
+        if(p && vz && 'g:' + vz.dataset.gid === p.lane){ if(!vorratNeuOk(vz.dataset.ber)){ toast('Diesen Vorrat darfst du nicht umordnen.', null, true); return; }
+          const g = vorratLageAm(vz, e.clientX - (d.x0 - d.rect.left), e.clientY); if(!g) return; const alt = { z: VNOT[p.id]?.z ?? null, a: VNOT[p.id]?.a ?? null };
+          if(await vnotSpeichern(p, { z: g.zeile, a: g.start })){ renderRows(); toast('Umgelegt', async () => { await vnotSpeichern(p, alt); renderRows(); }); } return; } }
       const p = PROV.find(x => x.id === d.pid); const ln = document.elementFromPoint(e.clientX, e.clientY)?.closest('.lane[data-mid]');
       if(p && ln && canEdit(ln.dataset.mid) && P[ln.dataset.mid]){ const len = p.min / 60 / 12; const s = zoom === 'tag' || zoom === 'woche' ? Math.round(uAt(e.clientX) * 48) / 48 : Math.floor(uAt(e.clientX)) + 1 / 12;
         const oben = ln.dataset.off !== '1', okZ = oben, fwZ = false; // Zeile bestimmt: Hauptzeile = fix, Zeile «offen» = offen (Entscheid 2026-11-27) // fixe Woche mit Anmeldung: oben, aber gestrichelt // Personenzeile = abgemacht, offene Linie = offen
@@ -3954,7 +4025,7 @@ function bindWindow(){
     const vZiel = d.kind === 'bar' && d.moved && vorratAn() && !d.copy && !d.occ ? document.elementFromPoint(e.clientX, e.clientY)?.closest('.vorrat[data-ber]') : null;
     if(vZiel){
       const it = byId(d.id); Object.assign(it, { s: d.s0, e: d.e0, mid: d.mid0, ok: d.ok0, ...(d.pz0 ? { pz: d.pz0 } : {}), ...(d.at0 ? { at: d.at0 } : {}) }); renderRows();
-      if(insVorratOk(it)) await zurueckInVorrat(it, vZiel.dataset.ber); else toast('Nur Baustellen und Termine (ohne Wiederholung) können in den Vorrat.', null, true);
+      if(insVorratOk(it)) await zurueckInVorrat(it, vZiel.dataset.ber, d.left0 != null ? vorratLageAm(vZiel, d.left0 + e.clientX - d.x0, e.clientY) : null); else toast('Nur Baustellen und Termine (ohne Wiederholung) können in den Vorrat.', null, true);
       return;
     }
     if(d.kind === 'bar' && d.moved && isBuero() && document.elementFromPoint(e.clientX, e.clientY)?.closest('#aufp')){
@@ -4558,9 +4629,7 @@ function openProvPanel(pid){
   $('pX').onclick = () => { selProv = null; $('side').innerHTML = ''; };
   bindAcc(); pflegeMedien(p.kid);
   // Notiz und Zuständig zum Vorschlag (eigene Tabelle, gehen beim Abmachen in den Einsatz)
-  const speichereV = async neu => { const v = { n: VNOT[p.id]?.n || '', pl: VNOT[p.id]?.pl || null, ...neu }; $('vSave').textContent = 'Speichere …';
-    const { error } = v.n || v.pl ? await sb.from('planer_vorschlag_notiz').upsert({ kunde_kategorie_id: p.kk, jahr: p.y, kw: p.w, buendel: p.b, notiz: v.n || null, projektleiter_id: v.pl, geaendert_am: new Date().toISOString() }, { onConflict: 'kunde_kategorie_id,jahr,kw,buendel' }) : await sb.from('planer_vorschlag_notiz').delete().eq('kunde_kategorie_id', p.kk).eq('jahr', p.y).eq('kw', p.w).eq('buendel', p.b);
-    if(error){ fehler(error); $('vSave').textContent = ''; return; } if(v.n || v.pl) VNOT[p.id] = v; else delete VNOT[p.id]; $('vSave').textContent = 'Gespeichert'; };
+  const speichereV = async neu => { $('vSave').textContent = 'Speichere …'; const ok = await vnotSpeichern(p, neu); $('vSave').textContent = ok ? 'Gespeichert' : ''; };
   let vt; $('vNotiz').oninput = e => { clearTimeout(vt); const n = e.target.value.trim(); vt = setTimeout(() => speichereV({ n }), 700); };
   $('vPl').onchange = e => speichereV({ pl: e.target.value || null });
 }
