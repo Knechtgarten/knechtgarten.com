@@ -68,6 +68,7 @@
 @media (max-width:700px){.kgv-knoepfe{display:none;}}`;
 
   let O = null, ME = null, START = null, NAMEN = {}, ADMIN = false;
+  let letzterBezug = null, STILL = []; // STILL: Zeitfenster [von, bis] nach Zurück/Vorwärts
   let schritte = [], ST = {}, REDO = [], grenze = 0, offen = false, filterIch = false, sel = null, liste = [], limit = 300, laeuft = false;
 
   function toast(t, err){ const d = document.createElement('div'); d.className = 'kgv-toast' + (err ? ' err' : ''); d.textContent = t; document.body.appendChild(d); setTimeout(() => d.remove(), err ? 6000 : 2600); }
@@ -99,10 +100,13 @@
   // --- eigene Schritte (Zurück/Vorwärts) ---
   async function eigeneLaden(){
     if(!ME) return;
+    const bz = O.bezug ? O.bezug() : null; if(bz !== letzterBezug){ letzterBezug = bz; ST = {}; REDO = []; schritte = []; grenze = 0; START = new Date(Date.now() - 1000).toISOString(); sel = null; if(offen) listeLaden(); }
     const { data, error } = await abfrage(O.sb.from('verlauf').select('id,zeit,benutzer_id,tabelle,datensatz_id,aktion,alt,neu,rueck,tx')).eq('benutzer_id', ME).eq('rueck', false).gte('zeit', START).order('id').limit(1000);
     if(error) return;
     schritte = buendeln(data || []);
-    const maxId = data?.length ? data[data.length - 1].id : 0;
+    // Schreibt das Tool direkt nach Zurück/Vorwärts selbst etwas (Neuberechnung beim Laden), gehört das nicht als eigener Schritt dazu
+    schritte.forEach(s => { if(!ST[s.min] && STILL.some(w => s.von >= w[0] && s.von <= w[1])) ST[s.min] = 'intern'; });
+    const maxId = Math.max(0, ...schritte.filter(s => ST[s.min] !== 'intern').map(s => s.max));
     if(REDO.length && maxId > grenze){ REDO.forEach(k => ST[k] = 'verworfen'); REDO = []; }
     knoepfe();
   }
@@ -110,6 +114,7 @@
   const redoSchritt = () => REDO.length ? schritte.find(s => s.min === REDO[REDO.length - 1]) : null;
 
   async function anwenden(ids, richtung, erzwingen){
+    if(O.vorher && !erzwingen) await O.vorher();
     const { data, error } = await O.sb.rpc('verlauf_anwenden', { ids, richtung, erzwingen: !!erzwingen });
     if(error){ toast('Fehler: ' + error.message, true); return false; }
     if(data?.ok) return true;
@@ -126,7 +131,7 @@
       const ids = s.e.map(e => e.id).sort((a, b) => b - a);
       if(!await anwenden(ids, 'zurueck')) return;
       grenze = Math.max(grenze, ...schritte.map(x => x.max)); ST[s.min] = 'zurueck'; REDO.push(s.min);
-      toast('Rückgängig: ' + txt(s).was); await O.neuLaden(); await eigeneLaden(); if(offen) await listeLaden();
+      toast('Rückgängig: ' + txt(s).was); STILL.push([Date.now() - 500, Date.now() + 6000]); await O.neuLaden(); await eigeneLaden(); if(offen) await listeLaden();
     } finally { laeuft = false; }
   }
   async function vor(){
@@ -135,7 +140,7 @@
       const ids = s.e.map(e => e.id).sort((a, b) => a - b);
       if(!await anwenden(ids, 'vor')) return;
       REDO.pop(); delete ST[s.min];
-      toast('Wiederholt: ' + txt(s).was); await O.neuLaden(); await eigeneLaden(); if(offen) await listeLaden();
+      toast('Wiederholt: ' + txt(s).was); STILL.push([Date.now() - 500, Date.now() + 6000]); await O.neuLaden(); await eigeneLaden(); if(offen) await listeLaden();
     } finally { laeuft = false; }
   }
 
@@ -240,7 +245,7 @@
   // --- Start ---
   KG.verlauf = {
     async start(opt){
-      O = opt; START = new Date(Date.now() - 1000).toISOString();
+      if(O){ O = opt; return; } O = opt; START = new Date(Date.now() - 1000).toISOString(); letzterBezug = O.bezug ? O.bezug() : null;
       if(!document.getElementById('kgv-css')){ const st = document.createElement('style'); st.id = 'kgv-css'; st.textContent = css; document.head.appendChild(st); }
       const { data: { session } } = await O.sb.auth.getSession(); ME = session?.user?.id || null;
       const { data: bn } = await O.sb.from('benutzer').select('id,anzeigename,email,rolle'); (bn || []).forEach(b => { NAMEN[b.id] = b.anzeigename || (b.email || '').split('@')[0]; if(b.id === ME) ADMIN = b.rolle === 'admin'; });
