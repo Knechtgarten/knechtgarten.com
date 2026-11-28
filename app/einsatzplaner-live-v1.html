@@ -540,6 +540,7 @@ body.kopiert, body.kopiert *{cursor:copy !important;}
 .row.azz .lane > .ferb.fer-betrieb{top:19px;}
 .azi{position:absolute;top:19px;height:15px;display:inline-flex;align-items:center;gap:2px;cursor:pointer;z-index:3;font-size:10px;color:#323E4E;}
 .teamrahmen{position:absolute;box-sizing:border-box;z-index:3;pointer-events:none;background:rgba(50,62,78,.075);border-left:1px solid rgba(50,62,78,.2);border-right:1px solid rgba(50,62,78,.2);} /* Team-Tag: feiner Schleier + feine Kante (Variante E, 2026-11-28) */
+.resrahmen{position:absolute;box-sizing:border-box;border:2px solid #D1DB5F;border-radius:5px;background:rgba(209,219,95,.08);pointer-events:none;z-index:3;} .resrahmen > span{position:absolute;left:5px;top:-1px;max-width:calc(100% - 10px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9.5px;font-weight:700;line-height:12px;color:#323E4E;background:#D1DB5F;padding:0 6px 1px;border-radius:0 0 4px 4px;} /* Platz reservieren (2026-11-28) */
 .teamband{position:absolute;bottom:0;height:4px;background:#323E4E;opacity:.85;border-radius:3px 3px 0 0;pointer-events:none;z-index:5;} /* Team-Tag: Band im Datumskopf */
 .row.teamz .azi{top:3px;} /* Arbeitsstart in der Team-Zeile */
 .azi svg{width:15px;height:15px;} .azi b{font-weight:700;background:rgba(255,255,255,.8);border-radius:3px;padding:0 2px;}
@@ -2353,6 +2354,25 @@ function teamRahmen(t){
     hd.querySelectorAll('.teamband').forEach(x => x.remove());
     hd.insertAdjacentHTML('beforeend', sp.map(([a, b]) => `<div class="teamband" style="left:${dx + x0 + X(a) + 1}px;width:${Math.max(4, XW(a, b) - 2)}px"></div>`).join('')); }
 }
+// Platz reservieren: grüner Rahmen ganz aussen um Hauptzeile + Zeile «offen» der Person, Schild hängt innen oben (2026-11-28)
+function resRahmen(t){
+  if(zoom === 'jahr' || !RESR.length) return; const g = t.querySelector('.grid'); if(!g) return; const gr = g.getBoundingClientRect();
+  g.insertAdjacentHTML('beforeend', RESR.map(r => { const row = g.querySelector(`:scope > .row[data-mid="${r.mid}"]`); if(!row) return '';
+    const off = g.querySelector(`:scope > .row[data-offp="${r.mid}"]`), lane = row.querySelector('.lane'); if(!lane) return '';
+    const x0 = lane.getBoundingClientRect().left - gr.left, top = row.getBoundingClientRect().top - gr.top, bot = (off || row).getBoundingClientRect().bottom - gr.top;
+    const l = x0 + X(r.s) - 3, w = Math.max(10, XW(r.s, r.e) + 6), lab = `Reserviert · ${r.arb} · ${r.n} ${r.n === 1 ? 'Kunde' : 'Kunden'}`;
+    return `<div class="resrahmen" style="top:${top}px;height:${bot - top}px;left:${l}px;width:${w}px" title="${esc(lab + ' – Platz in der Zeile von ' + (P[r.mid]?.name || '') + ' freihalten')}">${w > 60 ? `<span>${esc(lab)}</span>` : ''}</div>`; }).join(''));
+}
+// Liegt [s, e) in einem Reservierungsrahmen der Person? Dann vor dem Einplanen fragen
+const resKonflikt = (mid, s, e) => RESR.find(r => r.mid === mid && r.s < e - 1e-6 && r.e > s + 1e-6) || null;
+function resFrage(r, pt){
+  return new Promise(res => {
+    const pop = popAt({ left: pt.x - 20, bottom: pt.y }, `<b>Platz ist reserviert</b><span class="small">Hier ist bei ${esc(P[r.mid]?.name || '')} Platz für <b>${esc(r.arb)}</b> reserviert (noch ${r.n} ${r.n === 1 ? 'Kunde' : 'Kunden'} offen). Der Rahmen wird dann länger.</span><div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-ghost" data-rq="ab">Abbrechen</button><button class="btn btn-primary" data-rq="ok">Trotzdem einplanen</button></div>`);
+    pop.classList.add('upop');
+    const fertig = w => { removeEventListener('pointerdown', aussen, true); removeEventListener('keydown', esc_, true); $('popwrap').innerHTML = ''; res(w === 'ok'); };
+    const aussen = e => { const b = e.target.closest('[data-rq]'); if(b){ e.preventDefault(); e.stopPropagation(); fertig(b.dataset.rq); } else if(!e.target.closest('.upop')) fertig('ab'); };
+    const esc_ = e => { if(e.key === 'Escape'){ e.preventDefault(); fertig('ab'); } else if(e.key === 'Enter'){ e.preventDefault(); fertig('ok'); } };
+    addEventListener('pointerdown', aussen, true); addEventListener('keydown', esc_, true); }); }
 // Planer füllt das Fenster bis unten (kein leerer Streifen unter dem Plan)
 function tlFuellen(){ const t = tlEl(); if(!t || EINGEBETTET) return; const h = Math.max(300, Math.floor(innerHeight - t.getBoundingClientRect().top - 2)); t.style.setProperty('height', h + 'px', 'important'); const a = $('aufp'); if(a) a.style.height = Math.max(300, Math.floor(innerHeight - a.getBoundingClientRect().top - 2)) + 'px'; }
 addEventListener('resize', () => tlFuellen());
@@ -2402,7 +2422,7 @@ function renderRows(){
   }
   const sl = t.scrollLeft, stp = t.scrollTop, vsl = {}; t.querySelectorAll('.vsc[data-vsc]').forEach(x => vsl[x.dataset.vsc] = x.scrollLeft);
   t.innerHTML = `<div class="grid" style="width:${W + NAMEW}px">${h}</div>`;
-  t.scrollLeft = sl; t.scrollTop = stp; t.querySelectorAll('.vsc[data-vsc]').forEach(x => { if(vsl[x.dataset.vsc]) x.scrollLeft = vsl[x.dataset.vsc]; }); phPanelZeichnen(); fokusRahmen(t); teamRahmen(t); stickLabels(); tlTopSync(); phBlock(t); swDropZeichnen();
+  t.scrollLeft = sl; t.scrollTop = stp; t.querySelectorAll('.vsc[data-vsc]').forEach(x => { if(vsl[x.dataset.vsc]) x.scrollLeft = vsl[x.dataset.vsc]; }); phPanelZeichnen(); fokusRahmen(t); teamRahmen(t); resRahmen(t); stickLabels(); tlTopSync(); phBlock(t); swDropZeichnen();
 }
 
 // ---------------------------------------------------------------------------
@@ -3285,10 +3305,10 @@ async function ladePflege(){
     const y = new Date().getFullYear();
     const [kat, arb, ku, kk, ka, st, feld] = await Promise.all([
       fetchAll(() => sb.from('pflege_kategorie').select('id,name,kuerzel,farbe')),
-      fetchAll(() => sb.from('pflege_arbeit').select('id,kategorie_id,name,standard_kws,dauer_min,ablauf')),
+      fetchAll(() => sb.from('pflege_arbeit').select('id,kategorie_id,name,standard_kws,dauer_min,ablauf,platz_reservieren')),
       fetchAll(() => sb.from('pflege_kunde').select('kunde_id,abo_typ,wunsch_wochentage,notiz'), ['kunde_id']),
       fetchAll(() => sb.from('pflege_kunde_kategorie').select('id,kunde_id,kategorie_id,werte,bewaesserung')),
-      fetchAll(() => sb.from('pflege_kunde_arbeit').select('id,kunde_kategorie_id,arbeit_id,titel,beschrieb,kws,standard_aus,fixe_tage,abgewaehlte_jahre,rhythmus_jahre,start_jahr,dauer_min,allein,anmelden,fixe_woche,zustaendig_id,notiz')),
+      fetchAll(() => sb.from('pflege_kunde_arbeit').select('id,kunde_kategorie_id,arbeit_id,titel,beschrieb,kws,standard_aus,fixe_tage,abgewaehlte_jahre,rhythmus_jahre,start_jahr,dauer_min,allein,anmelden,fixe_woche,zustaendig_id,notiz,platz_reservieren')),
       fetchAll(() => sb.from('pflege_einsatz_status').select('kunde_kategorie_id,jahr,kw,buendel').in('jahr', [y, y + 1]), ['kunde_kategorie_id', 'jahr', 'kw', 'buendel']),
       fetchAll(() => sb.from('pflege_feld').select('id,kategorie_id,name,typ,einheit,reihenfolge'))
     ]);
@@ -3311,8 +3331,9 @@ const pfErledigt = (kk, y, w, b) => PF.st.has(pfKey(kk, y, w, b)) || PF.st.has(p
 function kwMonday(y, w){ const j4 = new Date(y, 0, 4); const mon = new Date(y, 0, 4 - ((j4.getDay() + 6) % 7) + (w - 1) * 7); return dayIdx(mon); }
 const pfJahrAktiv = (a, y) => { const r = +a.rhythmus_jahre || 1, s = +a.start_jahr || y; return r <= 1 || (y >= s && (y - s) % r === 0); }; // Jahresrhythmus aus dem Pflege-Tool (2026-11-27)
 const teamLaneId = () => (GRUPPEN.find(g => /pflege|service/i.test(g.name)) || GRUPPEN[0])?.id;
+let RESR = []; // Reservierungsrahmen (Platz reservieren)
 function computeProv(){
-  PROV = []; PROVLAY = {}; if(!PF || !showProv) return;
+  PROV = []; PROVLAY = {}; RESR = []; if(!PF || !showProv) return;
   let base = TODAY; while(dDate(base).getDay() === 0 || dDate(base).getDay() === 6) base++; const y0 = dDate(base + 3 - ((dDate(base).getDay() + 6) % 7)).getFullYear(), k0 = kw(base);
   const linked = new Set(EINS.filter(e => e.pkk).map(e => pfKey(e.pkk, e.pj, e.pkw, e.pb || '')));
   // KW = Startwoche. Offene aus bis zu 8 Wochen zurück reihen sich ab heute zuerst ein (rot «seit KW …»).
@@ -3327,14 +3348,14 @@ function computeProv(){
     const lane = pers ? 'p:' + pers.id : (teamLaneId() ? 'g:' + teamLaneId() : null); if(!lane) return;
     weeks.forEach(({ y, w, mon }) => {
       if(pfErledigt(kk.id, y, w, b) || linked.has(pfKey(kk.id, y, w, b)) || linked.has(pfKey(kk.id, y, w, ''))) return;
-      const arb = []; let min = 0, fehlt = false, allein = false, anm = false, fixe = false, fd = null;
+      const arb = []; let min = 0, fehlt = false, allein = false, anm = false, fixe = false, fd = null, res = null;
       liste.forEach(a => { if(!pfJahrAktiv(a, y)) return; const std = a.arbeit_id ? PF.arb[a.arbeit_id] : null;
         // Zeitpunkt (2026-11-27): Standardwochen (ausser beim Kunden ausgeschaltet) und/oder fixe Tage [{kw, wt}]
         const fx = (Array.isArray(a.fixe_tage) ? a.fixe_tage : []).find(f => f && f.kw === w);
         const inStd = std && !a.standard_aus && (std.standard_kws || []).includes(w);
-        if(!fx && !inStd) return; if(fx && fd == null) fd = fx.wt || 1; arb.push(std ? std.name : a.titel); if(a.allein) allein = true; if(a.fixe_woche) fixe = true; /* «Fix» beim Kunden: Vorschlag direkt in der Zeile der zuständigen Person (2026-11-27) */ const dm = a.dauer_min ?? std?.dauer_min; if(dm == null) fehlt = true; min += dm ?? 60; });
+        if(!fx && !inStd) return; if(fx && fd == null) fd = fx.wt || 1; arb.push(std ? std.name : a.titel); if(res == null && (a.platz_reservieren ?? !!std?.platz_reservieren)) res = std ? std.name : (a.titel || 'Eigene Arbeit'); /* Platz reservieren (2026-11-28) */ if(a.allein) allein = true; if(a.fixe_woche) fixe = true; /* «Fix» beim Kunden: Vorschlag direkt in der Zeile der zuständigen Person (2026-11-27) */ const dm = a.dauer_min ?? std?.dauer_min; if(dm == null) fehlt = true; min += dm ?? 60; });
       if(!arb.length) return;
-      PROV.push({ id: pfKey(kk.id, y, w, b), kk: kk.id, b, y, w, mon, kid: kk.kunde_id, kat, arb, min, fehlt, allein, anm, fixe, lane, key: fixe && lane.startsWith('p:') ? 'pf:' + lane.slice(2) : lane, wd: [], fd, fdTag: fd != null ? mon + fd - 1 : null });
+      PROV.push({ id: pfKey(kk.id, y, w, b), kk: kk.id, b, y, w, mon, kid: kk.kunde_id, kat, arb, res, min, fehlt, allein, anm, fixe, lane, key: fixe && lane.startsWith('p:') ? 'pf:' + lane.slice(2) : lane, wd: [], fd, fdTag: fd != null ? mon + fd - 1 : null });
     });
     });
   });
@@ -3362,6 +3383,13 @@ function computeProv(){
     });
     PROVLAY[key] = out.sort((a, b) => a.s - b.s);
   });
+  // Platz reservieren (2026-11-28): pro Person und Arbeit ein Rahmen vom ersten bis zum letzten noch offenen Kunden der Kette
+  // (die Kette überspringt Wochenende, Absenzen und fixe Termine schon, darum wird der Rahmen dort einfach länger)
+  RESR = [];
+  Object.entries(PROVLAY).forEach(([key, out]) => { if(!key.startsWith('p:')) return; const mid = key.slice(2), by = {};
+    out.filter(x => x.p.res && !x.p.fixe).forEach(x => (by[x.p.res] ??= []).push(x));
+    Object.entries(by).forEach(([arb, l]) => { l.sort((a, b) => a.s - b.s); let r = null;
+      l.forEach(x => { if(r && x.s - r.e <= 3){ r.e = Math.max(r.e, x.e); r.n++; } else { r = { mid, arb, s: x.s, e: x.e, n: 1 }; RESR.push(r); } }); }); });
 }
 // Pflege-Vorschlag: Farbe des Projektleiters (Pflegekunde › Kategorie, sonst Vorgabe der Kategorie); «selbst» schwarz, keiner grau (2026-11-27)
 const provFarbe = p => P[VNOT[p.id]?.pl]?.farbe || SYSTEM; // Pflege-Vorschlag = Systemfarbe (Projektleiter pro Kategorie entfällt, 2026-11-27)
@@ -3573,6 +3601,7 @@ async function legeAn(art, extra = {}){
   const kurz = L.b - L.a < .5 - 1e-6;
   const kind = art === 'absenz' ? 'absenz' : art === 'hilfe' ? 'hilfe' : (kurz || istTeamZeile(L.mid) ? 'termin' : 'baustelle'); // Team-Anlass = Termin ohne Zuständige
   const mePl = myPerson(); const pl = kind === 'baustelle' ? (P[L.mid]?.ist_projektleiter ? L.mid : (mePl?.ist_projektleiter ? mePl.id : null)) : null;
+  if((kind === 'termin' || kind === 'baustelle') && art !== 'offen' && !P[L.mid]?.ist_ablage && L.lane?.dataset?.off !== '1'){ const r = resKonflikt(L.mid, L.a, L.b); if(r && !(await resFrage(r, { x: (L.r?.left || 200) + 20, y: L.r?.bottom || 200 }))) return; } // Platz reserviert
   const host = L.host; if(host && !host.frei && !host.soll && LAY[host.id]?.n){ host.soll = LAY[host.id].n; await speichere(host, { soll_tage: host.soll }); } // eingeschoben: Schloss zu = Tage festhalten, Balken zeigt rot
   const neu = await neuerEinsatz({ mid: L.mid, kind, s: L.a, e: L.b, title: extra.title || '', link: extra.link || null, mp: extra.mp || null, ok: art !== 'offen' && L.lane?.dataset?.off !== '1', fw: false, pl, allein: art === 'termin' && !!L.allein, frei: kind === 'termin' || kind === 'baustelle' /* von Hand = Schloss offen */ }, kind === 'termin' || kind === 'baustelle');
   if(neu && (kind === 'absenz' || kind === 'hilfe')) toast(`${kind === 'absenz' ? extra.title : labOf(neu)} eingetragen${neu._teile?.length ? ` · ${neu._teile.length + 1} Stücke` : ''}`, () => kind === 'hilfe' ? hilfeWeg(neu) : loescheEinsatz(neu));
@@ -4015,7 +4044,7 @@ function bindWindow(){
       const p = PROV.find(x => x.id === d.pid); const ln = document.elementFromPoint(e.clientX, e.clientY)?.closest('.lane[data-mid]');
       if(p && ln && canEdit(ln.dataset.mid) && P[ln.dataset.mid]){ const len = p.min / 60 / 12; const s = zoom === 'tag' || zoom === 'woche' ? Math.round(uAt(e.clientX) * 48) / 48 : Math.floor(uAt(e.clientX)) + 1 / 12;
         const oben = ln.dataset.off !== '1', okZ = oben, fwZ = false; // Zeile bestimmt: Hauptzeile = fix, Zeile «offen» = offen (Entscheid 2026-11-27) // fixe Woche mit Anmeldung: oben, aber gestrichelt // Personenzeile = abgemacht, offene Linie = offen
-        const tmp = { id: '_tmp', mid: ln.dataset.mid, kind: 'termin', s: r48(s), e: r48(s + len), title: '', ok: okZ }; EINS.push(tmp); // erst prüfen: übereinander / reinschieben / dritter Termin
+        const tmp = { id: '_tmp', mid: ln.dataset.mid, kind: 'termin', s: r48(s), e: r48(s + len), title: '', ok: okZ, _prov: true }; EINS.push(tmp); // erst prüfen: übereinander / reinschieben / dritter Termin
         const pr = await ablegenPruefen(tmp, { x: e.clientX, y: e.clientY }); EINS = EINS.filter(x => x !== tmp); renderRows();
         if(pr !== 'ab') await provToEinsatz(p.id, ln.dataset.mid, s, s + len, okZ, undefined, tmp.ueber, tmp.weicht, fwZ); }
       return;
@@ -4223,6 +4252,9 @@ async function pausenGeaendert(it, pz0, nV){
 async function ablegenPruefen(it, pt){
   if(istOffen(it)) return 'ok';
   compute();
+  // Platz reservieren: liegt der Termin in einem grünen Rahmen dieser Person (Rahmen ohne diesen Termin gerechnet)? Dann fragen
+  if(it.kind !== 'absenz' && !it.pkk && !it._prov && !P[it.mid]?.ist_ablage && RESR.length){ const m0 = it.mid; it.mid = '_'; compute(); const r = resKonflikt.call(null, m0, it.s, it.e); it.mid = m0; compute();
+    if(r && !(await resFrage(r, pt))) return 'ab'; }
   const zuViele = () => { compute(); const L = LAY[it.id]; return !!L && L.free.some(k => ALL.filter(o => o.mid === it.mid && LAY[o.id]?.dup?.[k]).length > 2); };
   // Tage der unterbrochenen langen Termine festhalten (ohne it gezählt), damit rot «x von y T» erscheint
   const tageFesthalten = async H => { const mid0 = it.mid; it.mid = '_'; compute(); const n0 = {}; H.forEach(h => { if(!h.rep && !h.soll && !h.frei && h.kind !== 'absenz' && h.e - h.s > 1 + 1e-6) n0[h.id] = LAY[h.id]?.n; }); it.mid = mid0; compute();
