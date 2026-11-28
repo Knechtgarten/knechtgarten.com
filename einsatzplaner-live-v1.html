@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <script src="/kg-pw-schutz.js?v=5"></script>
-<script src="/kg-stil.js?v=102"></script>
+<script src="/kg-stil.js?v=103"></script>
+<script src="/kg-verlauf.js?v=1"></script>
 <title>Einsatzplaner – Knechtgarten</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
@@ -540,6 +541,7 @@ body.kopiert, body.kopiert *{cursor:copy !important;}
 .row.azz .lane > .ferb.fer-betrieb{top:19px;}
 .azi{position:absolute;top:19px;height:15px;display:inline-flex;align-items:center;gap:2px;cursor:pointer;z-index:3;font-size:10px;color:#323E4E;}
 .teamrahmen{position:absolute;box-sizing:border-box;z-index:3;pointer-events:none;background:rgba(50,62,78,.075);border-left:1px solid rgba(50,62,78,.2);border-right:1px solid rgba(50,62,78,.2);} /* Team-Tag: feiner Schleier + feine Kante (Variante E, 2026-11-28) */
+.bar.vgeaendert{outline:2.5px solid #D1DB5F;outline-offset:1px;} body.vorschau #tl .lane{background-color:#FAFBFC;} /* Verlauf-Vorschau (2026-11-28) */
 .resrahmen{position:absolute;box-sizing:border-box;border:2px solid #D1DB5F;border-radius:5px;background:rgba(209,219,95,.08);pointer-events:none;z-index:3;} .resrahmen > span{display:none;position:absolute;left:5px;top:-1px;z-index:20;box-shadow:0 2px 6px rgba(35,43,53,.18);max-width:calc(100% - 10px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9.5px;font-weight:700;line-height:12px;color:#323E4E;background:#D1DB5F;padding:0 6px 1px;border-radius:0 0 4px 4px;} .resrahmen.zeig{z-index:30;} .resrahmen.zeig > span{display:block;} /* Platz reservieren (2026-11-28): Schild nur beim Darüberfahren, liegt über den Terminen */
 .teamband{position:absolute;bottom:0;height:4px;background:#323E4E;opacity:.85;border-radius:3px 3px 0 0;pointer-events:none;z-index:5;} /* Team-Tag: Band im Datumskopf */
 .row.teamz .azi{top:3px;} /* Arbeitsstart in der Team-Zeile */
@@ -1040,6 +1042,7 @@ const I = id => `<svg class="i"><use href="#i-${id}"/></svg>`;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 // ?eingebettet = Widget auf der Startseite: nur der Plan in der Wochenansicht, nur ansehen, Einstellungen bleiben unverändert
 const EINGEBETTET = new URLSearchParams(location.search).has('eingebettet');
+let VORSCHAU = false; // Verlauf: früherer Stand wird nur angezeigt (kg-verlauf.js, 2026-11-28)
 if(EINGEBETTET) document.documentElement.classList.add('ep-eingebettet');
 // Farben im Widget: meine = nur eigene Einsätze farbig, alle = wie im Planer, aus = alles nur mit Rahmen
 let EFARBE = new URLSearchParams(location.search).get('farbe') || 'meine';
@@ -1082,6 +1085,7 @@ async function pruefeAnmeldung(){
   zeigeNur('appMain');
   await ladeAlles();
   await starteLive();
+  verlaufStarten();
   route();
 }
 $('loginBtn').addEventListener('click', async () => {
@@ -1579,7 +1583,7 @@ const first = n => String(n || '').split(' ')[0];
 // Die Titelzeile einer Gruppe darf bearbeiten, wer eine Zeile dieser Gruppe bearbeiten darf (siehe Team-Lane).
 // Ohne Gruppe (alte Konten): wie bisher Büro alles, sonst die eigene Zeile.
 const canEdit = mid => {
-  if(EINGEBETTET) return false;
+  if(EINGEBETTET || VORSCHAU) return false;
   const w = window.KG && KG.darf ? KG.darf('plan', 'einsaetze', 'bearbeiten') : null;
   if(w === null) return isBuero() || !!(P[mid] && P[mid].benutzer_id === ME);
   if(w === 'A') return true;
@@ -5116,7 +5120,62 @@ function renderFeiertage(){
 // Live-Abgleich: Änderungen anderer erscheinen sofort
 // ---------------------------------------------------------------------------
 let reloadT = null;
-async function neuLaden(){ await ladeAlles(); if(drag) return; if(boardRef) renderBoard(); if(VIEW === 'plan'){ renderRows(); renderChips(); renderAuf(); if(selId && !byId(selId)) closePanel(); } else render(); }
+async function neuLaden(){ if(VORSCHAU) return; await ladeAlles(); if(drag) return; if(boardRef) renderBoard(); if(VIEW === 'plan'){ renderRows(); renderChips(); renderAuf(); if(selId && !byId(selId)) closePanel(); } else render(); }
+// ---------------------------------------------------------------------------
+// Verlauf / Zurück / Vorwärts (kg-verlauf.js, Tabelle verlauf, 2026-11-28)
+// ---------------------------------------------------------------------------
+const VTAB = { planer_ressource_einsatz: 'Maschine', planer_einsatz_info: 'Wichtige Info', planer_vorrat: 'Vorrat', planer_vorschlag_notiz: 'Pflege-Vorschlag', planer_markierung: 'Markierung', planer_magazin: 'Magazin', planer_pendenz: 'Pendenz', planer_ferien: 'Ferien' };
+const vDatum = iso => { if(!iso) return ''; const d = new Date(iso); return `${d.getDate()}.${d.getMonth() + 1}.`; };
+function verlaufText(es){
+  const e = es.find(x => x.tabelle === 'planer_einsatz') || es[0], r = e.neu || e.alt || {};
+  const mehr = es.length > 1 ? ` · +${es.length - 1}` : '';
+  if(e.tabelle !== 'planer_einsatz'){
+    const t = VTAB[e.tabelle] || e.tabelle, n = r.titel || kName(KUNDEN[r.kunde_id]) || '';
+    return { was: `${t} ${e.aktion === 'I' ? 'erfasst' : e.aktion === 'D' ? 'gelöscht' : 'geändert'}${n ? ': ' + n : ''}`, detail: mehr ? 'mit weiteren Änderungen' : '' };
+  }
+  let lab = ''; try { lab = labOf(rowToItem(r)); } catch(x){ lab = r.titel || ''; }
+  const pn = id => P[id]?.name || '';
+  if(e.aktion === 'I') return { was: `Neu: ${lab}`, detail: `${pn(r.person_id)} · ${vDatum(r.beginn)}${r.ende && vDatum(r.ende) !== vDatum(r.beginn) ? '–' + vDatum(r.ende) : ''}${mehr}` };
+  if(e.aktion === 'D') return { was: `Gelöscht: ${lab}`, detail: `${pn(r.person_id)} · ${vDatum(r.beginn)}${mehr}` };
+  const a = e.alt, n = e.neu, anders = k => JSON.stringify(a[k]) !== JSON.stringify(n[k]);
+  if(anders('person_id')) return { was: `${lab} zu ${first(pn(n.person_id))}`, detail: `von ${pn(a.person_id)} · ${vDatum(n.beginn)}${mehr}` };
+  if(anders('beginn') && anders('ende')) return { was: `${lab} verschoben`, detail: `${pn(n.person_id)} · ${vDatum(a.beginn)} → ${vDatum(n.beginn)}${mehr}` };
+  if(anders('beginn') || anders('ende')) return { was: `${lab}: Dauer geändert`, detail: `${pn(n.person_id)} · ${vDatum(n.beginn)}–${vDatum(n.ende)}${mehr}` };
+  if(anders('abgemacht')) return { was: `${lab} ${n.abgemacht ? 'terminiert' : '– Terminierung offen'}`, detail: pn(n.person_id) + mehr };
+  return { was: `${lab} geändert`, detail: pn(n.person_id) + mehr };
+}
+// Vorschau: aktueller Stand minus alle Änderungen danach (nur Einsätze), nur Ansicht
+async function vorschauZeigen(nach){
+  const von = fromU(0), bis = fromU(NDAYS);
+  const [e, s] = await Promise.all([
+    fetchAll(() => sb.from('planer_einsatz').select('*, planer_datei(id,art,name,storage_pfad)').lt('beginn', bis).gt('ende', von)),
+    fetchAll(() => sb.from('planer_einsatz').select('*, planer_datei(id,art,name,storage_pfad)').not('wdh', 'is', null).lt('beginn', bis))]);
+  const M = new Map(); e.concat(s).forEach(r => M.set(r.id, r));
+  const geaendert = new Set();
+  [...nach].filter(x => x.tabelle === 'planer_einsatz').sort((p, q) => q.id - p.id).forEach(x => {
+    geaendert.add(x.datensatz_id);
+    if(x.aktion === 'I') M.delete(x.datensatz_id);
+    else if(x.aktion === 'D') M.set(x.datensatz_id, { ...x.alt, planer_datei: [] });
+    else { const cur = { ...(M.get(x.datensatz_id) || { ...x.neu, planer_datei: [] }) }; Object.keys(x.alt).forEach(k => { if(JSON.stringify(x.alt[k]) !== JSON.stringify(x.neu[k])) cur[k] = x.alt[k]; }); M.set(x.datensatz_id, cur); }
+  });
+  VORSCHAU = true; document.body.classList.add('vorschau'); closePanel?.();
+  EINS = [...M.values()].map(rowToItem);
+  if(VIEW === 'plan'){ renderRows(); document.querySelectorAll('#tl .bar[data-id]').forEach(b => b.classList.toggle('vgeaendert', geaendert.has(b.dataset.id))); } else render();
+}
+async function vorschauEnde(){ if(!VORSCHAU) return; VORSCHAU = false; document.body.classList.remove('vorschau'); await neuLaden(); }
+// In der Vorschau nichts ändern: Klicks im Planer abfangen (Scrollen geht weiter)
+['pointerdown', 'click', 'dblclick', 'contextmenu'].forEach(ev => addEventListener(ev, e => {
+  if(!VORSCHAU || !e.target.closest?.('#appMain') || e.target.closest('.kgv-leiste')) return;
+  e.stopPropagation(); if(ev !== 'pointerdown') e.preventDefault();
+  if(ev === 'click') toast('Vorschau eines früheren Stands – zum Bearbeiten im Verlauf «Zurück zu jetzt» wählen');
+}, true));
+function verlaufStarten(){
+  if(EINGEBETTET || !window.KG?.verlauf) return;
+  KG.verlauf.start({ sb, bereich: 'planer', beschreibe: verlaufText, ganz: 'Ganzen Planer', ganzNurAdmin: true,
+    neuLaden: async () => { if(VORSCHAU){ VORSCHAU = false; document.body.classList.remove('vorschau'); } await neuLaden(); },
+    vorschau: vorschauZeigen, vorschauEnde });
+}
+
 async function starteLive(){
   // Live-Verbindung braucht das Login-Ticket, sonst gilt sie als anonym und die Rechte filtern alles weg
   const { data: { session } } = await sb.auth.getSession(); if(session) await sb.realtime.setAuth(session.access_token);
