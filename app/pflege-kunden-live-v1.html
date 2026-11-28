@@ -296,6 +296,7 @@ tbody tr:last-child td{border-bottom:none;}
 .sp-item{all:unset;cursor:pointer;display:flex;justify-content:space-between;gap:10px;padding:8px;border-radius:5px;font-size:12.5px;}
 .sp-item:hover{background:var(--soft);}
 .addk{position:relative;margin-left:12px;} .addk > summary{list-style:none;display:inline-flex;align-items:center;gap:6px;padding:4px 12px;font-size:12.5px;cursor:pointer;} .addk > summary::-webkit-details-marker{display:none;} .addk > summary .i{width:14px;height:14px;} .sp-da{cursor:default;color:var(--muted);} .sp-da:hover{background:none;} .sp-sep{border-top:1px solid var(--line);margin:4px 0;} .sp-eigen{font-weight:700;color:var(--primary);} .sp-eigen span{display:inline-flex;align-items:center;gap:6px;} .sp-eigen .i{width:14px;height:14px;} .sp-panel{max-height:60vh;overflow:auto;} /* «Arbeit hinzufügen» (2026-11-28) */
+.pf-hl{display:flex;align-items:center;gap:14px;} .pf-sort button{font-size:12px;} .pf-kw{font-weight:700;color:var(--primary);font-variant-numeric:tabular-nums;} .pf-kdot{margin-right:6px;} .pf-occ{font-size:12px;color:#4C5C70;} /* Sortierung Kategorie | Jahresplan (2026-11-28) */
 .wt-ed{cursor:text;border-radius:4px;padding:0 3px;margin-left:-3px;outline:none;} .wt-ed:hover{background:var(--soft);} .wt-ed:focus{background:#fff;box-shadow:0 0 0 1px var(--line);} /* eigene Arbeit direkt umbenennen */
 .spick summary{border:0;padding:6px 0;background:transparent;font-size:12.5px;}
 
@@ -714,7 +715,7 @@ const S = {
   kat: [], felder: [], arbeiten: [], tabellen: [], spalten: [], zust: [],
   kunden: [], obj: [], kk: [], kz: [], ka: [], fotos: [], fk: [], urls: {}, dok: [], dk: [], eb: {}, auNur: true, auZeigen: 20, auVon: '',
   f: { q: '', abo: [], ma: [], kat: '', tags: [], kanal: [], reg: [], ohneEb: false, pruefen: false }, tags: [], reg: [], regPlz: {},
-  ktab: null, pfKat: '', kachelAuf: {}, kwAsk: null, modal: null, fotoTag: '', hochladen: 0, lb: null, bpOffen: new Set(), bpLaeuft: false, bpSys: {}
+  ktab: null, pfKat: '', pfSort: (() => { try { return localStorage.getItem('pfSort') || 'kat'; } catch { return 'kat'; } })(), kachelAuf: {}, kwAsk: null, modal: null, fotoTag: '', hochladen: 0, lb: null, bpOffen: new Set(), bpLaeuft: false, bpSys: {}
 };
 const katById = id => S.kat.find(k => k.id === id);
 const felderVon = katId => S.felder.filter(f => f.kategorie_id === katId).sort(nachReihe);
@@ -1274,23 +1275,31 @@ function pflegeZeilen(kks){
     .map(ka => ({ ka, kk: kkIds.get(ka.kunde_kategorie_id) }))
     .sort((a, b) => katReihe(a.kk) - katReihe(b.kk) || (wochenVon(a.ka)[0] ?? 99) - (wochenVon(b.ka)[0] ?? 99) || arbName(a.ka).localeCompare(arbName(b.ka), 'de'));
 }
+// Jahresplan (2026-11-28): jede Arbeit einmal pro Woche, in der sie vorkommt (Standardwochen + fixe Tage), nach KW sortiert; ohne Zeitpunkt ans Ende
+function jahrZeilen(zeilen){
+  const out = [];
+  zeilen.forEach(z => { const occ = [...stdWochen(z.ka).map(kw => ({ kw, art: 'std' })), ...fixeTage(z.ka).map(f => ({ kw: f.kw, art: 'fix', wt: f.wt || 1 }))];
+    (occ.length ? occ : [{ kw: 99, art: null }]).forEach(o => out.push({ ...z, occ: o })); });
+  return out.sort((a, b) => a.occ.kw - b.occ.kw || (a.occ.wt || 0) - (b.occ.wt || 0) || katReihe(a.kk) - katReihe(b.kk) || arbName(a.ka).localeCompare(arbName(b.ka), 'de'));
+}
 function pflegeHtml(kks){
   const alle = pflegeZeilen(kks);
   if(S.pfKat && !alle.some(z => z.kk.kategorie_id === S.pfKat)) S.pfKat = '';
   const zeilen = alle.filter(z => !S.pfKat || z.kk.kategorie_id === S.pfKat);
   const katsMit = S.kat.filter(c => alle.some(z => z.kk.kategorie_id === c.id));
   let vorher = null;
-  const zeile = ({ ka, kk }) => {
+  let kwVorher = null; const jahr = S.pfSort === 'jahr';
+  const zeile = ({ ka, kk, occ }) => {
     const kat = katById(kk.kategorie_id), erste = kat?.id !== vorher; vorher = kat?.id;
     const a = ka.arbeit_id && S.arbeiten.find(x => x.id === ka.arbeit_id), r = +ka.rhythmus_jahre || 1;
     const ablauf = a ? (a.ablauf || '').split('\n').map(s => s.replace(/^[-•*\d.)\s]+/, '').trim()).filter(Boolean) : [];
     const zuOk = !!ka.zustaendig_id, fix = !!ka.fixe_woche && zuOk; // Fix nur mit zuständiger Person sinnvoll
     return `<tr data-id="${ka.id}" data-kk="${kk.id}" class="kg-zeile">
-      <td>${erste && kat ? `<span class="pf-kat">${dot(kat)}${esc(kat.name)}</span>` : ''}</td>
+      <td>${jahr ? (occ.kw !== kwVorher ? ((kwVorher = occ.kw), `<span class="pf-kw">${occ.kw < 99 ? 'KW ' + occ.kw : 'ohne'}</span>`) : '') : erste && kat ? `<span class="pf-kat">${dot(kat)}${esc(kat.name)}</span>` : ''}</td>
       <td><select class="zs${zuOk ? '' : ' leer'}" data-act="arb-zust" aria-label="Zuständig"><option value="">niemand</option>${zustAuswahl(zuOk ? [ka.zustaendig_id] : []).map(b => `<option value="${b.id}"${b.id === ka.zustaendig_id ? ' selected' : ''}>${esc(zustName(b.id))}</option>`).join('')}</select></td>
-      <td>${a ? `<span class="wt-n"${ablauf.length ? ` title="${esc('Ablauf:\n• ' + ablauf.join('\n• '))}"` : ''}>${esc(a.name)}</span>`
+      <td>${jahr && kat ? `<span class="pf-kdot" title="${esc(kat.name)}">${dot(kat)}</span>` : ''}${a ? `<span class="wt-n"${ablauf.length ? ` title="${esc('Ablauf:\n• ' + ablauf.join('\n• '))}"` : ''}>${esc(a.name)}</span>`
         : `<span class="wt-n wt-ed" contenteditable="plaintext-only" spellcheck="false" data-act="zus-titel" title="Klicken zum Umbenennen">${esc(ka.titel || 'Eigene Arbeit')}</span>${ka.beschrieb ? `<div class="wt-bes" title="${esc(ka.beschrieb)}">${esc(ka.beschrieb.split('\n')[0])}</div>` : ''}`}</td>
-      <td>${zeitpunktHtml(ka)}</td>
+      <td>${jahr ? `<span class="pf-occ">${occ.art === 'std' ? 'Standardwoche' : occ.art === 'fix' ? 'Fixer Tag · ' + WT_NAMEN[(occ.wt || 1) - 1] : 'kein Zeitpunkt'}</span>` : zeitpunktHtml(ka)}</td>
       <td><span class="zt"><input class="tin" type="text" inputmode="decimal" data-act="arb-zeit" value="${zeitText(ka.dauer_min)}" placeholder="${a && a.dauer_min != null ? zeitText(a.dauer_min) : '–'}" title="${a && a.dauer_min != null ? 'Standard: ' + zeitText(a.dauer_min) + ' Std. – hier für diesen Kunden überschreiben' : 'Zeit für diesen Kunden in Stunden (z. B. 1,5)'}" aria-label="Zeit in Stunden"><span>Std.</span></span></td>
       <td><span class="wt-kn">
         <span class="seg${zuOk ? '' : ' aus'}" title="${zuOk ? 'Offen = Vorschlag auf der offenen Linie, Fix = direkt in der Zeile der zuständigen Person' : 'Erst eine zuständige Person wählen'}"><button type="button" data-act="arb-fix" data-v="0" aria-pressed="${!fix}"${zuOk ? '' : ' disabled'}>Offen</button><button type="button" data-act="arb-fix" data-v="1" aria-pressed="${fix}"${zuOk ? '' : ' disabled'}>Fix</button></span>
@@ -1306,7 +1315,7 @@ function pflegeHtml(kks){
   const da = new Set(alle.filter(z => z.ka.arbeit_id).map(z => z.ka.arbeit_id));
   const gruppen = S.kat.map(c => ({ c, l: [...arbeitenVon(c.id)].sort((x, y) => x.name.localeCompare(y.name, 'de')) })).filter(g => g.l.length); // alle Standardarbeiten, vorhandene ausgegraut
   return `<section class="card panel">
-    <div class="panel-h"><h3>Pflege</h3>
+    <div class="panel-h"><div class="pf-hl"><h3>Pflege</h3><span class="seg pf-sort" role="group" aria-label="Sortierung"><button type="button" data-act="pf-sort" data-v="kat" aria-pressed="${!jahr}" title="Gruppiert nach Gartenpflege, Bewässerung, Pool">Nach Kategorie</button><button type="button" data-act="pf-sort" data-v="jahr" aria-pressed="${jahr}" title="Alle Einsätze nach Kalenderwoche – wer mehrmals vorkommt, erscheint in jeder Woche">Jahresplan</button></span></div>
       <details class="ms spick addk" id="spick">
         <summary class="btn btn-ghost">${I('plus')}Arbeit hinzufügen</summary>
         <div class="ms-panel sp-panel">
@@ -1321,8 +1330,8 @@ function pflegeHtml(kks){
         ${katsMit.map(c => `<button type="button" data-act="pf-kat" data-kat="${c.id}" aria-pressed="${S.pfKat === c.id}">${dot(c)}${esc(c.name)} <span>${alle.filter(z => z.kk.kategorie_id === c.id).length}</span></button>`).join('')}
       </div>` : ''}</div>
     <div class="pf-tw"><table class="wt wt-arb">
-      <thead><tr><th class="w-kat">Kategorie</th><th class="w-zs">Zuständig</th><th class="w-arb">Arbeit</th><th class="w-wo">Zeitpunkt</th><th class="w-zt" title="Zeit pro Einsatz. Grau = Standard der Arbeit, hier überschreibbar.">Zeit</th><th class="w-kn"></th></tr></thead>
-      <tbody>${zeilen.map(zeile).join('') || '<tr><td colspan="6" class="muted small">Noch keine Arbeiten. Oben über «Arbeit hinzufügen» erfassen.</td></tr>'}</tbody>
+      <thead><tr><th class="w-kat">${jahr ? "Woche" : "Kategorie"}</th><th class="w-zs">Zuständig</th><th class="w-arb">Arbeit</th><th class="w-wo">Zeitpunkt</th><th class="w-zt" title="Zeit pro Einsatz. Grau = Standard der Arbeit, hier überschreibbar.">Zeit</th><th class="w-kn"></th></tr></thead>
+      <tbody>${(jahr ? jahrZeilen(zeilen) : zeilen).map(zeile).join('') || '<tr><td colspan="6" class="muted small">Noch keine Arbeiten. Oben über «Arbeit hinzufügen» erfassen.</td></tr>'}</tbody>
     </table></div>
   </section>`;
 }
@@ -2240,6 +2249,7 @@ appUndLeiste('click', async e => {
     if(await speichere('pflege_kunde', { kunde_id: kundeId }, { abo_typ: b.dataset.abo, aktualisiert_am: new Date().toISOString() })){ k.abo_typ = b.dataset.abo; render(); }
   }
   else if(act === 'pf-kat'){ S.pfKat = b.dataset.kat; render(); }
+  else if(act === 'pf-sort'){ S.pfSort = b.dataset.v; try { localStorage.setItem('pfSort', S.pfSort); } catch {} render(); }
   else if(act === 'kachel'){ // Kachel auf/zu; ohne Eintrag zuerst die Kategorie beim Kunden anlegen
     const katId = b.dataset.kat, kkK = kkVon(b) || await kkSicher(katId); if(!kkK) return;
     S.kachelAuf[katId] = !b.closest('.kachel').classList.contains('zu') ? false : true; render();
