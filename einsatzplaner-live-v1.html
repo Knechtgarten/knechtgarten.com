@@ -1442,7 +1442,7 @@ addEventListener('pointerdown', e => {
     z: Math.min((+el.dataset.vr || 1) - 1, Math.max(0, Math.floor((e.clientY - r.top) / VH))) }; } // Zeile unter der Maus
 });
 addEventListener('pointermove', e => {
-  if(!vDrag) return; const d = vDrag;
+  if(!vDrag) return; const d = vDrag; if(e.buttons === 0 && e.pointerType === 'mouse'){ dispatchEvent(new PointerEvent('pointerup', { clientX: e.clientX, clientY: e.clientY, pointerType: 'mouse' })); return; }
   if(!d.moved && Math.hypot(e.clientX - d.x0, e.clientY - d.y0) < 5) return;
   d.moved = true;
   if(d.art === 'bar'){
@@ -3855,6 +3855,7 @@ function bindWindow(){
   if(winBound) return; winBound = true;
   addEventListener('pointermove', e => {
     if(!drag || drag.kind === 'click') return;
+    if(e.buttons === 0 && e.pointerType === 'mouse'){ dispatchEvent(new PointerEvent('pointerup', { clientX: e.clientX, clientY: e.clientY, pointerType: 'mouse' })); return; } // Maustaste schon los (z. B. ausserhalb losgelassen): Ziehen sofort beenden
     if(drag.kind === 'bar'){
       if(!drag.ed && !drag.copy) return;
       if(!drag.moved && Math.abs(e.clientX - drag.x0) < 4 && Math.abs(e.clientY - drag.y0) < 4) return;
@@ -4052,6 +4053,9 @@ function bindWindow(){
         if(d.vown && z0 && z0.art === 'zuteilung' && !z0.eid){ vehWeg(z0); return; }
         openResPop(d.zid, d.rid, d.rect, d.u0); return; }
       const z = RESE.find(o => o.id === d.zid); if(!z) return;
+      // Übereinander gibt es nicht (2026-11-28): gleiche Maschine / gleiches Fahrzeug schon belegt = zurück
+      const zk = RESE.find(o => o !== z && o.rid === z.rid && o.art === z.art && o.s != null && o.e != null && o.s < z.e - 1e-6 && o.e > z.s + 1e-6);
+      if(zk){ z.s = d.s0; z.e = d.e0; renderRows(); toast(`${resName(resById(d.rid))} ist dort schon eingeteilt – übereinander geht nicht.`, null, true); return; }
       const { error } = await sb.from('planer_ressource_einsatz').update({ beginn: fromU(z.s), ende: fromU(z.e, true) }).eq('id', z.id);
       if(error){ fehler(error); z.s = d.s0; z.e = d.e0; renderRows(); return; }
       toast(`${resName(resById(d.rid))}: ${spanLabel({ s: z.s, e: z.e })}`, async () => { z.s = d.s0; z.e = d.e0; renderRows(); await sb.from('planer_ressource_einsatz').update({ beginn: fromU(z.s), ende: fromU(z.e, true) }).eq('id', z.id); });
@@ -4217,12 +4221,13 @@ async function ablegenPruefen(it, pt){
   const reihe = ALL.filter(o => o.mid === it.mid && o !== it && !o.rep && !istOffen(o) && o.e > it.s + 1e-6 && o.s < it.e - 1e-6);
   // Ganz in einem längeren Termin = hineinschieben (Menü); teilweise überlappend = wer sich bewegt, gibt nach (weicht)
   const H = it.kind === 'absenz' ? [] : reihe.filter(o => !isShort(o) && passtRein(o, it)), teil = reihe.filter(o => !passtRein(o, it) && !passtRein(it, o)); // Absenz: kein Menü, das Nachziehen macht ausgleich()
-  let wahl = H.length ? 'rein' : 'ok'; if(H.length && !isShort(it)){ wahl = await reinFrage(pt); if(wahl === 'ab') return 'ab'; } // kurz: immer reinschieben
-  const alt = { ueber: it.ueber, weicht: it.weicht };
-  // weicht = der hinzugeschobene: gibt bei Teil-Überlappung nach und wird übereinander rot gefüllt
-  if(H.length) it.ueber = wahl === 'ueber'; it.weicht = teil.length > 0 || it.ueber || reihe.some(o => o.s <= it.s + 1e-6 && o.e >= it.e - 1e-6 && !passtRein(o, it));
-  if(zuViele()){ Object.assign(it, alt); compute(); toast('Dort liegen schon zwei Termine übereinander – ein dritter geht nicht.', null, true); return 'ab'; }
-  for(const o of teil) if(o.weicht){ o.weicht = false; await speichere(o, { weicht: false }); } // der bestehende ist jetzt der stärkere
+  // Übereinander gibt es nicht mehr (2026-11-28): nur noch Reinschieben in einen längeren Auftrag (bzw. einen kürzeren ganz zudecken);
+  // jede andere Überschneidung wird abgelehnt und der Balken springt zurück. Absenzen dürfen über Aufträge (Auftrag wird unterbrochen).
+  const konflikt = it.kind === 'absenz' ? [] : reihe.filter(o => o.kind !== 'absenz' && !H.includes(o) && !(!isShort(it) && passtRein(it, o)));
+  if(konflikt.length){ toast(`Dort ist schon «${labOf(konflikt[0])}» eingeplant – übereinander geht nicht.`, null, true); return 'ab'; }
+  const wahl = H.length ? 'rein' : 'ok';
+  it.ueber = false; it.weicht = false;
+  for(const o of teil) if(o.weicht){ o.weicht = false; await speichere(o, { weicht: false }); }
   if(wahl === 'rein'){ await tageFesthalten(H); await nachHinten(H, it.s); }
   return 'ok';
 }
